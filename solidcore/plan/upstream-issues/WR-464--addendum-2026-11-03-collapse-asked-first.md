@@ -1,0 +1,5 @@
+Updates: WR-464
+
+#### WR-464 (update, 2026-11-03). The collapse is asked before the offset is made (#2357)
+
+The fork asks `SmSurface::OffsetCollapses` in `SmOffsetGeometryCreation::FaceuseOffset` before it calls `CreateOffsetSurface` (tangency-labs/smlib 758829c); the port asked it only after an offset gave no surface. For a cone, sphere, torus or round of revolution the two orders give the same result, since their offsets are no surface exactly where they collapse. A ball patch's exact offset (`SmBallPatch::CreateOffsetSurface`) refuses with `SM_ERR_INVALID_INPUT` where it would pass its centre, so the port's order failed the shell. Case: a 40 x 30 x 60 box rounded r 1.5 on all twelve edges under `fillet_blend_corner`, shelled 2 in, failed in process. Under `offset_missing_surface_fails` the port now asks first, and the case builds at its closed-form volume: 15305.435766881 open at the front, 19337.435766881 closed (`wr697_ball_patch`, `a_box_rounded_all_round_shells_in_and_out_after_a_round_trip`). With the flag off nothing changes.

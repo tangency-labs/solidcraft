@@ -1,0 +1,153 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Outline"
+   }
+  },
+  {
+   "command": "sketch.rectangle.rounded",
+   "params": {
+    "p0": [
+     0,
+     0
+    ],
+    "p1": [
+     60,
+     50
+    ],
+    "radius": 4
+   }
+  },
+  {
+   "command": "sketch.rectangle.rounded",
+   "params": {
+    "p0": [
+     -10,
+     -10
+    ],
+    "p1": [
+     70,
+     60
+    ],
+    "radius": 14
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Outline",
+    "profiles": [
+     {
+      "point": [
+       30,
+       25
+      ]
+     }
+    ],
+    "distance": 3.25,
+    "body_name": "Floor"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "offset": 3.25,
+    "name": "Pocket"
+   }
+  },
+  {
+   "command": "sketch.rectangle.rounded",
+   "params": {
+    "p0": [
+     10,
+     10
+    ],
+    "p1": [
+     50,
+     40
+    ],
+    "radius": 3
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Pocket",
+    "distance": 2.25,
+    "direction": "negative",
+    "taper": "-15 deg",
+    "operation": "cut",
+    "targets": [
+     "Floor"
+    ]
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Socket"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     12,
+     12
+    ],
+    "p1": [
+     48,
+     38
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Socket",
+    "distance": 4.75,
+    "direction": "negative",
+    "operation": "join",
+    "targets": [
+     "Floor"
+    ]
+   }
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Outline",
+    "profiles": [
+     {
+      "point": [
+       -5,
+       25
+      ]
+     }
+    ],
+    "distance": 40,
+    "operation": "join",
+    "targets": [
+     "Floor"
+    ]
+   }
+  }
+ ]
+}

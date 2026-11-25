@@ -1,0 +1,100 @@
+{
+  "cases": [
+    {
+      "name": "hermite_sheet_scale1_tol1e-3_eu0",
+      "upstream_ref": "source/SMLib/src/SmEdgeuse.cpp (CreateUVTrimCurve drop of an SmHermiteCurve edge on a B-spline face)",
+      "inputs": {
+        "brep": {
+          "kind": "hermite_sheet_face",
+          "scale": 1.0,
+          "edge_tol": 0.001
+        },
+        "op": "create",
+        "eu": 0,
+        "want_dev": true,
+        "has_fail": false,
+        "sample_lift": true
+      }
+    },
+    {
+      "name": "hermite_sheet_scale1_tol1e-3_eu1",
+      "upstream_ref": "source/SMLib/src/SmEdgeuse.cpp (CreateUVTrimCurve drop of an SmHermiteCurve edge on a B-spline face)",
+      "inputs": {
+        "brep": {
+          "kind": "hermite_sheet_face",
+          "scale": 1.0,
+          "edge_tol": 0.001
+        },
+        "op": "create",
+        "eu": 1,
+        "want_dev": true,
+        "has_fail": true,
+        "sample_lift": true
+      }
+    },
+    {
+      "name": "hermite_sheet_scale1_tol1e-3_eu4",
+      "upstream_ref": "source/SMLib/src/SmEdgeuse.cpp (CreateUVTrimCurve drop of an SmHermiteCurve edge on a B-spline face)",
+      "inputs": {
+        "brep": {
+          "kind": "hermite_sheet_face",
+          "scale": 1.0,
+          "edge_tol": 0.001
+        },
+        "op": "create",
+        "eu": 4,
+        "want_dev": false,
+        "has_fail": false,
+        "sample_lift": true
+      }
+    },
+    {
+      "name": "hermite_sheet_scale1_tol1e-3_eu5",
+      "upstream_ref": "source/SMLib/src/SmEdgeuse.cpp (CreateUVTrimCurve drop of an SmHermiteCurve edge on a B-spline face)",
+      "inputs": {
+        "brep": {
+          "kind": "hermite_sheet_face",
+          "scale": 1.0,
+          "edge_tol": 0.001
+        },
+        "op": "create",
+        "eu": 5,
+        "want_dev": true,
+        "has_fail": false,
+        "sample_lift": true
+      }
+    },
+    {
+      "name": "hermite_sheet_scale1e6_tol1e-10_eu0",
+      "upstream_ref": "source/SMLib/src/SmEdgeuse.cpp (CreateUVTrimCurve drop of an SmHermiteCurve edge on a B-spline face)",
+      "inputs": {
+        "brep": {
+          "kind": "hermite_sheet_face",
+          "scale": 1000000.0,
+          "edge_tol": 1e-10
+        },
+        "op": "create",
+        "eu": 0,
+        "want_dev": true,
+        "has_fail": false,
+        "sample_lift": true
+      }
+    },
+    {
+      "name": "hermite_sheet_scale1e6_tol1e-10_eu5",
+      "upstream_ref": "source/SMLib/src/SmEdgeuse.cpp (CreateUVTrimCurve drop of an SmHermiteCurve edge on a B-spline face)",
+      "inputs": {
+        "brep": {
+          "kind": "hermite_sheet_face",
+          "scale": 1000000.0,
+          "edge_tol": 1e-10
+        },
+        "op": "create",
+        "eu": 5,
+        "want_dev": false,
+        "has_fail": true,
+        "sample_lift": true
+      }
+    }
+  ]
+}

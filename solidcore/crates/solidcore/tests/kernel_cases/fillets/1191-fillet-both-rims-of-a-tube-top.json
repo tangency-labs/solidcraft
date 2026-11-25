@@ -1,0 +1,181 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  18.5,
+                  0.0,
+                  33.0
+                ],
+                [
+                  18.5,
+                  0.0,
+                  33.0
+                ]
+              ],
+              "index": 2
+            },
+            {
+              "at": [
+                [
+                  11.5,
+                  1.224646799147353e-15,
+                  33.0
+                ],
+                [
+                  11.5,
+                  1.224646799147353e-15,
+                  33.0
+                ]
+              ],
+              "index": 4
+            }
+          ],
+          "points": [
+            [
+              -18.5,
+              7.993605777301127e-15,
+              33.0
+            ],
+            [
+              -11.499999999999996,
+              -1.6649850536082115e-16,
+              33.0
+            ]
+          ],
+          "tolerance": 3.0941375656443086
+        },
+        "kind": "round",
+        "sizes": [
+          2.0,
+          2.0
+        ]
+      }
+    }
+  ],
+  "case": "1191-fillet-both-rims-of-a-tube-top",
+  "expected": {
+    "bbox": {
+      "max": [
+        18.5,
+        18.5,
+        33
+      ],
+      "min": [
+        -18.5,
+        -18.5,
+        0
+      ]
+    },
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "faces": 6,
+    "method": "Tube R=18.5, r=11.5, h=33: V0 = pi (18.5^2 - 11.5^2) 33 = 21771.2371. Each rim round removes the square-minus-quarter-disc section (area A = (1-pi/4) 4 = 0.858407, first moment about the round's centre line rho^3/6 = 4/3) swept about the axis (Pappus). Outer rim (convex), section centre at radius 16.5: 2 pi (16.5 A + 4/3) = 97.3737; inner rim (convex, material outside r=11.5), centre at radius 13.5: 2 pi (13.5 A - 4/3) = 64.4333. V = 21771.2371 - 97.3737 - 64.4333 = 21609.4311 mm3. Faces: outer wall, two toroidal rounds, top ring, inner wall, bottom ring = 6.",
+    "outcome": "solid",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#1191"
+    ],
+    "volume_mm3": 21609.4311,
+    "what": "an R2 round on the outer and inner rim circles of a tube's top face (the report's ten picks on a ring-shaped top: the round failed after 0.10.1; rebuilt as a plain tube since the design is not in the report)"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 10,
+      "faces": 6,
+      "vertices": 6
+    }
+  },
+  "records": "1191-fillet-both-rims-of-a-tube-top.bodies.json.gz",
+  "result": [
+    {
+      "body": "Ring",
+      "made": "b6"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 7378.016395850497,
+      "body_count": 1,
+      "edges": 10,
+      "faces": 6,
+      "vertices": 6,
+      "volume_mm3": 21609.431117513035
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#1191"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "an R2 round on the outer and inner rim circles of a tube's top face (the report's ten picks on a ring-shaped top: the round failed after 0.10.1; rebuilt as a plain tube since the design is not in the report)",
+  "why_not": []
+}

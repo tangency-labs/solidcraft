@@ -1,111 +1,180 @@
-//! Trim and Break on free-form curves (ellipses, splines, conics). The curve is cut into exact
-//! pieces (cubic Béziers become single-span control splines, conic arcs conics), so the result
-//! stays exact; the pieces replace the original curve.
+//! Trim and Break on free-form curves. Split the exact spans at the boundaries of the selected
+//! piece. The remaining intervals of a spline each form one editable control spline.
 
 use serde_json::{Value, json};
-use solidcraft_geom::{Seg2, Vec2};
-use solidcraft_sketch::{ConstraintKind, CurveKind, Sketch};
+use solidcore_record::brep::{Curve as RecordCurve, Frame};
+use solidcore_record::{Plane, Seg2, Vec2, Vec3};
+use solidcraft_geom::prelude::*;
+use solidcraft_sketch::{ConstraintKind, CurveKind, Nurbs, Shape, Sketch};
 
-use super::sketch::add_c;
+use super::sketch_modify::{Boundary, boundary_points, pin, support};
+use super::sketch_rational;
 use crate::Result;
 use crate::params::bad;
 
-/// Exact pieces of a free-form curve (polyline lines for the few kinds without them).
-fn pieces(sk: &Sketch, ci: usize) -> Vec<Seg2> {
-    sk.exact_segs(ci).unwrap_or_else(|| sk.segs(ci))
+/// An imported weighted spline may have no polynomial Bézier or rational quadratic
+/// spans. Its own NURBS record still supports exact projection, crossing and subdivision.
+#[derive(Clone, Debug)]
+enum Geometry {
+    Spans(Vec<Seg2>),
+    Rational(RecordCurve),
 }
 
-/// Position along the pieces (piece index + local parameter) closest to `p`, and the distance.
-fn locate(segs: &[Seg2], p: Vec2) -> (f64, f64) {
-    segs.iter()
-        .enumerate()
-        .map(|(i, s)| {
-            let t = s.closest_param(p);
-            (i as f64 + t, s.point_at(t).dist(p))
-        })
-        .min_by(|a, b| a.1.total_cmp(&b.1))
-        .unwrap_or((0.0, f64::INFINITY))
-}
-
-fn point_at(segs: &[Seg2], u: f64) -> Vec2 {
-    let n = segs.len();
-    let i = (u.floor() as usize).min(n.saturating_sub(1));
-    segs.get(i).map(|s| s.point_at((u - i as f64).clamp(0.0, 1.0))).unwrap_or_default()
-}
-
-/// Closest point on curve `ci` (exact pieces, or the analytic shape).
-fn project(sk: &Sketch, ci: usize, p: Vec2) -> Vec2 {
-    if sk.curves.get(ci).is_some_and(|c| c.kind.is_freeform()) {
-        let segs = pieces(sk, ci);
-        let (u, _) = locate(&segs, p);
-        return point_at(&segs, u);
-    }
-    sk.shape(ci).map(|s| s.project(p)).unwrap_or(p)
-}
-
-/// Where other curves meet free-form curve `ci`: (position along it, the point, the other curve).
-fn cuts(sk: &Sketch, ci: usize, segs: &[Seg2], only_freeform: bool) -> Vec<(f64, Vec2, usize)> {
-    let mine = sk.polyline(ci);
-    let tol = 1e-6;
-    let mut out: Vec<(f64, Vec2, usize)> = Vec::new();
-    let seg_x = |a: Vec2, b: Vec2, c: Vec2, d: Vec2| -> Option<Vec2> {
-        let (r, s) = (b - a, d - c);
-        let den = r.cross(s);
-        if den.abs() < 1e-15 {
-            return None;
+impl Geometry {
+    fn new(sk: &Sketch, ci: usize, cmd: &str) -> Result<Self> {
+        if let Some(segs) = sk.exact_segs(ci) {
+            return Ok(Self::Spans(segs));
         }
-        let (t, u) = ((c - a).cross(s) / den, (c - a).cross(r) / den);
-        ((-1e-9..=1.0 + 1e-9).contains(&t) && (-1e-9..=1.0 + 1e-9).contains(&u)).then(|| a + r * t)
-    };
+        if sk.curves.get(ci).is_some_and(|curve| curve.kind.is_freeform()) {
+            return sketch_rational::record(sk, ci).map(Self::Rational).ok_or_else(|| bad(cmd, "invalid free-form curve"));
+        }
+        Ok(Self::Spans(sk.segs(ci)))
+    }
+
+    fn limit(&self) -> f64 {
+        match self {
+            Self::Spans(segs) => segs.len() as f64,
+            Self::Rational(_) => 1.0,
+        }
+    }
+
+    fn closed(&self, sk: &Sketch, ci: usize) -> bool {
+        match self {
+            Self::Spans(segs) => segs.first().zip(segs.last()).is_some_and(|(a, b)| a.start().dist(b.end()) < 1e-9),
+            Self::Rational(_) => {
+                sk.curves.get(ci).and_then(|c| c.kind.ends()).and_then(|(a, b)| sk.point(a).zip(sk.point(b))).is_some_and(|(a, b)| a.dist(b) < 1e-9)
+            }
+        }
+    }
+
+    fn project(&self, at: Vec2, cmd: &str) -> Result<(f64, Vec2)> {
+        match self {
+            Self::Spans(segs) => segs
+                .iter()
+                .enumerate()
+                .map(|(i, seg)| {
+                    let t = seg.closest_param(at);
+                    (i as f64 + t, seg.point_at(t))
+                })
+                .min_by(|a, b| a.1.dist(at).total_cmp(&b.1.dist(at)))
+                .ok_or_else(|| bad(cmd, "the curve has no shape")),
+            Self::Rational(curve) => {
+                let hit = solidcraft_kernel::services::curve::closest_point(curve, [at.x, at.y, 0.0], 1e-9)
+                    .map_err(|e| bad(cmd, e.to_string()))?
+                    .ok_or_else(|| bad(cmd, "cannot locate point on spline"))?;
+                Ok((hit.parameter, Vec2::new(hit.point[0], hit.point[1])))
+            }
+        }
+    }
+
+    fn path(&self, a: f64, b: f64, cmd: &str) -> Result<Vec<Vec2>> {
+        match self {
+            Self::Spans(segs) => Ok(span(segs, a, b).iter().flat_map(|s| s.polyline(1e-3)).collect()),
+            Self::Rational(curve) => sketch_rational::preview(curve, [a, b], cmd),
+        }
+    }
+
+    fn records(&self, cmd: &str) -> Result<Vec<RecordCurve>> {
+        match self {
+            Self::Spans(segs) => segs.iter().map(|seg| recorded(seg, cmd)).collect(),
+            Self::Rational(curve) => Ok(vec![curve.clone()]),
+        }
+    }
+}
+
+/// Crossings of exact free-form spans. The record keeps each Bézier or rational conic bounded
+/// to its own knot domain, so crossings on another span's continuation are excluded.
+fn recorded(seg: &Seg2, cmd: &str) -> Result<solidcore_record::brep::Curve> {
+    let curve =
+        solidcraft_kernel::services::sweep::Curve::from_seg2(seg, &solidcore_record::Plane::XY).ok_or_else(|| bad(cmd, "invalid curve span"))?;
+    curve.to_record().map(|record| record.curve).map_err(|error| bad(cmd, error.to_string()))
+}
+
+/// Exact intersections of a free-form curve and an analytic sketch curve.
+fn support_hits(geo: &Geometry, shape: &Shape, infinite: bool, budget: &mut usize, cmd: &str) -> Result<Vec<Vec2>> {
+    let mut out = Vec::new();
+    match geo {
+        Geometry::Spans(segs) => {
+            for seg in segs {
+                out.extend(support::hits_for(cmd, shape, seg, budget)?);
+            }
+        }
+        Geometry::Rational(curve) => match *shape {
+            Shape::Line { a, b } => {
+                let d = (b - a).normalized().ok_or_else(|| bad(cmd, "zero-length cutting line"))?;
+                let plane = Plane { origin: Vec3::new(a.x, a.y, 0.0), x: Vec3::new(d.x, d.y, 0.0), y: Vec3::Z };
+                let hits = solidcraft_kernel::services::curve::plane_crossings(curve, [0.0, 1.0], &plane).map_err(|e| bad(cmd, e.to_string()))?;
+                out.extend(hits.into_iter().map(|hit| a + d * hit.x));
+            }
+            Shape::Round { c, r, .. } => {
+                let circle =
+                    RecordCurve::Circle { frame: Frame { origin: [c.x, c.y, 0.0], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] }, radius: r };
+                out.extend(record_crossings(curve, &circle, cmd)?);
+            }
+        },
+    }
+    out.retain(|q| infinite || shape.dist(*q) < 1e-6);
+    Ok(out)
+}
+
+fn record_crossings(a: &RecordCurve, b: &RecordCurve, cmd: &str) -> Result<Vec<Vec2>> {
+    let hits = solidcraft_kernel::services::curve::crossings(a, b, None, 1e-7).map_err(|e| bad(cmd, e.to_string()))?;
+    Ok(hits.into_iter().map(|hit| Vec2::new(hit.on_a[0], hit.on_a[1])).collect())
+}
+
+/// Where other curves meet the target. Intersect the same supports in either target order.
+fn cuts(sk: &Sketch, ci: usize, geo: &Geometry, cmd: &str) -> Result<Vec<Boundary>> {
+    let mut out = Vec::new();
+    let target = sk.curves.get(ci).ok_or_else(|| bad(cmd, "curve"))?;
+    let shape = sk.shape(ci);
+    let (major, minor) = sk.ellipse_axis_lines(ci).unwrap_or((None, None));
+    let own_axes = [major.map(|(l, _)| l), minor.map(|(l, ..)| l)];
+    let mut budget = 1_000_000usize;
+    let mut records = None;
     for (oi, curve) in sk.curves.iter().enumerate() {
-        if oi == ci || (only_freeform && !curve.kind.is_freeform()) {
+        if oi == ci
+            || (shape.is_some() && !curve.kind.is_freeform())
+            || own_axes.contains(&Some(oi))
+            || curve.spline_handle_of.as_ref() == Some(&target.id)
+        {
             continue;
         }
-        let other = sk.polyline(oi);
-        let mut found: Vec<Vec2> = Vec::new();
-        for w in mine.windows(2) {
-            for v in other.windows(2) {
-                if let Some(x) = seg_x(w[0], w[1], v[0], v[1]) {
-                    found.push(x);
+        let mut found = if let Some(support) = &shape {
+            support_hits(&Geometry::new(sk, oi, cmd)?, support, target.infinite, &mut budget, cmd)?
+        } else if let Some(support) = sk.shape(oi) {
+            support_hits(geo, &support, curve.infinite, &mut budget, cmd)?
+        } else {
+            if records.is_none() {
+                records = Some(geo.records(cmd)?);
+            }
+            let other = Geometry::new(sk, oi, cmd)?.records(cmd)?;
+            let mut hits = Vec::new();
+            for a in records.iter().flatten() {
+                for b in &other {
+                    budget = budget.checked_sub(1).ok_or_else(|| bad(cmd, "intersection work limit exceeded"))?;
+                    hits.extend(record_crossings(a, b, cmd)?);
                 }
             }
+            hits
+        };
+        if let Some((a, b)) = curve.kind.ends() {
+            found.extend([a, b].into_iter().filter_map(|p| sk.point(p)));
         }
-        // End points of the other curve lying on this one.
-        if let Some((a, b)) = sk.curves.get(oi).and_then(|c| c.kind.ends()) {
-            for q in [a, b].iter().filter_map(|q| sk.point(*q)) {
-                if locate(segs, q).1 < 1e-6 {
-                    found.push(q);
-                }
-            }
-        }
-        for x in found {
-            // Refine onto both exact curves by alternating projection.
-            let mut q = x;
-            for _ in 0..40 {
-                let n = project(sk, ci, project(sk, oi, q));
-                if n.dist(q) < 1e-13 {
-                    q = n;
-                    break;
-                }
-                q = n;
-            }
-            let (u, d) = locate(segs, q);
-            if d < tol && project(sk, oi, q).dist(q) < tol && !out.iter().any(|(_, y, _)| y.dist(q) < tol * 10.0) {
-                out.push((u, q, oi));
+        for position in found {
+            let (parameter, q) = geo.project(position, cmd)?;
+            if q.dist(position) < 1e-6 && !out.iter().any(|c: &Boundary| c.position.dist(position) < 1e-6) {
+                out.push(Boundary { parameter, position: q, point: None, cutter: Some(oi) });
             }
         }
     }
-    out.sort_by(|a, b| a.0.total_cmp(&b.0));
-    out
+    Ok(out)
 }
 
-/// Crossings for an analytic target with free-form cutters. Analytic-to-analytic crossings
-/// remain in the shape intersection routine; this supplies the missing mixed pairs.
-pub(super) fn analytic_cut_points(sk: &Sketch, ci: usize) -> Vec<(Vec2, usize)> {
+pub(super) fn analytic_cut_points(sk: &Sketch, ci: usize, cmd: &str) -> Result<Vec<(Vec2, usize)>> {
     if !sk.curves.iter().any(|c| c.kind.is_freeform()) {
-        return Vec::new();
+        return Ok(Vec::new());
     }
-    cuts(sk, ci, &pieces(sk, ci), true).into_iter().map(|(_, q, oi)| (q, oi)).collect()
+    Ok(cuts(sk, ci, &Geometry::new(sk, ci, cmd)?, cmd)?.into_iter().filter_map(|c| Some((c.position, c.cutter?))).collect())
 }
 
 /// Exact sub-pieces between positions `ua` < `ub` (positions may run past the end on closed
@@ -156,22 +225,22 @@ fn add_pieces(sk: &mut Sketch, segs: &[Seg2], start: Option<usize>, end: Option<
             Seg2::Line { .. } => CurveKind::Line { a: prev, b: to },
             Seg2::Cubic { p1, p2, .. } => {
                 let (c1, c2) = (sk.add_point(p1, None)?, sk.add_point(p2, None)?);
-                CurveKind::Spline { pts: vec![prev, c1, c2, to], control: true, degree: 3, periodic: false }
+                CurveKind::Spline { pts: vec![prev, c1, c2, to], control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }
             }
             Seg2::Conic { apex, w, .. } => {
                 let x = sk.add_point(apex, None)?;
                 CurveKind::Conic { a: prev, b: to, apex: x, rho: w / (1.0 + w) }
             }
             Seg2::Bezier { n, p } => {
-                let k = (n as usize).clamp(1, solidcraft_geom::MAX_BEZIER_DEGREE);
+                let k = (n as usize).clamp(1, solidcore_record::MAX_BEZIER_DEGREE);
                 let mut pts = vec![prev];
                 for q in p.iter().take(k).skip(1) {
                     pts.push(sk.add_point(*q, None)?);
                 }
                 pts.push(to);
-                CurveKind::Spline { pts, control: true, degree: n, periodic: false }
+                CurveKind::Spline { pts, control: true, degree: n, periodic: false, nurbs: None, handles: Vec::new() }
             }
-            Seg2::Arc { .. } => return Err(bad("trim", "unexpected arc piece")),
+            Seg2::Arc { .. } => return Err(bad("sketch.trim", "unexpected arc piece")),
         };
         let c = sk.add_curve(kind, None)?;
         if let Some(cu) = sk.curves.get_mut(c) {
@@ -194,99 +263,231 @@ pub(super) fn break_at_points(sk: &mut Sketch, ci: usize, points: &[Vec2], cmd: 
     modify(sk, ci, Vec2::ZERO, false, Some(points), cmd)
 }
 
+fn trim_cuts(sk: &Sketch, ci: usize, geo: &Geometry, closed: bool, cmd: &str) -> Result<Vec<Boundary>> {
+    let n = geo.limit();
+    let mut bounds = cuts(sk, ci, geo, cmd)?;
+    for (point, at) in boundary_points(sk, ci) {
+        let (parameter, q) = geo.project(at, cmd)?;
+        if q.dist(at) <= 1e-6 {
+            Boundary::add_point(&mut bounds, parameter, at, point);
+        }
+    }
+    bounds.retain(|cut| closed || (cut.parameter > 1e-9 && cut.parameter < n - 1e-9));
+    bounds.sort_by(|a, b| a.parameter.total_cmp(&b.parameter));
+    Ok(bounds)
+}
+
+/// The two cuts enclosing the pick, and the interval between them in path order.
+fn picked(cuts: &[Boundary], u: f64, closed: bool, n: f64) -> ([Option<Boundary>; 2], (f64, f64)) {
+    let pair = Boundary::around(cuts, u, closed);
+    let a = pair[0].map_or(0.0, |c| c.parameter);
+    let b = pair[1].map_or(n, |c| c.parameter);
+    (pair, (a, if closed && b <= a { b + n } else { b }))
+}
+
+/// Store each selected interval of a spline as one editable spline. Successive Bézier spans
+/// share their end control point. A knot of multiplicity degree joins their control polygons
+/// without changing the geometry, including the weights of rational quadratic spans.
+fn add_spline(sk: &mut Sketch, segs: &[Seg2], start: Option<usize>, end: Option<usize>, construction: bool, cmd: &str) -> Result<usize> {
+    let first = segs.first().ok_or_else(|| bad(cmd, "empty spline piece"))?;
+    let mut pts = vec![match start {
+        Some(p) => p,
+        None => sk.add_point(first.start(), None)?,
+    }];
+    let mut weights = vec![1.0];
+    let mut knots = vec![0.0];
+    let mut degree = 0;
+    for (k, seg) in segs.iter().enumerate() {
+        let (inner, w): (Vec<Vec2>, f64) = match *seg {
+            Seg2::Line { .. } => (Vec::new(), 1.0),
+            Seg2::Conic { apex, w, .. } => (vec![apex], w),
+            Seg2::Cubic { p1, p2, .. } => (vec![p1, p2], 1.0),
+            Seg2::Bezier { n, ref p } => (p.get(1..usize::from(n)).ok_or_else(|| bad(cmd, "invalid spline degree"))?.to_vec(), 1.0),
+            Seg2::Arc { .. } => return Err(bad(cmd, "unexpected arc in a spline")),
+        };
+        if k > 0 && degree != inner.len() + 1 {
+            return Err(bad(cmd, "inconsistent spline degrees"));
+        }
+        degree = inner.len() + 1;
+        for q in inner {
+            pts.push(sk.add_point(q, None)?);
+            weights.push(w);
+        }
+        let to = if k + 1 == segs.len() { end } else { None };
+        pts.push(match to {
+            Some(p) => p,
+            None => sk.add_point(seg.end(), None)?,
+        });
+        weights.push(1.0);
+        knots.extend(std::iter::repeat_n(k as f64, degree));
+    }
+    knots.extend(std::iter::repeat_n(segs.len() as f64, degree + 1));
+    if weights.iter().all(|w| *w == 1.0) {
+        weights.clear();
+    }
+    let degree = degree as u8;
+    let nurbs = Nurbs { knots, weights };
+    nurbs.check(pts.len(), degree)?;
+    let nurbs = (segs.len() > 1 || !nurbs.weights.is_empty()).then_some(nurbs);
+    let c = sk.add_curve(CurveKind::Spline { pts, degree, control: true, periodic: false, handles: Vec::new(), nurbs }, None)?;
+    if let Some(curve) = sk.curves.get_mut(c) {
+        curve.construction = construction;
+    }
+    Ok(c)
+}
+
+/// What Trim's hover keeps of a free-form curve while the sketch is unchanged: the cuts are the
+/// costly part, and [`FreeformTrim::piece`] only looks the cursor up among them.
+#[derive(Clone, Debug)]
+pub(super) struct FreeformTrim {
+    geo: Geometry,
+    closed: bool,
+    cuts: Vec<Boundary>,
+    /// The curve as points where nothing cuts it, so a click deletes all of it.
+    whole: Option<Vec<Vec2>>,
+}
+
+impl FreeformTrim {
+    pub(super) fn new(sk: &Sketch, ci: usize) -> Option<Self> {
+        let geo = Geometry::new(sk, ci, "sketch.trim").ok()?;
+        if geo.limit() == 0.0 {
+            return None;
+        }
+        let closed = geo.closed(sk, ci);
+        let cuts = trim_cuts(sk, ci, &geo, closed, "sketch.trim").ok()?;
+        let whole = (cuts.is_empty() || (closed && cuts.len() < 2)).then(|| sk.polyline(ci));
+        Some(Self { geo, closed, cuts, whole })
+    }
+
+    /// The piece a click at `at` removes, the one `sketch.trim` reports.
+    pub(super) fn piece(&self, at: Vec2) -> Option<Vec<Vec2>> {
+        if let Some(whole) = &self.whole {
+            return Some(whole.clone());
+        }
+        let (uq, _) = self.geo.project(at, "sketch.trim").ok()?;
+        let (_, (a, b)) = picked(&self.cuts, uq, self.closed, self.geo.limit());
+        self.geo.path(a, b, "sketch.trim").ok()
+    }
+}
+
 fn modify(sk: &mut Sketch, ci: usize, at: Vec2, remove: bool, points: Option<&[Vec2]>, cmd: &str) -> Result<Value> {
-    let segs = pieces(sk, ci);
-    if segs.is_empty() {
+    let geo = Geometry::new(sk, ci, cmd)?;
+    if geo.limit() == 0.0 {
         return Err(bad(cmd, "the curve has no shape"));
     }
-    let n = segs.len() as f64;
-    let closed = segs.first().zip(segs.last()).is_some_and(|(a, b)| a.start().dist(b.end()) < 1e-9);
-    let cs: Vec<(f64, Vec2, Option<usize>)> = if let Some(points) = points {
-        let mut positions: Vec<f64> = points.iter().map(|q| locate(&segs, *q).0).collect();
-        if positions.iter().any(|u| !u.is_finite() || (!closed && (*u <= 1e-9 || *u >= n - 1e-9))) {
-            return Err(bad(cmd, "break points must project inside the curve, away from its ends"));
-        }
-        if closed {
-            for u in &mut positions {
-                if *u >= n - 1e-9 {
-                    *u = 0.0;
-                }
+    let n = geo.limit();
+    let closed = geo.closed(sk, ci);
+    let mut removed_interval = None;
+    let cs: Vec<Boundary> = if let Some(points) = points {
+        let mut positions = Vec::new();
+        for q in points {
+            let (u, position) = geo.project(*q, cmd)?;
+            if !u.is_finite() || (!closed && (u <= 1e-9 || u >= n - 1e-9)) {
+                return Err(bad(cmd, "break points must project inside the curve, away from its ends"));
             }
+            let parameter = if closed && u >= n - 1e-9 { 0.0 } else { u };
+            positions.push(Boundary { parameter, position, point: None, cutter: None });
         }
-        positions.sort_by(f64::total_cmp);
-        positions.dedup_by(|a, b| (*a - *b).abs() <= 1e-9);
-        positions.into_iter().map(|u| (u, point_at(&segs, u), None)).collect()
+        positions.sort_by(|a, b| a.parameter.total_cmp(&b.parameter));
+        positions.dedup_by(|a, b| (a.parameter - b.parameter).abs() <= 1e-9);
+        positions
     } else {
-        cuts(sk, ci, &segs, false).into_iter().filter(|c| closed || (c.0 > 1e-9 && c.0 < n - 1e-9)).map(|(u, q, c)| (u, q, Some(c))).collect()
+        let cuts = trim_cuts(sk, ci, &geo, closed, cmd)?;
+        let (pair, interval) = picked(&cuts, geo.project(at, cmd)?.0, closed, n);
+        removed_interval = remove.then_some(interval);
+        let mut pair: Vec<_> = pair.into_iter().flatten().collect();
+        pair.sort_by(|a, b| a.parameter.total_cmp(&b.parameter));
+        pair
     };
-    let (uq, _) = locate(&segs, at);
-    let ends = sk.curves.get(ci).and_then(|c| c.kind.ends());
-    let construction = sk.curves.get(ci).is_some_and(|c| c.construction);
-    // Intervals between consecutive cuts (closed curves wrap round).
-    let mut bounds: Vec<(f64, Option<usize>)> = cs.iter().map(|c| (c.0, c.2)).collect();
-    if bounds.is_empty() {
+    if cs.is_empty() {
         if remove {
             sk.remove_curves(&[ci]);
             return Ok(json!({"deleted": true}));
         }
         return Err(bad(cmd, "nothing to break at there"));
     }
-    let intervals: Vec<(f64, f64, Option<usize>, Option<usize>)> = if closed {
-        if bounds.len() < 2 && remove {
-            return Err(bad(cmd, "a closed curve needs two crossings to trim"));
-        }
-        let m = bounds.len();
-        (0..m)
-            .filter_map(|i| {
-                let (a, ca) = *bounds.get(i)?;
-                let (b, cb) = *bounds.get((i + 1) % m)?;
-                let b = if b <= a + 1e-12 { b + n } else { b };
-                Some((a, b, ca, cb))
-            })
-            .collect()
-    } else {
-        bounds.insert(0, (0.0, None));
-        bounds.push((n, None));
-        bounds.windows(2).map(|w| (w[0].0, w[1].0, w[0].1, w[1].1)).collect()
-    };
-    let inside = |(a, b, _, _): &(f64, f64, Option<usize>, Option<usize>)| {
-        let u = if closed && uq < *a { uq + n } else { uq };
-        u >= *a && u <= *b
-    };
-    let gone = if remove { intervals.iter().position(inside) } else { None };
-    // Points at the cuts are shared by neighbouring intervals.
-    let mut cut_pt: Vec<(f64, usize)> = Vec::new();
-    for (u, q, _) in &cs {
-        cut_pt.push((*u, sk.add_point(*q, None)?));
+    let curve = sk.curves.get(ci).ok_or_else(|| bad(cmd, "curve"))?;
+    let ends = curve.kind.ends();
+    let construction = curve.construction;
+    let join_spans = points.is_none() && matches!(curve.kind, CurveKind::Spline { .. });
+    let mut bounds = Vec::new();
+    if !closed {
+        bounds.push((0.0, ends.map(|e| e.0)));
     }
-    let point_for =
-        |u: f64, cut_pt: &[(f64, usize)]| cut_pt.iter().find(|(x, _)| (x - u.rem_euclid(n)).abs() < 1e-9 || (x - u).abs() < 1e-9).map(|p| p.1);
+    for cut in &cs {
+        let cutter_ends = cut.cutter.and_then(|i| sk.curves.get(i)?.kind.ends());
+        let marker = cut.point.filter(|p| cutter_ends.is_none_or(|(a, b)| *p != a && *p != b));
+        let p = match marker {
+            Some(p) => p,
+            None => sk.add_point(cut.position, None)?,
+        };
+        if let Some(c) = cut.cutter {
+            pin(sk, p, c)?;
+        }
+        bounds.push((cut.parameter, Some(p)));
+    }
+    if closed {
+        if let Some(&(u, p)) = bounds.first() {
+            bounds.push((u + n, p));
+        }
+    } else {
+        bounds.push((n, ends.map(|e| e.1)));
+    }
     let mut made = Vec::new();
-    for (k, iv) in intervals.iter().enumerate() {
-        if Some(k) == gone {
+    for pair in bounds.windows(2) {
+        let [(a, start), (b, end)] = pair else { continue };
+        if removed_interval.is_some_and(|(from, _)| from == *a) {
             continue;
         }
-        let (a, b, ..) = *iv;
-        let start = if !closed && a <= 1e-12 { ends.map(|e| e.0) } else { point_for(a, &cut_pt) };
-        let end = if !closed && b >= n - 1e-12 { ends.map(|e| e.1) } else { point_for(b, &cut_pt) };
-        let sub = span(&segs, a, b);
-        made.extend(add_pieces(sk, &sub, start, end, construction)?);
-    }
-    // Cut points stay on the curves that cut there.
-    for ((_, _, oi), (_, pi)) in cs.iter().zip(&cut_pt) {
-        let used = sk.curves.iter().any(|c| c.kind.uses(*pi));
-        if used && let Some(oi) = oi {
-            add_c(sk, ConstraintKind::PointOnCurve { p: *pi, c: *oi })?;
+        match &geo {
+            Geometry::Rational(curve) => made.push(sketch_rational::add_interval(sk, curve, [*a, *b], *start, *end, construction, cmd)?),
+            Geometry::Spans(segs) => {
+                let sub = span(segs, *a, *b);
+                if join_spans {
+                    made.push(add_spline(sk, &sub, *start, *end, construction, cmd)?);
+                } else {
+                    made.extend(add_pieces(sk, &sub, *start, *end, construction)?);
+                }
+            }
         }
+    }
+    // The original spline goes away. A cut can now use the held point as its endpoint.
+    // Keep the IDs of other point-on-curve constraints by moving them to their new pieces.
+    let mut held: std::collections::BTreeMap<_, _> = boundary_points(sk, ci).collect();
+    for p in cs.iter().filter_map(|cut| cut.point) {
+        held.remove(&p);
+    }
+    for c in &made {
+        if let Some((a, b)) = sk.curves.get(*c).and_then(|curve| curve.kind.ends()) {
+            held.remove(&a);
+            held.remove(&b);
+        }
+    }
+    for c in &made {
+        if held.is_empty() {
+            break;
+        }
+        let piece = Geometry::new(sk, *c, cmd)?;
+        let mut belongs = std::collections::BTreeSet::new();
+        for (&p, &at) in &held {
+            if piece.project(at, cmd)?.1.dist(at) <= 1e-6 {
+                belongs.insert(p);
+            }
+        }
+        for k in &mut sk.constraints {
+            if let ConstraintKind::PointOnCurve { p, c: on } = &mut k.kind
+                && *on == ci
+                && belongs.contains(p)
+            {
+                *on = *c;
+            }
+        }
+        held.retain(|p, _| !belongs.contains(p));
     }
     let ids: Vec<String> = made.iter().filter_map(|c| sk.curves.get(*c).map(|c| c.id.clone())).collect();
     // The removed piece, for previews (`sketch.trim.path`).
-    let removed: Vec<[f64; 2]> = gone
-        .and_then(|k| intervals.get(k))
-        .map(|(a, b, ..)| span(&segs, *a, *b).iter().flat_map(|s| s.polyline(1e-3)).map(|q| [q.x, q.y]).collect())
-        .unwrap_or_default();
+    let removed = removed_interval.map(|(a, b)| geo.path(a, b, cmd)).transpose()?.unwrap_or_default();
+    let removed: Vec<[f64; 2]> = removed.into_iter().map(|q| [q.x, q.y]).collect();
     sk.remove_curves(&[ci]);
-    let unused: Vec<usize> = cut_pt.iter().map(|x| x.1).filter(|pi| !sk.curves.iter().any(|c| c.kind.uses(*pi))).collect();
-    sk.remove_points(&unused);
     Ok(json!({"curves": ids, "removed": removed}))
 }

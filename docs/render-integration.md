@@ -1,5 +1,37 @@
 # Phased render and material integration
 
+## Current product acceptance target (2 November 2026)
+
+The owner has prioritised the complete Render UI journey in #6201. Historical
+feature inventories and source-only checkpoints do not complete this target.
+
+- **Progressive by default:** entering the rendering workflow should produce
+  progressive visual feedback without finding an opt-in sampling switch. Publish
+  every completed pass, display the captured current/target count, invalidate on
+  visual edits and keep cancellation responsive. A slow screen may coalesce
+  repaints; counters alone are not evidence that intermediate images work.
+- **CPU and GPU usability:** CPU ray tracing and GPU path tracing should both
+  support the complete artistic and optical feature set. Until each producer,
+  saved contract and UI route exists and is tested, report its gap explicitly.
+  Do not remove an admission check to imply parity or silently switch methods.
+- **Raster purpose:** offer raster for schematic presentation, with controls
+  appropriate to that output. Do not present it as the default photorealistic
+  renderer or offer unsupported optical effects as working controls.
+- **Useful defaults:** a new setup should select an available ray-traced route
+  and an admissible progressive sample budget. Preserve existing saved setups,
+  output size and explicit choices. Keep the old defaults behind the normal
+  compatibility preference; do not silently lower quality to make a job start.
+- **One trustworthy image journey:** choose an appearance, adjust lighting and
+  framing, see the changes, render, cancel, export the identified completed image,
+  save and reopen. Provisional pixels must never replace the final export source.
+  Keep the merged #6281 selection-driven editors, results and compare paths.
+
+Acceptance requires real UI interaction and original diagnostic scenes on the
+tested source: opaque and textured surfaces, glass/absorption, lights and HDR,
+aging, lens/finishing, a narrow window, undo/redo and cold reopen. Evaluate CPU
+and GPU separately, including image quality and cancellation. Passing a codec,
+one low-sample scene or a source test does not establish complete effect coverage.
+
 The native GPU image path is described in [Progressive product images](render-path.md).
 Optional [CPU progressive camera sampling](render-cpu-progressive.md)
 through its existing CPU executor and shared image-job protocol.

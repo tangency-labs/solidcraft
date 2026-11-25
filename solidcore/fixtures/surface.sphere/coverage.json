@@ -1,0 +1,824 @@
+{
+ "cases": [
+  {
+   "name": "trim_circle_tangent_to_boundary_closed",
+   "upstream_ref": "source/SMLib/src/SmSphere.cpp:2166 (coverage: crates/solidcore/src/surface/sphere.rs:1405)",
+   "inputs": {
+    "sphere": {
+     "mode": 1,
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "radius": 1.0,
+     "dom": [
+      0,
+      -90,
+      360,
+      30
+     ]
+    },
+    "op": "trim",
+    "c": [
+     0.43301270189221946,
+     0.0,
+     0.75
+    ],
+    "x": [
+     -0.8660254037844386,
+     0,
+     0.5000000000000001
+    ],
+    "y": [
+     0,
+     -1,
+     0
+    ],
+    "d": [
+     0,
+     360
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "trim_circle_tangent_to_boundary_open",
+   "upstream_ref": "source/SMLib/src/SmSphere.cpp:2337 (coverage: crates/solidcore/src/surface/sphere.rs:1548)",
+   "inputs": {
+    "sphere": {
+     "mode": 1,
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "radius": 1.0,
+     "dom": [
+      0,
+      -90,
+      360,
+      30
+     ]
+    },
+    "op": "trim",
+    "c": [
+     0.43301270189221946,
+     0.0,
+     0.75
+    ],
+    "x": [
+     -0.8660254037844386,
+     0,
+     0.5000000000000001
+    ],
+    "y": [
+     0,
+     -1,
+     0
+    ],
+    "d": [
+     0,
+     300
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "trim_circle_short_arc_across_boundary",
+   "upstream_ref": "source/SMLib/src/SmSphere.cpp:2254 (coverage: crates/solidcore/src/surface/sphere.rs:1472)",
+   "inputs": {
+    "sphere": {
+     "mode": 1,
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "radius": 1.0,
+     "dom": [
+      0,
+      -90,
+      360,
+      30
+     ]
+    },
+    "op": "trim",
+    "c": [
+     0.4330126993922194,
+     0.0,
+     0.749999995669873
+    ],
+    "x": [
+     -0.8660254037844386,
+     0,
+     0.5000000000000001
+    ],
+    "y": [
+     0,
+     -1,
+     0
+    ],
+    "d": [
+     0,
+     360
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "trim_circle_short_arc_across_boundary_open",
+   "upstream_ref": "source/SMLib/src/SmSphere.cpp:2254 (coverage: crates/solidcore/src/surface/sphere.rs:1472)",
+   "inputs": {
+    "sphere": {
+     "mode": 1,
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "radius": 1.0,
+     "dom": [
+      0,
+      -90,
+      360,
+      30
+     ]
+    },
+    "op": "trim",
+    "c": [
+     0.4330126993922194,
+     0.0,
+     0.749999995669873
+    ],
+    "x": [
+     -0.8660254037844386,
+     0,
+     0.5000000000000001
+    ],
+    "y": [
+     0,
+     -1,
+     0
+    ],
+    "d": [
+     0,
+     300
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "isect_sphere_coincident",
+   "upstream_ref": "source/SMLib/src/SmSphere.cpp:1705 (coverage: crates/solidcore/src/surface/sphere.rs:1069)",
+   "inputs": {
+    "sphere": {
+     "mode": 0,
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "radius": 1.0
+    },
+    "op": "isect_sphere",
+    "other": {
+     "mode": 0,
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "radius": 1.0
+    },
+    "args": {
+     "dom": {
+      "kind": "natural"
+     },
+     "other_dom": {
+      "kind": "natural"
+     }
+    }
+   }
+  },
+  {
+   "name": "isect_sphere_coincident_tol",
+   "upstream_ref": "source/SMLib/src/SmSphere.cpp:1705 (coverage: crates/solidcore/src/surface/sphere.rs:1069)",
+   "inputs": {
+    "sphere": {
+     "mode": 0,
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "radius": 2.0
+    },
+    "op": "isect_sphere",
+    "other": {
+     "mode": 0,
+     "origin": [
+      1e-07,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "radius": 2.0000001
+    },
+    "args": {
+     "dom": {
+      "kind": "natural"
+     },
+     "other_dom": {
+      "kind": "natural"
+     },
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "isect_sphere_concentric_radius_gap",
+   "upstream_ref": "source/SMLib/src/SmSphere.cpp:1709 (coverage: crates/solidcore/src/surface/sphere.rs:1075)",
+   "inputs": {
+    "sphere": {
+     "mode": 0,
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "radius": 1.0
+    },
+    "op": "isect_sphere",
+    "other": {
+     "mode": 0,
+     "origin": [
+      5e-07,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "radius": 1.0000012
+    },
+    "args": {
+     "dom": {
+      "kind": "natural"
+     },
+     "other_dom": {
+      "kind": "natural"
+     }
+    }
+   }
+  },
+  {
+   "name": "isect_sphere_short_arc_across_cap",
+   "upstream_ref": "source/SMLib/src/SmSphere.cpp:1842 (coverage: crates/solidcore/src/surface/sphere.rs:1152)",
+   "inputs": {
+    "sphere": {
+     "mode": 1,
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "radius": 1.0,
+     "dom": [
+      0,
+      -90,
+      360,
+      30
+     ]
+    },
+    "op": "isect_sphere",
+    "other": {
+     "mode": 0,
+     "origin": [
+      0.5000000000000001,
+      0,
+      0.8660254037844386
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "radius": 0.5176380998642998
+    },
+    "args": {
+     "dom": {
+      "kind": "natural"
+     },
+     "other_dom": {
+      "kind": "natural"
+     },
+     "tol": 0.001
+    }
+   }
+  },
+  {
+   "name": "isect_sphere_short_arc_across_cap_other_cap",
+   "upstream_ref": "source/SMLib/src/SmSphere.cpp:1842 (coverage: crates/solidcore/src/surface/sphere.rs:1152)",
+   "inputs": {
+    "sphere": {
+     "mode": 1,
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "radius": 1.0,
+     "dom": [
+      0,
+      -90,
+      360,
+      30
+     ]
+    },
+    "op": "isect_sphere",
+    "other": {
+     "mode": 1,
+     "origin": [
+      0.5000000000000001,
+      0,
+      0.8660254037844386
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "radius": 0.5176380998642998,
+     "dom": [
+      0,
+      -90,
+      180,
+      90
+     ]
+    },
+    "args": {
+     "dom": {
+      "kind": "natural"
+     },
+     "other_dom": {
+      "kind": "natural"
+     },
+     "tol": 0.001
+    }
+   }
+  },
+  {
+   "name": "isect_cone_far_from_axis",
+   "upstream_ref": "source/SMLib/src/SmSphere.cpp:2459 (coverage: crates/solidcore/src/surface/sphere.rs:1598)",
+   "inputs": {
+    "sphere": {
+     "mode": 0,
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "radius": 1.0
+    },
+    "op": "isect_cone",
+    "cone": {
+     "origin": [
+      10,
+      0,
+      -1
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "r0": 1,
+     "r1": 2,
+     "h": 2
+    },
+    "args": {
+     "dom": {
+      "kind": "natural"
+     },
+     "other_dom": {
+      "kind": "natural"
+     }
+    }
+   }
+  },
+  {
+   "name": "isect_cone_boxes_disjoint",
+   "upstream_ref": "source/SMLib/src/SmSphere.cpp:2477 (coverage: crates/solidcore/src/surface/sphere.rs:1627)",
+   "inputs": {
+    "sphere": {
+     "mode": 0,
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "radius": 1.0
+    },
+    "op": "isect_cone",
+    "cone": {
+     "origin": [
+      0,
+      0,
+      -10
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "r0": 0.5,
+     "r1": 0.5,
+     "h": 3
+    },
+    "args": {
+     "dom": {
+      "kind": "natural"
+     },
+     "other_dom": {
+      "kind": "natural"
+     }
+    }
+   }
+  },
+  {
+   "name": "isect_cone_apex_on_sphere",
+   "upstream_ref": "source/SMLib/src/SmSphere.cpp:2625 (coverage: crates/solidcore/src/surface/sphere.rs:1719)",
+   "inputs": {
+    "sphere": {
+     "mode": 0,
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "radius": 1.0
+    },
+    "op": "isect_cone",
+    "cone": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "r0": 1,
+     "r1": 0,
+     "h": 1
+    },
+    "args": {
+     "dom": {
+      "kind": "natural"
+     },
+     "other_dom": {
+      "kind": "natural"
+     }
+    }
+   }
+  },
+  {
+   "name": "isect_cone_apex_on_cap",
+   "upstream_ref": "source/SMLib/src/SmSphere.cpp:2625 (coverage: crates/solidcore/src/surface/sphere.rs:1719)",
+   "inputs": {
+    "sphere": {
+     "mode": 1,
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "radius": 1.0,
+     "dom": [
+      0,
+      -90,
+      360,
+      30
+     ]
+    },
+    "op": "isect_cone",
+    "cone": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "r0": 1,
+     "r1": 0,
+     "h": 1
+    },
+    "args": {
+     "dom": {
+      "kind": "natural"
+     },
+     "other_dom": {
+      "kind": "natural"
+     }
+    }
+   }
+  },
+  {
+   "name": "step_inv_pole",
+   "upstream_ref": "source/SMLib/src/SmSphere.cpp:3524 (coverage: crates/solidcore/src/surface/sphere.rs:2297)",
+   "inputs": {
+    "sphere": {
+     "mode": 0,
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "radius": 1.0
+    },
+    "op": "step_inv",
+    "point": [
+     0,
+     0,
+     1
+    ],
+    "tol": 1e-09
+   }
+  },
+  {
+   "name": "step_inv_seam_guess_high",
+   "upstream_ref": "source/SMLib/src/SmSphere.cpp:3530 (coverage: crates/solidcore/src/surface/sphere.rs:2309)",
+   "inputs": {
+    "sphere": {
+     "mode": 0,
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "radius": 1.0
+    },
+    "op": "step_inv",
+    "point": [
+     1,
+     0,
+     0
+    ],
+    "tol": 1e-09,
+    "guess": [
+     350,
+     0
+    ]
+   }
+  },
+  {
+   "name": "step_inv_seam_guess_low",
+   "upstream_ref": "source/SMLib/src/SmSphere.cpp:3530 (coverage: crates/solidcore/src/surface/sphere.rs:2309)",
+   "inputs": {
+    "sphere": {
+     "mode": 0,
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "radius": 1.0
+    },
+    "op": "step_inv",
+    "point": [
+     1,
+     0,
+     0
+    ],
+    "tol": 1e-09,
+    "guess": [
+     10,
+     0
+    ]
+   }
+  }
+ ]
+}

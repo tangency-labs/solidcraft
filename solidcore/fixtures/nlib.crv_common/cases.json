@@ -1,0 +1,3473 @@
+{
+ "cases": [
+  {
+   "name": "create_circle_r10_ctp2",
+   "upstream_ref": "upstream/tests/SM_API_test/src/TestSmCurves.cpp:TestSmCreateCircle (SmApiCreateCircle centre 0, radius 10)",
+   "inputs": {
+    "op": "circ_arc",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r": 10.0,
+    "as": 0.0,
+    "ae": 360.0,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "create_arc_r10_0_135_ctp2",
+   "upstream_ref": "upstream/tests/SM_API_test/src/TestSmCurves.cpp:TestSmCreateArc (SmApiCreateArc radius 10, 0..135 deg)",
+   "inputs": {
+    "op": "circ_arc",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r": 10.0,
+    "as": 0.0,
+    "ae": 135.0,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "general_arc_r1_full_ctp2",
+   "upstream_ref": "upstream/tests/SM_API_test/src/TestSmGeneral.cpp:1198 (SmApiCreateArc radius 1, 0..360)",
+   "inputs": {
+    "op": "circ_arc",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r": 1.0,
+    "as": 0.0,
+    "ae": 360.0,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "create_circle_r10_ctp4",
+   "upstream_ref": "upstream/tests/SM_API_test/src/TestSmCurves.cpp:TestSmCreateCircle (SmApiCreateCircle centre 0, radius 10)",
+   "inputs": {
+    "op": "circ_arc",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r": 10.0,
+    "as": 0.0,
+    "ae": 360.0,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "create_arc_r10_0_135_ctp4",
+   "upstream_ref": "upstream/tests/SM_API_test/src/TestSmCurves.cpp:TestSmCreateArc (SmApiCreateArc radius 10, 0..135 deg)",
+   "inputs": {
+    "op": "circ_arc",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r": 10.0,
+    "as": 0.0,
+    "ae": 135.0,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "general_arc_r1_full_ctp4",
+   "upstream_ref": "upstream/tests/SM_API_test/src/TestSmGeneral.cpp:1198 (SmApiCreateArc radius 1, 0..360)",
+   "inputs": {
+    "op": "circ_arc",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r": 1.0,
+    "as": 0.0,
+    "ae": 360.0,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "create_circle_r10_ctp5",
+   "upstream_ref": "upstream/tests/SM_API_test/src/TestSmCurves.cpp:TestSmCreateCircle (SmApiCreateCircle centre 0, radius 10)",
+   "inputs": {
+    "op": "circ_arc",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r": 10.0,
+    "as": 0.0,
+    "ae": 360.0,
+    "ctp": 5
+   }
+  },
+  {
+   "name": "create_arc_r10_0_135_ctp5",
+   "upstream_ref": "upstream/tests/SM_API_test/src/TestSmCurves.cpp:TestSmCreateArc (SmApiCreateArc radius 10, 0..135 deg)",
+   "inputs": {
+    "op": "circ_arc",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r": 10.0,
+    "as": 0.0,
+    "ae": 135.0,
+    "ctp": 5
+   }
+  },
+  {
+   "name": "general_arc_r1_full_ctp5",
+   "upstream_ref": "upstream/tests/SM_API_test/src/TestSmGeneral.cpp:1198 (SmApiCreateArc radius 1, 0..360)",
+   "inputs": {
+    "op": "circ_arc",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r": 1.0,
+    "as": 0.0,
+    "ae": 360.0,
+    "ctp": 5
+   }
+  },
+  {
+   "name": "quadratic_arc_tol_0_90",
+   "upstream_ref": "source/SMLib/src/NL_CrvCommon.cpp (direct; at = 0.01 as N_CreateCircArc)",
+   "inputs": {
+    "op": "quadratic_arc_tol",
+    "c": [
+     1,
+     2,
+     3
+    ],
+    "x": [
+     0,
+     0,
+     2
+    ],
+    "y": [
+     0,
+     3,
+     0
+    ],
+    "r": 2.5,
+    "as": 0.0,
+    "ae": 90.0,
+    "at": 0.01
+   }
+  },
+  {
+   "name": "quadratic_arc_tol_0_180",
+   "upstream_ref": "source/SMLib/src/NL_CrvCommon.cpp (direct; at = 0.01 as N_CreateCircArc)",
+   "inputs": {
+    "op": "quadratic_arc_tol",
+    "c": [
+     1,
+     2,
+     3
+    ],
+    "x": [
+     0,
+     0,
+     2
+    ],
+    "y": [
+     0,
+     3,
+     0
+    ],
+    "r": 2.5,
+    "as": 0.0,
+    "ae": 180.0,
+    "at": 0.01
+   }
+  },
+  {
+   "name": "quadratic_arc_tol_30_300",
+   "upstream_ref": "source/SMLib/src/NL_CrvCommon.cpp (direct; at = 0.01 as N_CreateCircArc)",
+   "inputs": {
+    "op": "quadratic_arc_tol",
+    "c": [
+     1,
+     2,
+     3
+    ],
+    "x": [
+     0,
+     0,
+     2
+    ],
+    "y": [
+     0,
+     3,
+     0
+    ],
+    "r": 2.5,
+    "as": 30.0,
+    "ae": 300.0,
+    "at": 0.01
+   }
+  },
+  {
+   "name": "quadratic_arc_tol_m45_45",
+   "upstream_ref": "source/SMLib/src/NL_CrvCommon.cpp (direct; at = 0.01 as N_CreateCircArc)",
+   "inputs": {
+    "op": "quadratic_arc_tol",
+    "c": [
+     1,
+     2,
+     3
+    ],
+    "x": [
+     0,
+     0,
+     2
+    ],
+    "y": [
+     0,
+     3,
+     0
+    ],
+    "r": 2.5,
+    "as": -45.0,
+    "ae": 45.0,
+    "at": 0.01
+   }
+  },
+  {
+   "name": "quadratic_arc_tol_10_10",
+   "upstream_ref": "source/SMLib/src/NL_CrvCommon.cpp (direct; at = 0.01 as N_CreateCircArc)",
+   "inputs": {
+    "op": "quadratic_arc_tol",
+    "c": [
+     1,
+     2,
+     3
+    ],
+    "x": [
+     0,
+     0,
+     2
+    ],
+    "y": [
+     0,
+     3,
+     0
+    ],
+    "r": 2.5,
+    "as": 10.0,
+    "ae": 10.0,
+    "at": 0.01
+   }
+  },
+  {
+   "name": "quadratic_arc_tol_0_359p995",
+   "upstream_ref": "source/SMLib/src/NL_CrvCommon.cpp (direct; at = 0.01 as N_CreateCircArc)",
+   "inputs": {
+    "op": "quadratic_arc_tol",
+    "c": [
+     1,
+     2,
+     3
+    ],
+    "x": [
+     0,
+     0,
+     2
+    ],
+    "y": [
+     0,
+     3,
+     0
+    ],
+    "r": 2.5,
+    "as": 0.0,
+    "ae": 359.995,
+    "at": 0.01
+   }
+  },
+  {
+   "name": "quadratic_arc_tol_200_100",
+   "upstream_ref": "source/SMLib/src/NL_CrvCommon.cpp (direct; at = 0.01 as N_CreateCircArc)",
+   "inputs": {
+    "op": "quadratic_arc_tol",
+    "c": [
+     1,
+     2,
+     3
+    ],
+    "x": [
+     0,
+     0,
+     2
+    ],
+    "y": [
+     0,
+     3,
+     0
+    ],
+    "r": 2.5,
+    "as": 200.0,
+    "ae": 100.0,
+    "at": 0.01
+   }
+  },
+  {
+   "name": "quartic_arc_tol_0_90",
+   "upstream_ref": "source/SMLib/src/NL_CrvCommon.cpp (direct; at = 0.01 as N_CreateCircArc)",
+   "inputs": {
+    "op": "quartic_arc_tol",
+    "c": [
+     1,
+     2,
+     3
+    ],
+    "x": [
+     0,
+     0,
+     2
+    ],
+    "y": [
+     0,
+     3,
+     0
+    ],
+    "r": 2.5,
+    "as": 0.0,
+    "ae": 90.0,
+    "at": 0.01
+   }
+  },
+  {
+   "name": "quartic_arc_tol_0_180",
+   "upstream_ref": "source/SMLib/src/NL_CrvCommon.cpp (direct; at = 0.01 as N_CreateCircArc)",
+   "inputs": {
+    "op": "quartic_arc_tol",
+    "c": [
+     1,
+     2,
+     3
+    ],
+    "x": [
+     0,
+     0,
+     2
+    ],
+    "y": [
+     0,
+     3,
+     0
+    ],
+    "r": 2.5,
+    "as": 0.0,
+    "ae": 180.0,
+    "at": 0.01
+   }
+  },
+  {
+   "name": "quartic_arc_tol_30_300",
+   "upstream_ref": "source/SMLib/src/NL_CrvCommon.cpp (direct; at = 0.01 as N_CreateCircArc)",
+   "inputs": {
+    "op": "quartic_arc_tol",
+    "c": [
+     1,
+     2,
+     3
+    ],
+    "x": [
+     0,
+     0,
+     2
+    ],
+    "y": [
+     0,
+     3,
+     0
+    ],
+    "r": 2.5,
+    "as": 30.0,
+    "ae": 300.0,
+    "at": 0.01
+   }
+  },
+  {
+   "name": "quartic_arc_tol_m45_45",
+   "upstream_ref": "source/SMLib/src/NL_CrvCommon.cpp (direct; at = 0.01 as N_CreateCircArc)",
+   "inputs": {
+    "op": "quartic_arc_tol",
+    "c": [
+     1,
+     2,
+     3
+    ],
+    "x": [
+     0,
+     0,
+     2
+    ],
+    "y": [
+     0,
+     3,
+     0
+    ],
+    "r": 2.5,
+    "as": -45.0,
+    "ae": 45.0,
+    "at": 0.01
+   }
+  },
+  {
+   "name": "quartic_arc_tol_10_10",
+   "upstream_ref": "source/SMLib/src/NL_CrvCommon.cpp (direct; at = 0.01 as N_CreateCircArc)",
+   "inputs": {
+    "op": "quartic_arc_tol",
+    "c": [
+     1,
+     2,
+     3
+    ],
+    "x": [
+     0,
+     0,
+     2
+    ],
+    "y": [
+     0,
+     3,
+     0
+    ],
+    "r": 2.5,
+    "as": 10.0,
+    "ae": 10.0,
+    "at": 0.01
+   }
+  },
+  {
+   "name": "quartic_arc_tol_0_359p995",
+   "upstream_ref": "source/SMLib/src/NL_CrvCommon.cpp (direct; at = 0.01 as N_CreateCircArc)",
+   "inputs": {
+    "op": "quartic_arc_tol",
+    "c": [
+     1,
+     2,
+     3
+    ],
+    "x": [
+     0,
+     0,
+     2
+    ],
+    "y": [
+     0,
+     3,
+     0
+    ],
+    "r": 2.5,
+    "as": 0.0,
+    "ae": 359.995,
+    "at": 0.01
+   }
+  },
+  {
+   "name": "quartic_arc_tol_200_100",
+   "upstream_ref": "source/SMLib/src/NL_CrvCommon.cpp (direct; at = 0.01 as N_CreateCircArc)",
+   "inputs": {
+    "op": "quartic_arc_tol",
+    "c": [
+     1,
+     2,
+     3
+    ],
+    "x": [
+     0,
+     0,
+     2
+    ],
+    "y": [
+     0,
+     3,
+     0
+    ],
+    "r": 2.5,
+    "as": 200.0,
+    "ae": 100.0,
+    "at": 0.01
+   }
+  },
+  {
+   "name": "quintic_arc_tol_0_90",
+   "upstream_ref": "source/SMLib/src/NL_CrvCommon.cpp (direct; at = 0.01 as N_CreateCircArc)",
+   "inputs": {
+    "op": "quintic_arc_tol",
+    "c": [
+     1,
+     2,
+     3
+    ],
+    "x": [
+     0,
+     0,
+     2
+    ],
+    "y": [
+     0,
+     3,
+     0
+    ],
+    "r": 2.5,
+    "as": 0.0,
+    "ae": 90.0,
+    "at": 0.01
+   }
+  },
+  {
+   "name": "quintic_arc_tol_0_180",
+   "upstream_ref": "source/SMLib/src/NL_CrvCommon.cpp (direct; at = 0.01 as N_CreateCircArc)",
+   "inputs": {
+    "op": "quintic_arc_tol",
+    "c": [
+     1,
+     2,
+     3
+    ],
+    "x": [
+     0,
+     0,
+     2
+    ],
+    "y": [
+     0,
+     3,
+     0
+    ],
+    "r": 2.5,
+    "as": 0.0,
+    "ae": 180.0,
+    "at": 0.01
+   }
+  },
+  {
+   "name": "quintic_arc_tol_30_300",
+   "upstream_ref": "source/SMLib/src/NL_CrvCommon.cpp (direct; at = 0.01 as N_CreateCircArc)",
+   "inputs": {
+    "op": "quintic_arc_tol",
+    "c": [
+     1,
+     2,
+     3
+    ],
+    "x": [
+     0,
+     0,
+     2
+    ],
+    "y": [
+     0,
+     3,
+     0
+    ],
+    "r": 2.5,
+    "as": 30.0,
+    "ae": 300.0,
+    "at": 0.01
+   }
+  },
+  {
+   "name": "quintic_arc_tol_m45_45",
+   "upstream_ref": "source/SMLib/src/NL_CrvCommon.cpp (direct; at = 0.01 as N_CreateCircArc)",
+   "inputs": {
+    "op": "quintic_arc_tol",
+    "c": [
+     1,
+     2,
+     3
+    ],
+    "x": [
+     0,
+     0,
+     2
+    ],
+    "y": [
+     0,
+     3,
+     0
+    ],
+    "r": 2.5,
+    "as": -45.0,
+    "ae": 45.0,
+    "at": 0.01
+   }
+  },
+  {
+   "name": "quintic_arc_tol_10_10",
+   "upstream_ref": "source/SMLib/src/NL_CrvCommon.cpp (direct; at = 0.01 as N_CreateCircArc)",
+   "inputs": {
+    "op": "quintic_arc_tol",
+    "c": [
+     1,
+     2,
+     3
+    ],
+    "x": [
+     0,
+     0,
+     2
+    ],
+    "y": [
+     0,
+     3,
+     0
+    ],
+    "r": 2.5,
+    "as": 10.0,
+    "ae": 10.0,
+    "at": 0.01
+   }
+  },
+  {
+   "name": "quintic_arc_tol_0_359p995",
+   "upstream_ref": "source/SMLib/src/NL_CrvCommon.cpp (direct; at = 0.01 as N_CreateCircArc)",
+   "inputs": {
+    "op": "quintic_arc_tol",
+    "c": [
+     1,
+     2,
+     3
+    ],
+    "x": [
+     0,
+     0,
+     2
+    ],
+    "y": [
+     0,
+     3,
+     0
+    ],
+    "r": 2.5,
+    "as": 0.0,
+    "ae": 359.995,
+    "at": 0.01
+   }
+  },
+  {
+   "name": "quintic_arc_tol_200_100",
+   "upstream_ref": "source/SMLib/src/NL_CrvCommon.cpp (direct; at = 0.01 as N_CreateCircArc)",
+   "inputs": {
+    "op": "quintic_arc_tol",
+    "c": [
+     1,
+     2,
+     3
+    ],
+    "x": [
+     0,
+     0,
+     2
+    ],
+    "y": [
+     0,
+     3,
+     0
+    ],
+    "r": 2.5,
+    "as": 200.0,
+    "ae": 100.0,
+    "at": 0.01
+   }
+  },
+  {
+   "name": "negative_radius_half_180_360",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:6813 (N_CreateQuadraticArc with -dOffset, 180..360)",
+   "inputs": {
+    "op": "quadratic_arc_tol",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     0,
+     0,
+     1
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r": -0.5,
+    "as": 180.0,
+    "ae": 360.0,
+    "at": 0.01
+   }
+  },
+  {
+   "name": "positive_radius_half_0_180",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurfaceNLib.cpp:6815 (N_CreateQuadraticArc with dOffset, 0..180)",
+   "inputs": {
+    "op": "quadratic_arc_tol",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     0,
+     0,
+     1
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r": 0.5,
+    "as": 0.0,
+    "ae": 180.0,
+    "at": 0.01
+   }
+  },
+  {
+   "name": "quartic_approx_0_60",
+   "upstream_ref": "source/SMLib/src/NL_CrvApprox.cpp:1600 (N_CreateQuarticArc)",
+   "inputs": {
+    "op": "quartic_arc_tol",
+    "c": [
+     5,
+     -1,
+     0
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0
+    ],
+    "r": 3.0,
+    "as": 0.0,
+    "ae": 60.0,
+    "at": 0.01
+   }
+  },
+  {
+   "name": "quartic_approx_0_120",
+   "upstream_ref": "source/SMLib/src/NL_CrvApprox.cpp:1600 (N_CreateQuarticArc)",
+   "inputs": {
+    "op": "quartic_arc_tol",
+    "c": [
+     5,
+     -1,
+     0
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0
+    ],
+    "r": 3.0,
+    "as": 0.0,
+    "ae": 120.0,
+    "at": 0.01
+   }
+  },
+  {
+   "name": "quartic_approx_0_121",
+   "upstream_ref": "source/SMLib/src/NL_CrvApprox.cpp:1600 (N_CreateQuarticArc)",
+   "inputs": {
+    "op": "quartic_arc_tol",
+    "c": [
+     5,
+     -1,
+     0
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0
+    ],
+    "r": 3.0,
+    "as": 0.0,
+    "ae": 121.0,
+    "at": 0.01
+   }
+  },
+  {
+   "name": "quartic_approx_0_240",
+   "upstream_ref": "source/SMLib/src/NL_CrvApprox.cpp:1600 (N_CreateQuarticArc)",
+   "inputs": {
+    "op": "quartic_arc_tol",
+    "c": [
+     5,
+     -1,
+     0
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0
+    ],
+    "r": 3.0,
+    "as": 0.0,
+    "ae": 240.0,
+    "at": 0.01
+   }
+  },
+  {
+   "name": "quartic_approx_0_241",
+   "upstream_ref": "source/SMLib/src/NL_CrvApprox.cpp:1600 (N_CreateQuarticArc)",
+   "inputs": {
+    "op": "quartic_arc_tol",
+    "c": [
+     5,
+     -1,
+     0
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0
+    ],
+    "r": 3.0,
+    "as": 0.0,
+    "ae": 241.0,
+    "at": 0.01
+   }
+  },
+  {
+   "name": "quartic_approx_0_360",
+   "upstream_ref": "source/SMLib/src/NL_CrvApprox.cpp:1600 (N_CreateQuarticArc)",
+   "inputs": {
+    "op": "quartic_arc_tol",
+    "c": [
+     5,
+     -1,
+     0
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0
+    ],
+    "r": 3.0,
+    "as": 0.0,
+    "ae": 360.0,
+    "at": 0.01
+   }
+  },
+  {
+   "name": "circ_weights_0_45p0_ctp2",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:1462 (N_CalcCircWeights(0, al, ctp))",
+   "inputs": {
+    "op": "circ_weights",
+    "as": 0.0,
+    "ae": 45.0,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "circ_weights_0_90p0_ctp2",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:1462 (N_CalcCircWeights(0, al, ctp))",
+   "inputs": {
+    "op": "circ_weights",
+    "as": 0.0,
+    "ae": 90.0,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "circ_weights_0_180p0_ctp2",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:1462 (N_CalcCircWeights(0, al, ctp))",
+   "inputs": {
+    "op": "circ_weights",
+    "as": 0.0,
+    "ae": 180.0,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "circ_weights_0_270p0_ctp2",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:1462 (N_CalcCircWeights(0, al, ctp))",
+   "inputs": {
+    "op": "circ_weights",
+    "as": 0.0,
+    "ae": 270.0,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "circ_weights_0_360p0_ctp2",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:1462 (N_CalcCircWeights(0, al, ctp))",
+   "inputs": {
+    "op": "circ_weights",
+    "as": 0.0,
+    "ae": 360.0,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "circ_weights_0_359p99_ctp2",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:1462 (N_CalcCircWeights(0, al, ctp))",
+   "inputs": {
+    "op": "circ_weights",
+    "as": 0.0,
+    "ae": 359.99,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "circ_weights_0_45p0_ctp4",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:1462 (N_CalcCircWeights(0, al, ctp))",
+   "inputs": {
+    "op": "circ_weights",
+    "as": 0.0,
+    "ae": 45.0,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "circ_weights_0_90p0_ctp4",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:1462 (N_CalcCircWeights(0, al, ctp))",
+   "inputs": {
+    "op": "circ_weights",
+    "as": 0.0,
+    "ae": 90.0,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "circ_weights_0_180p0_ctp4",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:1462 (N_CalcCircWeights(0, al, ctp))",
+   "inputs": {
+    "op": "circ_weights",
+    "as": 0.0,
+    "ae": 180.0,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "circ_weights_0_270p0_ctp4",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:1462 (N_CalcCircWeights(0, al, ctp))",
+   "inputs": {
+    "op": "circ_weights",
+    "as": 0.0,
+    "ae": 270.0,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "circ_weights_0_360p0_ctp4",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:1462 (N_CalcCircWeights(0, al, ctp))",
+   "inputs": {
+    "op": "circ_weights",
+    "as": 0.0,
+    "ae": 360.0,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "circ_weights_0_359p99_ctp4",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:1462 (N_CalcCircWeights(0, al, ctp))",
+   "inputs": {
+    "op": "circ_weights",
+    "as": 0.0,
+    "ae": 359.99,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "circ_weights_0_45p0_ctp5",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:1462 (N_CalcCircWeights(0, al, ctp))",
+   "inputs": {
+    "op": "circ_weights",
+    "as": 0.0,
+    "ae": 45.0,
+    "ctp": 5
+   }
+  },
+  {
+   "name": "circ_weights_0_90p0_ctp5",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:1462 (N_CalcCircWeights(0, al, ctp))",
+   "inputs": {
+    "op": "circ_weights",
+    "as": 0.0,
+    "ae": 90.0,
+    "ctp": 5
+   }
+  },
+  {
+   "name": "circ_weights_0_180p0_ctp5",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:1462 (N_CalcCircWeights(0, al, ctp))",
+   "inputs": {
+    "op": "circ_weights",
+    "as": 0.0,
+    "ae": 180.0,
+    "ctp": 5
+   }
+  },
+  {
+   "name": "circ_weights_0_270p0_ctp5",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:1462 (N_CalcCircWeights(0, al, ctp))",
+   "inputs": {
+    "op": "circ_weights",
+    "as": 0.0,
+    "ae": 270.0,
+    "ctp": 5
+   }
+  },
+  {
+   "name": "circ_weights_0_360p0_ctp5",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:1462 (N_CalcCircWeights(0, al, ctp))",
+   "inputs": {
+    "op": "circ_weights",
+    "as": 0.0,
+    "ae": 360.0,
+    "ctp": 5
+   }
+  },
+  {
+   "name": "circ_weights_0_359p99_ctp5",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:1462 (N_CalcCircWeights(0, al, ctp))",
+   "inputs": {
+    "op": "circ_weights",
+    "as": 0.0,
+    "ae": 359.99,
+    "ctp": 5
+   }
+  },
+  {
+   "name": "far_ellipse_0p5_1e10_ctp2",
+   "upstream_ref": "upstream/tests/SM_API_test/src/TestSmCurves.cpp:72 (SmApiCreateEllipse centre (0,1e16,0), radii 0.5, 1e10)",
+   "inputs": {
+    "op": "elliptical_arc_tol",
+    "c": [
+     0,
+     1e+16,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r1": 0.5,
+    "r2": 10000000000.0,
+    "as": 0.0,
+    "ae": 360.0,
+    "at": 0.01,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "ellipse_quarter_ctp2",
+   "upstream_ref": "source/SMLib/src/SmEllipse.cpp:3582 (N_CreateEllipticalArcTol, quadratic, at 0.01)",
+   "inputs": {
+    "op": "elliptical_arc_tol",
+    "c": [
+     1,
+     1,
+     1
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r1": 4.0,
+    "r2": 2.0,
+    "as": 0.0,
+    "ae": 90.0,
+    "at": 0.01,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "ellipse_default_tol_ctp2",
+   "upstream_ref": "source/SMLib/src/NL_CrvCommon.cpp:995 (at <= 0 becomes 0.01)",
+   "inputs": {
+    "op": "elliptical_arc_tol",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     0,
+     2,
+     0
+    ],
+    "y": [
+     0,
+     0,
+     3
+    ],
+    "r1": 3.0,
+    "r2": 1.0,
+    "as": 15.0,
+    "ae": 200.0,
+    "at": 0.0,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "ell_angtype0_0_90_ctp2",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": 0.0,
+    "ae": 90.0,
+    "at": 0.01,
+    "atp": 0,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "ell_angtype0_90_270_ctp2",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": 90.0,
+    "ae": 270.0,
+    "at": 0.01,
+    "atp": 0,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "ell_angtype0_45_315_ctp2",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": 45.0,
+    "ae": 315.0,
+    "at": 0.01,
+    "atp": 0,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "ell_angtype0_m30_30_ctp2",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": -30.0,
+    "ae": 30.0,
+    "at": 0.01,
+    "atp": 0,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "ell_angtype0_0_360_ctp2",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": 0.0,
+    "ae": 360.0,
+    "at": 0.01,
+    "atp": 0,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "ell_angtype0_270_90_ctp2",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": 270.0,
+    "ae": 90.0,
+    "at": 0.01,
+    "atp": 0,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "ell_angtype0_1em13_180_ctp2",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": 1e-13,
+    "ae": 180.0,
+    "at": 0.01,
+    "atp": 0,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "ell_angtype1_0_90_ctp2",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": 0.0,
+    "ae": 90.0,
+    "at": 0.01,
+    "atp": 1,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "ell_angtype1_90_270_ctp2",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": 90.0,
+    "ae": 270.0,
+    "at": 0.01,
+    "atp": 1,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "ell_angtype1_45_315_ctp2",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": 45.0,
+    "ae": 315.0,
+    "at": 0.01,
+    "atp": 1,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "ell_angtype1_m30_30_ctp2",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": -30.0,
+    "ae": 30.0,
+    "at": 0.01,
+    "atp": 1,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "ell_angtype1_0_360_ctp2",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": 0.0,
+    "ae": 360.0,
+    "at": 0.01,
+    "atp": 1,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "ell_angtype1_270_90_ctp2",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": 270.0,
+    "ae": 90.0,
+    "at": 0.01,
+    "atp": 1,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "ell_angtype1_1em13_180_ctp2",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": 1e-13,
+    "ae": 180.0,
+    "at": 0.01,
+    "atp": 1,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "far_ellipse_0p5_1e10_ctp4",
+   "upstream_ref": "upstream/tests/SM_API_test/src/TestSmCurves.cpp:72 (SmApiCreateEllipse centre (0,1e16,0), radii 0.5, 1e10)",
+   "inputs": {
+    "op": "elliptical_arc_tol",
+    "c": [
+     0,
+     1e+16,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r1": 0.5,
+    "r2": 10000000000.0,
+    "as": 0.0,
+    "ae": 360.0,
+    "at": 0.01,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "ellipse_quarter_ctp4",
+   "upstream_ref": "source/SMLib/src/SmEllipse.cpp:3582 (N_CreateEllipticalArcTol, quadratic, at 0.01)",
+   "inputs": {
+    "op": "elliptical_arc_tol",
+    "c": [
+     1,
+     1,
+     1
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r1": 4.0,
+    "r2": 2.0,
+    "as": 0.0,
+    "ae": 90.0,
+    "at": 0.01,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "ellipse_default_tol_ctp4",
+   "upstream_ref": "source/SMLib/src/NL_CrvCommon.cpp:995 (at <= 0 becomes 0.01)",
+   "inputs": {
+    "op": "elliptical_arc_tol",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     0,
+     2,
+     0
+    ],
+    "y": [
+     0,
+     0,
+     3
+    ],
+    "r1": 3.0,
+    "r2": 1.0,
+    "as": 15.0,
+    "ae": 200.0,
+    "at": 0.0,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "ell_angtype0_0_90_ctp4",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": 0.0,
+    "ae": 90.0,
+    "at": 0.01,
+    "atp": 0,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "ell_angtype0_90_270_ctp4",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": 90.0,
+    "ae": 270.0,
+    "at": 0.01,
+    "atp": 0,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "ell_angtype0_45_315_ctp4",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": 45.0,
+    "ae": 315.0,
+    "at": 0.01,
+    "atp": 0,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "ell_angtype0_m30_30_ctp4",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": -30.0,
+    "ae": 30.0,
+    "at": 0.01,
+    "atp": 0,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "ell_angtype0_0_360_ctp4",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": 0.0,
+    "ae": 360.0,
+    "at": 0.01,
+    "atp": 0,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "ell_angtype0_270_90_ctp4",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": 270.0,
+    "ae": 90.0,
+    "at": 0.01,
+    "atp": 0,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "ell_angtype0_1em13_180_ctp4",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": 1e-13,
+    "ae": 180.0,
+    "at": 0.01,
+    "atp": 0,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "ell_angtype1_0_90_ctp4",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": 0.0,
+    "ae": 90.0,
+    "at": 0.01,
+    "atp": 1,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "ell_angtype1_90_270_ctp4",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": 90.0,
+    "ae": 270.0,
+    "at": 0.01,
+    "atp": 1,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "ell_angtype1_45_315_ctp4",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": 45.0,
+    "ae": 315.0,
+    "at": 0.01,
+    "atp": 1,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "ell_angtype1_m30_30_ctp4",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": -30.0,
+    "ae": 30.0,
+    "at": 0.01,
+    "atp": 1,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "ell_angtype1_0_360_ctp4",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": 0.0,
+    "ae": 360.0,
+    "at": 0.01,
+    "atp": 1,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "ell_angtype1_270_90_ctp4",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": 270.0,
+    "ae": 90.0,
+    "at": 0.01,
+    "atp": 1,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "ell_angtype1_1em13_180_ctp4",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": 1e-13,
+    "ae": 180.0,
+    "at": 0.01,
+    "atp": 1,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "far_ellipse_0p5_1e10_ctp5",
+   "upstream_ref": "upstream/tests/SM_API_test/src/TestSmCurves.cpp:72 (SmApiCreateEllipse centre (0,1e16,0), radii 0.5, 1e10)",
+   "inputs": {
+    "op": "elliptical_arc_tol",
+    "c": [
+     0,
+     1e+16,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r1": 0.5,
+    "r2": 10000000000.0,
+    "as": 0.0,
+    "ae": 360.0,
+    "at": 0.01,
+    "ctp": 5
+   }
+  },
+  {
+   "name": "ellipse_quarter_ctp5",
+   "upstream_ref": "source/SMLib/src/SmEllipse.cpp:3582 (N_CreateEllipticalArcTol, quadratic, at 0.01)",
+   "inputs": {
+    "op": "elliptical_arc_tol",
+    "c": [
+     1,
+     1,
+     1
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r1": 4.0,
+    "r2": 2.0,
+    "as": 0.0,
+    "ae": 90.0,
+    "at": 0.01,
+    "ctp": 5
+   }
+  },
+  {
+   "name": "ellipse_default_tol_ctp5",
+   "upstream_ref": "source/SMLib/src/NL_CrvCommon.cpp:995 (at <= 0 becomes 0.01)",
+   "inputs": {
+    "op": "elliptical_arc_tol",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     0,
+     2,
+     0
+    ],
+    "y": [
+     0,
+     0,
+     3
+    ],
+    "r1": 3.0,
+    "r2": 1.0,
+    "as": 15.0,
+    "ae": 200.0,
+    "at": 0.0,
+    "ctp": 5
+   }
+  },
+  {
+   "name": "ell_angtype0_0_90_ctp5",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": 0.0,
+    "ae": 90.0,
+    "at": 0.01,
+    "atp": 0,
+    "ctp": 5
+   }
+  },
+  {
+   "name": "ell_angtype0_90_270_ctp5",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": 90.0,
+    "ae": 270.0,
+    "at": 0.01,
+    "atp": 0,
+    "ctp": 5
+   }
+  },
+  {
+   "name": "ell_angtype0_45_315_ctp5",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": 45.0,
+    "ae": 315.0,
+    "at": 0.01,
+    "atp": 0,
+    "ctp": 5
+   }
+  },
+  {
+   "name": "ell_angtype0_m30_30_ctp5",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": -30.0,
+    "ae": 30.0,
+    "at": 0.01,
+    "atp": 0,
+    "ctp": 5
+   }
+  },
+  {
+   "name": "ell_angtype0_0_360_ctp5",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": 0.0,
+    "ae": 360.0,
+    "at": 0.01,
+    "atp": 0,
+    "ctp": 5
+   }
+  },
+  {
+   "name": "ell_angtype0_270_90_ctp5",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": 270.0,
+    "ae": 90.0,
+    "at": 0.01,
+    "atp": 0,
+    "ctp": 5
+   }
+  },
+  {
+   "name": "ell_angtype0_1em13_180_ctp5",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": 1e-13,
+    "ae": 180.0,
+    "at": 0.01,
+    "atp": 0,
+    "ctp": 5
+   }
+  },
+  {
+   "name": "ell_angtype1_0_90_ctp5",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": 0.0,
+    "ae": 90.0,
+    "at": 0.01,
+    "atp": 1,
+    "ctp": 5
+   }
+  },
+  {
+   "name": "ell_angtype1_90_270_ctp5",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": 90.0,
+    "ae": 270.0,
+    "at": 0.01,
+    "atp": 1,
+    "ctp": 5
+   }
+  },
+  {
+   "name": "ell_angtype1_45_315_ctp5",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": 45.0,
+    "ae": 315.0,
+    "at": 0.01,
+    "atp": 1,
+    "ctp": 5
+   }
+  },
+  {
+   "name": "ell_angtype1_m30_30_ctp5",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": -30.0,
+    "ae": 30.0,
+    "at": 0.01,
+    "atp": 1,
+    "ctp": 5
+   }
+  },
+  {
+   "name": "ell_angtype1_0_360_ctp5",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": 0.0,
+    "ae": 360.0,
+    "at": 0.01,
+    "atp": 1,
+    "ctp": 5
+   }
+  },
+  {
+   "name": "ell_angtype1_270_90_ctp5",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": 270.0,
+    "ae": 90.0,
+    "at": 0.01,
+    "atp": 1,
+    "ctp": 5
+   }
+  },
+  {
+   "name": "ell_angtype1_1em13_180_ctp5",
+   "upstream_ref": "source/SMLib/src/NL_SrfCommon.cpp:648 / NL_Iges.cpp:3410 (N_CreateEllipticalArcAngType)",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     2,
+     -3,
+     1
+    ],
+    "x": [
+     1,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     1,
+     0.5
+    ],
+    "r1": 5.0,
+    "r2": 2.0,
+    "as": 1e-13,
+    "ae": 180.0,
+    "at": 0.01,
+    "atp": 1,
+    "ctp": 5
+   }
+  },
+  {
+   "name": "zero_x_axis_ctp2",
+   "upstream_ref": "edge: N_VectorNormalizeRef fails",
+   "inputs": {
+    "op": "circ_arc_tol",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     0,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r": 1.0,
+    "as": 0.0,
+    "ae": 90.0,
+    "at": 0.01,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "parallel_axes_ctp2",
+   "upstream_ref": "edge: X parallel to Y",
+   "inputs": {
+    "op": "circ_arc_tol",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     2,
+     0,
+     0
+    ],
+    "r": 1.0,
+    "as": 0.0,
+    "ae": 90.0,
+    "at": 0.01,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "zero_radius_ctp2",
+   "upstream_ref": "edge: r = 0",
+   "inputs": {
+    "op": "circ_arc_tol",
+    "c": [
+     1,
+     1,
+     1
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r": 0.0,
+    "as": 0.0,
+    "ae": 90.0,
+    "at": 0.01,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "tiny_sweep_ctp2",
+   "upstream_ref": "edge: sweep just above conic_data's 1e-6 degree snap",
+   "inputs": {
+    "op": "circ_arc_tol",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r": 1.0,
+    "as": 10.0,
+    "ae": 10.00001,
+    "at": 0.01,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "big_angles_ctp2",
+   "upstream_ref": "edge: angles far outside [0,360]",
+   "inputs": {
+    "op": "circ_arc_tol",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r": 1.0,
+    "as": -1000.0,
+    "ae": 1730.0,
+    "at": 0.01,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "large_at_ctp2",
+   "upstream_ref": "edge: at = 200 snaps the ends of a 200 degree arc",
+   "inputs": {
+    "op": "circ_arc_tol",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r": 1.0,
+    "as": 0.0,
+    "ae": 200.0,
+    "at": 200.0,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "ell_atp1_near_90_ctp2",
+   "upstream_ref": "edge: tan(angle) huge",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r1": 3.0,
+    "r2": 1.0,
+    "as": 89.9999999,
+    "ae": 90.0000001,
+    "at": 0.01,
+    "atp": 1,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "ell_zero_x_ctp2",
+   "upstream_ref": "edge: zero major axis",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     0,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r1": 3.0,
+    "r2": 1.0,
+    "as": 0.0,
+    "ae": 90.0,
+    "at": 0.01,
+    "atp": 0,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "ell_negative_r2_ctp2",
+   "upstream_ref": "edge: negative minor radius",
+   "inputs": {
+    "op": "elliptical_arc_tol",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r1": 3.0,
+    "r2": -1.0,
+    "as": 30.0,
+    "ae": 120.0,
+    "at": 0.01,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "ell_r2_gt_r1_ctp2",
+   "upstream_ref": "edge: minor radius above major",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r1": 1.0,
+    "r2": 4.0,
+    "as": 10.0,
+    "ae": 350.0,
+    "at": 0.01,
+    "atp": 1,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "zero_x_axis_ctp4",
+   "upstream_ref": "edge: N_VectorNormalizeRef fails",
+   "inputs": {
+    "op": "circ_arc_tol",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     0,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r": 1.0,
+    "as": 0.0,
+    "ae": 90.0,
+    "at": 0.01,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "parallel_axes_ctp4",
+   "upstream_ref": "edge: X parallel to Y",
+   "inputs": {
+    "op": "circ_arc_tol",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     2,
+     0,
+     0
+    ],
+    "r": 1.0,
+    "as": 0.0,
+    "ae": 90.0,
+    "at": 0.01,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "zero_radius_ctp4",
+   "upstream_ref": "edge: r = 0",
+   "inputs": {
+    "op": "circ_arc_tol",
+    "c": [
+     1,
+     1,
+     1
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r": 0.0,
+    "as": 0.0,
+    "ae": 90.0,
+    "at": 0.01,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "tiny_sweep_ctp4",
+   "upstream_ref": "edge: sweep just above conic_data's 1e-6 degree snap",
+   "inputs": {
+    "op": "circ_arc_tol",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r": 1.0,
+    "as": 10.0,
+    "ae": 10.00001,
+    "at": 0.01,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "big_angles_ctp4",
+   "upstream_ref": "edge: angles far outside [0,360]",
+   "inputs": {
+    "op": "circ_arc_tol",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r": 1.0,
+    "as": -1000.0,
+    "ae": 1730.0,
+    "at": 0.01,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "large_at_ctp4",
+   "upstream_ref": "edge: at = 200 snaps the ends of a 200 degree arc",
+   "inputs": {
+    "op": "circ_arc_tol",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r": 1.0,
+    "as": 0.0,
+    "ae": 200.0,
+    "at": 200.0,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "ell_atp1_near_90_ctp4",
+   "upstream_ref": "edge: tan(angle) huge",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r1": 3.0,
+    "r2": 1.0,
+    "as": 89.9999999,
+    "ae": 90.0000001,
+    "at": 0.01,
+    "atp": 1,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "ell_zero_x_ctp4",
+   "upstream_ref": "edge: zero major axis",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     0,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r1": 3.0,
+    "r2": 1.0,
+    "as": 0.0,
+    "ae": 90.0,
+    "at": 0.01,
+    "atp": 0,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "ell_negative_r2_ctp4",
+   "upstream_ref": "edge: negative minor radius",
+   "inputs": {
+    "op": "elliptical_arc_tol",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r1": 3.0,
+    "r2": -1.0,
+    "as": 30.0,
+    "ae": 120.0,
+    "at": 0.01,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "ell_r2_gt_r1_ctp4",
+   "upstream_ref": "edge: minor radius above major",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r1": 1.0,
+    "r2": 4.0,
+    "as": 10.0,
+    "ae": 350.0,
+    "at": 0.01,
+    "atp": 1,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "zero_x_axis_ctp5",
+   "upstream_ref": "edge: N_VectorNormalizeRef fails",
+   "inputs": {
+    "op": "circ_arc_tol",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     0,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r": 1.0,
+    "as": 0.0,
+    "ae": 90.0,
+    "at": 0.01,
+    "ctp": 5
+   }
+  },
+  {
+   "name": "parallel_axes_ctp5",
+   "upstream_ref": "edge: X parallel to Y",
+   "inputs": {
+    "op": "circ_arc_tol",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     2,
+     0,
+     0
+    ],
+    "r": 1.0,
+    "as": 0.0,
+    "ae": 90.0,
+    "at": 0.01,
+    "ctp": 5
+   }
+  },
+  {
+   "name": "zero_radius_ctp5",
+   "upstream_ref": "edge: r = 0",
+   "inputs": {
+    "op": "circ_arc_tol",
+    "c": [
+     1,
+     1,
+     1
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r": 0.0,
+    "as": 0.0,
+    "ae": 90.0,
+    "at": 0.01,
+    "ctp": 5
+   }
+  },
+  {
+   "name": "tiny_sweep_ctp5",
+   "upstream_ref": "edge: sweep just above conic_data's 1e-6 degree snap",
+   "inputs": {
+    "op": "circ_arc_tol",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r": 1.0,
+    "as": 10.0,
+    "ae": 10.00001,
+    "at": 0.01,
+    "ctp": 5
+   }
+  },
+  {
+   "name": "big_angles_ctp5",
+   "upstream_ref": "edge: angles far outside [0,360]",
+   "inputs": {
+    "op": "circ_arc_tol",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r": 1.0,
+    "as": -1000.0,
+    "ae": 1730.0,
+    "at": 0.01,
+    "ctp": 5
+   }
+  },
+  {
+   "name": "large_at_ctp5",
+   "upstream_ref": "edge: at = 200 snaps the ends of a 200 degree arc",
+   "inputs": {
+    "op": "circ_arc_tol",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r": 1.0,
+    "as": 0.0,
+    "ae": 200.0,
+    "at": 200.0,
+    "ctp": 5
+   }
+  },
+  {
+   "name": "ell_atp1_near_90_ctp5",
+   "upstream_ref": "edge: tan(angle) huge",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r1": 3.0,
+    "r2": 1.0,
+    "as": 89.9999999,
+    "ae": 90.0000001,
+    "at": 0.01,
+    "atp": 1,
+    "ctp": 5
+   }
+  },
+  {
+   "name": "ell_zero_x_ctp5",
+   "upstream_ref": "edge: zero major axis",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     0,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r1": 3.0,
+    "r2": 1.0,
+    "as": 0.0,
+    "ae": 90.0,
+    "at": 0.01,
+    "atp": 0,
+    "ctp": 5
+   }
+  },
+  {
+   "name": "ell_negative_r2_ctp5",
+   "upstream_ref": "edge: negative minor radius",
+   "inputs": {
+    "op": "elliptical_arc_tol",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r1": 3.0,
+    "r2": -1.0,
+    "as": 30.0,
+    "ae": 120.0,
+    "at": 0.01,
+    "ctp": 5
+   }
+  },
+  {
+   "name": "ell_r2_gt_r1_ctp5",
+   "upstream_ref": "edge: minor radius above major",
+   "inputs": {
+    "op": "elliptical_arc_ang_type_tol",
+    "c": [
+     0,
+     0,
+     0
+    ],
+    "x": [
+     1,
+     0,
+     0
+    ],
+    "y": [
+     0,
+     1,
+     0
+    ],
+    "r1": 1.0,
+    "r2": 4.0,
+    "as": 10.0,
+    "ae": 350.0,
+    "at": 0.01,
+    "atp": 1,
+    "ctp": 5
+   }
+  }
+ ]
+}

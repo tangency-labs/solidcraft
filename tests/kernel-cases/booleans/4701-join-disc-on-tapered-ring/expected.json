@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4701"
+ ],
+ "what": "a 3 mm disc (r23) joined on the top face of a ring extruded 14 mm with a 10 deg outward taper (r 18.5 growing, bore 13.75 shrinking): 202 s in truck before the right result",
+ "source": "analytic",
+ "method": "the ring: frustum r 18.5 -> 18.5 + 14 tan10 less frustum r 13.75 -> 13.75 - 14 tan10, both 14 high (pi h/3 (a^2+ab+b^2)); the cap pi 23^2 3 covers the ring's top (r 11.28..20.97) and its bore",
+ "body_count": 1,
+ "volume_mm3": 15224.7481
+}

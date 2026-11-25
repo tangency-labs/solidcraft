@@ -1,0 +1,25 @@
+{
+ "sources": [],
+ "what": "a cube's bottom face aligned onto a plate's top face (normals already opposite: a pure move)",
+ "source": "analytic",
+ "method": "the faces' normals are -Z and +Z: no turn; the picked point (105,5,0) goes to (20,20,10): the cube moves by (-85,15,10) to x 15..25, y 15..25, z 10..20. COM z = (16000*5 + 1000*15)/17000",
+ "body_count": 2,
+ "volume_mm3": 17000.0,
+ "center_of_mass": [
+  20,
+  20,
+  5.588235294117647
+ ],
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   40,
+   20
+  ]
+ }
+}

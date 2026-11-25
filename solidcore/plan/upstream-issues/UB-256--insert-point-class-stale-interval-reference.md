@@ -1,0 +1,9 @@
+#### UB-256. `SmCurveClassification::InsertPointClass` writes through an interval reference after `EditIntervalMin` / `EditIntervalMax` collapsed the interval
+- **Severity:** Crash / undefined behaviour
+- **Area:** Curve and point classification
+- **Location:** `source/SMLib/src/SmCurveClass.cpp`, `InsertPointClass`, the "input PtClass deviation is effectively zero and the found PtClass deviation is large" branch (around lines 7569-7585). `SmCurveInterval & rPtClass_Interval = (*this)[lIndex]` is taken at the top. The branch calls `EditIntervalMin(lIndex, ..)` / `EditIntervalMax(lIndex, ..)` with `bCollapseDegenIntervals` defaulting to `TRUE`, and then writes `rPtClass_Interval.m_vStart` / `m_vEnd = crPointClass`.
+- **What happens:** the edit makes an interval degenerate and `CollapseInterval` removes it, which shifts the array down by one and decrements `m_lSize`. The reference then names either a different interval, the one that moved into slot `lIndex`, or a spare slot past `m_lSize` when the last interval was collapsed. The write lands there: an unrelated interval gets the boundary, or the write is lost (`SetSize` resets spare slots before reuse).
+- **Trigger:** `intersect.curve_class_p4` gen1570: the second `GetLoopCrossings` seam classification, `IntersectVertices`, index 1 of 2, End position, the last interval collapsed.
+- **How found:** the port's bounds-checked `at_mut(index)` failed there ("interval index out of range") once the edge tolerance growth of the first `GetLoopCrossings` was kept on the B-rep. Found by reading the code and tracing the Rust side.
+- **Confirmed:** not instrumented with gdb on the C++. The C++ run gets past the same call, and every output agrees once the port writes to the slot the way upstream does.
+- **Rust port:** parity on purpose (`intersect::curve_class::p3::slot_mut`). It writes to whatever interval sits in slot `index`, and drops the write past the end.

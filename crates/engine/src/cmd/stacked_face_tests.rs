@@ -5,6 +5,7 @@
 use crate::Session;
 use serde_json::{Value, json};
 use solidcraft_doc::FaceAttachmentStatus;
+use solidcraft_geom::prelude::*;
 
 fn run(s: &mut Session, command: &str, params: Value) -> Value {
     s.execute(command, &params).unwrap_or_else(|e| panic!("{command} {params}: {e}"))
@@ -40,7 +41,7 @@ fn two_extrudes(circle: bool, full: bool, on_face: bool, operation: &str) -> Ses
     s
 }
 
-fn healthy(s: &Session, sketch: &str) -> solidcraft_geom::Plane {
+fn healthy(s: &Session, sketch: &str) -> solidcore_record::Plane {
     let id = s.doc.find_feature(sketch).map(|f| f.id).unwrap();
     match s.placed_document().sketch_face_attachment(id, &s.model) {
         FaceAttachmentStatus::Healthy { plane, .. } => plane,

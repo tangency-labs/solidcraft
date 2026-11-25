@@ -123,7 +123,7 @@ fn source_kind_boundaries_remain_independent_with_presets_and_full_rectangle_bud
         match kind {
             "directional" => {
                 let lights = options.lights.as_mut().unwrap();
-                lights.push(lights[0].clone());
+                lights.push(lights[0]);
             }
             "punctual" => {
                 let lights = options.punctual_lights.as_mut().unwrap();

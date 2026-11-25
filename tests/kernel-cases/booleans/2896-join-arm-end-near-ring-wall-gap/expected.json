@@ -1,0 +1,11 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#2896"
+  ],
+  "what": "a join of a ring and an arm whose R5 convex tip stops 0.01 mm short of the ring's outer wall: nothing overlaps, so nothing fuses",
+  "source": "analytic",
+  "method": "ring pi*(30^2-24^2)*6 and arm 6*(350+12.5*pi) are 0.01 mm apart (arm tip at x=30.01): the join has nothing to fuse, so V is the sum of the two and the arm stays a separate shell. A combine's join of a tool that meets no target keeps it in the target as a separate lump (crates/doc eval.rs, Operation::Join; engine test join_meeting_nothing_keeps_the_first_body), and the tool body is consumed: one body (Ring) of two shells",
+  "body_count": 1,
+  "volume_mm3": 8442.875567597792,
+  "shells": 2
+}

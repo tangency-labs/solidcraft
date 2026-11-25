@@ -1,0 +1,154 @@
+{
+ "cases": [
+  {
+   "name": "issue_2020_mitred_put_back_d9_corners",
+   "upstream_ref": "source/SM_API/src/SmApiBrep.cpp SmApiFilletEdges: the four r3 rounds put back on a 40x30x10 box whose rounded top moved down 9 (the offset-faces put-back of #2020, the B-rep as solidcore leaves it after taking the mitred rounds off and moving the top)",
+   "inputs": {
+    "real_solid": {
+     "checkpoint": "corners",
+     "source": {
+      "kind": "file",
+      "path": {
+       "$repo_file": "fixtures/blend.fillet_executive_p3/mitred_put_back_d9.smb"
+      }
+     },
+     "radius": 3.0,
+     "xsect": 1,
+     "continuity": 1,
+     "thumbweight": 1.0,
+     "edges": [
+      5,
+      6,
+      7,
+      4
+     ]
+    }
+   }
+  },
+  {
+   "name": "issue_2020_mitred_put_back_d9_corner_vertices_component",
+   "upstream_ref": "source/SM_API/src/SmApiBrep.cpp SmApiFilletEdges: the four r3 rounds put back on a 40x30x10 box whose rounded top moved down 9 (the offset-faces put-back of #2020, the B-rep as solidcore leaves it after taking the mitred rounds off and moving the top)",
+   "inputs": {
+    "real_solid": {
+     "checkpoint": "corner_vertices_component",
+     "source": {
+      "kind": "file",
+      "path": {
+       "$repo_file": "fixtures/blend.fillet_executive_p3/mitred_put_back_d9.smb"
+      }
+     },
+     "radius": 3.0,
+     "xsect": 1,
+     "continuity": 1,
+     "thumbweight": 1.0,
+     "edges": [
+      5,
+      6,
+      7,
+      4
+     ]
+    }
+   }
+  },
+  {
+   "name": "issue_2020_mitred_put_back_d9_adjusted_topology",
+   "upstream_ref": "source/SM_API/src/SmApiBrep.cpp SmApiFilletEdges: the four r3 rounds put back on a 40x30x10 box whose rounded top moved down 9 (the offset-faces put-back of #2020, the B-rep as solidcore leaves it after taking the mitred rounds off and moving the top)",
+   "inputs": {
+    "real_solid": {
+     "checkpoint": "adjusted_topology",
+     "source": {
+      "kind": "file",
+      "path": {
+       "$repo_file": "fixtures/blend.fillet_executive_p3/mitred_put_back_d9.smb"
+      }
+     },
+     "radius": 3.0,
+     "xsect": 1,
+     "continuity": 1,
+     "thumbweight": 1.0,
+     "edges": [
+      5,
+      6,
+      7,
+      4
+     ]
+    }
+   }
+  },
+  {
+   "name": "issue_2020_mitred_put_back_d9_solver_geometry",
+   "upstream_ref": "source/SM_API/src/SmApiBrep.cpp SmApiFilletEdges: the four r3 rounds put back on a 40x30x10 box whose rounded top moved down 9 (the offset-faces put-back of #2020, the B-rep as solidcore leaves it after taking the mitred rounds off and moving the top)",
+   "inputs": {
+    "real_solid": {
+     "checkpoint": "solver_geometry",
+     "source": {
+      "kind": "file",
+      "path": {
+       "$repo_file": "fixtures/blend.fillet_executive_p3/mitred_put_back_d9.smb"
+      }
+     },
+     "radius": 3.0,
+     "xsect": 1,
+     "continuity": 1,
+     "thumbweight": 1.0,
+     "edges": [
+      5,
+      6,
+      7,
+      4
+     ]
+    }
+   }
+  },
+  {
+   "name": "issue_2020_mitred_put_back_d9_corner_edges",
+   "upstream_ref": "source/SM_API/src/SmApiBrep.cpp SmApiFilletEdges: the four r3 rounds put back on a 40x30x10 box whose rounded top moved down 9 (the offset-faces put-back of #2020, the B-rep as solidcore leaves it after taking the mitred rounds off and moving the top)",
+   "inputs": {
+    "real_solid": {
+     "checkpoint": "corner_edges",
+     "source": {
+      "kind": "file",
+      "path": {
+       "$repo_file": "fixtures/blend.fillet_executive_p3/mitred_put_back_d9.smb"
+      }
+     },
+     "radius": 3.0,
+     "xsect": 1,
+     "continuity": 1,
+     "thumbweight": 1.0,
+     "edges": [
+      5,
+      6,
+      7,
+      4
+     ]
+    }
+   }
+  },
+  {
+   "name": "issue_2020_mitred_put_back_d9_full",
+   "upstream_ref": "source/SM_API/src/SmApiBrep.cpp SmApiFilletEdges: the four r3 rounds put back on a 40x30x10 box whose rounded top moved down 9 (the offset-faces put-back of #2020, the B-rep as solidcore leaves it after taking the mitred rounds off and moving the top)",
+   "inputs": {
+    "real_solid": {
+     "checkpoint": "full",
+     "source": {
+      "kind": "file",
+      "path": {
+       "$repo_file": "fixtures/blend.fillet_executive_p3/mitred_put_back_d9.smb"
+      }
+     },
+     "radius": 3.0,
+     "xsect": 1,
+     "continuity": 1,
+     "thumbweight": 1.0,
+     "edges": [
+      5,
+      6,
+      7,
+      4
+     ]
+    }
+   }
+  }
+ ]
+}

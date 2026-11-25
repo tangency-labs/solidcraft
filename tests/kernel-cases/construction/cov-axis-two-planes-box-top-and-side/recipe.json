@@ -1,0 +1,33 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 30,
+    "height": 20,
+    "body_name": "Box"
+   }
+  },
+  {
+   "command": "construct.axis.two_planes",
+   "params": {
+    "a": {
+     "face": [
+      20,
+      15,
+      20
+     ]
+    },
+    "b": {
+     "face": [
+      40,
+      15,
+      10
+     ]
+    },
+    "name": "A"
+   }
+  }
+ ]
+}

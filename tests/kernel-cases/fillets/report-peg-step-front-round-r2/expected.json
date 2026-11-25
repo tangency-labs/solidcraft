@@ -1,0 +1,10 @@
+{
+ "what": "the peg exported to STEP and read back, its front top edge then rounded r2 into the cylinder: the same round as on the native body; reported from the app (2026-10-30, test-peg part)",
+ "source": "analytic",
+ "method": "a bar 40 x 16 x 10 whose far end is a half disc R8 about (40, 8), a disc R8 about the same centre sketched on its top (the top's outline projected) and extruded 10 up, joined: the bar's front face y = 0 runs tangent into the cylinder along x = 40, V0 = 6400 + 960 pi; written to STEP and inserted into a new design; the r2 round of the front top edge (y = 0, z = 10) runs into the cylinder's wall: removed = integral over y in [0, 2] of (2 - sqrt(4 - (2 - y)^2)) (40 - sqrt(64 - (8 - y)^2)) dy = 32.3064750439 (tanh-sinh quadrature)",
+ "body_count": 1,
+ "volume_mm3": 9383.622472402329,
+ "continuity": {
+  "order": "g1"
+ }
+}

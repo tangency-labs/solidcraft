@@ -1,0 +1,183 @@
+{
+ "commands": [
+  {
+   "command": "sheet.manage_rules",
+   "params": {
+    "name": "Steel 2",
+    "thickness": "2 mm",
+    "active": true,
+    "bend_radius": "1 mm",
+    "k_factor": 0.5
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Plate"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      8,
+      0
+     ],
+     [
+      192,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": [
+     192,
+     0
+    ],
+    "end": [
+     200,
+     8
+    ],
+    "through": [
+     197.6568542495,
+     2.3431457505
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      200,
+      8
+     ],
+     [
+      200,
+      92
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": [
+     200,
+     92
+    ],
+    "end": [
+     192,
+     100
+    ],
+    "through": [
+     197.6568542495,
+     97.6568542495
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      192,
+      100
+     ],
+     [
+      8,
+      100
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": [
+     8,
+     100
+    ],
+    "end": [
+     0,
+     92
+    ],
+    "through": [
+     2.3431457505,
+     97.6568542495
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      92
+     ],
+     [
+      0,
+      8
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": [
+     0,
+     8
+    ],
+    "end": [
+     8,
+     0
+    ],
+    "through": [
+     2.3431457505,
+     2.3431457505
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sheet.flange",
+   "params": {
+    "type": "base",
+    "sketch": "Plate"
+   }
+  },
+  {
+   "command": "sheet.flange",
+   "params": {
+    "edges": [
+     [
+      100,
+      0,
+      2
+     ]
+    ],
+    "height": 40,
+    "angle": 90,
+    "position": "inside"
+   }
+  },
+  {
+   "command": "sheet.unfold",
+   "params": {}
+  },
+  {
+   "command": "inspect.measure",
+   "params": {}
+  }
+ ]
+}

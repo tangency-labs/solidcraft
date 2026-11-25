@@ -1,0 +1,58 @@
+{
+  "cases": [
+    {
+      "name": "cone_face0_out",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::LocalOperation",
+      "inputs": {
+        "file": "cone.smb",
+        "replaced": [
+          {
+            "face": 0,
+            "offset": 1.1436041365678737,
+            "tilt": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "cone_face0_same",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::LocalOperation",
+      "inputs": {
+        "file": "cone.smb",
+        "replaced": [
+          {
+            "face": 0,
+            "offset": 0,
+            "tilt": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "cone_face0_tilt",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::LocalOperation",
+      "inputs": {
+        "file": "cone.smb",
+        "replaced": [
+          {
+            "face": 0,
+            "offset": -0.77,
+            "tilt": [
+              -0.257,
+              0.105,
+              -0.263
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

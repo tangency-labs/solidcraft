@@ -1,0 +1,12 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#3485",
+    "tangency-labs/solidcraft#3062"
+  ],
+  "what": "a boss joined on a rod's top face (the join runs the boss on into the rod); the rod's side must stay one face, not seamed at the boss's foot",
+  "source": "analytic",
+  "method": "rod r=7, h=48.2 plus boss r=2.7 standing 2 mm above the top: V = pi*(7^2*48.2 + 2.7^2*2). Faces: rod bottom, rod side, rod top ring, boss side, boss top = 5 (the rod's side has no seam at the boss's foot)",
+  "body_count": 1,
+  "volume_mm3": 7465.618,
+  "faces": 5
+}

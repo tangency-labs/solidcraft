@@ -1,0 +1,584 @@
+{
+ "commands": [
+  {
+   "command": "construct.plane.offset",
+   "params": {
+    "base": "YZ",
+    "offset": "0 mm",
+    "name": "P0"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "P0",
+    "name": "S0"
+   }
+  },
+  {
+   "command": "sketch.spline.fit_point",
+   "params": {
+    "points": [
+     [
+      300.0,
+      2.0
+     ],
+     [
+      225.0,
+      41.375
+     ],
+     [
+      150.0,
+      69.5
+     ],
+     [
+      75.0,
+      86.375
+     ],
+     [
+      0.0,
+      92.0
+     ],
+     [
+      -75.0,
+      86.375
+     ],
+     [
+      -150.0,
+      69.5
+     ],
+     [
+      -225.0,
+      41.375
+     ],
+     [
+      -300.0,
+      2.0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -300.0,
+      2.0
+     ],
+     [
+      -303.0,
+      -1
+     ],
+     [
+      303.0,
+      -1
+     ],
+     [
+      300.0,
+      2.0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "construct.plane.offset",
+   "params": {
+    "base": "YZ",
+    "offset": "30 mm",
+    "name": "P30"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "P30",
+    "name": "S30"
+   }
+  },
+  {
+   "command": "sketch.spline.fit_point",
+   "params": {
+    "points": [
+     [
+      282.0,
+      2.0
+     ],
+     [
+      211.5,
+      36.7812
+     ],
+     [
+      141.0,
+      61.625
+     ],
+     [
+      70.5,
+      76.5312
+     ],
+     [
+      0.0,
+      81.5
+     ],
+     [
+      -70.5,
+      76.5312
+     ],
+     [
+      -141.0,
+      61.625
+     ],
+     [
+      -211.5,
+      36.7812
+     ],
+     [
+      -282.0,
+      2.0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -282.0,
+      2.0
+     ],
+     [
+      -285.0,
+      -1
+     ],
+     [
+      285.0,
+      -1
+     ],
+     [
+      282.0,
+      2.0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "construct.plane.offset",
+   "params": {
+    "base": "YZ",
+    "offset": "60 mm",
+    "name": "P60"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "P60",
+    "name": "S60"
+   }
+  },
+  {
+   "command": "sketch.spline.fit_point",
+   "params": {
+    "points": [
+     [
+      264.0,
+      2.0
+     ],
+     [
+      198.0,
+      32.1875
+     ],
+     [
+      132.0,
+      53.75
+     ],
+     [
+      66.0,
+      66.6875
+     ],
+     [
+      0.0,
+      71.0
+     ],
+     [
+      -66.0,
+      66.6875
+     ],
+     [
+      -132.0,
+      53.75
+     ],
+     [
+      -198.0,
+      32.1875
+     ],
+     [
+      -264.0,
+      2.0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -264.0,
+      2.0
+     ],
+     [
+      -267.0,
+      -1
+     ],
+     [
+      267.0,
+      -1
+     ],
+     [
+      264.0,
+      2.0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "construct.plane.offset",
+   "params": {
+    "base": "YZ",
+    "offset": "100 mm",
+    "name": "P100"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "P100",
+    "name": "S100"
+   }
+  },
+  {
+   "command": "sketch.spline.fit_point",
+   "params": {
+    "points": [
+     [
+      240.0,
+      2.0
+     ],
+     [
+      180.0,
+      26.0625
+     ],
+     [
+      120.0,
+      43.25
+     ],
+     [
+      60.0,
+      53.5625
+     ],
+     [
+      0.0,
+      57.0
+     ],
+     [
+      -60.0,
+      53.5625
+     ],
+     [
+      -120.0,
+      43.25
+     ],
+     [
+      -180.0,
+      26.0625
+     ],
+     [
+      -240.0,
+      2.0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -240.0,
+      2.0
+     ],
+     [
+      -243.0,
+      -1
+     ],
+     [
+      243.0,
+      -1
+     ],
+     [
+      240.0,
+      2.0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "construct.plane.offset",
+   "params": {
+    "base": "YZ",
+    "offset": "130 mm",
+    "name": "P130"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "P130",
+    "name": "S130"
+   }
+  },
+  {
+   "command": "sketch.spline.fit_point",
+   "params": {
+    "points": [
+     [
+      222.0,
+      2.0
+     ],
+     [
+      166.5,
+      21.4688
+     ],
+     [
+      111.0,
+      35.375
+     ],
+     [
+      55.5,
+      43.7188
+     ],
+     [
+      0.0,
+      46.5
+     ],
+     [
+      -55.5,
+      43.7188
+     ],
+     [
+      -111.0,
+      35.375
+     ],
+     [
+      -166.5,
+      21.4688
+     ],
+     [
+      -222.0,
+      2.0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -222.0,
+      2.0
+     ],
+     [
+      -225.0,
+      -1
+     ],
+     [
+      225.0,
+      -1
+     ],
+     [
+      222.0,
+      2.0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      149.0,
+      0.0,
+      0.0
+     ],
+     "x_dir": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "y_dir": [
+      -0.034899,
+      0.0,
+      0.999391
+     ]
+    },
+    "name": "S149"
+   }
+  },
+  {
+   "command": "sketch.spline.fit_point",
+   "params": {
+    "points": [
+     [
+      210.6,
+      2.0
+     ],
+     [
+      157.95,
+      18.5594
+     ],
+     [
+      105.3,
+      30.3875
+     ],
+     [
+      52.65,
+      37.4844
+     ],
+     [
+      0.0,
+      39.85
+     ],
+     [
+      -52.65,
+      37.4844
+     ],
+     [
+      -105.3,
+      30.3875
+     ],
+     [
+      -157.95,
+      18.5594
+     ],
+     [
+      -210.6,
+      2.0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -210.6,
+      2.0
+     ],
+     [
+      -213.6,
+      -1
+     ],
+     [
+      213.6,
+      -1
+     ],
+     [
+      210.6,
+      2.0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.loft",
+   "params": {
+    "sections": [
+     {
+      "sketch": "S0"
+     },
+     {
+      "sketch": "S30"
+     },
+     {
+      "sketch": "S60"
+     },
+     {
+      "sketch": "S100"
+     },
+     {
+      "sketch": "S130"
+     },
+     {
+      "sketch": "S149"
+     }
+    ],
+    "body_name": "Top",
+    "name": "Top"
+   }
+  },
+  {
+   "command": "solid.mirror",
+   "params": {
+    "bodies": [
+     "Top"
+    ],
+    "plane": "YZ",
+    "combine": true
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 149,
+    "width": 120,
+    "height": 120,
+    "center": [
+     165.5,
+     150.0,
+     58.0
+    ],
+    "operation": "new",
+    "body_name": "K"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Top",
+    "tools": [
+     "K"
+    ],
+    "operation": "cut"
+   }
+  }
+ ]
+}

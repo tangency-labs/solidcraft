@@ -1,0 +1,32 @@
+{
+ "sources": [],
+ "what": "a slider whose origins are the centres of two planar faces",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); a: Base's top face (centre (0,0,0), z +z); b: Arm's bottom face (centre (20,0,0), z -z); mated (no flip) the two faces meet: Arm slides 20 back along x so its bottom centre sits on (0,0,0) and turns at most about z; a slide of 3 lifts it 3 mm off the face: z centre 8, volume unchanged",
+ "body_count": 2,
+ "volume_mm3": 8000.0,
+ "results": [
+  {
+   "step": 9,
+   "json": {
+    "values": [
+     {
+      "value": 3.0
+     }
+    ]
+   }
+  },
+  {
+   "step": 10,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      0.0,
+      0.0,
+      8.0
+     ]
+    }
+   }
+  }
+ ]
+}

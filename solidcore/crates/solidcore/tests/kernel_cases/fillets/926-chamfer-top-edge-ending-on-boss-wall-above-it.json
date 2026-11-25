@@ -1,0 +1,156 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  40.0,
+                  0.0,
+                  20.0
+                ],
+                [
+                  40.0,
+                  7.999999999999991,
+                  20.0
+                ]
+              ],
+              "index": 11
+            }
+          ],
+          "points": [
+            [
+              40.0,
+              3.9999999999999956,
+              20.0
+            ]
+          ],
+          "tolerance": 3.841681105690132
+        },
+        "kind": "chamfer",
+        "sizes": [
+          0.8
+        ]
+      }
+    }
+  ],
+  "case": "926-chamfer-top-edge-ending-on-boss-wall-above-it",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g0"
+    },
+    "method": "V0 = 32000 + pi 144 40 - pi 144/2 20 = 45571.680264. The edge runs from the front face y = 0 to the boss's wall y = 20 - sqrt(144 - (x-40)^2) (8 at x = 40). The chamfer's section, x 39.2..40 above the line (40-x) + (20-z) = 0.8: h = x - 39.2, is swept along y to the wall: removed = Int_39.2^40 h(x) (20 - sqrt(144 - (x-40)^2)) dx = 2.561423. V = 45569.118841",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#926",
+      "tangency-labs/solidcraft#556"
+    ],
+    "volume_mm3": 45569.11884065282,
+    "what": "the top edge x = 40, z = 20 of #556's box (40x40x20 joined with an R12 boss 40 high on its side) chamfered 0.8: it runs into the boss's wall, which rises above the box, and ends on it"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 24,
+      "faces": 10,
+      "vertices": 16
+    }
+  },
+  "records": "926-chamfer-top-edge-ending-on-boss-wall-above-it.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 8630.590085689704,
+      "body_count": 1,
+      "edges": 24,
+      "faces": 10,
+      "vertices": 16,
+      "volume_mm3": 45569.11884091785
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#926",
+    "tangency-labs/solidcraft#556"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "the top edge x = 40, z = 20 of #556's box (40x40x20 joined with an R12 boss 40 high on its side) chamfered 0.8: it runs into the boss's wall, which rises above the box, and ends on it",
+  "why_not": []
+}

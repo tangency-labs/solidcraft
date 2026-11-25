@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "untrim on a face with no holes and its outer boundary kept: nothing to do, refused",
+ "source": "invariants",
+ "method": "the face has no inner loop and outer is not asked: the command says so",
+ "outcome": "refused",
+ "refusal": "the face has no holes to remove"
+}

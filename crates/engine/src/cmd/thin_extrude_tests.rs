@@ -2,6 +2,7 @@
 //! area times its height).
 
 use serde_json::{Value, json};
+use solidcraft_geom::prelude::*;
 
 use crate::Session;
 
@@ -52,6 +53,29 @@ fn a_rectangle_makes_a_ring_wall_on_either_side() {
         run(&mut s, "solid.extrude", p);
         close(volume(&mut s), area * 10.0);
         assert_eq!(body_count(&mut s), 1, "{side}");
+    }
+}
+
+/// A thin extrude goes To Object (a point at a plane's height) and From Object as a solid one
+/// does: the Extrude dialog sends these for a picked plane (#21033).
+#[test]
+fn a_thin_wall_runs_to_and_from_an_object() {
+    // fixed references: the 2 mm inside wall of the 40 x 20 outline (224 mm^2) over 17 and 14 mm
+    for (extent, low, high, expected) in
+        [(json!({"to": [0, 0, 17]}), 0.0, 17.0, 3808.0), (json!({"from": [0, 0, 3], "to": [0, 0, 17]}), 3.0, 17.0, 3136.0)]
+    {
+        let mut s = Session::default();
+        rectangle(&mut s);
+        let mut p = json!({"sketch": "Outline", "thin": true, "thickness": 2, "side": "inside", "operation": "new"});
+        if let (Some(p), Some(extent)) = (p.as_object_mut(), extent.as_object()) {
+            p.extend(extent.clone());
+        }
+        run(&mut s, "solid.extrude", p);
+        close(volume(&mut s), expected);
+        assert_eq!(body_count(&mut s), 1, "{extent}");
+        let bbox = run(&mut s, "inspect.measure", json!({}))["bodies"][0]["bbox"].clone();
+        close(bbox["min"][2].as_f64().unwrap_or(f64::NAN), low);
+        close(bbox["max"][2].as_f64().unwrap_or(f64::NAN), high);
     }
 }
 
@@ -143,17 +167,22 @@ fn bad_thin_walls_are_refused_and_change_nothing() {
         assert!(e.contains(says), "{p}: {e}");
         assert_eq!(s.doc.to_json(), before);
     }
-    // A wall thicker than an arc it follows bends.
-    let mut s = Session::default();
-    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Small"}));
-    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 1}));
-    run(&mut s, "sketch.finish", json!({}));
-    let e = s.execute("solid.extrude", &json!({"sketch": "Small", "thin": true, "thickness": 3, "side": "inside", "distance": 5}));
-    assert!(e.is_err_and(|e| e.to_string().contains("thicker")));
-    run(&mut s, "solid.extrude", json!({"sketch": "Small", "thin": true, "thickness": 3, "side": "outside", "distance": 5}));
-    // Measured from the tessellation, within its 1e-4.
-    let (v, exact) = (volume(&mut s), std::f64::consts::PI * (16.0 - 1.0) * 5.0);
-    assert!((v - exact).abs() < 1e-4 * exact, "{v} vs {exact}");
+    // A wall inside a circle thicker than its radius covers the whole disk (#7333); outside, the
+    // wall is a ring. Each in its own session, so one solid does not count in the other's volume.
+    let small = || {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Small"}));
+        run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 1}));
+        run(&mut s, "sketch.finish", json!({}));
+        s
+    };
+    for (side, exact) in [("inside", std::f64::consts::PI * 5.0), ("outside", std::f64::consts::PI * (16.0 - 1.0) * 5.0)] {
+        let mut s = small();
+        run(&mut s, "solid.extrude", json!({"sketch": "Small", "thin": true, "thickness": 3, "side": side, "distance": 5}));
+        // Measured from the tessellation, within its 1e-4.
+        let v = volume(&mut s);
+        assert!((v - exact).abs() < 1e-4 * exact, "{side}: {v} vs {exact}");
+    }
 }
 
 #[test]
@@ -182,15 +211,15 @@ fn attachment(s: &Session, sketch: &str) -> solidcraft_doc::FaceAttachmentStatus
     s.placed_document().sketch_face_attachment(id, &s.model)
 }
 
-fn attached(s: &Session, sketch: &str) -> (solidcraft_geom::Plane, Option<solidcraft_doc::config::FaceCertificate>) {
+fn attached(s: &Session, sketch: &str) -> (solidcore_record::Plane, Option<solidcraft_doc::config::FaceCertificate>) {
     match attachment(s, sketch) {
         solidcraft_doc::FaceAttachmentStatus::Healthy { plane, target, .. } => (plane, target.certificate),
         other => panic!("{sketch}: {other:?}"),
     }
 }
 
-fn same_plane(a: &solidcraft_geom::Plane, b: &solidcraft_geom::Plane) {
-    let near = |p: solidcraft_geom::Vec3, q: solidcraft_geom::Vec3| (p - q).len() < 1e-9;
+fn same_plane(a: &solidcore_record::Plane, b: &solidcore_record::Plane) {
+    let near = |p: solidcore_record::Vec3, q: solidcore_record::Vec3| (p - q).len() < 1e-9;
     assert!(near(a.origin, b.origin) && near(a.x, b.x) && near(a.y, b.y), "{a:?} != {b:?}");
 }
 
@@ -284,7 +313,7 @@ fn no_errors(s: &Session, context: &str) {
 }
 
 /// How far a face's plane lies from the origin along its own normal.
-fn plane_offset(plane: &solidcraft_geom::Plane) -> f64 {
+fn plane_offset(plane: &solidcore_record::Plane) -> f64 {
     plane.normal().dot(plane.origin)
 }
 
@@ -338,11 +367,11 @@ fn the_walls_of_an_open_thin_extrude_take_sketches_that_follow_their_thickness()
 
 /// A point inside each flat, vertical face of the first body: (what it is, point).
 fn flat_side_faces(s: &Session) -> Vec<(String, [f64; 3])> {
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let mut out = Vec::new();
     let Some(body) = world.bodies.first() else { return out };
     let mesh = body.mesh();
-    let mut best: std::collections::BTreeMap<usize, (solidcraft_geom::Vec3, f64)> = std::collections::BTreeMap::new();
+    let mut best: std::collections::BTreeMap<usize, (solidcore_record::Vec3, f64)> = std::collections::BTreeMap::new();
     for (triangle, face) in mesh.triangles.iter().zip(&mesh.tri_face) {
         if let Some([a, b, c]) = mesh.tri(triangle) {
             let area = (b - a).cross(c - a).len();
@@ -369,12 +398,17 @@ fn the_round_sides_of_a_thin_ring_are_named_by_the_circle_they_run_beside() {
     run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 10}));
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"sketch": "Outline", "thin": true, "thickness": 2, "distance": 5, "name": "Ring"}));
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let names = solidcraft_doc::naming::face_names(world.bodies.first().unwrap());
-    // Each round side is two half cylinders, told apart by their numbers.
+    // Each round side is one cylinder, closed along its seam, so its name needs no number.
     let walls: Vec<_> = names.iter().filter(|name| name.contains(":wall:")).collect();
-    assert_eq!(walls.len(), 4, "{names:?}");
-    for side in ["left", "right"] {
-        assert_eq!(walls.iter().filter(|name| name.contains(&format!(":wall:c1:{side}#"))).count(), 2, "{walls:?}");
+    assert_eq!(walls.len(), 2, "{names:?}");
+    // The wall is 2 thick about the circle (radius 9 to 11). The circle runs counter-clockwise,
+    // so its left is the inner side; each name is found again at a point on its own wall.
+    for (side, radius) in [("left", 9.0), ("right", 11.0)] {
+        let name = format!("F2:wall:c1:{side}");
+        assert!(walls.contains(&&name), "{walls:?}");
+        let at = solidcore_record::Vec3::new(0.0, radius, 2.5);
+        assert_eq!(solidcraft_doc::naming::face_names_at(&s.model.state(), &[at]), vec![name.clone()]);
     }
 }

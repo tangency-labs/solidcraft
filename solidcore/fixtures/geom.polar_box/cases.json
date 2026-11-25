@@ -1,0 +1,5905 @@
+{
+ "cases": [
+  {
+   "name": "line_tangent_single_point",
+   "upstream_ref": "source/SMLib/src/SmLine.cpp:652",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "from_vector",
+      "r": 0,
+      "v": [
+       3,
+       4,
+       0
+      ]
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "area",
+      "r": 0
+     },
+     {
+      "cmd": "boundary",
+      "r": 0
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.5,
+      "b": 0.5
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.0,
+      "b": 1.0
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     }
+    ]
+   }
+  },
+  {
+   "name": "zero_vector_ctor",
+   "upstream_ref": "source/SMLib/src/SmPolarBox.cpp:25",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "from_vector",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "area",
+      "r": 0
+     },
+     {
+      "cmd": "boundary",
+      "r": 0
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.5,
+      "b": 0.5
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.0,
+      "b": 1.0
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     }
+    ]
+   }
+  },
+  {
+   "name": "empty_box",
+   "upstream_ref": "source/SMLib/inc/SmPolarBox.h:203",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "area",
+      "r": 0
+     },
+     {
+      "cmd": "boundary",
+      "r": 0
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.5,
+      "b": 0.5
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.0,
+      "b": 1.0
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "union",
+      "r": 0,
+      "s": 0,
+      "t": 1
+     },
+     {
+      "cmd": "dump",
+      "r": 1
+     },
+     {
+      "cmd": "cross",
+      "r": 0,
+      "s": 0,
+      "t": 2
+     },
+     {
+      "cmd": "dump",
+      "r": 2
+     },
+     {
+      "cmd": "are_disjoint",
+      "r": 0,
+      "s": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "fitcrv_edges_0",
+   "upstream_ref": "source/SMLib/src/SmHermiteCurve.cpp:265",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "add_edges",
+      "r": 0,
+      "pts": {
+       "$pts": "FitCrvPoints.pts"
+      },
+      "start": 0,
+      "count": 2
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "area",
+      "r": 0
+     },
+     {
+      "cmd": "boundary",
+      "r": 0
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.5,
+      "b": 0.5
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.0,
+      "b": 1.0
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "expand",
+      "r": 0,
+      "d": 0.0008726646259971648
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "fitcrv_edges_3",
+   "upstream_ref": "source/SMLib/src/SmHermiteCurve.cpp:265",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "add_edges",
+      "r": 0,
+      "pts": {
+       "$pts": "FitCrvPoints.pts"
+      },
+      "start": 3,
+      "count": 2
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "area",
+      "r": 0
+     },
+     {
+      "cmd": "boundary",
+      "r": 0
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.5,
+      "b": 0.5
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.0,
+      "b": 1.0
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "expand",
+      "r": 0,
+      "d": 0.0008726646259971648
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "fitcrv_edges_6",
+   "upstream_ref": "source/SMLib/src/SmHermiteCurve.cpp:265",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "add_edges",
+      "r": 0,
+      "pts": {
+       "$pts": "FitCrvPoints.pts"
+      },
+      "start": 6,
+      "count": 2
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "area",
+      "r": 0
+     },
+     {
+      "cmd": "boundary",
+      "r": 0
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.5,
+      "b": 0.5
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.0,
+      "b": 1.0
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "expand",
+      "r": 0,
+      "d": 0.0008726646259971648
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "fitcrv_edges_9",
+   "upstream_ref": "source/SMLib/src/SmHermiteCurve.cpp:265",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "add_edges",
+      "r": 0,
+      "pts": {
+       "$pts": "FitCrvPoints.pts"
+      },
+      "start": 9,
+      "count": 2
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "area",
+      "r": 0
+     },
+     {
+      "cmd": "boundary",
+      "r": 0
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.5,
+      "b": 0.5
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.0,
+      "b": 1.0
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "expand",
+      "r": 0,
+      "d": 0.0008726646259971648
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "fitcrv_all_edges",
+   "upstream_ref": "source/SMLib/src/SmHermiteCurve.cpp:265",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "add_edges",
+      "r": 0,
+      "pts": {
+       "$pts": "FitCrvPoints.pts"
+      }
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "area",
+      "r": 0
+     },
+     {
+      "cmd": "boundary",
+      "r": 0
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.5,
+      "b": 0.5
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.0,
+      "b": 1.0
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     }
+    ]
+   }
+  },
+  {
+   "name": "points_edges_0",
+   "upstream_ref": "source/SMLib/src/SmHermiteCurve.cpp:265",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "add_edges",
+      "r": 0,
+      "pts": {
+       "$pts": "Points.pts"
+      },
+      "start": 0,
+      "count": 3
+     },
+     {
+      "cmd": "add_edges",
+      "r": 1,
+      "pts": {
+       "$pts": "Points.pts"
+      },
+      "start": 1,
+      "count": 3
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "area",
+      "r": 0
+     },
+     {
+      "cmd": "boundary",
+      "r": 0
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.5,
+      "b": 0.5
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.0,
+      "b": 1.0
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "are_disjoint",
+      "r": 0,
+      "s": 1
+     },
+     {
+      "cmd": "union",
+      "r": 0,
+      "s": 1,
+      "t": 2
+     },
+     {
+      "cmd": "dump",
+      "r": 2
+     },
+     {
+      "cmd": "area",
+      "r": 2
+     },
+     {
+      "cmd": "cross",
+      "r": 0,
+      "s": 1,
+      "t": 3
+     },
+     {
+      "cmd": "dump",
+      "r": 3
+     },
+     {
+      "cmd": "union_self",
+      "r": 0,
+      "s": 1
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "points_edges_4",
+   "upstream_ref": "source/SMLib/src/SmHermiteCurve.cpp:265",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "add_edges",
+      "r": 0,
+      "pts": {
+       "$pts": "Points.pts"
+      },
+      "start": 4,
+      "count": 3
+     },
+     {
+      "cmd": "add_edges",
+      "r": 1,
+      "pts": {
+       "$pts": "Points.pts"
+      },
+      "start": 5,
+      "count": 3
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "area",
+      "r": 0
+     },
+     {
+      "cmd": "boundary",
+      "r": 0
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.5,
+      "b": 0.5
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.0,
+      "b": 1.0
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "are_disjoint",
+      "r": 0,
+      "s": 1
+     },
+     {
+      "cmd": "union",
+      "r": 0,
+      "s": 1,
+      "t": 2
+     },
+     {
+      "cmd": "dump",
+      "r": 2
+     },
+     {
+      "cmd": "area",
+      "r": 2
+     },
+     {
+      "cmd": "cross",
+      "r": 0,
+      "s": 1,
+      "t": 3
+     },
+     {
+      "cmd": "dump",
+      "r": 3
+     },
+     {
+      "cmd": "union_self",
+      "r": 0,
+      "s": 1
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "points_edges_8",
+   "upstream_ref": "source/SMLib/src/SmHermiteCurve.cpp:265",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "add_edges",
+      "r": 0,
+      "pts": {
+       "$pts": "Points.pts"
+      },
+      "start": 8,
+      "count": 3
+     },
+     {
+      "cmd": "add_edges",
+      "r": 1,
+      "pts": {
+       "$pts": "Points.pts"
+      },
+      "start": 9,
+      "count": 3
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "area",
+      "r": 0
+     },
+     {
+      "cmd": "boundary",
+      "r": 0
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.5,
+      "b": 0.5
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.0,
+      "b": 1.0
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "are_disjoint",
+      "r": 0,
+      "s": 1
+     },
+     {
+      "cmd": "union",
+      "r": 0,
+      "s": 1,
+      "t": 2
+     },
+     {
+      "cmd": "dump",
+      "r": 2
+     },
+     {
+      "cmd": "area",
+      "r": 2
+     },
+     {
+      "cmd": "cross",
+      "r": 0,
+      "s": 1,
+      "t": 3
+     },
+     {
+      "cmd": "dump",
+      "r": 3
+     },
+     {
+      "cmd": "union_self",
+      "r": 0,
+      "s": 1
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "points_edges_12",
+   "upstream_ref": "source/SMLib/src/SmHermiteCurve.cpp:265",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "add_edges",
+      "r": 0,
+      "pts": {
+       "$pts": "Points.pts"
+      },
+      "start": 12,
+      "count": 3
+     },
+     {
+      "cmd": "add_edges",
+      "r": 1,
+      "pts": {
+       "$pts": "Points.pts"
+      },
+      "start": 13,
+      "count": 3
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "area",
+      "r": 0
+     },
+     {
+      "cmd": "boundary",
+      "r": 0
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.5,
+      "b": 0.5
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.0,
+      "b": 1.0
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "are_disjoint",
+      "r": 0,
+      "s": 1
+     },
+     {
+      "cmd": "union",
+      "r": 0,
+      "s": 1,
+      "t": 2
+     },
+     {
+      "cmd": "dump",
+      "r": 2
+     },
+     {
+      "cmd": "area",
+      "r": 2
+     },
+     {
+      "cmd": "cross",
+      "r": 0,
+      "s": 1,
+      "t": 3
+     },
+     {
+      "cmd": "dump",
+      "r": 3
+     },
+     {
+      "cmd": "union_self",
+      "r": 0,
+      "s": 1
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "points_edges_16",
+   "upstream_ref": "source/SMLib/src/SmHermiteCurve.cpp:265",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "add_edges",
+      "r": 0,
+      "pts": {
+       "$pts": "Points.pts"
+      },
+      "start": 16,
+      "count": 3
+     },
+     {
+      "cmd": "add_edges",
+      "r": 1,
+      "pts": {
+       "$pts": "Points.pts"
+      },
+      "start": 17,
+      "count": 3
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "area",
+      "r": 0
+     },
+     {
+      "cmd": "boundary",
+      "r": 0
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.5,
+      "b": 0.5
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.0,
+      "b": 1.0
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "are_disjoint",
+      "r": 0,
+      "s": 1
+     },
+     {
+      "cmd": "union",
+      "r": 0,
+      "s": 1,
+      "t": 2
+     },
+     {
+      "cmd": "dump",
+      "r": 2
+     },
+     {
+      "cmd": "area",
+      "r": 2
+     },
+     {
+      "cmd": "cross",
+      "r": 0,
+      "s": 1,
+      "t": 3
+     },
+     {
+      "cmd": "dump",
+      "r": 3
+     },
+     {
+      "cmd": "union_self",
+      "r": 0,
+      "s": 1
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "points_edges_20",
+   "upstream_ref": "source/SMLib/src/SmHermiteCurve.cpp:265",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "add_edges",
+      "r": 0,
+      "pts": {
+       "$pts": "Points.pts"
+      },
+      "start": 20,
+      "count": 3
+     },
+     {
+      "cmd": "add_edges",
+      "r": 1,
+      "pts": {
+       "$pts": "Points.pts"
+      },
+      "start": 21,
+      "count": 3
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "area",
+      "r": 0
+     },
+     {
+      "cmd": "boundary",
+      "r": 0
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.5,
+      "b": 0.5
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.0,
+      "b": 1.0
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "are_disjoint",
+      "r": 0,
+      "s": 1
+     },
+     {
+      "cmd": "union",
+      "r": 0,
+      "s": 1,
+      "t": 2
+     },
+     {
+      "cmd": "dump",
+      "r": 2
+     },
+     {
+      "cmd": "area",
+      "r": 2
+     },
+     {
+      "cmd": "cross",
+      "r": 0,
+      "s": 1,
+      "t": 3
+     },
+     {
+      "cmd": "dump",
+      "r": 3
+     },
+     {
+      "cmd": "union_self",
+      "r": 0,
+      "s": 1
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "points_edges_24",
+   "upstream_ref": "source/SMLib/src/SmHermiteCurve.cpp:265",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "add_edges",
+      "r": 0,
+      "pts": {
+       "$pts": "Points.pts"
+      },
+      "start": 24,
+      "count": 3
+     },
+     {
+      "cmd": "add_edges",
+      "r": 1,
+      "pts": {
+       "$pts": "Points.pts"
+      },
+      "start": 25,
+      "count": 3
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "area",
+      "r": 0
+     },
+     {
+      "cmd": "boundary",
+      "r": 0
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.5,
+      "b": 0.5
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.0,
+      "b": 1.0
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "are_disjoint",
+      "r": 0,
+      "s": 1
+     },
+     {
+      "cmd": "union",
+      "r": 0,
+      "s": 1,
+      "t": 2
+     },
+     {
+      "cmd": "dump",
+      "r": 2
+     },
+     {
+      "cmd": "area",
+      "r": 2
+     },
+     {
+      "cmd": "cross",
+      "r": 0,
+      "s": 1,
+      "t": 3
+     },
+     {
+      "cmd": "dump",
+      "r": 3
+     },
+     {
+      "cmd": "union_self",
+      "r": 0,
+      "s": 1
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "section0_edges",
+   "upstream_ref": "source/SMLib/src/SmHermiteCurve.cpp:265",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "add_edges",
+      "r": 0,
+      "pts": {
+       "$pts": "PointSet/Section00.pts"
+      },
+      "start": 0,
+      "count": 3
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "area",
+      "r": 0
+     },
+     {
+      "cmd": "boundary",
+      "r": 0
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.5,
+      "b": 0.5
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.0,
+      "b": 1.0
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     }
+    ]
+   }
+  },
+  {
+   "name": "section3_edges",
+   "upstream_ref": "source/SMLib/src/SmHermiteCurve.cpp:265",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "add_edges",
+      "r": 0,
+      "pts": {
+       "$pts": "PointSet/Section03.pts"
+      },
+      "start": 0,
+      "count": 3
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "area",
+      "r": 0
+     },
+     {
+      "cmd": "boundary",
+      "r": 0
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.5,
+      "b": 0.5
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.0,
+      "b": 1.0
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     }
+    ]
+   }
+  },
+  {
+   "name": "section6_edges",
+   "upstream_ref": "source/SMLib/src/SmHermiteCurve.cpp:265",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "add_edges",
+      "r": 0,
+      "pts": {
+       "$pts": "PointSet/Section06.pts"
+      },
+      "start": 0,
+      "count": 3
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "area",
+      "r": 0
+     },
+     {
+      "cmd": "boundary",
+      "r": 0
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.5,
+      "b": 0.5
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.0,
+      "b": 1.0
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     }
+    ]
+   }
+  },
+  {
+   "name": "section9_edges",
+   "upstream_ref": "source/SMLib/src/SmHermiteCurve.cpp:265",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "add_edges",
+      "r": 0,
+      "pts": {
+       "$pts": "PointSet/Section09.pts"
+      },
+      "start": 0,
+      "count": 3
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "area",
+      "r": 0
+     },
+     {
+      "cmd": "boundary",
+      "r": 0
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.5,
+      "b": 0.5
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.0,
+      "b": 1.0
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     }
+    ]
+   }
+  },
+  {
+   "name": "composite_union_self",
+   "upstream_ref": "source/SMLib/src/SmCompositeCurve.cpp:446",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "add",
+      "r": 0,
+      "v": [
+       1,
+       0.1,
+       0
+      ]
+     },
+     {
+      "cmd": "add",
+      "r": 0,
+      "v": [
+       1,
+       -0.1,
+       0.05
+      ]
+     },
+     {
+      "cmd": "add",
+      "r": 1,
+      "v": [
+       1,
+       0.2,
+       0.1
+      ]
+     },
+     {
+      "cmd": "add",
+      "r": 1,
+      "v": [
+       1,
+       0.25,
+       0
+      ]
+     },
+     {
+      "cmd": "union_self",
+      "r": 0,
+      "s": 1
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "union_self",
+      "r": 0,
+      "s": 1
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "silhouette_cross",
+   "upstream_ref": "source/SMLib/src/SmSurfaceSilhouette.cpp:1080",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "add",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "add",
+      "r": 0,
+      "v": [
+       0.1,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "add",
+      "r": 0,
+      "v": [
+       0,
+       0.1,
+       1
+      ]
+     },
+     {
+      "cmd": "from_vector",
+      "r": 1,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "cross",
+      "r": 0,
+      "s": 1,
+      "t": 2
+     },
+     {
+      "cmd": "dump",
+      "r": 2
+     },
+     {
+      "cmd": "cross",
+      "r": 2,
+      "s": 0,
+      "t": 3
+     },
+     {
+      "cmd": "dump",
+      "r": 3
+     },
+     {
+      "cmd": "area",
+      "r": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "bspline_normals_guess_basis",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurface.cpp:652",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "add",
+      "r": 0,
+      "v": [
+       0.1,
+       0.05,
+       1
+      ],
+      "b2": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "add",
+      "r": 0,
+      "v": [
+       -0.1,
+       0.02,
+       1
+      ]
+     },
+     {
+      "cmd": "add",
+      "r": 0,
+      "v": [
+       0,
+       -0.1,
+       1
+      ]
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "add",
+      "r": 1,
+      "v": [
+       0.1,
+       0.05,
+       1
+      ]
+     },
+     {
+      "cmd": "add",
+      "r": 1,
+      "v": [
+       -0.1,
+       0.02,
+       1
+      ]
+     },
+     {
+      "cmd": "add",
+      "r": 1,
+      "v": [
+       0,
+       -0.1,
+       1
+      ]
+     },
+     {
+      "cmd": "dump",
+      "r": 1
+     },
+     {
+      "cmd": "area",
+      "r": 0
+     },
+     {
+      "cmd": "area",
+      "r": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "guess_basis_parallel",
+   "upstream_ref": "source/SMLib/src/SmBSplineSurface.cpp:621",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "add",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       2
+      ],
+      "b2": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "add",
+      "r": 0,
+      "v": [
+       0,
+       0.3,
+       1
+      ]
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "opposite_unbounded",
+   "upstream_ref": "source/SMLib/src/SmPolarBox.cpp:763",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "add",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "add",
+      "r": 0,
+      "v": [
+       -1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "area",
+      "r": 0
+     },
+     {
+      "cmd": "boundary",
+      "r": 0
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.5,
+      "b": 0.5
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.0,
+      "b": 1.0
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "add",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "perpendicular_unbounded",
+   "upstream_ref": "source/SMLib/src/SmPolarBox.cpp:792",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "add",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "add",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "region_to_arc_relabel",
+   "upstream_ref": "source/SMLib/src/SmPolarBox.cpp:867",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "add",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "add",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0.2
+      ]
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "add",
+      "r": 0,
+      "v": [
+       1,
+       0.3,
+       0
+      ]
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "add",
+      "r": 0,
+      "v": [
+       1,
+       0.3,
+       1e-07
+      ]
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "arc_to_region",
+   "upstream_ref": "source/SMLib/src/SmPolarBox.cpp:822",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "add",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "add",
+      "r": 0,
+      "v": [
+       1,
+       0.5,
+       0
+      ]
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "add",
+      "r": 0,
+      "v": [
+       1,
+       0.2,
+       0.3
+      ]
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "area",
+      "r": 0
+     },
+     {
+      "cmd": "boundary",
+      "r": 0
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.5,
+      "b": 0.5
+     },
+     {
+      "cmd": "eval",
+      "r": 0,
+      "a": 0.0,
+      "b": 1.0
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       1,
+       1
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "polar",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "has_perp",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ]
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "perp_disjoint_cone",
+      "r": 0,
+      "v": [
+       0.3,
+       -0.2,
+       0.9
+      ],
+      "ang": 0.1
+     }
+    ]
+   }
+  },
+  {
+   "name": "expand_to_unbounded",
+   "upstream_ref": "source/SMLib/src/SmPolarBox.cpp:1627",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "add",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "add",
+      "r": 0,
+      "v": [
+       1,
+       0.5,
+       0.4
+      ]
+     },
+     {
+      "cmd": "assign",
+      "t": 1,
+      "r": 0
+     },
+     {
+      "cmd": "expand",
+      "r": 0,
+      "d": 0.1
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "expand",
+      "r": 0,
+      "d": 3.0
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "add",
+      "r": 1,
+      "v": [
+       1,
+       0.5,
+       0
+      ]
+     },
+     {
+      "cmd": "expand",
+      "r": 1,
+      "d": 1.4
+     },
+     {
+      "cmd": "dump",
+      "r": 1
+     },
+     {
+      "cmd": "expand",
+      "r": 1,
+      "d": 2.0
+     },
+     {
+      "cmd": "dump",
+      "r": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "reset_stale_union_ub",
+   "upstream_ref": "source/SMLib/src/SmPolarBox.cpp:1058",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "add",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "add",
+      "r": 0,
+      "v": [
+       1,
+       0.1,
+       0
+      ]
+     },
+     {
+      "cmd": "reset",
+      "r": 0
+     },
+     {
+      "cmd": "dump",
+      "r": 0
+     },
+     {
+      "cmd": "add",
+      "r": 1,
+      "v": [
+       1,
+       0.2,
+       0.1
+      ]
+     },
+     {
+      "cmd": "union",
+      "r": 0,
+      "s": 1,
+      "t": 2
+     },
+     {
+      "cmd": "dump",
+      "r": 2
+     },
+     {
+      "cmd": "union_self",
+      "r": 1,
+      "s": 0
+     },
+     {
+      "cmd": "dump",
+      "r": 1
+     },
+     {
+      "cmd": "disjoint_cone",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "ang": 0.1
+     },
+     {
+      "cmd": "assign",
+      "t": 3,
+      "r": 0
+     },
+     {
+      "cmd": "dump",
+      "r": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "disjoint_far_regions",
+   "upstream_ref": "source/SMLib/src/SmAdvSurfaceIntersector.cpp:1728",
+   "inputs": {
+    "prog": [
+     {
+      "cmd": "add",
+      "r": 0,
+      "v": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "cmd": "add",
+      "r": 0,
+      "v": [
+       1,
+       0.1,
+       0.05
+      ]
+     },
+     {
+      "cmd": "add",
+      "r": 0,
+      "v": [
+       1,
+       -0.05,
+       0.1
+      ]
+     },
+     {
+      "cmd": "add",
+      "r": 1,
+      "v": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "add",
+      "r": 1,
+      "v": [
+       0.1,
+       1,
+       0.05
+      ]
+     },
+     {
+      "cmd": "add",
+      "r": 1,
+      "v": [
+       -0.05,
+       1,
+       0.1
+      ]
+     },
+     {
+      "cmd": "are_disjoint",
+      "r": 0,
+      "s": 1
+     },
+     {
+      "cmd": "are_disjoint",
+      "r": 1,
+      "s": 0
+     },
+     {
+      "cmd": "add",
+      "r": 2,
+      "v": [
+       1,
+       1,
+       0
+      ]
+     },
+     {
+      "cmd": "add",
+      "r": 2,
+      "v": [
+       1,
+       1.3,
+       0.1
+      ]
+     },
+     {
+      "cmd": "are_disjoint",
+      "r": 0,
+      "s": 2
+     },
+     {
+      "cmd": "are_disjoint",
+      "r": 2,
+      "s": 1
+     },
+     {
+      "cmd": "from_vector",
+      "r": 3,
+      "v": [
+       0,
+       0,
+       1
+      ]
+     },
+     {
+      "cmd": "are_disjoint",
+      "r": 0,
+      "s": 3
+     },
+     {
+      "cmd": "are_disjoint",
+      "r": 3,
+      "s": 0
+     },
+     {
+      "cmd": "are_disjoint",
+      "r": 3,
+      "s": 3
+     }
+    ]
+   }
+  }
+ ]
+}

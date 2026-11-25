@@ -1,0 +1,7 @@
+{
+ "what": "report-fillet-g2-corner-of-bar-running-into-cylinder less its setback cube: the three rounds outside it, exactly; reported from the app (2026-10-30, test-peg part)",
+ "source": "analytic",
+ "method": "a bar 40 x 16 x 10 whose far end is a half disc R8 about (40, 8), a disc R8 about the same centre sketched on its top (the top's outline projected) and extruded 10 up, joined: the bar's sides run tangent into the cylinder, V0 = 6400 + 960 pi; the body less the setback cube: a box [-1, 3] x [-1, 3] x [7, 11] about the corner (the patch starts 3 along each edge, so outside it each round is its whole section) cut away: V0 - 27 - removed outside the cube: the front round's spandrel from x = 3 to the wall (29.7312596618), the vertical and left rounds' (1 - pi/4) r^2 over 7 and 13: removed 46.8994065900",
+ "body_count": 1,
+ "volume_mm3": 9342.029540856203
+}

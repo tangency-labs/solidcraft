@@ -1,0 +1,7 @@
+# blend.fillet_solver_p5: the fork's d6a6d53 (a rail back on its face past an end) is already covered by #1580 (2026-10-31)
+
+Updates: plan/findings/blend.fillet_solver_p5--fork-rails-fit-their-faces.md
+
+- **Fork change:** tangency-labs/smlib@d6a6d53 adds the branch that #1580 added to the port. A middle off-face run is skipped as past an end, but only when `LeavesPastAnEnd` finds that the rail both leaves and comes back across the side edge of the same end (the new `ppEnd` and `pbBySide` outputs). The fork's case: a chamfer of a box's top edge that ends on a boss's wall, whose rail crosses the boss's base arc just past the end and comes back onto the top beyond the boss.
+- **Port:** not ported as written. The port's #1580 branch accepts any middle run whose leave and return are both past an end, either across a side edge or with the foot at an end. That covers d6a6d53's case: a 40 x 20 x 10 box united with an r5 boss on (30, 0), whose front top edge is chamfered or rounded 2. It builds with the WR-302 and cliff-overflow flags, and the body equals the flag-off body to 1e-9; a probe confirmed that the #1580 branch is the one taken. d6a6d53's stricter rule would refuse #1580's spur prism, where the rail comes back across the spur's edge and not the side edge, and that round is valid (it removes exactly `(1 - pi/4) 2^2 40`). Keeping #1580's rule does not reproduce the fork's refusal there.
+- **Test:** `crates/solidcore/tests/wr302_rail_returns_past_end_beyond_boss.rs`. It passes on main without any code change and pins the case.

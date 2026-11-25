@@ -1,0 +1,18 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 5,
+    "height": 10,
+    "body_name": "Post"
+   }
+  },
+  {
+   "command": "surface.unstitch",
+   "params": {
+    "body": "Post"
+   }
+  }
+ ]
+}

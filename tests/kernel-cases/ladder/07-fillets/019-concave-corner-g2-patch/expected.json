@@ -1,0 +1,30 @@
+{
+ "sources": [],
+ "what": "three concave r5 rounds at the inner corner of a 20x20x10 notch, with the g2 corner patch",
+ "source": "invariants",
+ "method": "the notch's inner corner (40,20,10), three concave edges, set back 1.5 r = 7.5 and filled with one patch G2 to the three rounds and the three faces; one valid body with the faces of the ball corner (13); across the patch's seams the curvature jump is at most 1e-3 per mm (the ball's corner jumps 1/r = 0.2) clear of the six points where a round's section ends on a face (within 11 mm of the corner: the hole reaches 7.5 sqrt 2; the vertical round, 2.5 mm long past its setback, meets its faces 11.2 mm out, with the G1 jump every round has)",
+ "body_count": 1,
+ "faces": 13,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   40,
+   20
+  ]
+ },
+ "continuity": {
+  "near": [
+   40,
+   20,
+   10
+  ],
+  "within_mm": 11,
+  "clear_mm": 1.2,
+  "curvature_jump_per_mm": 0.001
+ }
+}

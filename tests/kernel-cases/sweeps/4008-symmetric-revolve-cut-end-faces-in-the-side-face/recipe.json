@@ -1,0 +1,95 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 60,
+    "width": 20,
+    "height": 25,
+    "corner": [
+     0,
+     0,
+     0
+    ],
+    "body_name": "Block"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      20.0,
+      0.0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "Tool"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     2.6,
+     2
+    ],
+    "p1": [
+     9.6,
+     23
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      0,
+      25
+     ]
+    ],
+    "infer": false,
+    "construction": true,
+    "ids": [
+     "ax"
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.revolve",
+   "params": {
+    "axis": "ax",
+    "angle": "180 deg",
+    "direction": "symmetric",
+    "operation": "cut",
+    "profiles": [
+     {
+      "point": [
+       6,
+       10
+      ]
+     }
+    ]
+   }
+  }
+ ]
+}

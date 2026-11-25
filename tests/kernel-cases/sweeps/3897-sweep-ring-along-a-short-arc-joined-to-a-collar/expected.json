@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3897"
+ ],
+ "what": "a ring profile (radii 79.815 and 78.285) swept along a 22.5 degree arc of radius 94.815 whose start is at the ring centre, joined to a ring-shaped collar under the profile (froze at \"Computing\")",
+ "source": "analytic",
+ "method": "the ring section is square to the path and centred on it, and its radius is below the bend radius, so the sweep is a tube segment: V = A_ring R theta, A_ring = pi (79.815^2 - 78.285^2). The collar is the same ring extruded 10 mm down, touching the sweep start face: V = A_ring (10 + 94.815 * 22.5 deg).",
+ "body_count": 1,
+ "volume_mm3": 35894.3194465593
+}

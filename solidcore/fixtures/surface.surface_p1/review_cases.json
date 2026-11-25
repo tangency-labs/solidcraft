@@ -1,0 +1,53 @@
+{
+ "cases": [
+  {
+   "name": "step_knots_ivl_just_inside_min",
+   "inputs": {
+    "surf": {"plane": {"o": [0, 0, 0], "x": [1, 0, 0], "y": [0, 1, 0], "scale": [1, 1], "dom": [0, 0, 1, 1]}},
+    "op": "step", "v": false, "ivl": [1e-13, 0.5]
+   }
+  },
+  {
+   "name": "step_knots_ivl_just_inside_max",
+   "inputs": {
+    "surf": {"plane": {"o": [0, 0, 0], "x": [1, 0, 0], "y": [0, 1, 0], "scale": [1, 1], "dom": [0, 0, 1, 1]}},
+    "op": "step", "v": false, "ivl": [0.5, 0.9999999999995]
+   }
+  },
+  {
+   "name": "step_knots_biquadratic_ivl_just_inside_min",
+   "inputs": {
+    "surf": {"bspline": {"oob": false, "form": 11, "srf": {"p": 2, "q": 2,
+     "net": [
+      [[0, 0, 0, -1.7976931348623157e+308], [0, 1, 0.3, -1.7976931348623157e+308], [0, 2, 0, -1.7976931348623157e+308]],
+      [[1, 0, 0.2, -1.7976931348623157e+308], [1, 1, 0.8, -1.7976931348623157e+308], [1, 2, 0.1, -1.7976931348623157e+308]],
+      [[2, 0, 0, -1.7976931348623157e+308], [2, 1, 0.4, -1.7976931348623157e+308], [2, 2, 0, -1.7976931348623157e+308]]
+     ],
+     "u": [0, 0, 0, 1, 1, 1], "v": [0, 0, 0, 1, 1, 1]}}},
+    "op": "step", "v": false, "ivl": [5e-13, 0.7]
+   }
+  },
+  {
+   "name": "bbox_polar_tilted_plane",
+   "inputs": {
+    "surf": {"plane": {"o": [1, 2, 3], "x": [1, 0, 0.3], "y": [0.2, 1, 0.5], "scale": [1.5, 0.7], "dom": [-1, 0.5, 2, 3]}},
+    "op": "b_box", "dom": [-1, 0.5, 2, 3], "normal": true, "pseudo": false, "expand": true, "polar": true
+   }
+  },
+  {
+   "name": "in_domain_outside_plane",
+   "inputs": {
+    "surf": {"plane": {"o": [0, 0, 0], "x": [1, 0, 0], "y": [0, 1, 0], "scale": [1, 1], "dom": [0, 0, 1, 1]}},
+    "op": "in_domain", "dom": [0, 0, 1, 1], "uv": [1.05, 0.5], "tol": null
+   }
+  },
+  {
+   "name": "on_boundary_just_outside_wrapped_plane",
+   "inputs": {
+    "wrap": true,
+    "surf": {"plane": {"o": [0, 0, 0], "x": [1, 0, 0], "y": [0, 1, 0], "scale": [1, 1], "dom": [0, 0, 1, 1]}},
+    "op": "on_boundary", "dom": [0, 0, 1, 1], "uv": [-1e-7, 0.3], "tol": null
+   }
+  }
+ ]
+}

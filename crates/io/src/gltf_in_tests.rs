@@ -260,6 +260,8 @@ fn materials_give_looks() {
     let glass = g.looks[1].as_ref().unwrap();
     assert!((i32::from(glass.color[0]) - 128).abs() <= 1, "{:?}", glass.color);
     assert!(close(glass.opacity, 0.5) && glass.pbr.is_none());
+    // A channel that isn't a number reads as linear 0.8, sRGB 231.
+    assert_eq!([f32::NAN, f32::INFINITY].map(srgb), [231, 231]);
 }
 
 #[test]

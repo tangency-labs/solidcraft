@@ -166,7 +166,7 @@ fn required_bytes(mut width: usize, mut height: usize) -> Result<usize, MipError
     if width == 1 && height == 1 { Ok(bytes) } else { Err(MipError::Budget) }
 }
 
-fn area_average(source: TextureView<'_>, x: usize, y: usize, width: usize, height: usize) -> Result<[f64; 3], MipError> {
+pub(crate) fn area_average(source: TextureView<'_>, x: usize, y: usize, width: usize, height: usize) -> Result<[f64; 3], MipError> {
     // Integer overlap numerators avoid dropping the final row/column at odd sizes.
     // All factors are bounded by the validated 2048 edge; at most 3x3 source cells.
     let x_start = x * source.width;

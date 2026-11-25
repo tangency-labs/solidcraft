@@ -1,0 +1,854 @@
+{
+ "cases": [
+  {
+   "name": "wire_line_bounded_far",
+   "upstream_ref": "edge case (plane/plane wiring of IntersectWithPlane)",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "b": [
+       1.0,
+       0.0,
+       0.0
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "bounded",
+     "o": [
+      0,
+      50,
+      0
+     ],
+     "x": [
+      0,
+      1,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "wire_line_bounded_near_miss",
+   "upstream_ref": "edge case (plane/plane wiring of IntersectWithPlane)",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "b": [
+       1.0,
+       0.0,
+       0.0
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "bounded",
+     "o": [
+      0.5,
+      0.001,
+      0
+     ],
+     "x": [
+      0,
+      1,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "dom": [
+      0,
+      -1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "wire_line_bounded_touch_edge",
+   "upstream_ref": "edge case (plane/plane wiring of IntersectWithPlane)",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "b": [
+       1.0,
+       0.0,
+       0.0
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "bounded",
+     "o": [
+      0.5,
+      0,
+      0
+     ],
+     "x": [
+      0,
+      1,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "dom": [
+      0,
+      -1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "wire_line_bounded_crossing",
+   "upstream_ref": "edge case (plane/plane wiring of IntersectWithPlane)",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "b": [
+       1.0,
+       0.0,
+       0.0
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "bounded",
+     "o": [
+      0.5,
+      0,
+      0
+     ],
+     "x": [
+      0,
+      1,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "wire_line_bounded_far_tilted",
+   "upstream_ref": "edge case (plane/plane wiring of IntersectWithPlane)",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "b": [
+       1.0,
+       0.0,
+       0.0
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "bounded",
+     "o": [
+      0,
+      -7,
+      3
+     ],
+     "x": [
+      0.6,
+      0.8,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "dom": [
+      -2,
+      -2,
+      2,
+      2
+     ]
+    }
+   }
+  },
+  {
+   "name": "wire_line_bounded_huge_far",
+   "upstream_ref": "edge case (plane/plane wiring of IntersectWithPlane)",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       1000000.0,
+       0,
+       0
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1000000.0
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "bounded",
+     "o": [
+      500000.0,
+      3000000.0,
+      0
+     ],
+     "x": [
+      0,
+      1,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "dom": [
+      -1000000.0,
+      -1000000.0,
+      1000000.0,
+      1000000.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "wire_line_bounded_tiny_far",
+   "upstream_ref": "edge case (plane/plane wiring of IntersectWithPlane)",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       0.0001,
+       0,
+       0
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       0.0001
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "bounded",
+     "o": [
+      5e-05,
+      0.0003,
+      0
+     ],
+     "x": [
+      0,
+      1,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "dom": [
+      -0.0001,
+      -0.0001,
+      0.0001,
+      0.0001
+     ]
+    }
+   }
+  },
+  {
+   "name": "wire_line_bounded_far_swap",
+   "upstream_ref": "edge case (plane/plane wiring of IntersectWithPlane)",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "b": [
+       1.0,
+       0.0,
+       0.0
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     },
+     "oob": false,
+     "swap": true
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "bounded",
+     "o": [
+      0,
+      50,
+      0
+     ],
+     "x": [
+      0,
+      1,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "wire_line_bounded_far_tol",
+   "upstream_ref": "edge case (plane/plane wiring of IntersectWithPlane)",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "b": [
+       1.0,
+       0.0,
+       0.0
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "bounded",
+     "o": [
+      0,
+      0.01,
+      0
+     ],
+     "x": [
+      0,
+      1,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "dom": [
+      0,
+      -1,
+      1,
+      1
+     ]
+    },
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "wire_line_bounded_far_tol0",
+   "upstream_ref": "edge case (plane/plane wiring of IntersectWithPlane)",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "b": [
+       1.0,
+       0.0,
+       0.0
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "bounded",
+     "o": [
+      0,
+      1e-09,
+      0
+     ],
+     "x": [
+      0,
+      1,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "dom": [
+      0,
+      -1,
+      1,
+      1
+     ]
+    },
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "wire_line_normal_crossing_tilted",
+   "upstream_ref": "edge case (plane/plane wiring of IntersectWithPlane)",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "b": [
+       1.0,
+       0.0,
+       0.0
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "normal",
+     "o": [
+      0.3,
+      0,
+      0
+     ],
+     "n": [
+      1,
+      0.2,
+      0.1
+     ]
+    }
+   }
+  },
+  {
+   "name": "wire_line_bounded_subdomain_miss",
+   "upstream_ref": "edge case (plane/plane wiring of IntersectWithPlane)",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "b": [
+       1.0,
+       0.0,
+       0.0
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "plane",
+    "plane": {
+     "kind": "bounded",
+     "o": [
+      0.5,
+      0,
+      0
+     ],
+     "x": [
+      0,
+      1,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "other_dom": [
+     0.25,
+     -1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "wire_global_line_bounded_far",
+   "upstream_ref": "edge case (plane/plane wiring of IntersectWithPlane)",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "b": [
+       1.0,
+       0.0,
+       0.0
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "global",
+    "target": "plane",
+    "plane": {
+     "kind": "bounded",
+     "o": [
+      0,
+      50,
+      0
+     ],
+     "x": [
+      0,
+      1,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "wire_global_line_bounded_far_as_surface",
+   "upstream_ref": "edge case (plane/plane wiring of IntersectWithPlane)",
+   "inputs": {
+    "src": "built",
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "b": [
+       1.0,
+       0.0,
+       0.0
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     },
+     "oob": false,
+     "swap": false
+    },
+    "op": "global",
+    "target": "plane",
+    "as_surface": true,
+    "plane": {
+     "kind": "bounded",
+     "o": [
+      0,
+      50,
+      0
+     ],
+     "x": [
+      0,
+      1,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "dom": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    }
+   }
+  }
+ ]
+}

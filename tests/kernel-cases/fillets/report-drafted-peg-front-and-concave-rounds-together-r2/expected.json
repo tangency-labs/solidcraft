@@ -1,0 +1,9 @@
+{
+ "what": "as report-peg-front-and-concave-rounds-together-r2 on the drafted peg, whose front face runs tangent into a cone",
+ "source": "invariants",
+ "method": "the peg (a bar 40 x 16 whose far end is a half disc R8 about (40, 8)) extruded 10 with a 5 deg inward taper, then the top's end circle (R 8 - 10 tan 5 deg about (40, 8)) extruded 10 up with the same taper and joined: the bar's drafted front face runs tangent into the cone along its generator through x = 40, and the top's concave arc meets the front top edge where the two are tangent, as on the straight peg; the front top edge and the concave arc rounded r2 in one fillet, tangent chain on; no closed form: one valid body, every seam a round or the corner patch makes G1",
+ "body_count": 1,
+ "continuity": {
+  "order": "g1"
+ }
+}

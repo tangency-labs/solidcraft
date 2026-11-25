@@ -1,11 +1,12 @@
 //! Original periodic preview fields in an explicit world-space millimetre frame.
 //! Only roughness and shading normals change; geometry and visibility do not.
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 use std::f64::consts::TAU;
 
 use crate::job::{ErrorCode, JobError, Result};
-use crate::surface::{MIN_ROUGHNESS, OpaqueSurface, unit_direction};
+use solidcraft_viewport::surface::{MIN_ROUGHNESS, OpaqueSurface, unit_direction};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -62,7 +63,11 @@ fn bounded_position(p: Vec3) -> bool {
 
 impl SurfaceEffect {
     pub fn prepare(&self) -> Result<PreparedEffect> {
-        if self.body.is_empty() || self.body.len() > 256 || self.body.capacity() > 256 || self.body.chars().any(char::is_control) {
+        if self.body.is_empty()
+            || self.body.len() > crate::job::MAX_BODY_NAME_BYTES
+            || self.body.capacity() > crate::job::MAX_BODY_NAME_BYTES
+            || self.body.chars().any(char::is_control)
+        {
             return Err(invalid("surface effect requires an exact bounded captured-body name"));
         }
         let origin = vector(self.frame.origin_mm);
@@ -103,10 +108,10 @@ fn bounded_body_name<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Res
     impl serde::de::Visitor<'_> for Name {
         type Value = String;
         fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_str("captured body name of 1..256 bytes without control characters")
+            f.write_str("captured body name of 1..512 bytes without control characters")
         }
         fn visit_str<E: serde::de::Error>(self, value: &str) -> std::result::Result<String, E> {
-            if value.is_empty() || value.len() > 256 || value.chars().any(char::is_control) {
+            if value.is_empty() || value.len() > crate::job::MAX_BODY_NAME_BYTES || value.chars().any(char::is_control) {
                 return Err(E::custom("bounded captured body name required"));
             }
             let mut name = String::new();
@@ -202,7 +207,8 @@ impl PreparedEffect {
                 (surface.roughness() + self.roughness * field).clamp(MIN_ROUGHNESS, 1.0),
                 surface.dielectric_ior(),
             )
-            .map_err(|_| invalid("invalid procedural surface"))?;
+            .map_err(|_| invalid("invalid procedural surface"))?
+            .with_metal_energy_compensation(surface.metal_energy_compensation());
             // GPU2 shares this surface type. Changing the substrate roughness
             // must retain an already captured coat for direct-light evaluation.
             surface.clear_coat().map_or(changed, |coat| changed.with_clear_coat(coat))

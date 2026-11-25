@@ -1,0 +1,12 @@
+id = "geom.geom_utility_p1"
+upstream = ["source/SMLib/src/SmGeomUtility.cpp"]
+rust_module = "geom::geom_utility::p1"
+depends_on = ["geom.axis2_placement", "geom.extent1d", "geom.matrix", "geom.tol", "geom.vector2d", "geom.vector3d"]
+soft_depends_on = ["geom.polynomial"]
+est_lines = 2178
+layer = 4
+tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
+status = "green"
+claimed_by = "swarm-geom.geom_utility_p1-a1"
+claimed_at = "2026-10-12T20:09:08Z"
+notes = "GREEN: difftest 4185 cases (185 fixture + 4000 generated), all bit-identical, 0 deferred; wired UNPORTED(geom.geom_utility_p1) in geom.axis2_placement (now green) and geom.geom_utility_p2 (now green); 45 fns; largest: smgu_LineCoPlanarCircleIntersect, smgu_BestFitLineToPoints, smgu_CircleCoPlanarCircleIntersect, smgu_TransformPointToStartPlane; unit-SCC #22 (220 units); 317 upstream test entry points reach this unit"

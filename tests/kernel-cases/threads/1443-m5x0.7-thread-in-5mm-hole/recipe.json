@@ -1,0 +1,35 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 7,
+    "height": 4.2,
+    "body_name": "Nut"
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     0,
+     0,
+     4.2
+    ],
+    "diameter": 5
+   }
+  },
+  {
+   "command": "solid.thread",
+   "params": {
+    "face": [
+     2.5,
+     0,
+     2.1
+    ],
+    "designation": "M5x0.7",
+    "modeled": true
+   }
+  }
+ ]
+}

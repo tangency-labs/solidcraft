@@ -1,0 +1,28 @@
+# blend.blend_corner: the setback a curved Setback's growth names as building is refused when asked for, under the 1e-2 search (2026-11-03)
+
+- **Unit:** `blend.blend_corner` (the Setback beside curved faces, #2343, PR #2366; `Kernel::fixes.fillet_setback_beside_curved_faces` with `fillet_blend_corner`).
+- **Inputs:** the D prism (R 10, flat a 4, H 10), its top corner (4, sqrt 84, 10), the chord, the upright and the arc rounded 2, 2.5 and 3 (`crates/solidcore/tests/issue_2343_curved_setback.rs`, `d_prism_case`).
+- **Search:** the growth as at 37c9e1d: twice first, then bisecting while the certifying end is more than 1.01 times the failing one. Since then the growth uses the planar search's thousandths (below).
+  - **Asked 3.05:** the corner is refused: "a setback of 3.05 is too short for the setback corner's fill to stay no more concave than its faces: a setback of 3.24062 builds it". `fit_setback` is 3.2406249999999996 (3.05 x 1.0625).
+    - The growth's trials at 2, 1.5, 1.25, 1.125 and 1.0625 certify; those at 1.03125, 1.046875 and 1.0546875 do not.
+    - At 1.0625 the fill certifies only at degree 9: degrees 4 to 7 are infeasible, and degree 8 solves but is not certified.
+  - **Asked 3.2406249999999996:** refused in turn, naming 3.26594.
+- **Expected:** a setback the corner names as building builds when asked for (`fit_setback`'s contract).
+- **Cause (checked 2026-11-03):** not state the trials inherit. Release probes of the growth (D prism asked 3.05) and of a fresh build asked 3.2406249999999996 were compared at the scale 1.0625:
+  - The three setback vertices the trial places are bit for bit the fresh build's, and so are the vertices of every other trial at the same scale.
+  - What differs is the rounds. The trial evaluates the rounds built at the base setbacks, at rail parameters 0.99168, 0.00481 and 0.98171. The fresh build evaluates its own rounds at 1, 0 and 1: the same geometry, parametrized over another interval.
+  - The fill's inputs agree to rounding: the geometric rows, the raw jets 0 to 2, the axis e (bit for bit) and the origin o, all within 1e-15 relative; every k is 0.
+  - From those inputs the fill certifies in the trial (at degree 9 only) and not in the fresh build. The decision at the growth's threshold is not stable under rounding-level changes of its inputs. The fresh build's own threshold lies in (3.2406, 3.2659], the trial's in (3.2168, 3.2406].
+  - The fork notes the same class open at 37c9e1d ("the cone still differs grown vs scaled with identical round rows").
+- **Ways out (a design question, not decided here):**
+  - Name a setback whose certificate holds with a margin beyond rounding.
+  - Or make the fill's inputs a function of the placed vertices alone (their points, ball centres and rail tangents, bit for bit the same in a trial and in a fresh build), not of the rounds' surfaces.
+- **Since the thousandths search** (2026-11-03): the growth now bisects on the planar search's grid of thousandths (`certified_scale`, #2382, the fork's 20b1c01), the smallest certifying scale whose neighbour below fails.
+  - **Asked 3.05:** refused, naming 3.23605 (3.05 x 1.061).
+  - **Asked 3.23605:** certified at the setbacks themselves; the fillet completes. This time the decision at the threshold held. Its stability under rounding is still not shown.
+  - The body then fails `check_brep` level 2: two patches' control nets double back (test #5), as the countersink's (`plan/findings/blend.blend_corner--curved-setback-countersink-net-doubles-back.md`).
+- **Not a hang:** the growth is bounded: at most nine fills under the 1e-2 search (twelve under the thousandths), seven degrees each, at most 200 row rounds per quadratic programme, each with at most `50 (m + n) + 1000` dual steps. Asked 3.05 took 136 s in release under the 1e-2 search, and most of an hour in a debug build. Each solve at degree 9 near the threshold takes 8 to 27 s in release, mostly the dual active-set steps over a working set of up to 12000 rows. A debug-build probe of it was first taken for a hang.
+- **Resolution (2026-11-03, the owner's answers on #2243):** a growth trial is certified only by more than its certificate's rounding bound: each test's slack for rounding (`1e-12` of its scale, two orders above the coefficients' own rounding) halved, and grown with the corner's distance from the origin. The programme is the same for the trial and for the corner built afresh, and with the net's fairness term strictly convex, so its solution differs between the two by rounding only. The named setback's certificate then holds again when it is asked for. After the trial, the fill is made at the setbacks found as a corner asking them would make it.
+  - D prism asked 3.05: refused, naming 3.233 (3.05 x 1.06).
+  - Asked 3.233: certified at the setbacks themselves (degree 5); the fillet completes, sound, its nets never turning back, graded on the faces' closed forms.
+- **State:** resolved. `d_prism_asked_too_short_names_the_setback_that_builds` checks the name (ignored as slow: twelve curved fills); `the_named_setback_builds` asks 3.05 x 1.06 and grades the body (not ignored).

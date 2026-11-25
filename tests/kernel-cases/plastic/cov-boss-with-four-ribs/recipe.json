@@ -1,0 +1,29 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 60,
+    "width": 60,
+    "height": 3,
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "plastic.boss",
+   "params": {
+    "position": [
+     30,
+     30,
+     3
+    ],
+    "diameter": 10,
+    "height": 12,
+    "ribs": 4,
+    "rib_thickness": 1.5,
+    "rib_length": 6,
+    "rib_offset": 2
+   }
+  }
+ ]
+}

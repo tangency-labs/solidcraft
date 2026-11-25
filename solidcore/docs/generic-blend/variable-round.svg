@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="560" height="360" viewBox="0 0 560 360">
+  <title>A variable round as the union of its balls</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path d="M0 0 L560 0 L560 360 L0 360 Z" fill="#ffffff"/>
+    <path d="M70 190 C70 206.569 83.431 220 100 220 C116.569 220 130 206.569 130 190 C130 173.431 116.569 160 100 160 C83.431 160 70 173.431 70 190 Z" fill="none" stroke="#aaaaaa" stroke-width="0.8" stroke-miterlimit="10" stroke-dasharray="2 3"/>
+    <path d="M122.5 190 C122.5 216.234 143.766 237.5 170 237.5 C196.234 237.5 217.5 216.234 217.5 190 C217.5 163.766 196.234 142.5 170 142.5 C143.766 142.5 122.5 163.766 122.5 190 Z" fill="none" stroke="#aaaaaa" stroke-width="0.8" stroke-miterlimit="10" stroke-dasharray="2 3"/>
+    <path d="M175 190 C175 225.899 204.101 255 240 255 C275.899 255 305 225.899 305 190 C305 154.101 275.899 125 240 125 C204.101 125 175 154.101 175 190 Z" fill="none" stroke="#aaaaaa" stroke-width="0.8" stroke-miterlimit="10" stroke-dasharray="2 3"/>
+    <path d="M280 190 C280 245.228 324.772 290 380 290 C435.228 290 480 245.228 480 190 C480 134.772 435.228 90 380 90 C324.772 90 280 134.772 280 190 Z" fill="none" stroke="#aaaaaa" stroke-width="0.8" stroke-miterlimit="10" stroke-dasharray="2 3"/>
+    <path d="M50 190 L500 190" fill="none" stroke="#777777" stroke-width="0.8" stroke-miterlimit="10" stroke-dasharray="5 4"/>
+    <path d="M227.5 190 C227.5 235.563 264.437 272.5 310 272.5 C355.563 272.5 392.5 235.563 392.5 190 C392.5 144.437 355.563 107.5 310 107.5 C264.437 107.5 227.5 144.437 227.5 190 Z" fill="none" stroke="#000000" stroke-width="0.9" stroke-miterlimit="10"/>
+    <path d="M310 107.5 L310 272.5" fill="none" stroke="#000000" stroke-width="1.2" stroke-miterlimit="10" stroke-dasharray="5 3"/>
+    <path d="M40 344 L75 344" fill="none" stroke="#000000" stroke-width="1.2" stroke-miterlimit="10" stroke-dasharray="5 3"/>
+    <path d="M92.5 160.95 L355 93.18" fill="none" stroke="#000000" stroke-width="1.7" stroke-miterlimit="10"/>
+    <path d="M92.5 219.05 L355 286.82" fill="none" stroke="#000000" stroke-width="1.7" stroke-miterlimit="10"/>
+    <path d="M289.4 292 L289.4 308 M310 292 L310 308 M289.4 300 L310 300" fill="none" stroke="#000000" stroke-width="0.8" stroke-miterlimit="10"/>
+    <path d="M289.4 110.1 L289.4 269.9" fill="none" stroke="#1f6fb2" stroke-width="2.4" stroke-miterlimit="10"/>
+    <path d="M40 326 L75 326" fill="none" stroke="#1f6fb2" stroke-width="2.4" stroke-miterlimit="10"/>
+    <path d="M293.4 110.1 C293.4 107.891 291.609 106.1 289.4 106.1 C287.191 106.1 285.4 107.891 285.4 110.1 C285.4 112.309 287.191 114.1 289.4 114.1 C291.609 114.1 293.4 112.309 293.4 110.1 Z" fill="#1f6fb2"/>
+    <path d="M293.4 269.9 C293.4 267.691 291.609 265.9 289.4 265.9 C287.191 265.9 285.4 267.691 285.4 269.9 C285.4 272.109 287.191 273.9 289.4 273.9 C291.609 273.9 293.4 272.109 293.4 269.9 Z" fill="#1f6fb2"/>
+    <path d="M313 190 C313 188.343 311.657 187 310 187 C308.343 187 307 188.343 307 190 C307 191.657 308.343 193 310 193 C311.657 193 313 191.657 313 190 Z" fill="#000000"/>
+    <text transform="matrix(1 0 0 1 40 40)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">side view: balls of radius r(s) along the centre line, r′ = dr/ds</tspan></text>
+    <text transform="matrix(1 0 0 1 40 132)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">envelope = the round</tspan></text>
+    <text transform="matrix(1 0 0 1 418 184)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#555555"><tspan x="0" y="0">centre line c(s)</tspan></text>
+    <text transform="matrix(1 0 0 1 316 304)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#000000"><tspan x="0" y="0">shift −r r′/|c′|</tspan></text>
+    <text transform="matrix(1 0 0 1 82 330)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#1f6fb2"><tspan x="0" y="0">touch circle, the section: centre shifted by −r r′/|c′|, radius r √(1 − r′²)</tspan></text>
+    <text transform="matrix(1 0 0 1 82 348)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#000000"><tspan x="0" y="0">great circle through the centre: off the envelope when r′ ≠ 0 (not used)</tspan></text>
+  </g>
+</svg>

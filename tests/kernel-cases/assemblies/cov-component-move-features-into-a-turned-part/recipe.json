@@ -1,0 +1,85 @@
+{
+ "commands": [
+  {
+   "command": "component.create",
+   "params": {
+    "name": "Holder",
+    "parent": "root",
+    "activate": false,
+    "grounded": false
+   }
+  },
+  {
+   "command": "occurrence.move",
+   "params": {
+    "occurrence": "Holder:1",
+    "matrix": [
+     [
+      0,
+      -1,
+      0,
+      100
+     ],
+     [
+      1,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     10,
+     20
+    ],
+    "p1": [
+     30,
+     30
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 5,
+    "operation": "new"
+   }
+  },
+  {
+   "command": "component.move_features",
+   "params": {
+    "features": [
+     "Sketch1",
+     "Extrude1"
+    ],
+    "component": "Holder"
+   }
+  },
+  {
+   "command": "occurrence.properties",
+   "params": {
+    "occurrence": "Holder:1"
+   }
+  }
+ ]
+}

@@ -1,13 +1,23 @@
 //! Snap points (#5881): the points a hovered edge or face offers as picks, so a point input
 //! (Move's From and To, Measure, …) can take a hole's centre or an edge's middle where no vertex
 //! sits. A round edge offers its centre (an arc also its ends and middle), a straight or other
-//! edge its ends and middle, a flat face its centre, a cylinder or cone the centres of its ends,
-//! a sphere or torus its centre, a vertex itself. The shapes are Measure's: exact from the
+//! edge its ends and middle, a cylinder or cone the centres of its ends, a sphere or torus its
+//! centre, a vertex itself. A flat face offers its centre and its whole outline at once (#11476):
+//! every corner, the middle of every straight edge and the centre of every round edge, holes
+//! included, read from the exact faces and edges. The other shapes are Measure's: exact from the
 //! kernel where it knows the curve or surface, fitted to the mesh otherwise. World coordinates,
 //! as the viewport shows the model.
+//!
+//! [`snap_points_from`] also says where each point came from ([`SnapSource`]): the face, its
+//! outward normal and the edge, so a tool can keep the point by name and turn a frame to the face.
 
 use serde::Serialize;
-use solidcraft_geom::{UnitVec3, Vec3};
+use solidcore_record::Vec3;
+use solidcore_record::brep::{Brep, Curve, Loop};
+use solidcraft_geom::UnitVec3;
+use solidcraft_geom::brep::eval::CurveEval;
+use solidcraft_geom::prelude::*;
+use solidcraft_kernel::{Body, EdgeCircle};
 
 use crate::cmd::Shape;
 use crate::{Sel, Session};
@@ -37,26 +47,88 @@ pub struct SnapPoint {
     pub body: String,
 }
 
-/// Points closer than this (relative to the item's size) are one snap point.
+/// Where a snap point came from, in world coordinates: what a tool needs to keep the point by
+/// name as the part changes (`joint.create`'s `{"edge", "corner", "on"}`) and to turn a frame to
+/// the face it lies on. Empty for a vertex and for sketch geometry.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct SnapSource {
+    /// A point on the face that offered the point: where the face was picked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub face: Option<Vec3>,
+    /// Which way the point's face looks, as a unit vector: a flat face's outward normal (out of
+    /// the material), or for a cylinder's or cone's end centre the axis pointing out of that end
+    /// of the face. That is an axis direction, not always out of the material: at a blind hole's
+    /// bottom it points into the material below.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub normal: Option<Vec3>,
+    /// A point inside the edge the point belongs to: the edge a corner starts, the straight edge a
+    /// middle halves, the round edge a centre is the centre of, or the picked edge itself.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edge: Option<Vec3>,
+}
+
+/// Two round edges' radii closer than this (relative to the radii) are one circle.
 const SAME: f64 = 1e-6;
+
+/// Points of one kind closer than this (relative to how far from the origin they are) are one
+/// place: well above the rounding of coordinates there and of a circle fitted to an imported
+/// edge, so a point found twice is one, and far below any feature, so distinct points stay apart
+/// far from the origin too (0.06 µm at 60 m, where `SAME` would be 0.06 mm).
+const SAME_PLACE: f64 = 1e-9;
+
+/// The most edges of one face whose points a flat face offers: a face with more (an imported
+/// lattice) offers those of its first edges.
+const MAX_OUTLINE_EDGES: usize = 4096;
+
+/// A point found on an item, its kind and where it came from.
+pub(crate) type Found = (Vec3, SnapKind, SnapSource);
 
 /// The snap points `sel` offers: none for things with no points to offer (a body, a plane).
 pub fn snap_points(s: &Session, sel: &Sel) -> Vec<SnapPoint> {
+    snap_points_from(s, sel).into_iter().map(|(p, _)| p).collect()
+}
+
+/// [`snap_points`], each with where it came from.
+pub fn snap_points_from(s: &Session, sel: &Sel) -> Vec<(SnapPoint, SnapSource)> {
     let body = match sel {
         Sel::Edge { body, .. } | Sel::Face { body, .. } | Sel::Vertex { body, .. } => body.clone(),
         _ => String::new(),
     };
+    let tagged =
+        |points: Vec<(Vec3, SnapKind)>, from: SnapSource| -> Vec<Found> { points.into_iter().map(|(at, kind)| (at, kind, from.clone())).collect() };
     let found = match sel {
-        Sel::Vertex { point, .. } => vec![(*point, SnapKind::Vertex)],
-        Sel::Edge { .. } | Sel::SketchCurve { .. } | Sel::ExternalSketchCurve { .. } => edge_points(s, sel),
+        Sel::Vertex { point, .. } => vec![(*point, SnapKind::Vertex, SnapSource::default())],
+        Sel::Edge { point, .. } => tagged(edge_points(s, sel), SnapSource { edge: Some(*point), ..SnapSource::default() }),
+        Sel::SketchCurve { .. } | Sel::ExternalSketchCurve { .. } => tagged(edge_points(s, sel), SnapSource::default()),
         Sel::Face { .. } => face_points(s, sel),
         _ => Vec::new(),
     };
-    let mut out: Vec<SnapPoint> = Vec::new();
-    for (at, kind) in found {
-        let tol = SAME * (1.0 + at.len());
-        if at.is_finite() && !out.iter().any(|p| p.at.dist(at) <= tol) {
-            out.push(SnapPoint { at, kind, body: body.clone() });
+    merged(found, &body)
+}
+
+/// The points found on an item as snap points, a point found twice kept once.
+pub(crate) fn merged(found: Vec<Found>, body: &str) -> Vec<(SnapPoint, SnapSource)> {
+    // A round edge's centre with the radius its rim has (the rim point is on the circle).
+    let radius = |at: Vec3, from: &SnapSource| from.edge.map(|rim| rim.dist(at));
+    let mut out: Vec<(SnapPoint, SnapSource)> = Vec::new();
+    for (at, kind, from) in found {
+        let tol = SAME_PLACE * (1.0 + at.len());
+        // Only points of one kind are one point: a hole centred on its face is both the face's
+        // centre and the hole's, and only the hole's keeps its rim. Centres are one point only
+        // on one circle: a washer's two rims keep a centre each, while the pieces the kernel
+        // split one circle into are one.
+        let r = radius(at, &from);
+        let one_circle = |other: Option<f64>| match (other, r) {
+            // By the radii's own size, not the place's: far from the origin two close rims
+            // would otherwise count as one.
+            (Some(a), Some(b)) => (a - b).abs() <= SAME * (1.0 + a.max(b)),
+            (None, None) => true,
+            _ => false,
+        };
+        let same =
+            |(p, f): &(SnapPoint, SnapSource)| p.kind == kind && p.at.dist(at) <= tol && (kind != SnapKind::Centre || one_circle(radius(p.at, f)));
+        if at.is_finite() && !out.iter().any(same) {
+            out.push((SnapPoint { at, kind, body: body.to_string() }, from));
         }
     }
     out
@@ -95,12 +167,12 @@ fn edge_points(s: &Session, sel: &Sel) -> Vec<(Vec3, SnapKind)> {
 /// same circle, in order: the whole arc when the kernel split it.
 fn whole_arc(s: &Session, sel: &Sel, center: Vec3, axis: UnitVec3, radius: f64) -> Option<Vec<Vec3>> {
     let Sel::Edge { body, index, .. } = sel else { return None };
-    let st = s.world_state();
+    let st = s.world_state().ok()?;
     let m = st.body(body)?.mesh();
     let tol = (radius * 1e-6).max(1e-9);
     let on = |e: &Vec<Vec3>| e.iter().all(|p| (p.dist(center) - radius).abs() <= tol * 10.0 && (*p - center).dot(axis).abs() <= tol * 10.0);
     let mut left: Vec<usize> =
-        m.tangent_chain(*index, 2f64.to_radians()).into_iter().filter(|&i| i != *index && m.edges.get(i).is_some_and(on)).collect();
+        m.tangent_chain(*index, solidcraft_geom::TANGENT_CHAIN).into_iter().filter(|&i| i != *index && m.edges.get(i).is_some_and(on)).collect();
     let mut arc = m.edges.get(*index).filter(|e| on(e))?.clone();
     // Add pieces at either end while one starts or ends there (capped by the pieces there are).
     while let Some((k, at_end, rev)) = left.iter().enumerate().find_map(|(k, &i)| {
@@ -153,26 +225,99 @@ fn along(pts: &[Vec3], f: f64) -> Option<Vec3> {
     pts.last().copied()
 }
 
-/// A face's points: a flat face its area's centre; a cylinder or cone the centres of its two
-/// ends on the axis; a sphere or torus its centre.
-fn face_points(s: &Session, sel: &Sel) -> Vec<(Vec3, SnapKind)> {
-    let Sel::Face { body, index, .. } = sel else { return Vec::new() };
-    let st = s.world_state();
+/// A face's points: a flat face its area's centre and its outline ([`outline_points`]); a
+/// cylinder or cone the centres of its two ends on the axis; a sphere or torus its centre.
+fn face_points(s: &Session, sel: &Sel) -> Vec<Found> {
+    let Sel::Face { body, index, point } = sel else { return Vec::new() };
+    let Ok(st) = s.world_state() else { return Vec::new() };
     let Some(b) = st.body(body) else { return Vec::new() };
     let Some((shape, _, tris)) = crate::cmd::shape_of(s, sel) else { return Vec::new() };
     let verts: Vec<Vec3> = tris.iter().flat_map(|t| t.iter().copied()).collect();
+    let on = SnapSource { face: Some(*point), ..SnapSource::default() };
+    let tagged = |points: Vec<(Vec3, SnapKind)>| -> Vec<Found> { points.into_iter().map(|(at, kind)| (at, kind, on.clone())).collect() };
     match solidcraft_kernel::face_surface(&b.body, *index) {
         Some(solidcraft_kernel::FaceSurface::Sphere { center, .. } | solidcraft_kernel::FaceSurface::Torus { center, .. }) => {
-            return vec![(center, SnapKind::Centre)];
+            return tagged(vec![(center, SnapKind::Centre)]);
         }
-        Some(solidcraft_kernel::FaceSurface::Cone { apex, axis, .. }) => return axis_ends(apex, axis, &verts),
+        Some(solidcraft_kernel::FaceSurface::Cone { apex, axis, .. }) => return ends_out(axis_ends(apex, axis, &verts), axis, &on),
         _ => {}
     }
     match shape {
-        Shape::Round { center, axis, .. } => axis_ends(center, axis, &verts),
-        Shape::Plane { .. } => area_centre(&tris).map(|p| vec![(p, SnapKind::FaceCentre)]).unwrap_or_default(),
+        Shape::Round { center, axis, .. } => ends_out(axis_ends(center, axis, &verts), axis, &on),
+        Shape::Plane { .. } => {
+            let flat = SnapSource { normal: b.body.planar_face(*index).and_then(|p| p.normal().normalized()), ..on.clone() };
+            let mut v: Vec<Found> = area_centre(&tris).map(|p| vec![(p, SnapKind::FaceCentre, flat.clone())]).unwrap_or_default();
+            v.extend(outline_points(&b.body, *index).into_iter().map(|(at, kind, edge)| (at, kind, SnapSource { edge: Some(edge), ..flat.clone() })));
+            v
+        }
         _ => Vec::new(),
     }
+}
+
+/// A flat face's outline from the exact record: every corner (where one edge ends and another
+/// begins, but not where a round edge runs on into the next piece of its circle, nor on a closed
+/// circle's seam), the middle of every straight edge and the centre of every round edge, holes
+/// included. Each comes with a point inside the edge it belongs to, which finds that edge again.
+fn outline_points(body: &Body, face: usize) -> Vec<(Vec3, SnapKind, Vec3)> {
+    let record = body.record();
+    let Some(f) = record.faces.get(face) else { return Vec::new() };
+    let tol = (body.size() * 1e-7).max(1e-9) * 100.0;
+    let mut out = Vec::new();
+    let mut left = MAX_OUTLINE_EDGES;
+    for l in &f.loops {
+        let Loop::Edges { edges } = l else { continue };
+        let edges = &edges[..edges.len().min(left)];
+        left -= edges.len();
+        let circles: Vec<Option<EdgeCircle>> = edges.iter().map(|oe| solidcraft_kernel::edge_circle(body, oe.edge as usize)).collect();
+        for (i, oe) in edges.iter().enumerate() {
+            let Some(e) = record.edges.get(oe.edge as usize) else { continue };
+            let Some(c) = CurveEval::new(e.parameters()).ok() else { continue };
+            let [t0, t1] = e.interval;
+            let Some(inside) = c.point((t0 + t1) * 0.5) else { continue };
+            match (circles.get(i).and_then(Option::as_ref), &e.curve) {
+                (Some(circle), _) => out.push((circle.center, SnapKind::Centre, inside)),
+                (None, Curve::Line { .. }) => {
+                    if let (Some(a), Some(b)) = (c.point(t0), c.point(t1)) {
+                        out.push((a.lerp(b, 0.5), SnapKind::Middle, inside));
+                    }
+                }
+                _ => {}
+            }
+            // The corner this edge starts from in the loop.
+            if e.vertices[0] == e.vertices[1] {
+                continue;
+            }
+            let previous = i.checked_sub(1).unwrap_or(edges.len().saturating_sub(1));
+            let runs_on = match (circles.get(previous).and_then(Option::as_ref), circles.get(i).and_then(Option::as_ref)) {
+                (Some(a), Some(b)) if previous != i => same_circle(a, b, tol),
+                _ => false,
+            };
+            let start = if oe.forward { e.vertices[0] } else { e.vertices[1] };
+            if let (false, Some(p)) = (runs_on, vertex(record, start)) {
+                out.push((p, SnapKind::End, inside));
+            }
+        }
+        if left == 0 {
+            break;
+        }
+    }
+    out
+}
+
+/// Whether two round edges lie on one circle: one circle the kernel split into pieces.
+fn same_circle(a: &EdgeCircle, b: &EdgeCircle, tol: f64) -> bool {
+    a.center.dist(b.center) <= tol && (a.radius - b.radius).abs() <= tol && a.axis.dot(b.axis).abs() >= 1.0 - 1e-9
+}
+
+/// Vertex `i`'s point.
+fn vertex(record: &Brep, i: u32) -> Option<Vec3> {
+    record.vertices.get(i as usize).map(|v| Vec3::from(v.point)).filter(|p| p.is_finite())
+}
+
+/// A round face's two end centres (lower along `axis` first), each with the axis pointing out of
+/// its end as the normal: the normal of the face a hole opens onto, or of a pin's end.
+fn ends_out(ends: Vec<(Vec3, SnapKind)>, axis: UnitVec3, on: &SnapSource) -> Vec<Found> {
+    ends.into_iter().zip([-axis.vec(), axis.vec()]).map(|((at, kind), out)| (at, kind, SnapSource { normal: Some(out), ..on.clone() })).collect()
 }
 
 /// The points of the axis through `origin` along `axis` level with the face's two ends.

@@ -1,0 +1,209 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b17": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b18"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b19"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b19"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b20"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b20"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b21"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  5.0,
+                  0.0,
+                  8.0
+                ],
+                [
+                  5.0,
+                  0.0,
+                  40.0
+                ]
+              ],
+              "index": 4
+            },
+            {
+              "at": [
+                [
+                  5.0,
+                  0.0,
+                  8.0
+                ],
+                [
+                  8.0,
+                  0.0,
+                  5.0
+                ]
+              ],
+              "index": 3
+            },
+            {
+              "at": [
+                [
+                  8.0,
+                  0.0,
+                  5.0
+                ],
+                [
+                  40.0,
+                  0.0,
+                  5.0
+                ]
+              ],
+              "index": 9
+            }
+          ],
+          "points": [
+            [
+              5.0,
+              0.0,
+              24.0
+            ],
+            [
+              5.878679656440358,
+              0.0,
+              5.878679656440358
+            ],
+            [
+              24.0,
+              0.0,
+              5.0
+            ]
+          ],
+          "tolerance": 3.001
+        },
+        "kind": "round",
+        "sizes": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    }
+  ],
+  "case": "every-l-bracket-front-inner-outline-after-bend-round-r1",
+  "expected": {
+    "bbox": {
+      "max": [
+        40,
+        20,
+        40
+      ],
+      "min": [
+        0,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "faces": 12,
+    "method": "L-bracket: the legs 40x20x5 (x 0..40, z 0..5) and 5x20x40 (x 0..5, z 0..40) joined, 20 deep in y: V0 = 4000 + 4000 - 500 = 7500, 8 faces. The bend r3 adds 20 (1-pi/4) 9 = 38.6283. The edge x = 5, y = 0 (z 8..40) rounded r1 with its tangent chain: the bend round's arc on y = 0 and the edge y = 0, z = 5 (x 8..40). Straight parts 32 + 32 remove (1-pi/4) each mm; along the arc the ball rolls between y = 0 and the concave r3 cylinder (axis (8, y, 8)), the material away from the axis: the spandrel with its corner 3 from the axis turned a quarter turn, (pi/2)(3 A1 + M1), M1 = 5/6 - pi/4. V = 7500 + 20 A3 - 64 A1 - (pi/2)(3 A1 + M1) = 7523.8072. Faces 9 + 3 = 12.",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 7523.80722932706,
+    "what": "an L-bracket's inside bend rounded r3, then the front edge of its upright's inner face rounded r1: the round runs on along the bend round's front arc and the foot's front top edge"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 28,
+      "faces": 12,
+      "vertices": 18
+    }
+  },
+  "records": "every-l-bracket-front-inner-outline-after-bend-round-r1.bodies.json.gz",
+  "result": [
+    {
+      "body": "Bracket",
+      "made": "b21"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 3898.3010058687214,
+      "body_count": 1,
+      "edges": 28,
+      "faces": 12,
+      "vertices": 18,
+      "volume_mm3": 7523.807229068634
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "an L-bracket's inside bend rounded r3, then the front edge of its upright's inner face rounded r1: the round runs on along the bend round's front arc and the foot's front top edge",
+  "why_not": []
+}

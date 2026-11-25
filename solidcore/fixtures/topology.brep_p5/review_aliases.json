@@ -1,0 +1,1062 @@
+{
+  "cases": [
+    {
+      "name": "glue_alias_0_0_0_False_0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:9593",
+      "inputs": {
+        "op": 5,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": false,
+        "first": 0,
+        "second": 0
+      }
+    },
+    {
+      "name": "glue_alias_0_0_0_False_1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:9593",
+      "inputs": {
+        "op": 5,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": false,
+        "first": 1,
+        "second": 1
+      }
+    },
+    {
+      "name": "glue_alias_0_0_0_False_3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:9593",
+      "inputs": {
+        "op": 5,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": false,
+        "first": 3,
+        "second": 3
+      }
+    },
+    {
+      "name": "glue_alias_0_0_0_False_-1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:9593",
+      "inputs": {
+        "op": 5,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": false,
+        "first": -1,
+        "second": -1
+      }
+    },
+    {
+      "name": "glue_alias_0_0_0_True_0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:9593",
+      "inputs": {
+        "op": 5,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": true,
+        "first": 0,
+        "second": 0
+      }
+    },
+    {
+      "name": "glue_alias_0_0_0_True_1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:9593",
+      "inputs": {
+        "op": 5,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": true,
+        "first": 1,
+        "second": 1
+      }
+    },
+    {
+      "name": "glue_alias_0_0_0_True_3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:9593",
+      "inputs": {
+        "op": 5,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": true,
+        "first": 3,
+        "second": 3
+      }
+    },
+    {
+      "name": "glue_alias_0_0_0_True_-1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:9593",
+      "inputs": {
+        "op": 5,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": true,
+        "first": -1,
+        "second": -1
+      }
+    },
+    {
+      "name": "glue_alias_0_1_2_False_0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:9593",
+      "inputs": {
+        "op": 5,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          1,
+          2
+        ],
+        "editing": false,
+        "first": 0,
+        "second": 0
+      }
+    },
+    {
+      "name": "glue_alias_0_1_2_False_1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:9593",
+      "inputs": {
+        "op": 5,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          1,
+          2
+        ],
+        "editing": false,
+        "first": 1,
+        "second": 1
+      }
+    },
+    {
+      "name": "glue_alias_0_1_2_False_3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:9593",
+      "inputs": {
+        "op": 5,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          1,
+          2
+        ],
+        "editing": false,
+        "first": 3,
+        "second": 3
+      }
+    },
+    {
+      "name": "glue_alias_0_1_2_False_-1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:9593",
+      "inputs": {
+        "op": 5,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          1,
+          2
+        ],
+        "editing": false,
+        "first": -1,
+        "second": -1
+      }
+    },
+    {
+      "name": "glue_alias_0_1_2_True_0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:9593",
+      "inputs": {
+        "op": 5,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          1,
+          2
+        ],
+        "editing": true,
+        "first": 0,
+        "second": 0
+      }
+    },
+    {
+      "name": "glue_alias_0_1_2_True_1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:9593",
+      "inputs": {
+        "op": 5,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          1,
+          2
+        ],
+        "editing": true,
+        "first": 1,
+        "second": 1
+      }
+    },
+    {
+      "name": "glue_alias_0_1_2_True_3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:9593",
+      "inputs": {
+        "op": 5,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          1,
+          2
+        ],
+        "editing": true,
+        "first": 3,
+        "second": 3
+      }
+    },
+    {
+      "name": "glue_alias_0_1_2_True_-1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:9593",
+      "inputs": {
+        "op": 5,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          1,
+          2
+        ],
+        "editing": true,
+        "first": -1,
+        "second": -1
+      }
+    },
+    {
+      "name": "glue_alias_1_0_0_False_0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:9593",
+      "inputs": {
+        "op": 5,
+        "fixture": [
+          1,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": false,
+        "first": 0,
+        "second": 0
+      }
+    },
+    {
+      "name": "glue_alias_1_0_0_False_1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:9593",
+      "inputs": {
+        "op": 5,
+        "fixture": [
+          1,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": false,
+        "first": 1,
+        "second": 1
+      }
+    },
+    {
+      "name": "glue_alias_1_0_0_False_3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:9593",
+      "inputs": {
+        "op": 5,
+        "fixture": [
+          1,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": false,
+        "first": 3,
+        "second": 3
+      }
+    },
+    {
+      "name": "glue_alias_1_0_0_False_-1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:9593",
+      "inputs": {
+        "op": 5,
+        "fixture": [
+          1,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": false,
+        "first": -1,
+        "second": -1
+      }
+    },
+    {
+      "name": "glue_alias_1_0_0_True_0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:9593",
+      "inputs": {
+        "op": 5,
+        "fixture": [
+          1,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": true,
+        "first": 0,
+        "second": 0
+      }
+    },
+    {
+      "name": "glue_alias_1_0_0_True_1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:9593",
+      "inputs": {
+        "op": 5,
+        "fixture": [
+          1,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": true,
+        "first": 1,
+        "second": 1
+      }
+    },
+    {
+      "name": "glue_alias_1_0_0_True_3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:9593",
+      "inputs": {
+        "op": 5,
+        "fixture": [
+          1,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": true,
+        "first": 3,
+        "second": 3
+      }
+    },
+    {
+      "name": "glue_alias_1_0_0_True_-1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:9593",
+      "inputs": {
+        "op": 5,
+        "fixture": [
+          1,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": true,
+        "first": -1,
+        "second": -1
+      }
+    },
+    {
+      "name": "glue_alias_2_0_0_False_0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:9593",
+      "inputs": {
+        "op": 5,
+        "fixture": [
+          2,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": false,
+        "first": 0,
+        "second": 0
+      }
+    },
+    {
+      "name": "glue_alias_2_0_0_False_1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:9593",
+      "inputs": {
+        "op": 5,
+        "fixture": [
+          2,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": false,
+        "first": 1,
+        "second": 1
+      }
+    },
+    {
+      "name": "glue_alias_2_0_0_False_3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:9593",
+      "inputs": {
+        "op": 5,
+        "fixture": [
+          2,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": false,
+        "first": 3,
+        "second": 3
+      }
+    },
+    {
+      "name": "glue_alias_2_0_0_False_-1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:9593",
+      "inputs": {
+        "op": 5,
+        "fixture": [
+          2,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": false,
+        "first": -1,
+        "second": -1
+      }
+    },
+    {
+      "name": "glue_alias_2_0_0_True_0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:9593",
+      "inputs": {
+        "op": 5,
+        "fixture": [
+          2,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": true,
+        "first": 0,
+        "second": 0
+      }
+    },
+    {
+      "name": "glue_alias_2_0_0_True_1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:9593",
+      "inputs": {
+        "op": 5,
+        "fixture": [
+          2,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": true,
+        "first": 1,
+        "second": 1
+      }
+    },
+    {
+      "name": "glue_alias_2_0_0_True_3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:9593",
+      "inputs": {
+        "op": 5,
+        "fixture": [
+          2,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": true,
+        "first": 3,
+        "second": 3
+      }
+    },
+    {
+      "name": "glue_alias_2_0_0_True_-1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:9593",
+      "inputs": {
+        "op": 5,
+        "fixture": [
+          2,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": true,
+        "first": -1,
+        "second": -1
+      }
+    },
+    {
+      "name": "combine_alias_wire_False_0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:1589",
+      "inputs": {
+        "op": 1,
+        "fixture": [
+          1,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": false,
+        "first": 0,
+        "second": 0
+      }
+    },
+    {
+      "name": "combine_alias_wire_True_0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:1589",
+      "inputs": {
+        "op": 1,
+        "fixture": [
+          1,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": true,
+        "first": 0,
+        "second": 0
+      }
+    },
+    {
+      "name": "combine_alias_wire_False_1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:1589",
+      "inputs": {
+        "op": 1,
+        "fixture": [
+          1,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": false,
+        "first": 1,
+        "second": 1
+      }
+    },
+    {
+      "name": "combine_alias_wire_True_1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:1589",
+      "inputs": {
+        "op": 1,
+        "fixture": [
+          1,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": true,
+        "first": 1,
+        "second": 1
+      }
+    },
+    {
+      "name": "combine_alias_wire_False_2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:1589",
+      "inputs": {
+        "op": 1,
+        "fixture": [
+          1,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": false,
+        "first": 2,
+        "second": 2
+      }
+    },
+    {
+      "name": "combine_alias_wire_True_2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:1589",
+      "inputs": {
+        "op": 1,
+        "fixture": [
+          1,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": true,
+        "first": 2,
+        "second": 2
+      }
+    },
+    {
+      "name": "combine_alias_wire_False_3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:1589",
+      "inputs": {
+        "op": 1,
+        "fixture": [
+          1,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": false,
+        "first": 3,
+        "second": 3
+      }
+    },
+    {
+      "name": "combine_alias_wire_True_3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:1589",
+      "inputs": {
+        "op": 1,
+        "fixture": [
+          1,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": true,
+        "first": 3,
+        "second": 3
+      }
+    },
+    {
+      "name": "combine_alias_isolated_00_False_0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:1354",
+      "inputs": {
+        "op": 1,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": false,
+        "first": 0,
+        "second": 0
+      }
+    },
+    {
+      "name": "combine_alias_isolated_00_True_0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:1354",
+      "inputs": {
+        "op": 1,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": true,
+        "first": 0,
+        "second": 0
+      }
+    },
+    {
+      "name": "combine_alias_isolated_00_False_1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:1354",
+      "inputs": {
+        "op": 1,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": false,
+        "first": 1,
+        "second": 1
+      }
+    },
+    {
+      "name": "combine_alias_isolated_00_True_1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:1354",
+      "inputs": {
+        "op": 1,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          0
+        ],
+        "editing": true,
+        "first": 1,
+        "second": 1
+      }
+    },
+    {
+      "name": "combine_alias_isolated_02_False_0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:1354",
+      "inputs": {
+        "op": 1,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          2
+        ],
+        "editing": false,
+        "first": 0,
+        "second": 0
+      }
+    },
+    {
+      "name": "combine_alias_isolated_02_True_0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:1354",
+      "inputs": {
+        "op": 1,
+        "fixture": [
+          0,
+          0,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          1e-05,
+          2e-05,
+          0,
+          2
+        ],
+        "editing": true,
+        "first": 0,
+        "second": 0
+      }
+    }
+  ]
+}

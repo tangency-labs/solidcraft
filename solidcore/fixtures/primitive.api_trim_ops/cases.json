@@ -1,0 +1,3098 @@
+{
+ "cases": [
+  {
+   "name": "trim3d_upstream_6_3_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmTrimmedSurfaces.cpp:95",
+   "inputs": {
+    "op": "trim3d",
+    "surface": {
+     "kind": "corners",
+     "corners": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       10,
+       0,
+       0
+      ],
+      [
+       0,
+       10,
+       0
+      ],
+      [
+       10,
+       10,
+       0
+      ]
+     ]
+    },
+    "loops": [
+     6,
+     3,
+     1
+    ],
+    "curves": [
+     {
+      "kind": "segment",
+      "start": [
+       0,
+       0,
+       0
+      ],
+      "end": [
+       10,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       10,
+       0,
+       0
+      ],
+      "end": [
+       10,
+       5,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       10,
+       5,
+       0
+      ],
+      "end": [
+       5,
+       5,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       5,
+       5,
+       0
+      ],
+      "end": [
+       5,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       5,
+       10,
+       0
+      ],
+      "end": [
+       0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       0,
+       10,
+       0
+      ],
+      "end": [
+       0,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       1,
+       5,
+       0
+      ],
+      "end": [
+       1,
+       8,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       1,
+       8,
+       0
+      ],
+      "end": [
+       4,
+       5,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       4,
+       5,
+       0
+      ],
+      "end": [
+       1,
+       5,
+       0
+      ]
+     },
+     {
+      "kind": "circle",
+      "center": [
+       6,
+       2.5,
+       0
+      ],
+      "radius": 1.5
+     }
+    ]
+   }
+  },
+  {
+   "name": "trim3d_outer_only",
+   "upstream_ref": "tests/SM_API_test/src/TestSmTrimmedSurfaces.cpp:95",
+   "inputs": {
+    "op": "trim3d",
+    "surface": {
+     "kind": "corners",
+     "corners": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       10,
+       0,
+       0
+      ],
+      [
+       0,
+       10,
+       0
+      ],
+      [
+       10,
+       10,
+       0
+      ]
+     ]
+    },
+    "loops": [
+     6
+    ],
+    "curves": [
+     {
+      "kind": "segment",
+      "start": [
+       0,
+       0,
+       0
+      ],
+      "end": [
+       10,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       10,
+       0,
+       0
+      ],
+      "end": [
+       10,
+       5,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       10,
+       5,
+       0
+      ],
+      "end": [
+       5,
+       5,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       5,
+       5,
+       0
+      ],
+      "end": [
+       5,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       5,
+       10,
+       0
+      ],
+      "end": [
+       0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       0,
+       10,
+       0
+      ],
+      "end": [
+       0,
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "trim3d_outer_and_circle",
+   "upstream_ref": "tests/SM_API_test/src/TestSmTrimmedSurfaces.cpp:95",
+   "inputs": {
+    "op": "trim3d",
+    "surface": {
+     "kind": "corners",
+     "corners": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       10,
+       0,
+       0
+      ],
+      [
+       0,
+       10,
+       0
+      ],
+      [
+       10,
+       10,
+       0
+      ]
+     ]
+    },
+    "loops": [
+     6,
+     1
+    ],
+    "curves": [
+     {
+      "kind": "segment",
+      "start": [
+       0,
+       0,
+       0
+      ],
+      "end": [
+       10,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       10,
+       0,
+       0
+      ],
+      "end": [
+       10,
+       5,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       10,
+       5,
+       0
+      ],
+      "end": [
+       5,
+       5,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       5,
+       5,
+       0
+      ],
+      "end": [
+       5,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       5,
+       10,
+       0
+      ],
+      "end": [
+       0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       0,
+       10,
+       0
+      ],
+      "end": [
+       0,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "circle",
+      "center": [
+       6,
+       2.5,
+       0
+      ],
+      "radius": 1.5
+     }
+    ]
+   }
+  },
+  {
+   "name": "trim3d_rectangle",
+   "inputs": {
+    "op": "trim3d",
+    "surface": {
+     "kind": "corners",
+     "corners": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       10,
+       0,
+       0
+      ],
+      [
+       0,
+       10,
+       0
+      ],
+      [
+       10,
+       10,
+       0
+      ]
+     ]
+    },
+    "loops": [
+     4
+    ],
+    "curves": [
+     {
+      "kind": "rectangle",
+      "center": [
+       5,
+       5,
+       0
+      ],
+      "length": 8,
+      "width": 6
+     }
+    ]
+   }
+  },
+  {
+   "name": "trim3d_analytic_circle_outer",
+   "inputs": {
+    "op": "trim3d",
+    "surface": {
+     "kind": "corners",
+     "corners": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       10,
+       0,
+       0
+      ],
+      [
+       0,
+       10,
+       0
+      ],
+      [
+       10,
+       10,
+       0
+      ]
+     ]
+    },
+    "loops": [
+     1
+    ],
+    "curves": [
+     {
+      "kind": "analytic_circle",
+      "center": [
+       5,
+       5,
+       0
+      ],
+      "radius": 4
+     }
+    ]
+   }
+  },
+  {
+   "name": "trim3d_count_mismatch",
+   "inputs": {
+    "op": "trim3d",
+    "surface": {
+     "kind": "corners",
+     "corners": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       10,
+       0,
+       0
+      ],
+      [
+       0,
+       10,
+       0
+      ],
+      [
+       10,
+       10,
+       0
+      ]
+     ]
+    },
+    "loops": [
+     5
+    ],
+    "curves": [
+     {
+      "kind": "segment",
+      "start": [
+       0,
+       0,
+       0
+      ],
+      "end": [
+       10,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       10,
+       0,
+       0
+      ],
+      "end": [
+       10,
+       5,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       10,
+       5,
+       0
+      ],
+      "end": [
+       5,
+       5,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       5,
+       5,
+       0
+      ],
+      "end": [
+       5,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       5,
+       10,
+       0
+      ],
+      "end": [
+       0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       0,
+       10,
+       0
+      ],
+      "end": [
+       0,
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "trim3d_count_overrun",
+   "inputs": {
+    "op": "trim3d",
+    "surface": {
+     "kind": "corners",
+     "corners": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       10,
+       0,
+       0
+      ],
+      [
+       0,
+       10,
+       0
+      ],
+      [
+       10,
+       10,
+       0
+      ]
+     ]
+    },
+    "loops": [
+     6,
+     3,
+     2
+    ],
+    "curves": [
+     {
+      "kind": "segment",
+      "start": [
+       0,
+       0,
+       0
+      ],
+      "end": [
+       10,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       10,
+       0,
+       0
+      ],
+      "end": [
+       10,
+       5,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       10,
+       5,
+       0
+      ],
+      "end": [
+       5,
+       5,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       5,
+       5,
+       0
+      ],
+      "end": [
+       5,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       5,
+       10,
+       0
+      ],
+      "end": [
+       0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       0,
+       10,
+       0
+      ],
+      "end": [
+       0,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       1,
+       5,
+       0
+      ],
+      "end": [
+       1,
+       8,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       1,
+       8,
+       0
+      ],
+      "end": [
+       4,
+       5,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       4,
+       5,
+       0
+      ],
+      "end": [
+       1,
+       5,
+       0
+      ]
+     },
+     {
+      "kind": "circle",
+      "center": [
+       6,
+       2.5,
+       0
+      ],
+      "radius": 1.5
+     }
+    ]
+   }
+  },
+  {
+   "name": "trim3d_no_loops",
+   "inputs": {
+    "op": "trim3d",
+    "surface": {
+     "kind": "corners",
+     "corners": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       10,
+       0,
+       0
+      ],
+      [
+       0,
+       10,
+       0
+      ],
+      [
+       10,
+       10,
+       0
+      ]
+     ]
+    },
+    "loops": [],
+    "curves": []
+   }
+  },
+  {
+   "name": "trim3d_open_loop",
+   "inputs": {
+    "op": "trim3d",
+    "surface": {
+     "kind": "corners",
+     "corners": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       10,
+       0,
+       0
+      ],
+      [
+       0,
+       10,
+       0
+      ],
+      [
+       10,
+       10,
+       0
+      ]
+     ]
+    },
+    "loops": [
+     5
+    ],
+    "curves": [
+     {
+      "kind": "segment",
+      "start": [
+       0,
+       0,
+       0
+      ],
+      "end": [
+       10,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       10,
+       0,
+       0
+      ],
+      "end": [
+       10,
+       5,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       10,
+       5,
+       0
+      ],
+      "end": [
+       5,
+       5,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       5,
+       5,
+       0
+      ],
+      "end": [
+       5,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       5,
+       10,
+       0
+      ],
+      "end": [
+       0,
+       10,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "trim3d_off_surface",
+   "inputs": {
+    "op": "trim3d",
+    "surface": {
+     "kind": "corners",
+     "corners": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       10,
+       0,
+       0
+      ],
+      [
+       0,
+       10,
+       0
+      ],
+      [
+       10,
+       10,
+       0
+      ]
+     ]
+    },
+    "loops": [
+     1
+    ],
+    "curves": [
+     {
+      "kind": "circle",
+      "center": [
+       5,
+       5,
+       3
+      ],
+      "radius": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "trim3d_net_surface",
+   "inputs": {
+    "op": "trim3d",
+    "surface": {
+     "kind": "net",
+     "rows": 4,
+     "columns": 4,
+     "points": [
+      [
+       0.0,
+       0.0,
+       0
+      ],
+      [
+       0.0,
+       3.3333333333333335,
+       0
+      ],
+      [
+       0.0,
+       6.666666666666667,
+       0
+      ],
+      [
+       0.0,
+       10.0,
+       0
+      ],
+      [
+       3.3333333333333335,
+       0.0,
+       0
+      ],
+      [
+       3.3333333333333335,
+       3.3333333333333335,
+       0
+      ],
+      [
+       3.3333333333333335,
+       6.666666666666667,
+       0
+      ],
+      [
+       3.3333333333333335,
+       10.0,
+       0
+      ],
+      [
+       6.666666666666667,
+       0.0,
+       0
+      ],
+      [
+       6.666666666666667,
+       3.3333333333333335,
+       0
+      ],
+      [
+       6.666666666666667,
+       6.666666666666667,
+       0
+      ],
+      [
+       6.666666666666667,
+       10.0,
+       0
+      ],
+      [
+       10.0,
+       0.0,
+       0
+      ],
+      [
+       10.0,
+       3.3333333333333335,
+       0
+      ],
+      [
+       10.0,
+       6.666666666666667,
+       0
+      ],
+      [
+       10.0,
+       10.0,
+       0
+      ]
+     ]
+    },
+    "loops": [
+     1
+    ],
+    "curves": [
+     {
+      "kind": "circle",
+      "center": [
+       5,
+       5,
+       0
+      ],
+      "radius": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "planar_upstream",
+   "upstream_ref": "tests/SM_API_test/src/TestSmTrimmedSurfaces.cpp:370",
+   "inputs": {
+    "op": "planar_faces",
+    "curves": [
+     {
+      "kind": "segment",
+      "start": [
+       0,
+       0,
+       0
+      ],
+      "end": [
+       10,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       10,
+       0,
+       0
+      ],
+      "end": [
+       10,
+       5,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       10,
+       5,
+       0
+      ],
+      "end": [
+       5,
+       5,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       5,
+       5,
+       0
+      ],
+      "end": [
+       5,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       5,
+       10,
+       0
+      ],
+      "end": [
+       0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       0,
+       10,
+       0
+      ],
+      "end": [
+       0,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       1,
+       5,
+       0
+      ],
+      "end": [
+       1,
+       8,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       1,
+       8,
+       0
+      ],
+      "end": [
+       4,
+       5,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       4,
+       5,
+       0
+      ],
+      "end": [
+       1,
+       5,
+       0
+      ]
+     },
+     {
+      "kind": "circle",
+      "center": [
+       6,
+       2.5,
+       0
+      ],
+      "radius": 1.5
+     }
+    ]
+   }
+  },
+  {
+   "name": "planar_outer_only",
+   "upstream_ref": "tests/SM_API_test/src/TestSmTrimmedSurfaces.cpp:370",
+   "inputs": {
+    "op": "planar_faces",
+    "curves": [
+     {
+      "kind": "segment",
+      "start": [
+       0,
+       0,
+       0
+      ],
+      "end": [
+       10,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       10,
+       0,
+       0
+      ],
+      "end": [
+       10,
+       5,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       10,
+       5,
+       0
+      ],
+      "end": [
+       5,
+       5,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       5,
+       5,
+       0
+      ],
+      "end": [
+       5,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       5,
+       10,
+       0
+      ],
+      "end": [
+       0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       0,
+       10,
+       0
+      ],
+      "end": [
+       0,
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "planar_shuffled_reversed",
+   "inputs": {
+    "op": "planar_faces",
+    "curves": [
+     {
+      "kind": "segment",
+      "start": [
+       5,
+       5,
+       0
+      ],
+      "end": [
+       10,
+       5,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       0,
+       0,
+       0
+      ],
+      "end": [
+       0,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       10,
+       5,
+       0
+      ],
+      "end": [
+       10,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       0,
+       10,
+       0
+      ],
+      "end": [
+       5,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       10,
+       0,
+       0
+      ],
+      "end": [
+       0,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       5,
+       10,
+       0
+      ],
+      "end": [
+       5,
+       5,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "planar_rectangle",
+   "inputs": {
+    "op": "planar_faces",
+    "curves": [
+     {
+      "kind": "rectangle",
+      "center": [
+       1,
+       2,
+       3
+      ],
+      "length": 4,
+      "width": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "planar_circle",
+   "inputs": {
+    "op": "planar_faces",
+    "curves": [
+     {
+      "kind": "circle",
+      "center": [
+       0,
+       0,
+       5
+      ],
+      "radius": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "planar_analytic_circle",
+   "inputs": {
+    "op": "planar_faces",
+    "curves": [
+     {
+      "kind": "analytic_circle",
+      "center": [
+       0,
+       0,
+       5
+      ],
+      "radius": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "planar_two_rectangles",
+   "inputs": {
+    "op": "planar_faces",
+    "curves": [
+     {
+      "kind": "rectangle",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "length": 2,
+      "width": 2
+     },
+     {
+      "kind": "rectangle",
+      "center": [
+       5,
+       0,
+       0
+      ],
+      "length": 2,
+      "width": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "planar_tilted_triangle",
+   "inputs": {
+    "op": "planar_faces",
+    "curves": [
+     {
+      "kind": "segment",
+      "start": [
+       0,
+       0,
+       0
+      ],
+      "end": [
+       4,
+       0,
+       1
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       4,
+       0,
+       1
+      ],
+      "end": [
+       0,
+       3,
+       2
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       0,
+       3,
+       2
+      ],
+      "end": [
+       0,
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "planar_open_loop",
+   "upstream_ref": "tests/SM_API_test/src/TestSmGeneral.cpp:1135",
+   "inputs": {
+    "op": "planar_faces",
+    "curves": [
+     {
+      "kind": "segment",
+      "start": [
+       0,
+       0,
+       0
+      ],
+      "end": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       1,
+       0,
+       0
+      ],
+      "end": [
+       0,
+       1,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "planar_nonplanar",
+   "inputs": {
+    "op": "planar_faces",
+    "curves": [
+     {
+      "kind": "segment",
+      "start": [
+       0,
+       0,
+       0
+      ],
+      "end": [
+       1,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       1,
+       0,
+       0
+      ],
+      "end": [
+       1,
+       1,
+       1
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       1,
+       1,
+       1
+      ],
+      "end": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       0,
+       1,
+       0
+      ],
+      "end": [
+       0,
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "planar_empty",
+   "inputs": {
+    "op": "planar_faces",
+    "curves": []
+   }
+  },
+  {
+   "name": "pp_surface_line_keep_point",
+   "upstream_ref": "tests/SM_API_test/src/TestSmTrimmedSurfaces.cpp:304",
+   "inputs": {
+    "op": "project_parallel",
+    "object": {
+     "surface": {
+      "kind": "corners",
+      "corners": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        25,
+        0,
+        0
+       ],
+       [
+        0,
+        25,
+        0
+       ],
+       [
+        25,
+        25,
+        0
+       ]
+      ]
+     }
+    },
+    "curve": {
+     "kind": "segment",
+     "start": [
+      -10,
+      15,
+      10
+     ],
+     "end": [
+      30,
+      15,
+      10
+     ]
+    },
+    "direction": [
+     0,
+     0,
+     -1
+    ],
+    "reference": [
+     5,
+     5,
+     0
+    ],
+    "trim_type": "keep_point"
+   }
+  },
+  {
+   "name": "pp_surface_line_delete_point",
+   "upstream_ref": "tests/SM_API_test/src/TestSmTrimmedSurfaces.cpp:304",
+   "inputs": {
+    "op": "project_parallel",
+    "object": {
+     "surface": {
+      "kind": "corners",
+      "corners": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        25,
+        0,
+        0
+       ],
+       [
+        0,
+        25,
+        0
+       ],
+       [
+        25,
+        25,
+        0
+       ]
+      ]
+     }
+    },
+    "curve": {
+     "kind": "segment",
+     "start": [
+      -10,
+      15,
+      10
+     ],
+     "end": [
+      30,
+      15,
+      10
+     ]
+    },
+    "direction": [
+     0,
+     0,
+     -1
+    ],
+    "reference": [
+     5,
+     5,
+     0
+    ],
+    "trim_type": "delete_point"
+   }
+  },
+  {
+   "name": "pp_surface_line_split",
+   "upstream_ref": "tests/SM_API_test/src/TestSmTrimmedSurfaces.cpp:304",
+   "inputs": {
+    "op": "project_parallel",
+    "object": {
+     "surface": {
+      "kind": "corners",
+      "corners": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        25,
+        0,
+        0
+       ],
+       [
+        0,
+        25,
+        0
+       ],
+       [
+        25,
+        25,
+        0
+       ]
+      ]
+     }
+    },
+    "curve": {
+     "kind": "segment",
+     "start": [
+      -10,
+      15,
+      10
+     ],
+     "end": [
+      30,
+      15,
+      10
+     ]
+    },
+    "direction": [
+     0,
+     0,
+     -1
+    ],
+    "reference": [
+     5,
+     5,
+     0
+    ],
+    "trim_type": "split"
+   }
+  },
+  {
+   "name": "pp_surface_bspline_keep",
+   "upstream_ref": "tests/SM_API_test/src/TestSmTrimmedSurfaces.cpp:304",
+   "inputs": {
+    "op": "project_parallel",
+    "object": {
+     "surface": {
+      "kind": "corners",
+      "corners": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        25,
+        0,
+        0
+       ],
+       [
+        0,
+        25,
+        0
+       ],
+       [
+        25,
+        25,
+        0
+       ]
+      ]
+     }
+    },
+    "curve": {
+     "kind": "curve",
+     "points": [
+      [
+       -5,
+       5,
+       15
+      ],
+      [
+       2,
+       12,
+       15
+      ],
+      [
+       18,
+       8,
+       15
+      ],
+      [
+       30,
+       14,
+       15
+      ]
+     ]
+    },
+    "direction": [
+     0,
+     0,
+     -1
+    ],
+    "reference": [
+     5,
+     2,
+     0
+    ],
+    "trim_type": "keep_point"
+   }
+  },
+  {
+   "name": "pp_surface_zero_direction",
+   "upstream_ref": "tests/SM_API_test/src/TestSmTrimmedSurfaces.cpp:269",
+   "inputs": {
+    "op": "project_parallel",
+    "object": {
+     "surface": {
+      "kind": "corners",
+      "corners": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        25,
+        0,
+        0
+       ],
+       [
+        0,
+        25,
+        0
+       ],
+       [
+        25,
+        25,
+        0
+       ]
+      ]
+     }
+    },
+    "curve": {
+     "kind": "segment",
+     "start": [
+      -5,
+      5,
+      15
+     ],
+     "end": [
+      15,
+      5,
+      15
+     ]
+    },
+    "direction": [
+     0,
+     0,
+     0
+    ],
+    "reference": [
+     5,
+     5,
+     0
+    ],
+    "trim_type": "keep_point"
+   }
+  },
+  {
+   "name": "pp_degenerate_surface",
+   "upstream_ref": "tests/SM_API_test/src/TestSmTrimmedSurfaces.cpp:289",
+   "inputs": {
+    "op": "project_parallel",
+    "object": {
+     "surface": {
+      "kind": "corners",
+      "corners": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        1,
+        0,
+        0
+       ],
+       [
+        2,
+        0,
+        0
+       ],
+       [
+        3,
+        0,
+        0
+       ]
+      ]
+     }
+    },
+    "curve": {
+     "kind": "curve",
+     "points": [
+      [
+       -5,
+       5,
+       15
+      ],
+      [
+       2,
+       5,
+       15
+      ],
+      [
+       8,
+       5,
+       15
+      ],
+      [
+       15,
+       5,
+       15
+      ]
+     ]
+    },
+    "direction": [
+     0,
+     0,
+     -1
+    ],
+    "reference": [
+     1,
+     1,
+     1
+    ],
+    "trim_type": "keep_point"
+   }
+  },
+  {
+   "name": "pp_box_zero_direction",
+   "upstream_ref": "tests/SM_API_test/src/TestSmTrimmedSurfaces.cpp:261",
+   "inputs": {
+    "op": "project_parallel",
+    "object": {
+     "box": {
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "length": 10,
+      "width": 10,
+      "height": 10
+     }
+    },
+    "curve": {
+     "kind": "segment",
+     "start": [
+      -5,
+      5,
+      15
+     ],
+     "end": [
+      15,
+      5,
+      15
+     ]
+    },
+    "direction": [
+     0,
+     0,
+     0
+    ],
+    "reference": [
+     5,
+     5,
+     0
+    ],
+    "trim_type": "keep_point"
+   }
+  },
+  {
+   "name": "pp_box_line_keep_point",
+   "upstream_ref": "tests/SM_API_test/src/TestSmTrimmedSurfaces.cpp:226",
+   "inputs": {
+    "op": "project_parallel",
+    "object": {
+     "box": {
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "length": 10,
+      "width": 10,
+      "height": 10
+     }
+    },
+    "curve": {
+     "kind": "segment",
+     "start": [
+      -5,
+      5,
+      15
+     ],
+     "end": [
+      15,
+      5,
+      15
+     ]
+    },
+    "direction": [
+     0,
+     0,
+     -1
+    ],
+    "reference": [
+     5,
+     5,
+     0
+    ],
+    "trim_type": "keep_point"
+   }
+  },
+  {
+   "name": "pp_box_line_delete_point",
+   "upstream_ref": "tests/SM_API_test/src/TestSmTrimmedSurfaces.cpp:226",
+   "inputs": {
+    "op": "project_parallel",
+    "object": {
+     "box": {
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "length": 10,
+      "width": 10,
+      "height": 10
+     }
+    },
+    "curve": {
+     "kind": "segment",
+     "start": [
+      -5,
+      5,
+      15
+     ],
+     "end": [
+      15,
+      5,
+      15
+     ]
+    },
+    "direction": [
+     0,
+     0,
+     -1
+    ],
+    "reference": [
+     5,
+     5,
+     0
+    ],
+    "trim_type": "delete_point"
+   }
+  },
+  {
+   "name": "pp_box_line_split",
+   "upstream_ref": "tests/SM_API_test/src/TestSmTrimmedSurfaces.cpp:226",
+   "inputs": {
+    "op": "project_parallel",
+    "object": {
+     "box": {
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "length": 10,
+      "width": 10,
+      "height": 10
+     }
+    },
+    "curve": {
+     "kind": "segment",
+     "start": [
+      -5,
+      5,
+      15
+     ],
+     "end": [
+      15,
+      5,
+      15
+     ]
+    },
+    "direction": [
+     0,
+     0,
+     -1
+    ],
+    "reference": [
+     5,
+     5,
+     0
+    ],
+    "trim_type": "split"
+   }
+  },
+  {
+   "name": "pp_box_circle_keep",
+   "inputs": {
+    "op": "project_parallel",
+    "object": {
+     "box": {
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "length": 10,
+      "width": 10,
+      "height": 10
+     }
+    },
+    "curve": {
+     "kind": "circle",
+     "center": [
+      5,
+      5,
+      15
+     ],
+     "radius": 2
+    },
+    "direction": [
+     0,
+     0,
+     -1
+    ],
+    "reference": [
+     5,
+     5,
+     10
+    ],
+    "trim_type": "keep_point"
+   }
+  },
+  {
+   "name": "pp_box_arc_split",
+   "inputs": {
+    "op": "project_parallel",
+    "object": {
+     "box": {
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "length": 10,
+      "width": 10,
+      "height": 10
+     }
+    },
+    "curve": {
+     "kind": "arc",
+     "center": [
+      5,
+      -2,
+      15
+     ],
+     "radius": 6,
+     "start_deg": 20,
+     "end_deg": 160
+    },
+    "direction": [
+     0,
+     0,
+     -1
+    ],
+    "reference": [
+     5,
+     1,
+     10
+    ],
+    "trim_type": "split"
+   }
+  },
+  {
+   "name": "pp_box_misses",
+   "inputs": {
+    "op": "project_parallel",
+    "object": {
+     "box": {
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "length": 10,
+      "width": 10,
+      "height": 10
+     }
+    },
+    "curve": {
+     "kind": "curve",
+     "points": [
+      [
+       100,
+       5,
+       15
+      ],
+      [
+       115,
+       5,
+       15
+      ]
+     ]
+    },
+    "direction": [
+     0,
+     0,
+     -1
+    ],
+    "reference": [
+     5,
+     5,
+     10
+    ],
+    "trim_type": "keep_point"
+   }
+  },
+  {
+   "name": "pat_upstream_filleted_box",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:1715",
+   "inputs": {
+    "op": "project_and_trim",
+    "box": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "length": 10,
+     "width": 5,
+     "height": 15,
+     "fillet": 0.5
+    },
+    "curve": {
+     "kind": "curve",
+     "points": [
+      [
+       -10,
+       -2,
+       20
+      ],
+      [
+       0,
+       5,
+       20
+      ],
+      [
+       10,
+       0,
+       20
+      ],
+      [
+       20,
+       2,
+       20
+      ]
+     ]
+    },
+    "direction": [
+     0,
+     0,
+     -1
+    ],
+    "reference": [
+     5,
+     1,
+     20
+    ]
+   }
+  },
+  {
+   "name": "pat_long_direction",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:1725",
+   "inputs": {
+    "op": "project_and_trim",
+    "box": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "length": 10,
+     "width": 5,
+     "height": 15,
+     "fillet": 0.5
+    },
+    "curve": {
+     "kind": "curve",
+     "points": [
+      [
+       -10,
+       -2,
+       20
+      ],
+      [
+       0,
+       5,
+       20
+      ],
+      [
+       10,
+       0,
+       20
+      ],
+      [
+       20,
+       2,
+       20
+      ]
+     ]
+    },
+    "direction": [
+     0,
+     0,
+     -4
+    ],
+    "reference": [
+     5,
+     1,
+     20
+    ]
+   }
+  },
+  {
+   "name": "pat_zero_direction",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:1695",
+   "inputs": {
+    "op": "project_and_trim",
+    "box": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "length": 10,
+     "width": 5,
+     "height": 15,
+     "fillet": 0.5
+    },
+    "curve": {
+     "kind": "curve",
+     "points": [
+      [
+       -10,
+       -2,
+       20
+      ],
+      [
+       0,
+       5,
+       20
+      ],
+      [
+       10,
+       0,
+       20
+      ],
+      [
+       20,
+       2,
+       20
+      ]
+     ]
+    },
+    "direction": [
+     0,
+     0,
+     0
+    ],
+    "reference": [
+     5,
+     1,
+     20
+    ]
+   }
+  },
+  {
+   "name": "pat_misses",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:1710",
+   "inputs": {
+    "op": "project_and_trim",
+    "box": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "length": 10,
+     "width": 5,
+     "height": 15,
+     "fillet": 0.5
+    },
+    "curve": {
+     "kind": "curve",
+     "points": [
+      [
+       100,
+       -2,
+       20
+      ],
+      [
+       101,
+       5,
+       20
+      ],
+      [
+       102,
+       0,
+       20
+      ],
+      [
+       103,
+       2,
+       20
+      ]
+     ]
+    },
+    "direction": [
+     0,
+     0,
+     -1
+    ],
+    "reference": [
+     5,
+     1,
+     20
+    ]
+   }
+  },
+  {
+   "name": "pat_circle_on_top",
+   "inputs": {
+    "op": "project_and_trim",
+    "box": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "length": 10,
+     "width": 10,
+     "height": 10
+    },
+    "curve": {
+     "kind": "circle",
+     "center": [
+      5,
+      5,
+      20
+     ],
+     "radius": 3
+    },
+    "direction": [
+     0,
+     0,
+     -1
+    ],
+    "reference": [
+     5,
+     5,
+     10
+    ]
+   }
+  },
+  {
+   "name": "pat_side_projection",
+   "inputs": {
+    "op": "project_and_trim",
+    "box": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "length": 10,
+     "width": 10,
+     "height": 10
+    },
+    "curve": {
+     "kind": "curve",
+     "points": [
+      [
+       -20,
+       -5,
+       5
+      ],
+      [
+       -20,
+       15,
+       5
+      ]
+     ]
+    },
+    "direction": [
+     1,
+     0,
+     0
+    ],
+    "reference": [
+     0,
+     5,
+     2
+    ]
+   }
+  },
+  {
+   "name": "pp_surface_bspline_line_keep",
+   "inputs": {
+    "op": "project_parallel",
+    "object": {
+     "surface": {
+      "kind": "corners",
+      "corners": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        25,
+        0,
+        0
+       ],
+       [
+        0,
+        25,
+        0
+       ],
+       [
+        25,
+        25,
+        0
+       ]
+      ]
+     }
+    },
+    "curve": {
+     "kind": "curve",
+     "points": [
+      [
+       -10,
+       15,
+       10
+      ],
+      [
+       30,
+       15,
+       10
+      ]
+     ]
+    },
+    "direction": [
+     0,
+     0,
+     -1
+    ],
+    "reference": [
+     5,
+     5,
+     0
+    ],
+    "trim_type": "keep_point"
+   }
+  },
+  {
+   "name": "pp_box_analytic_circle_delete",
+   "inputs": {
+    "op": "project_parallel",
+    "object": {
+     "box": {
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "length": 10,
+      "width": 10,
+      "height": 10
+     }
+    },
+    "curve": {
+     "kind": "analytic_circle",
+     "center": [
+      5,
+      5,
+      15
+     ],
+     "radius": 2
+    },
+    "direction": [
+     0,
+     0,
+     -1
+    ],
+    "reference": [
+     5,
+     5,
+     10
+    ],
+    "trim_type": "delete_point"
+   }
+  },
+  {
+   "name": "pat_plain_box",
+   "inputs": {
+    "op": "project_and_trim",
+    "box": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "length": 10,
+     "width": 5,
+     "height": 15
+    },
+    "curve": {
+     "kind": "curve",
+     "points": [
+      [
+       -10,
+       -2,
+       20
+      ],
+      [
+       0,
+       5,
+       20
+      ],
+      [
+       10,
+       0,
+       20
+      ],
+      [
+       20,
+       2,
+       20
+      ]
+     ]
+    },
+    "direction": [
+     0,
+     0,
+     -1
+    ],
+    "reference": [
+     5,
+     1,
+     20
+    ]
+   }
+  },
+  {
+   "name": "pat_plain_long_direction",
+   "inputs": {
+    "op": "project_and_trim",
+    "box": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "length": 10,
+     "width": 5,
+     "height": 15
+    },
+    "curve": {
+     "kind": "curve",
+     "points": [
+      [
+       -10,
+       -2,
+       20
+      ],
+      [
+       0,
+       5,
+       20
+      ],
+      [
+       10,
+       0,
+       20
+      ],
+      [
+       20,
+       2,
+       20
+      ]
+     ]
+    },
+    "direction": [
+     0,
+     0,
+     -4
+    ],
+    "reference": [
+     5,
+     1,
+     20
+    ]
+   }
+  },
+  {
+   "name": "pat_plain_zero_direction",
+   "inputs": {
+    "op": "project_and_trim",
+    "box": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "length": 10,
+     "width": 5,
+     "height": 15
+    },
+    "curve": {
+     "kind": "curve",
+     "points": [
+      [
+       -10,
+       -2,
+       20
+      ],
+      [
+       0,
+       5,
+       20
+      ],
+      [
+       10,
+       0,
+       20
+      ],
+      [
+       20,
+       2,
+       20
+      ]
+     ]
+    },
+    "direction": [
+     0,
+     0,
+     0
+    ],
+    "reference": [
+     5,
+     1,
+     20
+    ]
+   }
+  },
+  {
+   "name": "pat_plain_misses",
+   "inputs": {
+    "op": "project_and_trim",
+    "box": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "length": 10,
+     "width": 5,
+     "height": 15
+    },
+    "curve": {
+     "kind": "curve",
+     "points": [
+      [
+       100,
+       -2,
+       20
+      ],
+      [
+       101,
+       5,
+       20
+      ],
+      [
+       102,
+       0,
+       20
+      ],
+      [
+       103,
+       2,
+       20
+      ]
+     ]
+    },
+    "direction": [
+     0,
+     0,
+     -1
+    ],
+    "reference": [
+     5,
+     1,
+     20
+    ]
+   }
+  },
+  {
+   "name": "pat_segment_on_top",
+   "inputs": {
+    "op": "project_and_trim",
+    "box": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "length": 10,
+     "width": 10,
+     "height": 10
+    },
+    "curve": {
+     "kind": "segment",
+     "start": [
+      -5,
+      4,
+      20
+     ],
+     "end": [
+      15,
+      6,
+      20
+     ]
+    },
+    "direction": [
+     0,
+     0,
+     -1
+    ],
+    "reference": [
+     5,
+     1,
+     10
+    ]
+   }
+  },
+  {
+   "name": "pat_analytic_circle_filleted",
+   "inputs": {
+    "op": "project_and_trim",
+    "box": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "length": 10,
+     "width": 5,
+     "height": 15,
+     "fillet": 0.5
+    },
+    "curve": {
+     "kind": "analytic_circle",
+     "center": [
+      5,
+      2.5,
+      20
+     ],
+     "radius": 1.5
+    },
+    "direction": [
+     0,
+     0,
+     -1
+    ],
+    "reference": [
+     5,
+     2.5,
+     15
+    ]
+   }
+  },
+  {
+   "name": "pp_surface_line_then_cross_line",
+   "upstream_ref": "tests/SM_API_test/src/TestSmTrimmedSurfaces.cpp:309",
+   "inputs": {
+    "op": "project_parallel",
+    "object": {
+     "surface": {
+      "kind": "corners",
+      "corners": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        25,
+        0,
+        0
+       ],
+       [
+        0,
+        25,
+        0
+       ],
+       [
+        25,
+        25,
+        0
+       ]
+      ]
+     }
+    },
+    "curve": {
+     "kind": "segment",
+     "start": [
+      -10,
+      15,
+      10
+     ],
+     "end": [
+      30,
+      15,
+      10
+     ]
+    },
+    "direction": [
+     0,
+     0,
+     -1
+    ],
+    "reference": [
+     5,
+     5,
+     0
+    ],
+    "trim_type": "keep_point",
+    "again": {
+     "curve": {
+      "kind": "segment",
+      "start": [
+       15,
+       -10,
+       10
+      ],
+      "end": [
+       15,
+       30,
+       10
+      ]
+     },
+     "direction": [
+      0,
+      0,
+      -1
+     ],
+     "reference": [
+      5,
+      5,
+      0
+     ],
+     "trim_type": "keep_point"
+    }
+   }
+  },
+  {
+   "name": "pp_surface_line_then_cross_split",
+   "inputs": {
+    "op": "project_parallel",
+    "object": {
+     "surface": {
+      "kind": "corners",
+      "corners": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        25,
+        0,
+        0
+       ],
+       [
+        0,
+        25,
+        0
+       ],
+       [
+        25,
+        25,
+        0
+       ]
+      ]
+     }
+    },
+    "curve": {
+     "kind": "segment",
+     "start": [
+      -10,
+      15,
+      10
+     ],
+     "end": [
+      30,
+      15,
+      10
+     ]
+    },
+    "direction": [
+     0,
+     0,
+     -1
+    ],
+    "reference": [
+     5,
+     5,
+     0
+    ],
+    "trim_type": "keep_point",
+    "again": {
+     "curve": {
+      "kind": "segment",
+      "start": [
+       15,
+       -10,
+       10
+      ],
+      "end": [
+       15,
+       30,
+       10
+      ]
+     },
+     "direction": [
+      0,
+      0,
+      -1
+     ],
+     "reference": [
+      5,
+      5,
+      0
+     ],
+     "trim_type": "split"
+    }
+   }
+  }
+ ]
+}

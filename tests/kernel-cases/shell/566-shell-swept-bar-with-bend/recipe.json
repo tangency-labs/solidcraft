@@ -1,0 +1,112 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XZ",
+    "name": "Path"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      0,
+      30
+     ]
+    ],
+    "ids": [
+     "l1"
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": "l1.end",
+    "through": [
+     8.787,
+     51.213
+    ],
+    "end": [
+     30,
+     60
+    ],
+    "id": "a1"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     "a1.end",
+     [
+      60,
+      60
+     ]
+    ],
+    "ids": [
+     "l2"
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Section"
+   }
+  },
+  {
+   "command": "sketch.rectangle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "corner": [
+     4,
+     2.5
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.sweep",
+   "params": {
+    "sketch": "Section",
+    "path_sketch": "Path",
+    "path": [
+     "l1",
+     "a1",
+     "l2"
+    ]
+   }
+  },
+  {
+   "command": "solid.shell",
+   "params": {
+    "faces": [
+     [
+      0,
+      0,
+      0
+     ]
+    ],
+    "thickness": 0.5
+   }
+  }
+ ]
+}

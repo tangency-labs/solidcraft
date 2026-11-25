@@ -3,6 +3,7 @@
 mod support;
 
 use serde_json::json;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::{Sel, sketch::ConstraintKind};
 use solidcraft_ui_egui::scenario::Harness;
 
@@ -138,25 +139,90 @@ fn selected_circles_all_become_equal() {
 
 #[test]
 fn ambiguous_selection_preserves_tool_first_workflow() {
-    for selection in [
-        vec![],
-        vec![Sel::SketchCurve { id: "l1".into(), sketch: None }],
-        vec![
-            Sel::SketchCurve { id: "l1".into(), sketch: None },
-            Sel::SketchCurve { id: "l2".into(), sketch: None },
-            Sel::SketchPoint { id: "origin".into() },
-        ],
-    ] {
+    let mut h = lines();
+    let undo = h.app.session.undo.len();
+    h.run(&json!([{"start":"sketch.constraint.parallel"}])).unwrap();
+    assert_eq!(h.app.session.undo.len(), undo);
+    assert!(h.app.tool.as_ref().unwrap().picks.is_empty());
+    h.run(&json!([{"click":{"sketch":[25,10]}}, {"click":{"sketch":[25,32.5]}}])).unwrap();
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error));
+
+    // A single compatible curve seeds the pick list so only one remaining click is needed,
+    // and completing the constraint unselects the operator.
+    let mut h = lines();
+    h.app.session.selection = vec![Sel::SketchCurve { id: "l1".into(), sketch: None }];
+    let undo = h.app.session.undo.len();
+    h.run(&json!([{"start":"sketch.constraint.parallel"}])).unwrap();
+    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.tool.as_ref().unwrap().picks, vec!["l1"]);
+    assert!(h.app.session.selection.is_empty());
+    // Clicking the already-seeded curve ignores duplicates, then clicking the second applies Parallel
+    // and exits the preselected constraint operator.
+    h.run(&json!([{"click":{"sketch":[25,10]}}, {"click":{"sketch":[25,32.5]}}])).unwrap();
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error));
+    assert!(h.app.tool.is_none());
+
+    // Over-limit / incompatible preselections are automatically unselected and start tool-first
+    // picking (leaving the operator selected afterwards).
+    let mut h = lines();
+    h.app.session.selection = vec![
+        Sel::SketchCurve { id: "l1".into(), sketch: None },
+        Sel::SketchCurve { id: "l2".into(), sketch: None },
+        Sel::SketchPoint { id: "origin".into() },
+    ];
+    let undo = h.app.session.undo.len();
+    h.run(&json!([{"start":"sketch.constraint.parallel"}])).unwrap();
+    assert_eq!(h.app.session.undo.len(), undo);
+    assert!(h.app.session.selection.is_empty());
+    assert!(h.app.tool.as_ref().unwrap().picks.is_empty());
+    h.run(&json!([{"click":{"sketch":[25,10]}}, {"click":{"sketch":[25,32.5]}}])).unwrap();
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error));
+    assert!(h.app.tool.as_ref().is_some_and(|t| t.cmd == "sketch.constraint.parallel" && t.picks.is_empty()));
+}
+
+/// #12092: a tool that constrains two curves takes the line when the click lands on its end
+/// point. It used to pass the point on, and the command refused it ("unknown sketch curve
+/// `l1.end`"). Tangent keeps the end: the line's end then moves onto the circle, tangent there.
+#[test]
+fn a_click_on_a_line_end_picks_the_line_for_two_curve_constraints() {
+    for command in ["parallel", "perpendicular", "equal", "collinear"] {
         let mut h = lines();
-        h.app.session.selection = selection;
         let undo = h.app.session.undo.len();
-        h.run(&json!([{"start":"sketch.constraint.parallel"}])).unwrap();
-        assert_eq!(h.app.session.undo.len(), undo);
-        assert!(h.app.tool.as_ref().unwrap().picks.is_empty());
-        h.run(&json!([{"click":{"sketch":[25,10]}}, {"click":{"sketch":[25,32.5]}}])).unwrap();
-        assert_eq!(h.app.session.undo.len(), undo + 1);
-        assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error));
+        h.run(&json!([{"start":format!("sketch.constraint.{command}")}, {"click":{"sketch":[40,10]}}, {"click":{"sketch":[40,35]}}])).unwrap();
+        assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error), "{command}: {:?}", h.app.status);
+        assert_eq!(h.app.session.undo.len(), undo + 1, "{command}");
+        assert_line_geometry(&h, command);
     }
+    let mut h = Harness::new();
+    h.run(&json!([
+        {"call":"engine.execute","params":{"command":"sketch.create","params":{"plane":"XY"}}},
+        {"call":"engine.execute","params":{"command":"sketch.line","params":{"points":[[0,20],[30,20]],"infer":false}}},
+        {"call":"engine.execute","params":{"command":"sketch.circle.center","params":{"center":[50,0],"radius":10}}},
+        {"call":"ui.view","params":{"view":"top"}},
+        {"start":"sketch.constraint.tangent"},
+        {"click":{"sketch":[30,20]}},
+        {"click":{"sketch":[60,0]}}
+    ]))
+    .unwrap();
+    assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error), "tangent: {:?}", h.app.status);
+    let sk = &h.app.session.model.state().sketches[0].sketch;
+    assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Tangent { .. })), "tangent");
+    // The line now touches the circle: its distance from the centre is the radius.
+    let a = sk.point(sk.resolve_point("l1.start").unwrap()).unwrap();
+    let b = sk.point(sk.resolve_point("l1.end").unwrap()).unwrap();
+    let circle = sk.curves.iter().position(|c| matches!(c.kind, solidcraft_engine::sketch::CurveKind::Circle { .. })).unwrap();
+    let centre = sk.point(sk.resolve_point(&format!("{}.center", sk.curves[circle].id)).unwrap()).unwrap();
+    let radius = sk.radius(circle).unwrap();
+    let distance = (b - a).normalized().unwrap().cross(centre - a).abs();
+    assert!((distance - radius).abs() < 1e-6, "line {a:?}..{b:?} is {distance} from the centre, radius {radius}");
+    // The clicked end lies on the circle, where the line touches it.
+    assert!((b.dist(centre) - radius).abs() < 1e-6, "the line's end {b:?} is {} from the centre, radius {radius}", b.dist(centre));
+    // Only that end moved: the line turned about its other end, and the circle stayed.
+    assert!(a.x.abs() < 1e-9 && (a.y - 20.0).abs() < 1e-9, "the line's other end moved to {a:?}");
+    assert!((centre.x - 50.0).abs() < 1e-9 && centre.y.abs() < 1e-9 && (radius - 10.0).abs() < 1e-9, "the circle moved: {centre:?}, radius {radius}");
 }
 
 #[test]
@@ -202,7 +268,7 @@ fn curvature_polygon_and_fix_consume_clicked_operands_atomically() {
         };
         h.call("ui.view", json!({"view":"top"}));
         h.app.cam.distance = 80.0;
-        h.app.cam.target = solidcraft_engine::geom::Vec3::new(30.0, 15.0, 0.0);
+        h.app.cam.target = solidcore_record::Vec3::new(30.0, 15.0, 0.0);
         h.settle();
         for (i, p) in picks.iter().enumerate() {
             h.step(&json!({"click":{"sketch":p},"shift":i>0})).unwrap();
@@ -215,7 +281,7 @@ fn curvature_polygon_and_fix_consume_clicked_operands_atomically() {
         assert!(h.app.tool.is_none());
         assert!(h.app.session.selection.is_empty());
         assert_eq!(h.app.session.undo.len(), undo + 1);
-        let st = h.app.session.world_state();
+        let st = h.app.session.world_state().unwrap();
         let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
         assert!(sk.constraints.iter().any(|c| match command {
             "fix" => matches!(c.kind, ConstraintKind::Fix { .. }),
@@ -257,16 +323,17 @@ fn curvature_polygon_and_fix_consume_clicked_operands_atomically() {
 }
 
 #[test]
-fn remaining_constraints_preserve_mixed_selections_and_rejected_geometry() {
+fn remaining_constraints_clear_invalid_selections_and_preserve_rejected_geometry() {
     for command in ["fix", "curvature", "polygon"] {
         let mut h = lines();
         let before = h.app.session.doc.to_json();
         let undo = h.app.session.undo.len();
         let mixed = vec![Sel::SketchCurve { id: "l1".into(), sketch: None }, Sel::Body { name: "missing".into() }];
-        h.app.session.selection = mixed.clone();
+        h.app.session.selection = mixed;
         h.step(&json!({"start":format!("sketch.constraint.{command}")})).unwrap();
         assert!(h.app.tool.is_some());
-        assert_eq!(h.app.session.selection, mixed);
+        assert!(h.app.tool.as_ref().unwrap().picks.is_empty());
+        assert!(h.app.session.selection.is_empty());
         assert_eq!(h.app.session.doc.to_json(), before);
         assert_eq!(h.app.session.undo.len(), undo);
     }
@@ -280,4 +347,160 @@ fn remaining_constraints_preserve_mixed_selections_and_rejected_geometry() {
     assert_eq!(h.app.session.selection, selection);
     assert_eq!(h.app.session.doc.to_json(), before);
     assert_eq!(h.app.session.undo.len(), undo);
+}
+
+#[test]
+fn constraint_pick_tools_suppress_snap_hint_and_keep_picks_until_finished() {
+    use solidcraft_ui_egui::scenario::rect_of;
+    let mut h = lines();
+    h.app.home.open = false;
+    h.call("ui.view", json!({"view": "top"}));
+    h.settle();
+
+    // Pick tool (Parallel): suppresses snap_hint over midpoints/edges and retains first pick until second click.
+    h.step(&json!({"start": "sketch.constraint.parallel"})).unwrap();
+    h.step(&json!({"move": {"sketch": [25.0, 10.0]}})).unwrap();
+    h.frames(2);
+    assert!(rect_of("viewport:snap_hint").is_none(), "Parallel should suppress snap_hint");
+    h.step(&json!({"click": {"sketch": [25.0, 10.0]}})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.tool.as_ref().unwrap().picks, vec!["l1"]);
+    h.step(&json!({"move": {"sketch": [25.0, 32.5]}})).unwrap();
+    h.frames(2);
+    assert!(rect_of("viewport:snap_hint").is_none(), "Parallel keeps snap_hint hidden before second pick");
+    assert_eq!(h.app.tool.as_ref().unwrap().picks, vec!["l1"]);
+    h.step(&json!({"click": {"sketch": [25.0, 32.5]}})).unwrap();
+    h.frames(2);
+    // Constraint pick tools clear their picks once a constraint commits so more pairs can follow.
+    assert!(h.app.tool.as_ref().is_some_and(|t| t.picks.is_empty()));
+    let st = h.app.session.world_state().unwrap();
+    let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Parallel { .. })));
+    h.step(&json!({"key": "Escape"})).unwrap();
+    assert!(h.app.tool.is_none());
+
+    // Horizontal/Vertical: suppresses snap_hint normally, keeps Shift-Midpoint snap_hint working.
+    h.step(&json!({"start": "sketch.constraint.horizontal_vertical"})).unwrap();
+    h.step(&json!({"move": {"sketch": [25.0, 10.0]}})).unwrap();
+    h.frames(2);
+    assert!(rect_of("viewport:snap_hint").is_none(), "H/V should suppress snap_hint without Shift");
+    assert!(rect_of("viewport:readout").is_none(), "H/V should suppress coordinate readout");
+    assert!(h.app.tool.as_ref().unwrap().hover.is_none(), "H/V should suppress auto-snap hover without Shift");
+    h.step(&json!({"move": {"sketch": [25.0, 10.0]}, "shift": true})).unwrap();
+    h.frames(2);
+    assert!(rect_of("viewport:snap_hint").is_none(), "H/V with Shift should still suppress snap_hint badge");
+    assert_eq!(
+        h.app.tool.as_ref().unwrap().hover.as_ref().and_then(|(_, s)| s.as_deref()),
+        Some("Midpoint"),
+        "H/V with Shift should still resolve Midpoint hover"
+    );
+    h.step(&json!({"key": "Escape"})).unwrap();
+
+    // Entities-mode constraint tool (Curvature): suppresses snap_hint too.
+    h.step(&json!({"start": "sketch.constraint.curvature"})).unwrap();
+    h.step(&json!({"move": {"sketch": [25.0, 10.0]}})).unwrap();
+    h.frames(2);
+    assert!(rect_of("viewport:snap_hint").is_none(), "Curvature constraint tool should suppress snap_hint");
+    h.step(&json!({"key": "Escape"})).unwrap();
+
+    // Dimension tool: suppresses snap_hint like other constraint tools, while keeping plane hover and readout before typing.
+    h.step(&json!({"start": "sketch.dimension"})).unwrap();
+    h.step(&json!({"move": {"sketch": [25.0, 10.0]}})).unwrap();
+    h.frames(2);
+    assert!(rect_of("viewport:snap_hint").is_none(), "Dimension should suppress snap_hint");
+    assert!(rect_of("viewport:readout").is_some(), "Dimension should keep coordinate readout while hovering");
+    assert!(h.app.tool.as_ref().unwrap().hover.is_some(), "Dimension should keep raw plane hover for live preview");
+    h.step(&json!({"key": "Escape"})).unwrap();
+}
+
+#[test]
+fn incompatible_curve_or_preselected_dimension_clears_or_exits() {
+    // Circles cannot participate in line-only constraints: auto-unselect and enter tool empty.
+    for command in ["parallel", "perpendicular", "collinear", "horizontal_vertical"] {
+        let mut h = Harness::new();
+        h.run(&json!([
+            {"call":"engine.execute","params":{"command":"sketch.create","params":{"plane":"XY"}}},
+            {"call":"engine.execute","params":{"command":"sketch.circle.center","params":{"center":[20,20],"radius":8}}},
+            {"call":"ui.view","params":{"view":"top"}}
+        ]))
+        .unwrap();
+        h.app.session.selection = vec![Sel::SketchCurve { id: "c1".into(), sketch: None }];
+        h.step(&json!({"start": format!("sketch.constraint.{command}")})).unwrap();
+        assert!(h.app.session.selection.is_empty(), "{command} should unselect incompatible circle");
+        assert!(h.app.tool.as_ref().is_some_and(|t| t.picks.is_empty() && t.point_picks.is_empty()), "{command}");
+        assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error), "{command}: {:?}", h.app.status);
+    }
+
+    // Invalid selection before Dimension auto-unselects and enters sticky Dimension empty.
+    let mut h = lines();
+    h.app.session.selection = vec![Sel::Body { name: "Body1".into() }];
+    h.step(&json!({"start": "sketch.dimension"})).unwrap();
+    assert!(h.app.session.selection.is_empty());
+    assert!(h.app.tool.as_ref().is_some_and(|t| t.cmd == "sketch.dimension" && t.picks.is_empty() && !t.preselected));
+
+    // Preselected line in Dimension places once and exits the Dimension operator.
+    let mut h = lines();
+    h.app.session.selection = vec![Sel::SketchCurve { id: "l1".into(), sketch: None }];
+    h.step(&json!({"start": "sketch.dimension"})).unwrap();
+    assert!(h.app.session.selection.is_empty());
+    assert!(h.app.tool.as_ref().is_some_and(|t| t.picks == vec!["l1"] && t.preselected));
+    h.step(&json!({"click": {"sketch": [25.0, 2.0]}})).unwrap();
+    h.frames(1);
+    h.step(&json!({"key": "Return"})).unwrap();
+    h.frames(1);
+    assert!(h.app.tool.is_none(), "preselected dimension should exit tool after committing");
+}
+
+#[test]
+fn constraint_pick_tools_show_constraint_cursor_icon_and_avoid_duplication() {
+    use solidcraft_ui_egui::scenario::rect_of;
+    let mut h = lines();
+    h.app.home.open = false;
+    h.app.ui.tool_cursor = true;
+    h.call("ui.view", json!({"view": "top"}));
+    h.settle();
+
+    // Every constraint/dimension pick tool publishes `viewport:constraint_cursor`, suppresses
+    // `viewport:snap_hint`, and never draws a duplicate `viewport:tool_cursor` badge.
+    for cmd in [
+        "sketch.constraint.parallel",
+        "sketch.constraint.horizontal_vertical",
+        "sketch.constraint.curvature",
+        "sketch.constraint.polygon",
+        "sketch.constrainer",
+        "sketch.dimension",
+    ] {
+        h.step(&json!({"start": cmd})).unwrap();
+        h.step(&json!({"move": {"sketch": [25.0, 20.0]}})).unwrap();
+        h.frames(2);
+        let badge = rect_of("viewport:constraint_cursor").unwrap_or_else(|| panic!("{cmd} should show cursor icon"));
+        assert!((badge.width() - 15.0).abs() < 0.1, "{cmd} default cursor icon width should be 15 px, got {}", badge.width());
+        assert!((badge.height() - 15.0).abs() < 0.1, "{cmd} default cursor icon height should be 15 px, got {}", badge.height());
+        assert!(rect_of("viewport:tool_cursor").is_none(), "{cmd} must not duplicate icon via tool_cursor");
+        assert!(rect_of("viewport:snap_hint").is_none(), "{cmd} should suppress snap_hint");
+        h.step(&json!({"key": "Escape"})).unwrap();
+        h.frames(1);
+        assert!(rect_of("viewport:constraint_cursor").is_none(), "{cmd} should clear cursor icon on Escape");
+    }
+
+    // Badge size follows `constraint_glyph_scale`.
+    h.app.preferences.constraint_glyph_scale = 2.0;
+    h.step(&json!({"start": "sketch.constraint.equal"})).unwrap();
+    h.step(&json!({"move": {"sketch": [25.0, 20.0]}})).unwrap();
+    h.frames(2);
+    let scaled = rect_of("viewport:constraint_cursor").expect("scaled cursor icon");
+    assert!((scaled.width() - 30.0).abs() < 0.1 && (scaled.height() - 30.0).abs() < 0.1, "expected 30 px badge, got {scaled:?}");
+    h.app.preferences.constraint_glyph_scale = 1.0;
+    h.step(&json!({"key": "Escape"})).unwrap();
+
+    // Dimension hides the cursor badge while the floating dimension editor box is open.
+    h.app.session.selection = vec![Sel::SketchCurve { id: "l1".into(), sketch: None }];
+    h.step(&json!({"start": "sketch.dimension"})).unwrap();
+    h.step(&json!({"move": {"sketch": [25.0, 2.0]}})).unwrap();
+    h.frames(2);
+    assert!(rect_of("viewport:constraint_cursor").is_some(), "Dimension should show cursor icon before editor opens");
+    h.step(&json!({"click": {"sketch": [25.0, 2.0]}})).unwrap();
+    h.frames(2);
+    assert!(rect_of("viewport:constraint_cursor").is_none(), "Dimension should hide cursor icon while editor box owns the cursor");
+    h.step(&json!({"key": "Escape"})).unwrap();
 }

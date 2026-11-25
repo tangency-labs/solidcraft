@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="600" viewBox="0 0 1000 600">
+  <title>s-and-net</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path d="M0 0 L1000 0 L1000 600 L0 600 Z" fill="#ffffff"/>
+    <text transform="matrix(1 0 0 1 40 50)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">A definition S and its certified net B</tspan></text>
+    <path d="M80 360 C320 90 640 560 920 300" fill="none" stroke="#dce9f5" stroke-width="50" stroke-miterlimit="10"/>
+    <path d="M80 360 L192 224 L331 333 L502 277 L619 428 L767 325 L920 300" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="6 4"/>
+    <path d="M80 360 C320 90 640 560 920 300" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <path d="M83 362.7 C103 346.6 160 277.7 202.8 266.3 C245.6 254.8 292 286 339.7 294 C387.5 301.9 441.3 298.9 489.3 314 C537.4 329.1 580.6 376.4 628.2 384.8 C675.7 393.2 726.7 378.8 774.9 364.2 C823.1 349.6 893.5 308.3 917.3 297.1" fill="none" stroke="#000000" stroke-width="2" stroke-miterlimit="10"/>
+    <path d="M76 356 L84 356 L84 364 L76 364 Z" fill="#ffffff" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <path d="M188 220 L196 220 L196 228 L188 228 Z" fill="#ffffff" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <path d="M327 329 L335 329 L335 337 L327 337 Z" fill="#ffffff" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <path d="M498 273 L506 273 L506 281 L498 281 Z" fill="#ffffff" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <path d="M615 424 L623 424 L623 432 L615 432 Z" fill="#ffffff" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <path d="M763 321 L771 321 L771 329 L763 329 Z" fill="#ffffff" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <path d="M916 296 L924 296 L924 304 L916 304 Z" fill="#ffffff" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <g>
+      <g>
+        <path d="M761.295 381.67 L763.895 401.171 L762.705 401.33 L760.105 381.829 Z" fill="#000000"/>
+        <path d="M760.6 381 L761.956 382.998 L760.8 382.499 L759.815 383.284 Z" fill="#000000"/>
+        <path d="M763.4 402 L762.044 400.002 L763.2 400.501 L764.185 399.716 Z" fill="#000000"/>
+      </g>
+    </g>
+    <text transform="matrix(1 0 0 1 771 400)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">ε</tspan></text>
+    <text transform="matrix(1 0 0 1 345 236)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">S, the definition</tspan></text>
+    <path d="M375 241 L352 280" fill="none" stroke="#000000" stroke-width="0.75" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 800 450)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">B, the net</tspan></text>
+    <path d="M840 436 L836 346" fill="none" stroke="#000000" stroke-width="0.75" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 330 450)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">ε band: B lies inside it</tspan></text>
+    <path d="M420 436 L432 334" fill="none" stroke="#000000" stroke-width="0.75" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 40 200)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">control points of B: off S</tspan></text>
+    <path d="M190 205 L192 219" fill="none" stroke="#000000" stroke-width="0.75" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 40 560)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">Every point of B is within ε of S at the same parameters: proved on control points and enclosures, never sampled.</tspan></text>
+  </g>
+</svg>

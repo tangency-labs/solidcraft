@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "a countersunk hole: d6.6 through, d12 x 90 deg countersink",
+ "source": "analytic",
+ "method": "countersink frustum r6 -> r3.3 over (6-3.3)/tan45 = 2.7; + bore below it; + cone and bore faces",
+ "body_count": 1,
+ "volume_mm3": 47219.571836181,
+ "faces": 8
+}

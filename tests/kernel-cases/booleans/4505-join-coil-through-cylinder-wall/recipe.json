@@ -1,0 +1,38 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "diameter": 152,
+    "height": 100,
+    "body_name": "Cyl"
+   }
+  },
+  {
+   "command": "solid.coil",
+   "params": {
+    "diameter": 151,
+    "pitch": 10,
+    "height": 80,
+    "section_size": 5,
+    "base": [
+     0,
+     0,
+     10
+    ],
+    "operation": "new",
+    "body_name": "Coil"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Cyl",
+    "tools": [
+     "Coil"
+    ],
+    "operation": "join"
+   }
+  }
+ ]
+}

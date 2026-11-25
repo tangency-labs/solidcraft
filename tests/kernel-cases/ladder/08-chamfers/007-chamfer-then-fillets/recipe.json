@@ -1,0 +1,36 @@
+{
+ "base": "../../01-primitives/001-box",
+ "commands": [
+  {
+   "command": "solid.chamfer",
+   "params": {
+    "edges": [
+     [
+      30,
+      0,
+      20
+     ]
+    ],
+    "distance": 3
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      0,
+      0,
+      5
+     ],
+     [
+      60,
+      0,
+      5
+     ]
+    ],
+    "radius": 2
+   }
+  }
+ ]
+}

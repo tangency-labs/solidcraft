@@ -1,0 +1,27 @@
+{
+ "sources": [],
+ "what": "a 5 mm deep pocket's rim edges rounded r5 with the default turn, Auto: the rounds use up the walls, meet the floor where the walls met it, and turn round the pocket's upright corners swept",
+ "source": "analytic",
+ "method": "plate 60x40x10 with the pocket 30x20x5 (x 15..45, y 10..30, floor z = 5, sharp vertical corners): V0 = 24000 - 3000 = 21000. As every-pocket-rim-edges-r2 with r = 5, the wall's height: each round reaches the floor tangent to the wall exactly at the floor edge, so the walls are used up (a round may use up a face), and Auto sweeps each corner, the torus piece reaching the floor at the corner. Removed = 100 A + 2 pi M, A = 25 (1 - pi/4), M = 125 (5/6 - pi/4) = 5.991896: 574.1528. V = 20425.8472. Faces 11 - 4 walls + 4 rounds + 4 corner torus pieces = 15. Graded to 1e-7 relative: the Mitre and Swept turns differ by (8 - 2 pi) M = 10.2870 mm^3 at these four corners, 4.9e-04 of the volume, inside the default 1e-3.",
+ "body_count": 1,
+ "volume_mm3": 20425.847214063833,
+ "faces": 15,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   40,
+   10
+  ]
+ },
+ "continuity": {
+  "order": "g1"
+ },
+ "tolerance": {
+  "rel": 1e-07
+ }
+}

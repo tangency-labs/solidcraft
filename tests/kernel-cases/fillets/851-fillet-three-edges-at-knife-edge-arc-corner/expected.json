@@ -1,0 +1,17 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#851",
+  "tangency-labs/solidcraft#854",
+  "tangency-labs/solidcraft#926",
+  "tangency-labs/solidcraft#935",
+  "tangency-labs/solidcraft#1294"
+ ],
+ "what": "three edges meeting at the front corner of a plate with a concave arc wall that runs out in a knife-edge tip: top front edge, arc top edge and front upright, R2 together",
+ "source": "analytic",
+ "method": "plate 41.5 x 21 plus the corner that a circle of radius 21 leaves (the arc wall meets the front face square and runs out tangent into the back face at (62.1667, 0)), 10 high: V0 = 9591.394 (tessellation/1263). Rolling ball R2: near the three edges the part is z <= 10, y >= -21 and rho >= 21 about the wall's axis, so ball centres lie in z <= 8, y >= -19, rho >= 23, and a column (x, y) keeps material up to 8 + sqrt(4 - d^2), d its distance in plan to {y >= -19, rho >= 23}, none past d = 2 (the upright's round). Removed: the top front round (4 - pi) along x 0..37 = 31.761, the arc's round outside the corner Int_21^23 (2 - sqrt(4 - (23-rho)^2)) rho (asin(21/rho) - asin(6/rho)) drho = 20.286, and the corner x 37..45, y -21..-15 on a 0.0025 grid, 15.004: 67.051 (the engine test's independent grid: 67.05). V = 9524.343.",
+ "body_count": 1,
+ "continuity": {
+  "order": "g1"
+ },
+ "volume_mm3": 9524.342896
+}

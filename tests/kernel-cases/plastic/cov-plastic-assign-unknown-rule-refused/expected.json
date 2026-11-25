@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "plastic.assign_rule with a rule name that is neither a library nor a design rule",
+ "source": "invariants",
+ "method": "only an existing rule can be assigned: a clean refusal that names the rule",
+ "outcome": "refused",
+ "refusal": "no plastic rule `Nope`"
+}

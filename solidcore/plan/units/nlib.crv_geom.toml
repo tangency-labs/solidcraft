@@ -1,0 +1,12 @@
+id = "nlib.crv_geom"
+upstream = ["source/SMLib/src/NL_CrvGeom.cpp"]
+rust_module = "nurbs::crv_geom"
+depends_on = ["nlib.crv_basic", "nlib.crv_nurb", "nlib.geom", "nlib.math"]
+soft_depends_on = ["nlib.bezier", "nlib.crv_tool_p1", "nlib.knots"]
+est_lines = 729
+layer = 7
+tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
+status = "green"
+claimed_by = "swarm-nlib.crv_geom-a1"
+claimed_at = "2026-10-12T00:00:00Z"
+notes = "main CI e33985411 (2026-10-23): PASS nlib.crv_geom cases=1725 passed=1725 failed=0 deferred=0. difftest: 1723 cases (223 fixtures on the six pt_TestFiles .smc curves + edge cases, 1500 generated), 1723 pass bit-for-bit, 0 deferred; wired UNPORTED(nlib.crv_geom) in nlib.crv_nurb (now green); 3 fns; largest: N_ApproxCrvWithPolyline, N_CrvArcLength, N_CrvClosestPt; unit-SCC #6 (5 units); 317 upstream test entry points reach this unit"

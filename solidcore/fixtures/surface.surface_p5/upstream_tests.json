@@ -1,0 +1,1188 @@
+{
+ "cases": [
+  {
+   "name": "closest_pt1_min",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "drop",
+     "dom": [
+      0.0,
+      0.0634210842965636,
+      1.0,
+      0.6377485983139218
+     ],
+     "p": [
+      -1.0616429349692744,
+      -20.167126109553802,
+      20.02082373943756
+     ],
+     "guess": null,
+     "sop": 3,
+     "tgt": null,
+     "want": false
+    }
+   }
+  },
+  {
+   "name": "closest_pt1_norm",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "drop",
+     "dom": [
+      0.0,
+      0.0634210842965636,
+      1.0,
+      0.6377485983139218
+     ],
+     "p": [
+      -1.0616429349692744,
+      -20.167126109553802,
+      20.02082373943756
+     ],
+     "guess": null,
+     "sop": 5,
+     "tgt": null,
+     "want": false
+    }
+   }
+  },
+  {
+   "name": "closest_pt2_min",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "drop",
+     "dom": [
+      0.0,
+      0.0634210842965636,
+      1.0,
+      0.6377485983139218
+     ],
+     "p": [
+      -1.158343495768524,
+      -19.95343872268017,
+      20.0059217689707
+     ],
+     "guess": null,
+     "sop": 3,
+     "tgt": null,
+     "want": false
+    }
+   }
+  },
+  {
+   "name": "closest_pt2_norm",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "drop",
+     "dom": [
+      0.0,
+      0.0634210842965636,
+      1.0,
+      0.6377485983139218
+     ],
+     "p": [
+      -1.158343495768524,
+      -19.95343872268017,
+      20.0059217689707
+     ],
+     "guess": null,
+     "sop": 5,
+     "tgt": null,
+     "want": false
+    }
+   }
+  },
+  {
+   "name": "closest_pt3_min",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "drop",
+     "dom": [
+      0.0,
+      0.0634210842965636,
+      1.0,
+      0.6377485983139218
+     ],
+     "p": [
+      -4.594157470164914,
+      -9.652863554299548,
+      19.29094927564143
+     ],
+     "guess": null,
+     "sop": 3,
+     "tgt": null,
+     "want": false
+    }
+   }
+  },
+  {
+   "name": "closest_pt3_norm",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "drop",
+     "dom": [
+      0.0,
+      0.0634210842965636,
+      1.0,
+      0.6377485983139218
+     ],
+     "p": [
+      -4.594157470164914,
+      -9.652863554299548,
+      19.29094927564143
+     ],
+     "guess": null,
+     "sop": 5,
+     "tgt": null,
+     "want": false
+    }
+   }
+  },
+  {
+   "name": "closest_pt4_min",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "drop",
+     "dom": [
+      0.0,
+      0.0634210842965636,
+      1.0,
+      0.6377485983139218
+     ],
+     "p": [
+      -0.8390871400009248,
+      -20.645564191951244,
+      20.05407058495214
+     ],
+     "guess": null,
+     "sop": 3,
+     "tgt": null,
+     "want": false
+    }
+   }
+  },
+  {
+   "name": "closest_pt4_norm",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "drop",
+     "dom": [
+      0.0,
+      0.0634210842965636,
+      1.0,
+      0.6377485983139218
+     ],
+     "p": [
+      -0.8390871400009248,
+      -20.645564191951244,
+      20.05407058495214
+     ],
+     "guess": null,
+     "sop": 5,
+     "tgt": null,
+     "want": false
+    }
+   }
+  },
+  {
+   "name": "closest_pt5_min",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "drop",
+     "dom": [
+      0.0,
+      0.0634210842965636,
+      1.0,
+      0.6377485983139218
+     ],
+     "p": [
+      -0.22169184902399575,
+      -21.752883811327614,
+      20.07708482750489
+     ],
+     "guess": null,
+     "sop": 3,
+     "tgt": null,
+     "want": false
+    }
+   }
+  },
+  {
+   "name": "closest_pt5_norm",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "drop",
+     "dom": [
+      0.0,
+      0.0634210842965636,
+      1.0,
+      0.6377485983139218
+     ],
+     "p": [
+      -0.22169184902399575,
+      -21.752883811327614,
+      20.07708482750489
+     ],
+     "guess": null,
+     "sop": 5,
+     "tgt": null,
+     "want": false
+    }
+   }
+  },
+  {
+   "name": "closest_pt6_min",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "drop",
+     "dom": [
+      0.0,
+      0.0634210842965636,
+      1.0,
+      0.6377485983139218
+     ],
+     "p": [
+      0.09787679346832802,
+      -21.633397717952313,
+      18.978461556867217
+     ],
+     "guess": null,
+     "sop": 3,
+     "tgt": null,
+     "want": false
+    }
+   }
+  },
+  {
+   "name": "closest_pt6_norm",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "drop",
+     "dom": [
+      0.0,
+      0.0634210842965636,
+      1.0,
+      0.6377485983139218
+     ],
+     "p": [
+      0.09787679346832802,
+      -21.633397717952313,
+      18.978461556867217
+     ],
+     "guess": null,
+     "sop": 5,
+     "tgt": null,
+     "want": false
+    }
+   }
+  },
+  {
+   "name": "closest_pt7_min",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "drop",
+     "dom": [
+      0.0,
+      0.0634210842965636,
+      1.0,
+      0.6377485983139218
+     ],
+     "p": [
+      -0.2525759380664189,
+      -20.10880763638518,
+      19.018298541213202
+     ],
+     "guess": null,
+     "sop": 3,
+     "tgt": null,
+     "want": false
+    }
+   }
+  },
+  {
+   "name": "closest_pt7_norm",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "drop",
+     "dom": [
+      0.0,
+      0.0634210842965636,
+      1.0,
+      0.6377485983139218
+     ],
+     "p": [
+      -0.2525759380664189,
+      -20.10880763638518,
+      19.018298541213202
+     ],
+     "guess": null,
+     "sop": 5,
+     "tgt": null,
+     "want": false
+    }
+   }
+  },
+  {
+   "name": "closest_pt8_min",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "drop",
+     "dom": [
+      0.0,
+      0.0634210842965636,
+      1.0,
+      0.6377485983139218
+     ],
+     "p": [
+      -0.3262981819065092,
+      -19.760345509317247,
+      19.026748453308592
+     ],
+     "guess": null,
+     "sop": 3,
+     "tgt": null,
+     "want": false
+    }
+   }
+  },
+  {
+   "name": "closest_pt8_norm",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "drop",
+     "dom": [
+      0.0,
+      0.0634210842965636,
+      1.0,
+      0.6377485983139218
+     ],
+     "p": [
+      -0.3262981819065092,
+      -19.760345509317247,
+      19.026748453308592
+     ],
+     "guess": null,
+     "sop": 5,
+     "tgt": null,
+     "want": false
+    }
+   }
+  },
+  {
+   "name": "closest_pt9_min",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "drop",
+     "dom": [
+      0.0,
+      0.0634210842965636,
+      1.0,
+      0.6377485983139218
+     ],
+     "p": [
+      -0.6689215485688522,
+      -17.879224383359258,
+      19.07264718580291
+     ],
+     "guess": null,
+     "sop": 3,
+     "tgt": null,
+     "want": false
+    }
+   }
+  },
+  {
+   "name": "closest_pt9_norm",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "drop",
+     "dom": [
+      0.0,
+      0.0634210842965636,
+      1.0,
+      0.6377485983139218
+     ],
+     "p": [
+      -0.6689215485688522,
+      -17.879224383359258,
+      19.07264718580291
+     ],
+     "guess": null,
+     "sop": 5,
+     "tgt": null,
+     "want": false
+    }
+   }
+  },
+  {
+   "name": "closest_pt10_min",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "drop",
+     "dom": [
+      0.0,
+      0.0634210842965636,
+      1.0,
+      0.6377485983139218
+     ],
+     "p": [
+      -0.8375857346222633,
+      -20.648619822796935,
+      20.054270506974774
+     ],
+     "guess": null,
+     "sop": 3,
+     "tgt": null,
+     "want": false
+    }
+   }
+  },
+  {
+   "name": "closest_pt10_norm",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "drop",
+     "dom": [
+      0.0,
+      0.0634210842965636,
+      1.0,
+      0.6377485983139218
+     ],
+     "p": [
+      -0.8375857346222633,
+      -20.648619822796935,
+      20.054270506974774
+     ],
+     "guess": null,
+     "sop": 5,
+     "tgt": null,
+     "want": false
+    }
+   }
+  },
+  {
+   "name": "closest_pt11_min",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "drop",
+     "dom": [
+      0.0,
+      0.0634210842965636,
+      1.0,
+      0.6377485983139218
+     ],
+     "p": [
+      -0.22211826515506564,
+      -21.75240325273451,
+      20.07740102208611
+     ],
+     "guess": null,
+     "sop": 3,
+     "tgt": null,
+     "want": false
+    }
+   }
+  },
+  {
+   "name": "closest_pt11_norm",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "drop",
+     "dom": [
+      0.0,
+      0.0634210842965636,
+      1.0,
+      0.6377485983139218
+     ],
+     "p": [
+      -0.22211826515506564,
+      -21.75240325273451,
+      20.07740102208611
+     ],
+     "guess": null,
+     "sop": 5,
+     "tgt": null,
+     "want": false
+    }
+   }
+  },
+  {
+   "name": "closest_pt12_min",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "drop",
+     "dom": [
+      0.0,
+      0.0634210842965636,
+      1.0,
+      0.6377485983139218
+     ],
+     "p": [
+      0.09787860127308134,
+      -21.6334057640379,
+      18.978461275445223
+     ],
+     "guess": null,
+     "sop": 3,
+     "tgt": null,
+     "want": false
+    }
+   }
+  },
+  {
+   "name": "closest_pt12_norm",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "drop",
+     "dom": [
+      0.0,
+      0.0634210842965636,
+      1.0,
+      0.6377485983139218
+     ],
+     "p": [
+      0.09787860127308134,
+      -21.6334057640379,
+      18.978461275445223
+     ],
+     "guess": null,
+     "sop": 5,
+     "tgt": null,
+     "want": false
+    }
+   }
+  },
+  {
+   "name": "closest_pt13_min",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "drop",
+     "dom": [
+      0.0,
+      0.0634210842965636,
+      1.0,
+      0.6377485983139218
+     ],
+     "p": [
+      -0.2528076031107555,
+      -20.10779761067562,
+      19.018327728721825
+     ],
+     "guess": null,
+     "sop": 3,
+     "tgt": null,
+     "want": false
+    }
+   }
+  },
+  {
+   "name": "closest_pt13_norm",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "drop",
+     "dom": [
+      0.0,
+      0.0634210842965636,
+      1.0,
+      0.6377485983139218
+     ],
+     "p": [
+      -0.2528076031107555,
+      -20.10779761067562,
+      19.018327728721825
+     ],
+     "guess": null,
+     "sop": 5,
+     "tgt": null,
+     "want": false
+    }
+   }
+  },
+  {
+   "name": "closest_pt14_min",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "drop",
+     "dom": [
+      0.0,
+      0.0634210842965636,
+      1.0,
+      0.6377485983139218
+     ],
+     "p": [
+      -0.3265146310261884,
+      -19.7592999915767,
+      19.026773809915298
+     ],
+     "guess": null,
+     "sop": 3,
+     "tgt": null,
+     "want": false
+    }
+   }
+  },
+  {
+   "name": "closest_pt14_norm",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "drop",
+     "dom": [
+      0.0,
+      0.0634210842965636,
+      1.0,
+      0.6377485983139218
+     ],
+     "p": [
+      -0.3265146310261884,
+      -19.7592999915767,
+      19.026773809915298
+     ],
+     "guess": null,
+     "sop": 5,
+     "tgt": null,
+     "want": false
+    }
+   }
+  },
+  {
+   "name": "closest_pt15_min",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "drop",
+     "dom": [
+      0.0,
+      0.0634210842965636,
+      1.0,
+      0.6377485983139218
+     ],
+     "p": [
+      -0.40219453853645376,
+      -19.384417128948424,
+      19.035877125510886
+     ],
+     "guess": null,
+     "sop": 3,
+     "tgt": null,
+     "want": false
+    }
+   }
+  },
+  {
+   "name": "closest_pt15_norm",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "drop",
+     "dom": [
+      0.0,
+      0.0634210842965636,
+      1.0,
+      0.6377485983139218
+     ],
+     "p": [
+      -0.40219453853645376,
+      -19.384417128948424,
+      19.035877125510886
+     ],
+     "guess": null,
+     "sop": 5,
+     "tgt": null,
+     "want": false
+    }
+   }
+  },
+  {
+   "name": "is_singularity_corner_umin_vmin_full",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "is_sing",
+     "uv": [
+      0.0,
+      0.0634210842965636
+     ],
+     "tol": 1e-07,
+     "pt_only": false
+    }
+   }
+  },
+  {
+   "name": "is_singularity_corner_umin_vmin_pt",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "is_sing",
+     "uv": [
+      0.0,
+      0.0634210842965636
+     ],
+     "tol": 1e-07,
+     "pt_only": true
+    }
+   }
+  },
+  {
+   "name": "is_singularity_corner_umax_vmax_full",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "is_sing",
+     "uv": [
+      1.0,
+      0.6377485983139218
+     ],
+     "tol": 1e-07,
+     "pt_only": false
+    }
+   }
+  },
+  {
+   "name": "is_singularity_corner_umax_vmax_pt",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "is_sing",
+     "uv": [
+      1.0,
+      0.6377485983139218
+     ],
+     "tol": 1e-07,
+     "pt_only": true
+    }
+   }
+  },
+  {
+   "name": "is_singularity_mid_full",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "is_sing",
+     "uv": [
+      0.5,
+      0.35
+     ],
+     "tol": 1e-07,
+     "pt_only": false
+    }
+   }
+  },
+  {
+   "name": "is_singularity_mid_pt",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "is_sing",
+     "uv": [
+      0.5,
+      0.35
+     ],
+     "tol": 1e-07,
+     "pt_only": true
+    }
+   }
+  },
+  {
+   "name": "is_singularity_seam_u0_full",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "is_sing",
+     "uv": [
+      0.0,
+      0.3
+     ],
+     "tol": 1e-07,
+     "pt_only": false
+    }
+   }
+  },
+  {
+   "name": "is_singularity_seam_u0_pt",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "is_sing",
+     "uv": [
+      0.0,
+      0.3
+     ],
+     "tol": 1e-07,
+     "pt_only": true
+    }
+   }
+  },
+  {
+   "name": "is_singularity_seam_u1_full",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "is_sing",
+     "uv": [
+      1.0,
+      0.3
+     ],
+     "tol": 1e-07,
+     "pt_only": false
+    }
+   }
+  },
+  {
+   "name": "is_singularity_seam_u1_pt",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "is_sing",
+     "uv": [
+      1.0,
+      0.3
+     ],
+     "tol": 1e-07,
+     "pt_only": true
+    }
+   }
+  },
+  {
+   "name": "iso_p0_0.0",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "iso",
+     "param": 0,
+     "iso": 0.0,
+     "tol": 0.0,
+     "dom": null,
+     "want_uv": true
+    }
+   }
+  },
+  {
+   "name": "iso_p0_1.0",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "iso",
+     "param": 0,
+     "iso": 1.0,
+     "tol": 0.0,
+     "dom": null,
+     "want_uv": true
+    }
+   }
+  },
+  {
+   "name": "iso_p0_0.5",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "iso",
+     "param": 0,
+     "iso": 0.5,
+     "tol": 0.0,
+     "dom": null,
+     "want_uv": true
+    }
+   }
+  },
+  {
+   "name": "iso_p1_0.0634210842965636",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "iso",
+     "param": 1,
+     "iso": 0.0634210842965636,
+     "tol": 0.0,
+     "dom": null,
+     "want_uv": true
+    }
+   }
+  },
+  {
+   "name": "iso_p1_0.6377485983139218",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "iso",
+     "param": 1,
+     "iso": 0.6377485983139218,
+     "tol": 0.0,
+     "dom": null,
+     "want_uv": true
+    }
+   }
+  },
+  {
+   "name": "iso_p1_0.3",
+   "upstream_ref": "prog_test smSurfaceTest.cpp:4117 (my_test_surface_closest_point: thinly closed Surface.sms)",
+   "inputs": {
+    "surface": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "op": {
+     "op": "iso",
+     "param": 1,
+     "iso": 0.3,
+     "tol": 0.0,
+     "dom": null,
+     "want_uv": true
+    }
+   }
+  }
+ ]
+}

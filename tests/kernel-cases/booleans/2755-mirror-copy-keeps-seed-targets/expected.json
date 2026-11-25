@@ -1,0 +1,10 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#2755"
+  ],
+  "what": "the mirror copy of a primitive cut changes only the seed's targets, not a body the seed was told to leave alone",
+  "source": "analytic",
+  "method": "Plaque loses two through holes r3 (seed at x=10, its mirror in x=50 at x=90, both inside the plate). Voisin (60000) and Loin (1000) are not targets and stay whole. Total = 121000 - 2*pi*3^2*10",
+  "body_count": 3,
+  "volume_mm3": 120434.51332235384
+}

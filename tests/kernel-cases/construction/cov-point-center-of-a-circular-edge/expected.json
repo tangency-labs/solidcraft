@@ -1,0 +1,15 @@
+{
+ "sources": [],
+ "what": "the centre of a cylinder's top edge",
+ "source": "analytic",
+ "method": "cylinder r 5, h 10 on (60,0,0) along +Z: its top edge is the circle about (60,0,10)",
+ "construction": {
+  "C": {
+   "point": [
+    60,
+    0,
+    10
+   ]
+  }
+ }
+}

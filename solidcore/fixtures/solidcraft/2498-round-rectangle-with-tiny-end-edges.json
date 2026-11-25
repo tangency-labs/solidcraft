@@ -1,0 +1,316 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/2498",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/2506",
+ "test": "crates/kernel/src/tests.rs: fillet_rounded_rectangle_with_tiny_end_edges",
+ "summary": "A rounded rectangle 26.4 x 8.6 with corner radius 4.29 leaves straight end edges only 0.02 mm long; rounding its top rim r 2 failed around them (#2498). The removed volume is the section's area swept by Pappus along the straight sides and the four quarter arcs at the section's centroid. SolidCraft checked 1e-3 relative on a fine mesh; these check 1e-4 mm^3. The test's one-pick tangent-chain selection is SolidCraft's own and is not ported.",
+ "cases": [
+  {
+   "name": "whole_rim",
+   "note": "All eight top rim edges picked, r 2.",
+   "steps": [
+    {
+     "op": "extrude",
+     "id": "body",
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        14.29,
+        10.0
+       ],
+       "to": [
+        32.11,
+        10.0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        32.11,
+        14.29
+       ],
+       "radius": 4.29,
+       "start_deg": -90,
+       "end_deg": 0
+      },
+      {
+       "kind": "line",
+       "from": [
+        36.4,
+        14.29
+       ],
+       "to": [
+        36.4,
+        14.309999999999999
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        32.11,
+        14.309999999999999
+       ],
+       "radius": 4.29,
+       "start_deg": 0,
+       "end_deg": 90
+      },
+      {
+       "kind": "line",
+       "from": [
+        32.11,
+        18.6
+       ],
+       "to": [
+        14.29,
+        18.6
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        14.29,
+        14.309999999999999
+       ],
+       "radius": 4.29,
+       "start_deg": 90,
+       "end_deg": 180
+      },
+      {
+       "kind": "line",
+       "from": [
+        10.0,
+        14.309999999999999
+       ],
+       "to": [
+        10.0,
+        14.29
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        14.29,
+        14.29
+       ],
+       "radius": 4.29,
+       "start_deg": 180,
+       "end_deg": 270
+      }
+     ],
+     "distance": 8.4
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "body",
+     "edges": [
+      [
+       23.2,
+       10.0,
+       8.4
+      ],
+      [
+       35.14348809129028,
+       11.25651190870971,
+       8.4
+      ],
+      [
+       11.256511908709715,
+       11.256511908709712,
+       8.4
+      ],
+      [
+       10.0,
+       14.3,
+       8.4
+      ],
+      [
+       11.256511908709713,
+       17.343488091290293,
+       8.4
+      ],
+      [
+       23.2,
+       18.6,
+       8.4
+      ],
+      [
+       35.14348809129028,
+       17.34348809129029,
+       8.4
+      ],
+      [
+       36.4,
+       14.3,
+       8.4
+      ]
+     ],
+     "radius": 2.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "removed": {
+     "from": "body",
+     "value": 51.356743786264715,
+     "tol": 0.0001,
+     "formula": "(1 - pi/4)*2^2 * (2*(26.4 + 8.6 - 4*4.29) + 2*pi*(4.29 - c)), c = 2*(10 - 3*pi)/(3*(4 - pi)) (Pappus along the straight sides and the four quarter arcs)"
+    }
+   }
+  },
+  {
+   "name": "whole_rim_reversed",
+   "note": "The same edges picked in the reverse order.",
+   "steps": [
+    {
+     "op": "extrude",
+     "id": "body",
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        14.29,
+        10.0
+       ],
+       "to": [
+        32.11,
+        10.0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        32.11,
+        14.29
+       ],
+       "radius": 4.29,
+       "start_deg": -90,
+       "end_deg": 0
+      },
+      {
+       "kind": "line",
+       "from": [
+        36.4,
+        14.29
+       ],
+       "to": [
+        36.4,
+        14.309999999999999
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        32.11,
+        14.309999999999999
+       ],
+       "radius": 4.29,
+       "start_deg": 0,
+       "end_deg": 90
+      },
+      {
+       "kind": "line",
+       "from": [
+        32.11,
+        18.6
+       ],
+       "to": [
+        14.29,
+        18.6
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        14.29,
+        14.309999999999999
+       ],
+       "radius": 4.29,
+       "start_deg": 90,
+       "end_deg": 180
+      },
+      {
+       "kind": "line",
+       "from": [
+        10.0,
+        14.309999999999999
+       ],
+       "to": [
+        10.0,
+        14.29
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        14.29,
+        14.29
+       ],
+       "radius": 4.29,
+       "start_deg": 180,
+       "end_deg": 270
+      }
+     ],
+     "distance": 8.4
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "body",
+     "edges": [
+      [
+       36.4,
+       14.3,
+       8.4
+      ],
+      [
+       35.14348809129028,
+       17.34348809129029,
+       8.4
+      ],
+      [
+       23.2,
+       18.6,
+       8.4
+      ],
+      [
+       11.256511908709713,
+       17.343488091290293,
+       8.4
+      ],
+      [
+       10.0,
+       14.3,
+       8.4
+      ],
+      [
+       11.256511908709715,
+       11.256511908709712,
+       8.4
+      ],
+      [
+       35.14348809129028,
+       11.25651190870971,
+       8.4
+      ],
+      [
+       23.2,
+       10.0,
+       8.4
+      ]
+     ],
+     "radius": 2.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "removed": {
+     "from": "body",
+     "value": 51.356743786264715,
+     "tol": 0.0001,
+     "formula": "(1 - pi/4)*2^2 * (2*(26.4 + 8.6 - 4*4.29) + 2*pi*(4.29 - c)), c = 2*(10 - 3*pi)/(3*(4 - pi)) (Pappus along the straight sides and the four quarter arcs)"
+    }
+   }
+  }
+ ]
+}

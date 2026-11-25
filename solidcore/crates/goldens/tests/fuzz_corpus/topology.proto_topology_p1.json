@@ -1,0 +1,7 @@
+{
+  "unit": "topology.proto_topology_p1",
+  "cases": [
+    {"name": "fuzz00000_c_invalid_argument_conic_domain_too", "origin": "fuzz-out/n2000/topology.proto_topology_p1/fuzz00000.json (timeout: cpp: no result after 20 s)", "issue": "HANG-4", "cpp": "harness: c++: invalid argument: conic domain too large", "rust": "harness: op arguments", "inputs": {"approx_tol": 1e-05, "capture": 0.001, "objects": [{"curve": {"conic": {"center": [-4.89, 2.66, 3.18], "domain": [-64.2, -1e+300], "rx": 2.33, "x": [1.0, 0.0, 0.0], "y": [0.263, -0.33, -0.201]}}}], "ops": [[4.7]], "override_tol": 0.374, "script": "proto"}},
+    {"name": "fuzz00350_c_invalid_argument_conic_axis_length", "origin": "fuzz-out/n2000/topology.proto_topology_p1/fuzz00350.json (crash: cpp: killed by signal 11)", "issue": "UB-46", "cpp": "harness: c++: invalid argument: conic axis length overflows", "rust": "harness: proto op", "inputs": {"approx_tol": 1e-05, "capture": 5.27e-05, "objects": [{"curve": {"conic": {"center": [-0.0577, -0.0244, 0.187], "domain": [-118.0, -49.9], "rx": 0.182, "x": [1.0, -1e+300, 0.0], "y": [-0.373, -0.432, -0.658]}}}], "ops": [[-1.0]], "override_tol": 0.937, "script": "proto"}}
+  ]
+}

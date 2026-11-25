@@ -1,0 +1,73 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 30,
+    "height": 10,
+    "body_name": "Block",
+    "name": "Block"
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "body": "Block",
+    "edges": [
+     [
+      5,
+      0,
+      10
+     ]
+    ],
+    "radius": 2,
+    "name": "Round"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "offset": 10,
+    "name": "NotchSketch"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     15,
+     0
+    ],
+    "p1": [
+     25,
+     10
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "NotchSketch",
+    "distance": -5,
+    "operation": "cut",
+    "name": "Notch"
+   }
+  },
+  {
+   "command": "timeline.group",
+   "params": {
+    "name": "Split",
+    "features": [
+     "Block",
+     "Notch"
+    ]
+   }
+  }
+ ]
+}

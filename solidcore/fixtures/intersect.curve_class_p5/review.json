@@ -1,0 +1,915 @@
+{
+  "cases": [
+    {
+      "name": "zero_tangent_shape2_dim20_ignore0_angle0.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791; source/SMLib/inc/SmCurve.h:396 (nonzero tangent default)",
+      "inputs": {
+        "op": 0,
+        "shape": 2,
+        "dim2": false,
+        "ignore": false,
+        "angle": 0.0,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "zero_tangent_shape2_dim20_ignore0_angle1.5707963267948966",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791; source/SMLib/inc/SmCurve.h:396 (nonzero tangent default)",
+      "inputs": {
+        "op": 0,
+        "shape": 2,
+        "dim2": false,
+        "ignore": false,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "zero_tangent_shape2_dim20_ignore1_angle0.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791; source/SMLib/inc/SmCurve.h:396 (nonzero tangent default)",
+      "inputs": {
+        "op": 0,
+        "shape": 2,
+        "dim2": false,
+        "ignore": true,
+        "angle": 0.0,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "zero_tangent_shape2_dim20_ignore1_angle1.5707963267948966",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791; source/SMLib/inc/SmCurve.h:396 (nonzero tangent default)",
+      "inputs": {
+        "op": 0,
+        "shape": 2,
+        "dim2": false,
+        "ignore": true,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "zero_tangent_shape2_dim21_ignore0_angle0.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791; source/SMLib/inc/SmCurve.h:396 (nonzero tangent default)",
+      "inputs": {
+        "op": 0,
+        "shape": 2,
+        "dim2": true,
+        "ignore": false,
+        "angle": 0.0,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "zero_tangent_shape2_dim21_ignore0_angle1.5707963267948966",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791; source/SMLib/inc/SmCurve.h:396 (nonzero tangent default)",
+      "inputs": {
+        "op": 0,
+        "shape": 2,
+        "dim2": true,
+        "ignore": false,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "zero_tangent_shape2_dim21_ignore1_angle0.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791; source/SMLib/inc/SmCurve.h:396 (nonzero tangent default)",
+      "inputs": {
+        "op": 0,
+        "shape": 2,
+        "dim2": true,
+        "ignore": true,
+        "angle": 0.0,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "zero_tangent_shape2_dim21_ignore1_angle1.5707963267948966",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791; source/SMLib/inc/SmCurve.h:396 (nonzero tangent default)",
+      "inputs": {
+        "op": 0,
+        "shape": 2,
+        "dim2": true,
+        "ignore": true,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "zero_tangent_shape3_dim20_ignore0_angle0.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791; source/SMLib/inc/SmCurve.h:396 (nonzero tangent default)",
+      "inputs": {
+        "op": 0,
+        "shape": 3,
+        "dim2": false,
+        "ignore": false,
+        "angle": 0.0,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "zero_tangent_shape3_dim20_ignore0_angle1.5707963267948966",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791; source/SMLib/inc/SmCurve.h:396 (nonzero tangent default)",
+      "inputs": {
+        "op": 0,
+        "shape": 3,
+        "dim2": false,
+        "ignore": false,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "zero_tangent_shape3_dim20_ignore1_angle0.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791; source/SMLib/inc/SmCurve.h:396 (nonzero tangent default)",
+      "inputs": {
+        "op": 0,
+        "shape": 3,
+        "dim2": false,
+        "ignore": true,
+        "angle": 0.0,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "zero_tangent_shape3_dim20_ignore1_angle1.5707963267948966",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791; source/SMLib/inc/SmCurve.h:396 (nonzero tangent default)",
+      "inputs": {
+        "op": 0,
+        "shape": 3,
+        "dim2": false,
+        "ignore": true,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "zero_tangent_shape3_dim21_ignore0_angle0.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791; source/SMLib/inc/SmCurve.h:396 (nonzero tangent default)",
+      "inputs": {
+        "op": 0,
+        "shape": 3,
+        "dim2": true,
+        "ignore": false,
+        "angle": 0.0,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "zero_tangent_shape3_dim21_ignore0_angle1.5707963267948966",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791; source/SMLib/inc/SmCurve.h:396 (nonzero tangent default)",
+      "inputs": {
+        "op": 0,
+        "shape": 3,
+        "dim2": true,
+        "ignore": false,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "zero_tangent_shape3_dim21_ignore1_angle0.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791; source/SMLib/inc/SmCurve.h:396 (nonzero tangent default)",
+      "inputs": {
+        "op": 0,
+        "shape": 3,
+        "dim2": true,
+        "ignore": true,
+        "angle": 0.0,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "zero_tangent_shape3_dim21_ignore1_angle1.5707963267948966",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791; source/SMLib/inc/SmCurve.h:396 (nonzero tangent default)",
+      "inputs": {
+        "op": 0,
+        "shape": 3,
+        "dim2": true,
+        "ignore": true,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "zero_tangent_shape4_dim20_ignore0_angle0.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791; source/SMLib/inc/SmCurve.h:396 (nonzero tangent default)",
+      "inputs": {
+        "op": 0,
+        "shape": 4,
+        "dim2": false,
+        "ignore": false,
+        "angle": 0.0,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "zero_tangent_shape4_dim20_ignore0_angle1.5707963267948966",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791; source/SMLib/inc/SmCurve.h:396 (nonzero tangent default)",
+      "inputs": {
+        "op": 0,
+        "shape": 4,
+        "dim2": false,
+        "ignore": false,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "zero_tangent_shape4_dim20_ignore1_angle0.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791; source/SMLib/inc/SmCurve.h:396 (nonzero tangent default)",
+      "inputs": {
+        "op": 0,
+        "shape": 4,
+        "dim2": false,
+        "ignore": true,
+        "angle": 0.0,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "zero_tangent_shape4_dim20_ignore1_angle1.5707963267948966",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791; source/SMLib/inc/SmCurve.h:396 (nonzero tangent default)",
+      "inputs": {
+        "op": 0,
+        "shape": 4,
+        "dim2": false,
+        "ignore": true,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "zero_tangent_shape4_dim21_ignore0_angle0.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791; source/SMLib/inc/SmCurve.h:396 (nonzero tangent default)",
+      "inputs": {
+        "op": 0,
+        "shape": 4,
+        "dim2": true,
+        "ignore": false,
+        "angle": 0.0,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "zero_tangent_shape4_dim21_ignore0_angle1.5707963267948966",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791; source/SMLib/inc/SmCurve.h:396 (nonzero tangent default)",
+      "inputs": {
+        "op": 0,
+        "shape": 4,
+        "dim2": true,
+        "ignore": false,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "zero_tangent_shape4_dim21_ignore1_angle0.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791; source/SMLib/inc/SmCurve.h:396 (nonzero tangent default)",
+      "inputs": {
+        "op": 0,
+        "shape": 4,
+        "dim2": true,
+        "ignore": true,
+        "angle": 0.0,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "zero_tangent_shape4_dim21_ignore1_angle1.5707963267948966",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791; source/SMLib/inc/SmCurve.h:396 (nonzero tangent default)",
+      "inputs": {
+        "op": 0,
+        "shape": 4,
+        "dim2": true,
+        "ignore": true,
+        "angle": 1.5707963267948966,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "circle_full_domain_op0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791; source/SMLib/inc/SmCurve.h:396 (nonzero tangent default)",
+      "inputs": {
+        "op": 0,
+        "shape": 1,
+        "bounds": [
+          0,
+          90,
+          180,
+          270,
+          360
+        ],
+        "solutions": [
+          [
+            1,
+            0,
+            0.5,
+            0,
+            0.5,
+            2,
+            2
+          ],
+          [
+            1,
+            45,
+            0.5,
+            45,
+            0.5,
+            2,
+            2
+          ],
+          [
+            1,
+            90,
+            0.5,
+            90,
+            0.5,
+            2,
+            2
+          ],
+          [
+            1,
+            180,
+            0.5,
+            180,
+            0.5,
+            2,
+            2
+          ],
+          [
+            1,
+            270,
+            0.5,
+            270,
+            0.5,
+            2,
+            2
+          ],
+          [
+            1,
+            359,
+            0.5,
+            359,
+            0.5,
+            2,
+            2
+          ],
+          [
+            1,
+            360,
+            0.5,
+            360,
+            0.5,
+            2,
+            2
+          ]
+        ]
+      }
+    },
+    {
+      "name": "circle_full_domain_op1",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791; source/SMLib/inc/SmCurve.h:396 (nonzero tangent default)",
+      "inputs": {
+        "op": 1,
+        "shape": 1,
+        "bounds": [
+          0,
+          90,
+          180,
+          270,
+          360
+        ],
+        "solutions": [
+          [
+            1,
+            0,
+            0.5,
+            0,
+            0.5,
+            2,
+            2
+          ],
+          [
+            1,
+            45,
+            0.5,
+            45,
+            0.5,
+            2,
+            2
+          ],
+          [
+            1,
+            90,
+            0.5,
+            90,
+            0.5,
+            2,
+            2
+          ],
+          [
+            1,
+            180,
+            0.5,
+            180,
+            0.5,
+            2,
+            2
+          ],
+          [
+            1,
+            270,
+            0.5,
+            270,
+            0.5,
+            2,
+            2
+          ],
+          [
+            1,
+            359,
+            0.5,
+            359,
+            0.5,
+            2,
+            2
+          ],
+          [
+            1,
+            360,
+            0.5,
+            360,
+            0.5,
+            2,
+            2
+          ]
+        ]
+      }
+    },
+    {
+      "name": "circle_full_domain_op3",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791; source/SMLib/inc/SmCurve.h:396 (nonzero tangent default)",
+      "inputs": {
+        "op": 3,
+        "shape": 1,
+        "bounds": [
+          0,
+          90,
+          180,
+          270,
+          360
+        ]
+      }
+    },
+    {
+      "name": "circle_full_domain_op4",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791; source/SMLib/inc/SmCurve.h:396 (nonzero tangent default)",
+      "inputs": {
+        "op": 4,
+        "shape": 1,
+        "bounds": [
+          0,
+          90,
+          180,
+          270,
+          360
+        ]
+      }
+    },
+    {
+      "name": "circle_full_domain_op5",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791; source/SMLib/inc/SmCurve.h:396 (nonzero tangent default)",
+      "inputs": {
+        "op": 5,
+        "shape": 1,
+        "bounds": [
+          0,
+          90,
+          180,
+          270,
+          360
+        ]
+      }
+    },
+    {
+      "name": "unequal_counts_op3_2_4",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp (Homogenize via ExtractGeometry/MergeClassifications)",
+      "inputs": {
+        "op": 3,
+        "bounds": [
+          0,
+          1
+        ],
+        "other_bounds": [
+          0,
+          0.25,
+          0.75,
+          1
+        ]
+      }
+    },
+    {
+      "name": "unequal_counts_op3_3_2",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp (Homogenize via ExtractGeometry/MergeClassifications)",
+      "inputs": {
+        "op": 3,
+        "bounds": [
+          0,
+          0.5,
+          1
+        ],
+        "other_bounds": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "unequal_counts_op3_3_4",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp (Homogenize via ExtractGeometry/MergeClassifications)",
+      "inputs": {
+        "op": 3,
+        "bounds": [
+          0,
+          0.25,
+          1
+        ],
+        "other_bounds": [
+          0,
+          0.5,
+          0.75,
+          1
+        ]
+      }
+    },
+    {
+      "name": "unsupported_insert_target2_returns_sm_err",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791; source/SMLib/inc/SmCurve.h:396 (nonzero tangent default)",
+      "inputs": {
+        "op": 0,
+        "target": 2,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "unsupported_insert_target3_returns_sm_err",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791; source/SMLib/inc/SmCurve.h:396 (nonzero tangent default)",
+      "inputs": {
+        "op": 0,
+        "target": 3,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "insert_nonunit_tolerance_and_gaps",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791; source/SMLib/inc/SmCurve.h:396 (nonzero tangent default)",
+      "inputs": {
+        "op": 0,
+        "tol": 2,
+        "xsect_tol": 2,
+        "solutions": [
+          [
+            1,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            3,
+            3
+          ]
+        ]
+      }
+    },
+    {
+      "name": "circle_full_domain_common_extraction_1",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp (ExtractGeometry on a real SmCircle)",
+      "inputs": {
+        "op": 3,
+        "shape": 1,
+        "target": 3,
+        "bounds": [
+          0,
+          360
+        ],
+        "classes": [
+          102,
+          102,
+          102
+        ],
+        "other_classes": [
+          102,
+          102,
+          102
+        ],
+        "flag3": false
+      }
+    },
+    {
+      "name": "circle_full_domain_common_extraction_4",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp (ExtractGeometry on a real SmCircle)",
+      "inputs": {
+        "op": 3,
+        "shape": 1,
+        "target": 3,
+        "bounds": [
+          0,
+          90,
+          180,
+          270,
+          360
+        ],
+        "classes": [
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102
+        ],
+        "other_classes": [
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102,
+          102
+        ],
+        "flag3": false
+      }
+    }
+  ]
+}

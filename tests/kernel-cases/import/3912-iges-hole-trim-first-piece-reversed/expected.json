@@ -1,0 +1,12 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3912"
+ ],
+ "what": "a 10 x 10 trimmed patch with a 4 x 4 square hole whose composite trim curve starts with a reversed piece: the hole stays a hole",
+ "source": "analytic",
+ "method": "one trimmed face: A = 10*10 - 4*4 = 84; a sheet, so valid is false",
+ "valid": false,
+ "body_count": 1,
+ "area_mm2": 84.0,
+ "faces": 1
+}

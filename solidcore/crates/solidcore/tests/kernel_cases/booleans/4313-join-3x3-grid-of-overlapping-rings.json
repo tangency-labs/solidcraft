@@ -1,0 +1,509 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b100": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b104": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b108": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b112": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b116": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b120": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b124": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b128": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b132": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b100"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b101"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b101"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b102"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b102"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b103"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b104"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b105"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b105"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b106"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b106"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b107"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b108"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b109"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b109"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b110"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b110"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b111"
+      ],
+      "params": {
+        "operand": 2
+      }
+    },
+    {
+      "inputs": [
+        "b112"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b113"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b113"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b114"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b114"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b115"
+      ],
+      "params": {
+        "operand": 3
+      }
+    },
+    {
+      "inputs": [
+        "b116"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b117"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b117"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b118"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b118"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b119"
+      ],
+      "params": {
+        "operand": 4
+      }
+    },
+    {
+      "inputs": [
+        "b120"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b121"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b121"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b122"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b122"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b123"
+      ],
+      "params": {
+        "operand": 5
+      }
+    },
+    {
+      "inputs": [
+        "b124"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b125"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b125"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b126"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b126"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b127"
+      ],
+      "params": {
+        "operand": 6
+      }
+    },
+    {
+      "inputs": [
+        "b128"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b129"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b129"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b130"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b130"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b131"
+      ],
+      "params": {
+        "operand": 7
+      }
+    },
+    {
+      "inputs": [
+        "b132"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b133"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b133"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b134"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b134"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b135"
+      ],
+      "params": {
+        "operand": 8
+      }
+    },
+    {
+      "inputs": [
+        "b103",
+        "b107",
+        "b111",
+        "b115",
+        "b119",
+        "b123",
+        "b127",
+        "b131",
+        "b135"
+      ],
+      "op": "union_all",
+      "outputs": [
+        "b136"
+      ],
+      "params": {}
+    }
+  ],
+  "case": "4313-join-3x3-grid-of-overlapping-rings",
+  "expected": {
+    "body_count": 1,
+    "method": "each ring pi (20^2-10^2) 5; the 12 edge-neighbour pairs overlap in a lens of two r20 circles 38 apart, 2 R^2 acos(d/2R) - (d/2) sqrt(4R^2-d^2), all of it in both rings' material (its points are at least 19 from both centres); diagonal pairs are 53.7 apart and don't meet. V = 9 * 1500 pi - 12 * 5 * lens. One shell",
+    "shells": 1,
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#4313"
+    ],
+    "volume_mm3": 41407.1957,
+    "what": "nine identical rings (r 10..20, 5 thick) in a 3x3 grid 38 apart, each overlapping its edge neighbours, joined in one combine: ~90 s then 'boolean Union: no result' (one pair already failed)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 126,
+      "faces": 44,
+      "vertices": 84
+    }
+  },
+  "records": "4313-join-3x3-grid-of-overlapping-rings.bodies.json.gz",
+  "result": [
+    {
+      "body": "Ring00",
+      "made": "b136"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 23520.88836623801,
+      "body_count": 1,
+      "edges": 99,
+      "faces": 35,
+      "vertices": 66,
+      "volume_mm3": 41407.195655169504
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#4313"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "copy",
+    "copy",
+    "tagged",
+    "union_all"
+  ],
+  "ungraded": [],
+  "what": "nine identical rings (r 10..20, 5 thick) in a 3x3 grid 38 apart, each overlapping its edge neighbours, joined in one combine: ~90 s then 'boolean Union: no result' (one pair already failed)",
+  "why_not": []
+}

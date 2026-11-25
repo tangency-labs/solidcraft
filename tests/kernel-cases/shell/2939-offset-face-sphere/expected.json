@@ -1,0 +1,17 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2939"
+ ],
+ "what": "Offset Face on a sphere's round face",
+ "source": "analytic",
+ "method": "a sphere r10 whose face moves out 2 mm is a sphere r12: V=4/3*pi*12^3, area 4*pi*144, centroid at the origin, one face",
+ "body_count": 1,
+ "volume_mm3": 7238.229473870882,
+ "area_mm2": 1809.5573684677208,
+ "faces": 1,
+ "center_of_mass": [
+  0,
+  0,
+  0
+ ]
+}

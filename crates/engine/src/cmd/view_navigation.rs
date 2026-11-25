@@ -1,15 +1,47 @@
-//! Stateless camera commands shared by the navigation cube and programmatic callers.
+//! Stateless camera commands shared by the view navigators and programmatic callers.
 use serde_json::{Value, json};
-use solidcraft_render::{Camera, StandardView};
+use solidcraft_geom::prelude::*;
+use solidcraft_viewport::{Camera, StandardView};
 
 use super::CommandSpec;
 use crate::params::{bad, num, req_vec2, req_vec3, vec3};
-use crate::schema::view_navigation::{RenderBrowser, RenderFocus};
+use crate::schema::view_navigation::{
+    AmbientOcclusionParams, AmbientOcclusionResult, BrowserTreeParams, BrowserTreeResult, CameraReply, DisplayToggleParams, DisplayToggleResult,
+    FitHomeParams, FitHomeResult, GraphicsPreset, GraphicsPresetParams, GraphicsPresetResult, HistoryDock, HistoryLayoutParams, HistoryLayoutResult,
+    LayoutMode, LayoutParams, LayoutResult, NavigateParams, NavigateResult, NavigationBarParams, NavigationBarResult, NavigationTool,
+    NavigatorParams, NormalToParams, PerspectiveParams, PerspectiveResult, PresetQuality, RenderBrowser, RenderFocus, RenderLive,
+    RenderPanelVisibilityParams, RenderPanelVisibilityResult, RenderSelect, RenderStageParams, RenderStageResult, RibbonTabsOnly,
+    RibbonTabsOnlyParams, StandardViewParams, TabStep, TabStepParams, ToolParams, ToolResult, ToolbarResetAll, ToolbarResetAllParams, VisualStyle,
+    VisualStyleParams, VisualStyleResult, ZoomTool,
+};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Sel, Session};
 
+const ZOOM_TOOL_CONTRACT: TypedContract<ZoomTool> = TypedContract::new();
+const DISPLAY_TOGGLE_CONTRACT: TypedContract<DisplayToggleParams> = TypedContract::new();
+const NAVIGATION_BAR_CONTRACT: TypedContract<NavigationBarParams> = TypedContract::new();
 const FOCUS_CONTRACT: TypedContract<RenderFocus> = TypedContract::new();
+const NAVIGATOR_CONTRACT: TypedContract<NavigatorParams> = TypedContract::new();
+const RENDER_LIVE_CONTRACT: TypedContract<RenderLive> = TypedContract::new();
+const RENDER_PANEL_VISIBILITY_CONTRACT: TypedContract<RenderPanelVisibilityParams> = TypedContract::new();
 const BROWSER_CONTRACT: TypedContract<RenderBrowserRequest> = TypedContract::new();
+const TAB_STEP_CONTRACT: TypedContract<TabStepParams> = TypedContract::new();
+const STANDARD_VIEW_CONTRACT: TypedContract<StandardViewParams> = TypedContract::new();
+const NORMAL_TO_CONTRACT: TypedContract<NormalToParams> = TypedContract::new();
+const RIBBON_TABS_ONLY_CONTRACT: TypedContract<RibbonTabsOnlyParams> = TypedContract::new();
+const TOOLBAR_RESET_ALL_CONTRACT: TypedContract<ToolbarResetAllParams> = TypedContract::new();
+const BROWSER_TREE_CONTRACT: TypedContract<BrowserTreeParams> = TypedContract::new();
+const LAYOUT_CONTRACT: TypedContract<LayoutParams> = TypedContract::new();
+const HISTORY_LAYOUT_CONTRACT: TypedContract<HistoryLayoutParams> = TypedContract::new();
+const GRAPHICS_PRESET_CONTRACT: TypedContract<GraphicsPresetParams> = TypedContract::new();
+const AMBIENT_OCCLUSION_CONTRACT: TypedContract<AmbientOcclusionParams> = TypedContract::new();
+const ISOLATE_OTHERS_CONTRACT: TypedContract<crate::schema::view_navigation::IsolateOthersParams> = TypedContract::new();
+const PERSPECTIVE_CONTRACT: TypedContract<PerspectiveParams> = TypedContract::new();
+const NAVIGATE_CONTRACT: TypedContract<NavigateParams> = TypedContract::new();
+const TOOL_CONTRACT: TypedContract<ToolParams> = TypedContract::new();
+const VISUAL_STYLE_CONTRACT: TypedContract<VisualStyleParams> = TypedContract::new();
+const ORIGIN_AXES_ACROSS_VIEW_CONTRACT: TypedContract<crate::schema::view_navigation::OriginAxesAcrossViewParams> = TypedContract::new();
+const SCALE_BAR_CONTRACT: TypedContract<crate::schema::view_navigation::ScaleBarParams> = TypedContract::new();
 
 // Both existing request forms share the Browser command and its published schema.
 #[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
@@ -30,74 +62,166 @@ struct RenderBrowserControls {
     query: Option<String>,
 }
 
+const RENDER_SELECT: TypedContract<RenderSelect> = TypedContract::new();
+const STATUS_ITEMS_CONTRACT: TypedContract<crate::schema::view_navigation::StatusItemsParams> = TypedContract::new();
+
 pub static COMMANDS: &[CommandSpec] = &[
-CommandSpec::new("view.fit", "Fit", fit)
-    .icon("fit").key("F6").noundo().doc_only().params("no parameters → frame the active canvas or selection; display only"),
-CommandSpec::new("view.home", "Home view", home)
-    .icon("home").noundo().doc_only().params("no parameters → home orientation framing the active canvas; display only"),
-CommandSpec::new("view.tool", "Navigation tool", tool)
-    .icon("orbit").noundo().doc_only().params("tool: orbit|pan|zoom|none → tool; latch a camera tool, none releases it"),
-CommandSpec::new("view.spin", "Continuous orbit", spin)
-    .icon("spin").noundo().doc_only().params("on?: bool (omitted: toggle) → on?; continuous orbit until the next click or key"),
-CommandSpec::new("view.visual_style", "Visual style", visual_style)
-    .icon("style").noundo().doc_only().params("style: shaded_with_edges|shaded|wireframe|shaded_with_hidden_edges → style, index (0..3 in that order)"),
-CommandSpec::new("view.grid", "Grid", grid)
-    .icon("style").noundo().doc_only().params("on?: bool (omitted: toggle) → on?; show the viewport grid"),
-CommandSpec::new("view.ground_shadow", "Ground shadow", ground_shadow)
-    .icon("style").noundo().doc_only().params("on?: bool (omitted: toggle) → on?; show the ground shadow"),
-CommandSpec::new("view.navigation_bar", "Navigation bar", navigation_bar)
-    .icon("pan").noundo().doc_only().params("visible?: bool (omitted: toggle) → visible?; show the navigation bar (window setting)"),
+CommandSpec::new("view.status_details", "Viewport Status Details", crate::checked!("view.status_details", status_details))
+    .icon("list").noundo().doc_only()
+    .contract(&STATUS_ITEMS_CONTRACT).output(output_schema_for::<crate::status_details::StatusDetails>)
+    .params("no parameters → current effect settings/detail capabilities and retained per-seam Continuity diagnostics, with current geometry validity; read-only, no evaluation"),
+CommandSpec::new("view.status_items", "Viewport Status Items", crate::checked!("view.status_items", status_items))
+    .icon("list").noundo().doc_only()
+    .contract(&STATUS_ITEMS_CONTRACT).output(output_schema_for::<crate::status_items::StatusItems>)
+    .params("no parameters → {items}; persistent viewport effects, oldest slot first, with structured settings and executable clear requests; read-only, no model evaluation"),
+CommandSpec::new("view.browser", "Browser Tree", crate::checked!("view.browser", browser_tree))
+    .icon("list").noundo().doc_only()
+    .contract(&BROWSER_TREE_CONTRACT).output(output_schema_for::<BrowserTreeResult>)
+    .params("visible?: bool (omitted: toggle) → visible?; show or hide the Browser tree panel, the design's tree of components, bodies and sketches (window setting)"),
+CommandSpec::new("view.fit", "Fit", crate::checked!("view.fit", fit))
+    // F6 also fits: the window handles it itself (`keymap::RESERVED`), so End is the key that can change.
+    .icon("fit").key("End").noundo().doc_only().any_part()
+    .contract(&FIT_HOME_CONTRACT).output(output_schema_for::<FitHomeResult>)
+    .params("no parameters → frame the active canvas or selection (with a drawing open, its sheet); display only"),
+CommandSpec::new("view.home", "Home View", crate::checked!("view.home", home))
+    .icon("home").key("Home").noundo().doc_only().any_part()
+    .contract(&FIT_HOME_CONTRACT).output(output_schema_for::<FitHomeResult>)
+    .params("no parameters → home orientation framing the active canvas (with a drawing open, its whole sheet); display only"),
+CommandSpec::new("view.tool", "Navigation Tool", crate::checked!("view.tool", tool))
+    .icon("orbit").noundo().doc_only().any_part()
+    .contract(&TOOL_CONTRACT).output(output_schema_for::<ToolResult>)
+    .params("tool: orbit|pan|zoom|none → tool; latch a camera tool, none releases it (a drawing's sheet pans and zooms)"),
+CommandSpec::new("view.tool.zoom", "Drag to Zoom", crate::checked!("view.tool.zoom", zoom_tool))
+    .icon("zoom").noundo().doc_only().any_part()
+    .contract(&ZOOM_TOOL_CONTRACT).output(output_schema_for::<ZoomTool>)
+    .params("on?: bool (omitted: toggle) → on?; latch the Zoom tool for left-button drags. A shortcut assigned in the UI zooms while held"),
+CommandSpec::new("view.pan_mode", "Pan Mode", crate::checked!("view.pan_mode", pan_mode))
+    .icon("pan").noundo().doc_only()
+    .contract(&DISPLAY_TOGGLE_CONTRACT).output(output_schema_for::<DisplayToggleResult>)
+    .params("on?: bool (omitted: toggle) → on?; moving the pointer over the view pans it, no button held, until turned off, another mode or Esc"),
+CommandSpec::new("view.orbit_mode", "Orbit Mode", crate::checked!("view.orbit_mode", orbit_mode))
+    .icon("orbit").noundo().doc_only()
+    .contract(&DISPLAY_TOGGLE_CONTRACT).output(output_schema_for::<DisplayToggleResult>)
+    .params("on?: bool (omitted: toggle) → on?; moving the pointer over the view orbits it, no button held, until turned off, another mode or Esc"),
+CommandSpec::new("view.zoom_mode", "Zoom Mode", crate::checked!("view.zoom_mode", zoom_mode))
+    .icon("zoom").noundo().doc_only()
+    .contract(&DISPLAY_TOGGLE_CONTRACT).output(output_schema_for::<DisplayToggleResult>)
+    .params("on?: bool (omitted: toggle) → on?; moving the pointer up over the view zooms in and down zooms out, no button held, until turned off, another mode or Esc"),
+CommandSpec::new("view.spin", "Continuous Orbit", crate::checked!("view.spin", spin))
+    .icon("spin").noundo().doc_only()
+    .contract(&DISPLAY_TOGGLE_CONTRACT).output(output_schema_for::<DisplayToggleResult>)
+    .params("on?: bool (omitted: toggle) → on?; continuous orbit until the next click or key"),
+CommandSpec::new("view.visual_style", "Visual Style", crate::checked!("view.visual_style", visual_style))
+    .icon("style").noundo().doc_only()
+    .contract(&VISUAL_STYLE_CONTRACT).output(output_schema_for::<VisualStyleResult>)
+    .params("style: shaded_with_edges|shaded|wireframe|shaded_with_hidden_edges → style, index (0..3 in that order)"),
+CommandSpec::new("view.grid", "Grid", crate::checked!("view.grid", grid))
+    .icon("style").noundo().doc_only()
+    .contract(&DISPLAY_TOGGLE_CONTRACT).output(output_schema_for::<DisplayToggleResult>)
+    .params("on?: bool (omitted: toggle) → on?; show the viewport grid"),
+CommandSpec::new("view.ground_shadow", "Ground Shadow", crate::checked!("view.ground_shadow", ground_shadow))
+    .icon("style").noundo().doc_only()
+    .contract(&DISPLAY_TOGGLE_CONTRACT).output(output_schema_for::<DisplayToggleResult>)
+    .params("on?: bool (omitted: toggle) → on?; show the ground shadow"),
+CommandSpec::new("view.navigation_bar", "Navigation Bar", crate::checked!("view.navigation_bar", navigation_bar))
+    .icon("pan").noundo().doc_only()
+    .contract(&NAVIGATION_BAR_CONTRACT).output(output_schema_for::<NavigationBarResult>)
+    .params("visible?: bool (omitted: toggle) → visible?; show the navigation bar (window setting)"),
+CommandSpec::new("view.navigator", "Custom View Navigator", crate::checked!("view.navigator", navigator))
+    .icon("nav_settings").noundo().doc_only()
+    .contract(&NAVIGATOR_CONTRACT).output(output_schema_for::<NavigatorParams>)
+    .params("style?: axes|custom; body?: body name|null; texture?: themed|modeled; arrows?, home?: bool → the navigator as set; the app's view navigator, never saved in the design; never opens a dialog (a toolbar start opens the Custom View Navigator panel)"),
+CommandSpec::new("view.ribbon_tabs_only", "Ribbon Tabs Only", crate::checked!("view.ribbon_tabs_only", ribbon_tabs_only))
+    .icon("chevron").noundo().doc_only().contract(&RIBBON_TABS_ONLY_CONTRACT).output(output_schema_for::<RibbonTabsOnly>)
+    .params("on?: bool (omitted: switch) → on?; fold the ribbon to its tab row, a tab click shows its panels over the view (window setting)"),
+CommandSpec::new("view.parts_library", "Parts library", parts_library)
+    .icon("folder").noundo().doc_only().params("visible?: bool (omitted: toggle) → visible?; show the parts library card (window setting)"),
+CommandSpec::new("view.toolbar_reset_all", "Reset All Toolbar Tabs", crate::checked!("view.toolbar_reset_all", toolbar_reset_all))
+    .icon("restore").noundo().doc_only().contract(&TOOLBAR_RESET_ALL_CONTRACT).output(output_schema_for::<ToolbarResetAll>)
+    .params("{} → {}; put the buttons of every toolbar tab back to their defaults (window setting; hidden tabs stay hidden); never asks"),
 CommandSpec::new("view.render_focus", "Render Focus View", crate::checked!("view.render_focus", render_focus))
     .icon("render_scene").noundo().doc_only()
     .contract(&FOCUS_CONTRACT).output(output_schema_for::<RenderFocus>)
     .params("on: bool → {on}; per-window UI state, never saved in the design; headless validation only"),
+CommandSpec::new("view.render_frame", "Render Frame Guides", crate::checked!("view.render_frame", render_frame))
+    .icon("camera").noundo().doc_only()
+    .contract(&RENDER_FRAME_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::view_navigation::RenderFrame>)
+    .params("aspect?: 16:9|3:2|1:1|4:5|9:16|custom; thirds?, safe_area?, centre_mark?: bool. At least one field. Validated transient overlay request, echoed headlessly; never saves guides, changes output size, evaluates geometry or opens a dialog"),
 CommandSpec::new("view.render_browser", "Render Browser", crate::checked!("view.render_browser", render_browser))
     .icon("list").noundo().doc_only()
     .contract(&BROWSER_CONTRACT).output(output_schema_for::<RenderBrowserRequest>)
     .params("open: bool; or by_look?: bool; search?: bool; query?: string (up to 1024 bytes) → validated transient Browser controls; never edits the design or opens a dialog"),
-CommandSpec::new("view.render_select", "Render selection", render_select)
+CommandSpec::new("view.render_inspector", "Render Inspector", crate::checked!("view.render_inspector", render_inspector))
+    .icon("inspect").noundo().doc_only().contract(&RENDER_PANEL_VISIBILITY_CONTRACT).output(output_schema_for::<RenderPanelVisibilityResult>)
+    .params("visible: bool → {visible}; per-document Inspector visibility; never edits the design or opens a dialog"),
+CommandSpec::new("view.render_live", "Pause or Resume Live Render", crate::checked!("view.render_live", render_live))
+    .icon("render_image").noundo().doc_only()
+    .contract(&RENDER_LIVE_CONTRACT).output(output_schema_for::<RenderLive>)
+    .params("paused: bool → {paused}; pause or resume this document's live Render preview; headless validation only, never saves settings or changes a final image"),
+CommandSpec::new("view.render_select", "Render selection", crate::checked!("view.render_select", render_select))
+    .contract(&RENDER_SELECT).output(output_schema_for::<RenderSelect>)
     .icon("select").noundo().doc_only()
-    .params("kind: nothing|environment|light|shot|output; id?: bounded nonempty string for light/shot → validated transient Browser focus; never edits the design or opens a dialog"),
-CommandSpec::new("view.render_stage", "Render Stage", render_stage)
+    .params("kind: nothing|environment|lighting|light|shot|output|wear|sampling|effects|check; id?: bounded nonempty string for light/shot → validated transient Browser focus; never edits the design or opens a dialog"),
+CommandSpec::new("view.render_stage", "Render Stage", crate::checked!("view.render_stage", render_stage))
     .icon("render_scene").noundo().doc_only()
+    .contract(&RENDER_STAGE_CONTRACT).output(output_schema_for::<RenderStageResult>)
     .params("stage: look|light|frame|output → {stage}; per-document UI state, never edits or evaluates the design; headless validation only"),
-CommandSpec::new("view.shots_strip", "Shots Strip", shots_strip)
-    .at("RENDER CAMERA", "SHOTS").icon("camera").noundo().doc_only()
+CommandSpec::new("view.shots_strip", "Shots Strip", crate::checked!("view.shots_strip", shots_strip))
+    .icon("camera").noundo().doc_only().contract(&RENDER_PANEL_VISIBILITY_CONTRACT).output(output_schema_for::<RenderPanelVisibilityResult>)
     .params("visible: bool → {visible}; Render Shots strip UI preference. Headless echo only, no document edits or undo"),
 CommandSpec::new("view.render_dock", "Move Render Dock", crate::checked!("view.render_dock", render_dock))
     .at("RENDER", "SCENE").icon("settings").noundo().doc_only()
     .contract(&RENDER_DOCK_CONTRACT)
     .output(crate::schema::output_schema_for::<crate::schema::view_navigation::RenderDock>)
     .params("panel: inspector|browser; side: left|right → {panel, side}; Render dock UI preference; headless echo only, no document edits or undo"),
-CommandSpec::new("view.layout", "Workspace layout", layout)
-    .icon("settings").noundo().doc_only().params("mode: floating|compact → validated workspace layout; display only, never opens a dialog"),
-CommandSpec::new("view.history_layout", "History layout", history_layout)
-    .icon("settings").noundo().doc_only().params("width?: 1..1000000; dock?: bottom|left|under_browser; collapsed?: bool → validated layout request; display only, never opens a dialog"),
-CommandSpec::new("view.graphics_preset", "Graphics Preset", graphics_preset)
-    .icon("settings").noundo().doc_only().params("preset: performance|quality → preset, enabled, display_quality, supersampling, supersampling_adaptive; Quality: AO, Fine, adaptive 2x SSAA; Performance: no AO, Normal, no SSAA"),
-CommandSpec::new("view.ambient_occlusion", "Ambient Occlusion", ambient_occlusion)
-    .icon("settings").noundo().doc_only().params("enabled: bool → enabled; apply soft contact shading in the GPU viewport"),
-CommandSpec::new("view.perspective", "Perspective view", perspective)
-    .icon("perspective").noundo().doc_only().params("enabled: bool → enabled; draw the view in perspective, or orthographic when false; a sketch being edited is always shown orthographic"),
-CommandSpec::new("view.navigate", "Navigate View", navigate)
+CommandSpec::new("view.layout", "Workspace layout", crate::checked!("view.layout", layout))
+    .icon("settings").noundo().doc_only().contract(&LAYOUT_CONTRACT).output(output_schema_for::<LayoutResult>).params("mode: floating|compact → validated workspace layout; display only, never opens a dialog"),
+CommandSpec::new("view.history_layout", "History layout", crate::checked!("view.history_layout", history_layout))
+    .icon("settings").noundo().doc_only().contract(&HISTORY_LAYOUT_CONTRACT).output(output_schema_for::<HistoryLayoutResult>).params("width?: 1..1000000; dock?: bottom|left|under_browser|browser (browser: the history in the browser, no timeline); collapsed?: bool → validated layout request; display only, never opens a dialog"),
+CommandSpec::new("view.graphics_preset", "Graphics Preset", crate::checked!("view.graphics_preset", graphics_preset))
+    .icon("settings").noundo().doc_only().contract(&GRAPHICS_PRESET_CONTRACT).output(output_schema_for::<GraphicsPresetResult>).params("preset: performance|quality → preset, enabled, display_quality, supersampling, supersampling_adaptive; Quality: AO, Fine, adaptive 2x SSAA; Performance: no AO, Normal, no SSAA"),
+CommandSpec::new("view.ambient_occlusion", "Ambient Occlusion", crate::checked!("view.ambient_occlusion", ambient_occlusion))
+    .icon("settings").noundo().doc_only().contract(&AMBIENT_OCCLUSION_CONTRACT).output(output_schema_for::<AmbientOcclusionResult>).params("enabled: bool → enabled; apply soft contact shading in the GPU viewport"),
+CommandSpec::new("view.isolate_others", "Show Isolated-Away Parts", crate::checked!("view.isolate_others", isolate_others))
+    .icon("isolate").noundo().doc_only().contract(&ISOLATE_OTHERS_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::IsolateOthersResult>).params("show?: hidden|transparent|wireframe, pick?: bool (at least one) → what was set; how the view shows the parts an Isolate hid: not at all, see-through, or as their edges, and whether a click on them selects them (pick: true) or goes through them; display only, never opens a dialog"),
+CommandSpec::new("view.origin_axes_across_view", "Origin Axes Across the Whole View", crate::checked!("view.origin_axes_across_view", origin_axes_across_view))
+    .icon("origin").noundo().doc_only().contract(&ORIGIN_AXES_ACROSS_VIEW_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::OriginAxesAcrossViewResult>).params("enabled: bool → enabled; extend the origin axes across the view, or keep the short axes when false; display only, never opens a dialog"),
+CommandSpec::new("view.perspective", "Perspective view", crate::checked!("view.perspective", perspective))
+    .icon("perspective").noundo().doc_only().contract(&PERSPECTIVE_CONTRACT).output(output_schema_for::<PerspectiveResult>).params("enabled: bool → enabled; draw the view in perspective, or orthographic when false; a sketch being edited is always shown orthographic"),
+CommandSpec::new("view.scale_bar", "Scale Bar", crate::checked!("view.scale_bar", scale_bar))
+    .icon("measure").noundo().doc_only().contract(&SCALE_BAR_CONTRACT).output(output_schema_for::<crate::schema::view_navigation::ScaleBarResult>).params("enabled: bool → enabled; show a bar in the view's bottom left corner and the round length it stands for in the design's units (at the view's centre in perspective), or hide it when false; display only, never opens a dialog"),
+CommandSpec::new("view.angle_readout", "View Angles", crate::checked!("view.angle_readout", angle_readout))
+    .icon("camera").noundo().doc_only().contract(&ANGLE_READOUT_CONTRACT).output(crate::schema::output_schema_for::<crate::schema::view_navigation::AngleReadoutResult>).params("enabled: bool → enabled; show the view's pitch, yaw and roll (degrees, as view.apply's camera in radians) and Ortho or Persp under the orientation gizmo; display only, never opens a dialog"),
+CommandSpec::new("view.navigate", "Navigate View", crate::checked!("view.navigate", navigate))
     .icon("orbit")
     .noundo()
     .doc_only()
-    .params("camera: Camera; direction?: [x,y,z] in the camera's up-axis frame; or action: left|right|up|down|clockwise|counterclockwise|home|fit, degrees?: 0..180 (how far left|right|up|down turn; default 90); or motion: pan|orbit|zoom, delta?: [dx,dy] (pixels, each ±10000), free_orbit?: bool (orbit through poles, default false), viewport?: [width,height] (1..1000000, required for pan or pivot), pivot?: [x,y,z], factor?: 0.05..20 (required for zoom), anchor?: [x,y,z] → camera, fit, continuous?"),
-CommandSpec::new("view.normal_to", "Normal to Selection", normal_to)
+    .contract(&NAVIGATE_CONTRACT)
+    .output(output_schema_for::<NavigateResult>)
+    .params("camera: Camera; direction?: [x,y,z] in the camera's up-axis frame; or action: left|right|up|down|clockwise|counterclockwise|turn_around|home|fit, degrees?: 0..180 (how far left|right|up|down turn; default 90), fit?: bool (frame the whole model from the new direction as well, as home does; default false); or motion: pan|orbit|zoom, delta?: [dx,dy] (pixels, each ±10000), free_orbit?: bool (orbit through poles, default false), viewport?: [width,height] (1..1000000, required for pan or pivot), pivot?: [x,y,z], factor?: 0.05..20 (required for zoom), anchor?: [x,y,z] → camera, fit, continuous?"),
+CommandSpec::new("view.normal_to", "Normal to Selection", crate::checked!("view.normal_to", normal_to))
         .icon("camera")
         .noundo()
         .enabled(|s| normal_target(s).map(|_| ()).ok_or_else(|| "select a planar face or plane".into()))
+        .contract(&NORMAL_TO_CONTRACT)
+        .output(output_schema_for::<CameraReply>)
         .params("camera?: Camera (default: current session camera or home view) → camera; Look At the first selected planar face or plane, centered on the picked point; repeat while aligned to flip the side; preserves scale and projection"),
-CommandSpec::new("view.front", "Front View", front).icon("camera").noundo().key("Ctrl+1").params(STANDARD_PARAMS),
-CommandSpec::new("view.back", "Back View", back).icon("camera").noundo().key("Ctrl+2").params(STANDARD_PARAMS),
-CommandSpec::new("view.left", "Left View", left).icon("camera").noundo().key("Ctrl+3").params(STANDARD_PARAMS),
-CommandSpec::new("view.right", "Right View", right).icon("camera").noundo().key("Ctrl+4").params(STANDARD_PARAMS),
-CommandSpec::new("view.top", "Top View", top).icon("camera").noundo().key("Ctrl+5").params(STANDARD_PARAMS),
-CommandSpec::new("view.bottom", "Bottom View", bottom).icon("camera").noundo().key("Ctrl+6").params(STANDARD_PARAMS),
-CommandSpec::new("view.isometric", "Isometric View", isometric).icon("camera").noundo().key("Ctrl+7").params(STANDARD_PARAMS)];
+CommandSpec::new("view.front", "Front View", crate::checked!("view.front", front)).icon("camera").noundo().key("Ctrl+1").contract(&STANDARD_VIEW_CONTRACT).output(output_schema_for::<CameraReply>).params(STANDARD_PARAMS),
+CommandSpec::new("view.back", "Back View", crate::checked!("view.back", back)).icon("camera").noundo().key("Ctrl+2").contract(&STANDARD_VIEW_CONTRACT).output(output_schema_for::<CameraReply>).params(STANDARD_PARAMS),
+CommandSpec::new("view.left", "Left View", crate::checked!("view.left", left)).icon("camera").noundo().key("Ctrl+3").contract(&STANDARD_VIEW_CONTRACT).output(output_schema_for::<CameraReply>).params(STANDARD_PARAMS),
+CommandSpec::new("view.right", "Right View", crate::checked!("view.right", right)).icon("camera").noundo().key("Ctrl+4").contract(&STANDARD_VIEW_CONTRACT).output(output_schema_for::<CameraReply>).params(STANDARD_PARAMS),
+CommandSpec::new("view.top", "Top View", crate::checked!("view.top", top)).icon("camera").noundo().key("Ctrl+5").contract(&STANDARD_VIEW_CONTRACT).output(output_schema_for::<CameraReply>).params(STANDARD_PARAMS),
+CommandSpec::new("view.bottom", "Bottom View", crate::checked!("view.bottom", bottom)).icon("camera").noundo().key("Ctrl+6").contract(&STANDARD_VIEW_CONTRACT).output(output_schema_for::<CameraReply>).params(STANDARD_PARAMS),
+CommandSpec::new("view.isometric", "Isometric View", crate::checked!("view.isometric", isometric)).icon("camera").noundo().key("Ctrl+7").contract(&STANDARD_VIEW_CONTRACT).output(output_schema_for::<CameraReply>).params(STANDARD_PARAMS),
+CommandSpec::new("view.next_tab", "Next Tab", crate::checked!("view.next_tab", next_tab))
+    .icon("chevron_right").noundo().doc_only().key("Ctrl+Tab").contract(&TAB_STEP_CONTRACT).output(output_schema_for::<TabStep>)
+    .params("no parameters → step: 1; the window shows the design tab to the right of the shown one (after the last, the first); never edits the design or opens a dialog"),
+CommandSpec::new("view.previous_tab", "Previous Tab", crate::checked!("view.previous_tab", previous_tab))
+    .icon("chevron_right").noundo().doc_only().key("Ctrl+Shift+Tab").contract(&TAB_STEP_CONTRACT).output(output_schema_for::<TabStep>)
+    .params("no parameters → step: -1; the window shows the design tab to the left of the shown one (before the first, the last); never edits the design or opens a dialog")];
 
-const STANDARD_PARAMS: &str = "camera?: Camera (default: current session camera or home view) → camera; turns to that standard view as the view cube does, keeping target, distance and projection";
+const STANDARD_PARAMS: &str = "camera?: Camera (default: current session camera or home view) → camera; turns to that standard view as the axes navigator does, keeping target, distance and projection";
 
 /// The standard view a `view.front` … `view.isometric` command turns to.
 pub fn standard_view(id: &str) -> Option<StandardView> {
@@ -135,54 +259,95 @@ fn isometric(s: &mut Session, p: &Value) -> Result<Value> {
     turn_to(s, p, "view.isometric")
 }
 
-fn turn_to(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
-    let view = standard_view(cmd).ok_or_else(|| bad(cmd, "not a standard view"))?;
-    let mut cam: Camera = match p.get("camera") {
-        Some(value) => serde_json::from_value(value.clone()).map_err(|_| bad(cmd, "invalid camera"))?,
-        None => s.camera.unwrap_or_else(|| crate::view::home_camera(s)),
-    };
-    if !cam.is_valid() || !cam.fov.is_finite() || !(0.0..std::f64::consts::PI).contains(&cam.fov) {
-        return Err(bad(cmd, "invalid camera"));
-    }
-    cam.set_view(view);
-    s.camera = Some(cam);
-    Ok(json!({"camera": cam}))
+/// A view command's `camera` as its handler reads it: a [`Camera`] with finite fields, a positive
+/// distance and a field of view in [0, π). None for anything else, which the handlers refuse as
+/// "invalid camera" (and `CameraParam`, its contract type, too).
+pub(crate) fn camera_form(v: &Value) -> Option<Camera> {
+    serde_json::from_value::<Camera>(v.clone()).ok().filter(usable_camera)
 }
 
-fn normal_target(s: &Session) -> Option<(solidcraft_geom::Vec3, solidcraft_geom::Vec3)> {
-    let state = s.world_state();
+fn usable_camera(cam: &Camera) -> bool {
+    cam.is_valid() && cam.fov.is_finite() && (0.0..std::f64::consts::PI).contains(&cam.fov)
+}
+
+/// The camera a view command turns: the one given, else the session's, else the home view.
+fn given_camera(s: &Session, p: &Value) -> Result<Option<Camera>> {
+    Ok(match p.get("camera") {
+        Some(value) => camera_form(value),
+        None => Some(match s.camera {
+            Some(c) => c,
+            None => crate::view::home_camera(s)?,
+        })
+        .filter(usable_camera),
+    })
+}
+
+/// The reply of a view command that turned the camera to `camera`.
+fn camera_reply(cmd: &str, camera: Camera) -> Result<Value> {
+    serde_json::to_value(CameraReply { camera, param_warnings: Vec::new() }).map_err(|e| bad(cmd, e.to_string()))
+}
+
+fn turn_to(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
+    let view = standard_view(cmd).ok_or_else(|| bad(cmd, "not a standard view"))?;
+    let mut cam = given_camera(s, p)?.ok_or_else(|| bad(cmd, "invalid camera"))?;
+    cam.set_view(view);
+    s.camera = Some(cam);
+    camera_reply(cmd, cam)
+}
+
+fn normal_target(s: &Session) -> Option<(solidcore_record::Vec3, solidcore_record::Vec3)> {
+    let state = s.world_state().ok()?;
     s.selection.iter().find_map(|selection| match selection {
         Sel::Face { body, index, point } if point.is_finite() => {
             let plane = state.body(body)?.body.planar_face(*index)?;
             Some((*point, plane.normal()))
         }
-        Sel::Plane { name } => solidcraft_geom::Plane::named(name).map(|plane| (plane.origin, plane.normal())),
+        Sel::Plane { name } => {
+            // The design's world planes keep the precedence they always had: `XY` looks at the
+            // design's XY plane before a construction plane of the same name answers (an older
+            // design can hold one named `XY`) (#7313 review). A component origin key follows
+            // its placement, with a construction plane of the same name still winning over it.
+            let feature = || crate::view::construction_planes(s).into_iter().find(|(_, n, _)| n == name).map(|(_, _, plane)| plane);
+            let plane = if crate::origins::datum(name).is_some() {
+                feature().or_else(|| s.origin_plane(name))
+            } else {
+                solidcore_record::Plane::named(name).or_else(feature)
+            };
+            plane.map(|plane| (plane.origin, plane.normal()))
+        }
         _ => None,
     })
+}
+
+fn status_details(s: &mut Session, p: &Value) -> Result<Value> {
+    let p = if p.is_null() { json!({}) } else { p.clone() };
+    if !p.as_object().is_some_and(|object| object.is_empty()) {
+        return Err(bad("view.status_details", "parameters must be an empty object"));
+    }
+    let _: crate::schema::view_navigation::StatusItemsParams = serde_json::from_value(p).map_err(|e| bad("view.status_details", e.to_string()))?;
+    let items =
+        s.status_items().into_iter().map(|source| crate::status_details::StatusDetailItem { has_details: source.has_details(), source }).collect();
+    serde_json::to_value(crate::status_details::StatusDetails {
+        document_id: s.document_id.clone(),
+        items,
+        continuity: s.continuity_details(),
+        param_warnings: Vec::new(),
+    })
+    .map_err(|e| bad("view.status_details", e.to_string()))
 }
 
 fn normal_to(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "view.normal_to";
     let (point, normal) = normal_target(s).ok_or_else(|| bad(cmd, "select a planar face or plane"))?;
-    let cam: Camera = match p.get("camera") {
-        Some(value) => serde_json::from_value(value.clone()).map_err(|_| bad(cmd, "invalid camera"))?,
-        None => s.camera.unwrap_or_else(|| crate::view::home_camera(s)),
-    };
-    if !cam.is_valid()
-        || !cam.fov.is_finite()
-        || !(0.0..std::f64::consts::PI).contains(&cam.fov)
-        || cam.yaw.abs() > 1e6
-        || cam.roll.abs() > 1e6
-        || cam.pitch.abs() > std::f64::consts::FRAC_PI_2
-    {
-        return Err(bad(cmd, "invalid camera"));
-    }
+    let cam = given_camera(s, p)?
+        .filter(|cam| cam.yaw.abs() <= 1e6 && cam.roll.abs() <= 1e6 && cam.pitch.abs() <= std::f64::consts::FRAC_PI_2)
+        .ok_or_else(|| bad(cmd, "invalid camera"))?;
     // Promoted from viewport::look_at_selection: asking again from the normal side flips it.
     let direction = if cam.back().dot(normal) > 0.999 { -normal } else { normal };
     let mut to = cam.looking_from(direction);
     to.target = point;
     s.camera = Some(to);
-    Ok(json!({"camera": to}))
+    camera_reply(cmd, to)
 }
 
 // UI-owned settings follow the layout command: validate here, apply in the UI adapter.
@@ -193,6 +358,8 @@ fn view_params(p: &Value, cmd: &str, allowed: &[&str]) -> Result<()> {
     }
     Ok(())
 }
+
+const FIT_HOME_CONTRACT: TypedContract<FitHomeParams> = TypedContract::new();
 
 fn fit(_s: &mut Session, p: &Value) -> Result<Value> {
     view_params(p, "view.fit", &[])?;
@@ -207,26 +374,27 @@ fn home(_s: &mut Session, p: &Value) -> Result<Value> {
 fn tool(_s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "view.tool";
     view_params(p, cmd, &["tool"])?;
-    let tool = p
-        .get("tool")
-        .and_then(Value::as_str)
-        .filter(|v| matches!(*v, "orbit" | "pan" | "zoom" | "none"))
-        .ok_or_else(|| bad(cmd, "tool must be orbit, pan, zoom or none"))?;
-    Ok(json!({"tool": tool}))
+    let tool = match p.get("tool").and_then(Value::as_str) {
+        Some("orbit") => NavigationTool::Orbit,
+        Some("pan") => NavigationTool::Pan,
+        Some("zoom") => NavigationTool::Zoom,
+        Some("none") => NavigationTool::None,
+        _ => return Err(bad(cmd, "tool must be orbit, pan, zoom or none")),
+    };
+    typed_reply(cmd, ToolResult { tool, param_warnings: Vec::new() })
 }
 
 fn visual_style(_s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "view.visual_style";
     view_params(p, cmd, &["style"])?;
-    let style = p.get("style").and_then(Value::as_str);
-    let index = match style {
-        Some("shaded_with_edges") => 0,
-        Some("shaded") => 1,
-        Some("wireframe") => 2,
-        Some("shaded_with_hidden_edges") => 3,
+    let style = match p.get("style").and_then(Value::as_str) {
+        Some("shaded_with_edges") => VisualStyle::ShadedWithEdges,
+        Some("shaded") => VisualStyle::Shaded,
+        Some("wireframe") => VisualStyle::Wireframe,
+        Some("shaded_with_hidden_edges") => VisualStyle::ShadedWithHiddenEdges,
         _ => return Err(bad(cmd, "style must be shaded_with_edges, shaded, wireframe or shaded_with_hidden_edges")),
     };
-    Ok(json!({"style": style, "index": index}))
+    typed_reply(cmd, VisualStyleResult { style, index: style.index(), param_warnings: Vec::new() })
 }
 
 fn view_toggle(p: &Value, cmd: &str, key: &str) -> Result<Value> {
@@ -235,6 +403,22 @@ fn view_toggle(p: &Value, cmd: &str, key: &str) -> Result<Value> {
         Some(value) => value.as_bool().map(|on| json!({key: on})).ok_or_else(|| bad(cmd, format!("{key} must be a boolean"))),
         None => Ok(json!({})),
     }
+}
+
+fn zoom_tool(_s: &mut Session, p: &Value) -> Result<Value> {
+    view_toggle(p, "view.tool.zoom", "on")
+}
+
+fn pan_mode(_s: &mut Session, p: &Value) -> Result<Value> {
+    view_toggle(p, "view.pan_mode", "on")
+}
+
+fn orbit_mode(_s: &mut Session, p: &Value) -> Result<Value> {
+    view_toggle(p, "view.orbit_mode", "on")
+}
+
+fn zoom_mode(_s: &mut Session, p: &Value) -> Result<Value> {
+    view_toggle(p, "view.zoom_mode", "on")
 }
 
 fn spin(_s: &mut Session, p: &Value) -> Result<Value> {
@@ -249,32 +433,86 @@ fn ground_shadow(_s: &mut Session, p: &Value) -> Result<Value> {
 fn navigation_bar(_s: &mut Session, p: &Value) -> Result<Value> {
     view_toggle(p, "view.navigation_bar", "visible")
 }
+fn parts_library(_s: &mut Session, p: &Value) -> Result<Value> {
+    view_toggle(p, "view.parts_library", "visible")
+}
+
+/// `view.browser`: the Browser tree panel is a window setting, so the engine only checks the
+/// request and echoes it. The window opens or closes the panel; the design is not changed.
+fn browser_tree(_s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "view.browser";
+    // The request is an object: serde would read a list as the fields in order, so a call
+    // like `[]` would answer instead of being refused.
+    let p = match p {
+        Value::Null => json!({}),
+        Value::Object(_) => p.clone(),
+        _ => return Err(bad(cmd, "parameters must be an object")),
+    };
+    let request: BrowserTreeParams = serde_json::from_value(p).map_err(|e| bad(cmd, e.to_string()))?;
+    serde_json::to_value(BrowserTreeResult { visible: request.visible, param_warnings: Vec::new() }).map_err(|e| bad(cmd, e.to_string()))
+}
+
+fn ribbon_tabs_only(_s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "view.ribbon_tabs_only";
+    let p = match p {
+        Value::Null => json!({}),
+        Value::Object(_) => p.clone(),
+        _ => return Err(bad(cmd, "parameters must be an object")),
+    };
+    let request: RibbonTabsOnlyParams = serde_json::from_value(p).map_err(|e| bad(cmd, e.to_string()))?;
+    serde_json::to_value(RibbonTabsOnly { on: request.on, param_warnings: Vec::new() }).map_err(|e| crate::EngineError::Other(e.to_string()))
+}
+
+/// `view.toolbar_reset_all`: check that the call has no parameters. The window then resets its
+/// toolbar customisation; the session and the design are not changed.
+fn toolbar_reset_all(_s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "view.toolbar_reset_all";
+    let p = match p {
+        Value::Null => json!({}),
+        Value::Object(_) => p.clone(),
+        _ => return Err(bad(cmd, "parameters must be an object")),
+    };
+    let _: ToolbarResetAllParams = serde_json::from_value(p).map_err(|e| bad(cmd, e.to_string()))?;
+    serde_json::to_value(ToolbarResetAll { param_warnings: Vec::new() }).map_err(|e| crate::EngineError::Other(e.to_string()))
+}
+
+fn status_items(s: &mut Session, p: &Value) -> Result<Value> {
+    if !p.is_object() {
+        return Err(bad("view.status_items", "parameters must be an empty object"));
+    }
+    let _: crate::schema::view_navigation::StatusItemsParams =
+        serde_json::from_value(p.clone()).map_err(|e| bad("view.status_items", e.to_string()))?;
+    Ok(json!(crate::status_items::StatusItems { items: s.status_items() }))
+}
+
+/// The app sets the navigator; the engine checks the parameters and that a named body exists.
+fn navigator(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "view.navigator";
+    let request: NavigatorParams = serde_json::from_value(if p.is_null() { json!({}) } else { p.clone() }).map_err(|e| bad(cmd, e.to_string()))?;
+    if let Some(Some(name)) = &request.body
+        && s.world_state()?.body(name).is_none()
+    {
+        return Err(bad(cmd, format!("no body named `{name}`")));
+    }
+    serde_json::to_value(request).map_err(|e| bad(cmd, e.to_string()))
+}
 
 fn render_focus(_s: &mut Session, p: &Value) -> Result<Value> {
     let request: RenderFocus = serde_json::from_value(p.clone()).map_err(|e| bad("view.render_focus", e.to_string()))?;
     Ok(json!(request))
 }
 
+fn render_live(_s: &mut Session, p: &Value) -> Result<Value> {
+    let request: RenderLive = serde_json::from_value(p.clone()).map_err(|e| bad("view.render_live", e.to_string()))?;
+    Ok(json!(request))
+}
+
 fn render_select(s: &mut Session, p: &Value) -> Result<Value> {
-    #[derive(serde::Deserialize, serde::Serialize)]
-    #[serde(deny_unknown_fields)]
-    struct Request {
-        kind: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        id: Option<String>,
-    }
-    let request: Request = serde_json::from_value(p.clone()).map_err(|e| bad("view.render_select", e.to_string()))?;
-    let identified = matches!(request.kind.as_str(), "light" | "shot");
-    if !matches!(request.kind.as_str(), "nothing" | "environment" | "light" | "shot" | "output")
-        || identified != request.id.is_some()
-        || request.id.as_ref().is_some_and(|id| id.trim().is_empty() || id.len() > 1024)
-    {
-        return Err(bad("view.render_select", "expected a Browser kind and an id only for light or shot"));
-    }
+    let request: RenderSelect = serde_json::from_value(p.clone()).map_err(|e| bad("view.render_select", e.to_string()))?;
     let result = serde_json::to_value(request).map_err(|e| bad("view.render_select", e.to_string()))?;
-    if !s.selection.is_empty() {
-        s.selection.clear();
-        s.revision += 1;
+    if s.has_selection() {
+        s.clear_selection();
+        s.refresh_display();
     }
     Ok(result)
 }
@@ -297,6 +535,19 @@ fn render_browser(_s: &mut Session, p: &Value) -> Result<Value> {
     serde_json::to_value(request).map_err(|e| bad("view.render_browser", e.to_string()))
 }
 
+static RENDER_FRAME_CONTRACT: crate::schema::TypedContract<crate::schema::view_navigation::RenderFrame> = crate::schema::TypedContract::new();
+
+fn render_frame(_s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "view.render_frame";
+    let request: crate::schema::view_navigation::RenderFrame = serde_json::from_value(p.clone()).map_err(|e| bad(cmd, e.to_string()))?;
+    if request.aspect.is_none() && request.thirds.is_none() && request.safe_area.is_none() && request.centre_mark.is_none() {
+        return Err(bad(cmd, "expected at least one frame control"));
+    }
+    serde_json::to_value(request).map_err(|e| bad(cmd, e.to_string()))
+}
+
+const RENDER_STAGE_CONTRACT: TypedContract<RenderStageParams> = TypedContract::new();
+
 fn render_stage(_s: &mut Session, p: &Value) -> Result<Value> {
     #[derive(serde::Deserialize)]
     #[serde(deny_unknown_fields)]
@@ -318,14 +569,14 @@ fn render_dock(_s: &mut Session, p: &Value) -> Result<Value> {
     serde_json::to_value(request).map_err(|e| bad("view.render_dock", e.to_string()))
 }
 
+fn render_inspector(_s: &mut Session, p: &Value) -> Result<Value> {
+    let request: RenderPanelVisibilityParams = serde_json::from_value(p.clone()).map_err(|e| bad("view.render_inspector", e.to_string()))?;
+    typed_reply("view.render_inspector", RenderPanelVisibilityResult { visible: request.visible, param_warnings: Vec::new() })
+}
+
 fn shots_strip(_s: &mut Session, p: &Value) -> Result<Value> {
-    #[derive(serde::Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct Request {
-        visible: bool,
-    }
-    let request: Request = serde_json::from_value(p.clone()).map_err(|e| bad("view.shots_strip", e.to_string()))?;
-    Ok(json!({"visible": request.visible}))
+    let request: RenderPanelVisibilityParams = serde_json::from_value(p.clone()).map_err(|e| bad("view.shots_strip", e.to_string()))?;
+    typed_reply("view.shots_strip", RenderPanelVisibilityResult { visible: request.visible, param_warnings: Vec::new() })
 }
 
 fn layout(_s: &mut Session, p: &Value) -> Result<Value> {
@@ -334,31 +585,39 @@ fn layout(_s: &mut Session, p: &Value) -> Result<Value> {
         .and_then(Value::as_str)
         .filter(|mode| matches!(*mode, "floating" | "compact"))
         .ok_or_else(|| bad("view.layout", "mode must be floating or compact"))?;
-    Ok(json!({"mode": mode}))
+    let mode = if mode == "compact" { LayoutMode::Compact } else { LayoutMode::Floating };
+    typed_reply("view.layout", LayoutResult { mode, param_warnings: Vec::new() })
+}
+
+/// A command's typed reply as the JSON it sends.
+fn typed_reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
 fn history_layout(_s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "view.history_layout";
-    let mut result = serde_json::Map::new();
+    let mut result = HistoryLayoutResult { width: None, dock: None, collapsed: None, param_warnings: Vec::new() };
     if let Some(value) = p.get("width") {
         let width = value
             .as_f64()
             .filter(|v| v.is_finite() && (1.0..=1_000_000.0).contains(v))
             .ok_or_else(|| bad(cmd, "width must be finite and within 1..1000000"))?;
-        result.insert("width".into(), json!(width));
+        result.width = Some(width);
     }
     if let Some(value) = p.get("dock") {
-        let dock = value
-            .as_str()
-            .filter(|v| matches!(*v, "bottom" | "left" | "under_browser"))
-            .ok_or_else(|| bad(cmd, "dock must be bottom, left or under_browser"))?;
-        result.insert("dock".into(), json!(dock));
+        let dock = match value.as_str() {
+            Some("bottom") => HistoryDock::Bottom,
+            Some("left") => HistoryDock::Left,
+            Some("under_browser") => HistoryDock::UnderBrowser,
+            Some("browser") => HistoryDock::Browser,
+            _ => return Err(bad(cmd, "dock must be bottom, left, under_browser or browser")),
+        };
+        result.dock = Some(dock);
     }
     if let Some(value) = p.get("collapsed") {
-        let collapsed = value.as_bool().ok_or_else(|| bad(cmd, "collapsed must be a boolean"))?;
-        result.insert("collapsed".into(), json!(collapsed));
+        result.collapsed = Some(value.as_bool().ok_or_else(|| bad(cmd, "collapsed must be a boolean"))?);
     }
-    Ok(Value::Object(result))
+    typed_reply(cmd, result)
 }
 
 fn navigate(_s: &mut Session, p: &Value) -> Result<Value> {
@@ -374,10 +633,19 @@ fn navigate(_s: &mut Session, p: &Value) -> Result<Value> {
     {
         return Err(bad(cmd, "invalid camera"));
     }
+    // A turn may ask the window to frame the whole model from the new direction, as `home` does
+    // (the navigators' Fit preference, #10091).
+    let framed = match p.get("fit") {
+        None => false,
+        Some(value) => value.as_bool().ok_or_else(|| bad(cmd, "fit must be a boolean"))?,
+    };
     if p.get("motion").is_some() {
+        if framed {
+            return Err(bad(cmd, "fit does not apply to a motion"));
+        }
         return continuous(cam, p);
     }
-    let mut fit = false;
+    let mut fit = framed;
     if let Some(value) = p.get("direction") {
         let dir = vec3(value)
             .filter(|v| v.is_finite() && v.len() <= 2.0)
@@ -391,7 +659,7 @@ fn navigate(_s: &mut Session, p: &Value) -> Result<Value> {
     } else {
         use std::f64::consts::FRAC_PI_2;
         let (r, u, b) = cam.basis();
-        // Left, right, up and down turn the view a quarter turn (the navigation cube's arrows),
+        // Left, right, up and down turn the view a quarter turn (the navigator's arrows),
         // or `degrees` (the arrow keys' 15° steps, #1541).
         let (sin, cos) = match p.get("degrees") {
             None => (1.0, 0.0),
@@ -401,14 +669,29 @@ fn navigate(_s: &mut Session, p: &Value) -> Result<Value> {
                 .map(|d| if d == 90.0 { (1.0, 0.0) } else { d.to_radians().sin_cos() })
                 .ok_or_else(|| bad(cmd, "degrees must be a number above 0 and at most 180"))?,
         };
-        let turn = |toward: solidcraft_geom::Vec3| cam.looking_from(b * cos + toward * sin);
+        // The navigator's arrows (no `degrees`) turn about the screen's own axis and keep the roll, so
+        // four clicks one way go all the way round, over the top too (#15633). The arrow keys'
+        // steps stand the view upright about the world's up axis.
+        let quarter = p.get("degrees").is_none();
+        let turn = |toward: solidcore_record::Vec3, about: solidcore_record::Vec3| {
+            if quarter {
+                let mut to = cam;
+                to.rotate_in_view(about * FRAC_PI_2);
+                to
+            } else {
+                cam.looking_from(b * cos + toward * sin)
+            }
+        };
+        // Screen axes for `rotate_in_view`: a turn about up moves the view toward the right.
+        let (x, y) = (solidcore_record::Vec3::X, solidcore_record::Vec3::Y);
         match p.get("action").and_then(Value::as_str) {
-            Some("left") => cam = turn(-r),
-            Some("right") => cam = turn(r),
-            Some("up") => cam = turn(u),
-            Some("down") => cam = turn(-u),
+            Some("left") => cam = turn(-r, -y),
+            Some("right") => cam = turn(r, y),
+            Some("up") => cam = turn(u, -x),
+            Some("down") => cam = turn(-u, x),
             Some("clockwise") => cam.roll = (cam.roll + FRAC_PI_2).rem_euclid(std::f64::consts::TAU),
             Some("counterclockwise") => cam.roll = (cam.roll - FRAC_PI_2).rem_euclid(std::f64::consts::TAU),
+            Some("turn_around") => cam.rotate_in_view(solidcore_record::Vec3::new(0.0, std::f64::consts::PI, 0.0)),
             Some("home") => {
                 cam.set_view(StandardView::Iso);
                 fit = true;
@@ -417,7 +700,7 @@ fn navigate(_s: &mut Session, p: &Value) -> Result<Value> {
             _ => return Err(bad(cmd, "unknown navigation action")),
         }
     }
-    Ok(json!({"camera": cam, "fit": fit}))
+    typed_reply(cmd, NavigateResult { camera: cam, fit, continuous: None, param_warnings: Vec::new() })
 }
 
 /// Direct manipulation is stateless, bounded and independent of document evaluation.
@@ -442,7 +725,7 @@ fn continuous(mut cam: Camera, p: &Value) -> Result<Value> {
             }
             let orbit = |cam: &mut Camera| {
                 if free_orbit {
-                    cam.rotate_in_view(solidcraft_geom::Vec3::new(-delta.y * 0.008, -delta.x * 0.008, 0.0));
+                    cam.rotate_in_view(solidcore_record::Vec3::new(-delta.y * 0.008, -delta.x * 0.008, 0.0));
                 } else {
                     cam.orbit(delta.x, delta.y);
                 }
@@ -469,7 +752,7 @@ fn continuous(mut cam: Camera, p: &Value) -> Result<Value> {
     if !cam.is_valid() {
         return Err(bad(cmd, "motion produced an invalid camera"));
     }
-    Ok(json!({"camera":cam, "fit":false, "continuous":true}))
+    typed_reply(cmd, NavigateResult { camera: cam, fit: false, continuous: Some(true), param_warnings: Vec::new() })
 }
 
 /// At a halfway tie prefer the heading nearer the front plan view.
@@ -493,8 +776,8 @@ pub(crate) fn square_heading(yaw: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solidcraft_geom::Vec3;
-    use solidcraft_render::UpAxis;
+    use solidcore_record::Vec3;
+    use solidcraft_viewport::UpAxis;
 
     #[test]
     fn view_bar_commands_validate_json_without_editing_design_or_history() {
@@ -518,7 +801,17 @@ mod tests {
                 assert!(s.execute(id, &json!({key:value})).is_err(), "{id}: {value}");
             }
         }
-        for (id, key) in [("view.spin", "on"), ("view.grid", "on"), ("view.ground_shadow", "on"), ("view.navigation_bar", "visible")] {
+        for (id, key) in [
+            ("view.tool.zoom", "on"),
+            ("view.pan_mode", "on"),
+            ("view.orbit_mode", "on"),
+            ("view.zoom_mode", "on"),
+            ("view.spin", "on"),
+            ("view.grid", "on"),
+            ("view.ground_shadow", "on"),
+            ("view.navigation_bar", "visible"),
+            ("view.parts_library", "visible"),
+        ] {
             assert_eq!(s.execute(id, &json!({})).unwrap(), json!({}));
             assert_eq!(s.execute(id, &Value::Null).unwrap(), json!({}));
             for on in [false, true] {
@@ -528,7 +821,21 @@ mod tests {
                 assert!(s.execute(id, &json!({key:value})).is_err(), "{id}: {value}");
             }
         }
-        for id in ["view.fit", "view.home", "view.tool", "view.spin", "view.visual_style", "view.grid", "view.ground_shadow", "view.navigation_bar"] {
+        for id in [
+            "view.fit",
+            "view.home",
+            "view.tool",
+            "view.tool.zoom",
+            "view.pan_mode",
+            "view.orbit_mode",
+            "view.zoom_mode",
+            "view.spin",
+            "view.visual_style",
+            "view.grid",
+            "view.ground_shadow",
+            "view.navigation_bar",
+            "view.parts_library",
+        ] {
             for params in [json!(true), json!(1), json!("orbit"), json!([]), json!({"unexpected":true})] {
                 assert!(s.execute(id, &params).is_err(), "{id}: {params}");
             }
@@ -536,6 +843,79 @@ mod tests {
         assert_eq!(s.doc.to_json(), before);
         assert!(s.undo.is_empty());
         assert!(s.camera.is_none());
+    }
+
+    /// `view.toolbar_reset_all` takes no parameters, refuses any, and leaves the design and undo.
+    #[test]
+    fn toolbar_reset_all_takes_no_parameters_and_leaves_the_design() {
+        let mut s = Session::default();
+        let before = s.doc.to_json();
+        assert_eq!(s.execute("view.toolbar_reset_all", &json!({})).unwrap(), json!({}));
+        assert_eq!(s.execute("view.toolbar_reset_all", &Value::Null).unwrap(), json!({}));
+        for params in [json!({"tab":"MODEL"}), json!({"all":true}), json!(true), json!([])] {
+            assert!(s.execute("view.toolbar_reset_all", &params).is_err(), "{params}");
+        }
+        assert_eq!(s.doc.to_json(), before);
+        assert!(s.undo.is_empty());
+    }
+
+    /// Fit, Home and the pan and zoom tools also frame and move a drawing's sheet, so they run with
+    /// a drawing open; the other view commands act on the model and run there too, as every model
+    /// command does. None makes an undo step or changes the design.
+    #[test]
+    fn sheet_navigation_runs_with_a_drawing_open() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        s.execute("drawing.create", &json!({})).unwrap();
+        let (before, undo) = (s.doc.to_json(), s.undo.len());
+        for (id, params) in
+            [("view.fit", json!({})), ("view.home", json!({})), ("view.tool", json!({"tool": "pan"})), ("view.tool", json!({"tool": "none"}))]
+        {
+            assert!(s.execute(id, &params).is_ok(), "{id}");
+        }
+        s.execute("view.visual_style", &json!({"style": "shaded"})).unwrap();
+        let normal = s.execute("view.normal_to", &json!({})).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(!normal.contains("a drawing is open"), "{normal}");
+        assert_eq!((s.doc.to_json(), s.undo.len()), (before, undo));
+    }
+
+    #[test]
+    fn ribbon_tabs_only_echoes_the_request_without_editing_the_design() {
+        let mut s = Session::default();
+        let before = s.doc.to_json();
+        assert_eq!(s.execute("view.ribbon_tabs_only", &json!({})).unwrap(), json!({}));
+        for on in [false, true] {
+            assert_eq!(s.execute("view.ribbon_tabs_only", &json!({"on":on})).unwrap(), json!({"on":on}));
+        }
+        for params in [json!({"on":0}), json!({"on":"true"}), json!({"on":[]}), json!({"unexpected":true}), json!(true), json!([])] {
+            assert!(s.execute("view.ribbon_tabs_only", &params).is_err(), "{params}");
+        }
+        assert_eq!(s.doc.to_json(), before);
+        assert!(s.undo.is_empty());
+    }
+
+    #[test]
+    fn browser_tree_echoes_the_request_without_editing_the_design() {
+        let mut s = Session::default();
+        let before = s.doc.to_json();
+        assert_eq!(s.execute("view.browser", &json!({})).unwrap(), json!({}));
+        assert_eq!(s.execute("view.browser", &Value::Null).unwrap(), json!({}));
+        for visible in [false, true] {
+            assert_eq!(s.execute("view.browser", &json!({"visible":visible})).unwrap(), json!({"visible":visible}));
+        }
+        for params in [
+            json!({"visible":0}),
+            json!({"visible":"true"}),
+            json!({"visible":null}),
+            json!({"visible":[]}),
+            json!({"unexpected":true}),
+            json!(true),
+            json!([]),
+        ] {
+            assert!(s.execute("view.browser", &params).is_err(), "{params}");
+        }
+        assert_eq!(s.doc.to_json(), before);
+        assert!(s.undo.is_empty());
     }
 
     #[test]
@@ -559,7 +939,7 @@ mod tests {
     fn normal_to_selection_faces_each_planar_surface_without_editing_the_design() {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length":40,"width":30,"height":20})).unwrap();
-        let state = s.world_state();
+        let state = s.world_state().unwrap();
         let body = state.bodies.first().unwrap();
         let faces = body.body.faces(0.01).unwrap();
         let document = s.doc.to_json();
@@ -614,7 +994,7 @@ mod tests {
     fn normal_to_selection_rejects_curved_missing_and_invalid_inputs() {
         let mut s = Session::default();
         s.execute("solid.cylinder", &json!({"diameter":20,"height":30})).unwrap();
-        let state = s.world_state();
+        let state = s.world_state().unwrap();
         let body = state.bodies.first().unwrap();
         let faces = body.body.faces(0.1).unwrap();
         let flat = faces.iter().find(|f| f.plane_normal.is_some()).unwrap();
@@ -645,7 +1025,7 @@ mod tests {
         s.execute("component.create", &json!({"name":"Part","grounded":false})).unwrap();
         s.execute("solid.box", &json!({"length":40,"width":30,"height":20})).unwrap();
         s.execute("occurrence.move", &json!({"occurrence":"Part:1","translate":[50,20,10],"axis":[1,2,3],"angle":"37 deg"})).unwrap();
-        let state = s.world_state();
+        let state = s.world_state().unwrap();
         let body = state.bodies.first().unwrap();
         let faces = body.body.faces(0.01).unwrap();
         let cam = Camera { roll: 1.4, ..Default::default() };
@@ -688,6 +1068,34 @@ mod tests {
         for bad in [json!(0), json!(-15), json!(181), json!(f64::NAN.to_string()), json!("15"), json!(null)] {
             assert!(turn("left", Some(bad.clone())).is_err(), "{bad}");
         }
+    }
+
+    /// #10091: a turn asked to frame the model reports `fit`, as home does; a motion can't.
+    #[test]
+    fn a_turn_with_fit_asks_the_window_to_frame_the_model() {
+        let mut s = Session::default();
+        let before = s.doc.to_json();
+        let cam = Camera { distance: 100.0, ..Default::default() };
+        for params in
+            [json!({"camera": cam, "direction": [0, 0, 1]}), json!({"camera": cam, "action": "right"}), json!({"camera": cam, "action": "clockwise"})]
+        {
+            let plain = s.execute("view.navigate", &params).unwrap();
+            assert_eq!(plain["fit"], false, "{params}");
+            let mut framed = params.clone();
+            framed["fit"] = json!(true);
+            let result = s.execute("view.navigate", &framed).unwrap();
+            assert_eq!(result["fit"], true, "{params}");
+            assert_eq!(result["camera"], plain["camera"], "fit asks for the framing, the turn is the same");
+            framed["fit"] = json!(false);
+            assert_eq!(s.execute("view.navigate", &framed).unwrap(), plain);
+        }
+        assert_eq!(s.execute("view.navigate", &json!({"camera": cam, "action": "home", "fit": false})).unwrap()["fit"], true, "home frames anyway");
+        for value in [json!(1), json!("yes"), Value::Null, json!([true])] {
+            assert!(s.execute("view.navigate", &json!({"camera": cam, "action": "right", "fit": value})).is_err(), "{value}");
+        }
+        assert!(s.execute("view.navigate", &json!({"camera": cam, "motion": "zoom", "factor": 2.0, "fit": true})).is_err());
+        assert!(s.execute("view.navigate", &json!({"camera": cam, "motion": "zoom", "factor": 2.0, "fit": false})).is_ok());
+        assert_eq!(s.doc.to_json(), before);
     }
 
     #[test]
@@ -812,7 +1220,7 @@ mod tests {
     }
 
     #[test]
-    fn every_cube_direction_preserves_framing_without_editing_the_design() {
+    fn every_direction_preserves_framing_without_editing_the_design() {
         for up in [UpAxis::Z, UpAxis::Y] {
             let mut s = Session::default();
             let before = s.doc.to_json();
@@ -830,6 +1238,38 @@ mod tests {
             }
             assert_eq!(s.doc.to_json(), before);
             assert!(s.undo.is_empty());
+        }
+    }
+
+    #[test]
+    fn turn_around_reverses_the_view_about_screen_up_without_editing_the_design() {
+        for up in [UpAxis::Z, UpAxis::Y] {
+            for (yaw, pitch, roll) in [
+                (0.0, 0.0, 0.0),
+                (0.8, 0.6, 0.4),
+                (-0.5, -0.3, 1.7),
+                (0.7, std::f64::consts::FRAC_PI_2, 0.3),
+                (-0.4, -std::f64::consts::FRAC_PI_2, -0.8),
+            ] {
+                let mut s = Session::default();
+                let before = s.doc.to_json();
+                let cam = Camera { up, yaw, pitch, roll, target: Vec3::new(10.0, 20.0, 30.0), distance: 123.0, fov: 0.6 };
+                let (right, screen_up, back) = cam.basis();
+                for fit in [false, true] {
+                    let result = s.execute("view.navigate", &json!({"camera":cam,"action":"turn_around","fit":fit})).unwrap();
+                    assert_eq!(result["fit"], fit);
+                    let to: Camera = serde_json::from_value(result["camera"].clone()).unwrap();
+                    let (turned_right, turned_up, turned_back) = to.basis();
+                    assert!(turned_right.dist(-right) < 1e-9 && turned_back.dist(-back) < 1e-9, "{cam:?} -> {to:?}");
+                    assert!(turned_up.dist(screen_up) < 1e-9, "screen up stays fixed: {cam:?} -> {to:?}");
+                    assert_eq!((to.target, to.distance, to.fov, to.up), (cam.target, cam.distance, cam.fov, cam.up));
+                    let again = s.execute("view.navigate", &json!({"camera":to,"action":"turn_around"})).unwrap();
+                    let again: Camera = serde_json::from_value(again["camera"].clone()).unwrap();
+                    assert!(again.basis().0.dist(right) < 1e-9 && again.back().dist(back) < 1e-9);
+                }
+                assert_eq!(s.doc.to_json(), before);
+                assert!(s.undo.is_empty());
+            }
         }
     }
 
@@ -859,21 +1299,187 @@ mod tests {
             assert!(s.execute("view.navigate", &params).is_err());
         }
     }
+
+    /// #15633: each navigator arrow turns a quarter turn about the screen's own axis and keeps the
+    /// roll, from upright, rolled, pole and Y-up starts, and four clicks one way come back round.
+    #[test]
+    fn navigator_arrows_turn_about_the_screen_axis_over_the_poles_and_keep_the_roll() {
+        let mut s = Session::default();
+        let mut step = |cam: Camera, action: &str| -> Camera {
+            let reply = navigate(&mut s, &json!({"camera": cam, "action": action})).unwrap();
+            serde_json::from_value(reply["camera"].clone()).unwrap()
+        };
+        let front = Camera { yaw: 0.0, pitch: 0.0, ..Camera::default() };
+        let starts = [
+            front,
+            Camera { roll: std::f64::consts::FRAC_PI_2, ..front },
+            Camera { roll: 0.4, ..Camera::default() },
+            Camera { pitch: std::f64::consts::FRAC_PI_2, ..front },
+            Camera { up: UpAxis::Y, roll: -1.0, ..Camera::default() },
+        ];
+        for start in starts {
+            for (action, toward, keep) in [("right", 0, 1), ("left", 0, 1), ("up", 1, 0), ("down", 1, 0)] {
+                let sign = if matches!(action, "left" | "down") { -1.0 } else { 1.0 };
+                let mut cam = start;
+                for click in 1..=4 {
+                    let before = cam.basis();
+                    let axes = |b: (Vec3, Vec3, Vec3)| [b.0, b.1, b.2];
+                    cam = step(cam, action);
+                    let (was, now) = (axes(before), axes(cam.basis()));
+                    let msg = format!("{action} click {click} from {start:?}");
+                    assert!(now[keep].dist(was[keep]) < 1e-9, "keeps the axis it turns about: {msg}");
+                    assert!(now[2].dist(was[toward] * sign) < 1e-9, "looks from the arrow's side: {msg}");
+                }
+                for (a, b) in [(cam.basis().0, start.basis().0), (cam.basis().1, start.basis().1), (cam.basis().2, start.basis().2)] {
+                    assert!(a.dist(b) < 1e-9, "four {action} clicks come back to the start from {start:?}");
+                }
+            }
+        }
+        // The report's sequence: Up ×4 from Front passes Top, an upside-down Back and Bottom.
+        let mut cam = front;
+        let mut seen = Vec::new();
+        for _ in 0..4 {
+            cam = step(cam, "up");
+            let a = cam.view_angles();
+            seen.push((a.yaw.round().abs() as i64 % 360, a.pitch.round() as i64, a.roll.round().abs() as i64));
+        }
+        // Straight down the picture turns with yaw + roll, so yaw 180 with roll 180 is the upright Bottom.
+        assert_eq!(seen, [(0, 90, 0), (180, 0, 180), (180, -90, 180), (0, 0, 0)]);
+    }
+}
+
+fn isolate_others(_s: &mut Session, p: &Value) -> Result<Value> {
+    use crate::schema::view_navigation::{IsolateOthersResult, IsolateShow};
+    let cmd = "view.isolate_others";
+    let show = match p.get("show") {
+        None => None,
+        Some(v) => Some(serde_json::from_value::<IsolateShow>(v.clone()).map_err(|_| bad(cmd, "show must be hidden, transparent or wireframe"))?),
+    };
+    let pick = match p.get("pick") {
+        None => None,
+        Some(v) => Some(v.as_bool().ok_or_else(|| bad(cmd, "pick must be true or false"))?),
+    };
+    if show.is_none() && pick.is_none() {
+        return Err(bad(cmd, "give show, pick or both"));
+    }
+    typed_reply(cmd, IsolateOthersResult { show, pick, param_warnings: Vec::new() })
 }
 
 fn ambient_occlusion(_s: &mut Session, p: &Value) -> Result<Value> {
     let enabled = p.get("enabled").and_then(Value::as_bool).ok_or_else(|| bad("view.ambient_occlusion", "enabled must be a boolean"))?;
-    Ok(json!({"enabled": enabled}))
+    typed_reply("view.ambient_occlusion", AmbientOcclusionResult { enabled, param_warnings: Vec::new() })
 }
 
 fn perspective(_s: &mut Session, p: &Value) -> Result<Value> {
     let enabled = p.get("enabled").and_then(Value::as_bool).ok_or_else(|| bad("view.perspective", "enabled must be a boolean"))?;
-    Ok(json!({"enabled": enabled}))
+    typed_reply("view.perspective", PerspectiveResult { enabled, param_warnings: Vec::new() })
+}
+
+const ANGLE_READOUT_CONTRACT: crate::schema::TypedContract<crate::schema::view_navigation::AngleReadoutParams> = crate::schema::TypedContract::new();
+
+/// The View angles readout under the orientation gizmo (#6032): a display setting the UI keeps.
+fn angle_readout(_s: &mut Session, p: &Value) -> Result<Value> {
+    let enabled = p.get("enabled").and_then(Value::as_bool).ok_or_else(|| bad("view.angle_readout", "`enabled` must be a boolean"))?;
+    let reply = crate::schema::view_navigation::AngleReadoutResult { enabled, param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| crate::EngineError::Other(e.to_string()))
+}
+
+/// Origin-axis display is an application preference, not a design edit.
+fn origin_axes_across_view(_s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "view.origin_axes_across_view";
+    let enabled = p.get("enabled").and_then(Value::as_bool).ok_or_else(|| bad(cmd, "`enabled` must be a boolean"))?;
+    typed_reply(cmd, crate::schema::view_navigation::OriginAxesAcrossViewResult { enabled, param_warnings: Vec::new() })
+}
+
+/// The scale bar in the view's bottom left corner (#375): an application preference, not a design edit.
+fn scale_bar(_s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "view.scale_bar";
+    let enabled = p.get("enabled").and_then(Value::as_bool).ok_or_else(|| bad(cmd, "`enabled` must be a boolean"))?;
+    typed_reply(cmd, crate::schema::view_navigation::ScaleBarResult { enabled, param_warnings: Vec::new() })
+}
+
+fn next_tab(_s: &mut Session, _p: &Value) -> Result<Value> {
+    tab_step(1)
+}
+
+fn previous_tab(_s: &mut Session, _p: &Value) -> Result<Value> {
+    tab_step(-1)
+}
+
+/// The engine holds one design: the window, which holds the tabs, makes the step (#8565).
+fn tab_step(step: i8) -> Result<Value> {
+    serde_json::to_value(TabStep { step, param_warnings: Vec::new() }).map_err(|e| crate::EngineError::Other(e.to_string()))
 }
 
 #[cfg(test)]
 mod ambient_occlusion_tests {
     use super::*;
+
+    #[test]
+    fn origin_axes_across_view_validates_without_editing_design_history_or_camera() {
+        for param_check in crate::schema::ParamCheck::ALL {
+            let mut s = Session { param_check, ..Session::default() };
+            let design = s.doc.to_json();
+            for enabled in [true, false] {
+                assert_eq!(s.execute("view.origin_axes_across_view", &json!({"enabled": enabled})).unwrap(), json!({"enabled": enabled}));
+            }
+            for params in [json!({}), json!({"enabled": 1}), json!({"enabled": "true"}), json!({"enabled": null})] {
+                assert!(s.execute("view.origin_axes_across_view", &params).is_err(), "{param_check:?}: {params}");
+            }
+            assert_eq!(s.doc.to_json(), design);
+            assert!(s.undo.is_empty() && s.camera.is_none());
+        }
+    }
+
+    #[test]
+    fn scale_bar_validates_without_editing_design_history_or_camera() {
+        for param_check in crate::schema::ParamCheck::ALL {
+            let mut s = Session { param_check, ..Session::default() };
+            let design = s.doc.to_json();
+            for enabled in [true, false] {
+                assert_eq!(s.execute("view.scale_bar", &json!({"enabled": enabled})).unwrap(), json!({"enabled": enabled}));
+            }
+            for params in [json!({}), json!({"enabled": 1}), json!({"enabled": "true"}), json!({"enabled": null})] {
+                assert!(s.execute("view.scale_bar", &params).is_err(), "{param_check:?}: {params}");
+            }
+            assert_eq!(s.doc.to_json(), design);
+            assert!(s.undo.is_empty() && s.camera.is_none());
+        }
+    }
+
+    /// #8120: how the view shows what an Isolate hid is a display setting: it validates its
+    /// choice and changes neither the design nor its history.
+    #[test]
+    fn isolate_others_validates_display_setting_without_editing_design_or_history() {
+        let mut s = Session::default();
+        let before = s.doc.to_json();
+        for show in ["hidden", "transparent", "wireframe"] {
+            assert_eq!(s.execute("view.isolate_others", &json!({"show": show})).unwrap(), json!({"show": show}));
+        }
+        for pick in [true, false] {
+            assert_eq!(s.execute("view.isolate_others", &json!({"pick": pick})).unwrap(), json!({"pick": pick}));
+        }
+        for p in [json!({}), json!({"show": "ghost"}), json!({"show": 1}), json!({"show": null}), json!({"pick": "yes"})] {
+            assert!(s.execute("view.isolate_others", &p).is_err(), "{p}");
+        }
+        assert_eq!(s.doc.to_json(), before);
+        assert!(s.undo.is_empty());
+    }
+
+    #[test]
+    fn angle_readout_validates_display_setting_without_editing_design_or_history() {
+        let mut s = Session::default();
+        let before = s.doc.to_json();
+        for enabled in [true, false] {
+            assert_eq!(s.execute("view.angle_readout", &json!({"enabled": enabled})).unwrap(), json!({"enabled": enabled}));
+        }
+        for p in [json!({}), json!({"enabled": 1}), json!({"enabled": "true"}), json!({"enabled": null}), json!({"enabled": f64::NAN})] {
+            assert!(s.execute("view.angle_readout", &p).is_err(), "{p}");
+        }
+        assert_eq!(s.doc.to_json(), before);
+        assert!(s.undo.is_empty());
+        assert!(s.camera.is_none(), "a display setting leaves the view where it is");
+    }
     #[test]
     fn validates_display_setting_without_editing_design_or_history() {
         let mut s = Session::default();
@@ -905,14 +1511,23 @@ mod ambient_occlusion_tests {
 
 /// One preset for contact shading, tessellation and supersampling. MSAA stays independent.
 fn graphics_preset(_s: &mut Session, p: &Value) -> Result<Value> {
-    let preset = p.get("preset").and_then(Value::as_str);
-    let enabled = match preset {
-        Some("quality") => true,
-        Some("performance") => false,
+    let preset = match p.get("preset").and_then(Value::as_str) {
+        Some("quality") => GraphicsPreset::Quality,
+        Some("performance") => GraphicsPreset::Performance,
         _ => return Err(bad("view.graphics_preset", "preset must be performance or quality")),
     };
-    Ok(json!({"preset": preset, "enabled": enabled, "display_quality": if enabled { "fine" } else { "normal" },
-        "supersampling": if enabled { 2.0 } else { 1.0 }, "supersampling_adaptive": true}))
+    let enabled = preset == GraphicsPreset::Quality;
+    typed_reply(
+        "view.graphics_preset",
+        GraphicsPresetResult {
+            preset,
+            enabled,
+            display_quality: if enabled { PresetQuality::Fine } else { PresetQuality::Normal },
+            supersampling: if enabled { 2.0 } else { 1.0 },
+            supersampling_adaptive: true,
+            param_warnings: Vec::new(),
+        },
+    )
 }
 
 #[cfg(test)]
@@ -974,7 +1589,7 @@ fn render_workspace_focus_and_browser_validate_without_side_effects() {
     let camera = session.camera;
     let document = session.doc.clone();
     let before = (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty());
-    for (id, field) in [("view.render_focus", "on"), ("view.render_browser", "open")] {
+    for (id, field) in [("view.render_focus", "on"), ("view.render_browser", "open"), ("view.render_live", "paused")] {
         let command = crate::find_command(id).unwrap();
         assert!(command.contract.is_some() && command.output.is_some());
         for on in [true, false] {
@@ -1021,6 +1636,43 @@ fn render_workspace_shots_strip_is_a_validated_headless_preference_request() {
     }
     assert!(std::sync::Arc::ptr_eq(&document, &session.doc));
     assert_eq!(before, (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty()));
+}
+
+#[cfg(test)]
+#[test]
+fn render_frame_validates_hostile_requests_without_saving_guides_or_evaluating() {
+    let mut s = Session::default();
+    let document = s.doc.clone();
+    let before = (s.undo.len(), s.redo.len(), s.revision, s.evaluations, s.is_dirty());
+    for mode in [crate::schema::ParamCheck::Off, crate::schema::ParamCheck::Strict] {
+        s.param_check = mode;
+        for aspect in ["16:9", "3:2", "1:1", "4:5", "9:16", "custom"] {
+            let request = json!({"aspect":aspect,"thirds":true,"safe_area":false,"centre_mark":true});
+            assert_eq!(s.execute("view.render_frame", &request).unwrap(), request);
+        }
+        for request in [json!({"thirds":false}), json!({"safe_area":true}), json!({"centre_mark":false})] {
+            assert_eq!(s.execute("view.render_frame", &request).unwrap(), request);
+        }
+        for request in [
+            Value::Null,
+            json!({}),
+            json!([]),
+            json!({"thirds":null}),
+            json!({"thirds":1e300}),
+            json!({"safe_area":"yes"}),
+            json!({"centre_mark":[]}),
+            json!({"aspect":"4:3"}),
+            json!({"aspect":"x".repeat(1025)}),
+            json!({"aspect":null}),
+            json!({"thirds":true,"extra":1}),
+        ] {
+            assert!(s.execute("view.render_frame", &request).is_err(), "{request}");
+        }
+    }
+    assert!(std::sync::Arc::ptr_eq(&document, &s.doc));
+    assert_eq!(before, (s.undo.len(), s.redo.len(), s.revision, s.evaluations, s.is_dirty()));
+    let command = crate::find_command("view.render_frame").unwrap();
+    assert!(command.contract.is_some() && command.output.is_some());
 }
 
 #[cfg(test)]
@@ -1089,9 +1741,14 @@ fn render_browser_focus_validates_without_document_changes_or_evaluation() {
     for request in [
         json!({"kind":"nothing"}),
         json!({"kind":"environment"}),
+        json!({"kind":"wear"}),
+        json!({"kind":"lighting"}),
         json!({"kind":"light","id":"sun:0"}),
         json!({"kind":"shot","id":"Hero"}),
         json!({"kind":"output"}),
+        json!({"kind":"sampling"}),
+        json!({"kind":"effects"}),
+        json!({"kind":"check"}),
     ] {
         assert_eq!(session.execute("view.render_select", &request).unwrap(), request);
     }
@@ -1099,18 +1756,54 @@ fn render_browser_focus_validates_without_document_changes_or_evaluation() {
         Value::Null,
         json!([]),
         json!({}),
+        json!({"kind":"wear","id":"extra"}),
+        json!({"kind":"wear","extra":true}),
+        json!({"kind":"wear","id":1e300}),
         json!({"kind":"object"}),
         json!({"kind":"shot"}),
         json!({"kind":"light","id":1}),
         json!({"kind":"light","id":" "}),
         json!({"kind":"shot","id":"x".repeat(1025)}),
         json!({"kind":"output","id":"extra"}),
+        json!({"kind":"sampling","id":"extra"}),
+        json!({"kind":"effects","id":"extra"}),
+        json!({"kind":"check","id":"extra"}),
+        json!({"kind":"lighting","id":"extra"}),
         json!({"kind":"environment","extra":true}),
     ] {
         assert!(session.execute("view.render_select", &request).is_err(), "{request}");
     }
     assert!(std::sync::Arc::ptr_eq(&doc, &session.doc));
     assert_eq!(before, (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty()));
+    let description = session.execute("engine.describe", &json!({"command":"view.render_select"})).unwrap();
+    for key in ["input", "output"] {
+        assert!(description[key].is_object());
+        assert!(description[key].to_string().contains("\"lighting\""));
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn render_select_wear_schema_and_strict_contract_agree() {
+    let mut session = Session { param_check: crate::schema::ParamCheck::Strict, ..Session::default() };
+    let spec = crate::find_command("view.render_select").unwrap();
+    let contract = spec.contract.unwrap();
+    assert_eq!(contract.allowed_keys().iter().map(String::as_str).collect::<Vec<_>>(), ["id", "kind"]);
+    let input = contract.input_schema().to_value();
+    let output = spec.output.unwrap()().to_value();
+    for schema in [input, output] {
+        assert!(schema["oneOf"][0]["properties"]["kind"]["enum"].as_array().unwrap().contains(&json!("wear")));
+        assert_eq!(schema["oneOf"][0]["additionalProperties"], false);
+    }
+    let request = json!({"kind":"wear"});
+    assert!(contract.check(&request).is_empty());
+    assert_eq!(session.execute("view.render_select", &request).unwrap(), request);
+    for request in [json!({"kind":"wear","id":"extra"}), json!({"kind":"wear","extra":true}), json!({"kind":"wear","id":1e300})] {
+        assert!(!contract.check(&request).is_empty());
+        assert!(session.execute("view.render_select", &request).is_err());
+    }
+    assert!(session.undo.is_empty() && session.redo.is_empty());
+    assert_eq!(session.evaluations, 0);
 }
 
 #[cfg(test)]
@@ -1135,4 +1828,20 @@ fn render_browser_controls_validate_without_document_changes_or_evaluation() {
     }
     assert!(std::sync::Arc::ptr_eq(&document, &session.doc));
     assert_eq!(before, (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty()));
+}
+
+#[test]
+fn render_inspector_visibility_is_validated_without_mutation() {
+    let mut session = Session::default();
+    let before = session.doc.to_json();
+    let revision = session.revision;
+    for visible in [false, true] {
+        assert_eq!(session.execute("view.render_inspector", &json!({"visible":visible})).unwrap(), json!({"visible":visible}));
+    }
+    for value in [json!({}), json!({"visible":null}), json!({"visible":"false"}), json!({"visible":true,"extra":1})] {
+        assert!(session.execute("view.render_inspector", &value).is_err());
+    }
+    assert_eq!(session.doc.to_json(), before);
+    assert_eq!(session.revision, revision);
+    assert!(session.undo.is_empty());
 }

@@ -1,0 +1,25 @@
+{
+ "sources": [],
+ "body_count": 1,
+ "what": "a plane continued by a circular round: tangent, with the curvature jumping from 0 to 1/r, G1 and not G2",
+ "source": "analytic",
+ "method": "box 20x20x20, its edge at x=20, y=0 rounded r5: the quarter cylinder meets y=0 along x=15 and x=20 along y=5, tangent to both; its normal curvature across the seam is 1/5 = 0.2 per mm against the plane's 0, past the G2 tolerance. V = 8000 - 20 (r^2 - pi r^2 / 4) = 7892.6991, 7 faces.",
+ "volume_mm3": 7892.6990816987245,
+ "faces": 7,
+ "continuity": {
+  "order": "g1",
+  "exact": true,
+  "edges": [
+   [
+    15,
+    0,
+    10
+   ],
+   [
+    20,
+    5,
+    10
+   ]
+  ]
+ }
+}

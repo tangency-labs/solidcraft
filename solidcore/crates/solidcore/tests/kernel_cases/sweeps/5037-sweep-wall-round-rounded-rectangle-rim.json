@@ -1,0 +1,151 @@
+{
+  "area": "sweeps",
+  "bodies": {
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b6": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "union"
+      }
+    }
+  ],
+  "case": "5037-sweep-wall-round-rounded-rectangle-rim",
+  "expected": {
+    "body_count": 1,
+    "method": "floor 94x64 r7 x 2 (z -2..0). The wall section 2 x 10 is centred on the path, so by Pappus it adds 20 x the path's length 2*80 + 2*50 + 2 pi 5; it stands inside the floor's outline. V = floor + wall",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#5037"
+    ],
+    "volume_mm3": 17776.1946,
+    "what": "a box wall swept round a rounded-rectangle rim (lines and r5 arcs) from a profile standing square to the path at its start, joined to the floor: the sweep didn't follow the path (synthetic: the report's card box had a stepped profile)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 80,
+      "faces": 35,
+      "vertices": 48
+    }
+  },
+  "records": "5037-sweep-wall-round-rounded-rectangle-rim.bodies.json.gz",
+  "result": [
+    {
+      "body": "Box",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 18384.15903082833,
+      "body_count": 1,
+      "edges": 80,
+      "faces": 35,
+      "vertices": 48,
+      "volume_mm3": 17776.193519454457
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#5037"
+  ],
+  "traced_ops": [
+    "extrude",
+    "sweep",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a box wall swept round a rounded-rectangle rim (lines and r5 arcs) from a profile standing square to the path at its start, joined to the floor: the sweep didn't follow the path (synthetic: the report's card box had a stepped profile)",
+  "why_not": []
+}

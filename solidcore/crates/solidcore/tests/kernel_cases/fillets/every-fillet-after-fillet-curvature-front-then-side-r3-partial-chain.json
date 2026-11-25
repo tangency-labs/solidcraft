@@ -1,0 +1,131 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b7": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b9"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b9"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "error": "SMLib failed (status 1001)",
+      "inputs": [
+        "b10"
+      ],
+      "op": "blend_dropping",
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  40.0,
+                  3.0,
+                  20.0
+                ],
+                [
+                  40.0,
+                  30.0,
+                  20.0
+                ]
+              ],
+              "index": 1
+            }
+          ],
+          "points": [
+            [
+              40.0,
+              16.5,
+              20.0
+            ]
+          ],
+          "tolerance": 2.693582403567252
+        },
+        "kind": "curvature",
+        "sizes": [
+          3.0
+        ]
+      }
+    }
+  ],
+  "case": "every-fillet-after-fillet-curvature-front-then-side-r3-partial-chain",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g2"
+    },
+    "method": "box 40x30x20; the edge y=0, z=20 rounded type curvature 3 (every-box-edge-r3-curvature's section), then the edge x=40, z=20 (now y 3..30) rounded type curvature 3 alone: at y = 3 it runs on tangentially into the first round's end curve on x = 40 (the order-2 section, tangent to the top there), so the second round ends on a curved round, not a planar end face: no closed form. A valid body with every blend seam G2, or a refusal saying the edge continues tangentially (the 1207 precedent).",
+    "outcome": "solid_or_refused",
+    "refusal": "continues tangentially",
+    "source": "invariants",
+    "sources": [],
+    "what": "a box's top front edge rounded curvature-continuous size 3, then the top side edge meeting it at the corner rounded the same way alone (Tangent chain off)"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "engine_error": "step 3 (solid.fillet): SMLib G2 fillet: operation: SMLib failed (status 1001) (a picked edge continues tangentially into the edge at (40.000, 0.906, 19.094), which is not blended with it, and the blend cannot end there: with tangent propagation on, tangent_chain: true, its tangent chain is blended as one)",
+    "kernel_error": "SMLib failed (status 1001)",
+    "ran": false
+  },
+  "records": "every-fillet-after-fillet-curvature-front-then-side-r3-partial-chain.bodies.json.gz",
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 3 (solid.fillet): SMLib G2 fillet: operation: SMLib failed (status 1001) (a picked edge continues tangentially into the edge at (40.000, 0.906, 19.094), which is not blended with it, and the blend cannot end there: with tangent propagation on, tangent_chain: true, its tangent chain is blended as one)",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it",
+    "refusal \"continues tangentially\": SolidCraft's wording of the kernel's error"
+  ],
+  "what": "a box's top front edge rounded curvature-continuous size 3, then the top side edge meeting it at the corner rounded the same way alone (Tangent chain off)",
+  "why_not": []
+}

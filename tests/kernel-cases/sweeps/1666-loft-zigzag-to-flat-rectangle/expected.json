@@ -1,0 +1,22 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1666"
+ ],
+ "what": "a ruled loft from an 18-vertex zig-zag section to a flat 52 x 3 rectangle with 18 vertices (8 of them collinear), whose twisted ruled faces were exported as crossing triangles",
+ "source": "analytic",
+ "method": "vertex i of the bottom section is joined to vertex i of the top (same start vertex and winding), so the solid is ruled and every section is the polygon of the interpolated vertices: V = h/6 (A0 + 4 Am + A1), h = 90.5, Am the shoelace area of the averaged polygon.",
+ "body_count": 1,
+ "volume_mm3": 17993.40548,
+ "bbox": {
+  "min": [
+   -26,
+   0,
+   0
+  ],
+  "max": [
+   26,
+   14.97217,
+   90.5
+  ]
+ }
+}

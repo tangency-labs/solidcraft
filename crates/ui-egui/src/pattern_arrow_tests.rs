@@ -5,6 +5,7 @@ use crate::dialogs::Kind;
 use crate::scenario::{Harness, handle_at};
 use crate::sketch_modify_ui::Mod;
 use serde_json::json;
+use solidcraft_engine::geom::prelude::*;
 
 fn spacings(h: &Harness) -> (String, String) {
     match h.app.dialog.as_ref().map(|d| &d.kind) {
@@ -29,9 +30,8 @@ fn a_sketch_pattern_drags_its_second_spacing_square_to_the_first() {
         {"click": {"sketch": [5, 0]}}
     ]))
     .unwrap();
-    // Keep both arrows in the exposed viewport beside the left dialog. The full-bleed
-    // projection otherwise puts Spacing 2 under the dialog's top edge.
-    h.call("ui.camera", json!({"target":[-30,0,0]}));
+    // Keep both arrows in the exposed canvas to the left of the floating editor.
+    h.call("ui.camera", json!({"target":[15,0,0]}));
     h.settle();
     let (Some(a1), Some(a2)) = (handle_at("arrow"), handle_at("arrow2")) else {
         panic!("both arrows: {:?} {:?}", handle_at("arrow"), handle_at("arrow2"));
@@ -104,8 +104,8 @@ fn a_pattern_of_features_puts_its_arrow_on_the_patterned_feature() {
     assert!(matches!(d.inputs.first().and_then(|i| i.items.first()), Some(solidcraft_engine::Sel::Feature { .. })), "{:?}", d.inputs);
     // The arrow starts at the middle of the boss and points along X, the pattern's direction.
     let (base, dir) = crate::canvas::anchor(&h.app, d).expect("the pattern has an anchor");
-    assert!(base.dist(solidcraft_engine::geom::Vec3::new(12.0, 10.0, 8.0)) < 1e-6, "{base:?}");
-    assert!(dir.is_some_and(|v| v.dist(solidcraft_engine::geom::Vec3::new(1.0, 0.0, 0.0)) < 1e-9), "{dir:?}");
+    assert!(base.dist(solidcore_record::Vec3::new(12.0, 10.0, 8.0)) < 1e-6, "{base:?}");
+    assert!(dir.is_some_and(|v| v.dist(solidcore_record::Vec3::new(1.0, 0.0, 0.0)) < 1e-9), "{dir:?}");
     let Some(tip) = handle_at("arrow") else { panic!("no arrow on a pattern of features") };
     let from = h.call("ui.worldToScreen", json!({"points": [[12, 10, 8], [32, 10, 8]]}))["result"].clone();
     let at = |i: usize| egui::pos2(from[i][0].as_f64().unwrap() as f32, from[i][1].as_f64().unwrap() as f32);
@@ -173,9 +173,100 @@ fn a_solid_pattern_spacing_arrow_dragged_past_zero_goes_negative() {
     // Applied, the copies sit on the negative side, as a typed negative spacing puts them.
     h.step(&json!({"widget": "OK"})).unwrap();
     assert!(h.app.dialog.is_none(), "{:?}", h.app.status);
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     for (copy, k) in [("Body1 (2)", 1.0), ("Body1 (3)", 2.0)] {
         let x = st.body(copy).unwrap_or_else(|| panic!("no {copy}: {:?}", h.app.status)).mesh().bounds().center().x;
         assert!((x - (5.0 + k * v)).abs() < 1e-6, "{copy} centred at x = {x} for Spacing {spacing}");
+    }
+}
+
+/// Quantity and Extent, centred and flipped (#8523): the arrow runs the way the copies go
+/// furthest and shows that side's share of the extent (Quantity 4 over 30 mm: two 10 mm steps
+/// ahead, one behind); Spacing and Extent adds its own Extent arrow beside Spacing's.
+#[test]
+fn a_centred_extent_arrow_shows_its_own_side_and_turns_with_flip() {
+    let mut h = Harness::new();
+    h.run(&json!([
+        {"call": "engine.execute", "params": {"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}},
+        {"call": "ui.view", "params": {"view": "iso"}},
+        {"start": "solid.pattern.rectangular"},
+        {"click": {"world": [5, 5, 10]}},
+        {"call": "ui.dialogInput", "params": {"index": 1}},
+        {"click": {"axis": "X"}}
+    ]))
+    .unwrap();
+    h.call("ui.camera", json!({"target": [5, 5, 5]}));
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        for (key, value) in [("distance1", json!("count_extent")), ("alignment", json!("center")), ("reversed", json!(true))] {
+            d.extra.insert(key.into(), value);
+        }
+        if let Kind::PatternRect { count, extent, .. } = &mut d.kind {
+            *count = "4".into();
+            *extent = "30 mm".into();
+        }
+    }
+    h.settle();
+    let (base, dir) = crate::canvas::anchor(&h.app, h.app.dialog.as_ref().unwrap()).expect("an anchor");
+    assert!(dir.is_some_and(|v| v.dist(solidcore_record::Vec3::new(-1.0, 0.0, 0.0)) < 1e-9), "Flip turns the arrow round: {dir:?}");
+    let Some(tip) = handle_at("arrow") else { panic!("no extent arrow") };
+    let end = h.call("ui.worldToScreen", json!({"points": [[base.x - 20.0, base.y, base.z]]}))["result"][0].clone();
+    let end = egui::pos2(end[0].as_f64().unwrap() as f32, end[1].as_f64().unwrap() as f32);
+    assert!(tip.distance(end) < 2.0, "the arrow ends 20 mm along -X: tip {tip:?}, expected {end:?}");
+    assert!(handle_at("arrow_extent").is_none(), "Quantity and Extent has one arrow");
+    h.app.dialog.as_mut().unwrap().extra.insert("distance1".into(), json!("spacing_extent"));
+    h.settle();
+    assert!(handle_at("arrow").is_some() && handle_at("arrow_extent").is_some(), "Spacing and Extent shows both arrows");
+}
+
+/// A reopened pattern whose first direction is no origin axis keeps its arrow (#8523): the
+/// window keeps that direction in `dir1` alone, as it keeps a slanted second one in `dir2`.
+#[test]
+fn a_reopened_pattern_along_a_slanted_first_direction_keeps_its_arrow() {
+    let mut h = Harness::new();
+    h.run(&json!([
+        {"call": "engine.execute", "params": {"command": "solid.box", "params": {"corner": [0, 0, 0], "length": 60, "width": 40, "height": 5, "name": "Plate"}}},
+        {"call": "engine.execute", "params": {"command": "solid.box", "params": {"corner": [8, 6, 5], "length": 8, "width": 8, "height": 6, "operation": "join", "name": "Boss"}}},
+        {"call": "engine.execute", "params": {"command": "solid.pattern.rectangular", "params": {"features": ["Boss"], "dir1": [0.6, 0.8, 0], "count1": 2, "spacing1": 20, "name": "Pattern"}}},
+        {"call": "ui.view", "params": {"view": "iso"}},
+        {"call": "ui.editFeature", "params": {"feature": "Pattern"}}
+    ]))
+    .unwrap();
+    h.settle();
+    let d = h.app.dialog.as_ref().expect("the pattern dialog");
+    assert!(d.inputs.get(1).is_none_or(|i| i.items.is_empty()), "a slanted direction is no pick: {:?}", d.inputs);
+    let (_, dir) = crate::canvas::anchor(&h.app, d).expect("an anchor");
+    assert!(dir.is_some_and(|v| (v.x - 0.6).abs() < 1e-9 && (v.y - 0.8).abs() < 1e-9 && v.z.abs() < 1e-9), "{dir:?}");
+    assert!(handle_at("arrow").is_some(), "the Spacing arrow along the kept direction");
+}
+
+/// Spacing 2's and Extent 2's boxes in the view stay while their text does not evaluate, so a
+/// cleared box can be typed on in (#8523), as Distance 2's does for an extrude.
+#[test]
+fn a_solid_pattern_second_direction_boxes_stay_while_their_text_is_incomplete() {
+    let mut h = Harness::new();
+    h.run(&json!([
+        {"call": "engine.execute", "params": {"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}},
+        {"call": "ui.view", "params": {"view": "iso"}},
+        {"start": "solid.pattern.rectangular"},
+        {"click": {"world": [5, 5, 10]}},
+        {"call": "ui.dialogInput", "params": {"index": 1}},
+        {"click": {"axis": "X"}},
+        {"call": "ui.dialogInput", "params": {"index": 2}},
+        {"click": {"axis": "Y"}}
+    ]))
+    .unwrap();
+    h.app.dialog.as_mut().unwrap().extra.insert("distance2".into(), json!("spacing_extent"));
+    h.settle();
+    let shown = |h: &Harness, what: &str| h.ctx.read_response(egui::Id::unique(what)).is_some();
+    assert!(shown(&h, "sc_canvas_value_spacing2") && shown(&h, "sc_canvas_value_extent2"), "both boxes with valid text");
+    for text in ["", "-"] {
+        if let Some(Kind::PatternRect { spacing2, extent2, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            *spacing2 = text.into();
+            *extent2 = text.into();
+        }
+        h.settle();
+        assert!(shown(&h, "sc_canvas_value_spacing2"), "Spacing 2's box went away at {text:?}");
+        assert!(shown(&h, "sc_canvas_value_extent2"), "Extent 2's box went away at {text:?}");
     }
 }

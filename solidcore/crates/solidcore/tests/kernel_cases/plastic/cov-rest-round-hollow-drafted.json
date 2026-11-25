@@ -1,0 +1,161 @@
+{
+  "area": "plastic",
+  "bodies": {
+    "b5": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b8": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b6"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b9"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b9"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b10"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b10"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b12"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b11",
+        "b12"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b13"
+      ],
+      "params": {
+        "op": "union"
+      }
+    }
+  ],
+  "case": "cov-rest-round-hollow-drafted",
+  "expected": {
+    "bbox": {
+      "max": [
+        60,
+        40,
+        7
+      ],
+      "min": [
+        0,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "method": "sized at the face; the draft takes s = h tan 2 deg = 0.139683078 off each side of the wall by the top (the outer radius 6 to 6 - s, the bore 4.5 to 4.5 + s). V = 60*40*3 + (pi h/3)(R0^2 + R0 R1 + R1^2) for the outer minus that of the bore = 7379.489589",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 7379.489589250136,
+    "what": "plastic.rest, round, 12 across, 4 high, a hollow ring with a 1.5 mm wall, drafted 2 degrees, on a 60 x 40 x 3 plate"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 18,
+      "faces": 10,
+      "vertices": 12
+    }
+  },
+  "records": "cov-rest-round-hollow-drafted.bodies.json.gz",
+  "result": [
+    {
+      "body": "Plate",
+      "made": "b13"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 5654.839263897051,
+      "body_count": 1,
+      "edges": 18,
+      "faces": 10,
+      "vertices": 12,
+      "volume_mm3": 7379.489589254041
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "extrude",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "plastic.rest, round, 12 across, 4 high, a hollow ring with a 1.5 mm wall, drafted 2 degrees, on a 60 x 40 x 3 plate",
+  "why_not": []
+}

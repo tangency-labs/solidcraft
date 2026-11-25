@@ -1,0 +1,62 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -10,
+     0,
+     -25
+    ],
+    "length": 6.5,
+    "width": 50,
+    "height": 52.7,
+    "body_name": "Block"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -3.5,
+     30,
+     7.5
+    ],
+    "length": 8.5,
+    "width": 20,
+    "height": 20.2,
+    "operation": "join",
+    "targets": [
+     "Block"
+    ]
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      -3.5,
+      0,
+      0
+     ]
+    ],
+    "radius": 1
+   }
+  },
+  {
+   "command": "solid.split_body",
+   "params": {
+    "body": "Block",
+    "tool": {
+     "body": "Block",
+     "point": [
+      -3.5,
+      15,
+      -10
+     ]
+    }
+   }
+  }
+ ]
+}

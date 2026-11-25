@@ -1,0 +1,9 @@
+#### WR-702. `SmFace::ShrinkGeometry` keeps a sliver span when the face's bound lands one rounding step past a knot
+- **Severity:** Wrong result (a degenerate sliver span on the shrunk surface)
+- **Area:** Topology (face shrink)
+- **Location:** `source/SMLib/src/SmFace.cpp`, `SmFace::ShrinkGeometry`. It takes the face's domain from its trim curves' control points and trims the surface to it. `SmBSplineSurface::TrimWithDomain` moves a bound that lies just past a knot off it by ten times its snapping tolerance, so the knot isn't used as the bound.
+- **What happens:** a computed end parameter, such as a trim curve's end control point made by knot insertion, can land a rounding step past the knot it stands for. The trimmed surface then keeps a sliver span past that knot. The fork saw it on a cone's variable round, where the bound 20.000000000000004 left the sliver [20, 20.00021].
+- **Trigger:** the fork's capi `bound_a_rounding_step_past_a_knot` (tangency-labs/smlib@9245ff7). A bicubic hill with knots 0, 0.5, 1 each way, and a face on [0.2, nextafter(0.5, 1)] x [0.3, 0.9]. After the shrink the surface has 2 spans along u, not 1.
+- **How found:** the SolidCraft fork's tangency-labs/smlib@d80ea93. Part of tangency-labs/smlib#79, step 4. Tracking: tangency-labs/solidcore#2273.
+- **Confirmed:** in the Rust port (`crates/solidcore/tests/wr700_shrink_keeps_exact_trims.rs`, `bound_a_rounding_step_past_a_knot_ends_on_the_knot`). Without the flag, 2 spans along u. With it, 1 span, [0.2, 0.5].
+- **Rust port (opt-in):** `Kernel::fixes.face_shrink_bound_on_knot` (`UpstreamFixes`, default `false`). For a surface that is an `SmBSplineSurface` kind, `topology::face::p1::shrink_geometry` replaces a bound within `64 * DBL_EPSILON * |knot|` of one of the surface's unique knots with that knot, before the trim.

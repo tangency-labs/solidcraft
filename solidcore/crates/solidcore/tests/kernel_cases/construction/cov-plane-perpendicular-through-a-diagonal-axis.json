@@ -1,0 +1,62 @@
+{
+  "area": "construction",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-plane-perpendicular-through-a-diagonal-axis",
+  "expected": {
+    "construction": {
+      "P": {
+        "plane": {
+          "normal": [
+            1,
+            -1,
+            0
+          ],
+          "through": [
+            5,
+            5,
+            7
+          ]
+        }
+      }
+    },
+    "method": "the axis from (0,0,0) to (10,10,0); square to XY and holding it: normal (1,1,0) x Z = (1,-1,0), through the origin",
+    "source": "analytic",
+    "sources": [],
+    "what": "a plane through a diagonal axis in XY, square to XY"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 0,
+      "faces": 0,
+      "vertices": 0
+    }
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 0.0,
+      "body_count": 0,
+      "edges": 0,
+      "faces": 0,
+      "vertices": 0,
+      "volume_mm3": 0.0
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [],
+  "ungraded": [
+    "construction: SolidCraft computes it"
+  ],
+  "what": "a plane through a diagonal axis in XY, square to XY",
+  "why_not": [
+    "the case ends with no body"
+  ]
+}

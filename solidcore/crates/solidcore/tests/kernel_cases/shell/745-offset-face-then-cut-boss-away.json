@@ -1,0 +1,170 @@
+{
+  "area": "shell",
+  "bodies": {
+    "b23": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b24": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b24"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b25"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b25"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b26"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b23"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b27"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b27"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b28"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b26"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b29"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b28"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b30"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b29",
+        "b30"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b31"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "745-offset-face-then-cut-boss-away",
+  "expected": {
+    "body_count": 1,
+    "faces": 6,
+    "method": "after the end moves to x=-1 and the cut removes everything at x>=24 (the spline boss lies at x 25..37.x, inside the cut): a box x -1..24, 20 wide, 10 tall: V=25*20*10=5000; 6 faces",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#745",
+      "tangency-labs/solidcraft#3893"
+    ],
+    "volume_mm3": 5000,
+    "what": "the same end offset, then the boss and the box beyond x=24 cut away, which leaves an analytic body"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 12,
+      "faces": 6,
+      "vertices": 8
+    }
+  },
+  "records": "745-offset-face-then-cut-boss-away.bodies.json.gz",
+  "result": [
+    {
+      "body": "B",
+      "made": "b31"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 1899.9999999999995,
+      "body_count": 1,
+      "edges": 12,
+      "faces": 6,
+      "vertices": 8,
+      "volume_mm3": 5000.0
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#745",
+    "tangency-labs/solidcraft#3893"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "merge_faces",
+    "copy",
+    "copy",
+    "tagged",
+    "offset_faces",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "the same end offset, then the boss and the box beyond x=24 cut away, which leaves an analytic body",
+  "why_not": []
+}

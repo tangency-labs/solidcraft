@@ -1,0 +1,1364 @@
+{
+  "cases": [
+    {
+      "name": "vg_family0_0",
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              0.0,
+              0.0,
+              -0.0
+            ]
+          },
+          {
+            "point": [
+              2.0,
+              0.0,
+              -0.0
+            ]
+          }
+        ],
+        "b": [],
+        "tree": [
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "vg_family0_1",
+      "inputs": {
+        "family": 0,
+        "operation": 1,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              1.0,
+              0.123,
+              -1.0
+            ]
+          },
+          {
+            "point": [
+              3.0,
+              0.123,
+              -1.0
+            ]
+          }
+        ],
+        "b": [],
+        "tree": [
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "vg_family0_2",
+      "inputs": {
+        "family": 0,
+        "operation": 2,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              2.0,
+              0.246,
+              -2.0
+            ]
+          },
+          {
+            "point": [
+              4.0,
+              0.246,
+              -2.0
+            ]
+          }
+        ],
+        "b": [],
+        "tree": [
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "vg_family0_3",
+      "inputs": {
+        "family": 0,
+        "operation": 3,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              3.0,
+              0.369,
+              -3.0
+            ]
+          },
+          {
+            "point": [
+              5.0,
+              0.369,
+              -3.0
+            ]
+          }
+        ],
+        "b": [],
+        "tree": [
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "vg_family0_4",
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              4.0,
+              0.492,
+              -4.0
+            ]
+          },
+          {
+            "point": [
+              6.0,
+              0.492,
+              -4.0
+            ]
+          }
+        ],
+        "b": [],
+        "tree": [
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "vg_family0_5",
+      "inputs": {
+        "family": 0,
+        "operation": 1,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              5.0,
+              0.615,
+              -5.0
+            ]
+          },
+          {
+            "point": [
+              7.0,
+              0.615,
+              -5.0
+            ]
+          }
+        ],
+        "b": [],
+        "tree": [
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "vg_family0_6",
+      "inputs": {
+        "family": 0,
+        "operation": 2,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              6.0,
+              0.738,
+              -6.0
+            ]
+          },
+          {
+            "point": [
+              8.0,
+              0.738,
+              -6.0
+            ]
+          }
+        ],
+        "b": [],
+        "tree": [
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "vg_family0_7",
+      "inputs": {
+        "family": 0,
+        "operation": 3,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              7.0,
+              0.861,
+              -7.0
+            ]
+          },
+          {
+            "point": [
+              9.0,
+              0.861,
+              -7.0
+            ]
+          }
+        ],
+        "b": [],
+        "tree": [
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "vg_family0_8",
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              8.0,
+              0.984,
+              -8.0
+            ]
+          },
+          {
+            "point": [
+              10.0,
+              0.984,
+              -8.0
+            ]
+          }
+        ],
+        "b": [],
+        "tree": [
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "vg_family0_9",
+      "inputs": {
+        "family": 0,
+        "operation": 1,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              9.0,
+              1.107,
+              -9.0
+            ]
+          },
+          {
+            "point": [
+              11.0,
+              1.107,
+              -9.0
+            ]
+          }
+        ],
+        "b": [],
+        "tree": [
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "vg_family1_0",
+      "inputs": {
+        "family": 1,
+        "operation": 0,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              100.0,
+              0.0,
+              -0.0
+            ]
+          },
+          {
+            "point": [
+              102.0,
+              0.0,
+              -0.0
+            ]
+          }
+        ],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family1_1",
+      "inputs": {
+        "family": 1,
+        "operation": 1,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              101.0,
+              0.123,
+              -1.0
+            ]
+          },
+          {
+            "point": [
+              103.0,
+              0.123,
+              -1.0
+            ]
+          }
+        ],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family1_2",
+      "inputs": {
+        "family": 1,
+        "operation": 2,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              102.0,
+              0.246,
+              -2.0
+            ]
+          },
+          {
+            "point": [
+              104.0,
+              0.246,
+              -2.0
+            ]
+          }
+        ],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family1_3",
+      "inputs": {
+        "family": 1,
+        "operation": 3,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              103.0,
+              0.369,
+              -3.0
+            ]
+          },
+          {
+            "point": [
+              105.0,
+              0.369,
+              -3.0
+            ]
+          }
+        ],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family1_4",
+      "inputs": {
+        "family": 1,
+        "operation": 0,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              104.0,
+              0.492,
+              -4.0
+            ]
+          },
+          {
+            "point": [
+              106.0,
+              0.492,
+              -4.0
+            ]
+          }
+        ],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family1_5",
+      "inputs": {
+        "family": 1,
+        "operation": 1,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              105.0,
+              0.615,
+              -5.0
+            ]
+          },
+          {
+            "point": [
+              107.0,
+              0.615,
+              -5.0
+            ]
+          }
+        ],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family1_6",
+      "inputs": {
+        "family": 1,
+        "operation": 2,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              106.0,
+              0.738,
+              -6.0
+            ]
+          },
+          {
+            "point": [
+              108.0,
+              0.738,
+              -6.0
+            ]
+          }
+        ],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family1_7",
+      "inputs": {
+        "family": 1,
+        "operation": 3,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              107.0,
+              0.861,
+              -7.0
+            ]
+          },
+          {
+            "point": [
+              109.0,
+              0.861,
+              -7.0
+            ]
+          }
+        ],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family1_8",
+      "inputs": {
+        "family": 1,
+        "operation": 0,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              108.0,
+              0.984,
+              -8.0
+            ]
+          },
+          {
+            "point": [
+              110.0,
+              0.984,
+              -8.0
+            ]
+          }
+        ],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family1_9",
+      "inputs": {
+        "family": 1,
+        "operation": 1,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              109.0,
+              1.107,
+              -9.0
+            ]
+          },
+          {
+            "point": [
+              111.0,
+              1.107,
+              -9.0
+            ]
+          }
+        ],
+        "b": [],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family2_0",
+      "inputs": {
+        "family": 2,
+        "operation": 0,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              200.0,
+              0.0,
+              -0.0
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              202.0,
+              0.0,
+              -0.0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family2_1",
+      "inputs": {
+        "family": 2,
+        "operation": 1,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              201.0,
+              0.123,
+              -1.0
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              203.0,
+              0.123,
+              -1.0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family2_2",
+      "inputs": {
+        "family": 2,
+        "operation": 2,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              202.0,
+              0.246,
+              -2.0
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              204.0,
+              0.246,
+              -2.0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family2_3",
+      "inputs": {
+        "family": 2,
+        "operation": 3,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              203.0,
+              0.369,
+              -3.0
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              205.0,
+              0.369,
+              -3.0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family2_4",
+      "inputs": {
+        "family": 2,
+        "operation": 0,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              204.0,
+              0.492,
+              -4.0
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              206.0,
+              0.492,
+              -4.0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family2_5",
+      "inputs": {
+        "family": 2,
+        "operation": 1,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              205.0,
+              0.615,
+              -5.0
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              207.0,
+              0.615,
+              -5.0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family2_6",
+      "inputs": {
+        "family": 2,
+        "operation": 2,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              206.0,
+              0.738,
+              -6.0
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              208.0,
+              0.738,
+              -6.0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family2_7",
+      "inputs": {
+        "family": 2,
+        "operation": 3,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              207.0,
+              0.861,
+              -7.0
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              209.0,
+              0.861,
+              -7.0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family2_8",
+      "inputs": {
+        "family": 2,
+        "operation": 0,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              208.0,
+              0.984,
+              -8.0
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              210.0,
+              0.984,
+              -8.0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family2_9",
+      "inputs": {
+        "family": 2,
+        "operation": 1,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              209.0,
+              1.107,
+              -9.0
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              211.0,
+              1.107,
+              -9.0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family3_0",
+      "inputs": {
+        "family": 3,
+        "operation": 1,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              300.0,
+              0.0,
+              -0.0
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              302.0,
+              0.0,
+              -0.0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family3_1",
+      "inputs": {
+        "family": 3,
+        "operation": 2,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              301.0,
+              0.123,
+              -1.0
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              303.0,
+              0.123,
+              -1.0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family3_2",
+      "inputs": {
+        "family": 3,
+        "operation": 3,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              302.0,
+              0.246,
+              -2.0
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              304.0,
+              0.246,
+              -2.0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family3_3",
+      "inputs": {
+        "family": 3,
+        "operation": 4,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              303.0,
+              0.369,
+              -3.0
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              305.0,
+              0.369,
+              -3.0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family3_4",
+      "inputs": {
+        "family": 3,
+        "operation": 5,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              304.0,
+              0.492,
+              -4.0
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              306.0,
+              0.492,
+              -4.0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family3_5",
+      "inputs": {
+        "family": 3,
+        "operation": 6,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              305.0,
+              0.615,
+              -5.0
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              307.0,
+              0.615,
+              -5.0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family3_6",
+      "inputs": {
+        "family": 3,
+        "operation": 7,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              306.0,
+              0.738,
+              -6.0
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              308.0,
+              0.738,
+              -6.0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family3_7",
+      "inputs": {
+        "family": 3,
+        "operation": 8,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              307.0,
+              0.861,
+              -7.0
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              309.0,
+              0.861,
+              -7.0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family3_8",
+      "inputs": {
+        "family": 3,
+        "operation": 9,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              308.0,
+              0.984,
+              -8.0
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              310.0,
+              0.984,
+              -8.0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family3_9",
+      "inputs": {
+        "family": 3,
+        "operation": 10,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              309.0,
+              1.107,
+              -9.0
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              311.0,
+              1.107,
+              -9.0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family4_0",
+      "inputs": {
+        "family": 4,
+        "operation": 1,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              400.0,
+              0.0,
+              -0.0
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              402.0,
+              0.0,
+              -0.0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family4_1",
+      "inputs": {
+        "family": 4,
+        "operation": 2,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              401.0,
+              0.123,
+              -1.0
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              403.0,
+              0.123,
+              -1.0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family4_2",
+      "inputs": {
+        "family": 4,
+        "operation": 3,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              402.0,
+              0.246,
+              -2.0
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              404.0,
+              0.246,
+              -2.0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family4_3",
+      "inputs": {
+        "family": 4,
+        "operation": 4,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              403.0,
+              0.369,
+              -3.0
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              405.0,
+              0.369,
+              -3.0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family4_4",
+      "inputs": {
+        "family": 4,
+        "operation": 5,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              404.0,
+              0.492,
+              -4.0
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              406.0,
+              0.492,
+              -4.0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family4_5",
+      "inputs": {
+        "family": 4,
+        "operation": 6,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              405.0,
+              0.615,
+              -5.0
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              407.0,
+              0.615,
+              -5.0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family4_6",
+      "inputs": {
+        "family": 4,
+        "operation": 7,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              406.0,
+              0.738,
+              -6.0
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              408.0,
+              0.738,
+              -6.0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family4_7",
+      "inputs": {
+        "family": 4,
+        "operation": 8,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              407.0,
+              0.861,
+              -7.0
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              409.0,
+              0.861,
+              -7.0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family4_8",
+      "inputs": {
+        "family": 4,
+        "operation": 9,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              408.0,
+              0.984,
+              -8.0
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              410.0,
+              0.984,
+              -8.0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    },
+    {
+      "name": "vg_family4_9",
+      "inputs": {
+        "family": 4,
+        "operation": 10,
+        "options": null,
+        "a": [
+          {
+            "point": [
+              409.0,
+              1.107,
+              -9.0
+            ]
+          }
+        ],
+        "b": [
+          {
+            "point": [
+              411.0,
+              1.107,
+              -9.0
+            ]
+          }
+        ],
+        "tree": []
+      }
+    }
+  ]
+}

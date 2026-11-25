@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "a revolved flange and hub with a bore, six bolt holes, a hub chamfer and a hub-root round",
+ "source": "analytic",
+ "method": "pi((40^2-8^2)10 + (15^2-8^2)20) - 6 pi 4^2 10 - 1.125 * 2 pi 14.5 (chamfer, Pappus) + (1-pi/4) 9 * 2 pi (15 + 3(10-3pi)/(12-3pi)) (concave round)",
+ "body_count": 1,
+ "volume_mm3": 55442.531825321,
+ "faces": 14
+}

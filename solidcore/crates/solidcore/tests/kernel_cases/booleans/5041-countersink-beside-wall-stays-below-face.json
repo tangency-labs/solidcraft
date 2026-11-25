@@ -1,0 +1,169 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b16": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b24": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b24"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b25"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b25"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b26"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b16"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b27"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b27"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b28"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b26"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b29"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b28"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b30"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b29",
+        "b30"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b31"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "5041-countersink-beside-wall-stays-below-face",
+  "expected": {
+    "area_mm2": 7550.8567,
+    "body_count": 1,
+    "faces": 10,
+    "method": "the countersink's rim (y = 23 + 6.85 = 29.85) stays clear of the wall (y = 30), so nothing above z = 8 changes. Plate 40x40x8 + wall 40x10x30 = 24800; the hole removes the O6.4 cylinder through 8 plus the countersink cone over it (depth (13.7-6.4)/2 = 3.65: pi h/3 (R^2+Rr+r^2) - pi r^2 h). Faces: bottom, the two L-shaped x faces, y=0, y=40 (plate and wall coplanar), the plate top, the wall's -y face and top, the cone and the bore = 10. Area: 7480 - pi 6.85^2 - pi 3.2^2 + pi (6.85+3.2) 3.65 sqrt2 + 2 pi 3.2 (8-3.65). The report's clearance M6 is given as its O6.4 so the answer doesn't depend on the clearance table",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#5041"
+    ],
+    "volume_mm3": 24357.7861,
+    "what": "a countersunk O6.4 hole (O13.7, 90 deg) through a plate 0.15 mm from a wall standing on it: the countersink tool reached ~0.7 mm above the entry face and notched the wall"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 24,
+      "faces": 10,
+      "vertices": 16
+    }
+  },
+  "records": "5041-countersink-beside-wall-stays-below-face.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b31"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 7550.856702793469,
+      "body_count": 1,
+      "edges": 24,
+      "faces": 10,
+      "vertices": 16,
+      "volume_mm3": 24357.786145557227
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#5041"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "revolve",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a countersunk O6.4 hole (O13.7, 90 deg) through a plate 0.15 mm from a wall standing on it: the countersink tool reached ~0.7 mm above the entry face and notched the wall",
+  "why_not": []
+}

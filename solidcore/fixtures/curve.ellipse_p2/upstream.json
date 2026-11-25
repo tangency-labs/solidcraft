@@ -1,0 +1,7128 @@
+{
+ "cases": [
+  {
+   "name": "analytic_curves_circle",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4903 (my_test_analytic_curves)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      1,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      0.5,
+      0.5
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "state",
+      "types": [
+       14022,
+       14021,
+       14033,
+       14001,
+       12060,
+       14010,
+       0
+      ]
+     },
+     {
+      "op": "eval_step",
+      "t": 0,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 0
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 0,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 30,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 30
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 30,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 45,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 45
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 45,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 90,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 90
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 90,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 180,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 180
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 180,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 359.99,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 359.99
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 359.99,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 360,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 360
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 360,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "drop",
+      "sop": 3,
+      "p": [
+       1.2,
+       0.3,
+       0.7
+      ],
+      "tol": 1e-05
+     },
+     {
+      "op": "drop",
+      "sop": 3,
+      "p": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "tol": 1e-05
+     },
+     {
+      "op": "drop",
+      "sop": 0,
+      "p": [
+       1.5,
+       0.0,
+       0.0
+      ],
+      "tol": 1e-05,
+      "req": 1
+     },
+     {
+      "op": "drop",
+      "sop": 3,
+      "p": [
+       1.5,
+       0.0,
+       0.0
+      ],
+      "tol": 1e-05,
+      "in_vec": [
+       0,
+       0,
+       -1
+      ],
+      "req": 1
+     },
+     {
+      "op": "step_inv",
+      "p": [
+       1.5,
+       0.0,
+       0.0
+      ],
+      "classify": true
+     },
+     {
+      "op": "start_plane",
+      "p": [
+       1.5,
+       0.0,
+       0.0
+      ],
+      "tol": 1e-05
+     },
+     {
+      "op": "start_plane",
+      "p": [
+       1.5,
+       0.0,
+       0.0
+      ],
+      "tol": 1e-05,
+      "snap": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_curves_circle_arc_0_90",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4903 (my_test_analytic_curves)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      1,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      90
+     ],
+     "radii": [
+      0.5,
+      0.5
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "state",
+      "types": [
+       14022,
+       14021,
+       14033,
+       14001,
+       12060,
+       14010,
+       0
+      ]
+     },
+     {
+      "op": "eval_step",
+      "t": 0,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 0
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 0,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 10,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 10
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 10,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 45,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 45
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 45,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 89.99999,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 89.99999
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 89.99999,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 90,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 90
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 90,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 120,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 120
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 120,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": -10,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": -10
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": -10,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "drop",
+      "sop": 3,
+      "p": [
+       0.0,
+       0.0,
+       -1.0
+      ],
+      "tol": 1e-05,
+      "req": 1
+     },
+     {
+      "op": "drop",
+      "sop": 3,
+      "p": [
+       2.0,
+       0.5,
+       2.0
+      ],
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_curves_ellipse",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4903 (my_test_analytic_curves)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      1,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "state",
+      "types": [
+       14022,
+       14021,
+       14033,
+       14001,
+       12060,
+       14010,
+       0
+      ]
+     },
+     {
+      "op": "eval_step",
+      "t": 0,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 0
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 0,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 45,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 45
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 45,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 90,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 90
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 90,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 135,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 135
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 135,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 270,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 270
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 270,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "step_inv",
+      "p": [
+       1.5,
+       0.0,
+       0.3
+      ],
+      "classify": true
+     },
+     {
+      "op": "drop",
+      "sop": 3,
+      "p": [
+       1.5,
+       0.0,
+       0.3
+      ],
+      "tol": 1e-05
+     },
+     {
+      "op": "is_degenerate",
+      "tol": 0.001
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_curves_ellipse_0_270",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4903 (my_test_analytic_curves)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      1,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      270
+     ],
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "state",
+      "types": [
+       14022,
+       14021,
+       14033,
+       14001,
+       12060,
+       14010,
+       0
+      ]
+     },
+     {
+      "op": "eval_step",
+      "t": 0,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 0
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 0,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 100,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 100
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 100,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 270,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 270
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 270,
+      "zone_tol": 0.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "drop_curve_near_seam_circle_rev0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:1971 (my_test_drop_curve_near_seam)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      1
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      270
+     ],
+     "radii": [
+      0.25,
+      0.25
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "state",
+      "types": [
+       14022,
+       14021,
+       14033,
+       14001,
+       12060,
+       14010,
+       0
+      ]
+     },
+     {
+      "op": "eval_step",
+      "t": 0,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 0
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 0,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 90,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 90
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 90,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 135,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 135
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 135,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 270,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 270
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 270,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "drop",
+      "sop": 3,
+      "p": [
+       0.25,
+       -1e-05,
+       5.0
+      ],
+      "tol": 1e-05,
+      "req": 1
+     },
+     {
+      "op": "drop",
+      "sop": 3,
+      "p": [
+       0.25,
+       0.0,
+       1.0
+      ],
+      "tol": 1e-05
+     },
+     {
+      "op": "set_up"
+     },
+     {
+      "op": "state",
+      "types": [
+       14022,
+       14021,
+       14033,
+       14001,
+       12060,
+       14010,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "drop_curve_near_seam_circle_rev1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:1971 (my_test_drop_curve_near_seam)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      1
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      270
+     ],
+     "radii": [
+      0.25,
+      0.25
+     ],
+     "dim": 3,
+     "inside_out": true
+    },
+    "ops": [
+     {
+      "op": "state",
+      "types": [
+       14022,
+       14021,
+       14033,
+       14001,
+       12060,
+       14010,
+       0
+      ]
+     },
+     {
+      "op": "eval_step",
+      "t": 0,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 0
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 0,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 90,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 90
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 90,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 135,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 135
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 135,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 270,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 270
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 270,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "drop",
+      "sop": 3,
+      "p": [
+       0.25,
+       -1e-05,
+       5.0
+      ],
+      "tol": 1e-05,
+      "req": 1
+     },
+     {
+      "op": "drop",
+      "sop": 3,
+      "p": [
+       0.25,
+       0.0,
+       1.0
+      ],
+      "tol": 1e-05
+     },
+     {
+      "op": "set_up"
+     },
+     {
+      "op": "state",
+      "types": [
+       14022,
+       14021,
+       14033,
+       14001,
+       12060,
+       14010,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_in_x_-0.001",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_ellipse",
+      "other": {
+       "c": [
+        -0.501,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radii": [
+        0.5,
+        0.5
+       ],
+       "dim": 3,
+       "inside_out": false
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_out_x_-0.001",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_ellipse",
+      "other": {
+       "c": [
+        0.499,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radii": [
+        0.5,
+        0.5
+       ],
+       "dim": 3,
+       "inside_out": false
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_in_y_-0.001",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_ellipse",
+      "other": {
+       "c": [
+        0,
+        0.499,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radii": [
+        0.5,
+        0.5
+       ],
+       "dim": 3,
+       "inside_out": false
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_x_offset_-0.001",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_ellipse",
+      "other": {
+       "c": [
+        0.001,
+        0.5,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radii": [
+        0.5,
+        0.5
+       ],
+       "dim": 3,
+       "inside_out": false
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_outside_-0.001",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_ellipse",
+      "other": {
+       "c": [
+        -1.501,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radii": [
+        0.5,
+        0.5
+       ],
+       "dim": 3,
+       "inside_out": false
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_in_x_-1e-05",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_ellipse",
+      "other": {
+       "c": [
+        -0.50001,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radii": [
+        0.5,
+        0.5
+       ],
+       "dim": 3,
+       "inside_out": false
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_out_x_-1e-05",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_ellipse",
+      "other": {
+       "c": [
+        0.49999,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radii": [
+        0.5,
+        0.5
+       ],
+       "dim": 3,
+       "inside_out": false
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_in_y_-1e-05",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_ellipse",
+      "other": {
+       "c": [
+        0,
+        0.49999,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radii": [
+        0.5,
+        0.5
+       ],
+       "dim": 3,
+       "inside_out": false
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_x_offset_-1e-05",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_ellipse",
+      "other": {
+       "c": [
+        1e-05,
+        0.5,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radii": [
+        0.5,
+        0.5
+       ],
+       "dim": 3,
+       "inside_out": false
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_outside_-1e-05",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_ellipse",
+      "other": {
+       "c": [
+        -1.50001,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radii": [
+        0.5,
+        0.5
+       ],
+       "dim": 3,
+       "inside_out": false
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_in_x_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_ellipse",
+      "other": {
+       "c": [
+        -0.5,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radii": [
+        0.5,
+        0.5
+       ],
+       "dim": 3,
+       "inside_out": false
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_out_x_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_ellipse",
+      "other": {
+       "c": [
+        0.5,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radii": [
+        0.5,
+        0.5
+       ],
+       "dim": 3,
+       "inside_out": false
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_in_y_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_ellipse",
+      "other": {
+       "c": [
+        0,
+        0.5,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radii": [
+        0.5,
+        0.5
+       ],
+       "dim": 3,
+       "inside_out": false
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_x_offset_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_ellipse",
+      "other": {
+       "c": [
+        -0.0,
+        0.5,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radii": [
+        0.5,
+        0.5
+       ],
+       "dim": 3,
+       "inside_out": false
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_outside_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_ellipse",
+      "other": {
+       "c": [
+        -1.5,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radii": [
+        0.5,
+        0.5
+       ],
+       "dim": 3,
+       "inside_out": false
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_in_x_1e-05",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_ellipse",
+      "other": {
+       "c": [
+        -0.49999,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radii": [
+        0.5,
+        0.5
+       ],
+       "dim": 3,
+       "inside_out": false
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_out_x_1e-05",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_ellipse",
+      "other": {
+       "c": [
+        0.50001,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radii": [
+        0.5,
+        0.5
+       ],
+       "dim": 3,
+       "inside_out": false
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_in_y_1e-05",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_ellipse",
+      "other": {
+       "c": [
+        0,
+        0.50001,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radii": [
+        0.5,
+        0.5
+       ],
+       "dim": 3,
+       "inside_out": false
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_x_offset_1e-05",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_ellipse",
+      "other": {
+       "c": [
+        -1e-05,
+        0.5,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radii": [
+        0.5,
+        0.5
+       ],
+       "dim": 3,
+       "inside_out": false
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_outside_1e-05",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_ellipse",
+      "other": {
+       "c": [
+        -1.49999,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radii": [
+        0.5,
+        0.5
+       ],
+       "dim": 3,
+       "inside_out": false
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_in_x_0.001",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_ellipse",
+      "other": {
+       "c": [
+        -0.499,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radii": [
+        0.5,
+        0.5
+       ],
+       "dim": 3,
+       "inside_out": false
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_out_x_0.001",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_ellipse",
+      "other": {
+       "c": [
+        0.501,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radii": [
+        0.5,
+        0.5
+       ],
+       "dim": 3,
+       "inside_out": false
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_in_y_0.001",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_ellipse",
+      "other": {
+       "c": [
+        0,
+        0.501,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radii": [
+        0.5,
+        0.5
+       ],
+       "dim": 3,
+       "inside_out": false
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_x_offset_0.001",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_ellipse",
+      "other": {
+       "c": [
+        -0.001,
+        0.5,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radii": [
+        0.5,
+        0.5
+       ],
+       "dim": 3,
+       "inside_out": false
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_outside_0.001",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_ellipse",
+      "other": {
+       "c": [
+        -1.499,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radii": [
+        0.5,
+        0.5
+       ],
+       "dim": 3,
+       "inside_out": false
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_rot30_-0.001",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_ellipse",
+      "other": {
+       "c": [
+        -0.501,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0.8660254037844387,
+        0.49999999999999994
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radii": [
+        0.5,
+        0.5
+       ],
+       "dim": 3,
+       "inside_out": false
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_rot30_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_ellipse",
+      "other": {
+       "c": [
+        -0.5,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0.8660254037844387,
+        0.49999999999999994
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radii": [
+        0.5,
+        0.5
+       ],
+       "dim": 3,
+       "inside_out": false
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_rot30_0.001",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_ellipse",
+      "other": {
+       "c": [
+        -0.499,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0.8660254037844387,
+        0.49999999999999994
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radii": [
+        0.5,
+        0.5
+       ],
+       "dim": 3,
+       "inside_out": false
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_nearly_parallel",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_ellipse",
+      "other": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0.9950041652780258,
+        0.09983341664682815
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radii": [
+        1.0,
+        1.0
+       ],
+       "dim": 3,
+       "inside_out": false
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_parallel_far",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_ellipse",
+      "other": {
+       "c": [
+        0,
+        0,
+        1
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radii": [
+        1.0,
+        1.0
+       ],
+       "dim": 3,
+       "inside_out": false
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_coincident",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_ellipse",
+      "other": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        180
+       ],
+       "radii": [
+        1.0,
+        1.0
+       ],
+       "dim": 3,
+       "inside_out": false
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "circle_circle_self",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_ellipse",
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "circle_ellipse_not_circle",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3537 (circle/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_ellipse",
+      "other": {
+       "c": [
+        -2,
+        2,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radii": [
+        1.0,
+        0.5
+       ],
+       "dim": 3,
+       "inside_out": false
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_15deg_-0.001",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        -0.001,
+        0,
+        0.049
+       ],
+       "v": [
+        -2.0,
+        0,
+        -0.1
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_15deg_b_-0.001",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        -0.001,
+        0,
+        0.099
+       ],
+       "v": [
+        -2.0,
+        0,
+        -0.2
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_45deg_-0.001",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        -0.001,
+        0,
+        1
+       ],
+       "v": [
+        -2.0,
+        0,
+        -2
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_end_out_of_plane_-0.001",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        -1.001,
+        0,
+        0
+       ],
+       "v": [
+        -0.9990000000000001,
+        0,
+        -2
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_end_in_plane_-0.001",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        -1.001,
+        0,
+        0
+       ],
+       "v": [
+        -0.9990000000000001,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_perp_-0.001",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        -1.001,
+        0,
+        -1
+       ],
+       "v": [
+        0.0,
+        0,
+        2
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_tangent_-0.001",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        -1.001,
+        -1,
+        0
+       ],
+       "v": [
+        0.0,
+        2,
+        0
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_15deg_-1e-05",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        -1e-05,
+        0,
+        0.04999
+       ],
+       "v": [
+        -2.0,
+        0,
+        -0.1
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_15deg_b_-1e-05",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        -1e-05,
+        0,
+        0.09999000000000001
+       ],
+       "v": [
+        -2.0,
+        0,
+        -0.2
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_45deg_-1e-05",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        -1e-05,
+        0,
+        1
+       ],
+       "v": [
+        -2.0,
+        0,
+        -2
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_end_out_of_plane_-1e-05",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        -1.00001,
+        0,
+        0
+       ],
+       "v": [
+        -0.9999899999999999,
+        0,
+        -2
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_end_in_plane_-1e-05",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        -1.00001,
+        0,
+        0
+       ],
+       "v": [
+        -0.9999899999999999,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_perp_-1e-05",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        -1.00001,
+        0,
+        -1
+       ],
+       "v": [
+        0.0,
+        0,
+        2
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_tangent_-1e-05",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        -1.00001,
+        -1,
+        0
+       ],
+       "v": [
+        0.0,
+        2,
+        0
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_15deg_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        0.0,
+        0,
+        0.05
+       ],
+       "v": [
+        -2.0,
+        0,
+        -0.1
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_15deg_b_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        0.0,
+        0,
+        0.1
+       ],
+       "v": [
+        -2.0,
+        0,
+        -0.2
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_45deg_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        0.0,
+        0,
+        1
+       ],
+       "v": [
+        -2.0,
+        0,
+        -2
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_end_out_of_plane_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        -1.0,
+        0,
+        0
+       ],
+       "v": [
+        -1.0,
+        0,
+        -2
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_end_in_plane_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        -1.0,
+        0,
+        0
+       ],
+       "v": [
+        -1.0,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_perp_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        -1.0,
+        0,
+        -1
+       ],
+       "v": [
+        0.0,
+        0,
+        2
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_tangent_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        -1.0,
+        -1,
+        0
+       ],
+       "v": [
+        0.0,
+        2,
+        0
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_15deg_1e-05",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        1e-05,
+        0,
+        0.050010000000000006
+       ],
+       "v": [
+        -2.0,
+        0,
+        -0.1
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_15deg_b_1e-05",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        1e-05,
+        0,
+        0.10001
+       ],
+       "v": [
+        -2.0,
+        0,
+        -0.2
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_45deg_1e-05",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        1e-05,
+        0,
+        1
+       ],
+       "v": [
+        -2.0,
+        0,
+        -2
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_end_out_of_plane_1e-05",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        -0.99999,
+        0,
+        0
+       ],
+       "v": [
+        -1.00001,
+        0,
+        -2
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_end_in_plane_1e-05",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        -0.99999,
+        0,
+        0
+       ],
+       "v": [
+        -1.00001,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_perp_1e-05",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        -0.99999,
+        0,
+        -1
+       ],
+       "v": [
+        0.0,
+        0,
+        2
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_tangent_1e-05",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        -0.99999,
+        -1,
+        0
+       ],
+       "v": [
+        0.0,
+        2,
+        0
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_15deg_0.001",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        0.001,
+        0,
+        0.051000000000000004
+       ],
+       "v": [
+        -2.0,
+        0,
+        -0.1
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_15deg_b_0.001",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        0.001,
+        0,
+        0.101
+       ],
+       "v": [
+        -2.0,
+        0,
+        -0.2
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_45deg_0.001",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        0.001,
+        0,
+        1
+       ],
+       "v": [
+        -2.0,
+        0,
+        -2
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_end_out_of_plane_0.001",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        -0.999,
+        0,
+        0
+       ],
+       "v": [
+        -1.001,
+        0,
+        -2
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_end_in_plane_0.001",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        -0.999,
+        0,
+        0
+       ],
+       "v": [
+        -1.001,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_perp_0.001",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        -0.999,
+        0,
+        -1
+       ],
+       "v": [
+        0.0,
+        0,
+        2
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_tangent_0.001",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        -0.999,
+        -1,
+        0
+       ],
+       "v": [
+        0.0,
+        2,
+        0
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_horizontal_0.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        0,
+        0.5,
+        0
+       ],
+       "v": [
+        2.5,
+        0.0,
+        0
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_horizontal_1.0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        0,
+        1.0,
+        0
+       ],
+       "v": [
+        2.5,
+        0.0,
+        0
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_horizontal_1.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        0,
+        1.5,
+        0
+       ],
+       "v": [
+        2.5,
+        0.0,
+        0
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_ellipse_not_circle",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      1,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      0.5
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        0,
+        0,
+        0
+       ],
+       "v": [
+        3,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_circle_axis_line",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3692 (line/circle intersections)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "intersect_line",
+      "line": {
+       "p": [
+        0,
+        0,
+        -1
+       ],
+       "v": [
+        0,
+        0,
+        2
+       ],
+       "domain": [
+        0,
+        1
+       ],
+       "scale": 1.0
+      },
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "inside_out_full",
+   "upstream_ref": "edge cases (source/SMLib/src/SmEllipse.cpp)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      2,
+      2
+     ],
+     "dim": 3,
+     "inside_out": true
+    },
+    "ops": [
+     {
+      "op": "state",
+      "types": [
+       14022,
+       14021,
+       14033,
+       14001,
+       12060,
+       14010,
+       0
+      ]
+     },
+     {
+      "op": "eval_step",
+      "t": 0,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 0
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 0,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 90,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 90
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 90,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 180,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 180
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 180,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 360,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 360
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 360,
+      "zone_tol": 0.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "inside_out_arc_neg",
+   "upstream_ref": "edge cases (source/SMLib/src/SmEllipse.cpp)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      1,
+      2,
+      3
+     ],
+     "x": [
+      0,
+      1,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1
+     ],
+     "domain": [
+      -120,
+      30
+     ],
+     "radii": [
+      1.5,
+      1.5
+     ],
+     "dim": 3,
+     "inside_out": true
+    },
+    "ops": [
+     {
+      "op": "state",
+      "types": [
+       14022,
+       14021,
+       14033,
+       14001,
+       12060,
+       14010,
+       0
+      ]
+     },
+     {
+      "op": "eval_step",
+      "t": -120,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": -120
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": -120,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": -60,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": -60
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": -60,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 0,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 0
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 0,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 30,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 30
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 30,
+      "zone_tol": 0.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "arc_near_zero_start",
+   "upstream_ref": "edge cases (source/SMLib/src/SmEllipse.cpp)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      1e-05,
+      270
+     ],
+     "radii": [
+      1,
+      1
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "state",
+      "types": [
+       14022,
+       14021,
+       14033,
+       14001,
+       12060,
+       14010,
+       0
+      ]
+     },
+     {
+      "op": "eval_step",
+      "t": 1e-05,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 1e-05
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 1e-05,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 90,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 90
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 90,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 270,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 270
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 270,
+      "zone_tol": 0.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "arc_near_180",
+   "upstream_ref": "edge cases (source/SMLib/src/SmEllipse.cpp)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      180.0002
+     ],
+     "radii": [
+      1,
+      1
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "state",
+      "types": [
+       14022,
+       14021,
+       14033,
+       14001,
+       12060,
+       14010,
+       0
+      ]
+     },
+     {
+      "op": "eval_step",
+      "t": 0,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 0
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 0,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 180,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 180
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 180,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 180.0002,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 180.0002
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 180.0002,
+      "zone_tol": 0.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "arc_near_360",
+   "upstream_ref": "edge cases (source/SMLib/src/SmEllipse.cpp)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0.0,
+      359.9999
+     ],
+     "radii": [
+      1,
+      1
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "state",
+      "types": [
+       14022,
+       14021,
+       14033,
+       14001,
+       12060,
+       14010,
+       0
+      ]
+     },
+     {
+      "op": "eval_step",
+      "t": 0,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 0
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 0,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 180,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 180
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 180,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 359.9999,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 359.9999
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 359.9999,
+      "zone_tol": 0.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "arc_negative",
+   "upstream_ref": "edge cases (source/SMLib/src/SmEllipse.cpp)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      -300,
+      -10
+     ],
+     "radii": [
+      3,
+      3
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "state",
+      "types": [
+       14022,
+       14021,
+       14033,
+       14001,
+       12060,
+       14010,
+       0
+      ]
+     },
+     {
+      "op": "eval_step",
+      "t": -300,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": -300
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": -300,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": -200,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": -200
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": -200,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": -10,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": -10
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": -10,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 50,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 50
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 50,
+      "zone_tol": 0.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "tiny_arc",
+   "upstream_ref": "edge cases (source/SMLib/src/SmEllipse.cpp)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      10,
+      10.001
+     ],
+     "radii": [
+      1,
+      1
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "state",
+      "types": [
+       14022,
+       14021,
+       14033,
+       14001,
+       12060,
+       14010,
+       0
+      ]
+     },
+     {
+      "op": "eval_step",
+      "t": 10,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 10
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 10,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 10.0005,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 10.0005
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 10.0005,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 10.001,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 10.001
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 10.001,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "is_degenerate",
+      "tol": 0.001
+     },
+     {
+      "op": "is_degenerate",
+      "tol": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "skewed_axes",
+   "upstream_ref": "edge cases (source/SMLib/src/SmEllipse.cpp)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      1,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1,
+      2
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "state",
+      "types": [
+       14022,
+       14021,
+       14033,
+       14001,
+       12060,
+       14010,
+       0
+      ]
+     },
+     {
+      "op": "eval_step",
+      "t": 0,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 0
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 0,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 90,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 90
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 90,
+      "zone_tol": 0.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "nurb_from_same",
+   "upstream_ref": "edge cases (source/SMLib/src/SmEllipse.cpp)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      180
+     ],
+     "radii": [
+      1,
+      1
+     ],
+     "dim": 3,
+     "inside_out": false,
+     "nurb_from": {
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       180
+      ],
+      "radii": [
+       1,
+       1
+      ],
+      "dim": 3,
+      "inside_out": false
+     }
+    },
+    "ops": [
+     {
+      "op": "state",
+      "types": [
+       14022,
+       14021,
+       14033,
+       14001,
+       12060,
+       14010,
+       0
+      ]
+     },
+     {
+      "op": "eval_step",
+      "t": 0,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 0
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 0,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 90,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 90
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 90,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 180,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 180
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 180,
+      "zone_tol": 0.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "nurb_from_other",
+   "upstream_ref": "edge cases (source/SMLib/src/SmEllipse.cpp)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      180
+     ],
+     "radii": [
+      1,
+      1
+     ],
+     "dim": 3,
+     "inside_out": false,
+     "nurb_from": {
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "domain": [
+       0,
+       90
+      ],
+      "radii": [
+       1,
+       1
+      ],
+      "dim": 3,
+      "inside_out": false
+     }
+    },
+    "ops": [
+     {
+      "op": "state",
+      "types": [
+       14022,
+       14021,
+       14033,
+       14001,
+       12060,
+       14010,
+       0
+      ]
+     },
+     {
+      "op": "eval_step",
+      "t": 0,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 0
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 0,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 90,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 90
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 90,
+      "zone_tol": 0.0
+     },
+     {
+      "op": "eval_step",
+      "t": 180,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 180
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 180,
+      "zone_tol": 0.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "ellipse_2d",
+   "upstream_ref": "edge cases (source/SMLib/src/SmEllipse.cpp)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      2,
+      1
+     ],
+     "dim": 2,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "state",
+      "types": [
+       14022,
+       14021,
+       14033,
+       14001,
+       12060,
+       14010,
+       0
+      ]
+     },
+     {
+      "op": "eval_step",
+      "t": 0,
+      "nd": 3
+     },
+     {
+      "op": "to_nurbs",
+      "t": 0
+     },
+     {
+      "op": "polar_to_nurbs",
+      "t": 0,
+      "zone_tol": 0.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "set_step_interval_then_set_up",
+   "upstream_ref": "edge cases (source/SMLib/src/SmEllipse.cpp)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      180
+     ],
+     "radii": [
+      1,
+      1
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "set_step_interval",
+      "domain": [
+       -30,
+       100
+      ]
+     },
+     {
+      "op": "set_up"
+     },
+     {
+      "op": "state",
+      "types": []
+     }
+    ]
+   }
+  },
+  {
+   "name": "transform_scale",
+   "upstream_ref": "edge cases (source/SMLib/src/SmEllipse.cpp)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      1,
+      1,
+      1
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      180
+     ],
+     "radii": [
+      1,
+      1
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "transform",
+      "origin": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       0,
+       1,
+       0
+      ],
+      "y": [
+       0,
+       0,
+       1
+      ],
+      "scale": [
+       2,
+       2,
+       2
+      ]
+     },
+     {
+      "op": "state",
+      "types": []
+     }
+    ]
+   }
+  },
+  {
+   "name": "transform_identity",
+   "upstream_ref": "edge cases (source/SMLib/src/SmEllipse.cpp)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      1,
+      1,
+      1
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      180
+     ],
+     "radii": [
+      1,
+      1
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "transform",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "transform_nonuniform",
+   "upstream_ref": "edge cases (source/SMLib/src/SmEllipse.cpp)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      1,
+      1,
+      1
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      180
+     ],
+     "radii": [
+      1,
+      1
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "transform",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       2,
+       1
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "to_3d",
+   "upstream_ref": "edge cases (source/SMLib/src/SmEllipse.cpp)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      1,
+      1,
+      1
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      180
+     ],
+     "radii": [
+      1,
+      1
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "to_3d"
+     }
+    ]
+   }
+  },
+  {
+   "name": "eq_same_and_other",
+   "upstream_ref": "edge cases (source/SMLib/src/SmEllipse.cpp)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      1,
+      1,
+      1
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      180
+     ],
+     "radii": [
+      1,
+      1
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "eq",
+      "other": {
+       "c": [
+        1,
+        1,
+        1
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        180
+       ],
+       "radii": [
+        1,
+        1
+       ],
+       "dim": 3,
+       "inside_out": false
+      }
+     },
+     {
+      "op": "eq",
+      "other": {
+       "c": [
+        1,
+        1,
+        1
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        180
+       ],
+       "radii": [
+        1,
+        1.0000001
+       ],
+       "dim": 3,
+       "inside_out": false
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "angle_to_nurb",
+   "upstream_ref": "edge cases (source/SMLib/src/SmEllipse.cpp)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "angle_to_nurb",
+      "args": [
+       0,
+       1,
+       0,
+       90,
+       45
+      ]
+     },
+     {
+      "op": "angle_to_nurb",
+      "args": [
+       0,
+       1,
+       0,
+       90,
+       0
+      ]
+     },
+     {
+      "op": "angle_to_nurb",
+      "args": [
+       0,
+       1,
+       0,
+       90,
+       90
+      ]
+     },
+     {
+      "op": "angle_to_nurb",
+      "args": [
+       0,
+       1,
+       90,
+       0,
+       30
+      ]
+     },
+     {
+      "op": "angle_to_nurb",
+      "args": [
+       0,
+       1,
+       0,
+       90,
+       120
+      ]
+     },
+     {
+      "op": "angle_to_nurb",
+      "args": [
+       1,
+       2,
+       -180,
+       -90,
+       -100
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "eval_step_too_many_derivs",
+   "upstream_ref": "edge cases (source/SMLib/src/SmEllipse.cpp)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "eval_step",
+      "t": 10,
+      "nd": 4
+     },
+     {
+      "op": "eval_step",
+      "t": -400,
+      "nd": 2
+     },
+     {
+      "op": "eval_step",
+      "t": 725,
+      "nd": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "drop_unsupported_ops",
+   "upstream_ref": "edge cases (source/SMLib/src/SmEllipse.cpp)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "drop",
+      "sop": 4,
+      "p": [
+       2,
+       0,
+       0
+      ],
+      "tol": 1e-05
+     },
+     {
+      "op": "drop",
+      "sop": 5,
+      "p": [
+       2,
+       0,
+       0
+      ],
+      "tol": 1e-05
+     },
+     {
+      "op": "drop",
+      "sop": 0,
+      "p": [
+       2,
+       0,
+       0
+      ],
+      "tol": 1e-05
+     }
+    ]
+   }
+  },
+  {
+   "name": "drop_seam_pointing",
+   "upstream_ref": "edge cases (source/SMLib/src/SmEllipse.cpp)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "drop",
+      "sop": 3,
+      "p": [
+       2,
+       0,
+       0
+      ],
+      "tol": 0.001,
+      "in_vec": [
+       0,
+       1,
+       0
+      ]
+     },
+     {
+      "op": "drop",
+      "sop": 3,
+      "p": [
+       2,
+       0,
+       0
+      ],
+      "tol": 0.001,
+      "in_vec": [
+       0,
+       -1,
+       0
+      ]
+     },
+     {
+      "op": "drop",
+      "sop": 3,
+      "p": [
+       2,
+       1e-09,
+       0
+      ],
+      "tol": 0.001
+     },
+     {
+      "op": "drop",
+      "sop": 3,
+      "p": [
+       2,
+       0,
+       0
+      ],
+      "tol": 0.001,
+      "target": 0.5
+     },
+     {
+      "op": "drop",
+      "sop": 3,
+      "p": [
+       2,
+       0,
+       0
+      ],
+      "tol": 0.001,
+      "target": 1.5,
+      "req": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "drop_sub_interval",
+   "upstream_ref": "edge cases (source/SMLib/src/SmEllipse.cpp)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "drop",
+      "sop": 3,
+      "ivl": [
+       0.25,
+       0.5
+      ],
+      "p": [
+       -2,
+       -2,
+       0
+      ],
+      "tol": 1e-05
+     },
+     {
+      "op": "drop",
+      "sop": 3,
+      "ivl": [
+       0.25,
+       0.5
+      ],
+      "p": [
+       0,
+       0,
+       5
+      ],
+      "tol": 1e-05,
+      "req": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "step_inv_seam_tols",
+   "upstream_ref": "edge cases (source/SMLib/src/SmEllipse.cpp)",
+   "inputs": {
+    "ellipse": {
+     "c": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      360
+     ],
+     "radii": [
+      1.0,
+      1.0
+     ],
+     "dim": 3,
+     "inside_out": false
+    },
+    "ops": [
+     {
+      "op": "step_inv",
+      "p": [
+       1,
+       0,
+       0
+      ],
+      "classify": true
+     },
+     {
+      "op": "step_inv",
+      "p": [
+       1,
+       -1e-09,
+       0
+      ],
+      "classify": true
+     },
+     {
+      "op": "step_inv",
+      "p": [
+       1,
+       -1e-09,
+       0
+      ],
+      "classify": true,
+      "zone_tol": 1e-12
+     },
+     {
+      "op": "step_inv",
+      "p": [
+       0,
+       0,
+       1
+      ],
+      "classify": true
+     }
+    ]
+   }
+  }
+ ]
+}

@@ -1,0 +1,22 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4294"
+ ],
+ "what": "a symmetric through-all cut by a 45 deg wedge across the end of a slotted ring (r 22.5..40, a 3 mm slot, 75 mm long): truck left a stray planar sheet out to the sketch's boundary at x = -65, with no error",
+ "source": "analytic",
+ "method": "the ring section (YZ) is the annulus less the slot |y| < 1.5 above it: A = pi*(40^2-22.5^2) - Int_-1.5^1.5 (sqrt(1600-y^2)-sqrt(506.25-y^2)) dy. The XZ sketch has y = -Z, so the wedge is z >= -0.014, x <= -37.5 + z + 0.014, through all y: it removes Int over the section with z >= -0.014 of (z + 0.014) dA (python quadrature). V = 75*A - removed. Nothing may stand outside the ring: bbox x -37.5..37.5, y -40..40, z -40..39.97186 (the outer arc at the slot)",
+ "body_count": 1,
+ "volume_mm3": 220314.0171,
+ "bbox": {
+  "min": [
+   -37.5,
+   -40.0,
+   -40.0
+  ],
+  "max": [
+   37.5,
+   40.0,
+   39.97186
+  ]
+ }
+}

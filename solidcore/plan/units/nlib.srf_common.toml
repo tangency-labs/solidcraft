@@ -1,0 +1,12 @@
+id = "nlib.srf_common"
+upstream = ["source/SMLib/src/NL_SrfCommon.cpp"]
+rust_module = "nurbs::srf_common"
+depends_on = ["nlib.crv_basic", "nlib.geom", "nlib.math"]
+soft_depends_on = ["nlib.crv_common", "nlib.crv_tool_p2", "nlib.srf_basic"]
+est_lines = 661
+layer = 9
+tests = ["SM_API_test:TestSmCreateSurfaceFromCornerPoints", "SM_API_test:TestSmIntersectCurveSurface", "SM_API_test:TestSmLiftUVCurve", "SM_API_test:TestSmProjectCurveToSurface", "SM_API_test:TestSmCreateRuledSurface", "prog_test:my_test_surf_methods"]
+status = "green"
+claimed_by = "swarm-nlib.srf_common-a1"
+claimed_at = "2026-10-12T21:56:24Z"
+notes = "5 fns; largest: N_CreateCylCone, N_CreateRuledSrf, N_CreateRevolvedSrf, N_CreateSrfExtrudeCrv; 228 upstream test entry points reach this unit; difftest: 1550 cases (50 fixtures + 1500 generated), 0 deferred"

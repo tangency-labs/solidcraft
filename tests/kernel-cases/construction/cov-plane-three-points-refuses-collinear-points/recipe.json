@@ -1,0 +1,31 @@
+{
+ "commands": [
+  {
+   "command": "construct.plane.three_points",
+   "params": {
+    "a": {
+     "point": [
+      0,
+      0,
+      0
+     ]
+    },
+    "b": {
+     "point": [
+      10,
+      10,
+      10
+     ]
+    },
+    "c": {
+     "point": [
+      20,
+      20,
+      20
+     ]
+    },
+    "name": "T"
+   }
+  }
+ ]
+}

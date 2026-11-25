@@ -1,0 +1,12 @@
+{
+  "description": "Issue #10: fuzzer seed 73. Extrude an arc-sided profile, fillet two top edges, then join a box. The join's boolean union is refused by solidcore's boolean check as \"Bad Gap: Edge/Vertex gap across Edgeuse start larger than tol\" (offset=7.7878382e-06, tolerance=7.5978919e-06). Every failing seed of the boolean fuzzer is a reproducible bug, fixed with a regression test that fails without the fix.",
+  "commands": [
+    {"command": "sketch.create", "params": {"plane": "XY"}},
+    {"command": "sketch.line", "params": {"points": [[0, 0], [45.0, 0], [45.0, 25.0], [0, 25.0]]}},
+    {"command": "sketch.arc.three_point", "params": {"end": [0, 0], "start": [0, 25.0], "through": [-10.0, 12.5]}},
+    {"command": "sketch.finish", "params": {}},
+    {"command": "solid.extrude", "params": {"distance": 27.5}},
+    {"command": "solid.fillet", "params": {"edges": [[0.0, 25.0, 13.75], [22.5, 25.0, 0.0]], "radius": 3.0}},
+    {"command": "solid.box", "params": {"corner": [-9.999992212161814, -4.440892098500626e-16, 12.5], "height": 12.5, "length": 10.0, "operation": "join", "width": 15.0}}
+  ]
+}

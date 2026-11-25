@@ -1,0 +1,99 @@
+{
+  "area": "surfaces",
+  "bodies": {
+    "b4": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "stitch",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "tolerance": 0.01
+      }
+    }
+  ],
+  "case": "cov-offset-sphere-inward-closes-a-solid",
+  "expected": {
+    "area_mm2": 452.3893421169302,
+    "bbox": {
+      "max": [
+        6,
+        6,
+        6
+      ],
+      "min": [
+        -6,
+        -6,
+        -6
+      ]
+    },
+    "body_count": 1,
+    "boundary_edges": 0,
+    "method": "the offset of a sphere by -4 along its outward normal is the concentric sphere r 6: A = 4 pi 36 = 452.389, V = 4/3 pi 216 = 904.779; its faces meet smoothly, so their offsets still share every edge and close up into a solid",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 904.7786842338603,
+    "what": "every face of a sphere r 10 (its smooth chain) offset 4 inward: the sphere r 6, closed, so a solid"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 1,
+      "faces": 1,
+      "vertices": 2
+    }
+  },
+  "records": "cov-offset-sphere-inward-closes-a-solid.bodies.json.gz",
+  "result": [
+    {
+      "body": "Core",
+      "made": "b6"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 452.3893421214628,
+      "body_count": 1,
+      "edges": 1,
+      "faces": 1,
+      "vertices": 2,
+      "volume_mm3": 904.7786842824663
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "make_sphere",
+    "offset_sheet",
+    "tagged",
+    "stitch"
+  ],
+  "ungraded": [],
+  "what": "every face of a sphere r 10 (its smooth chain) offset 4 inward: the sphere r 6, closed, so a solid",
+  "why_not": []
+}

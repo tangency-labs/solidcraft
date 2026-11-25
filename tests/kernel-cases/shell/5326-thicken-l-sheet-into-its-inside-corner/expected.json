@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#5326"
+ ],
+ "what": "an open sheet of two planar walls at a right angle (30 and 20 mm, 20 deep) thickened 2 mm toward the inside of its corner: truck refused it ('thickening into an inside corner across a sharp edge'); the outside worked",
+ "source": "analytic",
+ "method": "-2 is the inside of the corner (the side truck refused; +2, the outside, worked). Each wall offset 2 mm toward the other; the two slabs overlap in a 2x2 square: V = (30*2 + 20*2 - 2*2)*20 = 1920; faces 8 (an L-shaped prism). The sheet itself is removed afterwards, so only the new solid is graded",
+ "body_count": 1,
+ "faces": 8,
+ "volume_mm3": 1920.0
+}

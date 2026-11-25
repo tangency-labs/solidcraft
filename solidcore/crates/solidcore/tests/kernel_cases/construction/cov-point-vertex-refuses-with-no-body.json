@@ -1,0 +1,35 @@
+{
+  "area": "construction",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-point-vertex-refuses-with-no-body",
+  "expected": {
+    "method": "no body, so no vertex to put it on: refused",
+    "outcome": "refused",
+    "refusal": "there is no vertex",
+    "source": "analytic",
+    "sources": [],
+    "what": "a point on a vertex where there is no body"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 1 (construct.point.vertex): there is no vertex",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 1 (construct.point.vertex): there is no vertex",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [],
+  "ungraded": [],
+  "what": "a point on a vertex where there is no body",
+  "why_not": [
+    "no kernel operation ran before the failure: step 1 (construct.point.vertex): there is no vertex"
+  ]
+}

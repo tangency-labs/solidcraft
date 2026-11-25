@@ -2,7 +2,9 @@
 //! Endpoint walks exclude support centres. Crossings/touches refuse before nesting.
 use super::{LCurve, curve_points};
 use crate::{Shape, intersections};
-use solidcraft_geom::{Aabb2, Vec2};
+use solidcore_record::Vec2;
+use solidcraft_geom::Aabb2;
+use solidcraft_geom::prelude::*;
 use std::f64::consts::TAU;
 
 struct Boundary {
@@ -19,10 +21,40 @@ pub(super) struct Roles {
     pub fresh_normal: Vec<Vec2>,
     pub old_lines: Vec<Vec<Vec2>>,
     pub fresh_lines: Vec<Vec<Vec2>>,
+    /// The directions the lines at each point leave it in (as `old_lines`, but with their sense):
+    /// the two end corners of a thin arm have the same lines, leaving them opposite ways.
+    pub old_leaving: Vec<Vec<Vec2>>,
+    pub fresh_leaving: Vec<Vec<Vec2>>,
 }
 
 pub(super) fn same_lines(a: &[Vec2], b: &[Vec2]) -> bool {
     a.len() == b.len() && a.iter().all(|x| b.iter().any(|y| x.dot(*y).abs() > 0.98))
+}
+
+/// Whether the lines leave two points the same ways ([`Roles::old_leaving`]): each direction
+/// of one point matches a different direction of the other. At a sharp corner two nearly
+/// parallel directions must not both match one direction while the other line turned round.
+/// A point with more than 8 lines is never matched: the search stays small.
+pub(super) fn same_leaving(a: &[Vec2], b: &[Vec2]) -> bool {
+    fn assign(a: &[Vec2], b: &[Vec2], used: &mut [bool]) -> bool {
+        let Some((x, rest)) = a.split_first() else { return true };
+        for (i, y) in b.iter().enumerate() {
+            if used.get(i).copied().unwrap_or(true) || x.dot(*y) <= 0.98 {
+                continue;
+            }
+            if let Some(slot) = used.get_mut(i) {
+                *slot = true;
+            }
+            if assign(rest, b, used) {
+                return true;
+            }
+            if let Some(slot) = used.get_mut(i) {
+                *slot = false;
+            }
+        }
+        false
+    }
+    a.len() == b.len() && a.len() <= 8 && assign(a, b, &mut vec![false; b.len()])
 }
 fn on(s: &Shape, p: Vec2, tol: f64) -> bool {
     match *s {
@@ -96,8 +128,10 @@ fn clear(a: &Shape, b: &Shape, shared: &[Vec2], tol: f64) -> bool {
 fn contains(boundary: &Boundary, p: Vec2, tol: f64) -> Option<bool> {
     let mut crossings = 0;
     for shape in &boundary.shapes {
-        // Avoid ray/vertex coincidences rather than guessing a half-open arc rule.
-        if endpoints(shape).iter().any(|q| (q.y - p.y).abs() <= tol) {
+        // Avoid ray/vertex coincidences rather than guessing a half-open arc rule. A full
+        // circle's seam is no vertex: the ray meets it like any other point (#21213).
+        let seam_only = matches!(*shape, Shape::Round { sweep, .. } if sweep >= TAU - 1e-12);
+        if !seam_only && endpoints(shape).iter().any(|q| (q.y - p.y).abs() <= tol) {
             return None;
         }
         match *shape {
@@ -119,7 +153,7 @@ fn contains(boundary: &Boundary, p: Vec2, tol: f64) -> Option<bool> {
                     let angle = y.asin();
                     for theta in [angle, std::f64::consts::PI - angle] {
                         let off = (theta - start).rem_euclid(TAU);
-                        if off < sweep {
+                        if seam_only || off < sweep {
                             let x = c.x + r * theta.cos();
                             if (x - p.x).abs() <= tol {
                                 return None;
@@ -157,7 +191,10 @@ fn boundaries(curves: &[LCurve], pts: &[Vec2]) -> Option<Vec<Boundary>> {
         shapes.push(shape);
         ends.push(ep);
     }
-    if incidence.iter().any(|v| !v.is_empty() && v.len() != 2) {
+    // Two loops that meet at one vertex share that point: four curves end there. That is a
+    // valid solid's face (two joined features touching at a corner), so an even count is read
+    // as loops touching, not as an ambiguous boundary. Crossings still refuse in `clear`.
+    if incidence.iter().any(|v| !v.is_empty() && (v.len() != 2 && v.len() != 4)) {
         return None;
     }
     let mut visited = vec![false; curves.len()];
@@ -242,14 +279,39 @@ fn boundaries(curves: &[LCurve], pts: &[Vec2]) -> Option<Vec<Boundary>> {
             if i == j {
                 continue;
             }
-            let shape = out.get(i)?.shapes.first()?;
-            let (_, end) = shape.range();
-            let inside = [0.317, 0.613, 0.823].into_iter().find_map(|t| contains(out.get(j)?, shape.point(end * t), tol))?;
+            // The first point of loop `i` the ray test decides: a point level with a vertex of
+            // loop `j` is ambiguous, so the other curves of loop `i` are tried too (#21213).
+            let other = out.get(j)?;
+            let inside = out
+                .get(i)?
+                .shapes
+                .iter()
+                .flat_map(|shape| {
+                    let (_, end) = shape.range();
+                    [0.317, 0.613, 0.823].map(|t| shape.point(end * t))
+                })
+                .find_map(|p| contains(other, p, tol))?;
             depth += usize::from(inside);
         }
         out.get_mut(i)?.depth = depth;
     }
     Some(out)
+}
+
+/// Whether more than two curves end at one point of the layout: loops of the boundary touch
+/// there (two inner outlines of a face that meet at a corner, #20619).
+pub(super) fn meets_at_corner(curves: &[LCurve], points: usize) -> bool {
+    let mut ends = vec![0usize; points];
+    for curve in curves {
+        if let LCurve::Line(a, b) | LCurve::Arc(_, a, b) = *curve {
+            for p in [a, b] {
+                if let Some(n) = ends.get_mut(p) {
+                    *n += 1;
+                }
+            }
+        }
+    }
+    ends.iter().any(|n| *n > 2)
 }
 
 pub(super) fn valid(curves: &[LCurve], points: &[Vec2]) -> bool {
@@ -310,8 +372,10 @@ pub(super) fn roles(old_curves: &[LCurve], a: &[Vec2], fresh_curves: &[LCurve], 
     };
     let ((old, old_normal), (fresh, fresh_normal)) =
         (membership(&previous, old_curves, a, Some(&mapping))?, membership(&incoming, fresh_curves, b, None)?);
-    let line_roles = |loops: &[Boundary], curves: &[LCurve], pts: &[Vec2]| -> Option<Vec<Vec<Vec2>>> {
+    type Lines = Vec<Vec<Vec2>>;
+    let line_roles = |loops: &[Boundary], curves: &[LCurve], pts: &[Vec2]| -> Option<(Lines, Lines)> {
         let mut roles = vec![Vec::new(); pts.len()];
+        let mut leaving = vec![Vec::new(); pts.len()];
         for loop_ in loops {
             let size = loop_.bounds.max - loop_.bounds.min;
             for i in &loop_.curves {
@@ -320,12 +384,14 @@ pub(super) fn roles(old_curves: &[LCurve], a: &[Vec2], fresh_curves: &[LCurve], 
                     let direction = Vec2::new(d.x / size.x.max(1e-9), d.y / size.y.max(1e-9)).normalized()?;
                     roles.get_mut(a)?.push(direction);
                     roles.get_mut(b)?.push(direction);
+                    leaving.get_mut(a)?.push(direction);
+                    leaving.get_mut(b)?.push(direction * -1.0);
                 }
             }
         }
-        Some(roles)
+        Some((roles, leaving))
     };
-    let old_lines = line_roles(&previous, old_curves, a)?;
-    let fresh_lines = line_roles(&incoming, fresh_curves, b)?;
-    Some(Roles { old, fresh, old_normal, fresh_normal, old_lines, fresh_lines })
+    let (old_lines, old_leaving) = line_roles(&previous, old_curves, a)?;
+    let (fresh_lines, fresh_leaving) = line_roles(&incoming, fresh_curves, b)?;
+    Some(Roles { old, fresh, old_normal, fresh_normal, old_lines, fresh_lines, old_leaving, fresh_leaving })
 }

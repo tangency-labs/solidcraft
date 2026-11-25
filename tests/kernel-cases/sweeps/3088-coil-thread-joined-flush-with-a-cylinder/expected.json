@@ -1,0 +1,23 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3088",
+  "tangency-labs/solidcraft#3758"
+ ],
+ "what": "a 4-turn square coil (4 mm wire, pitch 9, outer diameter 30.8, section inside) joined round a cylinder of radius 15 and height 40, its ends flush with the cylinder end faces (hang of several minutes, crash report)",
+ "source": "analytic",
+ "method": "the wire is a 4 x 4 square, radial 11.4..15.4, axial +-2 about a path rising from z = 2 to 38, so its end faces touch z = 0 and z = 40. Inside r = 15 it merges with the cylinder; the ridge outside r = 15 is a 0.4 x 4 section at centroid radius 15.2 turned 4 times by the screw: V = pi 15^2 40 + 1.6 * 2 pi 15.2 * 4 = 28885.5. bbox r 15.4, z 0..40.",
+ "body_count": 1,
+ "volume_mm3": 28885.562148990564,
+ "bbox": {
+  "min": [
+   -15.4,
+   -15.4,
+   0
+  ],
+  "max": [
+   15.4,
+   15.4,
+   40
+  ]
+ }
+}

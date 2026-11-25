@@ -1,0 +1,2244 @@
+{
+ "cases": [
+  {
+   "name": "fitcrv_params_par1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data; N_FitCrvInterp / N_FitCrvApprox drivers in NL_CrvFit.cpp)",
+   "inputs": {
+    "op": "param_values",
+    "ptp": 1,
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "par": 1
+   }
+  },
+  {
+   "name": "points_params_par1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Points.pts (point set test data)",
+   "inputs": {
+    "op": "param_values",
+    "ptp": 1,
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "par": 1
+   }
+  },
+  {
+   "name": "fitcrv_params_par2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data; N_FitCrvInterp / N_FitCrvApprox drivers in NL_CrvFit.cpp)",
+   "inputs": {
+    "op": "param_values",
+    "ptp": 1,
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "par": 2
+   }
+  },
+  {
+   "name": "points_params_par2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Points.pts (point set test data)",
+   "inputs": {
+    "op": "param_values",
+    "ptp": 1,
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "par": 2
+   }
+  },
+  {
+   "name": "fitcrv_params_par3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data; N_FitCrvInterp / N_FitCrvApprox drivers in NL_CrvFit.cpp)",
+   "inputs": {
+    "op": "param_values",
+    "ptp": 1,
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "par": 3
+   }
+  },
+  {
+   "name": "points_params_par3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Points.pts (point set test data)",
+   "inputs": {
+    "op": "param_values",
+    "ptp": 1,
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "par": 3
+   }
+  },
+  {
+   "name": "fitcrv_interp_p1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data; N_FitCrvInterp / N_FitCrvApprox drivers in NL_CrvFit.cpp)",
+   "inputs": {
+    "op": "interp",
+    "ptp": 1,
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 1
+   }
+  },
+  {
+   "name": "fitcrv_interp_p2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data; N_FitCrvInterp / N_FitCrvApprox drivers in NL_CrvFit.cpp)",
+   "inputs": {
+    "op": "interp",
+    "ptp": 1,
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 2
+   }
+  },
+  {
+   "name": "fitcrv_interp_p3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data; N_FitCrvInterp / N_FitCrvApprox drivers in NL_CrvFit.cpp)",
+   "inputs": {
+    "op": "interp",
+    "ptp": 1,
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 3
+   }
+  },
+  {
+   "name": "fitcrv_interp_p4",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data; N_FitCrvInterp / N_FitCrvApprox drivers in NL_CrvFit.cpp)",
+   "inputs": {
+    "op": "interp",
+    "ptp": 1,
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 4
+   }
+  },
+  {
+   "name": "fitcrv_interp_p5",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data; N_FitCrvInterp / N_FitCrvApprox drivers in NL_CrvFit.cpp)",
+   "inputs": {
+    "op": "interp",
+    "ptp": 1,
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 5
+   }
+  },
+  {
+   "name": "fitcrv_interp_h_p2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data; N_FitCrvInterp / N_FitCrvApprox drivers in NL_CrvFit.cpp)",
+   "inputs": {
+    "op": "interp",
+    "ptp": 2,
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 2
+   }
+  },
+  {
+   "name": "fitcrv_interp_h_p3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data; N_FitCrvInterp / N_FitCrvApprox drivers in NL_CrvFit.cpp)",
+   "inputs": {
+    "op": "interp",
+    "ptp": 2,
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 3
+   }
+  },
+  {
+   "name": "points_interp_p3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Points.pts (point set test data)",
+   "inputs": {
+    "op": "interp",
+    "ptp": 1,
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "p": 3
+   }
+  },
+  {
+   "name": "fitcrv_derivs_p2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data; N_FitCrvInterp / N_FitCrvApprox drivers in NL_CrvFit.cpp)",
+   "inputs": {
+    "op": "derivs",
+    "ptp": 1,
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 2,
+    "ds": [
+     0.0,
+     3.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     -2.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "fitcrv_derivs_p3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data; N_FitCrvInterp / N_FitCrvApprox drivers in NL_CrvFit.cpp)",
+   "inputs": {
+    "op": "derivs",
+    "ptp": 1,
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 3,
+    "ds": [
+     0.0,
+     3.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     -2.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "fitcrv_derivs_p4",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data; N_FitCrvInterp / N_FitCrvApprox drivers in NL_CrvFit.cpp)",
+   "inputs": {
+    "op": "derivs",
+    "ptp": 1,
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 4,
+    "ds": [
+     0.0,
+     3.0,
+     0.0
+    ],
+    "de": [
+     0.0,
+     -2.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "points_derivs_p3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Points.pts (point set test data)",
+   "inputs": {
+    "op": "derivs",
+    "ptp": 1,
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "p": 3,
+    "ds": [
+     0.1,
+     -0.2,
+     0.3
+    ],
+    "de": [
+     -0.1,
+     0.0,
+     0.2
+    ]
+   }
+  },
+  {
+   "name": "fitcrv_deriv_whr1_p2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data; N_FitCrvInterp / N_FitCrvApprox drivers in NL_CrvFit.cpp)",
+   "inputs": {
+    "op": "deriv",
+    "ptp": 1,
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 2,
+    "t": [
+     1.0,
+     1.0,
+     0.0
+    ],
+    "whr": 1
+   }
+  },
+  {
+   "name": "fitcrv_deriv_whr1_p3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data; N_FitCrvInterp / N_FitCrvApprox drivers in NL_CrvFit.cpp)",
+   "inputs": {
+    "op": "deriv",
+    "ptp": 1,
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 3,
+    "t": [
+     1.0,
+     1.0,
+     0.0
+    ],
+    "whr": 1
+   }
+  },
+  {
+   "name": "fitcrv_deriv_whr2_p2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data; N_FitCrvInterp / N_FitCrvApprox drivers in NL_CrvFit.cpp)",
+   "inputs": {
+    "op": "deriv",
+    "ptp": 1,
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 2,
+    "t": [
+     1.0,
+     1.0,
+     0.0
+    ],
+    "whr": 2
+   }
+  },
+  {
+   "name": "fitcrv_deriv_whr2_p3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data; N_FitCrvInterp / N_FitCrvApprox drivers in NL_CrvFit.cpp)",
+   "inputs": {
+    "op": "deriv",
+    "ptp": 1,
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 3,
+    "t": [
+     1.0,
+     1.0,
+     0.0
+    ],
+    "whr": 2
+   }
+  },
+  {
+   "name": "fitcrv_first_derivs_p2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data; N_FitCrvInterp / N_FitCrvApprox drivers in NL_CrvFit.cpp)",
+   "inputs": {
+    "op": "first_derivs",
+    "ptp": 1,
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "d": [
+     [
+      0,
+      3,
+      0
+     ],
+     [
+      1,
+      5,
+      0
+     ],
+     [
+      5,
+      -1,
+      0
+     ],
+     [
+      8,
+      0,
+      0
+     ],
+     [
+      8,
+      2,
+      0
+     ],
+     [
+      6,
+      -1,
+      0
+     ],
+     [
+      4,
+      1,
+      0
+     ],
+     [
+      5,
+      2,
+      0
+     ],
+     [
+      6,
+      -1,
+      0
+     ],
+     [
+      4,
+      -4,
+      0
+     ],
+     [
+      1,
+      -4,
+      0
+     ],
+     [
+      0,
+      -2,
+      0
+     ]
+    ],
+    "p": 2
+   }
+  },
+  {
+   "name": "fitcrv_first_derivs_p3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data; N_FitCrvInterp / N_FitCrvApprox drivers in NL_CrvFit.cpp)",
+   "inputs": {
+    "op": "first_derivs",
+    "ptp": 1,
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "d": [
+     [
+      0,
+      3,
+      0
+     ],
+     [
+      1,
+      5,
+      0
+     ],
+     [
+      5,
+      -1,
+      0
+     ],
+     [
+      8,
+      0,
+      0
+     ],
+     [
+      8,
+      2,
+      0
+     ],
+     [
+      6,
+      -1,
+      0
+     ],
+     [
+      4,
+      1,
+      0
+     ],
+     [
+      5,
+      2,
+      0
+     ],
+     [
+      6,
+      -1,
+      0
+     ],
+     [
+      4,
+      -4,
+      0
+     ],
+     [
+      1,
+      -4,
+      0
+     ],
+     [
+      0,
+      -2,
+      0
+     ]
+    ],
+    "p": 3
+   }
+  },
+  {
+   "name": "fitcrv_first_derivs_p4_degree_error",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "first_derivs",
+    "ptp": 1,
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "d": [
+     [
+      0,
+      3,
+      0
+     ],
+     [
+      1,
+      5,
+      0
+     ],
+     [
+      5,
+      -1,
+      0
+     ],
+     [
+      8,
+      0,
+      0
+     ],
+     [
+      8,
+      2,
+      0
+     ],
+     [
+      6,
+      -1,
+      0
+     ],
+     [
+      4,
+      1,
+      0
+     ],
+     [
+      5,
+      2,
+      0
+     ],
+     [
+      6,
+      -1,
+      0
+     ],
+     [
+      4,
+      -4,
+      0
+     ],
+     [
+      1,
+      -4,
+      0
+     ],
+     [
+      0,
+      -2,
+      0
+     ]
+    ],
+    "p": 4
+   }
+  },
+  {
+   "name": "fitcrv_approx_n5_p3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data; N_FitCrvInterp / N_FitCrvApprox drivers in NL_CrvFit.cpp)",
+   "inputs": {
+    "op": "approx",
+    "ptp": 1,
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "n": 5,
+    "p": 3
+   }
+  },
+  {
+   "name": "fitcrv_approx_n7_p3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data; N_FitCrvInterp / N_FitCrvApprox drivers in NL_CrvFit.cpp)",
+   "inputs": {
+    "op": "approx",
+    "ptp": 1,
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "n": 7,
+    "p": 3
+   }
+  },
+  {
+   "name": "fitcrv_approx_n9_p2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data; N_FitCrvInterp / N_FitCrvApprox drivers in NL_CrvFit.cpp)",
+   "inputs": {
+    "op": "approx",
+    "ptp": 1,
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "n": 9,
+    "p": 2
+   }
+  },
+  {
+   "name": "fitcrv_approx_n11_p3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data; N_FitCrvInterp / N_FitCrvApprox drivers in NL_CrvFit.cpp)",
+   "inputs": {
+    "op": "approx",
+    "ptp": 1,
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "n": 11,
+    "p": 3
+   }
+  },
+  {
+   "name": "fitcrv_approx_n3_p3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data; N_FitCrvInterp / N_FitCrvApprox drivers in NL_CrvFit.cpp)",
+   "inputs": {
+    "op": "approx",
+    "ptp": 1,
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "n": 3,
+    "p": 3
+   }
+  },
+  {
+   "name": "fitcrv_approx_n1_p1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/FitCrvPoints.pts (curve fitting data; N_FitCrvInterp / N_FitCrvApprox drivers in NL_CrvFit.cpp)",
+   "inputs": {
+    "op": "approx",
+    "ptp": 1,
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "n": 1,
+    "p": 1
+   }
+  },
+  {
+   "name": "points_approx_n10_p3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Points.pts (point set test data)",
+   "inputs": {
+    "op": "approx",
+    "ptp": 1,
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "n": 10,
+    "p": 3
+   }
+  },
+  {
+   "name": "points_approx_n20_p3",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Points.pts (point set test data)",
+   "inputs": {
+    "op": "approx",
+    "ptp": 1,
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "n": 20,
+    "p": 3
+   }
+  },
+  {
+   "name": "points_approx_n15_p4",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/Points.pts (point set test data)",
+   "inputs": {
+    "op": "approx",
+    "ptp": 1,
+    "pts": {
+     "$pts": "Points.pts"
+    },
+    "n": 15,
+    "p": 4
+   }
+  },
+  {
+   "name": "rectangle_interp_p1",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp TestSmCreateRectangle (degree-1 interpolation of polygon corners)",
+   "inputs": {
+    "op": "interp",
+    "ptp": 1,
+    "pts": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      4,
+      0,
+      0
+     ],
+     [
+      4,
+      2,
+      0
+     ],
+     [
+      0,
+      2,
+      0
+     ],
+     [
+      0,
+      0,
+      0
+     ]
+    ],
+    "p": 1
+   }
+  },
+  {
+   "name": "rectangle_params_uniform",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp TestSmCreateRectangle (degree-1 interpolation of polygon corners)",
+   "inputs": {
+    "op": "param_values",
+    "ptp": 1,
+    "pts": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      4,
+      0,
+      0
+     ],
+     [
+      4,
+      2,
+      0
+     ],
+     [
+      0,
+      2,
+      0
+     ],
+     [
+      0,
+      0,
+      0
+     ]
+    ],
+    "par": 1
+   }
+  },
+  {
+   "name": "hexagon_interp_p1",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp TestSmCreateRegularPolygon (degree-1/2 interpolation of polygon vertices)",
+   "inputs": {
+    "op": "interp",
+    "ptp": 1,
+    "pts": [
+     [
+      3.0,
+      0.0,
+      1.0
+     ],
+     [
+      1.5000000000000004,
+      2.598076211353316,
+      1.0
+     ],
+     [
+      -1.4999999999999993,
+      2.598076211353316,
+      1.0
+     ],
+     [
+      -3.0,
+      3.6739403974420594e-16,
+      1.0
+     ],
+     [
+      -1.5000000000000013,
+      -2.598076211353315,
+      1.0
+     ],
+     [
+      1.5000000000000004,
+      -2.598076211353316,
+      1.0
+     ],
+     [
+      3.0,
+      -7.347880794884119e-16,
+      1.0
+     ]
+    ],
+    "p": 1
+   }
+  },
+  {
+   "name": "hexagon_interp_p2",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp TestSmCreateRegularPolygon (degree-1/2 interpolation of polygon vertices)",
+   "inputs": {
+    "op": "interp",
+    "ptp": 1,
+    "pts": [
+     [
+      3.0,
+      0.0,
+      1.0
+     ],
+     [
+      1.5000000000000004,
+      2.598076211353316,
+      1.0
+     ],
+     [
+      -1.4999999999999993,
+      2.598076211353316,
+      1.0
+     ],
+     [
+      -3.0,
+      3.6739403974420594e-16,
+      1.0
+     ],
+     [
+      -1.5000000000000013,
+      -2.598076211353315,
+      1.0
+     ],
+     [
+      1.5000000000000004,
+      -2.598076211353316,
+      1.0
+     ],
+     [
+      3.0,
+      -7.347880794884119e-16,
+      1.0
+     ]
+    ],
+    "p": 2
+   }
+  },
+  {
+   "name": "hexagon_interp_h_p3",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp TestSmCreateRegularPolygon (degree-1/2 interpolation of polygon vertices)",
+   "inputs": {
+    "op": "interp",
+    "ptp": 2,
+    "pts": [
+     [
+      3.0,
+      0.0,
+      1.0,
+      1.0
+     ],
+     [
+      1.5000000000000004,
+      2.598076211353316,
+      1.0,
+      1.0
+     ],
+     [
+      -1.4999999999999993,
+      2.598076211353316,
+      1.0,
+      1.0
+     ],
+     [
+      -3.0,
+      3.6739403974420594e-16,
+      1.0,
+      1.0
+     ],
+     [
+      -1.5000000000000013,
+      -2.598076211353315,
+      1.0,
+      1.0
+     ],
+     [
+      1.5000000000000004,
+      -2.598076211353316,
+      1.0,
+      1.0
+     ],
+     [
+      3.0,
+      -7.347880794884119e-16,
+      1.0,
+      1.0
+     ]
+    ],
+    "p": 3
+   }
+  },
+  {
+   "name": "interp_knots_p0",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "interp_knots",
+    "u": [
+     0.0,
+     0.1,
+     0.25,
+     0.3,
+     0.55,
+     0.7,
+     0.9,
+     1.0
+    ],
+    "p": 0
+   }
+  },
+  {
+   "name": "end_derivs_knots_p0",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "end_derivs_knots",
+    "u": [
+     0.0,
+     0.1,
+     0.25,
+     0.3,
+     0.55,
+     0.7,
+     0.9,
+     1.0
+    ],
+    "p": 0
+   }
+  },
+  {
+   "name": "deriv_knots_p0_whr1",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "deriv_knots",
+    "u": [
+     0.0,
+     0.1,
+     0.25,
+     0.3,
+     0.55,
+     0.7,
+     0.9,
+     1.0
+    ],
+    "p": 0,
+    "whr": 1
+   }
+  },
+  {
+   "name": "deriv_knots_p0_whr2",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "deriv_knots",
+    "u": [
+     0.0,
+     0.1,
+     0.25,
+     0.3,
+     0.55,
+     0.7,
+     0.9,
+     1.0
+    ],
+    "p": 0,
+    "whr": 2
+   }
+  },
+  {
+   "name": "interp_knots_p1",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "interp_knots",
+    "u": [
+     0.0,
+     0.1,
+     0.25,
+     0.3,
+     0.55,
+     0.7,
+     0.9,
+     1.0
+    ],
+    "p": 1
+   }
+  },
+  {
+   "name": "end_derivs_knots_p1",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "end_derivs_knots",
+    "u": [
+     0.0,
+     0.1,
+     0.25,
+     0.3,
+     0.55,
+     0.7,
+     0.9,
+     1.0
+    ],
+    "p": 1
+   }
+  },
+  {
+   "name": "deriv_knots_p1_whr1",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "deriv_knots",
+    "u": [
+     0.0,
+     0.1,
+     0.25,
+     0.3,
+     0.55,
+     0.7,
+     0.9,
+     1.0
+    ],
+    "p": 1,
+    "whr": 1
+   }
+  },
+  {
+   "name": "deriv_knots_p1_whr2",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "deriv_knots",
+    "u": [
+     0.0,
+     0.1,
+     0.25,
+     0.3,
+     0.55,
+     0.7,
+     0.9,
+     1.0
+    ],
+    "p": 1,
+    "whr": 2
+   }
+  },
+  {
+   "name": "interp_knots_p2",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "interp_knots",
+    "u": [
+     0.0,
+     0.1,
+     0.25,
+     0.3,
+     0.55,
+     0.7,
+     0.9,
+     1.0
+    ],
+    "p": 2
+   }
+  },
+  {
+   "name": "end_derivs_knots_p2",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "end_derivs_knots",
+    "u": [
+     0.0,
+     0.1,
+     0.25,
+     0.3,
+     0.55,
+     0.7,
+     0.9,
+     1.0
+    ],
+    "p": 2
+   }
+  },
+  {
+   "name": "deriv_knots_p2_whr1",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "deriv_knots",
+    "u": [
+     0.0,
+     0.1,
+     0.25,
+     0.3,
+     0.55,
+     0.7,
+     0.9,
+     1.0
+    ],
+    "p": 2,
+    "whr": 1
+   }
+  },
+  {
+   "name": "deriv_knots_p2_whr2",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "deriv_knots",
+    "u": [
+     0.0,
+     0.1,
+     0.25,
+     0.3,
+     0.55,
+     0.7,
+     0.9,
+     1.0
+    ],
+    "p": 2,
+    "whr": 2
+   }
+  },
+  {
+   "name": "interp_knots_p3",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "interp_knots",
+    "u": [
+     0.0,
+     0.1,
+     0.25,
+     0.3,
+     0.55,
+     0.7,
+     0.9,
+     1.0
+    ],
+    "p": 3
+   }
+  },
+  {
+   "name": "end_derivs_knots_p3",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "end_derivs_knots",
+    "u": [
+     0.0,
+     0.1,
+     0.25,
+     0.3,
+     0.55,
+     0.7,
+     0.9,
+     1.0
+    ],
+    "p": 3
+   }
+  },
+  {
+   "name": "deriv_knots_p3_whr1",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "deriv_knots",
+    "u": [
+     0.0,
+     0.1,
+     0.25,
+     0.3,
+     0.55,
+     0.7,
+     0.9,
+     1.0
+    ],
+    "p": 3,
+    "whr": 1
+   }
+  },
+  {
+   "name": "deriv_knots_p3_whr2",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "deriv_knots",
+    "u": [
+     0.0,
+     0.1,
+     0.25,
+     0.3,
+     0.55,
+     0.7,
+     0.9,
+     1.0
+    ],
+    "p": 3,
+    "whr": 2
+   }
+  },
+  {
+   "name": "interp_knots_p4",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "interp_knots",
+    "u": [
+     0.0,
+     0.1,
+     0.25,
+     0.3,
+     0.55,
+     0.7,
+     0.9,
+     1.0
+    ],
+    "p": 4
+   }
+  },
+  {
+   "name": "end_derivs_knots_p4",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "end_derivs_knots",
+    "u": [
+     0.0,
+     0.1,
+     0.25,
+     0.3,
+     0.55,
+     0.7,
+     0.9,
+     1.0
+    ],
+    "p": 4
+   }
+  },
+  {
+   "name": "deriv_knots_p4_whr1",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "deriv_knots",
+    "u": [
+     0.0,
+     0.1,
+     0.25,
+     0.3,
+     0.55,
+     0.7,
+     0.9,
+     1.0
+    ],
+    "p": 4,
+    "whr": 1
+   }
+  },
+  {
+   "name": "deriv_knots_p4_whr2",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "deriv_knots",
+    "u": [
+     0.0,
+     0.1,
+     0.25,
+     0.3,
+     0.55,
+     0.7,
+     0.9,
+     1.0
+    ],
+    "p": 4,
+    "whr": 2
+   }
+  },
+  {
+   "name": "deriv_knots_p_too_big",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "deriv_knots",
+    "u": [
+     0.0,
+     0.1,
+     0.25,
+     0.3,
+     0.55,
+     0.7,
+     0.9,
+     1.0
+    ],
+    "p": 9,
+    "whr": 1
+   }
+  },
+  {
+   "name": "deriv_knots_p1_k1",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "deriv_knots",
+    "u": [
+     0.0,
+     1.0
+    ],
+    "p": 1,
+    "whr": 2
+   }
+  },
+  {
+   "name": "end_derivs_knots_p1_k1",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "end_derivs_knots",
+    "u": [
+     0.0,
+     1.0
+    ],
+    "p": 1
+   }
+  },
+  {
+   "name": "approx_knots_n3_p2",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "approx_knot_vector",
+    "u": [
+     0.0,
+     0.1,
+     0.25,
+     0.3,
+     0.55,
+     0.7,
+     0.9,
+     1.0
+    ],
+    "n": 3,
+    "p": 2
+   }
+  },
+  {
+   "name": "approx_knots_n5_p3",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "approx_knot_vector",
+    "u": [
+     0.0,
+     0.1,
+     0.25,
+     0.3,
+     0.55,
+     0.7,
+     0.9,
+     1.0
+    ],
+    "n": 5,
+    "p": 3
+   }
+  },
+  {
+   "name": "approx_knots_n7_p3",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "approx_knot_vector",
+    "u": [
+     0.0,
+     0.1,
+     0.25,
+     0.3,
+     0.55,
+     0.7,
+     0.9,
+     1.0
+    ],
+    "n": 7,
+    "p": 3
+   }
+  },
+  {
+   "name": "approx_knots_n8_p1",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "approx_knot_vector",
+    "u": [
+     0.0,
+     0.1,
+     0.25,
+     0.3,
+     0.55,
+     0.7,
+     0.9,
+     1.0
+    ],
+    "n": 8,
+    "p": 1
+   }
+  },
+  {
+   "name": "approx_knots_n9_p4",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "approx_knot_vector",
+    "u": [
+     0.0,
+     0.1,
+     0.25,
+     0.3,
+     0.55,
+     0.7,
+     0.9,
+     1.0
+    ],
+    "n": 9,
+    "p": 4
+   }
+  },
+  {
+   "name": "approx_knots_n_gt_m",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "approx_knot_vector",
+    "u": [
+     0.0,
+     0.1,
+     0.25,
+     0.3,
+     0.55,
+     0.7,
+     0.9,
+     1.0
+    ],
+    "n": 8,
+    "p": 3
+   }
+  },
+  {
+   "name": "params_coincident",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "param_values",
+    "ptp": 1,
+    "pts": [
+     [
+      1,
+      1,
+      1
+     ],
+     [
+      1,
+      1,
+      1
+     ],
+     [
+      1,
+      1,
+      1
+     ],
+     [
+      1,
+      1,
+      1
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "params_single",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "param_values",
+    "ptp": 2,
+    "pts": [
+     [
+      1,
+      1,
+      1,
+      2
+     ]
+    ],
+    "par": 3
+   }
+  },
+  {
+   "name": "interp_knot_count_mismatch",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "interp",
+    "ptp": 1,
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 3,
+    "knots": [
+     0,
+     0,
+     0,
+     0,
+     1,
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "interp_p0",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "interp",
+    "ptp": 1,
+    "pts": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      2,
+      0
+     ],
+     [
+      3,
+      1,
+      0
+     ]
+    ],
+    "u": [
+     0.0,
+     0.5,
+     1.0
+    ],
+    "knots": [
+     0.0,
+     0.25,
+     0.75,
+     1.0
+    ],
+    "p": 0
+   }
+  },
+  {
+   "name": "derivs_p_too_small",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "derivs",
+    "ptp": 1,
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "p": 1,
+    "knots": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "ds": [
+     1,
+     0,
+     0
+    ],
+    "de": [
+     1,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "derivs_two_points_p2",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "derivs",
+    "ptp": 1,
+    "pts": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      1,
+      0
+     ]
+    ],
+    "p": 2,
+    "ds": [
+     1,
+     0,
+     0
+    ],
+    "de": [
+     0,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "deriv_p_too_big",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "deriv",
+    "ptp": 1,
+    "pts": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      1,
+      0
+     ],
+     [
+      2,
+      0,
+      0
+     ]
+    ],
+    "p": 4,
+    "knots": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     1,
+     1,
+     1,
+     1,
+     1
+    ],
+    "t": [
+     1,
+     0,
+     0
+    ],
+    "whr": 1
+   }
+  },
+  {
+   "name": "approx_knot_count_mismatch",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "approx",
+    "ptp": 1,
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "n": 5,
+    "p": 3,
+    "knots": [
+     0,
+     0,
+     0,
+     0,
+     0.3,
+     0.6,
+     1,
+     1,
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "approx_no_sample_in_span",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "approx",
+    "ptp": 1,
+    "pts": {
+     "$pts": "FitCrvPoints.pts"
+    },
+    "n": 5,
+    "p": 2,
+    "knots": [
+     0,
+     0,
+     0,
+     0.01,
+     0.02,
+     0.03,
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "first_derivs_double_knots",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "first_derivs",
+    "ptp": 1,
+    "pts": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      1,
+      0
+     ],
+     [
+      2,
+      0,
+      0
+     ]
+    ],
+    "d": [
+     [
+      1,
+      1,
+      0
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      1,
+      -1,
+      0
+     ]
+    ],
+    "u": [
+     0.0,
+     0.5,
+     1.0
+    ],
+    "knots": [
+     0,
+     0,
+     0,
+     0,
+     0.5,
+     0.5,
+     1,
+     1,
+     1,
+     1
+    ],
+    "p": 3
+   }
+  },
+  {
+   "name": "srf_data_udir",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "srf_data",
+    "ptp": 1,
+    "grid": [
+     [
+      [
+       0.0,
+       0.0,
+       0
+      ],
+      [
+       0.1,
+       1.5,
+       0
+      ],
+      [
+       0.2,
+       3.0,
+       0
+      ],
+      [
+       0.30000000000000004,
+       4.5,
+       0
+      ]
+     ],
+     [
+      [
+       1.0,
+       0.0,
+       0
+      ],
+      [
+       1.1,
+       1.5,
+       1
+      ],
+      [
+       1.2,
+       3.0,
+       2
+      ],
+      [
+       1.3,
+       4.5,
+       0
+      ]
+     ],
+     [
+      [
+       2.0,
+       0.0,
+       0
+      ],
+      [
+       2.1,
+       1.5,
+       2
+      ],
+      [
+       2.2,
+       3.0,
+       1
+      ],
+      [
+       2.3,
+       4.5,
+       0
+      ]
+     ]
+    ],
+    "k": 2,
+    "dir": 1,
+    "matrix": {
+     "n": 2,
+     "mtp": 3,
+     "bw": 3,
+     "storage": [
+      0.5,
+      4.0,
+      0.5,
+      0.5,
+      4.0,
+      0.5,
+      0.5,
+      4.0,
+      0.5
+     ]
+    }
+   }
+  },
+  {
+   "name": "srf_data_vdir",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "srf_data",
+    "ptp": 1,
+    "grid": [
+     [
+      [
+       0.0,
+       0.0,
+       0
+      ],
+      [
+       0.1,
+       1.5,
+       0
+      ],
+      [
+       0.2,
+       3.0,
+       0
+      ],
+      [
+       0.30000000000000004,
+       4.5,
+       0
+      ]
+     ],
+     [
+      [
+       1.0,
+       0.0,
+       0
+      ],
+      [
+       1.1,
+       1.5,
+       1
+      ],
+      [
+       1.2,
+       3.0,
+       2
+      ],
+      [
+       1.3,
+       4.5,
+       0
+      ]
+     ],
+     [
+      [
+       2.0,
+       0.0,
+       0
+      ],
+      [
+       2.1,
+       1.5,
+       2
+      ],
+      [
+       2.2,
+       3.0,
+       1
+      ],
+      [
+       2.3,
+       4.5,
+       0
+      ]
+     ]
+    ],
+    "k": 1,
+    "dir": 2,
+    "matrix": {
+     "n": 3,
+     "mtp": 3,
+     "bw": 3,
+     "storage": [
+      0.5,
+      4.0,
+      0.5,
+      0.5,
+      4.0,
+      0.5,
+      0.5,
+      4.0,
+      0.5,
+      0.5,
+      4.0,
+      0.5
+     ]
+    }
+   }
+  },
+  {
+   "name": "srf_data_singular",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "srf_data",
+    "ptp": 1,
+    "grid": [
+     [
+      [
+       0.0,
+       0.0,
+       0
+      ],
+      [
+       0.1,
+       1.5,
+       0
+      ],
+      [
+       0.2,
+       3.0,
+       0
+      ],
+      [
+       0.30000000000000004,
+       4.5,
+       0
+      ]
+     ],
+     [
+      [
+       1.0,
+       0.0,
+       0
+      ],
+      [
+       1.1,
+       1.5,
+       1
+      ],
+      [
+       1.2,
+       3.0,
+       2
+      ],
+      [
+       1.3,
+       4.5,
+       0
+      ]
+     ],
+     [
+      [
+       2.0,
+       0.0,
+       0
+      ],
+      [
+       2.1,
+       1.5,
+       2
+      ],
+      [
+       2.2,
+       3.0,
+       1
+      ],
+      [
+       2.3,
+       4.5,
+       0
+      ]
+     ]
+    ],
+    "k": 1,
+    "dir": 2,
+    "matrix": {
+     "n": 1,
+     "mtp": 0,
+     "bw": 2,
+     "storage": [
+      0,
+      1,
+      1,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "derivs_matrix_p3",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "derivs_matrix",
+    "ptp": 1,
+    "pts": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      2,
+      0
+     ],
+     [
+      3,
+      3,
+      1
+     ],
+     [
+      4,
+      1,
+      0
+     ]
+    ],
+    "p": 3,
+    "knots": [
+     0,
+     0,
+     0,
+     0,
+     0.25,
+     0.5,
+     0.75,
+     1,
+     1,
+     1,
+     1
+    ],
+    "ds": [
+     1,
+     0,
+     0
+    ],
+    "de": [
+     0,
+     -1,
+     0
+    ],
+    "matrix": {
+     "n": 5,
+     "mtp": 3,
+     "bw": 5,
+     "storage": [
+      0.5,
+      0.5,
+      4.0,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      4.0,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      4.0,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      4.0,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      4.0,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      4.0,
+      0.5,
+      0.5
+     ]
+    }
+   }
+  },
+  {
+   "name": "first_derivs_row_underflow_p2",
+   "upstream_ref": "edge case: span gives l == 0, so upstream writes M[2i+1][-1] (last entry of row 2i of its row-major block)",
+   "inputs": {
+    "op": "first_derivs",
+    "ptp": 1,
+    "pts": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      1,
+      0
+     ],
+     [
+      2,
+      0,
+      0
+     ]
+    ],
+    "d": [
+     [
+      1,
+      1,
+      0
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      1,
+      -1,
+      0
+     ]
+    ],
+    "u": [
+     0.0,
+     0.5,
+     1.0
+    ],
+    "knots": [
+     0,
+     0,
+     0,
+     0.4,
+     0.6,
+     0.8,
+     1,
+     1,
+     1
+    ],
+    "p": 2
+   }
+  },
+  {
+   "name": "first_derivs_row_underflow_p3",
+   "upstream_ref": "edge case: span gives l == 0, so upstream writes M[2i+1][-1] (last entry of row 2i of its row-major block)",
+   "inputs": {
+    "op": "first_derivs",
+    "ptp": 2,
+    "pts": [
+     [
+      0,
+      0,
+      0,
+      1
+     ],
+     [
+      1,
+      1,
+      0,
+      2
+     ],
+     [
+      2,
+      0,
+      0,
+      1
+     ]
+    ],
+    "d": [
+     [
+      1,
+      1,
+      0,
+      0
+     ],
+     [
+      1,
+      0,
+      0,
+      0.5
+     ],
+     [
+      1,
+      -1,
+      0,
+      0
+     ]
+    ],
+    "u": [
+     0.0,
+     0.5,
+     1.0
+    ],
+    "knots": [
+     0,
+     0,
+     0,
+     0,
+     0.6,
+     0.7,
+     0.8,
+     1,
+     1,
+     1,
+     1
+    ],
+    "p": 3
+   }
+  }
+ ]
+}

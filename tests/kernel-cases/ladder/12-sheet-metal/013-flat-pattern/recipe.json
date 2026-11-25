@@ -1,0 +1,9 @@
+{
+ "base": "../../12-sheet-metal/003-four-flanges-90-closed-corners",
+ "commands": [
+  {
+   "command": "sheet.flat_pattern",
+   "params": {}
+  }
+ ]
+}

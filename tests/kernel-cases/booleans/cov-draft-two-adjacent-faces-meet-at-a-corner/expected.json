@@ -1,0 +1,21 @@
+{
+ "sources": [],
+ "what": "two adjacent sides of a block (front and right) drafted 10 deg from the base: the drafted faces meet along a new slanted edge",
+ "source": "analytic",
+ "method": "the section at height z is (40 - z tan10)(30 - z tan10); V = int_0^20 = 24000 - 70 tan10 * 200 + tan10^2 * 8000/3; still 6 faces",
+ "body_count": 1,
+ "faces": 6,
+ "volume_mm3": 21614.332147750192,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   30,
+   20
+  ]
+ }
+}

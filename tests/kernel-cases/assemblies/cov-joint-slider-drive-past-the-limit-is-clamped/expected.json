@@ -1,0 +1,54 @@
+{
+ "sources": [],
+ "what": "a slider with limits 0..10 driven to 15 and to -4",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); slider along +x, limits [0,10]: 15 -> 10 (centre (30,0,5)), then -4 -> 0 (centre (20,0,5))",
+ "body_count": 2,
+ "volume_mm3": 8000.0,
+ "results": [
+  {
+   "step": 9,
+   "json": {
+    "values": [
+     {
+      "value": 10.0
+     }
+    ]
+   }
+  },
+  {
+   "step": 10,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      30.0,
+      0.0,
+      5.0
+     ]
+    }
+   }
+  },
+  {
+   "step": 11,
+   "json": {
+    "values": [
+     {
+      "value": 0.0
+     }
+    ]
+   }
+  },
+  {
+   "step": 12,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      20.0,
+      0.0,
+      5.0
+     ]
+    }
+   }
+  }
+ ]
+}

@@ -1,0 +1,1 @@
+#2572: a closed path whose transported frame does not close still needs the fitted frame chain's closure correction. Closed general splines also lack a certified frame. Closed paths of lines and arcs whose transported frame closes now keep an exact sweep definition.

@@ -1,5 +1,6 @@
 use serde::Serialize;
-use solidcraft_geom::{Aabb3, Mesh, Vec3};
+use solidcore_record::Vec3;
+use solidcraft_geom::Aabb3;
 
 use crate::Result;
 use crate::body::Body;
@@ -20,85 +21,62 @@ pub struct BodyMeasure {
     /// Counts after merging split pieces of the same analytic surface/curve (comparable with
     /// systems that use periodic faces and edges).
     pub merged: TopoCounts,
-}
-
-/// Per-face sums: area, 6 × signed volume and 24 × first moments (divergence theorem), taken
-/// about `o` (the moments relative to it), and the sum of the area vectors (zero over a closed
-/// surface). Over a closed surface the volume does not depend on `o`; over one that leaves a
-/// gap, the gap is closed by a cone to `o`, so `o` near the body keeps that cone small.
-fn face_sums(m: &Mesh, nf: usize, o: Vec3) -> Vec<(f64, f64, Vec3, Vec3)> {
-    let mut out = vec![(0.0, 0.0, Vec3::ZERO, Vec3::ZERO); nf];
-    for (t, f) in m.triangles.iter().zip(&m.tri_face) {
-        let (Some([a, b, c]), Some(slot)) = (m.tri(t), out.get_mut(*f as usize)) else { continue };
-        let n = (b - a).cross(c - a) * 0.5;
-        let (a, b, c) = (a - o, b - o, c - o);
-        let d = a.dot(b.cross(c));
-        slot.0 += n.len();
-        slot.1 += d;
-        slot.2 += (a + b + c) * d;
-        slot.3 += n;
-    }
-    out
-}
-
-/// Smallest radius of curvature along the mesh's edge polylines (straight edges ignored).
-fn min_edge_radius(m: &Mesh) -> Option<f64> {
-    let mut best: Option<f64> = None;
-    for e in &m.edges {
-        for w in e.windows(3) {
-            let (Some(&a), Some(&b), Some(&c)) = (w.first(), w.get(1), w.get(2)) else { continue };
-            let (ab, bc, ca) = (b - a, c - b, a - c);
-            let cross = ab.cross(bc).len();
-            if !(cross > 1e-12 * ab.len() * bc.len()) {
-                continue;
-            }
-            let r = ab.len() * bc.len() * ca.len() / (2.0 * cross);
-            if r.is_finite() && r > 0.0 && best.is_none_or(|x| r < x) {
-                best = Some(r);
-            }
-        }
-    }
-    best
+    /// What volume, area and centre come from: `smlib` (exact, integrated on the surfaces) or
+    /// `mesh` (a mesh body's own triangles).
+    pub measured_by: &'static str,
+    /// Anything the measurement says about itself.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
 }
 
 /// Volume, area, centre and box of a body, as [`measure`] works them out, without the topology
-/// counts (and the tessellation they take).
-#[derive(Clone, Copy, Debug, Serialize)]
+/// counts.
+#[derive(Clone, Debug, Serialize)]
 pub struct MassMeasure {
     pub volume: f64,
     pub area: f64,
     pub centroid: Vec3,
     pub bbox: Aabb3,
+    /// As [`BodyMeasure::measured_by`].
+    pub measured_by: &'static str,
+    /// As [`BodyMeasure::notes`].
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
 }
 
-/// Measure a body from a fine tessellation (chord tolerance 5e-5 of the body size, finer for
-/// small radii down to 5e-6). Faces whose fine tessellation disagrees with a coarse one (a
-/// meshing failure) use the coarse result.
+/// The relative accuracy SMLib integrates at: the finest the C API takes
+/// ([`solidcraft_smlib::MEASURE_ACCURACY`], 1e-8). `smlib_brep_mass_properties` calls the
+/// kernel's integration directly because SmApiBrepComputeMassProperties clamps to [1e-4, 1e-1],
+/// which leaves curved faces off by 1e-5 to 1e-3; asking 1e-4 here threw that away.
+const ACCURACY: f64 = solidcraft_smlib::MEASURE_ACCURACY;
+
+/// Measure a body. A B-rep body's volume, area and centre are SMLib's, integrated on its exact
+/// surfaces over its material regions (a sheet's: its faces' area and their centre, volume 0),
+/// and its box is SMLib's exact box; a body SMLib cannot measure is an error. A mesh body is
+/// measured from its triangles, exactly.
 pub fn measure(b: &Body) -> Result<BodyMeasure> {
-    if let Some((pos, tris)) = b.triangle_mesh() {
+    let _span = solidcraft_profile::span("kernel", "measure");
+    if let Some(mb) = &b.mesh {
         // Exact for a mesh body; topology counts are facets, sides and vertices.
-        let m = b.tessellate(1.0)?;
-        let mm = m.measure();
-        let edges = b.mesh.as_ref().map(|m| m.edge_count()).unwrap_or(0);
-        let merged =
-            TopoCounts { faces: tris.len(), edges, vertices: pos.len(), face_types: [("mesh".to_string(), tris.len())].into_iter().collect() };
+        let (mm, bbox) = mb.measure();
+        let edges = mb.edge_count();
+        let (nf, nv) = (mb.face_count(), mb.vertex_count());
+        let merged = TopoCounts { faces: nf, edges, vertices: nv, face_types: [("mesh".to_string(), nf)].into_iter().collect() };
         return Ok(BodyMeasure {
             volume: mm.volume,
             area: mm.area,
             centroid: mm.centroid,
-            bbox: m.bounds(),
-            faces: tris.len(),
+            bbox,
+            faces: nf,
             edges,
-            vertices: pos.len(),
+            vertices: nv,
             shells: 1,
             merged,
+            measured_by: "mesh",
+            notes: Vec::new(),
         });
     }
-    let (m, topo) = mass(b, true)?;
-    let topo = match topo {
-        Some(t) => t,
-        None => b.tessellate((b.size() * 1e-3).max(1e-3))?,
-    };
+    let m = measure_mass(b)?;
     Ok(BodyMeasure {
         volume: m.volume,
         area: m.area,
@@ -108,97 +86,86 @@ pub fn measure(b: &Body) -> Result<BodyMeasure> {
         edges: b.edge_count(),
         vertices: b.vertex_count(),
         shells: b.shell_count(),
-        merged: merged_topology(b, &topo)?,
+        merged: merged_topology(b)?,
+        measured_by: m.measured_by,
+        notes: m.notes,
     })
 }
 
-/// [`measure`]'s volume, area, centre and box alone: the same numbers, a tessellation fewer
-/// (for callers that need no topology counts, such as an interference check).
+/// [`measure`]'s volume, area, centre and box alone (for callers that need no topology counts,
+/// such as an interference check).
 pub fn measure_mass(b: &Body) -> Result<MassMeasure> {
+    let _span = solidcraft_profile::span("kernel", "measure_mass");
     if b.triangle_mesh().is_some() {
         let m = measure(b)?;
-        return Ok(MassMeasure { volume: m.volume, area: m.area, centroid: m.centroid, bbox: m.bbox });
+        return Ok(MassMeasure { volume: m.volume, area: m.area, centroid: m.centroid, bbox: m.bbox, measured_by: m.measured_by, notes: m.notes });
     }
-    Ok(mass(b, false)?.0)
+    let m = crate::guard("SMLib mass properties", || {
+        b.smlib()?.mass_properties(ACCURACY).map_err(|e| crate::KernelError::smlib("SMLib mass properties", e))
+    })?;
+    let [x, y, z] = m.centroid;
+    Ok(MassMeasure { volume: m.volume, area: m.area, centroid: Vec3::new(x, y, z), bbox: b.exact_bounds()?, measured_by: "smlib", notes: Vec::new() })
 }
 
-/// The mass properties of a B-rep body from three tessellations: a coarse one (which sets how
-/// fine the others go), then a fine and a medium one at once on desktop (one after the other
-/// in the browser). With `topology`, also the coarse unrefined mesh the topology counts take,
-/// made alongside them.
-fn mass(b: &Body, topology: bool) -> Result<(MassMeasure, Option<Mesh>)> {
-    let size = b.size();
-    let coarse_tol = (size * 1e-3).max(1e-3);
-    let coarse = b.tessellate_with(coarse_tol, true)?;
-    // Chord error relative to a radius sets the volume error: keep it near 3e-4 of the
-    // smallest radius (thin tubes, small fillets).
-    let tight = min_edge_radius(&coarse).map(|r| r * 3e-4).unwrap_or(f64::INFINITY);
-    let fine_tol = (size * 5e-5).min(tight).max(size * 5e-6).max(1e-4);
-    let mut jobs = vec![(fine_tol, true), ((fine_tol * 5.0).max(2e-4), true)];
-    if topology {
-        jobs.push((coarse_tol, false));
-    }
-    // Independent tessellations of one body: each on its own thread, the calling thread's
-    // profile counting their wall time once as tessellation. Not from inside a worker pool: a
-    // pool thread blocked on threads of its own could leave their meshing (which runs on the
-    // shared pool) without a worker.
-    #[cfg(not(target_arch = "wasm32"))]
-    let threads = if rayon::current_thread_index().is_none() { jobs.len() } else { 1 };
-    #[cfg(target_arch = "wasm32")]
-    let threads = 1;
-    let made = crate::profile::timed(crate::profile::Kind::Tessellate, || {
-        crate::par::map_on_threads(&jobs, threads, |&(tol, refine)| b.tessellate_with(tol, refine))
-    });
-    let mut made = made.into_iter().map(|m| m.unwrap_or_else(|| Err(crate::KernelError::Internal("tessellation failed".into()))));
-    let missing = || crate::KernelError::Internal("tessellation missing".into());
-    let fine = made.next().ok_or_else(missing)??;
-    let medium = made.next().ok_or_else(missing)??;
-    let topo = match made.next() {
-        Some(m) => Some(m?),
-        None => None,
+/// How far `b` reaches along `plane`'s normal, measured from the plane: the least and greatest
+/// level of its points, `[low, high]`, as solidcore-ops measures it
+/// ([`solidcore_ops::Body::levels_along`]: the body moved rigidly into the plane's own frame and
+/// its exact box read there), so the span is the body's own, not the shadow of its world box.
+/// A mesh body has no solidcore form and is refused.
+pub fn levels_along(b: &Body, plane: &solidcore_record::Plane) -> Result<[f64; 2]> {
+    let Some(form) = b.ops_body() else {
+        return Err(crate::KernelError::Failed("the body's reach along the plane's normal: the body has no solidcore form".into()));
     };
-    let nf = b.face_count();
-    // About the box's centre when the meshes leave only a crack: see `face_sums`. A body that is
-    // open on purpose (a surface, or a cup whose lid is still a separate sheet) has no volume of
-    // its own; it keeps the origin, so such bodies still compare with each other when the centre
-    // of their boxes moves (a crowned lid rises, the open cup under it doesn't change).
-    let (surface, gap) = face_sums(&fine, nf, Vec3::ZERO).iter().fold((0.0, Vec3::ZERO), |s, f| (s.0 + f.0, s.1 + f.3));
-    let o = Some(fine.bounds().center()).filter(|c| c.is_finite() && gap.len() <= 0.01 * surface).unwrap_or(Vec3::ZERO);
-    let (sf, sm, sc) = (face_sums(&fine, nf, o), face_sums(&medium, nf, o), face_sums(&coarse, nf, o));
-    let close = |x: f64, y: f64| (x - y).abs() <= 0.01 * x.abs().max(y.abs()) + 1e-9;
-    let (mut area, mut v6, mut mom) = (0.0, 0.0, Vec3::ZERO);
-    for ((f, m), c) in sf.iter().zip(&sm).zip(&sc) {
-        // Trust the finest tessellation that agrees with the next coarser one.
-        let pick = if close(f.0, m.0) {
-            f
-        } else if close(m.0, c.0) {
-            m
-        } else {
-            f
-        };
-        area += pick.0;
-        v6 += pick.1;
-        mom += pick.2;
-    }
-    // The moments back about the origin. A gap the meshes leave (a crack where a trimmed face
-    // meets a hole cut into it) is closed by a cone to the box's centre, which keeps it small
-    // (a crack of 0.3 mm² moved a part ring's volume by 7 % about the origin 1000 mm away; about
-    // the centre, by 0.1 %). Every body is measured by the same meshes this way, so a body and the
-    // pieces a boolean cuts it into add up: a closed display plan measured instead would mesh
-    // some faces more coarsely than the sums do and break that.
-    let mom = o * (4.0 * v6) + mom;
-    let volume = v6 / 6.0;
-    let centroid = if v6.abs() > 1e-12 { mom / (4.0 * v6) } else { fine.bounds().center() };
-    Ok((MassMeasure { volume, area, centroid, bbox: coarse.bounds().union(&fine.bounds()) }, topo))
+    let (ops, _) = &*form;
+    let (o, x, y) = (plane.origin, plane.x, plane.y);
+    ops.levels_along([o.x, o.y, o.z], [x.x, x.y, x.z], [y.x, y.y, y.z])
+        .map_err(|e| crate::KernelError::Invalid(format!("the body's reach along the plane's normal can't be measured: {e}")))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{BoolOp, boolean, cylinder, torus};
+    use solidcraft_geom::prelude::*;
 
-    /// The mass properties alone are [`measure`]'s, to the bit, with the tessellations made at
-    /// once; and on a curved intersection they are the textbook ones.
+    #[test]
+    fn selected_faces_skip_exact_conversion_for_either_mesh_operand() {
+        let mesh = crate::mesh_body(&[Vec3::ZERO, Vec3::X, Vec3::Y], &[[0, 1, 2]]).unwrap();
+        let exact = crate::box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap();
+        let mut unavailable = exact.clone();
+        // A cached refusal is how ops_body represents a B-rep it could not convert.
+        unavailable.ops = std::sync::Arc::new(crate::form_cell::FormCell::refused_for(()));
+        assert!(mesh.is_mesh() && !unavailable.is_mesh());
+        for (a, b) in [(&mesh, &unavailable), (&unavailable, &mesh)] {
+            assert_eq!(crate::faces_closest(a, &[0], b, &[0]).unwrap(), None);
+        }
+        for (a, b) in [(&exact, &unavailable), (&unavailable, &exact)] {
+            assert!(
+                matches!(crate::faces_closest(a, &[0], b, &[0]), Err(crate::KernelError::Failed(message)) if message.contains("exact measurement is unavailable"))
+            );
+        }
+    }
+
+    /// The selected sides of nested cylinders are their radii apart; whole-body distance
+    /// would instead see coincident caps. Both witnesses belong to the selected surfaces.
+    #[test]
+    fn selected_cylinder_faces_measure_their_exact_gap() {
+        let a = cylinder(Vec3::ZERO, Vec3::Z, 20.0, 5.0).unwrap();
+        let b = cylinder(Vec3::ZERO, Vec3::Z, 35.0, 5.0).unwrap();
+        let side = |b: &Body| {
+            (0..b.record().faces.len())
+                .filter(|&f| matches!(crate::face_surface(b, f), Some(crate::FaceSurface::Cylinder { .. })))
+                .collect::<Vec<_>>()
+        };
+        let (af, bf) = (side(&a), side(&b));
+        assert!(!af.is_empty() && !bf.is_empty());
+        let c = crate::faces_closest(&a, &af, &b, &bf).unwrap().unwrap();
+        assert!(c.exact && (c.distance - 15.0).abs() < 1e-9, "{c:?}");
+        assert!((c.from.x.hypot(c.from.y) - 20.0).abs() < 1e-9 && (c.to.x.hypot(c.to.y) - 35.0).abs() < 1e-9, "{c:?}");
+    }
+
+    /// The mass properties alone are [`measure`]'s, to the bit; and on a curved intersection
+    /// they are the textbook ones.
     #[test]
     fn mass_alone_is_the_full_measure() {
         let ring = torus(Vec3::ZERO, 10.0, 2.0).unwrap();
@@ -217,69 +184,78 @@ mod tests {
         assert!(measure(&ring).unwrap().merged.faces > 0);
     }
 
-    /// A 10 mm cube at `at`, each side in n × n squares of two triangles, one face per side;
-    /// without its first `open` triangles.
-    fn cube(at: Vec3, n: usize, open: usize) -> Mesh {
-        let mut m = Mesh::default();
-        let s = 10.0;
-        for axis in 0..3 {
-            for side in [0.0, 1.0] {
-                for i in 0..n {
-                    for j in 0..n {
-                        let corner = |a: usize, b: usize| {
-                            let mut c = [0.0; 3];
-                            c[axis] = side * s;
-                            c[(axis + 1) % 3] = a as f64 * s / n as f64;
-                            c[(axis + 2) % 3] = b as f64 * s / n as f64;
-                            at + Vec3::new(c[0], c[1], c[2])
-                        };
-                        let k = m.positions.len() as u32;
-                        m.positions.extend([corner(i, j), corner(i + 1, j), corner(i + 1, j + 1), corner(i, j + 1)]);
-                        m.triangles.extend(if side > 0.0 { [[k, k + 1, k + 2], [k, k + 2, k + 3]] } else { [[k, k + 2, k + 1], [k, k + 3, k + 2]] });
-                        m.tri_face.extend([(2 * axis) as u32 + side as u32; 2]);
-                    }
-                }
-            }
-        }
-        m.triangles.drain(..open);
-        m.tri_face.drain(..open);
-        m
+    /// A box's reach along a plane's normal, from the plane: away from the origin, and on a
+    /// plane whose normal is not a world axis's direction (its world box would overstate it).
+    #[test]
+    fn levels_along_a_plane_are_the_bodys_own() {
+        let block = crate::box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 10.0, 10.0)).unwrap();
+        let raised = solidcore_record::Plane { origin: Vec3::new(3.0, 4.0, 5.0), ..solidcore_record::Plane::XY };
+        let [lo, hi] = levels_along(&block, &raised).unwrap();
+        assert!((lo + 5.0).abs() < 1e-9 && (hi - 5.0).abs() < 1e-9, "{lo} {hi}");
+        // A plane through the origin whose normal is (1, 1, 0)/sqrt 2: the box's corners reach
+        // from 0 to 20/sqrt 2 along it.
+        let s = std::f64::consts::FRAC_1_SQRT_2;
+        let tilted = solidcore_record::Plane { origin: Vec3::ZERO, x: Vec3::new(0.0, 0.0, 1.0), y: Vec3::new(s, -s, 0.0) };
+        assert!((tilted.normal() - Vec3::new(s, s, 0.0)).len() < 1e-12, "{:?}", tilted.normal());
+        let [lo, hi] = levels_along(&block, &tilted).unwrap();
+        assert!(lo.abs() < 1e-9 && (hi - 20.0 * s).abs() < 1e-9, "{lo} {hi}");
     }
 
-    /// The summed per-face sums of `m` about `o`, with the moments about the origin (as
-    /// `measure` passes them on).
-    fn sums(m: &Mesh, o: Vec3) -> (f64, f64, Vec3, Vec3) {
-        let (area, v6, mom, normal) =
-            face_sums(m, 6, o).iter().fold((0.0, 0.0, Vec3::ZERO, Vec3::ZERO), |s, f| (s.0 + f.0, s.1 + f.1, s.2 + f.2, s.3 + f.3));
-        (area, v6, o * (4.0 * v6) + mom, normal)
+    /// A body's exact box is measured once and its clones share it; a moved copy is a new body
+    /// and measures its own.
+    #[test]
+    fn exact_box_is_kept_per_record() {
+        let post = cylinder(Vec3::ZERO, Vec3::Z, 1.5, 10.0).unwrap();
+        let clone = post.clone();
+        let first = post.exact_bounds().unwrap();
+        assert_eq!(*clone.bounds.lock().unwrap(), Some(first));
+        assert_eq!(clone.exact_bounds().unwrap(), first);
+        let moved = transform(&post, Vec3::new(5.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0).unwrap();
+        let b = moved.exact_bounds().unwrap();
+        assert!((b.min.x - first.min.x - 5.0).abs() < 1e-9 && (b.max.x - first.max.x - 5.0).abs() < 1e-9, "{b:?} against {first:?}");
+    }
+
+    /// A tool whose vertices' box meets the body's is not apart from it, and neither exact box is
+    /// measured to show it (a pattern's every cut asked for its target's, ever more holes); tools
+    /// whose vertices' boxes do not meet are judged by the exact boxes, as before.
+    #[test]
+    fn a_tool_among_the_bodys_vertices_is_not_apart_without_measuring() {
+        let plate = crate::box_solid(Vec3::ZERO, Vec3::new(200.0, 100.0, 1.0)).unwrap();
+        let pin = crate::box_solid(Vec3::new(4.0, 4.0, -2.0), Vec3::new(6.0, 6.0, 2.0)).unwrap();
+        assert!(!crate::apart(&plate, &pin).unwrap());
+        assert_eq!(*plate.bounds.lock().unwrap(), None);
+        assert_eq!(*pin.bounds.lock().unwrap(), None);
+        // Clear of the plate: the exact boxes show it, measured as before.
+        let far = crate::box_solid(Vec3::new(300.0, 0.0, 0.0), Vec3::new(310.0, 10.0, 1.0)).unwrap();
+        assert!(crate::apart(&plate, &far).unwrap());
+        assert!(plate.bounds.lock().unwrap().is_some());
+    }
+
+    /// Bodies whose vertices' boxes meet are not joined apart, and no exact box is measured to
+    /// show it (a Combine join onto a rounded spline body measured it for tens of seconds);
+    /// bodies whose vertices' boxes do not meet are judged by the exact boxes, as before.
+    #[test]
+    fn bodies_among_each_others_vertices_are_not_joined_apart_without_measuring() {
+        let plate = crate::box_solid(Vec3::ZERO, Vec3::new(200.0, 100.0, 1.0)).unwrap();
+        let on_top = crate::box_solid(Vec3::new(10.0, 10.0, 1.0), Vec3::new(20.0, 20.0, 5.0)).unwrap();
+        let far = crate::box_solid(Vec3::new(300.0, 0.0, 0.0), Vec3::new(310.0, 10.0, 1.0)).unwrap();
+        assert!(crate::union_apart(&[plate.clone(), far.clone(), on_top.clone()]).unwrap().is_none());
+        assert_eq!(*plate.bounds.lock().unwrap(), None);
+        assert_eq!(*on_top.bounds.lock().unwrap(), None);
+        assert_eq!(*far.bounds.lock().unwrap(), None);
+        // Clear of each other: the exact boxes show it, measured as before, and they are joined.
+        let joined = crate::union_apart(&[plate.clone(), far.clone()]).unwrap().expect("apart");
+        assert_eq!(joined.lumps().map_or(0, |l| l.len()), 2);
+        assert!(plate.bounds.lock().unwrap().is_some() && far.bounds.lock().unwrap().is_some());
     }
 
     /// A cube 1000 mm from the origin with one 0.5 mm² facet left out: about the box's centre
     /// the sums miss a cone of that facet to the centre (0.08 %), where about the origin they are
     /// 17 % over. Closed, it measures the same about either.
-    #[test]
-    fn a_mesh_left_open_is_measured_about_its_centre() {
-        let at = Vec3::new(1000.0, 1000.0, 1000.0);
-        let (closed, open) = (cube(at, 10, 0), cube(at, 10, 1));
-        let centre = at + Vec3::new(5.0, 5.0, 5.0);
-        for o in [Vec3::ZERO, centre] {
-            let (area, v6, mom, normal) = sums(&closed, o);
-            assert!((area - 600.0).abs() < 1e-9 && (v6 / 6.0 - 1000.0).abs() < 1e-6 && normal.len() < 1e-9);
-            assert!((mom / (4.0 * v6) - centre).len() < 1e-6 * at.len(), "{o:?}");
-        }
-        let (_, v6_origin, _, normal) = sums(&open, Vec3::ZERO);
-        assert!((normal.len() - 0.5).abs() < 1e-9);
-        // The facet faces the origin: leaving it out adds its cone to the origin, 167 mm³.
-        assert!((v6_origin / 6.0 - (1000.0 + 0.5 * 1000.0 / 3.0)).abs() < 1e-3, "{}", v6_origin / 6.0);
-        let (_, v6, mom, _) = sums(&open, centre);
-        assert!((v6 / 6.0 - (1000.0 - 0.5 * 5.0 / 3.0)).abs() < 1e-6, "{}", v6 / 6.0);
-        assert!((mom / (4.0 * v6) - centre).len() < 0.01, "{:?}", mom / (4.0 * v6));
-    }
-
     // A body's measured volume does not depend on where it sits: the same revolved ring of cones
     // and cylinders, moved far from the origin, measures what it measures at the origin.
     use crate::{revolve, transform};
-    use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+    use solidcore_record::{Loop2, Plane, Region2, Vec2};
     use std::f64::consts::{PI, TAU};
 
     /// Ring cross-section in (radius, height): cones top and bottom, cylinders inside and out.
@@ -332,5 +308,123 @@ mod tests {
             let cone = measure(&revolved(&Plane { origin: at, ..Plane::XZ }, &frustum)).unwrap();
             assert!(rel(cone.volume, cone_volume) < 5e-4, "frustum at {at:?}: {} vs {cone_volume}", cone.volume);
         }
+    }
+
+    /// Adds a STEP entity and returns its id.
+    fn ent(ents: &mut Vec<String>, e: String) -> usize {
+        ents.push(e);
+        ents.len()
+    }
+
+    fn placement(ents: &mut Vec<String>, origin: [f64; 3], axis: [f64; 3], reference: [f64; 3]) -> usize {
+        let o = ent(ents, format!("CARTESIAN_POINT('',({:?},{:?},{:?}))", origin[0], origin[1], origin[2]));
+        let z = ent(ents, format!("DIRECTION('',({:?},{:?},{:?}))", axis[0], axis[1], axis[2]));
+        let x = ent(ents, format!("DIRECTION('',({:?},{:?},{:?}))", reference[0], reference[1], reference[2]));
+        ent(ents, format!("AXIS2_PLACEMENT_3D('',#{o},#{z},#{x})"))
+    }
+
+    /// A 3 x 10 x 3 block (x 0..3, y 0..10, z 0..3) whose top is a cylinder of radius 10⁶ about an
+    /// axis along x, so the top bows up 12.5 nm; its top edges are arcs of full circles, as an
+    /// exporter writes a large-radius face. The loose box of such an arc holds the circle's whole
+    /// quarter spans, a million millimetres off. The centre of mass was z = 6.75, outside the block
+    /// (#17361): it is the block's, to the bow.
+    #[test]
+    fn a_large_radius_face_s_centre_of_mass_is_inside_the_body() {
+        let (l, w, h, r) = (3.0_f64, 10.0_f64, 3.0_f64, 1.0e6_f64);
+        let zc = h - r;
+        let zt = zc + (r * r - w * w / 4.0).sqrt();
+        let mut e = Vec::new();
+        let corners = [[0.0, 0.0, 0.0], [l, 0.0, 0.0], [l, w, 0.0], [0.0, w, 0.0], [0.0, 0.0, zt], [l, 0.0, zt], [l, w, zt], [0.0, w, zt]];
+        let mut v = Vec::new();
+        for c in corners {
+            let p = ent(&mut e, format!("CARTESIAN_POINT('',({:?},{:?},{:?}))", c[0], c[1], c[2]));
+            v.push(ent(&mut e, format!("VERTEX_POINT('',#{p})")));
+        }
+        // edges by their vertices (1-based corners); the two arcs run from y = 10 to y = 0
+        let edge = |e: &mut Vec<String>, a: usize, b: usize, arc_at: Option<f64>| {
+            let curve = match arc_at {
+                Some(x) => {
+                    let ax = placement(e, [x, w / 2.0, zc], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+                    ent(e, format!("CIRCLE('',#{ax},{r:?})"))
+                }
+                None => {
+                    let (pa, pb) = (corners[a - 1], corners[b - 1]);
+                    let d = [pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]];
+                    let n = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+                    let o = ent(e, format!("CARTESIAN_POINT('',({:?},{:?},{:?}))", pa[0], pa[1], pa[2]));
+                    let dd = ent(e, format!("DIRECTION('',({:?},{:?},{:?}))", d[0] / n, d[1] / n, d[2] / n));
+                    let vec = ent(e, format!("VECTOR('',#{dd},1.0)"));
+                    ent(e, format!("LINE('',#{o},#{vec})"))
+                }
+            };
+            ent(e, format!("EDGE_CURVE('',#{},#{},#{curve},.T.)", v[a - 1], v[b - 1]))
+        };
+        let ends = [
+            (1, 2, None),
+            (2, 3, None),
+            (3, 4, None),
+            (4, 1, None),
+            (1, 5, None),
+            (2, 6, None),
+            (3, 7, None),
+            (4, 8, None),
+            (5, 6, None),
+            (7, 8, None),
+            (8, 5, Some(0.0)),
+            (7, 6, Some(l)),
+        ];
+        let mut edges = Vec::new();
+        for (a, b, arc) in ends {
+            edges.push(edge(&mut e, a, b, arc));
+        }
+        // each face: its loop (edge number, same sense) counter-clockwise about its outward normal
+        let face = |e: &mut Vec<String>, lp: &[(usize, bool)], surface: usize| {
+            let mut uses = Vec::new();
+            for &(i, same) in lp {
+                uses.push(format!("#{}", ent(e, format!("ORIENTED_EDGE('',*,*,#{},.{}.)", edges[i - 1], if same { "T" } else { "F" }))));
+            }
+            let lo = ent(e, format!("EDGE_LOOP('',({}))", uses.join(",")));
+            let bound = ent(e, format!("FACE_OUTER_BOUND('',#{lo},.T.)"));
+            ent(e, format!("ADVANCED_FACE('',(#{bound}),#{surface},.T.)"))
+        };
+        let plane = |e: &mut Vec<String>, o: [f64; 3], n: [f64; 3], x: [f64; 3]| {
+            let ax = placement(e, o, n, x);
+            ent(e, format!("PLANE('',#{ax})"))
+        };
+        let mut faces = Vec::new();
+        let s = plane(&mut e, [0.0; 3], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]);
+        faces.push(face(&mut e, &[(4, false), (3, false), (2, false), (1, false)], s));
+        let s = plane(&mut e, [0.0; 3], [0.0, -1.0, 0.0], [1.0, 0.0, 0.0]);
+        faces.push(face(&mut e, &[(1, true), (6, true), (9, false), (5, false)], s));
+        let s = plane(&mut e, [0.0, w, 0.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]);
+        faces.push(face(&mut e, &[(3, true), (8, true), (10, false), (7, false)], s));
+        let s = plane(&mut e, [0.0; 3], [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        faces.push(face(&mut e, &[(5, true), (11, false), (8, false), (4, true)], s));
+        let s = plane(&mut e, [l, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        faces.push(face(&mut e, &[(2, true), (7, true), (12, true), (6, false)], s));
+        let ax = placement(&mut e, [0.0, w / 2.0, zc], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+        let s = ent(&mut e, format!("CYLINDRICAL_SURFACE('',#{ax},{r:?})"));
+        faces.push(face(&mut e, &[(9, true), (12, false), (10, true), (11, true)], s));
+        let list: Vec<String> = faces.iter().map(|f| format!("#{f}")).collect();
+        let shell = ent(&mut e, format!("CLOSED_SHELL('',({}))", list.join(",")));
+        let solid = ent(&mut e, format!("MANIFOLD_SOLID_BREP('Strip',#{shell})"));
+        ent(&mut e, format!("SHAPE_REPRESENTATION('',(#{solid}),$)"));
+        let mut text = String::from(
+            "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION((''),'2;1');\nFILE_NAME('t','',(''),(''),'','hand','');\nFILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }'));\nENDSEC;\nDATA;\n",
+        );
+        for (i, x) in e.iter().enumerate() {
+            text.push_str(&format!("#{}={x};\n", i + 1));
+        }
+        text.push_str("ENDSEC;\nEND-ISO-10303-21;\n");
+
+        let imp = crate::step_import(&text).unwrap();
+        assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+        assert!(imp.bodies[0].closed, "{:?}", imp.warnings);
+        let m = measure(&imp.bodies[0].body).unwrap();
+        // The block less a sliver under the bow: its centre is (1.5, 5, 1.5) to the bow's height.
+        let bow = h - zt;
+        assert!(rel(m.volume, l * w * h) < bow, "volume {}", m.volume);
+        let off = m.centroid - Vec3::new(l / 2.0, w / 2.0, h / 2.0);
+        assert!(off.len() < bow, "centre of mass {:?}, off by {off:?}", m.centroid);
     }
 }

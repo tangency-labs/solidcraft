@@ -1,0 +1,29 @@
+{
+ "commands": [
+  {
+   "command": "solid.coil",
+   "params": {
+    "diameter": 40,
+    "revolutions": 3,
+    "pitch": 8,
+    "section_size": 4,
+    "section": "square",
+    "section_position": "center",
+    "name": "Spring",
+    "operation": "new"
+   }
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "face": [
+     20,
+     0,
+     0
+    ],
+    "distance": 5,
+    "operation": "join"
+   }
+  }
+ ]
+}

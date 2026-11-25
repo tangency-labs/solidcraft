@@ -1,0 +1,35 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 30,
+    "height": 10,
+    "body_name": "Block",
+    "name": "Block"
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "body": "Block",
+    "edges": [
+     [
+      5,
+      0,
+      10
+     ]
+    ],
+    "radius": 2,
+    "name": "Round"
+   }
+  },
+  {
+   "command": "timeline.roll_to",
+   "params": {
+    "position": -1
+   }
+  }
+ ]
+}

@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1279"
+ ],
+ "what": "a corner piece (square column minus a quarter disc r1.5, 0.0003 off the axis) cut out of a part with a blind r1.6 hole on the same axis: the tool's r1.5 face sits 0.1 mm inside the hole wall; 'no result'",
+ "source": "analytic",
+ "method": "part 12x12x5.1 = 734.4 minus the hole pi*1.6^2*4.1 = 32.97 (hole z -4..0.1, part top z 0.1). The tool (z -3.9..3.2, the square 1.5x1.5 where r >= 1.5) overlaps solid only where r >= 1.6: area A1 = integral_0^1.5 (1.5 - min(1.5, sqrt(2.56-x^2))) dx = 0.31409, over the 4.0 mm of shared z: 1.25638 mm3 (the 0.0003 offset moves this by about 3e-3). V = 734.4 - 32.9662 - 1.2564 = 700.1695. Reduced from the report's STEP geometry (no pocket or rotation); the answer is for this geometry",
+ "body_count": 1,
+ "volume_mm3": 700.169466214
+}

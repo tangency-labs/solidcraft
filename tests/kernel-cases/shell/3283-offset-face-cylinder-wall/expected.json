@@ -1,0 +1,17 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3283",
+  "tangency-labs/solidcraft#3650"
+ ],
+ "what": "Offset Face on the outer cylindrical wall of a tube (the picker only accepted planar faces)",
+ "source": "analytic",
+ "method": "tube R20/r10 x 10 tall; the outer wall moves out 2 mm to R22: V=pi*(22^2-10^2)*10; faces 4 (outer, inner, top, bottom); centroid (0,0,5)",
+ "body_count": 1,
+ "volume_mm3": 12063.715789784805,
+ "faces": 4,
+ "center_of_mass": [
+  0,
+  0,
+  5
+ ]
+}

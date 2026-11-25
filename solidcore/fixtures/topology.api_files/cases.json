@@ -1,0 +1,795 @@
+{
+  "cases": [
+    {
+      "name": "read_null_file",
+      "upstream_ref": "tests/SM_API_test/src/TestSmErrorCodes.cpp NULL required arguments",
+      "inputs": {
+        "op": "read_brep",
+        "file": null,
+        "rebuild": false
+      }
+    },
+    {
+      "name": "read_null_file_rebuild",
+      "inputs": {
+        "op": "read_brep",
+        "file": null,
+        "rebuild": true
+      }
+    },
+    {
+      "name": "read_Mouse_smb",
+      "inputs": {
+        "op": "read_brep",
+        "file": "Mouse.smb",
+        "rebuild": false
+      }
+    },
+    {
+      "name": "read_Endcap_smb",
+      "inputs": {
+        "op": "read_brep",
+        "file": "Endcap.smb",
+        "rebuild": false
+      }
+    },
+    {
+      "name": "read_box_with_large_fillet_smb",
+      "inputs": {
+        "op": "read_brep",
+        "file": "box_with_large_fillet.smb",
+        "rebuild": false
+      }
+    },
+    {
+      "name": "read_cone_smb",
+      "inputs": {
+        "op": "read_brep",
+        "file": "cone.smb",
+        "rebuild": false
+      }
+    },
+    {
+      "name": "read_disk_smb",
+      "inputs": {
+        "op": "read_brep",
+        "file": "disk.smb",
+        "rebuild": false
+      }
+    },
+    {
+      "name": "read_ellips_ts2_smb",
+      "inputs": {
+        "op": "read_brep",
+        "file": "ellips_ts2.smb",
+        "rebuild": false
+      }
+    },
+    {
+      "name": "read_plane_circ_smb",
+      "inputs": {
+        "op": "read_brep",
+        "file": "plane_circ.smb",
+        "rebuild": false
+      }
+    },
+    {
+      "name": "read_plane_square_smb",
+      "inputs": {
+        "op": "read_brep",
+        "file": "plane_square.smb",
+        "rebuild": false
+      }
+    },
+    {
+      "name": "read_sphere_smb",
+      "inputs": {
+        "op": "read_brep",
+        "file": "sphere.smb",
+        "rebuild": false
+      }
+    },
+    {
+      "name": "read_surf_extrude_smb",
+      "inputs": {
+        "op": "read_brep",
+        "file": "surf_extrude.smb",
+        "rebuild": false
+      }
+    },
+    {
+      "name": "read_surf_rev_smb",
+      "inputs": {
+        "op": "read_brep",
+        "file": "surf_rev.smb",
+        "rebuild": false
+      }
+    },
+    {
+      "name": "read_surf_sphere150_smb",
+      "inputs": {
+        "op": "read_brep",
+        "file": "surf_sphere150.smb",
+        "rebuild": false
+      }
+    },
+    {
+      "name": "read_torus_smb",
+      "inputs": {
+        "op": "read_brep",
+        "file": "torus.smb",
+        "rebuild": false
+      }
+    },
+    {
+      "name": "read_toruswvy_smb",
+      "inputs": {
+        "op": "read_brep",
+        "file": "toruswvy.smb",
+        "rebuild": false
+      }
+    },
+    {
+      "name": "read_vase_rev_smb",
+      "inputs": {
+        "op": "read_brep",
+        "file": "vase_rev.smb",
+        "rebuild": false
+      }
+    },
+    {
+      "name": "read_rebuild_disk_smb",
+      "inputs": {
+        "op": "read_brep",
+        "file": "disk.smb",
+        "rebuild": true
+      }
+    },
+    {
+      "name": "read_rebuild_cone_smb",
+      "inputs": {
+        "op": "read_brep",
+        "file": "cone.smb",
+        "rebuild": true
+      }
+    },
+    {
+      "name": "read_rebuild_sphere_smb",
+      "inputs": {
+        "op": "read_brep",
+        "file": "sphere.smb",
+        "rebuild": true
+      }
+    },
+    {
+      "name": "read_rebuild_torus_smb",
+      "inputs": {
+        "op": "read_brep",
+        "file": "torus.smb",
+        "rebuild": true
+      }
+    },
+    {
+      "name": "read_rebuild_plane_circ_smb",
+      "inputs": {
+        "op": "read_brep",
+        "file": "plane_circ.smb",
+        "rebuild": true
+      }
+    },
+    {
+      "name": "read_rebuild_box_with_large_fillet_smb",
+      "inputs": {
+        "op": "read_brep",
+        "file": "box_with_large_fillet.smb",
+        "rebuild": true
+      }
+    },
+    {
+      "name": "part_null_file",
+      "inputs": {
+        "op": "read_part",
+        "file": null,
+        "prefill": 0
+      }
+    },
+    {
+      "name": "part_null_file_prefilled",
+      "inputs": {
+        "op": "read_part",
+        "file": null,
+        "prefill": 15
+      }
+    },
+    {
+      "name": "part_cci_bug_rhino1_smp",
+      "inputs": {
+        "op": "read_part",
+        "file": "cci_bug_rhino1.smp",
+        "prefill": 0
+      }
+    },
+    {
+      "name": "part_loft_smlib_smp",
+      "inputs": {
+        "op": "read_part",
+        "file": "loft-smlib.smp",
+        "prefill": 0
+      }
+    },
+    {
+      "name": "part_MakeFace_ApproximateSphere_smp",
+      "inputs": {
+        "op": "read_part",
+        "file": "MakeFace/ApproximateSphere.smp",
+        "prefill": 0
+      }
+    },
+    {
+      "name": "part_ssi_2pl_smp",
+      "inputs": {
+        "op": "read_part",
+        "file": "ssi_2pl.smp",
+        "prefill": 0
+      }
+    },
+    {
+      "name": "part_ssi_plncyl1_smp",
+      "inputs": {
+        "op": "read_part",
+        "file": "ssi_plncyl1.smp",
+        "prefill": 0
+      }
+    },
+    {
+      "name": "part_ssi_sph_plane1_smp",
+      "inputs": {
+        "op": "read_part",
+        "file": "ssi_sph_plane1.smp",
+        "prefill": 0
+      }
+    },
+    {
+      "name": "part_ssi_cone_plane1_smp",
+      "inputs": {
+        "op": "read_part",
+        "file": "ssi_cone_plane1.smp",
+        "prefill": 0
+      }
+    },
+    {
+      "name": "part_ss_plane_tor1_smp",
+      "inputs": {
+        "op": "read_part",
+        "file": "ss_plane_tor1.smp",
+        "prefill": 0
+      }
+    },
+    {
+      "name": "part_prefill_1_ssi_2pl",
+      "inputs": {
+        "op": "read_part",
+        "file": "ssi_2pl.smp",
+        "prefill": 1
+      }
+    },
+    {
+      "name": "part_prefill_2_ssi_2pl",
+      "inputs": {
+        "op": "read_part",
+        "file": "ssi_2pl.smp",
+        "prefill": 2
+      }
+    },
+    {
+      "name": "part_prefill_4_ssi_2pl",
+      "inputs": {
+        "op": "read_part",
+        "file": "ssi_2pl.smp",
+        "prefill": 4
+      }
+    },
+    {
+      "name": "part_prefill_8_ssi_2pl",
+      "inputs": {
+        "op": "read_part",
+        "file": "ssi_2pl.smp",
+        "prefill": 8
+      }
+    },
+    {
+      "name": "part_prefill_5_ssi_2pl",
+      "inputs": {
+        "op": "read_part",
+        "file": "ssi_2pl.smp",
+        "prefill": 5
+      }
+    },
+    {
+      "name": "part_prefill_15_ssi_2pl",
+      "inputs": {
+        "op": "read_part",
+        "file": "ssi_2pl.smp",
+        "prefill": 15
+      }
+    },
+    {
+      "name": "turn_null",
+      "upstream_ref": "tests/SM_API_test/src/TestSmErrorCodes.cpp NULL required arguments",
+      "inputs": {
+        "op": "turn_to_nurbs",
+        "body": "null"
+      }
+    },
+    {
+      "name": "turn_Mouse_smb",
+      "inputs": {
+        "op": "turn_to_nurbs",
+        "body": {
+          "file": {
+            "file": "Mouse.smb"
+          }
+        }
+      }
+    },
+    {
+      "name": "turn_Endcap_smb",
+      "inputs": {
+        "op": "turn_to_nurbs",
+        "body": {
+          "file": {
+            "file": "Endcap.smb"
+          }
+        }
+      }
+    },
+    {
+      "name": "turn_box_with_large_fillet_smb",
+      "inputs": {
+        "op": "turn_to_nurbs",
+        "body": {
+          "file": {
+            "file": "box_with_large_fillet.smb"
+          }
+        }
+      }
+    },
+    {
+      "name": "turn_cone_smb",
+      "inputs": {
+        "op": "turn_to_nurbs",
+        "body": {
+          "file": {
+            "file": "cone.smb"
+          }
+        }
+      }
+    },
+    {
+      "name": "turn_disk_smb",
+      "inputs": {
+        "op": "turn_to_nurbs",
+        "body": {
+          "file": {
+            "file": "disk.smb"
+          }
+        }
+      }
+    },
+    {
+      "name": "turn_ellips_ts2_smb",
+      "inputs": {
+        "op": "turn_to_nurbs",
+        "body": {
+          "file": {
+            "file": "ellips_ts2.smb"
+          }
+        }
+      }
+    },
+    {
+      "name": "turn_plane_circ_smb",
+      "inputs": {
+        "op": "turn_to_nurbs",
+        "body": {
+          "file": {
+            "file": "plane_circ.smb"
+          }
+        }
+      }
+    },
+    {
+      "name": "turn_plane_square_smb",
+      "inputs": {
+        "op": "turn_to_nurbs",
+        "body": {
+          "file": {
+            "file": "plane_square.smb"
+          }
+        }
+      }
+    },
+    {
+      "name": "turn_sphere_smb",
+      "inputs": {
+        "op": "turn_to_nurbs",
+        "body": {
+          "file": {
+            "file": "sphere.smb"
+          }
+        }
+      }
+    },
+    {
+      "name": "turn_surf_extrude_smb",
+      "inputs": {
+        "op": "turn_to_nurbs",
+        "body": {
+          "file": {
+            "file": "surf_extrude.smb"
+          }
+        }
+      }
+    },
+    {
+      "name": "turn_surf_rev_smb",
+      "inputs": {
+        "op": "turn_to_nurbs",
+        "body": {
+          "file": {
+            "file": "surf_rev.smb"
+          }
+        }
+      }
+    },
+    {
+      "name": "turn_surf_sphere150_smb",
+      "inputs": {
+        "op": "turn_to_nurbs",
+        "body": {
+          "file": {
+            "file": "surf_sphere150.smb"
+          }
+        }
+      }
+    },
+    {
+      "name": "turn_torus_smb",
+      "inputs": {
+        "op": "turn_to_nurbs",
+        "body": {
+          "file": {
+            "file": "torus.smb"
+          }
+        }
+      }
+    },
+    {
+      "name": "turn_toruswvy_smb",
+      "inputs": {
+        "op": "turn_to_nurbs",
+        "body": {
+          "file": {
+            "file": "toruswvy.smb"
+          }
+        }
+      }
+    },
+    {
+      "name": "turn_vase_rev_smb",
+      "inputs": {
+        "op": "turn_to_nurbs",
+        "body": {
+          "file": {
+            "file": "vase_rev.smb"
+          }
+        }
+      }
+    },
+    {
+      "name": "turn_fillet_box_10_r1",
+      "upstream_ref": "tests/SM_API_test/src/TestSmFillets.cpp TestSmRemoveFilletNurbsPlanes",
+      "inputs": {
+        "op": "turn_to_nurbs",
+        "body": {
+          "box": {
+            "size": [
+              10,
+              10,
+              10
+            ],
+            "fillet": 1.0
+          }
+        }
+      }
+    },
+    {
+      "name": "turn_box_5_10_20",
+      "inputs": {
+        "op": "turn_to_nurbs",
+        "body": {
+          "box": {
+            "size": [
+              5,
+              10,
+              20
+            ],
+            "fillet": 0.0
+          }
+        }
+      }
+    },
+    {
+      "name": "turn_box_tiny",
+      "inputs": {
+        "op": "turn_to_nurbs",
+        "body": {
+          "box": {
+            "size": [
+              0.0001,
+              0.0002,
+              0.0003
+            ],
+            "fillet": 0.0
+          }
+        }
+      }
+    },
+    {
+      "name": "turn_box_huge",
+      "inputs": {
+        "op": "turn_to_nurbs",
+        "body": {
+          "box": {
+            "size": [
+              100000.0,
+              200000.0,
+              300000.0
+            ],
+            "fillet": 0.0
+          }
+        }
+      }
+    },
+    {
+      "name": "turn_fillet_box_5_10_20_r05",
+      "inputs": {
+        "op": "turn_to_nurbs",
+        "body": {
+          "box": {
+            "size": [
+              5,
+              10,
+              20
+            ],
+            "fillet": 0.5
+          }
+        }
+      }
+    },
+    {
+      "name": "roundtrip_ascii_box_5_10_20",
+      "upstream_ref": "tests/SM_API_test/src/TestSmImportExport.cpp TestSmBrepFileRoundTrip",
+      "inputs": {
+        "op": "round_trip",
+        "size": [
+          5,
+          10,
+          20
+        ],
+        "ascii": true,
+        "rebuild": false
+      }
+    },
+    {
+      "name": "roundtrip_ascii_box_5_10_20_rebuild",
+      "inputs": {
+        "op": "round_trip",
+        "size": [
+          5,
+          10,
+          20
+        ],
+        "ascii": true,
+        "rebuild": true
+      }
+    },
+    {
+      "name": "roundtrip_ascii_box_tiny",
+      "inputs": {
+        "op": "round_trip",
+        "size": [
+          0.0001,
+          0.0002,
+          0.0003
+        ],
+        "ascii": true,
+        "rebuild": false
+      }
+    },
+    {
+      "name": "roundtrip_ascii_box_huge",
+      "inputs": {
+        "op": "round_trip",
+        "size": [
+          100000.0,
+          200000.0,
+          300000.0
+        ],
+        "ascii": true,
+        "rebuild": false
+      }
+    },
+    {
+      "name": "roundtrip_binary_box_5_10_20",
+      "upstream_ref": "tests/SM_API_test/src/TestSmImportExport.cpp TestSmBrepFileRoundTrip",
+      "inputs": {
+        "op": "round_trip",
+        "size": [
+          5,
+          10,
+          20
+        ],
+        "ascii": false,
+        "rebuild": false
+      }
+    },
+    {
+      "name": "roundtrip_binary_box_5_10_20_rebuild",
+      "inputs": {
+        "op": "round_trip",
+        "size": [
+          5,
+          10,
+          20
+        ],
+        "ascii": false,
+        "rebuild": true
+      }
+    },
+    {
+      "name": "roundtrip_binary_box_tiny",
+      "inputs": {
+        "op": "round_trip",
+        "size": [
+          0.0001,
+          0.0002,
+          0.0003
+        ],
+        "ascii": false,
+        "rebuild": false
+      }
+    },
+    {
+      "name": "roundtrip_binary_box_huge",
+      "inputs": {
+        "op": "round_trip",
+        "size": [
+          100000.0,
+          200000.0,
+          300000.0
+        ],
+        "ascii": false,
+        "rebuild": false
+      }
+    },
+    {
+      "name": "turn_box_4_5_6",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrepCopy.cpp TestSmBrepCopyRepresentation",
+      "inputs": {
+        "op": "turn_to_nurbs",
+        "body": {
+          "box": {
+            "size": [
+              4,
+              5,
+              6
+            ],
+            "fillet": 0.0
+          }
+        }
+      }
+    },
+    {
+      "name": "turn_mixed_box_4_5_6",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrepCopy.cpp TestSmBrepCopyRepresentation",
+      "inputs": {
+        "op": "turn_to_nurbs",
+        "body": {
+          "mixed_box": {
+            "size": [
+              4,
+              5,
+              6
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "turn_cylinder_3_8",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrepCopy.cpp TestSmBrepCopyRepresentation",
+      "inputs": {
+        "op": "turn_to_nurbs",
+        "body": {
+          "cylinder": {
+            "radius": 3,
+            "height": 8
+          }
+        }
+      }
+    },
+    {
+      "name": "turn_cone_3_1_8",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrepCopy.cpp TestSmBrepCopyRepresentation",
+      "inputs": {
+        "op": "turn_to_nurbs",
+        "body": {
+          "cone": {
+            "radius_base": 3,
+            "radius_top": 1,
+            "height": 8
+          }
+        }
+      }
+    },
+    {
+      "name": "turn_sphere_3",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrepCopy.cpp TestSmBrepCopyRepresentation",
+      "inputs": {
+        "op": "turn_to_nurbs",
+        "body": {
+          "sphere": {
+            "radius": 3
+          }
+        }
+      }
+    },
+    {
+      "name": "turn_torus_5_1",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrepCopy.cpp TestSmBrepCopyRepresentation",
+      "inputs": {
+        "op": "turn_to_nurbs",
+        "body": {
+          "torus": {
+            "major": 5,
+            "minor": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "turn_cylinder_tiny",
+      "inputs": {
+        "op": "turn_to_nurbs",
+        "body": {
+          "cylinder": {
+            "radius": 0.0003,
+            "height": 0.0008
+          }
+        }
+      }
+    },
+    {
+      "name": "turn_torus_huge",
+      "inputs": {
+        "op": "turn_to_nurbs",
+        "body": {
+          "torus": {
+            "major": 50000.0,
+            "minor": 10000.0
+          }
+        }
+      }
+    },
+    {
+      "name": "read_disk_ascii_file_as_binary",
+      "inputs": {
+        "op": "read_brep",
+        "file": "disk.smb",
+        "rebuild": false,
+        "ascii": false
+      }
+    }
+  ]
+}

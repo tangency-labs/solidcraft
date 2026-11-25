@@ -1,0 +1,193 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b30": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b50": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b30"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b51"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b51"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b52"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b50"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b53"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b53"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b54"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b52"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b55"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b54"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b56"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b55",
+        "b56"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b57"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "1858-shallow-cuts-after-earlier-pocket",
+  "expected": {
+    "body_count": 1,
+    "method": "plate 40x30x10 = 12000 minus the 2 mm round on its top-front edge (1-pi/4)*4*40 = 34.336, minus the 30x10x0.75 pocket (225), minus per circle (r5, centred y=15, so its upper half lies under the pocket): upper half 0.5*25pi*(1.5-0.75) + lower half 0.5*25pi*1.5 = 29.45 + 58.90 = 88.36 each (circles are 16 apart, so they do not meet). V = 12000 - 34.336 - 225 - 176.71 = 11563.95",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#1765",
+      "tangency-labs/solidcraft#1858"
+    ],
+    "volume_mm3": 11563.949119379165,
+    "what": "two 1.5 mm circular cuts overlapping an earlier 0.75 mm pocket (timeline roll-back, insert, redefine): the cut came out empty"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 43,
+      "faces": 18,
+      "vertices": 28
+    }
+  },
+  "records": "1858-shallow-cuts-after-earlier-pocket.bodies.json.gz",
+  "result": [
+    {
+      "body": "Plate",
+      "made": "b57"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 3879.6327261640604,
+      "body_count": 1,
+      "edges": 43,
+      "faces": 18,
+      "vertices": 28,
+      "volume_mm3": 11563.949119378747
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#1765",
+    "tangency-labs/solidcraft#1858"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "two 1.5 mm circular cuts overlapping an earlier 0.75 mm pocket (timeline roll-back, insert, redefine): the cut came out empty",
+  "why_not": []
+}

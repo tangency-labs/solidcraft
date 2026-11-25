@@ -1,0 +1,46 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     0,
+     0,
+     0
+    ],
+    "length": 25,
+    "width": 20,
+    "height": 35,
+    "body_name": "Body1"
+   }
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "face": [
+     8.5,
+     10,
+     35
+    ],
+    "face_body": "Body1",
+    "distance": 10,
+    "direction": "positive",
+    "operation": "join"
+   }
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "face": [
+     25,
+     12.07,
+     19.2
+    ],
+    "face_body": "Body1",
+    "distance": 10,
+    "direction": "positive",
+    "operation": "join"
+   }
+  }
+ ]
+}

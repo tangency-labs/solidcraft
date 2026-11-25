@@ -1,0 +1,75 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 100,
+    "width": 60,
+    "height": 10,
+    "body_name": "Plaque"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 100,
+    "width": 60,
+    "height": 10,
+    "corner": [
+     0,
+     0,
+     5
+    ],
+    "operation": "new",
+    "body_name": "Voisin"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 10,
+    "width": 10,
+    "height": 10,
+    "corner": [
+     200,
+     0,
+     0
+    ],
+    "operation": "new",
+    "body_name": "Loin"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 3,
+    "height": 30,
+    "base": [
+     10,
+     10,
+     -5
+    ],
+    "operation": "cut",
+    "targets": [
+     "Plaque"
+    ],
+    "name": "Trou"
+   }
+  },
+  {
+   "command": "solid.pattern.rectangular",
+   "params": {
+    "features": [
+     "Trou"
+    ],
+    "dir1": [
+     1,
+     0,
+     0
+    ],
+    "count1": 3,
+    "spacing1": 30
+   }
+  }
+ ]
+}

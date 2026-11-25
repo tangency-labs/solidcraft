@@ -1,0 +1,153 @@
+{
+  "area": "sweeps",
+  "bodies": {
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b6": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "union"
+      }
+    }
+  ],
+  "case": "561-extrude-the-end-face-of-a-loft",
+  "expected": {
+    "body_count": 1,
+    "method": "ruled loft of two squares = pyramid frustum: V = 40/3 (1600 + 400 + 800) = 37333.3; the top face is a 20 x 20 square at z = 40, extruding it 10 mm adds 4000: V = 41333.3.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#561",
+      "tangency-labs/solidcraft#677"
+    ],
+    "volume_mm3": 41333.333333333336,
+    "what": "the small end face of a square-to-square loft (40 mm side to 20 mm over 40 mm) extruded 10 mm (loft faces had no attachable source)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 20,
+      "faces": 10,
+      "vertices": 12
+    }
+  },
+  "records": "561-extrude-the-end-face-of-a-loft.bodies.json.gz",
+  "result": [
+    {
+      "body": "Loft",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 7747.7267507411925,
+      "body_count": 1,
+      "edges": 20,
+      "faces": 10,
+      "vertices": 12,
+      "volume_mm3": 41333.333333333336
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#561",
+    "tangency-labs/solidcraft#677"
+  ],
+  "traced_ops": [
+    "loft",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "the small end face of a square-to-square loft (40 mm side to 20 mm over 40 mm) extruded 10 mm (loft faces had no attachable source)",
+  "why_not": []
+}

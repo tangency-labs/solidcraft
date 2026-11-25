@@ -1,0 +1,224 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/674",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/704",
+ "test": "crates/engine/src/tests/robustness.rs: fixed_seeds_run_clean (seed 16, PR #704); contact case as crates/kernel/src/issue_674_tests.rs: partial_circular_contact_preserves_material_and_history (added in PR #782)",
+ "summary": "Block 25 x 47.5 x 37.5 at the origin, joined with r 5, 2.5 long cylinders. Robustness seed 16 is a 4-copy circular pattern about Z of the cylinder based at (0,7.5,0) along +X, so half its end hangs below the bottom edge z=0. The runner has no pattern on union, so the copies are written out. Volumes are closed form: block plus the parts of each cylinder outside it. The copies do not overlap each other. Tolerance 0.01 mm^3, as the other analytic cases (SolidCraft's tests allow 0.1 and 0.2 for their mesh measure).",
+ "cases": [
+  {
+   "name": "partial_face_contact_back_to_back",
+   "note": "#674 contact, as issue_674_tests.rs: end on face x=0 from outside, half of it below z=0. Adds a whole cylinder.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "result",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      25,
+      47.5,
+      37.5
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "c4",
+     "origin": [
+      0,
+      7.5,
+      0
+     ],
+     "axis": [
+      -1,
+      0,
+      0
+     ],
+     "radius": 5,
+     "height": 2.5
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "result",
+     "b": "c4"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 44727.59954084936,
+     "tol": 0.01,
+     "formula": "25*47.5*37.5 + pi*5^2*2.5 = 44531.25 + 62.5*pi"
+    }
+   }
+  },
+  {
+   "name": "half_embedded_end_control",
+   "note": "Control: the 0 degree copy alone. Its end is on face x=0 and half of it lies inside the block, so only the half below z=0 adds material.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "result",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      25,
+      47.5,
+      37.5
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "c1",
+     "origin": [
+      0,
+      7.5,
+      0
+     ],
+     "axis": [
+      1,
+      0,
+      0
+     ],
+     "radius": 5,
+     "height": 2.5
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "result",
+     "b": "c1"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 44629.42477042468,
+     "tol": 0.01,
+     "formula": "25*47.5*37.5 + (1/2)*pi*5^2*2.5 = 44531.25 + 31.25*pi"
+    }
+   }
+  },
+  {
+   "name": "seed_16_pattern",
+   "note": "Robustness seed 16 as a 4-copy circular pattern about Z. The 90 and 180 degree copies stay clear of the block and of each other, so 3 lumps.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "result",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      25,
+      47.5,
+      37.5
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "c1",
+     "origin": [
+      0,
+      7.5,
+      0
+     ],
+     "axis": [
+      1,
+      0,
+      0
+     ],
+     "radius": 5,
+     "height": 2.5
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "result",
+     "b": "c1"
+    },
+    {
+     "op": "cylinder",
+     "id": "c2",
+     "origin": [
+      -7.5,
+      0,
+      0
+     ],
+     "axis": [
+      0,
+      1,
+      0
+     ],
+     "radius": 5,
+     "height": 2.5
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "result",
+     "b": "c2"
+    },
+    {
+     "op": "cylinder",
+     "id": "c3",
+     "origin": [
+      0,
+      -7.5,
+      0
+     ],
+     "axis": [
+      -1,
+      0,
+      0
+     ],
+     "radius": 5,
+     "height": 2.5
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "result",
+     "b": "c3"
+    },
+    {
+     "op": "cylinder",
+     "id": "c4",
+     "origin": [
+      7.5,
+      0,
+      0
+     ],
+     "axis": [
+      0,
+      -1,
+      0
+     ],
+     "radius": 5,
+     "height": 2.5
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "result",
+     "b": "c4"
+    }
+   ],
+   "expect": {
+    "lumps": 3,
+    "volume": {
+     "value": 45218.473392972766,
+     "tol": 0.01,
+     "formula": "25*47.5*37.5 + 3.5*pi*5^2*2.5 = 44531.25 + 218.75*pi"
+    }
+   }
+  }
+ ]
+}

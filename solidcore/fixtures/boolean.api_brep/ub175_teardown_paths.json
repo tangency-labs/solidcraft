@@ -1,0 +1,33 @@
+{
+ "cases": [
+  {
+   "name": "ub175_after_editing_imprint_failure",
+   "note": "UB-175 on the UB-242 path: a tiny sphere/box union whose editing ImprintIntersections fails; upstream goes on to SetRelationships and ~SmProtoTopologyManager, which reads a freed proto edge (ASan-confirmed), so the case is rejected (generated seed 13617184360224748106, --seeds 4000 gen3207)",
+   "inputs": {
+    "a": {
+     "center": [
+      0.0006200181360265834,
+      -0.00046030442970172237,
+      7.698363037766113e-05
+     ],
+     "kind": "sphere",
+     "radius": 0.0006819027954907168
+    },
+    "api": "union",
+    "b": {
+     "kind": "box",
+     "origin": [
+      0.000510378840547897,
+      -0.000598367716621174,
+      0.00019712446318509934
+     ],
+     "size": [
+      0.0007767106345597747,
+      0.0005351886545936342,
+      0.0007196017104490305
+     ]
+    }
+   }
+  }
+ ]
+}

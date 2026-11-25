@@ -1,0 +1,10 @@
+{
+ "sources": [],
+ "what": "a 10x30 rectangle 10 mm off the Z axis revolved 360 deg: a tube",
+ "source": "analytic",
+ "method": "V = pi (20^2 - 10^2) 30; faces: two annuli, two cylinders",
+ "body_count": 1,
+ "volume_mm3": 28274.333882308,
+ "area_mm2": 7539.822368616,
+ "faces": 4
+}

@@ -1,0 +1,811 @@
+{
+  "cases": [
+    {
+      "name": "review_op4_parameter_NaN",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21249-21303",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 0,
+        "parameter": "NaN",
+        "tolerances": [
+          0,
+          0
+        ],
+        "editing": true,
+        "point": [
+          0.2,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "review_op4_parameter_inf",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21249-21303",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 0,
+        "parameter": "inf",
+        "tolerances": [
+          0,
+          0
+        ],
+        "editing": true,
+        "point": [
+          0.2,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "review_op4_parameter_-inf",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21249-21303",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 0,
+        "parameter": "-inf",
+        "tolerances": [
+          0,
+          0
+        ],
+        "editing": true,
+        "point": [
+          0.2,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "review_op6_parameter_NaN",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21249-21303",
+      "inputs": {
+        "op": 6,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 0,
+        "parameter": "NaN",
+        "tolerances": [
+          0,
+          0
+        ],
+        "editing": true,
+        "point": [
+          0.2,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "review_op6_parameter_inf",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21249-21303",
+      "inputs": {
+        "op": 6,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 0,
+        "parameter": "inf",
+        "tolerances": [
+          0,
+          0
+        ],
+        "editing": true,
+        "point": [
+          0.2,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "review_op6_parameter_-inf",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21249-21303",
+      "inputs": {
+        "op": 6,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 0,
+        "parameter": "-inf",
+        "tolerances": [
+          0,
+          0
+        ],
+        "editing": true,
+        "point": [
+          0.2,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "review_partial_overlap_retains_input_parameterization",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:12432-12483",
+      "inputs": {
+        "op": 8,
+        "variant": 0,
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "review_empty_drops_call_real_drop_and_trim",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:12432-12483",
+      "inputs": {
+        "op": 8,
+        "variant": 1,
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "review_contained_projection",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:12432-12483",
+      "inputs": {
+        "op": 8,
+        "variant": 2,
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "review_op4_tolerance_NaN",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21249-21303",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 0,
+        "parameter": 0.5,
+        "tolerances": [
+          "NaN",
+          0.25
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "review_op2_point_NaN",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:19061-19089",
+      "inputs": {
+        "op": 2,
+        "brep": {
+          "kind": "network"
+        },
+        "variant": 0,
+        "point": [
+          "NaN",
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "review_op3_point_NaN",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:19101-19199",
+      "inputs": {
+        "op": 3,
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -2,
+            -1,
+            3,
+            4
+          ]
+        },
+        "same": false,
+        "point": [
+          0.5,
+          "NaN",
+          0
+        ]
+      }
+    },
+    {
+      "name": "review_op7_point_NaN",
+      "upstream_ref": "source/SMLib/src/SmPointClass.cpp:895-1086",
+      "inputs": {
+        "op": 7,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "parameter": 0,
+        "point": [
+          10,
+          -10,
+          "NaN"
+        ],
+        "tolerances": [
+          0,
+          0
+        ],
+        "same": false
+      }
+    },
+    {
+      "name": "review_op4_tolerance_inf",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21249-21303",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 0,
+        "parameter": 0.5,
+        "tolerances": [
+          "inf",
+          0.25
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "review_op2_point_inf",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:19061-19089",
+      "inputs": {
+        "op": 2,
+        "brep": {
+          "kind": "network"
+        },
+        "variant": 0,
+        "point": [
+          "inf",
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "review_op3_point_inf",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:19101-19199",
+      "inputs": {
+        "op": 3,
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -2,
+            -1,
+            3,
+            4
+          ]
+        },
+        "same": false,
+        "point": [
+          0.5,
+          "inf",
+          0
+        ]
+      }
+    },
+    {
+      "name": "review_op7_point_inf",
+      "upstream_ref": "source/SMLib/src/SmPointClass.cpp:895-1086",
+      "inputs": {
+        "op": 7,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "parameter": 0,
+        "point": [
+          10,
+          -10,
+          "inf"
+        ],
+        "tolerances": [
+          0,
+          0
+        ],
+        "same": false
+      }
+    },
+    {
+      "name": "review_op4_tolerance_-inf",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:21249-21303",
+      "inputs": {
+        "op": 4,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "variant": 0,
+        "parameter": 0.5,
+        "tolerances": [
+          "-inf",
+          0.25
+        ],
+        "editing": true
+      }
+    },
+    {
+      "name": "review_op2_point_-inf",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:19061-19089",
+      "inputs": {
+        "op": 2,
+        "brep": {
+          "kind": "network"
+        },
+        "variant": 0,
+        "point": [
+          "-inf",
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "review_op3_point_-inf",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:19101-19199",
+      "inputs": {
+        "op": 3,
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -2,
+            -1,
+            3,
+            4
+          ]
+        },
+        "same": false,
+        "point": [
+          0.5,
+          "-inf",
+          0
+        ]
+      }
+    },
+    {
+      "name": "review_op7_point_-inf",
+      "upstream_ref": "source/SMLib/src/SmPointClass.cpp:895-1086",
+      "inputs": {
+        "op": 7,
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                1
+              ],
+              [
+                1,
+                0,
+                0,
+                1
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "parameter": 0,
+        "point": [
+          10,
+          -10,
+          "-inf"
+        ],
+        "tolerances": [
+          0,
+          0
+        ],
+        "same": false
+      }
+    }
+  ]
+}

@@ -1,0 +1,160 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b4": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b6"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "cov-boundary-fill-crescent-inside-one-tool",
+  "expected": {
+    "bbox": {
+      "max": [
+        5,
+        10,
+        10
+      ],
+      "min": [
+        -10,
+        -10,
+        0
+      ]
+    },
+    "body_count": 1,
+    "faces": 4,
+    "method": "A minus the lens: 1000 pi - 1228.370; faces: bottom, top, A's outer arc, B's inner arc = 4; A's arc with x > 5 lies inside B (|p - (10,0)|^2 = 200 - 200 cos t < 100 when cos t > 1/2), so the crescent ends at the cusps x = 5, y = ±5√3: bbox max x = 5",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 1913.222954981036,
+    "what": "Boundary Fill of the cell inside one cylinder and outside the other: the crescent"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 6,
+      "faces": 4,
+      "vertices": 4
+    }
+  },
+  "records": "cov-boundary-fill-crescent-inside-one-tool.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 1010.9631217231321,
+      "body_count": 1,
+      "edges": 6,
+      "faces": 4,
+      "vertices": 4,
+      "volume_mm3": 1913.222955020696
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "Boundary Fill of the cell inside one cylinder and outside the other: the crescent",
+  "why_not": []
+}

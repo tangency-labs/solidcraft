@@ -2,7 +2,8 @@
 //! No source mesh, visible emission, spectral/CCT calibration or separate transport.
 use super::{ErrorCode, JobError, RaytraceOptions, RectangleLightOptions, Result};
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 /// Illustrative linear RGB choices, not measured LED spectra or calibrated CCT.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

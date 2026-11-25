@@ -1,0 +1,21 @@
+{
+ "sources": [],
+ "what": "a profile closed by a cubic Bezier arch (control-point spline, 4 points), extruded 10",
+ "source": "analytic",
+ "method": "a 4-point cubic control-point spline is one Bezier segment; A = 400 + int (y-10) dx over the arch (Green, exact Gauss) = 820.000000000; max y = 10 + 0.75*20",
+ "body_count": 1,
+ "volume_mm3": 8200.0,
+ "faces": 6,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   25,
+   10
+  ]
+ }
+}

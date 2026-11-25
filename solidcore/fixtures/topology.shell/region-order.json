@@ -1,0 +1,1212 @@
+{
+  "cases": [
+    {
+      "name": "region_order_vertices_0_prefix_0",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "region_order": {
+          "prefix_empty": 0,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_vertices_0_prefix_1",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "region_order": {
+          "prefix_empty": 1,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_vertices_0_prefix_2",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "region_order": {
+          "prefix_empty": 2,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_vertices_0_prefix_8",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": []
+        },
+        "region_order": {
+          "prefix_empty": 8,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_vertices_1_prefix_0",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ]
+        },
+        "region_order": {
+          "prefix_empty": 0,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_vertices_1_prefix_1",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ]
+        },
+        "region_order": {
+          "prefix_empty": 1,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_vertices_1_prefix_2",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ]
+        },
+        "region_order": {
+          "prefix_empty": 2,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_vertices_1_prefix_8",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ]
+          ]
+        },
+        "region_order": {
+          "prefix_empty": 8,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_vertices_2_prefix_0",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_order": {
+          "prefix_empty": 0,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_vertices_2_prefix_1",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_order": {
+          "prefix_empty": 1,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_vertices_2_prefix_2",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_order": {
+          "prefix_empty": 2,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_vertices_2_prefix_8",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_order": {
+          "prefix_empty": 8,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_vertices_16_prefix_0",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              1.0,
+              0.0
+            ],
+            [
+              4.0,
+              0.0,
+              0.0
+            ],
+            [
+              5.0,
+              1.0,
+              0.0
+            ],
+            [
+              6.0,
+              0.0,
+              0.0
+            ],
+            [
+              7.0,
+              1.0,
+              0.0
+            ],
+            [
+              8.0,
+              0.0,
+              0.0
+            ],
+            [
+              9.0,
+              1.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0,
+              0.0
+            ],
+            [
+              11.0,
+              1.0,
+              0.0
+            ],
+            [
+              12.0,
+              0.0,
+              0.0
+            ],
+            [
+              13.0,
+              1.0,
+              0.0
+            ],
+            [
+              14.0,
+              0.0,
+              0.0
+            ],
+            [
+              15.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_order": {
+          "prefix_empty": 0,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_vertices_16_prefix_1",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              1.0,
+              0.0
+            ],
+            [
+              4.0,
+              0.0,
+              0.0
+            ],
+            [
+              5.0,
+              1.0,
+              0.0
+            ],
+            [
+              6.0,
+              0.0,
+              0.0
+            ],
+            [
+              7.0,
+              1.0,
+              0.0
+            ],
+            [
+              8.0,
+              0.0,
+              0.0
+            ],
+            [
+              9.0,
+              1.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0,
+              0.0
+            ],
+            [
+              11.0,
+              1.0,
+              0.0
+            ],
+            [
+              12.0,
+              0.0,
+              0.0
+            ],
+            [
+              13.0,
+              1.0,
+              0.0
+            ],
+            [
+              14.0,
+              0.0,
+              0.0
+            ],
+            [
+              15.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_order": {
+          "prefix_empty": 1,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_vertices_16_prefix_2",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              1.0,
+              0.0
+            ],
+            [
+              4.0,
+              0.0,
+              0.0
+            ],
+            [
+              5.0,
+              1.0,
+              0.0
+            ],
+            [
+              6.0,
+              0.0,
+              0.0
+            ],
+            [
+              7.0,
+              1.0,
+              0.0
+            ],
+            [
+              8.0,
+              0.0,
+              0.0
+            ],
+            [
+              9.0,
+              1.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0,
+              0.0
+            ],
+            [
+              11.0,
+              1.0,
+              0.0
+            ],
+            [
+              12.0,
+              0.0,
+              0.0
+            ],
+            [
+              13.0,
+              1.0,
+              0.0
+            ],
+            [
+              14.0,
+              0.0,
+              0.0
+            ],
+            [
+              15.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_order": {
+          "prefix_empty": 2,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_vertices_16_prefix_8",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              1.0,
+              1.0,
+              0.0
+            ],
+            [
+              2.0,
+              0.0,
+              0.0
+            ],
+            [
+              3.0,
+              1.0,
+              0.0
+            ],
+            [
+              4.0,
+              0.0,
+              0.0
+            ],
+            [
+              5.0,
+              1.0,
+              0.0
+            ],
+            [
+              6.0,
+              0.0,
+              0.0
+            ],
+            [
+              7.0,
+              1.0,
+              0.0
+            ],
+            [
+              8.0,
+              0.0,
+              0.0
+            ],
+            [
+              9.0,
+              1.0,
+              0.0
+            ],
+            [
+              10.0,
+              0.0,
+              0.0
+            ],
+            [
+              11.0,
+              1.0,
+              0.0
+            ],
+            [
+              12.0,
+              0.0,
+              0.0
+            ],
+            [
+              13.0,
+              1.0,
+              0.0
+            ],
+            [
+              14.0,
+              0.0,
+              0.0
+            ],
+            [
+              15.0,
+              1.0,
+              0.0
+            ]
+          ]
+        },
+        "region_order": {
+          "prefix_empty": 8,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_network_prefix_0",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "region_order": {
+          "prefix_empty": 0,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_network_prefix_1",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "region_order": {
+          "prefix_empty": 1,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_network_prefix_2",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "region_order": {
+          "prefix_empty": 2,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_network_prefix_8",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "region_order": {
+          "prefix_empty": 8,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_wire_prefix_0",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "region_order": {
+          "prefix_empty": 0,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_wire_prefix_1",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "region_order": {
+          "prefix_empty": 1,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_wire_prefix_2",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "region_order": {
+          "prefix_empty": 2,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_wire_prefix_8",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "wire",
+          "curve": {
+            "dim": 3,
+            "cpts": [
+              [
+                0,
+                0,
+                0,
+                -1.7976931348623157e+308
+              ],
+              [
+                0.001,
+                0.002,
+                0,
+                -1.7976931348623157e+308
+              ]
+            ],
+            "p": 1,
+            "u": [
+              0,
+              0,
+              1,
+              1
+            ]
+          },
+          "t0": 0,
+          "t1": 1
+        },
+        "region_order": {
+          "prefix_empty": 8,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_face_prefix_0",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "region_order": {
+          "prefix_empty": 0,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_face_prefix_1",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "region_order": {
+          "prefix_empty": 1,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_face_prefix_2",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "region_order": {
+          "prefix_empty": 2,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_face_prefix_8",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                0,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -0.001,
+            -0.001,
+            0.001,
+            0.001
+          ]
+        },
+        "region_order": {
+          "prefix_empty": 8,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_Mouse.smb_prefix_0",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "region_order": {
+          "prefix_empty": 0,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_Mouse.smb_prefix_1",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "region_order": {
+          "prefix_empty": 1,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_Mouse.smb_prefix_2",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "region_order": {
+          "prefix_empty": 2,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_Mouse.smb_prefix_8",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "region_order": {
+          "prefix_empty": 8,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_Endcap.smb_prefix_0",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Endcap.smb"
+        },
+        "region_order": {
+          "prefix_empty": 0,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_Endcap.smb_prefix_1",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Endcap.smb"
+        },
+        "region_order": {
+          "prefix_empty": 1,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_Endcap.smb_prefix_2",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Endcap.smb"
+        },
+        "region_order": {
+          "prefix_empty": 2,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_Endcap.smb_prefix_8",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Endcap.smb"
+        },
+        "region_order": {
+          "prefix_empty": 8,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_box_with_large_fillet.smb_prefix_0",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "box_with_large_fillet.smb"
+        },
+        "region_order": {
+          "prefix_empty": 0,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_box_with_large_fillet.smb_prefix_1",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "box_with_large_fillet.smb"
+        },
+        "region_order": {
+          "prefix_empty": 1,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_box_with_large_fillet.smb_prefix_2",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "box_with_large_fillet.smb"
+        },
+        "region_order": {
+          "prefix_empty": 2,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_box_with_large_fillet.smb_prefix_8",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells; native PostInsert and circular head rotation",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "box_with_large_fillet.smb"
+        },
+        "region_order": {
+          "prefix_empty": 8,
+          "gather_faces": false
+        }
+      }
+    },
+    {
+      "name": "region_order_gather_Mouse.smb_1",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells multiple face-use shells; native base Remove/PostInsert fixture construction",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "region_order": {
+          "prefix_empty": 1,
+          "gather_faces": true
+        }
+      }
+    },
+    {
+      "name": "region_order_gather_Mouse.smb_2",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells multiple face-use shells; native base Remove/PostInsert fixture construction",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "region_order": {
+          "prefix_empty": 2,
+          "gather_faces": true
+        }
+      }
+    },
+    {
+      "name": "region_order_gather_Endcap.smb_1",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells multiple face-use shells; native base Remove/PostInsert fixture construction",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Endcap.smb"
+        },
+        "region_order": {
+          "prefix_empty": 1,
+          "gather_faces": true
+        }
+      }
+    },
+    {
+      "name": "region_order_gather_Endcap.smb_2",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells multiple face-use shells; native base Remove/PostInsert fixture construction",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Endcap.smb"
+        },
+        "region_order": {
+          "prefix_empty": 2,
+          "gather_faces": true
+        }
+      }
+    },
+    {
+      "name": "region_order_gather_box_with_large_fillet.smb_1",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells multiple face-use shells; native base Remove/PostInsert fixture construction",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "box_with_large_fillet.smb"
+        },
+        "region_order": {
+          "prefix_empty": 1,
+          "gather_faces": true
+        }
+      }
+    },
+    {
+      "name": "region_order_gather_box_with_large_fillet.smb_2",
+      "upstream_ref": "SmRegion.cpp:324 OrderShells multiple face-use shells; native base Remove/PostInsert fixture construction",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "box_with_large_fillet.smb"
+        },
+        "region_order": {
+          "prefix_empty": 2,
+          "gather_faces": true
+        }
+      }
+    }
+  ]
+}

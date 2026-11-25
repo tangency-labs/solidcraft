@@ -1,0 +1,12 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2705",
+  "tangency-labs/solidcraft#1018",
+  "tangency-labs/solidcraft#2853"
+ ],
+ "what": "a modelled thread on a shaft that isn't the thread's size: refused with the size to use, never a silent change of the shaft",
+ "source": "analytic",
+ "method": "Decision (#1018, #2853): a modelled thread never changes the size of the shaft it is on; one that isn't the thread's size is refused, naming the size to use. A fill-to-tap-drill or turn-down option would be opt-in, off by default (see #3060), and get its own case. The refusal's numbers, from ISO 68-1 (H = P sqrt3/2, basic depth 5H/8): M14: an external thread's major diameter is 14 mm; a 14.6 mm shaft is above it, so the thread would have to turn the shaft down. Expected message: \"this 14.6 mm shaft is too thick for a modelled M14 thread; make the shaft 14 mm for M14\".",
+ "outcome": "refused",
+ "refusal": "this 14.6 mm shaft is too thick for a modelled M14 thread; make the shaft 14 mm for M14"
+}

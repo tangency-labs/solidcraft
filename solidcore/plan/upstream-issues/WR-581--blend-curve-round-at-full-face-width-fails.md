@@ -1,0 +1,15 @@
+#### WR-581. A blend-curve round as wide as the face it uses up fails: `CalcTorusFilletGeom` takes only circular sections, and the marched centre line is a point
+- **Severity:** Wrong result (the fillet fails, 1001, on valid input)
+- **Area:** Blends
+- **Location:** `source/SMLib/src/SmFilletSolver.cpp:879` (`m_pFSG->GetFilletSurfaceGeneratorType() != SM_FSG_CIRCULAR`, then `return SM_ERR`), `SmFilletSolver::CalcTorusFilletGeom` (def. `:860`), reached from `SmFilletSolver::CalcFilletGeom` (`:1977-2005`). The marched blend then fails in `SmFilletSolver::TrimRails` (def. `:5544`).
+- **Pinned reference:** SMLib v1.0.1, commit `3fd5b95`.
+- **What happens:** A blend-curve round (`SM_FSG_BLEND_CURVE`, G1 or G2) on the rim of an R10 cylinder at the full width 10 has its rail on the top face, and its centre line (the path of the rolling balls' centres) shrink to one point on the axis. A circular round there is built analytically by `CalcTorusFilletGeom`: the section revolved about the axis, a hemisphere. That method refuses every other section type, so the blend-curve round is marched along a centre line of no length. Its rails and surface span u in [0, 7.6e-11], and `TrimRails` fails. `SmApiFilletEdges` returns `SM_ERR` and leaves the cylinder as it was. At 9.99 the round builds.
+- **Trigger:** `SmApiFilletEdges` with `lXSectType = 2` (blend curve), continuity 1 or 2, radius 10 on the top rim of `SmApiCreateCylinder(origin, 10, 20)`.
+- **How found:** issue tangency-labs/solidcore#919 (SolidCraft). No fork fix exists.
+- **Confirmed:** yes, against the C++ build. In `blend.fillet_executive_p3`, the cases `issue919-cylinder-rim-edge{1,2}-blend-curve-g{1,2}-r10.0` (`fixtures/blend.fillet_executive_p3/issue_919_920_full_width.json`) give status 1001 with the body unchanged (2 vertices / 3 edges / 3 faces, area 1885.004), bit-identical to the port. The `-r9.99` cases build.
+
+The port keeps the pinned result by default. With the opt-in, default-off `Kernel::fixes.fillet_blend_curve_revolved_on_arc` (`crates/solidcore/src/kernel.rs`), `CalcTorusFilletGeom` (`blend::fillet_solver::p2`, `torus_fillet_geom_parts`) also takes a blend-curve section, but only when every centre-line point (the first offset surface's point at each fillet point, evaluated without keeping an extension) lies on the arc's axis to `1e-8 * (1 + arc radius)`. It revolves the blend curve that `SmBlendCurveCrossSectionFSG::CreateSurfaceFromCurves` builds for each section of a marched blend, built at the start point by the shared `BlendCurveCrossSectionFsg::cross_section_through`. Every other blend is marched as upstream, bit for bit. `crates/solidcore/tests/issue_919_full_width_blend_curve.rs` checks four things:
+- Off: the r10 G2 and G1 rounds fail with `SM_ERR` and leave the cylinder unchanged.
+- On: each closes the top as a manifold solid with one revolved dome face and a clean level-2 check.
+- On: its volume matches an independent integral of discs along the dome's meridian.
+- The r9.99 rounds are bit-identical with the fix on and off.

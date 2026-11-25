@@ -1,0 +1,272 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/2844",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/3887",
+ "test": "crates/kernel/src/prism_fast_path_tests.rs: a_ring_on_a_perforated_plate_keeps_whole_walls",
+ "summary": "A ring joined onto an 80 x 80 x 1.2 plate with a 9 x 9 grid of 6.4 mm square holes came out with its walls split into full-height strips, one seam wherever its foot crossed a hole edge. Each wall should be one cylinder (at most two half-turn faces). Geometry and the three variants are the PR test's; the ring is built as a cylinder minus a longer cylinder instead of an extruded annulus. Volume tolerance: the test's 1e-4 relative.",
+ "cases": [
+  {
+   "name": "plain_plate_ring_sunk",
+   "note": "control: no holes, ring sunk 0.6 into the plate",
+   "steps": [
+    {
+     "op": "box",
+     "id": "plate",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      80,
+      80,
+      1.2
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "outer",
+     "origin": [
+      41.3,
+      40.7,
+      0.6
+     ],
+     "radius": 20.8,
+     "height": 20.6
+    },
+    {
+     "op": "cylinder",
+     "id": "inner",
+     "origin": [
+      41.3,
+      40.7,
+      0.5
+     ],
+     "radius": 19.6,
+     "height": 20.8
+    },
+    {
+     "op": "difference",
+     "id": "ring",
+     "a": "outer",
+     "b": "inner"
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "plate",
+     "b": "ring"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "cylinder_faces_max": 4,
+    "volume": {
+     "value": 10726.088236920661,
+     "tol": 1.0726088236920661,
+     "formula": "80*80*1.2 + 20*pi*(20.8^2 - 19.6^2)"
+    }
+   }
+  },
+  {
+   "name": "holed_plate_ring_standing",
+   "note": "the issue's case: ring standing on the perforated plate (48 cylinder faces before the fix, 2 after in SolidCraft's count)",
+   "steps": [
+    {
+     "op": "box",
+     "id": "plate",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      80,
+      80,
+      1.2
+     ]
+    },
+    {
+     "op": "box",
+     "id": "hole",
+     "origin": [
+      4.8,
+      4.8,
+      -0.1
+     ],
+     "size": [
+      6.4,
+      6.4,
+      1.3
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "plate",
+     "a": "plate",
+     "b": "hole",
+     "pattern": {
+      "count": [
+       9,
+       9
+      ],
+      "pitch": [
+       [
+        8,
+        0,
+        0
+       ],
+       [
+        0,
+        8,
+        0
+       ]
+      ]
+     }
+    },
+    {
+     "op": "cylinder",
+     "id": "outer",
+     "origin": [
+      41.3,
+      40.7,
+      1.2
+     ],
+     "radius": 20.8,
+     "height": 20.0
+    },
+    {
+     "op": "cylinder",
+     "id": "inner",
+     "origin": [
+      41.3,
+      40.7,
+      1.1
+     ],
+     "radius": 19.6,
+     "height": 20.2
+    },
+    {
+     "op": "difference",
+     "id": "ring",
+     "a": "outer",
+     "b": "inner"
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "plate",
+     "b": "ring"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "cylinder_faces_max": 4,
+    "volume": {
+     "value": 6744.776236920661,
+     "tol": 0.6744776236920661,
+     "formula": "80*80*1.2 - 81*6.4^2*1.2 + 20*pi*(20.8^2 - 19.6^2)"
+    }
+   }
+  },
+  {
+   "name": "holed_plate_ring_sunk",
+   "note": "ring sunk 0.6 into the perforated plate; the SolidCraft fix still leaves 12 cylinder faces here (the foot in each hole stays its own face, follow-up solidcraft#2991), so no face bound",
+   "steps": [
+    {
+     "op": "box",
+     "id": "plate",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      80,
+      80,
+      1.2
+     ]
+    },
+    {
+     "op": "box",
+     "id": "hole",
+     "origin": [
+      4.8,
+      4.8,
+      -0.1
+     ],
+     "size": [
+      6.4,
+      6.4,
+      1.3
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "plate",
+     "a": "plate",
+     "b": "hole",
+     "pattern": {
+      "count": [
+       9,
+       9
+      ],
+      "pitch": [
+       [
+        8,
+        0,
+        0
+       ],
+       [
+        0,
+        8,
+        0
+       ]
+      ]
+     }
+    },
+    {
+     "op": "cylinder",
+     "id": "outer",
+     "origin": [
+      41.3,
+      40.7,
+      0.6
+     ],
+     "radius": 20.8,
+     "height": 20.6
+    },
+    {
+     "op": "cylinder",
+     "id": "inner",
+     "origin": [
+      41.3,
+      40.7,
+      0.5
+     ],
+     "radius": 19.6,
+     "height": 20.8
+    },
+    {
+     "op": "difference",
+     "id": "ring",
+     "a": "outer",
+     "b": "inner"
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "plate",
+     "b": "ring"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 6797.830478078864,
+     "tol": 0.6797830478078865,
+     "formula": "80*80*1.2 - 81*6.4^2*1.2 + 20*pi*(20.8^2 - 19.6^2) + 0.6*area(annulus inside the holes); that area is the closed-form disk/rectangle overlap, 88.42373526367092 mm^2"
+    }
+   }
+  }
+ ]
+}

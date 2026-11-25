@@ -1,0 +1,66 @@
+{
+  "area": "import",
+  "bodies": {},
+  "calls": [],
+  "case": "1721-closed-bspline-tube-face",
+  "expected": {
+    "area_mm2": 2513.2741,
+    "bbox": {
+      "max": [
+        10,
+        10,
+        30
+      ],
+      "min": [
+        -10,
+        -10,
+        0
+      ]
+    },
+    "body_count": 1,
+    "faces": 3,
+    "method": "V = 3000 pi = 9424.7780; A = 2 pi r h + 2 pi r^2 = 2513.2741; 3 faces",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#1721",
+      "tangency-labs/solidcraft#3880"
+    ],
+    "volume_mm3": 9424.778,
+    "what": "a cylinder r=10 h=30 whose side is a closed (rational B-spline) tube face wrapping all the way round a closed non-periodic surface: it must mesh and measure as the full tube"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 3,
+      "faces": 3,
+      "vertices": 2
+    }
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 2513.2741228818745,
+      "body_count": 1,
+      "edges": 3,
+      "faces": 3,
+      "vertices": 2,
+      "volume_mm3": 9424.777960740686
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#1721",
+    "tangency-labs/solidcraft#3880"
+  ],
+  "traced_ops": [],
+  "ungraded": [],
+  "what": "a cylinder r=10 h=30 whose side is a closed (rational B-spline) tube face wrapping all the way round a closed non-periodic surface: it must mesh and measure as the full tube",
+  "why_not": [
+    "body \"cylinder_nurbs\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+  ]
+}

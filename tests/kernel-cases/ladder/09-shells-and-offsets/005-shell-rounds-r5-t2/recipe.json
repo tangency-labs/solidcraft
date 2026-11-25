@@ -1,0 +1,18 @@
+{
+ "base": "../../07-fillets/002-four-vertical-edges-r5",
+ "commands": [
+  {
+   "command": "solid.shell",
+   "params": {
+    "faces": [
+     [
+      30,
+      20,
+      20
+     ]
+    ],
+    "thickness": 2
+   }
+  }
+ ]
+}

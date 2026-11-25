@@ -1,0 +1,24 @@
+{
+ "sources": [],
+ "what": "an L-bracket's inside bend rounded r3, then its outside bend r8 = 3 + its thickness: concentric rounds, a bend of even thickness",
+ "source": "analytic",
+ "method": "L-bracket: the legs 40x20x5 (x 0..40, z 0..5) and 5x20x40 (x 0..5, z 0..40) joined, 20 deep in y: V0 = 4000 + 4000 - 500 = 7500, 8 faces. Both rounds' centre lines are (8, y, 8): V = 7500 + 20 (1-pi/4) 9 - 20 (1-pi/4) 64 = 7263.9380. Check: in the square [0,8]^2 the bend is the quarter annulus pi (64 - 9)/4 against the L's 64 - 9 = 55 there: 20 (pi 55/4 - 55) = -236.0620. Faces 10.",
+ "body_count": 1,
+ "volume_mm3": 7263.937979737193,
+ "faces": 10,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   20,
+   40
+  ]
+ },
+ "continuity": {
+  "order": "g1"
+ }
+}

@@ -1,0 +1,245 @@
+{
+  "cases": [
+    {
+      "name": "revolution_cylinder_lsi_plane_through_axis",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:27439 LocalSurfaceIntersect of a canonical SmSurfOfRevolution of a line generator parallel to the axis (SmSurfOfRevolution::CreateCanonical, source/SMLib/src/SmSurfOfRevolution.cpp:639, over the SmLine of source/SMLib/src/SmLine.cpp:221) with an SmPlane through the revolution axis: the cylinder x^2+y^2=1 (axis z, radius 1, height 2) crosses the plane x=0 along the line x=0, y=1, so from a guess beside it the solver reports one found point with its UV on both surfaces and its deviation.",
+      "inputs": {
+        "op": 0,
+        "a": {
+          "kind": 3,
+          "net": [
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 0.0, 2.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0]
+          ],
+          "domain": [0.5, 0.1, 5.7, 0.9]
+        },
+        "b": {
+          "kind": 1,
+          "net": [
+            [0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0]
+          ],
+          "domain": [-2.0, -1.0, 2.0, 3.0]
+        },
+        "tol": 1e-6,
+        "guesses": [1.4, 0.5, 1.0, 1.0],
+        "boundary_testing": false
+      }
+    },
+    {
+      "name": "revolution_cylinder_lsi_plane_normal_at_mid_height",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:27439 LocalSurfaceIntersect with a caller plane normal (cpOptPlaneNormal) of the same canonical SmSurfOfRevolution cylinder and the SmPlane z=1: the cylinder meets that plane in the circle of radius 1 at height 1, and the solution point (0,1,1) lies on the plane through the two surface points with normal (0,0,1).",
+      "inputs": {
+        "op": 0,
+        "a": {
+          "kind": 3,
+          "net": [
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 0.0, 2.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0]
+          ],
+          "domain": [0.5, 0.1, 5.7, 0.9]
+        },
+        "b": {
+          "kind": 1,
+          "net": [
+            [0.0, 0.0, 1.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0]
+          ],
+          "domain": [-2.0, -2.0, 2.0, 2.0]
+        },
+        "tol": 1e-6,
+        "guesses": [1.5707963267948966, 0.5, 0.0, 1.0],
+        "plane_normal": [0.0, 0.0, 1.0],
+        "boundary_testing": false
+      }
+    },
+    {
+      "name": "revolution_cylinder_lsi_plane_first",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:27439 LocalSurfaceIntersect with the SmPlane x=0 as this surface and the canonical SmSurfOfRevolution cylinder as the other one (the opposite argument order of revolution_cylinder_lsi_plane_through_axis), from guesses on each surface near the crossing line x=0, y=1.",
+      "inputs": {
+        "op": 0,
+        "a": {
+          "kind": 1,
+          "net": [
+            [0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0]
+          ],
+          "domain": [-2.0, -1.0, 2.0, 3.0]
+        },
+        "b": {
+          "kind": 3,
+          "net": [
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 0.0, 2.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0]
+          ],
+          "domain": [0.5, 0.1, 5.7, 0.9]
+        },
+        "tol": 1e-6,
+        "guesses": [1.0, 1.0, 1.4, 0.5],
+        "boundary_testing": false
+      }
+    },
+    {
+      "name": "revolution_cylinder_lsi_swap_uv",
+      "upstream_ref": "source/SMLib/src/SmSurfOfRevolution.cpp:639 CreateCanonical with bSwapUV=TRUE (net[4][0]=1): the NURB u is the generator parameter and v the revolution arc length. SmSurface.cpp:27439 LocalSurfaceIntersect of that cylinder with the SmPlane x=0 along the same crossing line; the solution's first UV pair is (generator 0.5, angle 1.5707963...).",
+      "inputs": {
+        "op": 0,
+        "a": {
+          "kind": 3,
+          "net": [
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 0.0, 2.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0]
+          ],
+          "domain": [0.1, 0.5, 0.9, 5.7]
+        },
+        "b": {
+          "kind": 1,
+          "net": [
+            [0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0]
+          ],
+          "domain": [-2.0, -1.0, 2.0, 3.0]
+        },
+        "tol": 1e-6,
+        "guesses": [0.5, 1.4, 1.0, 1.0],
+        "boundary_testing": false
+      }
+    },
+    {
+      "name": "revolution_cylinder_isb_retained_circle",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:21745 IntersectSurfaceBoundaries of the SmPlane z=0 with the canonical SmSurfOfRevolution cylinder: SmSurfOfRevolution::CreateIsoParametricCurve (source/SMLib/src/SmSurfOfRevolution.cpp:1653) builds the v-min boundary as the typed circle of radius 1 at z=0, and the plane's natural [0,1]^2 iso boundary curves split it where they cross it. The retained typed arcs lie inside the plane's case domain and their deviations, intervals and points are compared; the fixture does not hardcode the retained count.",
+      "inputs": {
+        "op": 1,
+        "a": {
+          "kind": 1,
+          "net": [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0]
+          ],
+          "domain": [-1.5, -1.5, 1.5, 1.5]
+        },
+        "b": {
+          "kind": 3,
+          "net": [
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 0.0, 2.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0]
+          ],
+          "domain": [0.0, 0.0, 6.283185307179586, 1.0]
+        },
+        "tol": 1e-6,
+        "guesses": [0.0, 0.0, 0.0, 0.0],
+        "boundary_testing": false
+      }
+    },
+    {
+      "name": "revolution_cylinder_isb_radius_and_subdomain_control",
+      "upstream_ref": "source/SMLib/src/SmSurface.cpp:21745 IntersectSurfaceBoundaries of the same SmPlane z=0 with a canonical SmSurfOfRevolution cylinder of radius 0.5 (line generator x=0.5) over a u sub-domain [0, 2.5], so the revolution direction is not closed there and its u-max seam boundary is also built: the plane's natural [0,1]^2 iso boundary curves split the retained v-min typed circle of radius 0.5, and its deviation, interval and point values differ from revolution_cylinder_isb_retained_circle's. The fixture does not hardcode the retained count.",
+      "inputs": {
+        "op": 1,
+        "a": {
+          "kind": 1,
+          "net": [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0]
+          ],
+          "domain": [-1.5, -1.5, 1.5, 1.5]
+        },
+        "b": {
+          "kind": 3,
+          "net": [
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.5, 0.0, 0.0],
+            [0.5, 0.0, 2.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0]
+          ],
+          "domain": [0.0, 0.0, 2.5, 1.0]
+        },
+        "tol": 1e-6,
+        "guesses": [0.0, 0.0, 0.0, 0.0],
+        "boundary_testing": false
+      }
+    }
+  ]
+}

@@ -1,0 +1,52 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 100,
+    "width": 60,
+    "height": 40,
+    "corner": [
+     -50,
+     -30,
+     0
+    ],
+    "body_name": "Case"
+   }
+  },
+  {
+   "command": "solid.shell",
+   "params": {
+    "body": "Case",
+    "faces": [
+     [
+      0,
+      0,
+      0
+     ]
+    ],
+    "thickness": 2,
+    "direction": "outside"
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      0,
+      32,
+      42
+     ],
+     [
+      0,
+      30,
+      40
+     ]
+    ],
+    "radius": 7,
+    "body": "Case"
+   }
+  }
+ ]
+}

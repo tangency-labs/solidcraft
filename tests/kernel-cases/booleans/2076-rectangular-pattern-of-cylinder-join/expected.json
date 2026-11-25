@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2076"
+ ],
+ "what": "a rectangular pattern of a cylinder join (pin-fin plate) scales quadratically in time",
+ "source": "analytic",
+ "method": "plate 52x52x3 = 8112 plus 25 pins O1.4x3.5 standing on it, 2.6 apart (none touch): 8112 + 25*pi*0.49*3.5 = 8246.696. Result must also come in a reasonable time (the case has the runner's time limit)",
+ "body_count": 1,
+ "volume_mm3": 8246.695785022663
+}

@@ -4,9 +4,10 @@
 //! hovering one draws the axis or centre as construction geometry.
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::{AxisRef, FeatureKind, PatternKind, PlaneRef};
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::dialogs::Kind;
 use crate::scenario::Harness;
@@ -24,10 +25,12 @@ fn shaft() -> Harness {
     h
 }
 
-/// The shaft's wall, top rim and top cap, as picks.
+/// The shaft's wall, top rim and top cap, as picks. The rim is picked at the middle of its
+/// polyline: its first point is the vertex where the wall's seam meets it, as near the seam as
+/// the rim.
 fn picks(h: &Harness) -> (Sel, Sel, Sel) {
     use solidcraft_engine::kernel::{FaceSurface, face_surface};
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let b = st.body("Shaft").unwrap();
     let face = |want: fn(&FaceSurface) -> bool, point: Vec3| {
         let index = (0..b.body.face_count()).find(|i| face_surface(&b.body, *i).is_some_and(|f| want(&f))).unwrap();
@@ -42,7 +45,7 @@ fn picks(h: &Harness) -> (Sel, Sel, Sel) {
         .enumerate()
         .find_map(|(index, e)| {
             let c = solidcraft_engine::kernel::edge_circle(&b.body, index)?;
-            (c.center.z > 9.0).then(|| Sel::Edge { body: "Shaft".into(), index, point: e[0] })
+            (c.center.z > 9.0).then(|| Sel::Edge { body: "Shaft".into(), index, point: crate::viewport::polyline_mid(e) })
         })
         .unwrap();
     (wall, rim, cap)
@@ -51,7 +54,7 @@ fn picks(h: &Harness) -> (Sel, Sel, Sel) {
 fn hit(sel: &Sel) -> Hit {
     match sel {
         Sel::Face { body, index, point } => Hit::Face { body: body.clone(), index: *index, point: *point },
-        Sel::Edge { body, index, point } => Hit::Edge { body: body.clone(), index: *index, mid: *point },
+        Sel::Edge { body, index, point } => Hit::Edge { body: body.clone(), index: *index, mid: *point, point: *point },
         _ => panic!("not a model pick"),
     }
 }

@@ -1,0 +1,145 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 16.65,
+    "height": 5,
+    "body_name": "Base"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 15.27,
+    "height": 4,
+    "base": [
+     0,
+     0,
+     1.76
+    ],
+    "operation": "cut",
+    "targets": [
+     "Base"
+    ]
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      -1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -0.1706475844770042,
+      7.63270030627277
+     ],
+     [
+      -3,
+      4.99
+     ],
+     [
+      3,
+      4.99
+     ],
+     [
+      0.1706475844770042,
+      7.63270030627277
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": [
+     0.1706475844770042,
+     7.63270030627277
+    ],
+    "through": [
+     0,
+     7.7
+    ],
+    "end": [
+     -0.1706475844770042,
+     7.63270030627277
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 1.6875953835063608,
+    "start_offset": 14.962404616493638,
+    "operation": "new",
+    "body_name": "Tooth"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 15.27,
+    "height": 2.73,
+    "base": [
+     0,
+     0,
+     4.98
+    ],
+    "operation": "cut",
+    "targets": [
+     "Tooth"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 16.65,
+    "height": 2.73,
+    "base": [
+     0,
+     0,
+     4.98
+    ],
+    "operation": "intersect",
+    "targets": [
+     "Tooth"
+    ]
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Base",
+    "tools": [
+     "Tooth"
+    ],
+    "operation": "join"
+   }
+  }
+ ]
+}

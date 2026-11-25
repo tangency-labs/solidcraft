@@ -1,0 +1,154 @@
+{
+ "cases": [
+  {
+   "name": "fuzz_neg_zone_tol_network",
+   "upstream_ref": "SmCurveClassification ctor: SmZoneTol3d(-1e300) converts with fabs before ReSet keeps it (main 0cf3e290 --fuzz 2000 fuzz01490, gave 103 vs C++ 104)",
+   "inputs": {
+    "ang": 0.1,
+    "approx": 0.001,
+    "brep_a": {
+     "kind": "network"
+    },
+    "brep_b": null,
+    "ctor": 0,
+    "ops": [
+     {
+      "a": [
+       0,
+       1,
+       59253
+      ],
+      "b": [
+       0,
+       0,
+       20448
+      ],
+      "op": "relate"
+     },
+     {
+      "e": [
+       0,
+       1,
+       8864
+      ],
+      "op": "set_edge_class",
+      "relative": true,
+      "t0": 0.25588128598617577,
+      "t1": 0.8302201720948407,
+      "tol": -1e+300
+     },
+     {
+      "op": "clear_ssi"
+     },
+     {
+      "a": [
+       0,
+       0,
+       59454
+      ],
+      "b": [
+       0,
+       1,
+       54000
+      ],
+      "op": "relate"
+     },
+     {
+      "a": [
+       0,
+       1,
+       40680
+      ],
+      "b": [
+       0,
+       0,
+       60995
+      ],
+      "op": "relate"
+     },
+     {
+      "h": [
+       0,
+       0,
+       28993
+      ],
+      "op": "brep_mate"
+     }
+    ]
+   }
+  },
+  {
+   "name": "fuzz_neg_zone_tol_plane_square_torus",
+   "upstream_ref": "SmCurveClassification ctor: SmZoneTol3d(-1e300) converts with fabs before ReSet keeps it (main 0cf3e290 --fuzz 2000 fuzz01531, gave 103 vs C++ 104)",
+   "inputs": {
+    "ang": 0.001,
+    "approx": 1e-05,
+    "brep_a": {
+     "file": "plane_square.smb",
+     "kind": "file",
+     "rebuild": false
+    },
+    "brep_b": {
+     "file": "torus.smb",
+     "kind": "file",
+     "rebuild": true
+    },
+    "ctor": 0,
+    "ops": [
+     {
+      "e": [
+       0,
+       1,
+       59767
+      ],
+      "op": "set_edge_class",
+      "relative": true,
+      "t0": -0.09567098569341087,
+      "t1": 0.9880380629003984,
+      "tol": -1e+300
+     },
+     {
+      "capture": 1.0,
+      "op": "mgr_new",
+      "override_tol": 0.0
+     },
+     {
+      "op": "resolve"
+     }
+    ]
+   }
+  },
+  {
+   "name": "fuzz_neg_zone_tol_box_with_large_fillet",
+   "upstream_ref": "SmCurveClassification ctor: SmZoneTol3d(-1e300) converts with fabs before ReSet keeps it (main 0cf3e290 --fuzz 2000 fuzz01875, gave 103 vs C++ 104)",
+   "inputs": {
+    "ang": 0.3490658503988659,
+    "approx": 1e-05,
+    "brep_a": {
+     "file": "box_with_large_fillet.smb",
+     "kind": "file",
+     "rebuild": false
+    },
+    "brep_b": null,
+    "ctor": 0,
+    "ops": [
+     {
+      "e": [
+       0,
+       1,
+       6654
+      ],
+      "op": "set_edge_class",
+      "relative": true,
+      "t0": 0.4237108457337439,
+      "t1": 1.1715237836841945,
+      "tol": -1e+300
+     },
+     {
+      "op": "getters"
+     }
+    ]
+   }
+  }
+ ]
+}

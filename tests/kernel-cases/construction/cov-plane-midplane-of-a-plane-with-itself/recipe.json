@@ -1,0 +1,12 @@
+{
+ "commands": [
+  {
+   "command": "construct.plane.midplane",
+   "params": {
+    "a": "XY",
+    "b": "XY",
+    "name": "M"
+   }
+  }
+ ]
+}

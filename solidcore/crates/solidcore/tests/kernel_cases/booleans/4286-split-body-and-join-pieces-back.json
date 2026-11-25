@@ -1,0 +1,182 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b41": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b44": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b41"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b42"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b42"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b43"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b44"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b45"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b45"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b46"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b43"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b47"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b46"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b48"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b47",
+        "b48"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b49"
+      ],
+      "params": {
+        "op": "union"
+      }
+    }
+  ],
+  "case": "4286-split-body-and-join-pieces-back",
+  "expected": {
+    "body_count": 1,
+    "method": "the pieces meet over the whole split face, so the join gives the body back: V = 60*40*20 - pi 36 20 + pi 36 10 = 46869.027, one body",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#4286"
+    ],
+    "volume_mm3": 46869.0266,
+    "what": "a body split by a plane, its two pieces joined back, flush on the split faces (the report's part was an imported vendor connector; synthetic: a block with a bore and a boss, both cut by the plane): the join never finished"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 22,
+      "faces": 9,
+      "vertices": 16
+    }
+  },
+  "records": "4286-split-body-and-join-pieces-back.bodies.json.gz",
+  "result": [
+    {
+      "body": "Block",
+      "made": "b49"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 9704.778684226167,
+      "body_count": 1,
+      "edges": 18,
+      "faces": 9,
+      "vertices": 12,
+      "volume_mm3": 46869.02664484815
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#4286"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a body split by a plane, its two pieces joined back, flush on the split faces (the report's part was an imported vendor connector; synthetic: a block with a bore and a boss, both cut by the plane): the join never finished",
+  "why_not": []
+}

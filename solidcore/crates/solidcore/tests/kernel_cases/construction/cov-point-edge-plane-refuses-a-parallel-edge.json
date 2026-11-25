@@ -1,0 +1,37 @@
+{
+  "area": "construction",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-point-edge-plane-refuses-a-parallel-edge",
+  "expected": {
+    "method": "box 40 x 30 x 20 with a corner at the origin (x 0..40, y 0..30, z 0..20): the edge y 0, z 0 along X never crosses y = 10: refused",
+    "outcome": "refused",
+    "refusal": "the edge is parallel to the plane",
+    "source": "analytic",
+    "sources": [],
+    "what": "a box edge parallel to the plane"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 2 (construct.point.edge_plane): the edge is parallel to the plane",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 2 (construct.point.edge_plane): the edge is parallel to the plane",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude"
+  ],
+  "ungraded": [],
+  "what": "a box edge parallel to the plane",
+  "why_not": [
+    "the failure is SolidCraft's, not a kernel operation's: step 2 (construct.point.edge_plane): the edge is parallel to the plane"
+  ]
+}

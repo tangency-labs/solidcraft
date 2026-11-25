@@ -1,0 +1,15 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4010"
+ ],
+ "what": "plate with a through hole shelled 2.5 mm with only the hole's wall removed",
+ "source": "analytic",
+ "method": "plate 40x30x12.5 minus hole r5; cavity = inward offset box 35x25x7.5 minus the hole's cylinder (r=5 stays as the wall, height 7.5) open to the hole. V=(15000-pi*25*12.5)-(6562.5-pi*25*7.5); centroid (20,15,6.25) by symmetry",
+ "body_count": 1,
+ "volume_mm3": 8044.8009183012755,
+ "center_of_mass": [
+  20,
+  15,
+  6.25
+ ]
+}

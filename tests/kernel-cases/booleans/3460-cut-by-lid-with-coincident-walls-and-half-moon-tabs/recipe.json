@@ -1,0 +1,124 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     0,
+     0,
+     0
+    ],
+    "length": 40,
+    "width": 30,
+    "height": 20,
+    "body_name": "Enc"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     2,
+     2,
+     2
+    ],
+    "length": 36,
+    "width": 26,
+    "height": 18,
+    "operation": "cut",
+    "targets": [
+     "Enc"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     2,
+     2,
+     12
+    ],
+    "length": 36,
+    "width": 26,
+    "height": 8,
+    "body_name": "Lid"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 2.5,
+    "height": 6,
+    "base": [
+     4,
+     15,
+     13
+    ],
+    "operation": "join",
+    "targets": [
+     "Lid"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 2.5,
+    "height": 6,
+    "base": [
+     36,
+     15,
+     13
+    ],
+    "operation": "join",
+    "targets": [
+     "Lid"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 2.5,
+    "height": 6,
+    "base": [
+     20,
+     4,
+     13
+    ],
+    "operation": "join",
+    "targets": [
+     "Lid"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 2.5,
+    "height": 6,
+    "base": [
+     20,
+     26,
+     13
+    ],
+    "operation": "join",
+    "targets": [
+     "Lid"
+    ]
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Enc",
+    "tools": [
+     "Lid"
+    ],
+    "operation": "cut",
+    "keep_tools": true
+   }
+  }
+ ]
+}

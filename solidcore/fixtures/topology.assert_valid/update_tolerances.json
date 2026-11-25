@@ -1,0 +1,1239 @@
+{
+ "cases": [
+  {
+   "name": "update_box_m0_i0_v0_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 0,
+    "index": 0,
+    "value": 0.0
+   }
+  },
+  {
+   "name": "update_box_m0_i0_v0_l0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "level": 0,
+    "update": true,
+    "mutation": 0,
+    "index": 0,
+    "value": 0.0
+   }
+  },
+  {
+   "name": "update_box_m1_i0_v1e-12_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 1,
+    "index": 0,
+    "value": 1e-12
+   }
+  },
+  {
+   "name": "update_box_m1_i3_v1e-12_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 1,
+    "index": 3,
+    "value": 1e-12
+   }
+  },
+  {
+   "name": "update_box_m1_i1_v1e-07_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 1,
+    "index": 1,
+    "value": 1e-07
+   }
+  },
+  {
+   "name": "update_box_m2_i0_v1e-12_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 2,
+    "index": 0,
+    "value": 1e-12
+   }
+  },
+  {
+   "name": "update_box_m2_i2_v1e-09_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 2,
+    "index": 2,
+    "value": 1e-09
+   }
+  },
+  {
+   "name": "update_box_m6_i0_v0.0001_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 6,
+    "index": 0,
+    "value": 0.0001
+   }
+  },
+  {
+   "name": "update_box_m6_i0_v0.0001_l0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "level": 0,
+    "update": true,
+    "mutation": 6,
+    "index": 0,
+    "value": 0.0001
+   }
+  },
+  {
+   "name": "update_box_m6_i1_v1e-06_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 6,
+    "index": 1,
+    "value": 1e-06
+   }
+  },
+  {
+   "name": "update_box_m6_i1_v1e-06_l0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "level": 0,
+    "update": true,
+    "mutation": 6,
+    "index": 1,
+    "value": 1e-06
+   }
+  },
+  {
+   "name": "update_box_m6_i0_v1_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 6,
+    "index": 0,
+    "value": 1.0
+   }
+  },
+  {
+   "name": "update_box_m6_i0_v1_l0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "level": 0,
+    "update": true,
+    "mutation": 6,
+    "index": 0,
+    "value": 1.0
+   }
+  },
+  {
+   "name": "update_cylinder_m0_i0_v0_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 0,
+    "index": 0,
+    "value": 0.0
+   }
+  },
+  {
+   "name": "update_cylinder_m0_i0_v0_l0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "level": 0,
+    "update": true,
+    "mutation": 0,
+    "index": 0,
+    "value": 0.0
+   }
+  },
+  {
+   "name": "update_cylinder_m1_i0_v1e-12_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 1,
+    "index": 0,
+    "value": 1e-12
+   }
+  },
+  {
+   "name": "update_cylinder_m1_i3_v1e-12_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 1,
+    "index": 3,
+    "value": 1e-12
+   }
+  },
+  {
+   "name": "update_cylinder_m1_i1_v1e-07_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 1,
+    "index": 1,
+    "value": 1e-07
+   }
+  },
+  {
+   "name": "update_cylinder_m2_i0_v1e-12_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 2,
+    "index": 0,
+    "value": 1e-12
+   }
+  },
+  {
+   "name": "update_cylinder_m2_i2_v1e-09_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 2,
+    "index": 2,
+    "value": 1e-09
+   }
+  },
+  {
+   "name": "update_cylinder_m6_i0_v0.0001_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 6,
+    "index": 0,
+    "value": 0.0001
+   }
+  },
+  {
+   "name": "update_cylinder_m6_i0_v0.0001_l0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "level": 0,
+    "update": true,
+    "mutation": 6,
+    "index": 0,
+    "value": 0.0001
+   }
+  },
+  {
+   "name": "update_cylinder_m6_i1_v1e-06_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 6,
+    "index": 1,
+    "value": 1e-06
+   }
+  },
+  {
+   "name": "update_cylinder_m6_i1_v1e-06_l0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "level": 0,
+    "update": true,
+    "mutation": 6,
+    "index": 1,
+    "value": 1e-06
+   }
+  },
+  {
+   "name": "update_cylinder_m6_i0_v1_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 6,
+    "index": 0,
+    "value": 1.0
+   }
+  },
+  {
+   "name": "update_cylinder_m6_i0_v1_l0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "level": 0,
+    "update": true,
+    "mutation": 6,
+    "index": 0,
+    "value": 1.0
+   }
+  },
+  {
+   "name": "update_sphere_m0_i0_v0_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 0,
+    "index": 0,
+    "value": 0.0
+   }
+  },
+  {
+   "name": "update_sphere_m0_i0_v0_l0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "level": 0,
+    "update": true,
+    "mutation": 0,
+    "index": 0,
+    "value": 0.0
+   }
+  },
+  {
+   "name": "update_sphere_m1_i0_v1e-12_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 1,
+    "index": 0,
+    "value": 1e-12
+   }
+  },
+  {
+   "name": "update_sphere_m1_i3_v1e-12_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 1,
+    "index": 3,
+    "value": 1e-12
+   }
+  },
+  {
+   "name": "update_sphere_m1_i1_v1e-07_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 1,
+    "index": 1,
+    "value": 1e-07
+   }
+  },
+  {
+   "name": "update_sphere_m2_i0_v1e-12_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 2,
+    "index": 0,
+    "value": 1e-12
+   }
+  },
+  {
+   "name": "update_sphere_m2_i2_v1e-09_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 2,
+    "index": 2,
+    "value": 1e-09
+   }
+  },
+  {
+   "name": "update_sphere_m6_i0_v0.0001_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 6,
+    "index": 0,
+    "value": 0.0001
+   }
+  },
+  {
+   "name": "update_sphere_m6_i0_v0.0001_l0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "level": 0,
+    "update": true,
+    "mutation": 6,
+    "index": 0,
+    "value": 0.0001
+   }
+  },
+  {
+   "name": "update_sphere_m6_i1_v1e-06_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 6,
+    "index": 1,
+    "value": 1e-06
+   }
+  },
+  {
+   "name": "update_sphere_m6_i1_v1e-06_l0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "level": 0,
+    "update": true,
+    "mutation": 6,
+    "index": 1,
+    "value": 1e-06
+   }
+  },
+  {
+   "name": "update_sphere_m6_i0_v1_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 6,
+    "index": 0,
+    "value": 1.0
+   }
+  },
+  {
+   "name": "update_sphere_m6_i0_v1_l0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "level": 0,
+    "update": true,
+    "mutation": 6,
+    "index": 0,
+    "value": 1.0
+   }
+  },
+  {
+   "name": "update_boxfile_m0_i0_v0_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/box.smb"
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 0,
+    "index": 0,
+    "value": 0.0
+   }
+  },
+  {
+   "name": "update_boxfile_m0_i0_v0_l0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/box.smb"
+    },
+    "level": 0,
+    "update": true,
+    "mutation": 0,
+    "index": 0,
+    "value": 0.0
+   }
+  },
+  {
+   "name": "update_boxfile_m1_i0_v1e-12_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/box.smb"
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 1,
+    "index": 0,
+    "value": 1e-12
+   }
+  },
+  {
+   "name": "update_boxfile_m1_i3_v1e-12_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/box.smb"
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 1,
+    "index": 3,
+    "value": 1e-12
+   }
+  },
+  {
+   "name": "update_boxfile_m1_i1_v1e-07_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/box.smb"
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 1,
+    "index": 1,
+    "value": 1e-07
+   }
+  },
+  {
+   "name": "update_boxfile_m2_i0_v1e-12_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/box.smb"
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 2,
+    "index": 0,
+    "value": 1e-12
+   }
+  },
+  {
+   "name": "update_boxfile_m2_i2_v1e-09_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/box.smb"
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 2,
+    "index": 2,
+    "value": 1e-09
+   }
+  },
+  {
+   "name": "update_boxfile_m6_i0_v0.0001_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/box.smb"
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 6,
+    "index": 0,
+    "value": 0.0001
+   }
+  },
+  {
+   "name": "update_boxfile_m6_i0_v0.0001_l0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/box.smb"
+    },
+    "level": 0,
+    "update": true,
+    "mutation": 6,
+    "index": 0,
+    "value": 0.0001
+   }
+  },
+  {
+   "name": "update_boxfile_m6_i1_v1e-06_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/box.smb"
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 6,
+    "index": 1,
+    "value": 1e-06
+   }
+  },
+  {
+   "name": "update_boxfile_m6_i1_v1e-06_l0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/box.smb"
+    },
+    "level": 0,
+    "update": true,
+    "mutation": 6,
+    "index": 1,
+    "value": 1e-06
+   }
+  },
+  {
+   "name": "update_boxfile_m6_i0_v1_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/box.smb"
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 6,
+    "index": 0,
+    "value": 1.0
+   }
+  },
+  {
+   "name": "update_boxfile_m6_i0_v1_l0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/box.smb"
+    },
+    "level": 0,
+    "update": true,
+    "mutation": 6,
+    "index": 0,
+    "value": 1.0
+   }
+  },
+  {
+   "name": "update_patch_sheet_m0_i0_v0_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "fixtures/topology.assert_valid/data/issue2111_patch_sheet.smb"
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 0,
+    "index": 0,
+    "value": 0.0
+   }
+  },
+  {
+   "name": "update_patch_sheet_m0_i0_v0_l0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "fixtures/topology.assert_valid/data/issue2111_patch_sheet.smb"
+    },
+    "level": 0,
+    "update": true,
+    "mutation": 0,
+    "index": 0,
+    "value": 0.0
+   }
+  },
+  {
+   "name": "update_patch_sheet_m1_i0_v1e-12_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "fixtures/topology.assert_valid/data/issue2111_patch_sheet.smb"
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 1,
+    "index": 0,
+    "value": 1e-12
+   }
+  },
+  {
+   "name": "update_patch_sheet_m1_i3_v1e-12_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "fixtures/topology.assert_valid/data/issue2111_patch_sheet.smb"
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 1,
+    "index": 3,
+    "value": 1e-12
+   }
+  },
+  {
+   "name": "update_patch_sheet_m1_i1_v1e-07_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "fixtures/topology.assert_valid/data/issue2111_patch_sheet.smb"
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 1,
+    "index": 1,
+    "value": 1e-07
+   }
+  },
+  {
+   "name": "update_patch_sheet_m2_i0_v1e-12_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "fixtures/topology.assert_valid/data/issue2111_patch_sheet.smb"
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 2,
+    "index": 0,
+    "value": 1e-12
+   }
+  },
+  {
+   "name": "update_patch_sheet_m2_i2_v1e-09_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "fixtures/topology.assert_valid/data/issue2111_patch_sheet.smb"
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 2,
+    "index": 2,
+    "value": 1e-09
+   }
+  },
+  {
+   "name": "update_patch_sheet_m6_i0_v0.0001_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "fixtures/topology.assert_valid/data/issue2111_patch_sheet.smb"
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 6,
+    "index": 0,
+    "value": 0.0001
+   }
+  },
+  {
+   "name": "update_patch_sheet_m6_i0_v0.0001_l0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "fixtures/topology.assert_valid/data/issue2111_patch_sheet.smb"
+    },
+    "level": 0,
+    "update": true,
+    "mutation": 6,
+    "index": 0,
+    "value": 0.0001
+   }
+  },
+  {
+   "name": "update_patch_sheet_m6_i1_v1e-06_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "fixtures/topology.assert_valid/data/issue2111_patch_sheet.smb"
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 6,
+    "index": 1,
+    "value": 1e-06
+   }
+  },
+  {
+   "name": "update_patch_sheet_m6_i1_v1e-06_l0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "fixtures/topology.assert_valid/data/issue2111_patch_sheet.smb"
+    },
+    "level": 0,
+    "update": true,
+    "mutation": 6,
+    "index": 1,
+    "value": 1e-06
+   }
+  },
+  {
+   "name": "update_patch_sheet_m6_i0_v1_l2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "fixtures/topology.assert_valid/data/issue2111_patch_sheet.smb"
+    },
+    "level": 2,
+    "update": true,
+    "mutation": 6,
+    "index": 0,
+    "value": 1.0
+   }
+  },
+  {
+   "name": "update_patch_sheet_m6_i0_v1_l0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidateAndUpdateTolerances",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "fixtures/topology.assert_valid/data/issue2111_patch_sheet.smb"
+    },
+    "level": 0,
+    "update": true,
+    "mutation": 6,
+    "index": 0,
+    "value": 1.0
+   }
+  }
+ ]
+}

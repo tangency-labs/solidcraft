@@ -1,0 +1,61 @@
+{
+  "area": "sheet-metal",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-hem-closed-on-a-bottom-edge",
+  "expected": {
+    "bbox": {
+      "max": [
+        100,
+        60,
+        4.02
+      ],
+      "min": [
+        0,
+        -2.01,
+        0
+      ]
+    },
+    "body_count": 1,
+    "faces": 10,
+    "method": "as cov-hem-closed-on-a-top-edge, but a bottom-edge pick folds toward the top face: bend axis at (y 0, z T + g), the leg at z T + 2g .. 2T + 2g = 2.02 .. 4.02. V = 100*60*2 + (pi/2)(2.01^2 - 0.01^2)*100 + 5.99*100*2 = 13832.601716",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 13832.601716025138,
+    "what": "sheet.hem on the bottom edge of a 100 x 60 x 2 base: the hem folds over the top face"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 28,
+      "faces": 14,
+      "vertices": 16
+    }
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 14509.253750352998,
+      "body_count": 1,
+      "edges": 24,
+      "faces": 10,
+      "vertices": 16,
+      "volume_mm3": 13832.601716115003
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [],
+  "ungraded": [
+    "faces: graded merged across analytic surfaces (10), the records have 14"
+  ],
+  "what": "sheet.hem on the bottom edge of a 100 x 60 x 2 base: the hem folds over the top face",
+  "why_not": [
+    "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+  ]
+}

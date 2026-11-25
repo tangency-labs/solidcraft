@@ -1,0 +1,35 @@
+{
+  "area": "construction",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-point-three-planes-refuses-planes-through-one-line",
+  "expected": {
+    "method": "XZ, YZ and x = y all hold the Z axis: they meet in a line, not a point: refused",
+    "outcome": "refused",
+    "refusal": "the planes don't meet in a point",
+    "source": "analytic",
+    "sources": [],
+    "what": "three planes sharing one line"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 1 (construct.point.three_planes): the planes don't meet in a point",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 1 (construct.point.three_planes): the planes don't meet in a point",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [],
+  "ungraded": [],
+  "what": "three planes sharing one line",
+  "why_not": [
+    "no kernel operation ran before the failure: step 1 (construct.point.three_planes): the planes don't meet in a point"
+  ]
+}

@@ -5,14 +5,24 @@
 //! fields whose descriptions say so; the contracts don't check the combinations, and the
 //! handlers ignore those keys otherwise.
 
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 
+use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
+use serde::de::Error as _;
+use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::{Value, json};
+
+use super::check::whole;
+use super::config::NameList;
+use super::motion::require;
 use super::types::{
-    AngleExpr, AxisDir, ConventionParam, DirectionParam, ExtentKeyword, ExtrudeOperation, FacesParam, FeatureCommon, FromPoint, IdOrName, LengthExpr,
-    NumberExpr, OperationParam, Point3, PointExpr3, ProfilesParam, ScaleFactors, SketchRef, StringList, ThinSideParam, ToPoint, feature_common,
-    present,
+    AngleExpr, AxisDir, AxisDirExpr, AxisLine, CombineOperation, ConventionParam, DirectionParam, EdgeRefs, ExtentKeyword, ExtrudeOperation,
+    FaceRefs, FacesParam, FeatureCommon, FilletCornerParam, FilletFitParam, FilletTurnParam, FilletTypeParam, FromPoint, GeoRefParam, IdOrName,
+    LengthExpr, NumberExpr, OperationParam, PathList, PatternAxis, PlaneCommon, PlaneOrFace, PlaneParam, Point3, PointExpr3, ProfilesParam,
+    ScaleFactors, SketchRef, StringList, ThinSideParam, ToPoint, TouchingParam, feature_common, present,
 };
+use super::types::{RevolveAxis, RevolveConventionParam, RevolveDirection, RevolveToPoint};
+use crate::params::MAX_STRING_LIST;
 
 /// Add a box primitive.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -29,7 +39,8 @@ pub struct BoxParams {
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "PointExpr3")]
     pub corner: Option<PointExpr3>,
-    /// The box's centre, instead of `corner`.
+    /// The box's centre, instead of `corner`. The box stays centred there when its length, width
+    /// or height changes later.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "PointExpr3")]
     pub center: Option<PointExpr3>,
@@ -41,6 +52,9 @@ pub struct BoxParams {
     /// `participants` lists bodies.
     #[serde(default)]
     pub targets: Option<StringList>,
+    /// What a join makes of pieces that share no face. Default: separate.
+    #[serde(default)]
+    pub touching: Option<TouchingParam>,
     /// The bodies a join, cut or intersect works on, in place of `targets`.
     #[serde(default)]
     pub participants: Option<StringList>,
@@ -80,7 +94,8 @@ pub struct ExtrudeParams {
     #[serde(default)]
     pub exact_regions: Option<bool>,
     /// A point on a planar body face to extrude instead of a sketch profile.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "Point3")]
     pub face: Option<Point3>,
     /// Several coplanar faces of one body to extrude together, by a point on each. Not with
     /// `face`, `sketch` or `profiles`.
@@ -90,6 +105,11 @@ pub struct ExtrudeParams {
     /// The body whose face to use, where faces of several bodies meet at `face` (or `faces`).
     #[serde(default)]
     pub face_body: Option<String>,
+    /// With `face` or `faces`: start on the face's plane as a fixed plane, which won't follow later
+    /// changes to the face (for a face whose history can't keep an attachment, such as a converted
+    /// mesh's).
+    #[serde(default)]
+    pub fixed: Option<bool>,
     /// With `face`, among placed instances: the body whose placement `face` is read in (read by
     /// the engine's frame mapping, before the command runs). Default: `face_body`, else the
     /// body nearest the point.
@@ -108,14 +128,18 @@ pub struct ExtrudeParams {
     /// Which way to extrude. Default: positive.
     #[serde(default)]
     pub direction: Option<DirectionParam>,
-    /// Two Sides: a second distance the other way from the first side, which may be
-    /// `through_all` or `to`; with `direction: negative` the first side goes against the normal
-    /// and `distance2` along it.
+    /// Two Sides: a second distance on the side `direction` leaves free; the first side may be
+    /// `through_all` or `to`. With `direction: negative` the first side goes against the normal
+    /// and `distance2` along it. A negative distance only turns its own side over.
     #[serde(default)]
     pub distance2: Option<LengthExpr>,
     /// Start this far from the sketch plane, along its normal.
     #[serde(default)]
     pub start_offset: Option<LengthExpr>,
+    /// When symmetric extrude is offset, offset both directions symmetrically away from the sketch
+    /// plane, leaving a clearance gap between the two sides.
+    #[serde(default)]
+    pub symmetric_offset: Option<bool>,
     /// How a symmetric distance is read. Default: total_distance.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "ConventionParam")]
@@ -127,7 +151,15 @@ pub struct ExtrudeParams {
     /// How far past `to` to go.
     #[serde(default)]
     pub to_offset: Option<LengthExpr>,
-    /// Start at this face or point (From Object).
+    /// On a Join To Object, leave the body the `to` pick is on as its own body, so the join
+    /// changes only the bodies in `targets`. Needs a Join with `to`. Default: a call that names
+    /// its targets leaves that body apart; a call that names none takes it too.
+    // `skip_serializing_if` keeps schemars from writing `default: null`, which `bool` refuses.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub to_body_apart: Option<bool>,
+    /// Start at this face or point (From Object). On a flat face at a slant the start follows the
+    /// face, and a distance moves it along the extrusion.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "FromPoint")]
     pub from: Option<FromPoint>,
@@ -138,6 +170,9 @@ pub struct ExtrudeParams {
     /// that body.
     #[serde(default)]
     pub targets: Option<StringList>,
+    /// What a join makes of pieces that share no face. Default: separate.
+    #[serde(default)]
+    pub touching: Option<TouchingParam>,
     /// The bodies taking part; overrides the default scope.
     #[serde(default)]
     pub participants: Option<StringList>,
@@ -169,6 +204,104 @@ pub struct ExtrudeParams {
     pub thickness2: Option<LengthExpr>,
 }
 
+/// Revolve sketch profiles (or a planar body face) about an axis into a solid.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct RevolveParams {
+    /// The axis to turn about.
+    pub axis: RevolveAxis,
+    /// How far to turn: more than 0 and at most 360 degrees. With `angle2`, the angle on the
+    /// first side, the two adding up to the turn; with `direction: symmetric`, the whole turn,
+    /// split either side. Default: 360 deg. Not used when `to` is given, though it must still
+    /// evaluate.
+    #[serde(default)]
+    pub angle: Option<AngleExpr>,
+    /// Two Sides: the angle on the other side, turned back from the profile. Not used when `to`
+    /// is given; used instead of `direction: symmetric` when both are given.
+    #[serde(default)]
+    pub angle2: Option<AngleExpr>,
+    /// `symmetric` splits the angle evenly either side of the profile, whichever way the axis
+    /// points. The handler ignores every other value.
+    #[serde(default)]
+    pub direction: Option<RevolveDirection>,
+    /// When true, the same as `direction: symmetric`.
+    #[serde(default)]
+    pub symmetric: Option<bool>,
+    /// Where the angle starts. Default: sketch_normal.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "RevolveConventionParam")]
+    pub convention: Option<RevolveConventionParam>,
+    /// Turn until this face, vertex or point (To Object). Takes the place of `angle`, `angle2`
+    /// and `direction`.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "RevolveToPoint")]
+    pub to: Option<RevolveToPoint>,
+    /// The sketch to revolve, by id or name. Default: the active sketch, else the last one.
+    /// Ignored when `face` is given.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "IdOrName")]
+    pub sketch: Option<IdOrName>,
+    /// Which of the sketch's profiles to revolve. Default: all of them. Ignored when `face` is
+    /// given.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ProfilesParam")]
+    pub profiles: Option<ProfilesParam>,
+    /// Each index or point pick is exactly the region it names. Without it, a pick on a drawn
+    /// profile that reference geometry (a face's projected outline) cuts into regions takes the
+    /// whole drawn profile. The dialogs send `true`: they highlight the regions they pick.
+    #[serde(default)]
+    pub exact_regions: Option<bool>,
+    /// A point on a planar body face to revolve instead of a sketch profile.
+    #[serde(default)]
+    pub face: Option<Point3>,
+    /// The body whose face to use, where faces of several bodies meet at `face`.
+    #[serde(default)]
+    pub face_body: Option<String>,
+    /// With `face`: the face's plane as a fixed plane, as `solid.extrude`'s.
+    #[serde(default)]
+    pub fixed: Option<bool>,
+    /// With `face`, among placed instances: the body whose placement `face` is read in (read by
+    /// the engine's frame mapping, before the command runs). Default: `face_body`, else the
+    /// body nearest the point.
+    #[serde(default)]
+    pub body: Option<String>,
+    /// How the revolve combines with existing bodies. Default: new.
+    #[serde(default)]
+    pub operation: Option<OperationParam>,
+    /// The bodies a join, cut or intersect works on. Default for a join from a body's face, or
+    /// from a sketch on one: that body. Explicit `targets` or `participants` replace it.
+    #[serde(default)]
+    pub targets: Option<StringList>,
+    /// What a join makes of pieces that share no face. Default: separate.
+    #[serde(default)]
+    pub touching: Option<TouchingParam>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// Something a feature's result tells the user without stopping them, with an action to take.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct FeatureNotice {
+    /// The text to show.
+    pub message: String,
+    /// How the bodies split off touched the others: `along_edge`, `at_point` or `touching` (along
+    /// a line or at a point their boundaries don't hold).
+    pub contact: String,
+    /// The command that changes the feature as the notice offers.
+    pub action: NoticeAction,
+}
+
+/// A command a notice offers to run.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct NoticeAction {
+    /// The action's label.
+    pub label: String,
+    /// The command's id.
+    pub command: String,
+    /// Its parameters.
+    pub params: Value,
+}
+
 /// Add a cylinder primitive.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -185,10 +318,13 @@ pub struct CylinderParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "PointExpr3")]
     pub base: Option<PointExpr3>,
-    /// The direction from the bottom to the top. Default: Z.
+    /// The direction from the bottom to the top: X, Y, Z or `[x, y, z]`, each a number or an
+    /// expression with no unit (`["0", "-sin(t)", "-cos(t)"]`), which the cylinder follows as
+    /// the parameters change. A parameter added as a plain number is a length: divide it by its
+    /// unit (`"n / 1 mm"`). Default: Z.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "AxisDir")]
-    pub axis: Option<AxisDir>,
+    #[schemars(with = "AxisDirExpr")]
+    pub axis: Option<AxisDirExpr>,
     /// Up to two straight edges of the face it stands on, each `{edge: [x, y, z], distance: expr}`
     /// (as `solid.hole`'s): the base centre goes that far from each edge's line, in the face's
     /// plane, and follows the edges. With a numeric `base` only.
@@ -326,6 +462,153 @@ pub struct PipeParams {
     pub common: FeatureCommon,
 }
 
+/// Sweep sketch profiles along a path of sketch curves into a solid.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct SweepParams {
+    /// The sketch holding the profiles, by id or name. Default: the active sketch, else the last
+    /// one.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "IdOrName")]
+    pub sketch: Option<IdOrName>,
+    /// Which of the sketch's profiles to sweep. Default: all of them.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ProfilesParam")]
+    pub profiles: Option<ProfilesParam>,
+    /// Each index or point pick is exactly the region it names. Without it, a pick on a drawn
+    /// profile that reference geometry (a face's projected outline) cuts into regions takes the
+    /// whole drawn profile. The dialogs send `true`: they highlight the regions they pick.
+    #[serde(default)]
+    pub exact_regions: Option<bool>,
+    /// A point on a planar body face to sweep instead of a sketch profile.
+    #[serde(default)]
+    pub face: Option<Point3>,
+    /// The body whose face to use, where faces of several bodies meet at `face`.
+    #[serde(default)]
+    pub face_body: Option<String>,
+    /// With `face`: the face's plane as a fixed plane, as `solid.extrude`'s.
+    #[serde(default)]
+    pub fixed: Option<bool>,
+    /// With `face`, among placed instances: the body whose placement `face` is read in (read by
+    /// the engine's frame mapping, before the command runs). Default: `face_body`, else the
+    /// body nearest the point.
+    #[serde(default)]
+    pub body: Option<String>,
+    /// The sketch holding the path, by id or name. Not needed when the path is a body's edges.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SketchRef")]
+    pub path_sketch: Option<SketchRef>,
+    /// The path's curve ids, in order along the path; an entry may be `{"sketch": <sketch>,
+    /// "curve": <id>}` for a curve of another sketch (#16168). Not needed when the path is a
+    /// body's edges.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PathList")]
+    pub path: Option<PathList>,
+    /// The name of the body whose edges are the path, instead of a sketch's curves.
+    #[serde(default, deserialize_with = "path_body_opt", skip_serializing_if = "Option::is_none")]
+    pub path_body: Option<String>,
+    /// The points on that body's edges that are the path, 1 to 1000.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PathEdgePoints")]
+    pub path_edges: Option<PathEdgePoints>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub shape: SweepShape,
+    /// How the sweep combines with existing bodies. Default: new.
+    #[serde(default)]
+    pub operation: Option<OperationParam>,
+    /// The bodies a join, cut or intersect works on; given, they win over `participants`.
+    /// Default: `participants`, else for a join from a sketch on a body's face that body, else
+    /// every body in the active component (an intersect removes those the sweep doesn't meet),
+    /// or for a cut or intersect where it has none, every body.
+    #[serde(default)]
+    pub targets: Option<StringList>,
+    /// What a join makes of pieces that share no face. Default: separate.
+    #[serde(default)]
+    pub touching: Option<TouchingParam>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// Sweep sketch curves or profile boundaries along a path of sketch curves into a surface body:
+/// walls only, no caps. A path with corners, or of 3D curves, gives ruled walls mitred at the
+/// corners. `participants` changes nothing here.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct SurfaceSweepParams {
+    /// The sketch holding the curves or profiles, by id or name. Default: the active sketch, else
+    /// the last one.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "IdOrName")]
+    pub sketch: Option<IdOrName>,
+    /// Curve ids to sweep, at most 1000: open or closed chains of curves meeting end to end.
+    #[serde(default)]
+    pub curves: Option<StringList>,
+    /// Which of the sketch's profiles to sweep the boundaries of. Default: all of them when no
+    /// `curves` are given, else none.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ProfilesParam")]
+    pub profiles: Option<ProfilesParam>,
+    /// Each index or point pick is exactly the region it names. Without it, a pick on a drawn
+    /// profile that reference geometry (a face's projected outline) cuts into regions takes the
+    /// whole drawn profile. The dialogs send `true`: they highlight the regions they pick.
+    #[serde(default)]
+    pub exact_regions: Option<bool>,
+    /// The sketch holding the path, by id or name. Not needed when the path is a body's edges.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SketchRef")]
+    pub path_sketch: Option<SketchRef>,
+    /// The path's curve ids, in order along the path: 1 to 1000. Not needed when the path is a
+    /// body's edges.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "StringList")]
+    pub path: Option<StringList>,
+    /// The name of the body whose edges are the path, instead of a sketch's curves.
+    #[serde(default, deserialize_with = "path_body_opt", skip_serializing_if = "Option::is_none")]
+    pub path_body: Option<String>,
+    /// The points on that body's edges that are the path, 1 to 1000.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PathEdgePoints")]
+    pub path_edges: Option<PathEdgePoints>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub shape: SweepShape,
+    /// A result whose shells close stays a surface body, which Stitch makes a solid. Default:
+    /// true. False makes a solid of it, as features saved before it keep.
+    #[serde(default)]
+    pub stays_surface: Option<bool>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// How a sweep's profile turns and changes size along the path, as `features::sweep_options`
+/// and `features::sweep_rails` read it (solid.sweep and surface.sweep), flattened. Guide rails
+/// set the turn and the size themselves: with `rails`, the handler refuses `orientation`,
+/// `twist` and `scale`.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SweepShape {
+    /// How the profile turns as it follows the path. Default: perpendicular.
+    #[serde(default)]
+    pub orientation: Option<super::types::SweepOrientationParam>,
+    /// How far the profile turns about the path over its length, from none at the start: within
+    /// four turns (1440 deg) either way. Default: none.
+    #[serde(default)]
+    #[schemars(with = "Option<AngleExpr>")]
+    pub twist: Option<super::types::SweepTwist>,
+    /// The profile's scale at the end of the path, changing linearly along it from 1 at the
+    /// start: 0.01 to 100. Default: 1.
+    #[serde(default)]
+    pub scale: Option<NumberExpr>,
+    /// Guide rails, each meeting every plane square to the path once along it, followed from the
+    /// end nearest the path's start. One rail turns the profile so that its point where the rail
+    /// starts stays on the rail, and scales it with the rail's distance from the path; two rails
+    /// carry it between them, its points where they start staying on both. The path must have no
+    /// sharp corners.
+    #[serde(default)]
+    pub rails: Option<super::types::SweepRails>,
+    /// How the rails reshape the profile. Default: scale. Used only with `rails`.
+    #[serde(default)]
+    pub rail_fit: Option<super::types::RailFitParam>,
+}
+
 /// Add a box around bodies, larger by a margin on every side.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -336,8 +619,34 @@ pub struct BoundingSolidParams {
     /// How much larger than the bodies on every side. Default: 0.
     #[serde(default)]
     pub margin: Option<LengthExpr>,
+    /// A margin for each side instead of `margin`, in this order: -X, +X, -Y, +Y, -Z, +Z. A
+    /// negative one sets that side into the bodies, but not past their opposite side.
+    #[serde(default)]
+    pub margins: Option<[LengthExpr; 6]>,
+    /// Instead of `bodies`: an envelope of this component, a box around every body placed inside
+    /// it (its subcomponents' at any depth, every placement), added to the component in its axes.
+    #[serde(default)]
+    pub component: Option<super::component_link::ComponentRef>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
+}
+
+/// What a Scale grows its bodies about: the bodies' centre, or a reference.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum ScaleAboutParam {
+    /// The bodies' centre.
+    Centre(ScaleCentre),
+    /// A vertex, face, edge, sketch or construction point.
+    Pick(GeoRefParam),
+}
+
+/// The bodies' centre, in either spelling.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ScaleCentre {
+    Centre,
+    Center,
 }
 
 /// Scale bodies about a point.
@@ -353,9 +662,15 @@ pub struct ScaleParams {
     /// the scale; a `factor` given too has no effect but must still evaluate.
     #[serde(default)]
     pub factors: Option<ScaleFactors>,
-    /// The point that stays where it is, in mm. Default: the origin.
+    /// A fixed point that stays where it is, in mm. Default: the origin. Not with `about`.
     #[serde(default)]
     pub origin: Option<Point3>,
+    /// What stays where it is, found again each time the design updates: `"centre"` (the centre
+    /// of the bodies' box as the features before the Scale leave them) or a reference (a vertex,
+    /// a sketch or construction point, a circular edge's centre, a flat face's middle or a round
+    /// face's end), which follows the model. Not with `origin`.
+    #[serde(default)]
+    pub about: Option<ScaleAboutParam>,
     // Not `FeatureCommon`: a scale makes no body, so `body_name` and `body_names` would do nothing.
     // `participants` stays because `timeline.redefine` passes a feature's own back.
     /// The feature's name in the timeline.
@@ -365,6 +680,948 @@ pub struct ScaleParams {
     /// scale changes only `bodies`, whatever this lists.
     #[serde(default)]
     pub participants: Option<StringList>,
+}
+
+/// Combine bodies: join the tool bodies to the target, cut them from it, or keep only the space
+/// the target shares with them. Whether each body exists stays the handler's to check.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct CombineParams {
+    /// The body the tools combine with, by name.
+    #[serde(deserialize_with = "target_body")]
+    #[schemars(with = "String")]
+    pub target: String,
+    #[serde(deserialize_with = "tool_bodies")]
+    #[schemars(schema_with = "tool_bodies_schema")]
+    pub tools: NameList,
+    /// What the tools do to the target. Default: join.
+    #[serde(default)]
+    pub operation: Option<CombineOperation>,
+    /// What a join makes of pieces that share no face. Default: separate.
+    #[serde(default)]
+    pub touching: Option<TouchingParam>,
+    /// Keep the tool bodies as they are. Default: false (the combine uses them up).
+    #[serde(default)]
+    pub keep_tools: Option<bool>,
+    /// Move the result into a new component, made for it. Default: false.
+    #[serde(default)]
+    pub new_component: Option<bool>,
+    /// With `new_component`: the new component's name. Default: the target's name and
+    /// " Combined".
+    #[serde(default)]
+    pub component_name: Option<String>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// `target`: a body name, with the handler's message for anything else, `null` included.
+fn target_body<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    match Value::deserialize(d)? {
+        Value::String(name) => Ok(name),
+        _ => Err(D::Error::custom(whole("`target` must be a body name"))),
+    }
+}
+
+/// `path_body`: the name of the body whose edges are the path, as the handler's `sweep_path`
+/// reads it: a body name, or `null` (which the handler reads as absent). Anything else is
+/// refused with the handler's message.
+fn path_body_opt<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        Value::String(name) => Ok(Some(name)),
+        _ => Err(D::Error::custom(whole("`path_body` must be a body name"))),
+    }
+}
+
+/// `path_edges`: the points on the edges of the path, as the handler's `path_edge_points` reads
+/// them: 1 to 1000 points, each `[x, y, z]` or `{x, y, z}` of finite numbers.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PathEdgePoints(pub Vec<Point3>);
+
+impl<'de> Deserialize<'de> for PathEdgePoints {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        let items = v.as_array().ok_or_else(|| D::Error::custom(whole("`path_edges` must be a list of points")))?;
+        if items.is_empty() || items.len() > 1000 {
+            return Err(D::Error::custom(whole("the path needs 1…1000 edges")));
+        }
+        items
+            .iter()
+            .map(|item| Point3::deserialize(item).map_err(|_| D::Error::custom(whole("each `path_edges` entry must be a point [x,y,z]"))))
+            .collect::<Result<_, _>>()
+            .map(PathEdgePoints)
+    }
+}
+
+impl JsonSchema for PathEdgePoints {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "PathEdgePoints".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let item = generator.subschema_for::<Point3>();
+        json_schema!({
+            "description": "The points on the body's edges that are the path, one on each edge of the chain: 1 to 1000.",
+            "type": "array",
+            "items": item,
+            "minItems": 1,
+            "maxItems": 1000
+        })
+    }
+}
+
+/// The handler's message for no tools.
+const NO_TOOLS: &str = "`tools` must list bodies";
+
+/// `tools`: a name or a list of names, as `params::string_list` reads it and with its messages,
+/// and at least one. An empty list, and `null` (which the reader reads as none), get the
+/// handler's message for no tools.
+fn tool_bodies<'de, D: Deserializer<'de>>(d: D) -> Result<NameList, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Err(D::Error::custom(whole(NO_TOOLS))),
+        v => match NameList::deserialize(v).map_err(D::Error::custom)? {
+            NameList(names) if names.is_empty() => Err(D::Error::custom(whole(NO_TOOLS))),
+            names => Ok(names),
+        },
+    }
+}
+
+fn tool_bodies_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "The bodies combined with the target, by name: a name, or a list of one or more names (at most 10000).",
+        "anyOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": MAX_STRING_LIST}]
+    })
+}
+
+/// What `solid.combine` returns: a feature command's reply, with the new component's id when
+/// `new_component` moved the result into one.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct CombineResult {
+    #[serde(flatten)]
+    pub feature: FeatureResult,
+    /// With `new_component`: the id of the component the result went into.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub component: Option<u64>,
+}
+
+/// Add a construction plane parallel to `base`: `offset` away along its normal, or through a
+/// point.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct OffsetPlaneParams {
+    /// The plane it is parallel to.
+    pub base: PlaneOrFace,
+    /// How far from `base`, along its normal (negative: the other way). Required unless
+    /// `through` is given; not with `through` (`null` counts as not given).
+    #[serde(default)]
+    pub offset: Option<LengthExpr>,
+    /// A point the plane goes through instead: a vertex, a construction point, a sketch point, a
+    /// fixed point, or the centre of a circular edge, a sketch circle or arc, or a spherical or
+    /// toroidal face. `null` counts as not given.
+    #[serde(default)]
+    pub through: Option<GeoRefParam>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: PlaneCommon,
+}
+
+/// Add a construction plane: `base` turned by `angle` about an axis.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct PlaneAtAngleParams {
+    /// The plane to turn.
+    pub base: PlaneOrFace,
+    /// The axis it turns about. A picked edge's or face's axis points the way its largest
+    /// component is positive.
+    pub axis: AxisLine,
+    /// How far to turn, counterclockwise looking back along `axis`'s direction.
+    pub angle: AngleExpr,
+    /// Use only the axis direction (projected onto `base`), not the axis as a full line.
+    /// When true, the plane turns about the line through `pivot` (or the base origin).
+    #[serde(default)]
+    pub direction_only: Option<bool>,
+    /// Pivot for `direction_only`: a vertex, sketch point, construction point or fixed point.
+    /// Omit to use the base plane's origin. `null` counts as not given.
+    #[serde(default)]
+    pub pivot: Option<GeoRefParam>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: PlaneCommon,
+}
+
+/// Copy features or bodies across a plane: the features replayed mirrored, or the bodies copied
+/// mirrored, each copy a body of its own unless `combine` joins it to its original. Give
+/// `features` or `bodies`: a call with neither is the handler's to refuse, with its message.
+/// Whether each name exists is the handler's to check.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct MirrorParams {
+    /// The features to mirror, by name. Read when `bodies` lists none.
+    #[serde(default)]
+    pub features: Option<NameList>,
+    /// The bodies to mirror, by name as the viewport shows them: a further instance's copy goes
+    /// where that instance is.
+    #[serde(default)]
+    pub bodies: Option<NameList>,
+    /// The plane to mirror across. The mirror follows a construction plane, and an explicit
+    /// plane's origin given as length expressions.
+    pub plane: PlaneParam,
+    /// Join each copy to its original. Default: false.
+    #[serde(default)]
+    pub combine: Option<bool>,
+    /// What a replayed join makes of pieces that share no face: the copies of a join among
+    /// `features` are joined with this setting, not their source's. Mirrored bodies don't use it.
+    /// Default: separate.
+    #[serde(default)]
+    pub touching: Option<TouchingParam>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// Round edges of a body: a constant radius by default, or a chord, a curvature-continuous
+/// section or a radius varying along each edge (`type`).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct FilletParams {
+    /// The edges to round: a point on each, or `{body, index}`.
+    pub edges: EdgeRefs,
+    /// The radius; the chord's width with `type: chord`, the equivalent circular setback with
+    /// `type: curvature`, the start radius with `type: variable` or `spline`.
+    pub radius: LengthExpr,
+    /// The body whose edges the points pick. Default: each point is looked up on every placed
+    /// body, shown or hidden, and a point on edges of 2 bodies is refused, naming them.
+    #[serde(default)]
+    pub body: Option<String>,
+    /// Round each picked edge's tangent chain with it. Default: true; false rounds exactly the
+    /// picked edges.
+    #[serde(default)]
+    pub tangent_chain: Option<bool>,
+    /// Each picked edge's own radius, one per edge in the order of `edges`, all rounded in one
+    /// fillet (`radius` is then the nominal one, usually the first). Takes a constant, exact, rolling-corner,
+    /// mitred round with `tangent_chain: false`.
+    #[serde(default)]
+    pub edge_radii: Option<Vec<LengthExpr>>,
+    #[serde(default, rename = "type")]
+    pub kind: Option<FilletTypeParam>,
+    /// `type: variable`: the radius at the end away from `start`; it or `radius` may be 0, where
+    /// the round closes to the corner.
+    #[serde(default)]
+    pub radius2: Option<LengthExpr>,
+    /// `type: variable` or `spline`: a point near the end the radius starts from.
+    #[serde(default)]
+    pub start: Option<Point3>,
+    /// `type: variable`: radii between the ends, each `[position, radius]`, the position between 0
+    /// and 1 from the start end. At most 100 are read.
+    #[serde(default)]
+    pub mid: Option<Vec<(f64, LengthExpr)>>,
+    /// `type: variable`: smooth instead of straight between the radii. Default: false.
+    #[serde(default)]
+    pub smooth: Option<bool>,
+    /// `type: spline`: the control radii after `radius`. At most 100 are read.
+    #[serde(default)]
+    pub radii: Option<Vec<LengthExpr>>,
+    /// `type: spline`: the knot vector from 0 to 1, as many knots as all control radii, the
+    /// degree (1 to 3) and one more.
+    #[serde(default)]
+    pub knots: Option<Vec<f64>>,
+    #[serde(default)]
+    pub fit: Option<FilletFitParam>,
+    #[serde(default)]
+    pub corner: Option<FilletCornerParam>,
+    /// Corner setbacks: the corner at the vertex nearest each `vertex`, where every edge meeting it
+    /// is rounded, starts its patch `distance` along each of those edges from the vertex, past
+    /// where the rounds would meet. Constant-radius exact fillets only.
+    #[serde(default)]
+    pub setbacks: Option<Vec<SetbackParam>>,
+    #[serde(default)]
+    pub turn: Option<FilletTurnParam>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+fn face_or_edges(schema: &mut Schema) {
+    require(schema, "distance");
+    schema.insert("anyOf".into(), json!([{"required": ["face"]}, {"required": ["edges"]}]));
+}
+
+/// Press Pull a face or round edges. A flat face moves along its normal: a positive distance joins
+/// material outward, a negative one cuts inward. A curved face offsets. A fillet's or chamfer's
+/// face changes that feature's size by the distance. Edges are rounded with the distance as the
+/// radius. `edges` is read before `face`. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = face_or_edges)]
+pub struct PressPullParams {
+    /// A point on the face to move.
+    #[serde(default)]
+    pub face: Option<Point3>,
+    /// The edges to round: a point on each, or `{body, index}`.
+    #[serde(default)]
+    pub edges: Option<EdgeRefs>,
+    /// How far the face moves, positive outward; the radius for `edges`.
+    // Optional in the type, required in the schema: left out, the handler refuses the call with
+    // its own message.
+    #[serde(default)]
+    pub distance: Option<LengthExpr>,
+    /// The body the face or edges are on. Default: found from the points.
+    #[serde(default)]
+    pub body: Option<String>,
+    /// The body the flat face is on, when `body` is omitted. Disambiguates touching faces.
+    #[serde(default)]
+    pub face_body: Option<String>,
+}
+
+/// A fillet's or chamfer's face was pressed or pulled: the feature it belongs to changed size.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PressPullEdit {
+    /// The edited feature's id.
+    pub feature: u64,
+    /// The edited feature's name.
+    pub edited: String,
+    /// A fillet's new radius, as an expression.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub radius: Option<String>,
+    /// A chamfer's new distance, as an expression.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub distance: Option<String>,
+    /// How many features were evaluated again.
+    pub recomputed: Option<usize>,
+    /// How many features were restored from earlier results.
+    pub restored: Option<usize>,
+}
+
+/// What `solid.press_pull` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum PressPullResult {
+    /// A new feature: the extrude, offset or fillet the press or pull made.
+    Feature(Box<FilletResult>),
+    /// An existing fillet or chamfer changed size.
+    Edited(PressPullEdit),
+}
+
+/// A fillet corner set back.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SetbackParam {
+    /// A point at the corner's vertex.
+    pub vertex: Point3,
+    /// How far along each edge there the corner's patch starts.
+    pub distance: LengthExpr,
+}
+
+/// Bevel edges of a body with a flat face: `distance` back from each edge along both faces, or
+/// along the first face with `distance2` along the second, or with the bevel at `angle` from the
+/// first. Giving both `distance2` and `angle` is the handler's to refuse.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ChamferParams {
+    /// The edges to bevel: a point on each, or `{body, index}`.
+    pub edges: EdgeRefs,
+    /// How far the bevel cuts back from the edge: along both faces, or along the first face when
+    /// `distance2` or `angle` is given.
+    pub distance: LengthExpr,
+    /// How far the bevel cuts back along the second face. Not with `angle`.
+    #[serde(default)]
+    pub distance2: Option<LengthExpr>,
+    /// The bevel's angle from the first face. Not with `distance2`.
+    #[serde(default)]
+    pub angle: Option<AngleExpr>,
+    /// Which face is first: by default the one facing up most; true takes the other. Default:
+    /// false.
+    #[serde(default)]
+    pub flip: Option<bool>,
+    /// The body whose edges the points pick. Default: whichever body has an edge there.
+    #[serde(default)]
+    pub body: Option<String>,
+    /// Cut each picked edge's tangent chain with it. Default: true; false cuts exactly the picked
+    /// edges.
+    #[serde(default)]
+    pub tangent_chain: Option<bool>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// The radius `fit: reduce` gave one edge.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct AppliedRadius {
+    /// A point on the edge.
+    pub edge: [f64; 3],
+    /// The radius it was rounded at.
+    pub radius: f64,
+}
+
+/// What `solid.fillet` returns: a feature command's reply, with the radii `fit: reduce` used.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct FilletResult {
+    #[serde(flatten)]
+    pub feature: FeatureResult,
+    /// With `fit: reduce` where it reduced the radius: the smallest radius used.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub radius_applied: Option<f64>,
+    /// With `fit: reduce` where it reduced the radius: each edge's radius.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub radii_applied: Option<Vec<AppliedRadius>>,
+}
+
+/// A pattern's alignment under `key`, as `cmd::alignment_param` reads it, with its message.
+/// `null` is refused, as the reader refuses it.
+fn alignment_at<'de, D: Deserializer<'de>>(d: D, key: &str) -> Result<Option<solidcraft_sketch::PatternAlignment>, D::Error> {
+    serde_json::from_value(Value::deserialize(d)?).map(Some).map_err(|_| D::Error::custom(whole(format!("`{key}` must be left, center or right"))))
+}
+
+/// A reversal flag under `key`, as `cmd::reversed_param` reads it, with its message. `null` is
+/// refused, as the reader refuses it.
+fn reversed_at<'de, D: Deserializer<'de>>(d: D, key: &str) -> Result<Option<bool>, D::Error> {
+    serde_json::from_value(Value::deserialize(d)?).map(Some).map_err(|_| D::Error::custom(whole(format!("`{key}` must be true or false"))))
+}
+
+// serde's `deserialize_with` takes a path, not a closure, so each key has its own reader.
+fn pattern_alignment<'de, D: Deserializer<'de>>(d: D) -> Result<Option<solidcraft_sketch::PatternAlignment>, D::Error> {
+    alignment_at(d, "alignment")
+}
+
+fn pattern_alignment2<'de, D: Deserializer<'de>>(d: D) -> Result<Option<solidcraft_sketch::PatternAlignment>, D::Error> {
+    alignment_at(d, "alignment2")
+}
+
+pub(super) fn reversed_flag<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    reversed_at(d, "reversed")
+}
+
+fn pattern_reversed2<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    reversed_at(d, "reversed2")
+}
+
+/// Copy features, bodies or components evenly round an axis. Give one of `features`, `bodies` or
+/// `components`. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct PatternCircularParams {
+    /// The features to copy, by name. Used when `bodies` and `components` are left out or empty.
+    #[serde(default)]
+    pub features: Option<NameList>,
+    /// The bodies to copy, by name. Used when `components` is left out or empty.
+    #[serde(default)]
+    pub bodies: Option<NameList>,
+    /// The components to place more of, by id or name. The reply then lists the new occurrences.
+    #[serde(default)]
+    pub components: Option<NameList>,
+    /// The axis to turn about. The coordinates of `{origin, dir}`'s origin may also be length
+    /// expressions, which the pattern follows.
+    pub axis: PatternAxis,
+    /// How many, the original included: a whole number or an expression that gives one.
+    pub count: NumberExpr,
+    /// The angle the copies span. Default: 360 deg; a partial arc includes both ends.
+    #[serde(default)]
+    pub angle: Option<AngleExpr>,
+    /// Where the original sits in the pattern. Default: right, the original stays fixed.
+    #[serde(default, deserialize_with = "pattern_alignment", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "super::sketch_modify::alignment_schema")]
+    pub alignment: Option<solidcraft_sketch::PatternAlignment>,
+    /// Flip the pattern's direction; for an even count centred, selects the extra side.
+    #[serde(default, deserialize_with = "reversed_flag", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub reversed: Option<bool>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// What the patterns return: `solid.pattern.rectangular`, `solid.pattern.circular` and
+/// `solid.pattern.path` all finish through `features::finish_pattern`.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum PatternResult {
+    /// With `features` or `bodies`.
+    Feature(Box<FeatureResult>),
+    /// With `components`.
+    Components {
+        /// The new occurrences' ids.
+        occurrences: Vec<u64>,
+        /// In the warn parameter-check mode: what the call's parameters got wrong.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        param_warnings: Vec<String>,
+    },
+}
+
+/// A rigid matrix, in row-major order, with translation in its last column.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum MoveMatrix {
+    Flat3([f64; 12]),
+    Flat4([f64; 16]),
+    Rows3([[f64; 4]; 3]),
+    Rows4([[f64; 4]; 4]),
+}
+
+/// Move or copy bodies, rotating about an origin before translating, in world coordinates.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct MoveParams {
+    /// Bodies to move or copy. May be omitted when copying only components.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "StringList")]
+    pub bodies: Option<StringList>,
+    /// Component occurrence paths, root first, to copy independently. Requires `copy: true`.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Vec<Vec<u64>>")]
+    pub occurrences: Option<Vec<Vec<u64>>>,
+    /// Translation after rotation; default zero. Coordinates are lengths.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "PointExpr3")]
+    pub translate: Option<PointExpr3>,
+    /// Rotation pivot in world coordinates. Default: the moved body's component's origin, which
+    /// is the world origin for bodies at the root. Coordinates are lengths.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "PointExpr3")]
+    pub origin: Option<PointExpr3>,
+    /// Non-zero rotation direction in world coordinates. Default: world Z when `origin` is given,
+    /// else the moved body's component's Z, which is world Z for bodies at the root.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "Point3")]
+    pub axis: Option<Point3>,
+    /// The edge or round face of the model the turn was picked on, `{edge|face: [x,y,z], body?}`:
+    /// the move keeps turning about it where it is, when an earlier step moves the body
+    /// (#17974). `axis` gives the turn's sense, and with `origin` the line used when the edge
+    /// is not found.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "GeoRefParam")]
+    pub about: Option<GeoRefParam>,
+    /// Angle expression; default zero.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "AngleExpr")]
+    pub angle: Option<AngleExpr>,
+    /// Rigid matrix instead of translate, origin, axis and angle. Scales, shears and mirrors are refused.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "MoveMatrix")]
+    pub matrix: Option<MoveMatrix>,
+    /// With matrix: positive rotation tolerance, at most 1e-3; default 1e-9.
+    #[serde(default)]
+    #[schemars(with = "Option<super::component::MatrixTolerance>")]
+    pub tolerance: Option<f64>,
+    /// Keep the source bodies and transform new copies; default false.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub copy: Option<bool>,
+    #[serde(flatten, deserialize_with = "super::feature_common")]
+    pub common: super::FeatureCommon,
+}
+
+/// Body features, component copies, or repeated placements moved together.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum MoveResult {
+    Feature {
+        #[serde(flatten)]
+        feature: FeatureResult,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        features: Option<Vec<u64>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        occurrences: Option<Vec<u64>>,
+    },
+    Copies {
+        occurrences: Vec<u64>,
+    },
+    Placements {
+        placements: Vec<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        bodies: Option<FeatureResult>,
+    },
+}
+
+/// A pattern direction, as `features::pattern_rect` reads `dir1` and `dir2` (`params::vec3`):
+/// `[x, y, z]` or `{x, y, z}` of finite numbers, with the handler's message.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PatternDir(pub solidcore_record::Vec3);
+
+impl<'de> Deserialize<'de> for PatternDir {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        crate::params::vec3(&Value::deserialize(d)?).map(PatternDir).ok_or_else(|| D::Error::custom("must be [x, y, z]"))
+    }
+}
+
+impl JsonSchema for PatternDir {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "PatternDir".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        // The bounds are `params::finite`'s.
+        let c = json!({"type": "number", "exclusiveMinimum": -1e9, "exclusiveMaximum": 1e9});
+        json_schema!({
+            "description": "A direction: [x, y, z] or {\"x\", \"y\", \"z\"}. Only its direction counts; the spacing sets the step.",
+            "anyOf": [
+                {"type": "array", "items": c, "minItems": 3, "maxItems": 3},
+                {"type": "object", "properties": {"x": c, "y": c, "z": c}, "required": ["x", "y", "z"]}
+            ]
+        })
+    }
+}
+
+// `count1` and `spacing1` are not required: one of them is worked out with an extent.
+fn rectangular_required(schema: &mut Schema) {
+    require(schema, "dir1");
+}
+
+/// Copy features, bodies or components in a row, or a grid with a second direction. Give one of
+/// `features`, `bodies` or `components`. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = rectangular_required)]
+pub struct PatternRectangularParams {
+    /// The features to copy, by name. Used when `bodies` and `components` are left out or empty.
+    #[serde(default)]
+    pub features: Option<NameList>,
+    /// The bodies to copy, by name. Used when `components` is left out or empty.
+    #[serde(default)]
+    pub bodies: Option<NameList>,
+    /// The components to place more of, by id or name. The reply then lists the new occurrences.
+    #[serde(default)]
+    pub components: Option<NameList>,
+    // `dir1` is optional in the type and required in the schema: left out, the handler refuses
+    // the call with its own message ("`dir1` must be [x, y, z]"), which the check would otherwise
+    // replace with "`dir1` is required". `count1` and `spacing1` are read as `dir1`; the
+    // handler requires the ones `distance1` uses.
+    /// The first direction.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "PatternDir")]
+    pub dir1: Option<PatternDir>,
+    /// How many along the first direction, the original included: a whole number or an
+    /// expression that gives one. Not needed with `spacing_extent`.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "NumberExpr")]
+    pub count1: Option<NumberExpr>,
+    /// The step between neighbours along the first direction. Not needed with `count_extent`.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "LengthExpr")]
+    pub spacing1: Option<LengthExpr>,
+    // The handler reads `dir2`, `count2` and `spacing2` leniently: one it can't read is left
+    // out, as `null` is. The contract refuses a value of the wrong form and lets `null` through.
+    /// A second direction, for a grid. Default: none, a single row.
+    #[serde(default)]
+    pub dir2: Option<PatternDir>,
+    /// How many along the second direction, the original included.
+    #[serde(default)]
+    pub count2: Option<NumberExpr>,
+    /// The step between neighbours along the second direction.
+    #[serde(default)]
+    pub spacing2: Option<LengthExpr>,
+    /// Where the original sits along the first direction. Default: right, the original at the
+    /// start.
+    #[serde(default, deserialize_with = "pattern_alignment", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "super::sketch_modify::alignment_schema")]
+    pub alignment: Option<solidcraft_sketch::PatternAlignment>,
+    /// Where the original sits along the second direction. Default: right.
+    #[serde(default, deserialize_with = "pattern_alignment2", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "super::sketch_modify::alignment_schema")]
+    pub alignment2: Option<solidcraft_sketch::PatternAlignment>,
+    /// Flip the first direction; for an even count centred, selects the extra side.
+    #[serde(default, deserialize_with = "reversed_flag", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub reversed: Option<bool>,
+    /// Flip the second direction.
+    #[serde(default, deserialize_with = "pattern_reversed2", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub reversed2: Option<bool>,
+    /// What sets the first direction's copies: `count_spacing` (the default: `count1` and
+    /// `spacing1`), `count_extent` (`count1` and `extent1`; the spacing is the extent divided by
+    /// one less than the count) or `spacing_extent` (`spacing1` and `extent1`; as many copies as
+    /// fit, none past the extent's end).
+    #[serde(default, deserialize_with = "pattern_distance1")]
+    pub distance1: Option<PatternDistanceParam>,
+    /// What sets the second direction's copies, as `distance1`.
+    #[serde(default, deserialize_with = "pattern_distance2")]
+    pub distance2: Option<PatternDistanceParam>,
+    /// The distance from the first copy to the last along the first direction, greater than
+    /// zero, for `count_extent` and `spacing_extent`.
+    #[serde(default)]
+    pub extent1: Option<LengthExpr>,
+    /// The extent along the second direction.
+    #[serde(default)]
+    pub extent2: Option<LengthExpr>,
+    /// `spacing_extent`: one more copy exactly at the extent's end when the spacing doesn't divide
+    /// it, so only the last gap is shorter. Default false.
+    #[serde(default, deserialize_with = "copy_at_end1")]
+    pub copy_at_end1: Option<bool>,
+    /// As `copy_at_end1`, along the second direction.
+    #[serde(default, deserialize_with = "copy_at_end2")]
+    pub copy_at_end2: Option<bool>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// A rectangular pattern direction's distance type, as `features::pattern_direction` reads it.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PatternDistanceParam {
+    CountSpacing,
+    CountExtent,
+    SpacingExtent,
+}
+
+/// A distance type under `key`, with the handler's message; `null` is read as left out.
+fn distance_at<'de, D: Deserializer<'de>>(d: D, key: &str) -> Result<Option<PatternDistanceParam>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        v => serde_json::from_value(v)
+            .map(Some)
+            .map_err(|_| D::Error::custom(whole(format!("`{key}` must be count_spacing, count_extent or spacing_extent")))),
+    }
+}
+
+/// A Copy at the end flag under `key`, with the handler's message; `null` is read as left out.
+fn copy_at_end_at<'de, D: Deserializer<'de>>(d: D, key: &str) -> Result<Option<bool>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        Value::Bool(b) => Ok(Some(b)),
+        _ => Err(D::Error::custom(whole(format!("`{key}` must be true or false")))),
+    }
+}
+
+fn pattern_distance1<'de, D: Deserializer<'de>>(d: D) -> Result<Option<PatternDistanceParam>, D::Error> {
+    distance_at(d, "distance1")
+}
+
+fn pattern_distance2<'de, D: Deserializer<'de>>(d: D) -> Result<Option<PatternDistanceParam>, D::Error> {
+    distance_at(d, "distance2")
+}
+
+fn copy_at_end1<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    copy_at_end_at(d, "copy_at_end1")
+}
+
+fn copy_at_end2<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    copy_at_end_at(d, "copy_at_end2")
+}
+
+/// The most curves a pattern path lists, as `features::pattern_path` reads it.
+const MAX_PATH_CURVES: usize = 1000;
+
+/// Pattern on Path's `path`: 1 to 1000 curve ids, read through `NameList` (as
+/// `params::string_list` reads them), with the handler's message for any other count, `null`
+/// (read as no curves) included.
+fn path_curves<'de, D: Deserializer<'de>>(d: D) -> Result<Option<NameList>, D::Error> {
+    super::features_more::names_in(d, 1..=MAX_PATH_CURVES, "`path` must list 1…1000 curve ids")
+}
+
+fn path_curves_schema(_: &mut SchemaGenerator) -> Schema {
+    super::features_more::names_schema("The path's curve ids in the path sketch, in order along the path: 1 to 1000.", MAX_PATH_CURVES)
+}
+
+/// Pattern on Path's `sketch`, the other name of `path_sketch`: the handler reads it only when
+/// `path_sketch` is left out, and names `path_sketch` when it refuses it.
+fn path_sketch_alias<'de, D: Deserializer<'de>>(d: D) -> Result<Option<SketchRef>, D::Error> {
+    SketchRef::deserialize(Value::deserialize(d)?).map(Some).map_err(|_| D::Error::custom(whole("`path_sketch` must be a sketch id or name")))
+}
+
+/// Pattern on Path's `orientation`, as `features::pattern_path` reads it: one of its words, in
+/// lower case, with its message; true when the copies turn with the path.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PathOrientationParam(pub bool);
+
+// The words the handler takes, and whether each turns the copies with the path.
+const PATH_ORIENTATIONS: [(&str, bool); 4] = [("identical", false), ("path", true), ("path_direction", true), ("along_path", true)];
+
+impl<'de> Deserialize<'de> for PathOrientationParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::String(word) => PATH_ORIENTATIONS
+                .iter()
+                .find(|(w, _)| *w == word)
+                .map(|(_, along)| PathOrientationParam(*along))
+                .ok_or_else(|| D::Error::custom(whole(format!("unknown orientation `{word}` (identical or path)")))),
+            // The handler ignores a value that isn't text; the contract refuses it.
+            _ => Err(D::Error::custom("must be identical or path")),
+        }
+    }
+}
+
+impl JsonSchema for PathOrientationParam {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "PathOrientation".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        let words: Vec<&str> = PATH_ORIENTATIONS.iter().map(|(w, _)| *w).collect();
+        json_schema!({
+            "description": "How each copy is turned: identical (the default), as the original, or path, turned with the path's direction (path_direction and along_path are aliases). Lower case.",
+            "type": "string",
+            "enum": words
+        })
+    }
+}
+
+fn path_required(schema: &mut Schema) {
+    for key in ["path", "count"] {
+        require(schema, key);
+    }
+}
+
+/// Copy features, bodies or components along a chain of sketch curves. Give one of `features`,
+/// `bodies` or `components`, and `spacing` or `distance`. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = path_required)]
+pub struct PatternPathParams {
+    /// The features to copy, by name. Used when `bodies` and `components` are left out or empty.
+    #[serde(default)]
+    pub features: Option<NameList>,
+    /// The bodies to copy, by name. Used when `components` is left out or empty.
+    #[serde(default)]
+    pub bodies: Option<NameList>,
+    /// The components to place more of, by id or name. The reply then lists the new occurrences.
+    #[serde(default)]
+    pub components: Option<NameList>,
+    /// The sketch holding the path, by id or name. Required, unless given as `sketch`.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "SketchRef")]
+    pub path_sketch: Option<SketchRef>,
+    /// `path_sketch`'s other name, read only when `path_sketch` is left out.
+    #[serde(default, deserialize_with = "path_sketch_alias")]
+    #[schemars(with = "SketchRef")]
+    pub sketch: Option<SketchRef>,
+    // Optional in the type, required in the schema: left out, `null` or empty, the handler
+    // refuses the call with its own message.
+    #[serde(default, deserialize_with = "path_curves")]
+    #[schemars(schema_with = "path_curves_schema")]
+    pub path: Option<NameList>,
+    // Optional in the type, required in the schema, for the handler's message (as `count1`).
+    /// How many, the original included: a whole number or an expression that gives one.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "NumberExpr")]
+    pub count: Option<NumberExpr>,
+    // The handler takes `spacing` when it can read it, else `distance`, and refuses the call
+    // when it can read neither; the contract refuses either given in the wrong form.
+    /// The step along the path between neighbours. Used before `distance`.
+    #[serde(default)]
+    pub spacing: Option<LengthExpr>,
+    /// The length along the path from the first copy to the last, instead of `spacing`.
+    #[serde(default)]
+    pub distance: Option<LengthExpr>,
+    /// The start point: how far along the path the original sits, the copies measured on from
+    /// there. Default 0, the path's start. Give this or `start_fraction`, not both.
+    #[serde(default)]
+    pub start: Option<LengthExpr>,
+    /// The start point as a fraction, 0 to 1, of the path's length, kept as the path changes.
+    #[serde(default)]
+    pub start_fraction: Option<NumberExpr>,
+    /// How each copy is turned. Default: identical.
+    #[serde(default)]
+    pub orientation: Option<PathOrientationParam>,
+    /// Run along the path from its other end. Default: false.
+    #[serde(default)]
+    pub flip: Option<bool>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+// ---- Shell and Draft (#12752) ----
+//
+// Both read their faces with `features::face_points` ([`FaceRefs`]), Draft its neutral plane
+// with `features::plane_param` ([`PlaneParam`]). The keys a handler needs are optional in the
+// types and required in the schemas, so a call without one gets the handler's own message; a
+// `null` goes to the key's type (`present`), which refuses it with that message.
+
+/// Shell's `faces`: the faces to open, as [`FaceRefs`] reads them, or an empty list for a closed
+/// hollow body, its void sealed inside.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ShellFaces(pub Option<FaceRefs>);
+
+impl<'de> Deserialize<'de> for ShellFaces {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::Array(list) if list.is_empty() => Ok(ShellFaces(None)),
+            v => FaceRefs::deserialize(v).map(|faces| ShellFaces(Some(faces))).map_err(D::Error::custom),
+        }
+    }
+}
+
+impl JsonSchema for ShellFaces {
+    fn schema_name() -> Cow<'static, str> {
+        "ShellFaces".into()
+    }
+    fn inline_schema() -> bool {
+        true
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "The faces to open, 1 to 1000 points or face names; or an empty list for a closed hollow body, its void sealed inside.",
+            "anyOf": [{"type": "array", "maxItems": 0}, generator.subschema_for::<FaceRefs>()]
+        })
+    }
+}
+
+/// The values of Shell's `direction` (lowercased), as the handler reads them: empty text is
+/// inside, the default.
+const SHELL_DIRECTIONS: [&str; 4] = ["inside", "outside", "both", ""];
+
+/// Shell's `direction`, with the handler's message for a word it doesn't know. The handler reads
+/// a `direction` that isn't text as left out; the contract refuses it.
+fn shell_direction<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        Value::String(s) if SHELL_DIRECTIONS.contains(&s.to_ascii_lowercase().as_str()) => Ok(Some(s.to_ascii_lowercase())),
+        _ => Err(D::Error::custom(whole("`direction` must be inside, outside or both"))),
+    }
+}
+
+fn shell_direction_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "Which way the walls grow from the body's faces: inside (the default; empty text too), outside or both. Matching ignores case.",
+        "type": ["string", "null"],
+        "enum": [SHELL_DIRECTIONS[0], SHELL_DIRECTIONS[1], SHELL_DIRECTIONS[2], SHELL_DIRECTIONS[3], null]
+    })
+}
+
+fn faces_required(schema: &mut Schema) {
+    require(schema, "faces");
+}
+
+/// Hollow a solid into walls of a thickness, opening the faces picked (none: a closed hollow
+/// body). One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = faces_required)]
+pub struct ShellParams {
+    // Optional in the type, required in the schema: left out, the handler refuses the call with
+    // its own message; a `null` goes to `ShellFaces` (`present`), which refuses it the same way.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "ShellFaces")]
+    pub faces: Option<ShellFaces>,
+    /// The walls' thickness.
+    pub thickness: LengthExpr,
+    #[serde(default, deserialize_with = "shell_direction")]
+    #[schemars(schema_with = "shell_direction_schema")]
+    pub direction: Option<String>,
+    /// The body to hollow, by name. Needed with no faces when the design has several bodies.
+    #[serde(default)]
+    pub body: Option<String>,
+    /// True: each face picked opens its whole chain of smoothly joined faces too. Default: false.
+    #[serde(default)]
+    pub tangent_chain: Option<bool>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+fn faces_and_neutral_required(schema: &mut Schema) {
+    require(schema, "faces");
+    require(schema, "neutral");
+}
+
+/// Tilt faces by an angle about where they meet a neutral plane, so the part comes out of its
+/// mould along the pull direction. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = faces_and_neutral_required)]
+pub struct DraftParams {
+    // Required in the schema (`faces_and_neutral_required`), optional in the type, as Shell's.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "FaceRefs")]
+    pub faces: Option<FaceRefs>,
+    /// The draft angle.
+    pub angle: AngleExpr,
+    // As `faces`. The handler names this key `plane` in its messages, and so does `PlaneParam`.
+    /// The neutral plane: the faces keep their size where they cross it.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "PlaneParam")]
+    pub neutral: Option<PlaneParam>,
+    /// The pull direction, [x, y, z]. Default: the neutral plane's normal.
+    #[serde(default)]
+    pub pull: Option<Point3>,
+    /// The body the faces are on, by name. Default: the body at each face.
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
 }
 
 /// What a feature command returns.
@@ -385,6 +1642,12 @@ pub struct FeatureResult {
     /// A warning from the evaluation (a Boolean that needed a retry, a reference found again
     /// elsewhere), or `null`.
     pub warning: Option<String>,
+    /// A join that split pieces into bodies of their own because they touch the others only along
+    /// an edge or at a point (its `touching: separate`): what to tell the user, and the edit that
+    /// makes them one body instead. Left out otherwise, also when the join kept pieces that touch
+    /// nothing in one body.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notice: Option<FeatureNotice>,
     /// How long the feature took to evaluate, in milliseconds.
     pub ms: Option<f64>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.

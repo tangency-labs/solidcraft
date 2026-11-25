@@ -1,0 +1,8089 @@
+{
+ "cases": [
+  {
+   "name": "review_poly_p3_translate_neg",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        2,
+        3,
+        2e-05
+       ],
+       [
+        -1,
+        0.5,
+        0.25,
+        1e-06
+       ]
+      ]
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       -5,
+       -0.001,
+       -7
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_p3_translate_pos",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        2,
+        3,
+        2e-05
+       ],
+       [
+        -1,
+        0.5,
+        0.25,
+        1e-06
+       ]
+      ]
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       5,
+       0.001,
+       7
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_p3_translate_tiny_neg",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        2,
+        3,
+        2e-05
+       ],
+       [
+        -1,
+        0.5,
+        0.25,
+        1e-06
+       ]
+      ]
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       -1e-13,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_p3_translate_tiny",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        2,
+        3,
+        2e-05
+       ],
+       [
+        -1,
+        0.5,
+        0.25,
+        1e-06
+       ]
+      ]
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       1e-13,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_p3_translate_zero",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        2,
+        3,
+        2e-05
+       ],
+       [
+        -1,
+        0.5,
+        0.25,
+        1e-06
+       ]
+      ]
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       0,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_p3_scale_id",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        2,
+        3,
+        2e-05
+       ],
+       [
+        -1,
+        0.5,
+        0.25,
+        1e-06
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1,
+       1,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_p3_scale_near_id",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        2,
+        3,
+        2e-05
+       ],
+       [
+        -1,
+        0.5,
+        0.25,
+        1e-06
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1.0000000000001,
+       1,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_p3_scale_near_id2",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        2,
+        3,
+        2e-05
+       ],
+       [
+        -1,
+        0.5,
+        0.25,
+        1e-06
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1.00000000001,
+       1,
+       0.99999999999
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_p3_scale_nonuni",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        2,
+        3,
+        2e-05
+       ],
+       [
+        -1,
+        0.5,
+        0.25,
+        1e-06
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       3,
+       0.5,
+       2
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_p3_scale_neg",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        2,
+        3,
+        2e-05
+       ],
+       [
+        -1,
+        0.5,
+        0.25,
+        1e-06
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       -1,
+       1,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_p3_scale_tiny",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        2,
+        3,
+        2e-05
+       ],
+       [
+        -1,
+        0.5,
+        0.25,
+        1e-06
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1e-12,
+       1,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_p3_scale_tiny2",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        2,
+        3,
+        2e-05
+       ],
+       [
+        -1,
+        0.5,
+        0.25,
+        1e-06
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1.1e-12,
+       1e-11,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_p3_scale_huge",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        2,
+        3,
+        2e-05
+       ],
+       [
+        -1,
+        0.5,
+        0.25,
+        1e-06
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1e+200,
+       1e+200,
+       1e+200
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_p3_scale_huge2",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        2,
+        3,
+        2e-05
+       ],
+       [
+        -1,
+        0.5,
+        0.25,
+        1e-06
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1e+300,
+       1,
+       1e-05
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_p3_sbp",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        2,
+        3,
+        2e-05
+       ],
+       [
+        -1,
+        0.5,
+        0.25,
+        1e-06
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale_by_pt": {
+      "r": [
+       1,
+       -2,
+       3
+      ],
+      "s": [
+       2,
+       2,
+       2
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_p3_sbp_nonuni",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        2,
+        3,
+        2e-05
+       ],
+       [
+        -1,
+        0.5,
+        0.25,
+        1e-06
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale_by_pt": {
+      "r": [
+       -1,
+       -2,
+       -3
+      ],
+      "s": [
+       0.1,
+       4,
+       2
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_p3_rot90",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        2,
+        3,
+        2e-05
+       ],
+       [
+        -1,
+        0.5,
+        0.25,
+        1e-06
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       0,
+       0,
+       0
+      ],
+      "a": [
+       0,
+       0,
+       1
+      ],
+      "deg": 90
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_p3_rot0",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        2,
+        3,
+        2e-05
+       ],
+       [
+        -1,
+        0.5,
+        0.25,
+        1e-06
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       0,
+       0,
+       0
+      ],
+      "a": [
+       0,
+       0,
+       1
+      ],
+      "deg": 0
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_p3_rot360",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        2,
+        3,
+        2e-05
+       ],
+       [
+        -1,
+        0.5,
+        0.25,
+        1e-06
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       1,
+       2,
+       3
+      ],
+      "a": [
+       1,
+       1,
+       1
+      ],
+      "deg": 360
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_p3_rot_neg",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        2,
+        3,
+        2e-05
+       ],
+       [
+        -1,
+        0.5,
+        0.25,
+        1e-06
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       -1,
+       -2,
+       -3
+      ],
+      "a": [
+       0,
+       -1,
+       0
+      ],
+      "deg": -45
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_p3_rot_zero_axis",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        2,
+        3,
+        2e-05
+       ],
+       [
+        -1,
+        0.5,
+        0.25,
+        1e-06
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       0,
+       0,
+       0
+      ],
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "deg": 30
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_p3_rot_huge_deg",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        2,
+        3,
+        2e-05
+       ],
+       [
+        -1,
+        0.5,
+        0.25,
+        1e-06
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       0,
+       0,
+       0
+      ],
+      "a": [
+       1,
+       0,
+       0
+      ],
+      "deg": 10000000000.0
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_p3_xf_id",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        2,
+        3,
+        2e-05
+       ],
+       [
+        -1,
+        0.5,
+        0.25,
+        1e-06
+       ]
+      ]
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_p3_xf_negorigin",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        2,
+        3,
+        2e-05
+       ],
+       [
+        -1,
+        0.5,
+        0.25,
+        1e-06
+       ]
+      ]
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       -1,
+       -1,
+       -1
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_p3_xf_flip",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        2,
+        3,
+        2e-05
+       ],
+       [
+        -1,
+        0.5,
+        0.25,
+        1e-06
+       ]
+      ]
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       -1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       -1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_p3_xf_nonortho",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        2,
+        3,
+        2e-05
+       ],
+       [
+        -1,
+        0.5,
+        0.25,
+        1e-06
+       ]
+      ]
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       2,
+       0,
+       0
+      ],
+      "y": [
+       1,
+       1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_p3_xf_rot",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        2,
+        3,
+        2e-05
+       ],
+       [
+        -1,
+        0.5,
+        0.25,
+        1e-06
+       ]
+      ]
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       0,
+       1,
+       0
+      ],
+      "y": [
+       -1,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_neg_translate_neg",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        -1,
+        -2,
+        -3,
+        1e-05
+       ],
+       [
+        -1000.0,
+        5,
+        -7,
+        0.001
+       ]
+      ]
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       -5,
+       -0.001,
+       -7
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_neg_translate_pos",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        -1,
+        -2,
+        -3,
+        1e-05
+       ],
+       [
+        -1000.0,
+        5,
+        -7,
+        0.001
+       ]
+      ]
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       5,
+       0.001,
+       7
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_neg_translate_tiny_neg",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        -1,
+        -2,
+        -3,
+        1e-05
+       ],
+       [
+        -1000.0,
+        5,
+        -7,
+        0.001
+       ]
+      ]
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       -1e-13,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_neg_translate_tiny",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        -1,
+        -2,
+        -3,
+        1e-05
+       ],
+       [
+        -1000.0,
+        5,
+        -7,
+        0.001
+       ]
+      ]
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       1e-13,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_neg_translate_zero",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        -1,
+        -2,
+        -3,
+        1e-05
+       ],
+       [
+        -1000.0,
+        5,
+        -7,
+        0.001
+       ]
+      ]
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       0,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_neg_scale_id",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        -1,
+        -2,
+        -3,
+        1e-05
+       ],
+       [
+        -1000.0,
+        5,
+        -7,
+        0.001
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1,
+       1,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_neg_scale_near_id",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        -1,
+        -2,
+        -3,
+        1e-05
+       ],
+       [
+        -1000.0,
+        5,
+        -7,
+        0.001
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1.0000000000001,
+       1,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_neg_scale_near_id2",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        -1,
+        -2,
+        -3,
+        1e-05
+       ],
+       [
+        -1000.0,
+        5,
+        -7,
+        0.001
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1.00000000001,
+       1,
+       0.99999999999
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_neg_scale_nonuni",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        -1,
+        -2,
+        -3,
+        1e-05
+       ],
+       [
+        -1000.0,
+        5,
+        -7,
+        0.001
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       3,
+       0.5,
+       2
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_neg_scale_neg",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        -1,
+        -2,
+        -3,
+        1e-05
+       ],
+       [
+        -1000.0,
+        5,
+        -7,
+        0.001
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       -1,
+       1,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_neg_scale_tiny",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        -1,
+        -2,
+        -3,
+        1e-05
+       ],
+       [
+        -1000.0,
+        5,
+        -7,
+        0.001
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1e-12,
+       1,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_neg_scale_tiny2",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        -1,
+        -2,
+        -3,
+        1e-05
+       ],
+       [
+        -1000.0,
+        5,
+        -7,
+        0.001
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1.1e-12,
+       1e-11,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_neg_scale_huge",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        -1,
+        -2,
+        -3,
+        1e-05
+       ],
+       [
+        -1000.0,
+        5,
+        -7,
+        0.001
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1e+200,
+       1e+200,
+       1e+200
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_neg_scale_huge2",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        -1,
+        -2,
+        -3,
+        1e-05
+       ],
+       [
+        -1000.0,
+        5,
+        -7,
+        0.001
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1e+300,
+       1,
+       1e-05
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_neg_sbp",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        -1,
+        -2,
+        -3,
+        1e-05
+       ],
+       [
+        -1000.0,
+        5,
+        -7,
+        0.001
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale_by_pt": {
+      "r": [
+       1,
+       -2,
+       3
+      ],
+      "s": [
+       2,
+       2,
+       2
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_neg_sbp_nonuni",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        -1,
+        -2,
+        -3,
+        1e-05
+       ],
+       [
+        -1000.0,
+        5,
+        -7,
+        0.001
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale_by_pt": {
+      "r": [
+       -1,
+       -2,
+       -3
+      ],
+      "s": [
+       0.1,
+       4,
+       2
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_neg_rot90",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        -1,
+        -2,
+        -3,
+        1e-05
+       ],
+       [
+        -1000.0,
+        5,
+        -7,
+        0.001
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       0,
+       0,
+       0
+      ],
+      "a": [
+       0,
+       0,
+       1
+      ],
+      "deg": 90
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_neg_rot0",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        -1,
+        -2,
+        -3,
+        1e-05
+       ],
+       [
+        -1000.0,
+        5,
+        -7,
+        0.001
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       0,
+       0,
+       0
+      ],
+      "a": [
+       0,
+       0,
+       1
+      ],
+      "deg": 0
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_neg_rot360",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        -1,
+        -2,
+        -3,
+        1e-05
+       ],
+       [
+        -1000.0,
+        5,
+        -7,
+        0.001
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       1,
+       2,
+       3
+      ],
+      "a": [
+       1,
+       1,
+       1
+      ],
+      "deg": 360
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_neg_rot_neg",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        -1,
+        -2,
+        -3,
+        1e-05
+       ],
+       [
+        -1000.0,
+        5,
+        -7,
+        0.001
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       -1,
+       -2,
+       -3
+      ],
+      "a": [
+       0,
+       -1,
+       0
+      ],
+      "deg": -45
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_neg_rot_zero_axis",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        -1,
+        -2,
+        -3,
+        1e-05
+       ],
+       [
+        -1000.0,
+        5,
+        -7,
+        0.001
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       0,
+       0,
+       0
+      ],
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "deg": 30
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_neg_rot_huge_deg",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        -1,
+        -2,
+        -3,
+        1e-05
+       ],
+       [
+        -1000.0,
+        5,
+        -7,
+        0.001
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       0,
+       0,
+       0
+      ],
+      "a": [
+       1,
+       0,
+       0
+      ],
+      "deg": 10000000000.0
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_neg_xf_id",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        -1,
+        -2,
+        -3,
+        1e-05
+       ],
+       [
+        -1000.0,
+        5,
+        -7,
+        0.001
+       ]
+      ]
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_neg_xf_negorigin",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        -1,
+        -2,
+        -3,
+        1e-05
+       ],
+       [
+        -1000.0,
+        5,
+        -7,
+        0.001
+       ]
+      ]
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       -1,
+       -1,
+       -1
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_neg_xf_flip",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        -1,
+        -2,
+        -3,
+        1e-05
+       ],
+       [
+        -1000.0,
+        5,
+        -7,
+        0.001
+       ]
+      ]
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       -1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       -1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_neg_xf_nonortho",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        -1,
+        -2,
+        -3,
+        1e-05
+       ],
+       [
+        -1000.0,
+        5,
+        -7,
+        0.001
+       ]
+      ]
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       2,
+       0,
+       0
+      ],
+      "y": [
+       1,
+       1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_neg_xf_rot",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        -1,
+        -2,
+        -3,
+        1e-05
+       ],
+       [
+        -1000.0,
+        5,
+        -7,
+        0.001
+       ]
+      ]
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       0,
+       1,
+       0
+      ],
+      "y": [
+       -1,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_zero_tol_translate_neg",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        0.0
+       ],
+       [
+        2,
+        2,
+        2,
+        -1.0
+       ]
+      ]
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       -5,
+       -0.001,
+       -7
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_zero_tol_translate_pos",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        0.0
+       ],
+       [
+        2,
+        2,
+        2,
+        -1.0
+       ]
+      ]
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       5,
+       0.001,
+       7
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_zero_tol_translate_tiny_neg",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        0.0
+       ],
+       [
+        2,
+        2,
+        2,
+        -1.0
+       ]
+      ]
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       -1e-13,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_zero_tol_translate_tiny",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        0.0
+       ],
+       [
+        2,
+        2,
+        2,
+        -1.0
+       ]
+      ]
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       1e-13,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_zero_tol_translate_zero",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        0.0
+       ],
+       [
+        2,
+        2,
+        2,
+        -1.0
+       ]
+      ]
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       0,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_zero_tol_scale_id",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        0.0
+       ],
+       [
+        2,
+        2,
+        2,
+        -1.0
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1,
+       1,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_zero_tol_scale_near_id",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        0.0
+       ],
+       [
+        2,
+        2,
+        2,
+        -1.0
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1.0000000000001,
+       1,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_zero_tol_scale_near_id2",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        0.0
+       ],
+       [
+        2,
+        2,
+        2,
+        -1.0
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1.00000000001,
+       1,
+       0.99999999999
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_zero_tol_scale_nonuni",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        0.0
+       ],
+       [
+        2,
+        2,
+        2,
+        -1.0
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       3,
+       0.5,
+       2
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_zero_tol_scale_neg",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        0.0
+       ],
+       [
+        2,
+        2,
+        2,
+        -1.0
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       -1,
+       1,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_zero_tol_scale_tiny",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        0.0
+       ],
+       [
+        2,
+        2,
+        2,
+        -1.0
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1e-12,
+       1,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_zero_tol_scale_tiny2",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        0.0
+       ],
+       [
+        2,
+        2,
+        2,
+        -1.0
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1.1e-12,
+       1e-11,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_zero_tol_scale_huge",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        0.0
+       ],
+       [
+        2,
+        2,
+        2,
+        -1.0
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1e+200,
+       1e+200,
+       1e+200
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_zero_tol_scale_huge2",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        0.0
+       ],
+       [
+        2,
+        2,
+        2,
+        -1.0
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1e+300,
+       1,
+       1e-05
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_zero_tol_sbp",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        0.0
+       ],
+       [
+        2,
+        2,
+        2,
+        -1.0
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale_by_pt": {
+      "r": [
+       1,
+       -2,
+       3
+      ],
+      "s": [
+       2,
+       2,
+       2
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_zero_tol_sbp_nonuni",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        0.0
+       ],
+       [
+        2,
+        2,
+        2,
+        -1.0
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale_by_pt": {
+      "r": [
+       -1,
+       -2,
+       -3
+      ],
+      "s": [
+       0.1,
+       4,
+       2
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_zero_tol_rot90",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        0.0
+       ],
+       [
+        2,
+        2,
+        2,
+        -1.0
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       0,
+       0,
+       0
+      ],
+      "a": [
+       0,
+       0,
+       1
+      ],
+      "deg": 90
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_zero_tol_rot0",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        0.0
+       ],
+       [
+        2,
+        2,
+        2,
+        -1.0
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       0,
+       0,
+       0
+      ],
+      "a": [
+       0,
+       0,
+       1
+      ],
+      "deg": 0
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_zero_tol_rot360",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        0.0
+       ],
+       [
+        2,
+        2,
+        2,
+        -1.0
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       1,
+       2,
+       3
+      ],
+      "a": [
+       1,
+       1,
+       1
+      ],
+      "deg": 360
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_zero_tol_rot_neg",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        0.0
+       ],
+       [
+        2,
+        2,
+        2,
+        -1.0
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       -1,
+       -2,
+       -3
+      ],
+      "a": [
+       0,
+       -1,
+       0
+      ],
+      "deg": -45
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_zero_tol_rot_zero_axis",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        0.0
+       ],
+       [
+        2,
+        2,
+        2,
+        -1.0
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       0,
+       0,
+       0
+      ],
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "deg": 30
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_zero_tol_rot_huge_deg",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        0.0
+       ],
+       [
+        2,
+        2,
+        2,
+        -1.0
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       0,
+       0,
+       0
+      ],
+      "a": [
+       1,
+       0,
+       0
+      ],
+      "deg": 10000000000.0
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_zero_tol_xf_id",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        0.0
+       ],
+       [
+        2,
+        2,
+        2,
+        -1.0
+       ]
+      ]
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_zero_tol_xf_negorigin",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        0.0
+       ],
+       [
+        2,
+        2,
+        2,
+        -1.0
+       ]
+      ]
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       -1,
+       -1,
+       -1
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_zero_tol_xf_flip",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        0.0
+       ],
+       [
+        2,
+        2,
+        2,
+        -1.0
+       ]
+      ]
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       -1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       -1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_zero_tol_xf_nonortho",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        0.0
+       ],
+       [
+        2,
+        2,
+        2,
+        -1.0
+       ]
+      ]
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       2,
+       0,
+       0
+      ],
+      "y": [
+       1,
+       1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_zero_tol_xf_rot",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        0.0
+       ],
+       [
+        2,
+        2,
+        2,
+        -1.0
+       ]
+      ]
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       0,
+       1,
+       0
+      ],
+      "y": [
+       -1,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_big_tol_translate_neg",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        1e+300
+       ],
+       [
+        2,
+        -2,
+        2,
+        10000000000.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1e-300
+       ]
+      ]
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       -5,
+       -0.001,
+       -7
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_big_tol_translate_pos",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        1e+300
+       ],
+       [
+        2,
+        -2,
+        2,
+        10000000000.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1e-300
+       ]
+      ]
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       5,
+       0.001,
+       7
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_big_tol_translate_tiny_neg",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        1e+300
+       ],
+       [
+        2,
+        -2,
+        2,
+        10000000000.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1e-300
+       ]
+      ]
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       -1e-13,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_big_tol_translate_tiny",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        1e+300
+       ],
+       [
+        2,
+        -2,
+        2,
+        10000000000.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1e-300
+       ]
+      ]
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       1e-13,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_big_tol_translate_zero",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        1e+300
+       ],
+       [
+        2,
+        -2,
+        2,
+        10000000000.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1e-300
+       ]
+      ]
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       0,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_big_tol_scale_id",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        1e+300
+       ],
+       [
+        2,
+        -2,
+        2,
+        10000000000.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1e-300
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1,
+       1,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_big_tol_scale_near_id",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        1e+300
+       ],
+       [
+        2,
+        -2,
+        2,
+        10000000000.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1e-300
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1.0000000000001,
+       1,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_big_tol_scale_near_id2",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        1e+300
+       ],
+       [
+        2,
+        -2,
+        2,
+        10000000000.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1e-300
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1.00000000001,
+       1,
+       0.99999999999
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_big_tol_scale_nonuni",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        1e+300
+       ],
+       [
+        2,
+        -2,
+        2,
+        10000000000.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1e-300
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       3,
+       0.5,
+       2
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_big_tol_scale_neg",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        1e+300
+       ],
+       [
+        2,
+        -2,
+        2,
+        10000000000.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1e-300
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       -1,
+       1,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_big_tol_scale_tiny",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        1e+300
+       ],
+       [
+        2,
+        -2,
+        2,
+        10000000000.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1e-300
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1e-12,
+       1,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_big_tol_scale_tiny2",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        1e+300
+       ],
+       [
+        2,
+        -2,
+        2,
+        10000000000.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1e-300
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1.1e-12,
+       1e-11,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_big_tol_scale_huge",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        1e+300
+       ],
+       [
+        2,
+        -2,
+        2,
+        10000000000.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1e-300
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1e+200,
+       1e+200,
+       1e+200
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_big_tol_scale_huge2",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        1e+300
+       ],
+       [
+        2,
+        -2,
+        2,
+        10000000000.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1e-300
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1e+300,
+       1,
+       1e-05
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_big_tol_sbp",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        1e+300
+       ],
+       [
+        2,
+        -2,
+        2,
+        10000000000.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1e-300
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale_by_pt": {
+      "r": [
+       1,
+       -2,
+       3
+      ],
+      "s": [
+       2,
+       2,
+       2
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_big_tol_sbp_nonuni",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        1e+300
+       ],
+       [
+        2,
+        -2,
+        2,
+        10000000000.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1e-300
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale_by_pt": {
+      "r": [
+       -1,
+       -2,
+       -3
+      ],
+      "s": [
+       0.1,
+       4,
+       2
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_big_tol_rot90",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        1e+300
+       ],
+       [
+        2,
+        -2,
+        2,
+        10000000000.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1e-300
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       0,
+       0,
+       0
+      ],
+      "a": [
+       0,
+       0,
+       1
+      ],
+      "deg": 90
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_big_tol_rot0",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        1e+300
+       ],
+       [
+        2,
+        -2,
+        2,
+        10000000000.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1e-300
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       0,
+       0,
+       0
+      ],
+      "a": [
+       0,
+       0,
+       1
+      ],
+      "deg": 0
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_big_tol_rot360",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        1e+300
+       ],
+       [
+        2,
+        -2,
+        2,
+        10000000000.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1e-300
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       1,
+       2,
+       3
+      ],
+      "a": [
+       1,
+       1,
+       1
+      ],
+      "deg": 360
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_big_tol_rot_neg",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        1e+300
+       ],
+       [
+        2,
+        -2,
+        2,
+        10000000000.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1e-300
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       -1,
+       -2,
+       -3
+      ],
+      "a": [
+       0,
+       -1,
+       0
+      ],
+      "deg": -45
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_big_tol_rot_zero_axis",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        1e+300
+       ],
+       [
+        2,
+        -2,
+        2,
+        10000000000.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1e-300
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       0,
+       0,
+       0
+      ],
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "deg": 30
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_big_tol_rot_huge_deg",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        1e+300
+       ],
+       [
+        2,
+        -2,
+        2,
+        10000000000.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1e-300
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       0,
+       0,
+       0
+      ],
+      "a": [
+       1,
+       0,
+       0
+      ],
+      "deg": 10000000000.0
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_big_tol_xf_id",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        1e+300
+       ],
+       [
+        2,
+        -2,
+        2,
+        10000000000.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1e-300
+       ]
+      ]
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_big_tol_xf_negorigin",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        1e+300
+       ],
+       [
+        2,
+        -2,
+        2,
+        10000000000.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1e-300
+       ]
+      ]
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       -1,
+       -1,
+       -1
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_big_tol_xf_flip",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        1e+300
+       ],
+       [
+        2,
+        -2,
+        2,
+        10000000000.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1e-300
+       ]
+      ]
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       -1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       -1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_big_tol_xf_nonortho",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        1e+300
+       ],
+       [
+        2,
+        -2,
+        2,
+        10000000000.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1e-300
+       ]
+      ]
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       2,
+       0,
+       0
+      ],
+      "y": [
+       1,
+       1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_big_tol_xf_rot",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1,
+        1,
+        1,
+        1e+300
+       ],
+       [
+        2,
+        -2,
+        2,
+        10000000000.0
+       ],
+       [
+        0,
+        0,
+        0,
+        1e-300
+       ]
+      ]
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       0,
+       1,
+       0
+      ],
+      "y": [
+       -1,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_huge_translate_neg",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e+200,
+        -1e+200,
+        1e+150,
+        1e+190
+       ],
+       [
+        1e-200,
+        0,
+        0,
+        1e-12
+       ]
+      ]
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       -5,
+       -0.001,
+       -7
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_huge_translate_pos",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e+200,
+        -1e+200,
+        1e+150,
+        1e+190
+       ],
+       [
+        1e-200,
+        0,
+        0,
+        1e-12
+       ]
+      ]
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       5,
+       0.001,
+       7
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_huge_translate_tiny_neg",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e+200,
+        -1e+200,
+        1e+150,
+        1e+190
+       ],
+       [
+        1e-200,
+        0,
+        0,
+        1e-12
+       ]
+      ]
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       -1e-13,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_huge_translate_tiny",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e+200,
+        -1e+200,
+        1e+150,
+        1e+190
+       ],
+       [
+        1e-200,
+        0,
+        0,
+        1e-12
+       ]
+      ]
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       1e-13,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_huge_translate_zero",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e+200,
+        -1e+200,
+        1e+150,
+        1e+190
+       ],
+       [
+        1e-200,
+        0,
+        0,
+        1e-12
+       ]
+      ]
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       0,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_huge_scale_id",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e+200,
+        -1e+200,
+        1e+150,
+        1e+190
+       ],
+       [
+        1e-200,
+        0,
+        0,
+        1e-12
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1,
+       1,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_huge_scale_near_id",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e+200,
+        -1e+200,
+        1e+150,
+        1e+190
+       ],
+       [
+        1e-200,
+        0,
+        0,
+        1e-12
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1.0000000000001,
+       1,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_huge_scale_near_id2",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e+200,
+        -1e+200,
+        1e+150,
+        1e+190
+       ],
+       [
+        1e-200,
+        0,
+        0,
+        1e-12
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1.00000000001,
+       1,
+       0.99999999999
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_huge_scale_nonuni",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e+200,
+        -1e+200,
+        1e+150,
+        1e+190
+       ],
+       [
+        1e-200,
+        0,
+        0,
+        1e-12
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       3,
+       0.5,
+       2
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_huge_scale_neg",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e+200,
+        -1e+200,
+        1e+150,
+        1e+190
+       ],
+       [
+        1e-200,
+        0,
+        0,
+        1e-12
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       -1,
+       1,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_huge_scale_tiny",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e+200,
+        -1e+200,
+        1e+150,
+        1e+190
+       ],
+       [
+        1e-200,
+        0,
+        0,
+        1e-12
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1e-12,
+       1,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_huge_scale_tiny2",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e+200,
+        -1e+200,
+        1e+150,
+        1e+190
+       ],
+       [
+        1e-200,
+        0,
+        0,
+        1e-12
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1.1e-12,
+       1e-11,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_huge_scale_huge",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e+200,
+        -1e+200,
+        1e+150,
+        1e+190
+       ],
+       [
+        1e-200,
+        0,
+        0,
+        1e-12
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1e+200,
+       1e+200,
+       1e+200
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_huge_scale_huge2",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e+200,
+        -1e+200,
+        1e+150,
+        1e+190
+       ],
+       [
+        1e-200,
+        0,
+        0,
+        1e-12
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1e+300,
+       1,
+       1e-05
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_huge_sbp",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e+200,
+        -1e+200,
+        1e+150,
+        1e+190
+       ],
+       [
+        1e-200,
+        0,
+        0,
+        1e-12
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale_by_pt": {
+      "r": [
+       1,
+       -2,
+       3
+      ],
+      "s": [
+       2,
+       2,
+       2
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_huge_sbp_nonuni",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e+200,
+        -1e+200,
+        1e+150,
+        1e+190
+       ],
+       [
+        1e-200,
+        0,
+        0,
+        1e-12
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale_by_pt": {
+      "r": [
+       -1,
+       -2,
+       -3
+      ],
+      "s": [
+       0.1,
+       4,
+       2
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_huge_rot90",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e+200,
+        -1e+200,
+        1e+150,
+        1e+190
+       ],
+       [
+        1e-200,
+        0,
+        0,
+        1e-12
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       0,
+       0,
+       0
+      ],
+      "a": [
+       0,
+       0,
+       1
+      ],
+      "deg": 90
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_huge_rot0",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e+200,
+        -1e+200,
+        1e+150,
+        1e+190
+       ],
+       [
+        1e-200,
+        0,
+        0,
+        1e-12
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       0,
+       0,
+       0
+      ],
+      "a": [
+       0,
+       0,
+       1
+      ],
+      "deg": 0
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_huge_rot360",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e+200,
+        -1e+200,
+        1e+150,
+        1e+190
+       ],
+       [
+        1e-200,
+        0,
+        0,
+        1e-12
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       1,
+       2,
+       3
+      ],
+      "a": [
+       1,
+       1,
+       1
+      ],
+      "deg": 360
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_huge_rot_neg",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e+200,
+        -1e+200,
+        1e+150,
+        1e+190
+       ],
+       [
+        1e-200,
+        0,
+        0,
+        1e-12
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       -1,
+       -2,
+       -3
+      ],
+      "a": [
+       0,
+       -1,
+       0
+      ],
+      "deg": -45
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_huge_rot_zero_axis",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e+200,
+        -1e+200,
+        1e+150,
+        1e+190
+       ],
+       [
+        1e-200,
+        0,
+        0,
+        1e-12
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       0,
+       0,
+       0
+      ],
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "deg": 30
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_huge_rot_huge_deg",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e+200,
+        -1e+200,
+        1e+150,
+        1e+190
+       ],
+       [
+        1e-200,
+        0,
+        0,
+        1e-12
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       0,
+       0,
+       0
+      ],
+      "a": [
+       1,
+       0,
+       0
+      ],
+      "deg": 10000000000.0
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_huge_xf_id",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e+200,
+        -1e+200,
+        1e+150,
+        1e+190
+       ],
+       [
+        1e-200,
+        0,
+        0,
+        1e-12
+       ]
+      ]
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_huge_xf_negorigin",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e+200,
+        -1e+200,
+        1e+150,
+        1e+190
+       ],
+       [
+        1e-200,
+        0,
+        0,
+        1e-12
+       ]
+      ]
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       -1,
+       -1,
+       -1
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_huge_xf_flip",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e+200,
+        -1e+200,
+        1e+150,
+        1e+190
+       ],
+       [
+        1e-200,
+        0,
+        0,
+        1e-12
+       ]
+      ]
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       -1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       -1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_huge_xf_nonortho",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e+200,
+        -1e+200,
+        1e+150,
+        1e+190
+       ],
+       [
+        1e-200,
+        0,
+        0,
+        1e-12
+       ]
+      ]
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       2,
+       0,
+       0
+      ],
+      "y": [
+       1,
+       1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_huge_xf_rot",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e+200,
+        -1e+200,
+        1e+150,
+        1e+190
+       ],
+       [
+        1e-200,
+        0,
+        0,
+        1e-12
+       ]
+      ]
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       0,
+       1,
+       0
+      ],
+      "y": [
+       -1,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_tiny_translate_neg",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e-300,
+        -1e-300,
+        5e-310,
+        1e-310
+       ],
+       [
+        3e-12,
+        -2e-12,
+        1e-12,
+        1e-13
+       ]
+      ]
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       -5,
+       -0.001,
+       -7
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_tiny_translate_pos",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e-300,
+        -1e-300,
+        5e-310,
+        1e-310
+       ],
+       [
+        3e-12,
+        -2e-12,
+        1e-12,
+        1e-13
+       ]
+      ]
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       5,
+       0.001,
+       7
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_tiny_translate_tiny_neg",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e-300,
+        -1e-300,
+        5e-310,
+        1e-310
+       ],
+       [
+        3e-12,
+        -2e-12,
+        1e-12,
+        1e-13
+       ]
+      ]
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       -1e-13,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_tiny_translate_tiny",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e-300,
+        -1e-300,
+        5e-310,
+        1e-310
+       ],
+       [
+        3e-12,
+        -2e-12,
+        1e-12,
+        1e-13
+       ]
+      ]
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       1e-13,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_tiny_translate_zero",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e-300,
+        -1e-300,
+        5e-310,
+        1e-310
+       ],
+       [
+        3e-12,
+        -2e-12,
+        1e-12,
+        1e-13
+       ]
+      ]
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       0,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_tiny_scale_id",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e-300,
+        -1e-300,
+        5e-310,
+        1e-310
+       ],
+       [
+        3e-12,
+        -2e-12,
+        1e-12,
+        1e-13
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1,
+       1,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_tiny_scale_near_id",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e-300,
+        -1e-300,
+        5e-310,
+        1e-310
+       ],
+       [
+        3e-12,
+        -2e-12,
+        1e-12,
+        1e-13
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1.0000000000001,
+       1,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_tiny_scale_near_id2",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e-300,
+        -1e-300,
+        5e-310,
+        1e-310
+       ],
+       [
+        3e-12,
+        -2e-12,
+        1e-12,
+        1e-13
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1.00000000001,
+       1,
+       0.99999999999
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_tiny_scale_nonuni",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e-300,
+        -1e-300,
+        5e-310,
+        1e-310
+       ],
+       [
+        3e-12,
+        -2e-12,
+        1e-12,
+        1e-13
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       3,
+       0.5,
+       2
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_tiny_scale_neg",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e-300,
+        -1e-300,
+        5e-310,
+        1e-310
+       ],
+       [
+        3e-12,
+        -2e-12,
+        1e-12,
+        1e-13
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       -1,
+       1,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_tiny_scale_tiny",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e-300,
+        -1e-300,
+        5e-310,
+        1e-310
+       ],
+       [
+        3e-12,
+        -2e-12,
+        1e-12,
+        1e-13
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1e-12,
+       1,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_tiny_scale_tiny2",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e-300,
+        -1e-300,
+        5e-310,
+        1e-310
+       ],
+       [
+        3e-12,
+        -2e-12,
+        1e-12,
+        1e-13
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1.1e-12,
+       1e-11,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_tiny_scale_huge",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e-300,
+        -1e-300,
+        5e-310,
+        1e-310
+       ],
+       [
+        3e-12,
+        -2e-12,
+        1e-12,
+        1e-13
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1e+200,
+       1e+200,
+       1e+200
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_tiny_scale_huge2",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e-300,
+        -1e-300,
+        5e-310,
+        1e-310
+       ],
+       [
+        3e-12,
+        -2e-12,
+        1e-12,
+        1e-13
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1e+300,
+       1,
+       1e-05
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_tiny_sbp",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e-300,
+        -1e-300,
+        5e-310,
+        1e-310
+       ],
+       [
+        3e-12,
+        -2e-12,
+        1e-12,
+        1e-13
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale_by_pt": {
+      "r": [
+       1,
+       -2,
+       3
+      ],
+      "s": [
+       2,
+       2,
+       2
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_tiny_sbp_nonuni",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e-300,
+        -1e-300,
+        5e-310,
+        1e-310
+       ],
+       [
+        3e-12,
+        -2e-12,
+        1e-12,
+        1e-13
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale_by_pt": {
+      "r": [
+       -1,
+       -2,
+       -3
+      ],
+      "s": [
+       0.1,
+       4,
+       2
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_tiny_rot90",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e-300,
+        -1e-300,
+        5e-310,
+        1e-310
+       ],
+       [
+        3e-12,
+        -2e-12,
+        1e-12,
+        1e-13
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       0,
+       0,
+       0
+      ],
+      "a": [
+       0,
+       0,
+       1
+      ],
+      "deg": 90
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_tiny_rot0",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e-300,
+        -1e-300,
+        5e-310,
+        1e-310
+       ],
+       [
+        3e-12,
+        -2e-12,
+        1e-12,
+        1e-13
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       0,
+       0,
+       0
+      ],
+      "a": [
+       0,
+       0,
+       1
+      ],
+      "deg": 0
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_tiny_rot360",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e-300,
+        -1e-300,
+        5e-310,
+        1e-310
+       ],
+       [
+        3e-12,
+        -2e-12,
+        1e-12,
+        1e-13
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       1,
+       2,
+       3
+      ],
+      "a": [
+       1,
+       1,
+       1
+      ],
+      "deg": 360
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_tiny_rot_neg",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e-300,
+        -1e-300,
+        5e-310,
+        1e-310
+       ],
+       [
+        3e-12,
+        -2e-12,
+        1e-12,
+        1e-13
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       -1,
+       -2,
+       -3
+      ],
+      "a": [
+       0,
+       -1,
+       0
+      ],
+      "deg": -45
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_tiny_rot_zero_axis",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e-300,
+        -1e-300,
+        5e-310,
+        1e-310
+       ],
+       [
+        3e-12,
+        -2e-12,
+        1e-12,
+        1e-13
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       0,
+       0,
+       0
+      ],
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "deg": 30
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_tiny_rot_huge_deg",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e-300,
+        -1e-300,
+        5e-310,
+        1e-310
+       ],
+       [
+        3e-12,
+        -2e-12,
+        1e-12,
+        1e-13
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       0,
+       0,
+       0
+      ],
+      "a": [
+       1,
+       0,
+       0
+      ],
+      "deg": 10000000000.0
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_tiny_xf_id",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e-300,
+        -1e-300,
+        5e-310,
+        1e-310
+       ],
+       [
+        3e-12,
+        -2e-12,
+        1e-12,
+        1e-13
+       ]
+      ]
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_tiny_xf_negorigin",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e-300,
+        -1e-300,
+        5e-310,
+        1e-310
+       ],
+       [
+        3e-12,
+        -2e-12,
+        1e-12,
+        1e-13
+       ]
+      ]
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       -1,
+       -1,
+       -1
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_tiny_xf_flip",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e-300,
+        -1e-300,
+        5e-310,
+        1e-310
+       ],
+       [
+        3e-12,
+        -2e-12,
+        1e-12,
+        1e-13
+       ]
+      ]
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       -1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       -1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_tiny_xf_nonortho",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e-300,
+        -1e-300,
+        5e-310,
+        1e-310
+       ],
+       [
+        3e-12,
+        -2e-12,
+        1e-12,
+        1e-13
+       ]
+      ]
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       2,
+       0,
+       0
+      ],
+      "y": [
+       1,
+       1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_tiny_xf_rot",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        1e-300,
+        -1e-300,
+        5e-310,
+        1e-310
+       ],
+       [
+        3e-12,
+        -2e-12,
+        1e-12,
+        1e-13
+       ]
+      ]
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       0,
+       1,
+       0
+      ],
+      "y": [
+       -1,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_four_translate_neg",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        1,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        0,
+        1,
+        1e-05
+       ]
+      ]
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       -5,
+       -0.001,
+       -7
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_four_translate_pos",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        1,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        0,
+        1,
+        1e-05
+       ]
+      ]
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       5,
+       0.001,
+       7
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_four_translate_tiny_neg",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        1,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        0,
+        1,
+        1e-05
+       ]
+      ]
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       -1e-13,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_four_translate_tiny",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        1,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        0,
+        1,
+        1e-05
+       ]
+      ]
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       1e-13,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_four_translate_zero",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        1,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        0,
+        1,
+        1e-05
+       ]
+      ]
+     }
+    },
+    "op": {
+     "translate": {
+      "v": [
+       0,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_four_scale_id",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        1,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        0,
+        1,
+        1e-05
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1,
+       1,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_four_scale_near_id",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        1,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        0,
+        1,
+        1e-05
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1.0000000000001,
+       1,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_four_scale_near_id2",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        1,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        0,
+        1,
+        1e-05
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1.00000000001,
+       1,
+       0.99999999999
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_four_scale_nonuni",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        1,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        0,
+        1,
+        1e-05
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       3,
+       0.5,
+       2
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_four_scale_neg",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        1,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        0,
+        1,
+        1e-05
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       -1,
+       1,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_four_scale_tiny",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        1,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        0,
+        1,
+        1e-05
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1e-12,
+       1,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_four_scale_tiny2",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        1,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        0,
+        1,
+        1e-05
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1.1e-12,
+       1e-11,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_four_scale_huge",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        1,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        0,
+        1,
+        1e-05
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1e+200,
+       1e+200,
+       1e+200
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_four_scale_huge2",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        1,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        0,
+        1,
+        1e-05
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale": {
+      "s": [
+       1e+300,
+       1,
+       1e-05
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_four_sbp",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        1,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        0,
+        1,
+        1e-05
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale_by_pt": {
+      "r": [
+       1,
+       -2,
+       3
+      ],
+      "s": [
+       2,
+       2,
+       2
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_four_sbp_nonuni",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        1,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        0,
+        1,
+        1e-05
+       ]
+      ]
+     }
+    },
+    "op": {
+     "scale_by_pt": {
+      "r": [
+       -1,
+       -2,
+       -3
+      ],
+      "s": [
+       0.1,
+       4,
+       2
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_four_rot90",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        1,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        0,
+        1,
+        1e-05
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       0,
+       0,
+       0
+      ],
+      "a": [
+       0,
+       0,
+       1
+      ],
+      "deg": 90
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_four_rot0",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        1,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        0,
+        1,
+        1e-05
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       0,
+       0,
+       0
+      ],
+      "a": [
+       0,
+       0,
+       1
+      ],
+      "deg": 0
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_four_rot360",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        1,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        0,
+        1,
+        1e-05
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       1,
+       2,
+       3
+      ],
+      "a": [
+       1,
+       1,
+       1
+      ],
+      "deg": 360
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_four_rot_neg",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        1,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        0,
+        1,
+        1e-05
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       -1,
+       -2,
+       -3
+      ],
+      "a": [
+       0,
+       -1,
+       0
+      ],
+      "deg": -45
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_four_rot_zero_axis",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        1,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        0,
+        1,
+        1e-05
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       0,
+       0,
+       0
+      ],
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "deg": 30
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_four_rot_huge_deg",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        1,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        0,
+        1,
+        1e-05
+       ]
+      ]
+     }
+    },
+    "op": {
+     "rotate": {
+      "r": [
+       0,
+       0,
+       0
+      ],
+      "a": [
+       1,
+       0,
+       0
+      ],
+      "deg": 10000000000.0
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_four_xf_id",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        1,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        0,
+        1,
+        1e-05
+       ]
+      ]
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_four_xf_negorigin",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        1,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        0,
+        1,
+        1e-05
+       ]
+      ]
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       -1,
+       -1,
+       -1
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_four_xf_flip",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        1,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        0,
+        1,
+        1e-05
+       ]
+      ]
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       -1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       -1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_four_xf_nonortho",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        1,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        0,
+        1,
+        1e-05
+       ]
+      ]
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       2,
+       0,
+       0
+      ],
+      "y": [
+       1,
+       1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_four_xf_rot",
+   "inputs": {
+    "script": "transform",
+    "obj": {
+     "poly_pts": {
+      "pts": [
+       [
+        0,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        1,
+        0,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        1,
+        0,
+        1e-05
+       ],
+       [
+        0,
+        0,
+        1,
+        1e-05
+       ]
+      ]
+     }
+    },
+    "op": {
+     "transform": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       0,
+       1,
+       0
+      ],
+      "y": [
+       -1,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_empty_translate_neg",
+   "inputs": {
+    "script": "transform",
+    "obj": "poly",
+    "op": {
+     "translate": {
+      "v": [
+       -5,
+       -0.001,
+       -7
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_empty_translate_pos",
+   "inputs": {
+    "script": "transform",
+    "obj": "poly",
+    "op": {
+     "translate": {
+      "v": [
+       5,
+       0.001,
+       7
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_empty_translate_tiny_neg",
+   "inputs": {
+    "script": "transform",
+    "obj": "poly",
+    "op": {
+     "translate": {
+      "v": [
+       -1e-13,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_empty_translate_tiny",
+   "inputs": {
+    "script": "transform",
+    "obj": "poly",
+    "op": {
+     "translate": {
+      "v": [
+       1e-13,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_empty_translate_zero",
+   "inputs": {
+    "script": "transform",
+    "obj": "poly",
+    "op": {
+     "translate": {
+      "v": [
+       0,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_empty_scale_id",
+   "inputs": {
+    "script": "transform",
+    "obj": "poly",
+    "op": {
+     "scale": {
+      "s": [
+       1,
+       1,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_empty_scale_near_id",
+   "inputs": {
+    "script": "transform",
+    "obj": "poly",
+    "op": {
+     "scale": {
+      "s": [
+       1.0000000000001,
+       1,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_empty_scale_near_id2",
+   "inputs": {
+    "script": "transform",
+    "obj": "poly",
+    "op": {
+     "scale": {
+      "s": [
+       1.00000000001,
+       1,
+       0.99999999999
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_empty_scale_nonuni",
+   "inputs": {
+    "script": "transform",
+    "obj": "poly",
+    "op": {
+     "scale": {
+      "s": [
+       3,
+       0.5,
+       2
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_empty_scale_neg",
+   "inputs": {
+    "script": "transform",
+    "obj": "poly",
+    "op": {
+     "scale": {
+      "s": [
+       -1,
+       1,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_empty_scale_tiny",
+   "inputs": {
+    "script": "transform",
+    "obj": "poly",
+    "op": {
+     "scale": {
+      "s": [
+       1e-12,
+       1,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_empty_scale_tiny2",
+   "inputs": {
+    "script": "transform",
+    "obj": "poly",
+    "op": {
+     "scale": {
+      "s": [
+       1.1e-12,
+       1e-11,
+       1
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_empty_scale_huge",
+   "inputs": {
+    "script": "transform",
+    "obj": "poly",
+    "op": {
+     "scale": {
+      "s": [
+       1e+200,
+       1e+200,
+       1e+200
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_empty_scale_huge2",
+   "inputs": {
+    "script": "transform",
+    "obj": "poly",
+    "op": {
+     "scale": {
+      "s": [
+       1e+300,
+       1,
+       1e-05
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_empty_sbp",
+   "inputs": {
+    "script": "transform",
+    "obj": "poly",
+    "op": {
+     "scale_by_pt": {
+      "r": [
+       1,
+       -2,
+       3
+      ],
+      "s": [
+       2,
+       2,
+       2
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_empty_sbp_nonuni",
+   "inputs": {
+    "script": "transform",
+    "obj": "poly",
+    "op": {
+     "scale_by_pt": {
+      "r": [
+       -1,
+       -2,
+       -3
+      ],
+      "s": [
+       0.1,
+       4,
+       2
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_empty_rot90",
+   "inputs": {
+    "script": "transform",
+    "obj": "poly",
+    "op": {
+     "rotate": {
+      "r": [
+       0,
+       0,
+       0
+      ],
+      "a": [
+       0,
+       0,
+       1
+      ],
+      "deg": 90
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_empty_rot0",
+   "inputs": {
+    "script": "transform",
+    "obj": "poly",
+    "op": {
+     "rotate": {
+      "r": [
+       0,
+       0,
+       0
+      ],
+      "a": [
+       0,
+       0,
+       1
+      ],
+      "deg": 0
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_empty_rot360",
+   "inputs": {
+    "script": "transform",
+    "obj": "poly",
+    "op": {
+     "rotate": {
+      "r": [
+       1,
+       2,
+       3
+      ],
+      "a": [
+       1,
+       1,
+       1
+      ],
+      "deg": 360
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_empty_rot_neg",
+   "inputs": {
+    "script": "transform",
+    "obj": "poly",
+    "op": {
+     "rotate": {
+      "r": [
+       -1,
+       -2,
+       -3
+      ],
+      "a": [
+       0,
+       -1,
+       0
+      ],
+      "deg": -45
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_empty_rot_zero_axis",
+   "inputs": {
+    "script": "transform",
+    "obj": "poly",
+    "op": {
+     "rotate": {
+      "r": [
+       0,
+       0,
+       0
+      ],
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "deg": 30
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_empty_rot_huge_deg",
+   "inputs": {
+    "script": "transform",
+    "obj": "poly",
+    "op": {
+     "rotate": {
+      "r": [
+       0,
+       0,
+       0
+      ],
+      "a": [
+       1,
+       0,
+       0
+      ],
+      "deg": 10000000000.0
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_empty_xf_id",
+   "inputs": {
+    "script": "transform",
+    "obj": "poly",
+    "op": {
+     "transform": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_empty_xf_negorigin",
+   "inputs": {
+    "script": "transform",
+    "obj": "poly",
+    "op": {
+     "transform": {
+      "o": [
+       -1,
+       -1,
+       -1
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_empty_xf_flip",
+   "inputs": {
+    "script": "transform",
+    "obj": "poly",
+    "op": {
+     "transform": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       -1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       -1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_empty_xf_nonortho",
+   "inputs": {
+    "script": "transform",
+    "obj": "poly",
+    "op": {
+     "transform": {
+      "o": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       2,
+       0,
+       0
+      ],
+      "y": [
+       1,
+       1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "review_poly_empty_xf_rot",
+   "inputs": {
+    "script": "transform",
+    "obj": "poly",
+    "op": {
+     "transform": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       0,
+       1,
+       0
+      ],
+      "y": [
+       -1,
+       0,
+       0
+      ]
+     }
+    }
+   }
+  }
+ ]
+}

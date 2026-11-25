@@ -7,9 +7,9 @@
 //! `SOLIDCRAFT_BENCH_PARTS=400 cargo test --release -p solidcraft-engine bench_generated_assembly -- --ignored --nocapture`
 
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_doc::BodyName;
 use solidcraft_doc::{Document, FeatureKind, Operation, mat_inverse, point_expr, rigid};
-use solidcraft_geom::Vec3;
 
 use crate::Session;
 
@@ -29,12 +29,19 @@ fn generated_assembly(parts: usize) -> Document {
     let mut made = Vec::new();
     for i in 0..parts {
         let o = Vec3::new(30.0 * (i % 20) as f64, 30.0 * (i / 20) as f64, 0.0);
-        let block = FeatureKind::Box { corner: point_expr(o), length: mm(20.0), width: mm(12.0), height: mm(6.0), operation: Operation::NewBody };
+        let block = FeatureKind::Box {
+            corner: point_expr(o),
+            length: mm(20.0),
+            width: mm(12.0),
+            height: mm(6.0),
+            operation: Operation::NewBody,
+            centred: false,
+        };
         made.push((i, doc.add_feature(block, Some(&format!("Plate {i}"))).unwrap()));
         for (k, x) in [2.0, 9.0, 16.0].into_iter().enumerate() {
             let pin = FeatureKind::Cylinder {
                 base: point_expr(o + Vec3::new(x, 20.0, 0.0)),
-                axis: solidcraft_doc::Dir(Vec3::Z),
+                axis: solidcraft_doc::dir_expr(Vec3::Z),
                 radius: mm(1.5),
                 height: mm(4.0 + k as f64),
                 operation: Operation::NewBody,
@@ -70,7 +77,7 @@ fn generated_assembly_opens_with_every_body_in_place() {
     let doc = generated_assembly(parts);
     let mut s = Session::new(doc.clone());
     assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results.iter().find(|r| r.error.is_some()));
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     assert_eq!(world.bodies.len(), parts * 4);
     assert!(world.bodies.iter().all(|b| b.component != 0 && b.transferred));
     world.warm_meshes(|| true);
@@ -91,7 +98,7 @@ fn generated_assembly_opens_with_every_body_in_place() {
         }
     }
     // A saved copy opens to the same model.
-    let reopened = solidcraft_io::read_design(&solidcraft_io::write_design(&doc)).unwrap();
+    let reopened = solidcraft_io::read_design(&solidcraft_io::write_design(&doc).unwrap()).unwrap();
     assert_eq!(measured(&mut Session::new(reopened)), after);
 }
 
@@ -100,7 +107,7 @@ fn generated_assembly_opens_with_every_body_in_place() {
 #[ignore = "benchmark: run with --release --ignored --nocapture"]
 fn bench_generated_assembly() {
     let parts = std::env::var("SOLIDCRAFT_BENCH_PARTS").ok().and_then(|v| v.parse().ok()).unwrap_or(200);
-    let bytes = solidcraft_io::write_design(&generated_assembly(parts));
+    let bytes = solidcraft_io::write_design(&generated_assembly(parts)).unwrap();
     let ms = |t: std::time::Instant| t.elapsed().as_secs_f64() * 1000.0;
     let t = std::time::Instant::now();
     let doc = solidcraft_io::read_design(&bytes).unwrap();
@@ -110,7 +117,7 @@ fn bench_generated_assembly() {
     let evaluate = ms(t);
     let features: f64 = s.model.results.iter().map(|r| r.ms).sum();
     let t = std::time::Instant::now();
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     world.warm_meshes(|| true);
     let mesh = ms(t);
     let t = std::time::Instant::now();
@@ -123,4 +130,24 @@ fn bench_generated_assembly() {
                "in_features_ms": features, "outside_features_ms": evaluate - features, "mesh_ms": mesh, "measure_ms": measure,
                "volume_mm3": m["total"]["volume_mm3"]})
     );
+}
+
+#[test]
+fn names_only_lists_every_world_body_without_measuring() {
+    let mut s = Session::new(generated_assembly(3));
+    let full = s.execute("inspect.measure", &json!({})).unwrap();
+    let names = s.execute("inspect.measure", &json!({"names_only": true})).unwrap();
+    assert_eq!(names["body_count"], full["body_count"]);
+    let world = s.world_state().unwrap();
+    for ((n, f), b) in names["bodies"].as_array().unwrap().iter().zip(full["bodies"].as_array().unwrap()).zip(&world.bodies) {
+        assert_eq!(n["name"], f["name"]);
+        assert_eq!(n["definition"], json!(b.definition_name()));
+        assert!(n.get("volume_mm3").is_none(), "{n}");
+    }
+    assert!(names.get("total").is_none());
+    // The `bodies` filter holds, and an unknown name is still refused.
+    let first = names["bodies"][0]["name"].clone();
+    let one = s.execute("inspect.measure", &json!({"names_only": true, "bodies": [first]})).unwrap();
+    assert_eq!(one["body_count"], 1);
+    assert!(s.execute("inspect.measure", &json!({"names_only": true, "bodies": ["no such body"]})).is_err());
 }

@@ -1,0 +1,647 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/3665",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/3666",
+ "test": "crates/engine/src/boolean_regression_tests.rs: column_standing_in_a_channel_joins_as_drawn",
+ "summary": "A join extrude of a column standing in a housing's ring channel, on its floor and against its curved wall, failed with `Union: no result`. The kernel boolean underneath is a union of two bodies that only touch. The column is the channel between two r 3.04 pellet circles centred on r 20, so each touches the r 23.04 wall and the column ends in two sharp corners on the wall. Radii, heights and circle centres are the user's own design (examples/regressions/join_column_in_channel.json on the PR's branch); the housing is simplified to coaxial cylinders (outer r 25, floor 2.8, boss r 20 to z 11, wall to z 12.5). The column is cut from a box whose x = 0 and x = 7.58016 faces pass through those corners (inside the pellet circles everywhere else). Volumes are closed form.",
+ "cases": [
+  {
+   "name": "column_in_channel",
+   "note": "#3665 (fix 1): the column stands on the channel floor and fills the channel between the two pellet circles, flush with the outer wall, the boss and the housing's top.",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "housing",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 25.0,
+     "height": 12.5
+    },
+    {
+     "op": "cylinder",
+     "id": "channel",
+     "origin": [
+      0,
+      0,
+      2.8
+     ],
+     "radius": 23.04,
+     "height": 10.2
+    },
+    {
+     "op": "cylinder",
+     "id": "boss",
+     "origin": [
+      0,
+      0,
+      2
+     ],
+     "radius": 20.0,
+     "height": 9.0
+    },
+    {
+     "op": "difference",
+     "id": "channel",
+     "a": "channel",
+     "b": "boss"
+    },
+    {
+     "op": "difference",
+     "id": "housing",
+     "a": "housing",
+     "b": "channel"
+    },
+    {
+     "op": "box",
+     "id": "column",
+     "origin": [
+      0,
+      10,
+      2.8
+     ],
+     "size": [
+      7.580159999999999,
+      15,
+      9.7
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "cut",
+     "origin": [
+      0,
+      0,
+      2
+     ],
+     "radius": 23.04,
+     "height": 11
+    },
+    {
+     "op": "intersection",
+     "id": "column",
+     "a": "column",
+     "b": "cut"
+    },
+    {
+     "op": "cylinder",
+     "id": "cut",
+     "origin": [
+      0,
+      0,
+      2
+     ],
+     "radius": 20.0,
+     "height": 11
+    },
+    {
+     "op": "difference",
+     "id": "column",
+     "a": "column",
+     "b": "cut"
+    },
+    {
+     "op": "cylinder",
+     "id": "cut",
+     "origin": [
+      0,
+      20.0,
+      2
+     ],
+     "radius": 3.04,
+     "height": 11
+    },
+    {
+     "op": "difference",
+     "id": "column",
+     "a": "column",
+     "b": "cut"
+    },
+    {
+     "op": "cylinder",
+     "id": "cut",
+     "origin": [
+      6.58,
+      18.88659842322063,
+      2
+     ],
+     "radius": 3.04,
+     "height": 11
+    },
+    {
+     "op": "difference",
+     "id": "column",
+     "a": "column",
+     "b": "cut"
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "housing",
+     "b": "column"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 18738.925943688737,
+     "tol": 0.01,
+     "formula": "pi*(25^2*12.5 - (23.04^2 - 20^2)*8.2 - 23.04^2*1.5) + 9.7*A(20, 23.04); A(ri, ro) = (t/2)*(ro^2 - ri^2) - (L(ro) - L(ri)), t = asin(6.58/20), L(r) = area of the r 3.04 disc at distance 20 inside the disc of radius r (two-circle lens; L(23.04) = pi*3.04^2, internally tangent)"
+    }
+   }
+  },
+  {
+   "name": "column_beside_tangent_opening",
+   "note": "Bug 2, found on the user's design after fix 1: first the r 3.04 opening at (0, 20) is cut through the floor. It touches the wall, so the floor face under the column pinches to a point there, at the column's own sharp corner. SolidCraft's fix was never shipped (tangency-labs/solidcraft#3992); its local test is column_beside_an_opening_tangent_to_the_wall_combines.",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "housing",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 25.0,
+     "height": 12.5
+    },
+    {
+     "op": "cylinder",
+     "id": "channel",
+     "origin": [
+      0,
+      0,
+      2.8
+     ],
+     "radius": 23.04,
+     "height": 10.2
+    },
+    {
+     "op": "cylinder",
+     "id": "boss",
+     "origin": [
+      0,
+      0,
+      2
+     ],
+     "radius": 20.0,
+     "height": 9.0
+    },
+    {
+     "op": "difference",
+     "id": "channel",
+     "a": "channel",
+     "b": "boss"
+    },
+    {
+     "op": "difference",
+     "id": "housing",
+     "a": "housing",
+     "b": "channel"
+    },
+    {
+     "op": "cylinder",
+     "id": "opening",
+     "origin": [
+      0,
+      20.0,
+      -1
+     ],
+     "radius": 3.04,
+     "height": 3.8
+    },
+    {
+     "op": "difference",
+     "id": "housing",
+     "a": "housing",
+     "b": "opening"
+    },
+    {
+     "op": "box",
+     "id": "column",
+     "origin": [
+      0,
+      10,
+      2.8
+     ],
+     "size": [
+      7.580159999999999,
+      15,
+      9.7
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "cut",
+     "origin": [
+      0,
+      0,
+      2
+     ],
+     "radius": 23.04,
+     "height": 11
+    },
+    {
+     "op": "intersection",
+     "id": "column",
+     "a": "column",
+     "b": "cut"
+    },
+    {
+     "op": "cylinder",
+     "id": "cut",
+     "origin": [
+      0,
+      0,
+      2
+     ],
+     "radius": 20.0,
+     "height": 11
+    },
+    {
+     "op": "difference",
+     "id": "column",
+     "a": "column",
+     "b": "cut"
+    },
+    {
+     "op": "cylinder",
+     "id": "cut",
+     "origin": [
+      0,
+      20.0,
+      2
+     ],
+     "radius": 3.04,
+     "height": 11
+    },
+    {
+     "op": "difference",
+     "id": "column",
+     "a": "column",
+     "b": "cut"
+    },
+    {
+     "op": "cylinder",
+     "id": "cut",
+     "origin": [
+      6.58,
+      18.88659842322063,
+      2
+     ],
+     "radius": 3.04,
+     "height": 11
+    },
+    {
+     "op": "difference",
+     "id": "column",
+     "a": "column",
+     "b": "cut"
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "housing",
+     "b": "column"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 18657.632584219973,
+     "tol": 0.01,
+     "formula": "pi*(25^2*12.5 - (23.04^2 - 20^2)*8.2 - 23.04^2*1.5) - pi*3.04^2*2.8 + 9.7*A(20, 23.04); A(ri, ro) = (t/2)*(ro^2 - ri^2) - (L(ro) - L(ri)), t = asin(6.58/20), L(r) = area of the r 3.04 disc at distance 20 inside the disc of radius r (two-circle lens; L(23.04) = pi*3.04^2, internally tangent)"
+    }
+   }
+  },
+  {
+   "name": "control_column_clear",
+   "note": "control: the column of the opening case, 0.001 clear of the floor and both walls (radii 20.001 and 23.039, from z 2.801), stays a second lump.",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "housing",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 25.0,
+     "height": 12.5
+    },
+    {
+     "op": "cylinder",
+     "id": "channel",
+     "origin": [
+      0,
+      0,
+      2.8
+     ],
+     "radius": 23.04,
+     "height": 10.2
+    },
+    {
+     "op": "cylinder",
+     "id": "boss",
+     "origin": [
+      0,
+      0,
+      2
+     ],
+     "radius": 20.0,
+     "height": 9.0
+    },
+    {
+     "op": "difference",
+     "id": "channel",
+     "a": "channel",
+     "b": "boss"
+    },
+    {
+     "op": "difference",
+     "id": "housing",
+     "a": "housing",
+     "b": "channel"
+    },
+    {
+     "op": "cylinder",
+     "id": "opening",
+     "origin": [
+      0,
+      20.0,
+      -1
+     ],
+     "radius": 3.04,
+     "height": 3.8
+    },
+    {
+     "op": "difference",
+     "id": "housing",
+     "a": "housing",
+     "b": "opening"
+    },
+    {
+     "op": "box",
+     "id": "column",
+     "origin": [
+      0,
+      10,
+      2.8009999999999997
+     ],
+     "size": [
+      7.580159999999999,
+      15,
+      9.699
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "cut",
+     "origin": [
+      0,
+      0,
+      2
+     ],
+     "radius": 23.038999999999998,
+     "height": 11
+    },
+    {
+     "op": "intersection",
+     "id": "column",
+     "a": "column",
+     "b": "cut"
+    },
+    {
+     "op": "cylinder",
+     "id": "cut",
+     "origin": [
+      0,
+      0,
+      2
+     ],
+     "radius": 20.001,
+     "height": 11
+    },
+    {
+     "op": "difference",
+     "id": "column",
+     "a": "column",
+     "b": "cut"
+    },
+    {
+     "op": "cylinder",
+     "id": "cut",
+     "origin": [
+      0,
+      20.0,
+      2
+     ],
+     "radius": 3.04,
+     "height": 11
+    },
+    {
+     "op": "difference",
+     "id": "column",
+     "a": "column",
+     "b": "cut"
+    },
+    {
+     "op": "cylinder",
+     "id": "cut",
+     "origin": [
+      6.58,
+      18.88659842322063,
+      2
+     ],
+     "radius": 3.04,
+     "height": 11
+    },
+    {
+     "op": "difference",
+     "id": "column",
+     "a": "column",
+     "b": "cut"
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "housing",
+     "b": "column"
+    }
+   ],
+   "expect": {
+    "lumps": 2,
+    "volume": {
+     "value": 18657.545801142827,
+     "tol": 0.01,
+     "formula": "pi*(25^2*12.5 - (23.04^2 - 20^2)*8.2 - 23.04^2*1.5) - pi*3.04^2*2.8 + 9.699*A(20.001, 23.039); A(ri, ro) = (t/2)*(ro^2 - ri^2) - (L(ro) - L(ri)), t = asin(6.58/20), L(r) = area of the r 3.04 disc at distance 20 inside the disc of radius r (two-circle lens; L(23.04) = pi*3.04^2, internally tangent)"
+    }
+   }
+  },
+  {
+   "name": "control_column_overlapping",
+   "note": "control: the column of the opening case, 0.001 into the floor and both walls (radii 19.999 and 23.041, from z 2.799). It adds the flush column plus the band r 19.999..20 above the boss (z 11..12.5); the rest of the overlap is housing already.",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "housing",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 25.0,
+     "height": 12.5
+    },
+    {
+     "op": "cylinder",
+     "id": "channel",
+     "origin": [
+      0,
+      0,
+      2.8
+     ],
+     "radius": 23.04,
+     "height": 10.2
+    },
+    {
+     "op": "cylinder",
+     "id": "boss",
+     "origin": [
+      0,
+      0,
+      2
+     ],
+     "radius": 20.0,
+     "height": 9.0
+    },
+    {
+     "op": "difference",
+     "id": "channel",
+     "a": "channel",
+     "b": "boss"
+    },
+    {
+     "op": "difference",
+     "id": "housing",
+     "a": "housing",
+     "b": "channel"
+    },
+    {
+     "op": "cylinder",
+     "id": "opening",
+     "origin": [
+      0,
+      20.0,
+      -1
+     ],
+     "radius": 3.04,
+     "height": 3.8
+    },
+    {
+     "op": "difference",
+     "id": "housing",
+     "a": "housing",
+     "b": "opening"
+    },
+    {
+     "op": "box",
+     "id": "column",
+     "origin": [
+      0,
+      10,
+      2.799
+     ],
+     "size": [
+      7.580159999999999,
+      15,
+      9.701
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "cut",
+     "origin": [
+      0,
+      0,
+      2
+     ],
+     "radius": 23.041,
+     "height": 11
+    },
+    {
+     "op": "intersection",
+     "id": "column",
+     "a": "column",
+     "b": "cut"
+    },
+    {
+     "op": "cylinder",
+     "id": "cut",
+     "origin": [
+      0,
+      0,
+      2
+     ],
+     "radius": 19.999,
+     "height": 11
+    },
+    {
+     "op": "difference",
+     "id": "column",
+     "a": "column",
+     "b": "cut"
+    },
+    {
+     "op": "cylinder",
+     "id": "cut",
+     "origin": [
+      0,
+      20.0,
+      2
+     ],
+     "radius": 3.04,
+     "height": 11
+    },
+    {
+     "op": "difference",
+     "id": "column",
+     "a": "column",
+     "b": "cut"
+    },
+    {
+     "op": "cylinder",
+     "id": "cut",
+     "origin": [
+      6.58,
+      18.88659842322063,
+      2
+     ],
+     "radius": 3.04,
+     "height": 11
+    },
+    {
+     "op": "difference",
+     "id": "column",
+     "a": "column",
+     "b": "cut"
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "housing",
+     "b": "column"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 18657.633512613003,
+     "tol": 0.01,
+     "formula": "pi*(25^2*12.5 - (23.04^2 - 20^2)*8.2 - 23.04^2*1.5) - pi*3.04^2*2.8 + 9.7*A(20, 23.04) + 1.5*A(19.999, 20); A(ri, ro) = (t/2)*(ro^2 - ri^2) - (L(ro) - L(ri)), t = asin(6.58/20), L(r) = area of the r 3.04 disc at distance 20 inside the disc of radius r (two-circle lens; L(23.04) = pi*3.04^2, internally tangent)"
+    }
+   }
+  }
+ ]
+}

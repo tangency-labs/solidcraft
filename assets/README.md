@@ -17,12 +17,11 @@ assets/
     ui/design/tools/                 # authoring bases, checks and included review app
     ui/source/                       # Rust viewport glyphs, markers and navigation
   branding/web/source/og.png          # shared social preview card
-  styles/ui/palettes.rs               # light/dark defaults
+  branding/logo/                     # print/web logo files; guide in branding/README.md
   styles/web/loading.css             # web loading/canvas styles
   appearances/library.rs             # built-in visual presets
   materials/library.rs               # physical defaults and colours
-  shaders/viewport.wgsl               # original viewport shader
-  fonts/{liberation-sans,biz-udp-gothic}/ # unmodified fonts and OFL licences
+  fonts/<family>/                    # unmodified fonts and OFL licences
   locales/{en,de,ja,ko}.json          # shared offline catalogs
   platforms/{macos,linux,windows}/    # bundle, freedesktop and WiX templates
   platforms/macos/dmg/                # disk image window: layout, dmgbuild settings, background art
@@ -79,14 +78,16 @@ The CLI still supports arbitrary PNG/ICO exports with `solidcraft-cli icon`.
 | Linux, Nix, deb/rpm, tar, Flatpak, Snap | Copy canonical hicolor images; icon name stays `io.tangencylabs.solidcraft` |
 | AppImage | Uses the Linux 256 px image and `.DirIcon` alias |
 | FreeBSD | Shares Linux hicolor images and freedesktop metadata |
-| Web | HTML/Trunk and `manifest.webmanifest` stay in `apps/solidcraft-web/`; copies Japanese font/licence to `fonts/`, uses the collected CSS, and copies the Linux 32/256/512 px images to `icons/` for the favicon and installed app |
+| Web | HTML/Trunk and `manifest.webmanifest` stay in `apps/solidcraft-web/`; copies the Japanese font/licence to `fonts/` and the Noto Sans Arabic, KR, SC and TC fonts with their licences to `fonts/<family>/` (fetched when a drawing's text needs them), uses the collected CSS, and copies the Linux 32/256/512 px images to `icons/` for the favicon and installed app |
 | Docs and link previews | `xtask book` copies the shared card to the existing `/solidcraft/og.png` public path |
 
 ## Code and provenance
 
 Resources remain compiled by their owning layer through existing APIs:
 `ui-egui::icons::paint_icon` and `Tokens` at L5, model presets in L2 `doc`, and sketch
-fonts at L1. State, projection, interaction, commands and GPU bindings stay in
+fonts at L1. The sketch crate owns its built-in Liberation Sans font and OFL
+licence under `crates/sketch/assets/fonts/liberation-sans/`, so Cargo source
+packages and vendored builds include both files. State, projection, interaction, commands and GPU bindings stay in
 their current modules. Embedded data uses `CARGO_MANIFEST_DIR`; application code
 needs no runtime resource registry or repository lookup.
 

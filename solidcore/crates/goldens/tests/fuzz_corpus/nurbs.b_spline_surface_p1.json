@@ -1,0 +1,7 @@
+{
+  "unit": "nurbs.b_spline_surface_p1",
+  "cases": [
+    {"name": "fuzz00512_canonical_one_multiplicity_per_knot", "origin": "fuzz-out/n2000/nurbs.b_spline_surface_p1/fuzz00512.json (crash: rust: killed by signal 6 (memory allocation of 17179869184 bytes failed))", "cpp": "harness: canonical: one multiplicity per knot", "rust": "ok", "inputs": {"cps": [[5.79, -7.46, 2.53]], "form": 4, "kt": 2, "op": "canonical", "ud": 2, "uk": [0.751], "um": [3], "vd": 1, "vk": [4.12], "vm": [1, 2]}},
+    {"name": "fuzz01669_bad_index_count_9223372036854776000", "origin": "fuzz-out/n2000/nurbs.b_spline_surface_p1/fuzz01669.json (panic: rust: capacity overflow)", "cpp": "harness: invalid argument: bad index/count 9223372036854776000", "rust": "ok", "inputs": {"cps": [[0.473, 9.5, 5.06]], "form": 11, "kt": 4, "op": "canonical", "ud": 2, "uk": [-1.0, 3.15], "um": [9223372036854775807, 3], "vd": 3, "vk": [1.35, 2.59], "vm": [4, 9223372036854775807]}}
+  ]
+}

@@ -1,0 +1,22 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3078",
+  "tangency-labs/solidcraft#3274"
+ ],
+ "what": "an edge flange on the side edge of an existing wall, meeting a flange on the base across the existing bend with a round corner relief (not supported yet: a flange on the side of another flange)",
+ "source": "invariants",
+ "method": "one valid closed body: a 120 x 90 base with a 30 mm wall on its y = 0 edge and a 20 mm flange on its x = 120 edge, plus a flange on the wall's side edge (x = 120) that mitres with it. The outer faces stand on the base's outline and the tallest wall is 30 high, so the bounding box is 120 x 90 x 30 (x 0..120, y 0..90, z 0..30)",
+ "body_count": 1,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   120,
+   90,
+   30
+  ]
+ }
+}

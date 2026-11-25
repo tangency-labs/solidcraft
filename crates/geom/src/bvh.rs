@@ -3,7 +3,9 @@
 //! the box centres, a few items per leaf) and only read afterwards. [`MeshIndex`] holds one over
 //! a mesh's triangles and one over its edge segments, for picking.
 
-use crate::{Aabb3, Mesh, Vec3};
+use crate::prelude::*;
+use crate::{Aabb3, Mesh};
+use solidcore_record::Vec3;
 
 /// Most items in a leaf.
 const LEAF: usize = 4;
@@ -238,29 +240,43 @@ pub struct MeshIndex {
     segment_of: Vec<(u32, u32)>,
 }
 
+fn pad_pick_bounds(mut bounds: Aabb3) -> Aabb3 {
+    // Grow flat boxes by enough to keep rays on a face from rounding out of the box.
+    let scale = [bounds.min.x, bounds.min.y, bounds.min.z, bounds.max.x, bounds.max.y, bounds.max.z].iter().fold(1.0f64, |m, v| m.max(v.abs()));
+    let e = scale * 1e-9;
+    bounds.min -= Vec3::new(e, e, e);
+    bounds.max += Vec3::new(e, e, e);
+    bounds
+}
+
 impl MeshIndex {
     /// The index of `mesh`.
     pub fn new(mesh: &Mesh) -> MeshIndex {
-        let pad = |mut b: Aabb3| {
-            // Flat boxes (a triangle square to an axis) are grown a little, so a ray through
-            // them is never lost to rounding in the box test.
-            let scale = [b.min.x, b.min.y, b.min.z, b.max.x, b.max.y, b.max.z].iter().fold(1.0f64, |m, v| m.max(v.abs()));
-            let e = scale * 1e-9;
-            b.min -= Vec3::new(e, e, e);
-            b.max += Vec3::new(e, e, e);
-            b
-        };
+        let mut index = Self::triangles_only(mesh);
+        let outlines = Self::segments_only(mesh);
+        index.segments = outlines.segments;
+        index.segment_of = outlines.segment_of;
+        index
+    }
+
+    /// Index the triangles without the display outlines of an imported mesh.
+    pub fn triangles_only(mesh: &Mesh) -> MeshIndex {
         let boxes: Vec<Aabb3> = mesh
             .triangles
             .iter()
             .map(|t| {
-                let mut b = Aabb3::EMPTY;
+                let mut bounds = Aabb3::EMPTY;
                 for p in mesh.tri(t).into_iter().flatten() {
-                    b.add(p);
+                    bounds.add(p);
                 }
-                if b.is_empty() { b } else { pad(b) }
+                if bounds.is_empty() { bounds } else { pad_pick_bounds(bounds) }
             })
             .collect();
+        MeshIndex { triangles: Bvh::new(&boxes), triangle_count: mesh.triangles.len(), ..Default::default() }
+    }
+
+    /// Index the edge polylines separately when a tool can pick display outlines.
+    pub fn segments_only(mesh: &Mesh) -> MeshIndex {
         let mut segment_of = Vec::new();
         let mut seg_boxes = Vec::new();
         for (ei, e) in mesh.edges.iter().enumerate() {
@@ -271,11 +287,11 @@ impl MeshIndex {
                 let mut bx = Aabb3::EMPTY;
                 bx.add(*a);
                 bx.add(*b);
-                seg_boxes.push(pad(bx));
+                seg_boxes.push(pad_pick_bounds(bx));
                 segment_of.push((ei as u32, si as u32));
             }
         }
-        MeshIndex { triangles: Bvh::new(&boxes), triangle_count: mesh.triangles.len(), segments: Bvh::new(&seg_boxes), segment_of }
+        MeshIndex { segments: Bvh::new(&seg_boxes), segment_of, ..Default::default() }
     }
 
     /// [`Mesh::raycast`] through the index: the same answer, including which triangle wins a tie.
@@ -309,6 +325,166 @@ impl MeshIndex {
                 }
             },
         );
+    }
+}
+
+/// Most points in a [`PointCloudIndex`] leaf. Kept larger than [`LEAF`] so a multi-million-point
+/// scan takes a few megabytes and builds in a fraction of a second.
+const POINT_LEAF: usize = 64;
+
+#[derive(Clone, Copy, Debug)]
+struct PointNode {
+    min: [f32; 3],
+    max: [f32; 3],
+    /// A leaf: the first of its `count` point indices in [`PointCloudIndex::order`]. Otherwise its
+    /// children are `first` and `first + 1`.
+    first: u32,
+    count: u32,
+}
+
+impl PointNode {
+    fn aabb(&self) -> Aabb3 {
+        Aabb3 {
+            min: Vec3::new(f64::from(self.min[0]), f64::from(self.min[1]), f64::from(self.min[2])),
+            max: Vec3::new(f64::from(self.max[0]), f64::from(self.max[1]), f64::from(self.max[2])),
+        }
+    }
+}
+
+/// The nearest any corner of `b` lies along `d` from `o`.
+fn nearest_along(o: Vec3, d: Vec3, b: &Aabb3) -> f64 {
+    let along = |lo: f64, hi: f64, o: f64, d: f64| if d >= 0.0 { (lo - o) * d } else { (hi - o) * d };
+    along(b.min.x, b.max.x, o.x, d.x) + along(b.min.y, b.max.y, o.y, d.y) + along(b.min.z, b.max.z, o.z, d.z)
+}
+
+/// A compact bounding-volume hierarchy over a point cloud's raw `[x, y, z]` coordinates (single
+/// precision, local to the cloud's origin). Built once per point array so moving or rotating the
+/// cloud never rebuilds it.
+#[derive(Clone, Debug, Default)]
+pub struct PointCloudIndex {
+    nodes: Vec<PointNode>,
+    order: Vec<u32>,
+    point_count: usize,
+}
+
+impl PointCloudIndex {
+    /// Build a hierarchy over `values` (`x, y, z` triples). Non-finite points are left out.
+    pub fn new(values: &[f32]) -> PointCloudIndex {
+        let point_count = (values.len() / 3).min(u32::MAX as usize);
+        let pt = |i: u32| -> Option<[f32; 3]> {
+            let base = (i as usize).checked_mul(3)?;
+            let s = values.get(base..base.checked_add(3)?)?;
+            let p = [*s.first()?, *s.get(1)?, *s.get(2)?];
+            p.iter().all(|v| v.is_finite()).then_some(p)
+        };
+        let mut order: Vec<u32> = (0..point_count as u32).filter(|&i| pt(i).is_some()).collect();
+        if order.is_empty() {
+            return PointCloudIndex { nodes: Vec::new(), order, point_count };
+        }
+        let mut nodes = vec![PointNode { min: [0.0; 3], max: [0.0; 3], first: 0, count: 0 }];
+        let mut todo = vec![(0usize, 0usize, order.len())];
+        while let Some((n, start, end)) = todo.pop() {
+            let Some(span) = order.get_mut(start..end) else { continue };
+            let mut min = [f32::INFINITY; 3];
+            let mut max = [f32::NEG_INFINITY; 3];
+            for &i in span.iter() {
+                if let Some(p) = pt(i) {
+                    for k in 0..3 {
+                        min[k] = min[k].min(p[k]);
+                        max[k] = max[k].max(p[k]);
+                    }
+                }
+            }
+            let size = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
+            let axis = if size[0] >= size[1] && size[0] >= size[2] {
+                0
+            } else if size[1] >= size[2] {
+                1
+            } else {
+                2
+            };
+            let extent = size[axis];
+            if span.len() <= POINT_LEAF || !(extent > 0.0 && extent.is_finite()) {
+                if let Some(node) = nodes.get_mut(n) {
+                    *node = PointNode { min, max, first: start as u32, count: span.len() as u32 };
+                }
+                continue;
+            }
+            let key = |i: &u32| pt(*i).map_or(0.0f32, |p| p[axis]);
+            let mid = span.len() / 2;
+            span.select_nth_unstable_by(mid, |a, b| key(a).total_cmp(&key(b)));
+            let left = nodes.len();
+            nodes.push(PointNode { min: [0.0; 3], max: [0.0; 3], first: 0, count: 0 });
+            nodes.push(PointNode { min: [0.0; 3], max: [0.0; 3], first: 0, count: 0 });
+            if let Some(node) = nodes.get_mut(n) {
+                *node = PointNode { min, max, first: left as u32, count: 0 };
+            }
+            todo.push((left, start, start + mid));
+            todo.push((left + 1, start + mid, end));
+        }
+        PointCloudIndex { nodes, order, point_count }
+    }
+
+    /// Number of points this index was built for.
+    pub fn point_count(&self) -> usize {
+        self.point_count
+    }
+
+    /// Visit every point index whose leaf box may come within `a + b·t` of the ray from `o` along
+    /// unit `d` ahead of `o` and within `*max_t` along `d`. Nearer child boxes are entered first,
+    /// and `visit` may tighten `max_t` as front hits are found so boxes behind them are skipped.
+    pub fn visit_near_ray(&self, o: Vec3, d: Vec3, a: f64, b: f64, max_t: &mut f64, mut visit: impl FnMut(u32, &mut f64)) {
+        if self.nodes.is_empty() || ![a, b, o.x, o.y, o.z, d.x, d.y, d.z].iter().all(|v| v.is_finite()) || !(*max_t >= 0.0) {
+            return;
+        }
+        let a = a.max(0.0);
+        let b = b.max(0.0);
+        let inv = Vec3::new(1.0 / d.x, 1.0 / d.y, 1.0 / d.z);
+        let test = |n: usize, cap: f64| -> Option<f64> {
+            let bx = self.nodes.get(n)?.aabb();
+            let near = nearest_along(o, d, &bx);
+            if near > cap {
+                return None;
+            }
+            let far = farthest_along(o, d, &bx).min(cap);
+            if far < 0.0 {
+                return None;
+            }
+            let reach = a + b * far;
+            let enter = ray_box(o, d, inv, &bx, reach)?;
+            (enter <= cap + reach).then_some(enter)
+        };
+        let Some(root_t) = test(0, *max_t) else { return };
+        let mut stack = vec![(0usize, root_t)];
+        while let Some((n, enter)) = stack.pop() {
+            let Some(node) = self.nodes.get(n) else { continue };
+            let bx = node.aabb();
+            if nearest_along(o, d, &bx) > *max_t {
+                continue;
+            }
+            let far = farthest_along(o, d, &bx).min(*max_t);
+            let reach = a + b * far.max(0.0);
+            if enter > *max_t + reach {
+                continue;
+            }
+            if node.count > 0 {
+                let (lo, hi) = (node.first as usize, node.first as usize + node.count as usize);
+                for &i in self.order.get(lo..hi).unwrap_or(&[]) {
+                    visit(i, max_t);
+                }
+                continue;
+            }
+            let (l, r) = (node.first as usize, node.first as usize + 1);
+            let tl = test(l, *max_t);
+            let tr = test(r, *max_t);
+            match (tl, tr) {
+                (Some(x), Some(y)) if x <= y => stack.extend([(r, y), (l, x)]),
+                (Some(x), Some(y)) => stack.extend([(l, x), (r, y)]),
+                (Some(x), None) => stack.push((l, x)),
+                (None, Some(y)) => stack.push((r, y)),
+                (None, None) => {}
+            }
+        }
     }
 }
 

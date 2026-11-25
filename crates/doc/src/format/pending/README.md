@@ -5,7 +5,7 @@ here is the whole format bump: never edit `FORMAT`, `JSON_STEPS` or another chan
 
 - Name it after the change, lowercase with dashes: `placed-plane-origins.rs`.
 - Start it with a `//!` note: what is saved, what an older design gets without it, and what
-  the last release does with a design that has it (it refuses the newer format number).
+  the last release does with a design that has it (it warns about the newer format number, opens what it can read and keeps the rest).
 - If older designs must be rewritten as they open, add the step to the same file:
 
   ```rust

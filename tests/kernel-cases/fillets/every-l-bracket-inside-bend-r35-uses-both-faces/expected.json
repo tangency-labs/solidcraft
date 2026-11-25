@@ -1,0 +1,21 @@
+{
+ "sources": [],
+ "what": "an L-bracket's inside bend rounded r35, exactly as long as both inside faces: the round uses them up and meets the legs' ends at their edges",
+ "source": "analytic",
+ "method": "L-bracket: the legs 40x20x5 (x 0..40, z 0..5) and 5x20x40 (x 0..5, z 0..40) joined, 20 deep in y: V0 = 4000 + 4000 - 500 = 7500, 8 faces. The inside faces run 35 from the bend (x = 5..40 on the foot's top, z = 5..40 on the upright's inner face); the r35 round is tangent to them at their far edges (x = 40, z = 40), so both are used up. Added = 20 (1-pi/4) 35^2 = 5257.7450. V = 12757.7450. Faces 8 - 2 + 1 = 7. No continuity check: with both faces it was tangent to used up, the round meets only the legs' end faces (x = 40, z = 40), square to it (creases), so no tangent seam is left to measure.",
+ "body_count": 1,
+ "volume_mm3": 12757.744996762518,
+ "faces": 7,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   20,
+   40
+  ]
+ }
+}

@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "sheet.export_bend_table asked for a format it does not write (xlsx)",
+ "source": "invariants",
+ "method": "the table is written as csv or json only: any other format is refused, naming the two",
+ "outcome": "refused",
+ "refusal": "`format` must be csv or json"
+}

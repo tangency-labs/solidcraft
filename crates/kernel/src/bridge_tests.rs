@@ -4,16 +4,33 @@
 use super::*;
 use crate::{box_solid, cylinder};
 
+#[test]
+fn nearest_distance_uses_a_point_on_the_curve_not_its_chord() {
+    let curve = solidcore_record::brep::Curve::Circle {
+        frame: solidcore_record::brep::Frame { origin: [0.0, 0.0, 0.0], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] },
+        radius: 1.0,
+    };
+    let end = std::f64::consts::FRAC_PI_2;
+    let line = ChainLine {
+        curves: vec![(CurveEval::new(&curve).unwrap(), [0.0, end])],
+        samples: vec![
+            Sample { p: Vec3::new(1.0, 0.0, 0.0), s: 0.0, edge: 0, t: 0.0 },
+            Sample { p: Vec3::new(0.0, 1.0, 0.0), s: 2.0_f64.sqrt(), edge: 0, t: end },
+        ],
+        closed: false,
+    };
+    let distance = line.nearest_with_distance(Vec3::new(0.5, 0.5, 0.0)).1.unwrap();
+    assert!((distance - (1.0 - 0.5_f64.sqrt())).abs() < 1e-12, "{distance}");
+}
+
 /// The shape of a bridge's cross-section at the parameter `u`, measured off the finished face (not
 /// from the construction): position, unit tangent, curvature vector and the arclength derivative
 /// of that curvature vector at the start of the cross-section. The samples run inwards from the
 /// boundary, so nothing is asked of the surface outside its own domain.
 fn section_at(body: &Body, u: f64) -> (Vec3, Vec3, Vec3, Vec3) {
-    let face = body.solid.face_iter().next().unwrap();
-    let surf = face.surface();
-    let (Some(_), Some((v0, _))) = surf.try_range_tuple() else { panic!("unbounded") };
+    let (surf, [_, [v0, _]]) = the_face(body).unwrap();
     let h = 1e-3;
-    let q: Vec<Vec3> = (0..5).map(|k| from_p3(surf.subs(u, v0 + k as f64 * h))).collect();
+    let q: Vec<Vec3> = (0..5).map(|k| surf.point([u, v0 + k as f64 * h]).unwrap()).collect();
     let (f0, f1, f2, f3, f4) = (q[0], q[1], q[2], q[3], q[4]);
     let d1 = (f0 * -25.0 + f1 * 48.0 + f2 * -36.0 + f3 * 16.0 + f4 * -3.0) * (1.0 / (12.0 * h));
     let d2 = (f0 * 35.0 + f1 * -104.0 + f2 * 114.0 + f3 * -56.0 + f4 * 11.0) * (1.0 / (12.0 * h * h));
@@ -25,11 +42,9 @@ fn section_at(body: &Body, u: f64) -> (Vec3, Vec3, Vec3, Vec3) {
 /// The same at the end of the cross-section (`v = v1`), with the samples running back inwards and
 /// the odd derivatives turned round.
 fn section_end_at(body: &Body, u: f64) -> (Vec3, Vec3, Vec3, Vec3) {
-    let face = body.solid.face_iter().next().unwrap();
-    let surf = face.surface();
-    let (Some(_), Some((_, v1))) = surf.try_range_tuple() else { panic!("unbounded") };
+    let (surf, [_, [_, v1]]) = the_face(body).unwrap();
     let h = 1e-3;
-    let q: Vec<Vec3> = (0..5).map(|k| from_p3(surf.subs(u, v1 - k as f64 * h))).collect();
+    let q: Vec<Vec3> = (0..5).map(|k| surf.point([u, v1 - k as f64 * h]).unwrap()).collect();
     let (f0, f1, f2, f3, f4) = (q[0], q[1], q[2], q[3], q[4]);
     let d1 = (f0 * -25.0 + f1 * 48.0 + f2 * -36.0 + f3 * 16.0 + f4 * -3.0) * (-1.0 / (12.0 * h));
     let d2 = (f0 * 35.0 + f1 * -104.0 + f2 * 114.0 + f3 * -56.0 + f4 * 11.0) * (1.0 / (12.0 * h * h));
@@ -81,28 +96,40 @@ fn valley_between_cylinders(count: usize, r: f64) -> (Vec<Frame>, Vec<Frame>) {
     (a, b)
 }
 
-/// The edges of `face` chained into one loop.
-fn loop_of(face: &mt::Face) -> Vec<mt::Edge> {
-    let mut pool: Vec<mt::Edge> = face.edge_iter().collect();
-    let mut out = vec![pool.remove(0)];
-    let mut end = out[0].back().clone();
-    while !pool.is_empty() {
-        let k = pool.iter().position(|e| e.front().id() == end.id() || e.back().id() == end.id()).unwrap();
-        let e = pool.remove(k);
-        let e = if e.front().id() == end.id() { e } else { e.inverse() };
-        end = e.back().clone();
-        out.push(e);
-    }
-    out
+/// The edges of `body`'s face `face` chained into one loop (its outer loop, as it runs).
+fn loop_of(body: &Body, face: usize) -> Chain {
+    let r = body.record();
+    let solidcore_record::brep::Loop::Edges { edges } = &r.faces[face].loops[0] else { panic!("a vertex loop") };
+    edges.iter().map(|u| (u.edge as usize, u.forward)).collect()
 }
 
-/// The face of `body` that contains `at`.
-fn face_at(body: &Body, at: Vec3) -> mt::Face {
-    body.solid
-        .face_iter()
-        .find(|f| f.surface().search_nearest_parameter(p3(at), None, 100).is_some_and(|(u, v)| from_p3(f.surface().subs(u, v)).dist(at) < 1e-6))
-        .unwrap()
-        .clone()
+/// The face of `body` (its index) whose surface contains `at`.
+fn face_at(body: &Body, at: Vec3) -> usize {
+    let r = body.record();
+    r.faces.iter().position(|f| SurfaceEval::new(&f.surface).unwrap().project(at, None, 1e-6).is_some()).unwrap()
+}
+
+/// A 600 by 150 mm sheet with crown in both directions. Its height is
+/// 30(x/600)² + 9(y/150)² + 6(y/150)³. At the origin the requested diagonal
+/// crosses the u edge in one direction and the v edge in the other.
+#[test]
+fn a_double_curvature_panel_corner_keeps_its_g3_frame() {
+    let mut points = Vec::new();
+    for (j, height_y) in [0.0, 0.0, 3.0, 15.0].into_iter().enumerate() {
+        for (i, height_x) in [0.0, 0.0, 30.0].into_iter().enumerate() {
+            points.push(Vec3::new(300.0 * i as f64, 50.0 * j as f64, height_x + height_y));
+        }
+    }
+    let knots = [vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]];
+    let panel = crate::surfaces::tensor_sheet(&NurbsSurface::new([2, 3], knots, &points, &[1.0; 12]).unwrap()).unwrap();
+    let boundary = chain(&panel, &[Vec3::new(300.0, 0.0, 7.5)]).unwrap();
+    let leave = Vec3::new(1.0, -1.0, 0.0).normalized().unwrap();
+    let frames = frames(&panel, 0, &boundary, leave, 5).unwrap();
+    let corner = frames.iter().find(|f| f.p.len() < 1e-8).unwrap();
+    let expected_bend = 60.0 * (leave.x / 600.0).powi(2) + 18.0 * (leave.y / 150.0).powi(2);
+    let expected_change = 36.0 * (leave.y / 150.0).powi(3);
+    assert!((corner.bend.z - expected_bend).abs() < 1e-10, "{corner:?}");
+    assert!((corner.bend_change.z - expected_change).abs() < 1e-11, "{corner:?}");
 }
 
 #[test]
@@ -110,9 +137,9 @@ fn frames_read_a_plane_and_a_cylinder_wall() {
     // A 40 x 30 x 20 box: the top face's rim leaves along +x, a plane with no curvature.
     let b = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap();
     let top = face_at(&b, Vec3::new(20.0, 15.0, 20.0));
-    let rim = loop_of(&top);
-    assert!(chain_closes(&rim));
-    let f = frames(&top, &rim, Vec3::new(1.0, 0.0, 0.0), 9).unwrap();
+    let rim = loop_of(&b, top);
+    assert!(chain_closes(&b, &rim));
+    let f = frames(&b, top, &rim, Vec3::new(1.0, 0.0, 0.0), 9).unwrap();
     assert_eq!(f.len(), 9);
     for s in &f {
         assert!((s.p.z - 20.0).abs() < 1e-9, "{s:?}");
@@ -127,15 +154,15 @@ fn frames_read_a_plane_and_a_cylinder_wall() {
     // has no tangent plane to work in.
     let c = cylinder(Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0), 10.0, 30.0).unwrap();
     let wall = face_at(&c, Vec3::new(10.0, 0.0, 15.0));
-    let ring = loop_of(&wall);
-    let f = frames(&wall, &ring, Vec3::new(0.0, 0.0, 1.0), 5).unwrap();
+    let ring = loop_of(&c, wall);
+    let f = frames(&c, wall, &ring, Vec3::new(0.0, 0.0, 1.0), 5).unwrap();
     for s in &f {
         assert!(s.bend.len() < 1e-6, "the axis direction is straight: {s:?}");
     }
     // A leave direction that is normal to the support surface has no tangent plane to work in.
-    assert!(frames(&top, &rim, Vec3::new(0.0, 0.0, 1.0), 9).is_err(), "a face's own normal is no direction to leave in");
+    assert!(frames(&b, top, &rim, Vec3::new(0.0, 0.0, 1.0), 9).is_err(), "a face's own normal is no direction to leave in");
     // On the cylinder's wall only a direction with a tangential part is usable.
-    assert!(frames(&wall, &ring, Vec3::new(1.0, 0.0, 0.0), 5).is_ok());
+    assert!(frames(&c, wall, &ring, Vec3::new(1.0, 0.0, 0.0), 5).is_ok());
 }
 
 #[test]
@@ -224,6 +251,9 @@ fn the_bridge_refuses_what_it_cannot_hold() {
     assert!(bridge(&bad, &b, [Continuity::G1, Continuity::G1], [0.0, 0.0]).is_err());
     // Fewer than two stations.
     assert!(bridge(&a[..1], &b[..1], [Continuity::G1, Continuity::G1], [0.0, 0.0]).is_err());
+    // G4 is past the bridge's Hermite rows: refused by the one check, not built as G3.
+    let e = bridge(&a, &b, [Continuity::G4, Continuity::G1], [0.0, 0.0]).unwrap_err().to_string();
+    assert!(e.contains("not supported yet") && e.contains("g4"), "{e}");
     // Every order from G0 to G3 builds.
     for (x, y) in [(Continuity::G0, Continuity::G0), (Continuity::G1, Continuity::G0), (Continuity::G3, Continuity::G1)] {
         let body = bridge(&a, &b, [x, y], [0.0, 0.0]).unwrap();
@@ -232,15 +262,6 @@ fn the_bridge_refuses_what_it_cannot_hold() {
             assert!(angle_deg(t, Vec3::new(0.0, 1.0, 0.0)) < 0.01, "{x:?}");
         }
     }
-}
-
-#[test]
-fn continuity_parses_its_words() {
-    assert_eq!(Continuity::parse("g0"), Some(Continuity::G0));
-    assert_eq!(Continuity::parse("G3"), Some(Continuity::G3));
-    assert_eq!(Continuity::parse("g9"), None);
-    assert_eq!(Continuity::parse(""), None);
-    assert_eq!([Continuity::G0, Continuity::G1, Continuity::G2, Continuity::G3].map(Continuity::conditions), [1, 2, 3, 4]);
 }
 
 /// A radius-10 tube along z from `z0` to `z0 + 30`, turned `turn` radians about its axis (which
@@ -269,6 +290,24 @@ fn worst_turn(body: &Body) -> f64 {
             angle_deg(Vec3::new(a.x, a.y, 0.0), Vec3::new(b.x, b.y, 0.0))
         })
         .fold(0.0, f64::max)
+}
+
+#[test]
+fn a_bridge_on_a_rim_chord_reports_the_circular_gap() {
+    let tube = open_tube(0.0, 0.0, 30.0);
+    let rim = ChainLine::of(&tube, &chain(&tube, &rim_at(30.0)).unwrap()).unwrap();
+    let (a, b) = (rim.samples[0].p, rim.samples[1].p);
+    let mid = (a + b) * 0.5;
+    let expected = 10.0 - mid.x.hypot(mid.y);
+    assert!(expected > 1e-5);
+    let row = |dz: f64| -> Vec<Frame> {
+        (0..5)
+            .map(|i| Frame { p: a + (b - a) * (f64::from(i) / 4.0) + Vec3::Z * dz, leave: Vec3::Z, bend: Vec3::ZERO, bend_change: Vec3::ZERO })
+            .collect()
+    };
+    let sheet = bridge(&row(0.0), &row(1.0), [Continuity::G0; 2], [0.0; 2]).unwrap();
+    let gap = boundary_gap(&sheet, &rim, false).unwrap();
+    assert!((gap - expected).abs() < 1e-10, "boundary gap {gap}, circular sagitta {expected}");
 }
 
 #[test]
@@ -332,13 +371,12 @@ fn a_blend_between_offset_strips_is_the_cubic_hermite_strip() {
         }
     }
     // G1 at both seams: the blend's normal is the top faces' (±z) all along each rim.
-    let face = made.solid.face_iter().next().unwrap();
-    let surf = face.surface();
-    let (Some((u0, u1)), Some((v0, v1))) = surf.try_range_tuple() else { panic!("unbounded") };
+    let (surf, [[u0, u1], [v0, v1]]) = the_face(&made).unwrap();
     for i in 0..=16 {
         let u = u0 + (u1 - u0) * i as f64 / 16.0;
         for v in [v0, v1] {
-            let n = surf.normal(u, v);
+            let (_, su, sv) = surf.derivs(u, v).unwrap();
+            let n = su.cross(sv);
             let worst = angle_deg(Vec3::new(n.x, n.y, n.z), Vec3::Z).min(angle_deg(Vec3::new(n.x, n.y, n.z), Vec3::Z * -1.0));
             assert!(worst < 0.01, "at u = {u}, v = {v}: the normal is {worst}° off the top faces'");
         }

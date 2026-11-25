@@ -1,0 +1,25 @@
+{
+ "sources": [],
+ "what": "a cylinder wall r 10, 20 high, thickened 2 symmetric: a tube r 9..11",
+ "source": "analytic",
+ "method": "symmetric splits the thickness 1 each side: V = pi (11^2 - 9^2) 20 = 800 pi = 2513.27; faces: outer and inner cylinders and two flat rings, 4",
+ "body_count": 1,
+ "faces": 4,
+ "volume_mm3": 2513.2741228718346,
+ "surface_types": [
+  "cylinder",
+  "plane"
+ ],
+ "bbox": {
+  "min": [
+   -11,
+   -11,
+   0
+  ],
+  "max": [
+   11,
+   11,
+   20
+  ]
+ }
+}

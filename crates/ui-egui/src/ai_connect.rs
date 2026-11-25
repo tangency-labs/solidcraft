@@ -118,7 +118,7 @@ pub fn tick(app: &mut SolveApp) {
             }
             let _ = std::fs::write(&file, serde_json::to_string(&all).unwrap_or_default());
             let names = fresh.iter().map(|c| client_name(c)).collect::<Vec<_>>().join(", ");
-            app.set_status(crate::i18n::format("ai.connected_toast", &[("clients", &names)]), false);
+            app.set_status(solidcraft_ui_text::format("ai.connected_toast", &[("clients", &names)]), false);
         }
         Err(std::sync::mpsc::TryRecvError::Empty) => {}
         Err(std::sync::mpsc::TryRecvError::Disconnected) => app.ai_connect.job = None,

@@ -1,0 +1,150 @@
+{
+  "area": "sweeps",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "screw_sweep",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "direction": [
+          -0.0,
+          -0.0,
+          -1.0
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "pitch": -8.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                24.0,
+                0.0,
+                -2.0
+              ],
+              "start": [
+                20.0,
+                0.0,
+                -2.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                24.0,
+                0.0,
+                2.0
+              ],
+              "start": [
+                24.0,
+                0.0,
+                -2.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                20.0,
+                0.0,
+                2.0
+              ],
+              "start": [
+                24.0,
+                0.0,
+                2.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                20.0,
+                0.0,
+                -2.0
+              ],
+              "start": [
+                20.0,
+                0.0,
+                2.0
+              ]
+            }
+          }
+        ],
+        "tolerance": 0.0008,
+        "turns": 5.0
+      }
+    }
+  ],
+  "case": "3862-coil-square-wire-outside-the-diameter",
+  "expected": {
+    "bbox": {
+      "max": [
+        24,
+        24,
+        42
+      ],
+      "min": [
+        -24,
+        -24,
+        -2
+      ]
+    },
+    "body_count": 1,
+    "method": "outside puts the wire centre at radius 20 + 2 = 22 (radial 20..24); the 4 x 4 section turned 5 times by the screw: V = 16 * 2 pi 22 * 5 = 11060.6. bbox r 24, z from -2 to 40 + 2.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#3862",
+      "tangency-labs/solidcraft#3915"
+    ],
+    "volume_mm3": 11058.40614063607,
+    "what": "a clockwise 5-turn coil of 4 mm square wire placed outside a 40 mm diameter, pitch 8 (the section, position and direction parameters)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 84,
+      "faces": 42,
+      "vertices": 44
+    }
+  },
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b1"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 11099.684138271352,
+      "body_count": 1,
+      "edges": 66,
+      "faces": 24,
+      "vertices": 44,
+      "volume_mm3": 11058.406140637037
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#3862",
+    "tangency-labs/solidcraft#3915"
+  ],
+  "traced_ops": [
+    "screw_sweep"
+  ],
+  "ungraded": [],
+  "what": "a clockwise 5-turn coil of 4 mm square wire placed outside a 40 mm diameter, pitch 8 (the section, position and direction parameters)",
+  "why_not": []
+}

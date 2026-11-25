@@ -1,0 +1,15 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3120",
+  "tangency-labs/solidcraft#3208"
+ ],
+ "what": "a prism over a circular segment whose curved side lies on a SURFACE_OF_LINEAR_EXTRUSION of an ELLIPSE (a = b = 10) and spans the ellipse's parameter origin (-60 to +60 degrees): the face must cover only the narrow segment side, not wrap the ellipse",
+ "source": "analytic",
+ "method": "segment of a circle r=10 over theta=2pi/3: A_seg = r^2/2 (theta - sin theta) = 61.418485; height 5; V = A_seg*h = 307.0924; A = 2*A_seg + chord 2 r sin(theta/2)*h + arc r*theta*h = 314.1593; 4 faces, 6 edges, 4 vertices",
+ "body_count": 1,
+ "volume_mm3": 307.0924,
+ "area_mm2": 314.1593,
+ "faces": 4,
+ "edges": 6,
+ "vertices": 4
+}

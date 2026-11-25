@@ -1,0 +1,22 @@
+{
+ "sources": [],
+ "what": "the midplane of a plane and itself",
+ "source": "analytic",
+ "method": "halfway between XY and XY: XY",
+ "construction": {
+  "M": {
+   "plane": {
+    "through": [
+     0,
+     0,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   }
+  }
+ }
+}

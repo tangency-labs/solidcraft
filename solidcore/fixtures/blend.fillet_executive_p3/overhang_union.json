@@ -1,0 +1,124 @@
+{
+  "cases": [
+    {
+      "name": "overhang-union-y-overhang-all-edges-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                -2,
+                10
+              ],
+              "size": [
+                10,
+                6,
+                10
+              ]
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "all_edges": true
+        }
+      }
+    },
+    {
+      "name": "overhang-union-y-both-overhang-all-edges-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                -2,
+                10
+              ],
+              "size": [
+                10,
+                14,
+                10
+              ]
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "all_edges": true
+        }
+      }
+    },
+    {
+      "name": "overhang-union-xy-overhang-all-edges-r0.5",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                -2,
+                -2,
+                10
+              ],
+              "size": [
+                10,
+                6,
+                10
+              ]
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "all_edges": true
+        }
+      }
+    }
+  ]
+}

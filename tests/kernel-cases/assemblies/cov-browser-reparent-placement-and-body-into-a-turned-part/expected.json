@@ -1,0 +1,52 @@
+{
+ "sources": [],
+ "what": "browser.reparent of a part's placement and a loose body into a component placed turned and moved",
+ "source": "analytic",
+ "method": "Arm: box 40x10x10 from (0,-5,0), centre (20,0,5), V 4000, placed as occurrence 3 (ids count every component, occurrence and feature made); Cube: box 10x10x10 from (0,20,0) in the design, centre (5,25,5), V 1000; Holder placed a quarter turn about z and 100 mm along x. Both move into Holder and keep their world place: Holder's total is V 5000, centre ((4000*20 + 1000*5)/5000, (1000*25)/5000, 5) = (17,5,5), box (0,-5,0)-(40,30,10)",
+ "body_count": 2,
+ "volume_mm3": 5000.0,
+ "center_of_mass": [
+  17.0,
+  5.0,
+  5.0
+ ],
+ "bbox": {
+  "min": [
+   0.0,
+   -5.0,
+   0.0
+  ],
+  "max": [
+   40.0,
+   30.0,
+   10.0
+  ]
+ },
+ "results": [
+  {
+   "step": 8,
+   "json": {
+    "total": {
+     "volume_mm3": 5000.0,
+     "center_of_mass": [
+      17.0,
+      5.0,
+      5.0
+     ],
+     "bbox": {
+      "min": [
+       0.0,
+       -5.0,
+       0.0
+      ],
+      "max": [
+       40.0,
+       30.0,
+       10.0
+      ]
+     }
+    }
+   }
+  }
+ ]
+}

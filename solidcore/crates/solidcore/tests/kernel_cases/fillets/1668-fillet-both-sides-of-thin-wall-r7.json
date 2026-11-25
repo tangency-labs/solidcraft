@@ -1,0 +1,195 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b30": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b30"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b31"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b31"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b32"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b32"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b33"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b33"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b34"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  52.0,
+                  32.0,
+                  42.0
+                ],
+                [
+                  -52.0,
+                  32.0,
+                  42.0
+                ]
+              ],
+              "index": 3
+            },
+            {
+              "at": [
+                [
+                  50.0,
+                  30.0,
+                  40.0
+                ],
+                [
+                  -50.0,
+                  30.0,
+                  40.0
+                ]
+              ],
+              "index": 23
+            }
+          ],
+          "points": [
+            [
+              0.0,
+              32.0,
+              42.0
+            ],
+            [
+              0.0,
+              30.0,
+              40.0
+            ]
+          ],
+          "tolerance": 6.457779382943173
+        },
+        "kind": "round",
+        "sizes": [
+          7.0,
+          7.0
+        ]
+      }
+    }
+  ],
+  "case": "1668-fillet-both-sides-of-thin-wall-r7",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "method": "as 1668-fillet-both-sides-of-thin-wall at R7: the inside (concave) round adds (1-pi/4) 49 along 100 about (23, 33); the outer one's part over the hollow lies at least 9.7 from (23, 33), inside the added material, so it takes its whole section (1-pi/4) 49 along 104. V = 39552 - (1-pi/4) 49 x 4 = 39509.938040, exact: the tolerance holds it to 0.04 mm^3",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#1668",
+      "tangency-labs/solidcraft#1080"
+    ],
+    "tolerance": {
+      "rel": 1e-6
+    },
+    "volume_mm3": 39509.9380400259,
+    "what": "R7 rounds of the outer top edge and the inside edge of a 2 mm wall in one fillet: the inside round holds the material the outer one runs over, so the wall stays closed"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 30,
+      "faces": 13,
+      "vertices": 20
+    }
+  },
+  "records": "1668-fillet-both-sides-of-thin-wall-r7.bodies.json.gz",
+  "result": [
+    {
+      "body": "Case",
+      "made": "b34"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 39569.03519474522,
+      "body_count": 1,
+      "edges": 30,
+      "faces": 13,
+      "vertices": 20,
+      "volume_mm3": 39509.93803969449
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#1668",
+    "tangency-labs/solidcraft#1080"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "merge_faces",
+    "copy",
+    "copy",
+    "tagged",
+    "offset_faces",
+    "copy",
+    "copy",
+    "tagged",
+    "merge_faces",
+    "copy",
+    "copy",
+    "tagged",
+    "offset_faces",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "R7 rounds of the outer top edge and the inside edge of a 2 mm wall in one fillet: the inside round holds the material the outer one runs over, so the wall stays closed",
+  "why_not": []
+}

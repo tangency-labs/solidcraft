@@ -1,7 +1,8 @@
 //! Stored parameters and stable entity ids for editing an existing sketch pattern.
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 
 use crate::{ConstraintKind, Curve, CurveKind, Sketch, SketchError};
 
@@ -225,7 +226,19 @@ impl Sketch {
                 }
                 instance
             } else {
-                let cs: Vec<_> = entity_ids.iter().filter_map(|id| self.curve_index(id)).collect();
+                let mut cs: Vec<_> = entity_ids.iter().filter_map(|id| self.curve_index(id)).collect();
+                let spline_ids: std::collections::BTreeSet<String> = cs
+                    .iter()
+                    .filter_map(|index| self.curves.get(*index))
+                    .filter(|curve| matches!(curve.kind, CurveKind::Spline { .. }))
+                    .map(|curve| curve.id.clone())
+                    .collect();
+                let helpers =
+                    self.curves.iter().enumerate().filter_map(|(index, curve)| {
+                        curve.spline_handle_of.as_ref().is_some_and(|parent| spline_ids.contains(parent)).then_some(index)
+                    });
+                let mut seen: std::collections::BTreeSet<usize> = cs.iter().copied().collect();
+                cs.extend(helpers.filter(|index| seen.insert(*index)));
                 let ps: Vec<_> = entity_ids.iter().filter(|id| self.curve_index(id).is_none()).filter_map(|id| self.resolve_point(id)).collect();
                 let (made, map) = copy_through(self, &cs, &ps, &transform)?;
                 let mut cons = Vec::new();
@@ -306,10 +319,12 @@ impl Sketch {
         if self.patterns.is_empty() {
             return;
         }
-        let curves: std::collections::BTreeSet<_> = self.curves.iter().map(|c| c.id.as_str()).collect();
-        let points: std::collections::BTreeSet<_> = self.points.iter().map(|p| p.id.as_str()).collect();
-        let constraint_ids: std::collections::BTreeSet<_> = self.constraints.iter().map(|c| c.id.as_str()).collect();
-        let retired: Vec<_> = self
+        let curves: std::collections::HashSet<_> = self.curves.iter().map(|c| c.id.as_str()).collect();
+        let points: std::collections::HashSet<_> = self.points.iter().map(|p| p.id.as_str()).collect();
+        let constraint_ids: std::collections::HashSet<_> = self.constraints.iter().map(|c| c.id.as_str()).collect();
+        // A set, since each pattern is looked up in it twice below. With a list, a design with
+        // many patterns to drop took minutes at every solve.
+        let retired: std::collections::HashSet<_> = self
             .patterns
             .iter()
             .filter(|pattern| {
@@ -334,15 +349,31 @@ impl Sketch {
     /// Conic rho is an authored shape parameter rather than a solver unknown. Like its
     /// defining points, the copies follow the seed's shape when that parameter is edited.
     pub(crate) fn refresh_pattern_shapes(&mut self) {
-        if !self.curves.iter().any(|c| matches!(c.kind, CurveKind::Conic { .. } | CurveKind::Arc { .. })) {
+        if self.patterns.is_empty() || !self.curves.iter().any(|c| matches!(c.kind, CurveKind::Conic { .. } | CurveKind::Arc { .. })) {
             return;
         }
-        for pattern in &self.patterns {
-            let sources: Vec<_> = pattern.entities.iter().filter_map(|id| self.curve_index(id)).collect();
-            for instance in &pattern.instances {
-                for (seed, copy) in sources.iter().zip(&instance.curves) {
+        // This runs before every solve, drag frames included. Ids resolve through maps built
+        // once here: a linear search per copy cost patterns × copies × seeds × curves string
+        // comparisons, which dominated dragging anything in a sketch with a large pattern.
+        // Only curve shapes change below, so the indices stay valid throughout.
+        let (sources, copies): (Vec<Vec<usize>>, Vec<Vec<Vec<Option<usize>>>>) = {
+            let curves = first_index(self.curves.iter().map(|c| c.id.as_str()));
+            self.patterns
+                .iter()
+                .map(|pattern| {
+                    (
+                        pattern.entities.iter().filter_map(|id| curves.get(id.as_str()).copied()).collect(),
+                        pattern.instances.iter().map(|i| i.curves.iter().map(|id| curves.get(id.as_str()).copied()).collect()).collect(),
+                    )
+                })
+                .unzip()
+        };
+        let points = first_index(self.points.iter().map(|p| p.id.as_str()));
+        for ((pattern, sources), copies) in self.patterns.iter().zip(&sources).zip(&copies) {
+            for (instance, copies) in pattern.instances.iter().zip(copies) {
+                for (seed, copy) in sources.iter().zip(copies) {
                     if let Some(CurveKind::Conic { rho, .. }) = self.curves.get(*seed).map(|c| &c.kind)
-                        && let Some(copy) = self.curve_index(copy)
+                        && let Some(copy) = *copy
                     {
                         let rho = *rho;
                         if let Some(CurveKind::Conic { rho: slot, .. }) = self.curves.get_mut(copy).map(|c| &mut c.kind) {
@@ -355,9 +386,9 @@ impl Sketch {
                             self.points
                                 .get(p)
                                 .and_then(|p| instance.points.iter().find(|(id, _)| *id == p.id))
-                                .and_then(|(_, id)| self.point_index(id))
+                                .and_then(|(_, id)| points.get(id.as_str()).copied())
                         };
-                        if let (Some(c), Some(a), Some(b), Some(copy)) = (mapped(c), mapped(a), mapped(b), self.curve_index(copy))
+                        if let (Some(c), Some(a), Some(b), Some(copy)) = (mapped(c), mapped(a), mapped(b), *copy)
                             && let Some(curve) = self.curves.get_mut(copy)
                         {
                             curve.kind = CurveKind::Arc { c, a, b };
@@ -369,10 +400,41 @@ impl Sketch {
         }
     }
 
+    /// The ids of the sketch's pattern relations (the constraints that keep a pattern copy
+    /// following its original), in order. Each call walks every constraint, so many lookups
+    /// belong in a set built from one call.
+    pub(crate) fn pattern_relation_ids(&self) -> impl Iterator<Item = &str> {
+        #[cfg(test)]
+        crate::tests::count_id_search();
+        self.constraints
+            .iter()
+            .filter(|c| matches!(c.kind, ConstraintKind::PatternPoint { .. } | ConstraintKind::PatternRadius { .. }))
+            .map(|c| c.id.as_str())
+    }
+
     pub fn validate_patterns(&self) -> Result<(), SketchError> {
-        if self.patterns.len() > crate::MAX_CONSTRAINTS {
+        if self.patterns.len() > crate::CEILING_CONSTRAINTS {
             return Err(SketchError::TooLarge);
         }
+        // The ids patterns and their copies may name, each index built once at its first use. A
+        // linear search per reference or per pattern cost references × ids comparisons, up to
+        // about 3e11 and many minutes per sketch for a hostile design file within the size
+        // limits, paid by everything that reads designs. Each curve id maps to its first curve,
+        // the one `curve_index` finds.
+        let curves = std::cell::LazyCell::new(|| {
+            let mut first = std::collections::HashMap::with_capacity(self.curves.len());
+            for curve in &self.curves {
+                first.entry(curve.id.as_str()).or_insert(curve);
+            }
+            first
+        });
+        let points = std::cell::LazyCell::new(|| self.points.iter().map(|p| p.id.as_str()).collect::<std::collections::HashSet<_>>());
+        let relations = std::cell::LazyCell::new(|| self.pattern_relation_ids().collect::<std::collections::HashSet<_>>());
+        // What `resolve_point` finds, a point id first, else `<curve>.<role>` on the first curve of that id.
+        let resolves = |r: &str| {
+            points.contains(r) || r.rsplit_once('.').is_some_and(|(id, role)| curves.get(id).is_some_and(|c| Self::curve_point(c, role).is_some()))
+        };
+        let line = |id: &str| curves.get(id).is_some_and(|c| matches!(c.kind, CurveKind::Line { .. }));
         let mut ids = std::collections::BTreeSet::new();
         for pattern in &self.patterns {
             if pattern.expressions.len() > 5
@@ -393,7 +455,7 @@ impl Sketch {
                 || pattern.id.len() > 512
                 || !ids.insert(&pattern.id)
                 || pattern.entities.is_empty()
-                || pattern.entities.len() > crate::MAX_CURVES + crate::MAX_POINTS
+                || pattern.entities.len() > crate::CEILING_CURVES + crate::CEILING_POINTS
                 || pattern.instances.len() >= 500
             {
                 return Err(SketchError::Invalid("invalid sketch pattern".into()));
@@ -402,7 +464,7 @@ impl Sketch {
             let finite = |v: f64| v.is_finite() && v.abs() <= crate::MAX_COORD;
             let valid = match &pattern.kind {
                 SketchPatternKind::Circular { count, angle, center, .. } => {
-                    valid_count(*count) && angle.is_finite() && angle.abs() > 1e-9 && angle.abs() <= 360.0 && self.resolve_point(center).is_some()
+                    valid_count(*count) && angle.is_finite() && angle.abs() > 1e-9 && angle.abs() <= 360.0 && resolves(center)
                 }
                 SketchPatternKind::Rectangular { count, count2, spacing, spacing2, dir, dir2, direction, direction2, .. } => {
                     valid_count(*count)
@@ -414,9 +476,7 @@ impl Sketch {
                         && finite(dir.y)
                         && (dir.len() - 1.0).abs() < 1e-6
                         && dir2.is_none_or(|d| finite(d.x) && finite(d.y) && (d.len() - 1.0).abs() < 1e-6)
-                        && direction.iter().chain(direction2).all(|id| {
-                            self.curve_index(id).is_some_and(|l| matches!(self.curves.get(l).map(|c| &c.kind), Some(CurveKind::Line { .. })))
-                        })
+                        && direction.iter().chain(direction2).all(|id| line(id))
                 }
             };
             if !valid {
@@ -437,21 +497,15 @@ impl Sketch {
                     || j >= n2
                     || (i == 0 && j == 0)
                     || !slots.insert(instance.index)
-                    || instance.points.len() > crate::MAX_POINTS
-                    || instance.curves.len() > crate::MAX_CURVES
-                    || instance.constraints.len() > crate::MAX_CONSTRAINTS
-                    || instance.curves.iter().any(|id| !valid_id(id) || self.curve_index(id).is_none())
+                    || instance.points.len() > crate::CEILING_POINTS
+                    || instance.curves.len() > crate::CEILING_CURVES
+                    || instance.constraints.len() > crate::CEILING_CONSTRAINTS
+                    || instance.curves.iter().any(|id| !valid_id(id) || !curves.contains_key(id.as_str()))
                     || instance
                         .points
                         .iter()
-                        .any(|(p, q)| !valid_id(p) || !valid_id(q) || self.point_index(p).is_none() || self.point_index(q).is_none())
-                    || instance.constraints.iter().any(|id| {
-                        !valid_id(id)
-                            || !self.constraints.iter().any(|c| {
-                                c.id == *id
-                                    && matches!(c.kind, crate::ConstraintKind::PatternPoint { .. } | crate::ConstraintKind::PatternRadius { .. })
-                            })
-                    })
+                        .any(|(p, q)| !valid_id(p) || !valid_id(q) || !points.contains(p.as_str()) || !points.contains(q.as_str()))
+                    || instance.constraints.iter().any(|id| !valid_id(id) || !relations.contains(id.as_str()))
                 {
                     return Err(SketchError::Invalid("invalid sketch pattern instance".into()));
                 }
@@ -512,7 +566,7 @@ fn involved_points(sk: &Sketch, cs: &[usize], ps: &[usize]) -> Vec<usize> {
 
 /// Copy seed curves and their points, returning curves and the original-to-copy point map.
 fn copy_through(sk: &mut Sketch, cs: &[usize], ps: &[usize], f: &dyn Fn(Vec2) -> Vec2) -> Result<(Vec<usize>, Vec<(usize, usize)>), SketchError> {
-    if sk.curves.len().saturating_add(cs.len()) > crate::MAX_CURVES {
+    if sk.curves.len().saturating_add(cs.len()) > crate::limits::max_curves() {
         return Err(crate::SketchError::TooLarge);
     }
     let pts = involved_points(sk, cs, ps);
@@ -523,23 +577,29 @@ fn copy_through(sk: &mut Sketch, cs: &[usize], ps: &[usize], f: &dyn Fn(Vec2) ->
         map.push((*q, n));
     }
     let m = |q: usize| map.iter().find(|x| x.0 == q).map(|x| x.1).unwrap_or(q);
-    let mut made = Vec::new();
+    let mut clones = Vec::with_capacity(cs.len());
+    let mut curve_map = std::collections::BTreeMap::new();
     for c in cs {
         let Some(cu) = sk.curves.get(*c).cloned() else { continue };
         let mut kind = cu.kind.clone();
         kind.map_points(&m);
-        let prefix = match &kind {
-            CurveKind::Ellipse { .. } => "e",
-            CurveKind::Spline { .. } => "s",
-            CurveKind::Conic { .. } => "k",
-            CurveKind::Line { .. } => "l",
-            CurveKind::Circle { .. } => "c",
-            CurveKind::Arc { .. } => "a",
+        let prefix = if cu.spline_handle_of.is_some() {
+            "h"
+        } else {
+            match &kind {
+                CurveKind::Ellipse { .. } => "e",
+                CurveKind::Spline { .. } => "s",
+                CurveKind::Conic { .. } => "n",
+                CurveKind::Line { .. } => "l",
+                CurveKind::Circle { .. } => "c",
+                CurveKind::Arc { .. } => "a",
+            }
         };
         let id = sk.fresh(prefix)?;
         // Copies retain the seed line's extent.
         let infinite = cu.infinite && matches!(kind, CurveKind::Line { .. });
-        sk.curves.push(Curve {
+        curve_map.insert(cu.id.clone(), id.clone());
+        clones.push(Curve {
             id,
             kind,
             construction: cu.construction,
@@ -548,7 +608,15 @@ fn copy_through(sk: &mut Sketch, cs: &[usize], ps: &[usize], f: &dyn Fn(Vec2) ->
             centerline: false,
             fixed: false,
             infinite,
+            spline_handle_of: cu.spline_handle_of,
         });
+    }
+    let mut made = Vec::with_capacity(clones.len());
+    for mut copy in clones {
+        if let Some(parent) = copy.spline_handle_of.as_mut() {
+            *parent = curve_map.get(parent).cloned().ok_or_else(|| SketchError::Invalid("missing spline handle parent".into()))?;
+        }
+        sk.curves.push(copy);
         made.push(sk.curves.len() - 1);
     }
     Ok((made, map))
@@ -560,4 +628,13 @@ fn rotate(c: Vec2, ang: f64) -> impl Fn(Vec2) -> Vec2 {
         let (s, co) = ang.sin_cos();
         c + Vec2::new(d.x * co - d.y * s, d.x * s + d.y * co)
     }
+}
+
+/// Each id's first index, as `position` finds it.
+fn first_index<'a>(ids: impl Iterator<Item = &'a str>) -> std::collections::HashMap<&'a str, usize> {
+    let mut map = std::collections::HashMap::new();
+    for (i, id) in ids.enumerate() {
+        map.entry(id).or_insert(i);
+    }
+    map
 }

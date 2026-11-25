@@ -1,0 +1,117 @@
+{
+  "cases": [
+    {
+      "name": "real-box-fillet12-r3-shell-closed-issue-460",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2350",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            30,
+            20,
+            10
+          ],
+          "radius": 3.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11
+          ],
+          "shell": {
+            "distance": -2.0
+          }
+        }
+      }
+    },
+    {
+      "name": "real-box-fillet12-r3-shell-open-top-issue-460",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2350",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            30,
+            20,
+            10
+          ],
+          "radius": 3.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11
+          ],
+          "shell": {
+            "distance": -2.0,
+            "open_top": true
+          }
+        }
+      }
+    },
+    {
+      "name": "real-box-fillet4v-r3-shell-closed",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2350",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            30,
+            20,
+            10
+          ],
+          "radius": 3.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [],
+          "select": "vertical",
+          "shell": {
+            "distance": -2.0
+          }
+        }
+      }
+    },
+    {
+      "name": "real-box-fillet1v-r3-shell-closed",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2350",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            30,
+            20,
+            10
+          ],
+          "radius": 3.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [],
+          "select": "first_vertical",
+          "shell": {
+            "distance": -2.0
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,1500 @@
+{
+  "cases": [
+    {
+      "name": "Solids_box_smb_yz_at_0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/box.smb",
+        "origin": [
+          0,
+          0,
+          0
+        ],
+        "x": [
+          0,
+          1,
+          0
+        ],
+        "y": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "Solids_box_smb_xz_at_y3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/box.smb",
+        "origin": [
+          0,
+          3,
+          0
+        ],
+        "x": [
+          0,
+          0,
+          1
+        ],
+        "y": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "Solids_box_smb_xy_at_z12",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/box.smb",
+        "origin": [
+          0,
+          0,
+          12
+        ],
+        "x": [
+          1,
+          0,
+          0
+        ],
+        "y": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "Solids_box_smb_oblique",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/box.smb",
+        "origin": [
+          1,
+          -2,
+          0.5
+        ],
+        "x": [
+          1,
+          1,
+          0
+        ],
+        "y": [
+          -1,
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "name": "Solids_cylinder_smb_yz_at_0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/cylinder.smb",
+        "origin": [
+          0,
+          0,
+          0
+        ],
+        "x": [
+          0,
+          1,
+          0
+        ],
+        "y": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "Solids_cylinder_smb_xz_at_y3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/cylinder.smb",
+        "origin": [
+          0,
+          3,
+          0
+        ],
+        "x": [
+          0,
+          0,
+          1
+        ],
+        "y": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "Solids_cylinder_smb_xy_at_z12",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/cylinder.smb",
+        "origin": [
+          0,
+          0,
+          12
+        ],
+        "x": [
+          1,
+          0,
+          0
+        ],
+        "y": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "Solids_cylinder_smb_oblique",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/cylinder.smb",
+        "origin": [
+          1,
+          -2,
+          0.5
+        ],
+        "x": [
+          1,
+          1,
+          0
+        ],
+        "y": [
+          -1,
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "name": "Solids_sphere_smb_yz_at_0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/sphere.smb",
+        "origin": [
+          0,
+          0,
+          0
+        ],
+        "x": [
+          0,
+          1,
+          0
+        ],
+        "y": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "Solids_sphere_smb_xz_at_y3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/sphere.smb",
+        "origin": [
+          0,
+          3,
+          0
+        ],
+        "x": [
+          0,
+          0,
+          1
+        ],
+        "y": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "Solids_sphere_smb_xy_at_z12",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/sphere.smb",
+        "origin": [
+          0,
+          0,
+          12
+        ],
+        "x": [
+          1,
+          0,
+          0
+        ],
+        "y": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "Solids_sphere_smb_oblique",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/sphere.smb",
+        "origin": [
+          1,
+          -2,
+          0.5
+        ],
+        "x": [
+          1,
+          1,
+          0
+        ],
+        "y": [
+          -1,
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "name": "Solids_pyramid_smb_yz_at_0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/pyramid.smb",
+        "origin": [
+          0,
+          0,
+          0
+        ],
+        "x": [
+          0,
+          1,
+          0
+        ],
+        "y": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "Solids_pyramid_smb_xz_at_y3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/pyramid.smb",
+        "origin": [
+          0,
+          3,
+          0
+        ],
+        "x": [
+          0,
+          0,
+          1
+        ],
+        "y": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "Solids_pyramid_smb_xy_at_z12",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/pyramid.smb",
+        "origin": [
+          0,
+          0,
+          12
+        ],
+        "x": [
+          1,
+          0,
+          0
+        ],
+        "y": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "Solids_pyramid_smb_oblique",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/pyramid.smb",
+        "origin": [
+          1,
+          -2,
+          0.5
+        ],
+        "x": [
+          1,
+          1,
+          0
+        ],
+        "y": [
+          -1,
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "name": "Solids_revolution_smb_yz_at_0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/revolution.smb",
+        "origin": [
+          0,
+          0,
+          0
+        ],
+        "x": [
+          0,
+          1,
+          0
+        ],
+        "y": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "Solids_revolution_smb_xz_at_y3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/revolution.smb",
+        "origin": [
+          0,
+          3,
+          0
+        ],
+        "x": [
+          0,
+          0,
+          1
+        ],
+        "y": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "Solids_revolution_smb_xy_at_z12",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/revolution.smb",
+        "origin": [
+          0,
+          0,
+          12
+        ],
+        "x": [
+          1,
+          0,
+          0
+        ],
+        "y": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "Solids_revolution_smb_oblique",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/revolution.smb",
+        "origin": [
+          1,
+          -2,
+          0.5
+        ],
+        "x": [
+          1,
+          1,
+          0
+        ],
+        "y": [
+          -1,
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "name": "Solids_extrusion_smb_yz_at_0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/extrusion.smb",
+        "origin": [
+          0,
+          0,
+          0
+        ],
+        "x": [
+          0,
+          1,
+          0
+        ],
+        "y": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "Solids_extrusion_smb_xz_at_y3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/extrusion.smb",
+        "origin": [
+          0,
+          3,
+          0
+        ],
+        "x": [
+          0,
+          0,
+          1
+        ],
+        "y": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "Solids_extrusion_smb_xy_at_z12",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/extrusion.smb",
+        "origin": [
+          0,
+          0,
+          12
+        ],
+        "x": [
+          1,
+          0,
+          0
+        ],
+        "y": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "Solids_extrusion_smb_oblique",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/extrusion.smb",
+        "origin": [
+          1,
+          -2,
+          0.5
+        ],
+        "x": [
+          1,
+          1,
+          0
+        ],
+        "y": [
+          -1,
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "name": "Solids_l_shape_with_boss_smb_yz_at_0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/l_shape_with_boss.smb",
+        "origin": [
+          0,
+          0,
+          0
+        ],
+        "x": [
+          0,
+          1,
+          0
+        ],
+        "y": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "Solids_l_shape_with_boss_smb_xz_at_y3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/l_shape_with_boss.smb",
+        "origin": [
+          0,
+          3,
+          0
+        ],
+        "x": [
+          0,
+          0,
+          1
+        ],
+        "y": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "Solids_l_shape_with_boss_smb_xy_at_z12",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/l_shape_with_boss.smb",
+        "origin": [
+          0,
+          0,
+          12
+        ],
+        "x": [
+          1,
+          0,
+          0
+        ],
+        "y": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "Solids_l_shape_with_boss_smb_oblique",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/l_shape_with_boss.smb",
+        "origin": [
+          1,
+          -2,
+          0.5
+        ],
+        "x": [
+          1,
+          1,
+          0
+        ],
+        "y": [
+          -1,
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "name": "Solids_nurb_fillet_smb_yz_at_0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "origin": [
+          0,
+          0,
+          0
+        ],
+        "x": [
+          0,
+          1,
+          0
+        ],
+        "y": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "Solids_nurb_fillet_smb_xz_at_y3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "origin": [
+          0,
+          3,
+          0
+        ],
+        "x": [
+          0,
+          0,
+          1
+        ],
+        "y": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "Solids_nurb_fillet_smb_xy_at_z12",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "origin": [
+          0,
+          0,
+          12
+        ],
+        "x": [
+          1,
+          0,
+          0
+        ],
+        "y": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "Solids_nurb_fillet_smb_oblique",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "origin": [
+          1,
+          -2,
+          0.5
+        ],
+        "x": [
+          1,
+          1,
+          0
+        ],
+        "y": [
+          -1,
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "name": "Solids_revolution_360_smb_yz_at_0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/revolution_360.smb",
+        "origin": [
+          0,
+          0,
+          0
+        ],
+        "x": [
+          0,
+          1,
+          0
+        ],
+        "y": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "Solids_revolution_360_smb_xz_at_y3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/revolution_360.smb",
+        "origin": [
+          0,
+          3,
+          0
+        ],
+        "x": [
+          0,
+          0,
+          1
+        ],
+        "y": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "Solids_revolution_360_smb_xy_at_z12",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/revolution_360.smb",
+        "origin": [
+          0,
+          0,
+          12
+        ],
+        "x": [
+          1,
+          0,
+          0
+        ],
+        "y": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "Solids_revolution_360_smb_oblique",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/revolution_360.smb",
+        "origin": [
+          1,
+          -2,
+          0.5
+        ],
+        "x": [
+          1,
+          1,
+          0
+        ],
+        "y": [
+          -1,
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "name": "Solids_OffsetBoxCylOnCorner_smb_yz_at_0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/OffsetBoxCylOnCorner.smb",
+        "origin": [
+          0,
+          0,
+          0
+        ],
+        "x": [
+          0,
+          1,
+          0
+        ],
+        "y": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "Solids_OffsetBoxCylOnCorner_smb_xz_at_y3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/OffsetBoxCylOnCorner.smb",
+        "origin": [
+          0,
+          3,
+          0
+        ],
+        "x": [
+          0,
+          0,
+          1
+        ],
+        "y": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "Solids_OffsetBoxCylOnCorner_smb_xy_at_z12",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/OffsetBoxCylOnCorner.smb",
+        "origin": [
+          0,
+          0,
+          12
+        ],
+        "x": [
+          1,
+          0,
+          0
+        ],
+        "y": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "Solids_OffsetBoxCylOnCorner_smb_oblique",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Solids/OffsetBoxCylOnCorner.smb",
+        "origin": [
+          1,
+          -2,
+          0.5
+        ],
+        "x": [
+          1,
+          1,
+          0
+        ],
+        "y": [
+          -1,
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "name": "cone_smb_yz_at_0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "cone.smb",
+        "origin": [
+          0,
+          0,
+          0
+        ],
+        "x": [
+          0,
+          1,
+          0
+        ],
+        "y": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "cone_smb_xz_at_y3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "cone.smb",
+        "origin": [
+          0,
+          3,
+          0
+        ],
+        "x": [
+          0,
+          0,
+          1
+        ],
+        "y": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "cone_smb_xy_at_z12",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "cone.smb",
+        "origin": [
+          0,
+          0,
+          12
+        ],
+        "x": [
+          1,
+          0,
+          0
+        ],
+        "y": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "cone_smb_oblique",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "cone.smb",
+        "origin": [
+          1,
+          -2,
+          0.5
+        ],
+        "x": [
+          1,
+          1,
+          0
+        ],
+        "y": [
+          -1,
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "name": "disk_smb_yz_at_0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "disk.smb",
+        "origin": [
+          0,
+          0,
+          0
+        ],
+        "x": [
+          0,
+          1,
+          0
+        ],
+        "y": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "disk_smb_xz_at_y3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "disk.smb",
+        "origin": [
+          0,
+          3,
+          0
+        ],
+        "x": [
+          0,
+          0,
+          1
+        ],
+        "y": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "disk_smb_xy_at_z12",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "disk.smb",
+        "origin": [
+          0,
+          0,
+          12
+        ],
+        "x": [
+          1,
+          0,
+          0
+        ],
+        "y": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "disk_smb_oblique",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "disk.smb",
+        "origin": [
+          1,
+          -2,
+          0.5
+        ],
+        "x": [
+          1,
+          1,
+          0
+        ],
+        "y": [
+          -1,
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "name": "box_with_large_fillet_smb_yz_at_0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "box_with_large_fillet.smb",
+        "origin": [
+          0,
+          0,
+          0
+        ],
+        "x": [
+          0,
+          1,
+          0
+        ],
+        "y": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "box_with_large_fillet_smb_xz_at_y3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "box_with_large_fillet.smb",
+        "origin": [
+          0,
+          3,
+          0
+        ],
+        "x": [
+          0,
+          0,
+          1
+        ],
+        "y": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "box_with_large_fillet_smb_xy_at_z12",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "box_with_large_fillet.smb",
+        "origin": [
+          0,
+          0,
+          12
+        ],
+        "x": [
+          1,
+          0,
+          0
+        ],
+        "y": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "box_with_large_fillet_smb_oblique",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "box_with_large_fillet.smb",
+        "origin": [
+          1,
+          -2,
+          0.5
+        ],
+        "x": [
+          1,
+          1,
+          0
+        ],
+        "y": [
+          -1,
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "name": "plane_circ_smb_yz_at_0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "plane_circ.smb",
+        "origin": [
+          0,
+          0,
+          0
+        ],
+        "x": [
+          0,
+          1,
+          0
+        ],
+        "y": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "plane_circ_smb_xz_at_y3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "plane_circ.smb",
+        "origin": [
+          0,
+          3,
+          0
+        ],
+        "x": [
+          0,
+          0,
+          1
+        ],
+        "y": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "plane_circ_smb_xy_at_z12",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "plane_circ.smb",
+        "origin": [
+          0,
+          0,
+          12
+        ],
+        "x": [
+          1,
+          0,
+          0
+        ],
+        "y": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "plane_circ_smb_oblique",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "plane_circ.smb",
+        "origin": [
+          1,
+          -2,
+          0.5
+        ],
+        "x": [
+          1,
+          1,
+          0
+        ],
+        "y": [
+          -1,
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "name": "plane_square_smb_yz_at_0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "plane_square.smb",
+        "origin": [
+          0,
+          0,
+          0
+        ],
+        "x": [
+          0,
+          1,
+          0
+        ],
+        "y": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "plane_square_smb_xz_at_y3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "plane_square.smb",
+        "origin": [
+          0,
+          3,
+          0
+        ],
+        "x": [
+          0,
+          0,
+          1
+        ],
+        "y": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "plane_square_smb_xy_at_z12",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "plane_square.smb",
+        "origin": [
+          0,
+          0,
+          12
+        ],
+        "x": [
+          1,
+          0,
+          0
+        ],
+        "y": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "plane_square_smb_oblique",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "plane_square.smb",
+        "origin": [
+          1,
+          -2,
+          0.5
+        ],
+        "x": [
+          1,
+          1,
+          0
+        ],
+        "y": [
+          -1,
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "name": "ellips_ts2_smb_yz_at_0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "ellips_ts2.smb",
+        "origin": [
+          0,
+          0,
+          0
+        ],
+        "x": [
+          0,
+          1,
+          0
+        ],
+        "y": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "ellips_ts2_smb_xz_at_y3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "ellips_ts2.smb",
+        "origin": [
+          0,
+          3,
+          0
+        ],
+        "x": [
+          0,
+          0,
+          1
+        ],
+        "y": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "ellips_ts2_smb_xy_at_z12",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "ellips_ts2.smb",
+        "origin": [
+          0,
+          0,
+          12
+        ],
+        "x": [
+          1,
+          0,
+          0
+        ],
+        "y": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "ellips_ts2_smb_oblique",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "ellips_ts2.smb",
+        "origin": [
+          1,
+          -2,
+          0.5
+        ],
+        "x": [
+          1,
+          1,
+          0
+        ],
+        "y": [
+          -1,
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "name": "Endcap_smb_yz_at_0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Endcap.smb",
+        "origin": [
+          0,
+          0,
+          0
+        ],
+        "x": [
+          0,
+          1,
+          0
+        ],
+        "y": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "Endcap_smb_xz_at_y3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Endcap.smb",
+        "origin": [
+          0,
+          3,
+          0
+        ],
+        "x": [
+          0,
+          0,
+          1
+        ],
+        "y": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "Endcap_smb_xy_at_z12",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Endcap.smb",
+        "origin": [
+          0,
+          0,
+          12
+        ],
+        "x": [
+          1,
+          0,
+          0
+        ],
+        "y": [
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "Endcap_smb_oblique",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Mirror",
+      "inputs": {
+        "file": "Endcap.smb",
+        "origin": [
+          1,
+          -2,
+          0.5
+        ],
+        "x": [
+          1,
+          1,
+          0
+        ],
+        "y": [
+          -1,
+          1,
+          2
+        ]
+      }
+    }
+  ]
+}

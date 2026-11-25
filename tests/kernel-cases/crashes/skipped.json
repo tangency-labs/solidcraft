@@ -1,0 +1,182 @@
+[
+ {
+  "source": "tangency-labs/solidcraft#661",
+  "why": "truck intersection_curve unwrap in solid.hole at a position on a design only in the reporter's crash folder; no recipe to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1023",
+  "why": "hole hang shown only in a video and a private design file; no recipe to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1024",
+  "why": "not geometry: Windows heap corruption in the thread unit-test process (dependency/memory bug), and threads are another area (other area: threads)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1104",
+  "why": "truck intersection_curve unwrap in solid.extrude: needs the reporter's private design or replay (only a crash report), so it can't be rebuilt synthetically"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1123",
+  "why": "unclean exit in solid.extrude after a slot sketch dragged many times: needs the reporter's private design or replay (only a crash report), so it can't be rebuilt synthetically"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1147",
+  "why": "perf only, no wrong result: 1,300-body design built over MCP is slow in the engine and the UI (fixed by #1148/#1152/#1154/#1158)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1337",
+  "why": "extrude 'to object' on an imported STEP bracket: needs the user's STEP file"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1351",
+  "why": "unclean exit in solid.combine after a mirror of an extruded sketch: needs the reporter's private design or replay (only a crash report), so it can't be rebuilt synthetically"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1374",
+  "why": "other area: tessellation (STEP import meshing runs out of memory on a private 480-solid file; the mesher's curve division)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1400",
+  "why": "other area: tessellation (a far-out boundary parameter spikes a face; meshing takes minutes)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1411",
+  "why": "other area: threads (solid.coil crash, no geometry beyond the command; coil is a helical sweep)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1597",
+  "why": "not geometry: kernel roadmap and contribution guide"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1856",
+  "why": "20-tooth lofted helical pinion join is slow: the scripts are only in a downloadable zip (the body gives the join command, not the sketches and lofts); duplicate in spirit of #2992 (case 2992)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1957",
+  "why": "unclean exit in file.export of a bird-house design: needs the reporter's private design or replay (only a crash report), so it can't be rebuilt synthetically; the STEP-export hang family is case 1985"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2037",
+  "why": "multi-face extrusion preview/OK freeze and failing cut on an imported STEP model: needs the user's STEP file, and a UI/preview responsiveness report"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2038",
+  "why": "other area: threads (second modelled thread on one body; join of two faceted threaded bodies)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2451",
+  "why": "other area: threads (solid.thread unclean exit)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2467",
+  "why": "not geometry: renaming a body recomputes the features after it on the window thread (perf/UI only, no wrong result)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2470",
+  "why": "other area: threads (solid.thread stack overflow on a modelled thread)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2508",
+  "why": "other area: tessellation (bound on runaway closing polylines in the mesher); the STEP export hang itself is case 1985"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2552",
+  "why": "other area: threads (solid.coil crash, helical sweep cut; no backtrace)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2570",
+  "why": "loft freeze from a design with an arc profile and a non-convex polyline profile that the report does not give; the web build only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2796",
+  "why": "other area: threads (solid.thread unclean exit)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2891",
+  "why": "other area: sweeps (twisted sweep cut through a tube freezes)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2974",
+  "why": "perf only, no wrong result: a counterbored hole pattern is ~8x slower with a joined cylinder elsewhere; results already match hand calculation"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3066",
+  "why": "unclean exit in solid.extrude with a parametric sketch (nozL): needs the reporter's private design or replay (only a crash report), so it can't be rebuilt synthetically"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3085",
+  "why": "fillet/chamfer crash after combine with an imported STEP body: needs the user's STEP file (and edge selection is UI)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3088",
+  "why": "other area: threads (solid.coil join crash, no backtrace)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3207",
+  "why": "perf only: faster slow unit tests (clearance, inside_index, fill reference), same answers"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3368",
+  "why": "other area: threads (finely faceted booleans, repro is a modelled-thread join; thread cases cover it)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3386",
+  "why": "other area: threads (solid.thread unclean exit)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3410",
+  "why": "other area: threads (faceted-boolean stack overflow on a modelled thread, #2470)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3430",
+  "why": "not a kernel operation: unclean exit at startup in the graphics surface configure on macOS"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3473",
+  "why": "unclean exit in a 16-fold circular pattern of a cylinder cut driven by parameters: the recipe is only in an attached replay.json, and the issue gives no dimensions"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3695",
+  "why": "other area: sweeps (twisted sweep cut through a tube, bounded intersection work)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3731",
+  "why": "perf only, no wrong result: joins onto drafted walls are 20-100x slower than onto vertical ones (results are correct apart from a 4e-4 mm retry displacement); the 67-flute design takes tens of minutes and a one-line recipe can't pin it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3737",
+  "why": "not geometry: UI highlight work on the main thread while orbiting an imported model (edge highlight)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3745",
+  "why": "not geometry: hover highlight of a large thread freezes the UI (fixed by #3766/#3818)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3818",
+  "why": "not geometry: hover highlight of a helical edge (mesh tangent chain), UI freeze fixed, same results"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3892",
+  "why": "not geometry: browser tree frame time on a large nested STEP assembly (UI)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3897",
+  "why": "other area: sweeps (ring profile swept along a short arc with Join freezes)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3962",
+  "why": "unclean exit in solid.combine cut on macOS: needs the reporter's private design or replay (only a crash report), so it can't be rebuilt synthetically"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4031",
+  "why": "spade CDT assertion in solid.extrude of a face with Join: needs the reporter's private design or replay (only a crash report), so it can't be rebuilt synthetically (no geometry given)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4102",
+  "why": "booleans on a FreeCAD-exported STEP are ~15x slower: needs the 104 KB FreeCAD STEP file (written by another CAD, can't be rebuilt by hand), results are correct (perf only)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4149",
+  "why": "other area: threads (solid.thread stack overflow on an internal M10x1.5 modelled thread)"
+ }
+]

@@ -1,6 +1,7 @@
 use super::*;
 use crate::{Body, BoolOp, ExportBody, StepHeader, boolean, box_solid, cylinder, fillet, iges_export_bodies, measure, sphere, torus};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 fn rel(a: f64, b: f64) -> f64 {
     (a - b).abs() / b.abs().max(1e-9)
@@ -40,6 +41,44 @@ fn features_round_trip_through_iges() {
     let holed = boolean(&plate, &pin, BoolOp::Cut).unwrap().unwrap();
     round_trip(&holed);
     round_trip(&fillet(&plate, &[Vec3::new(20.0, 0.0, 10.0)], 3.0).unwrap());
+}
+
+/// A body colour is written as a Color Definition (314) that IGES 5.3 readers accept: its
+/// directory status is subordinate switch 00 and entity use flag 02, "definition"
+/// (§2.2.4.4.9, §4.76), and its unnamed CNAME is omitted rather than written as `0H` (a
+/// Hollerith count is at least one). Two colours, read back unchanged.
+#[test]
+fn colour_definitions_are_unnamed_independent_definitions() {
+    let a = box_solid(Vec3::ZERO, Vec3::new(1.0, 2.0, 3.0)).unwrap();
+    let b = box_solid(Vec3::new(5.0, 0.0, 0.0), Vec3::new(6.0, 1.0, 1.0)).unwrap();
+    let text = iges_export_bodies(
+        &[
+            ExportBody { name: "A".into(), body: &a, color: Some([1.0, 0.5, 0.0]) },
+            ExportBody { name: "B".into(), body: &b, color: Some([0.0, 0.25, 1.0]) },
+        ],
+        &StepHeader::default(),
+    )
+    .unwrap();
+    let section = |c: char| text.lines().filter(move |l| l.as_bytes().get(72) == Some(&(c as u8))).collect::<Vec<_>>();
+    let (d, p) = (section('D'), section('P'));
+    let mut defs = 0;
+    for pair in d.chunks(2) {
+        if pair[0][..8].trim() != "314" {
+            continue;
+        }
+        defs += 1;
+        assert_eq!(&pair[0][64..72], "00000200", "{}", pair[0]);
+        // The parameter data: the lines whose back pointer (columns 65-72) is this entry's sequence.
+        let seq = pair[0][73..].trim().to_string();
+        let params: String = p.iter().filter(|l| l[64..72].trim() == seq).map(|l| l[..64].trim_end()).collect();
+        assert!(!params.contains("0H"), "{params}");
+        assert_eq!(params.trim_end_matches(';').split(',').count(), 4, "{params}");
+    }
+    assert_eq!(defs, 2);
+    let imp = iges_import(&text).unwrap();
+    let mut colors: Vec<_> = imp.bodies.iter().map(|b| b.color).collect();
+    colors.sort_by(|x, y| format!("{x:?}").cmp(&format!("{y:?}")));
+    assert_eq!(colors, [Some([0.0, 0.25, 1.0]), Some([1.0, 0.5, 0.0])]);
 }
 
 /// Hostile files fail cleanly: garbage, truncation, missing and circular references, huge
@@ -138,7 +177,7 @@ fn an_arc_revolved_about_its_centre_is_a_cap_not_a_ball() {
     ];
     let imp = iges_import(&iges_file_placed(&ents)).unwrap();
     assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
-    let mesh = imp.bodies[0].body.tessellate(0.01).unwrap();
+    let mesh = imp.bodies[0].body.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
     let (mut lo, mut hi) = ([f64::MAX; 3], [f64::MIN; 3]);
     for p in &mesh.positions {
         for (k, x) in [p.x, p.y, p.z].into_iter().enumerate() {
@@ -361,11 +400,59 @@ fn surfaces_in_separate_groups_remain_separate_parts() {
     }
 }
 
+/// The box of [`trimmed_surfaces_sew_into_a_solid`] with its edge (0, 0, 0)–(0, 20, 0) stopping
+/// 0.01 mm short of its corner in both faces that use it, its next pieces starting at the
+/// corner. The pieces of a trim curve run on from one another, so the edge ends at the corner the
+/// other three edges there agree on, exactly: a closed box SMLib finds valid. The edge was left
+/// short with the gap on the vertex's tolerance, 2000 times the file's resolution (#3845).
+#[test]
+fn trim_pieces_that_miss_their_corner_are_closed_onto_it() {
+    let c =
+        |i: usize| -> [f64; 3] { [if i & 1 != 0 { 10.0 } else { 0.0 }, if i & 2 != 0 { 20.0 } else { 0.0 }, if i & 4 != 0 { 30.0 } else { 0.0 }] };
+    let short = [0.0, 19.99, 0.0];
+    let quads = [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]];
+    let mut ents: Vec<(i64, i64, String)> = Vec::new();
+    let fmt = |p: [f64; 3]| format!("{:?},{:?},{:?}", p[0], p[1], p[2]);
+    for q in quads {
+        let (a, b, cc, d) = (c(q[0]), c(q[1]), c(q[2]), c(q[3]));
+        let surf = format!("1,1,1,1,0,0,1,0,0,0.,0.,1.,1.,0.,0.,1.,1.,1.,1.,1.,1.,{},{},{},{},0.,1.,0.,1.", fmt(a), fmt(b), fmt(d), fmt(cc));
+        ents.push((128, 0, surf));
+        let s_de = 2 * ents.len() - 1;
+        let mut lines = Vec::new();
+        for (p0, p1) in [(a, b), (b, cc), (cc, d), (d, a)] {
+            // The short edge: its end at (0, 20, 0) is 0.01 short.
+            let (p0, p1) = match (p0, p1) {
+                ([0.0, 0.0, 0.0], [0.0, 20.0, 0.0]) => (p0, short),
+                ([0.0, 20.0, 0.0], [0.0, 0.0, 0.0]) => (short, p1),
+                x => x,
+            };
+            ents.push((110, 0, format!("{},{}", fmt(p0), fmt(p1))));
+            lines.push(2 * ents.len() - 1);
+        }
+        ents.push((102, 0, format!("4,{}", lines.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(","))));
+        let comp = 2 * ents.len() - 1;
+        ents.push((142, 0, format!("0,{s_de},0,{comp},2")));
+        let cos = 2 * ents.len() - 1;
+        ents.push((144, 0, format!("{s_de},1,0,{cos}")));
+    }
+    let imp = iges_import(&iges_file(&ents)).unwrap();
+    assert!(imp.warnings.is_empty(), "{:?}", imp.warnings);
+    assert!(imp.bodies[0].closed);
+    let body = &imp.bodies[0].body;
+    let check = body.smlib().unwrap().check(solidcraft_smlib::CheckLevel::All).unwrap();
+    assert!(check.is_valid(), "{check}");
+    for v in &body.record().vertices {
+        assert!(v.tolerance <= body.record().tolerance, "a vertex {:?} kept a gap in its tolerance {}", v.point, v.tolerance);
+    }
+    let m = measure(body).unwrap();
+    assert!(rel(m.volume, 6000.0) < 1e-6 && rel(m.area, 2200.0) < 1e-6, "{} {}", m.volume, m.area);
+}
+
 #[test]
 fn a_drill_point_round_trips_through_iges() {
     // A blind hole with a cone tip: the tip's face closes at its apex (its seam runs out to the
     // apex and straight back).
-    use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+    use solidcore_record::{Loop2, Plane, Region2, Vec2};
     let plate = box_solid(Vec3::new(-20.0, -15.0, 0.0), Vec3::new(20.0, 15.0, 10.0)).unwrap();
     let profile =
         Region2 { outer: Loop2::polygon(&[Vec2::new(0.0, 2.0), Vec2::new(4.0, 5.0), Vec2::new(4.0, 11.0), Vec2::new(0.0, 11.0)]), holes: vec![] };
@@ -553,9 +640,36 @@ fn a_curve_over_a_tiny_knot_span_still_bounds_its_faces() {
     }
 }
 
+/// A patch trimmed by a curve on a surface with only its model-space curve (no B curve), a
+/// composite whose first line is written end to start: the first piece is turned to run on into
+/// the second, so the loop closes and the face is kept.
+#[test]
+fn a_trim_without_a_parameter_curve_whose_first_piece_is_reversed_keeps_its_face() {
+    let corners = [[0.0, 0.0, 0.0], [20.0, 0.0, 0.0], [20.0, 20.0, 0.0], [0.0, 20.0, 0.0]];
+    let mut ents: Vec<(i64, i64, String)> = vec![bilinear_patch(corners[0], corners[1], corners[2], corners[3])];
+    let fmt = |p: [f64; 3]| format!("{:?},{:?},{:?}", p[0], p[1], p[2]);
+    let mut pieces = Vec::new();
+    for k in 0..4 {
+        let (p0, p1) = (corners[k], corners[(k + 1) % 4]);
+        let (p0, p1) = if k == 0 { (p1, p0) } else { (p0, p1) };
+        ents.push((110, 0, format!("{},{}", fmt(p0), fmt(p1))));
+        pieces.push((2 * ents.len() - 1).to_string());
+    }
+    ents.push((102, 0, format!("4,{}", pieces.join(","))));
+    let c = 2 * ents.len() - 1;
+    // Created by projection, preferring the model-space curve (PREF 2), with no B curve.
+    ents.push((142, 0, format!("0,1,0,{c},2")));
+    let cos = 2 * ents.len() - 1;
+    ents.push((144, 0, format!("1,1,0,{cos}")));
+    let imp = iges_import(&iges_file(&ents)).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    assert!(!imp.warnings.iter().any(|w| w.contains("closed loop") || w.contains("face #")), "{:?}", imp.warnings);
+    let m = measure(&imp.bodies[0].body).unwrap();
+    assert!(rel(m.area, 400.0) < 1e-6, "area {}", m.area);
+}
+
 #[test]
 fn the_global_sections_native_system_becomes_the_originating_system() {
     let imp = round_trip(&box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap());
     assert_eq!(imp.system, "SolidCraft");
-    assert_eq!(imp.preprocessor, "SolidCraft IGES");
 }

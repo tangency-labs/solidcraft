@@ -1,210 +1,39 @@
-//! The window's own title bar on Windows and Linux, where the window has no OS decorations
-//! ([`SolveApp::custom_titlebar`]): empty space in the application bar drags the window and a
-//! double-click there maximizes or restores it, caption buttons at the far right minimize,
-//! maximize/restore and close, and thin invisible zones along the window's edges resize it.
-//! Dragging uses the OS's own move loop, so Windows snapping (to the screen edges and corners)
-//! works as with a native title bar.
-//!
-//! The resize zones are as wide as Windows' own resize border at the window's scale
-//! ([`resize_border_px`]), corners win where they overlap the edges ([`resize_hit`]). On Windows
-//! the desktop app answers the system's hit test with them (`apps/solidcraft/src/native_frame.rs`),
-//! so the OS shows its resize cursors and resizes from the first frame; elsewhere egui zones above
-//! everything else start an OS resize ([`resize_zones`]). macOS keeps its traffic lights over the bar
-//! ([`SolveApp::integrated_titlebar`]); the web build has neither.
-//!
-//! Adapted from VectorCraft's `crates/ui-egui/src/titlebar.rs` (MIT OR Apache-2.0).
+//! SolidCraft's window title bar: the shared window chrome ([`crate::window_chrome`]) with the
+//! app's own answers. Closing asks about unsaved designs first ([`window_action`]); on Windows and
+//! Linux without OS decorations ([`SolveApp::custom_titlebar`]) the application bar is the title
+//! bar, and on macOS it runs under the traffic lights ([`SolveApp::integrated_titlebar`]).
 
-use crate::icons::glyphs::paint_glyph;
-use egui::{Color32, CursorIcon, Id, LayerId, Order, PointerButton, Pos2, Rect, ResizeDirection, Sense, Stroke, Ui, ViewportCommand, pos2, vec2};
+use crate::window_chrome::WindowAction;
+pub use crate::window_chrome::{Caption, dpi_scaled_size, resize_border_px, resize_hit, resize_zones, toggle_maximize};
 
 use crate::SolveApp;
-use crate::theme::Tokens;
-
-/// One caption button: as wide as the native Windows ones.
-pub const BUTTON_WIDTH: f32 = 46.0;
-/// The three caption buttons together.
-pub const WIDTH: f32 = 3.0 * BUTTON_WIDTH;
-/// Room for the macOS traffic lights at the bar's left end.
-pub const TRAFFIC_LIGHTS: f32 = 76.0;
-/// Windows' resize border at 100 % (96 DPI): `SM_CXSIZEFRAME` + `SM_CXPADDEDBORDER`, 4 + 4 px.
-pub const RESIZE_BORDER_AT_96_DPI: f32 = 8.0;
-
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum Caption {
-    Minimize,
-    Maximize,
-    Close,
-}
-
-/// Left to right.
-pub const CAPTIONS: [Caption; 3] = [Caption::Minimize, Caption::Maximize, Caption::Close];
-
-/// Caption button ids (stable, so tests and agents can find them).
-pub fn caption_id(c: Caption) -> Id {
-    Id::new(("titlebar-caption", c as u8))
-}
-
-fn maximized(ctx: &egui::Context) -> bool {
-    ctx.input(|i| i.viewport().maximized.unwrap_or(false))
-}
-
-pub fn toggle_maximize(ctx: &egui::Context) {
-    ctx.send_viewport_cmd(ViewportCommand::Maximized(!maximized(ctx)));
-}
 
 /// Window actions for the control channel (`ui.window`): minimize, maximize, restore, toggle
 /// (maximize or restore), close.
 pub fn window_action(app: &mut SolveApp, ctx: &egui::Context, action: &str) -> Result<(), String> {
-    match action {
-        "minimize" => ctx.send_viewport_cmd(ViewportCommand::Minimized(true)),
-        "maximize" => ctx.send_viewport_cmd(ViewportCommand::Maximized(true)),
-        "restore" => ctx.send_viewport_cmd(ViewportCommand::Maximized(false)),
-        "toggle" => toggle_maximize(ctx),
-        "close" => {
-            // Unsaved designs are asked about first; the window closes once they are answered.
-            crate::documents::request_quit(app);
-            if app.quit_requested {
-                ctx.send_viewport_cmd(ViewportCommand::Close);
-            }
-        }
-        other => return Err(format!("unknown window action `{other}` (minimize, maximize, restore, toggle, close)")),
-    }
+    run(app, ctx, WindowAction::parse(action)?);
     Ok(())
 }
 
-/// The bar's background: a press-and-drag on empty space moves the window, a double-click
-/// toggles maximize. Call it before laying out the bar so its buttons, registered later, take
-/// their clicks.
-pub fn drag_area(ui: &Ui, rect: Rect) {
-    let ctx = ui.ctx();
-    let resp = ui.interact(rect, Id::new("titlebar-drag"), Sense::click_and_drag());
-    // egui hands a drag that starts on a click-only widget to the drag-sensing background below
-    // it, so remember whether the press itself landed on bare background.
-    if ctx.input(|i| i.pointer.any_pressed()) {
-        let bare = ctx.viewport(|v| v.hits.click.is_some_and(|w| w.id == resp.id));
-        ctx.data_mut(|d| d.insert_temp(resp.id, bare));
-    }
-    if resp.double_clicked() {
-        toggle_maximize(ctx);
-    } else if resp.drag_started_by(PointerButton::Primary) && ctx.data(|d| d.get_temp(resp.id).unwrap_or(false)) {
-        ctx.send_viewport_cmd(ViewportCommand::StartDrag);
-    }
-}
-
-/// Minimize, Maximize/Restore and Close at the right end of `bar` (the application bar's
-/// rect), full bar height, flush with the window's edge so a maximized window's corner hits
-/// Close.
-pub fn caption_buttons(app: &mut SolveApp, ui: &mut Ui, bar: Rect) {
-    let t = Tokens::get();
-    let max = maximized(ui.ctx());
-    let mut clicked = None;
-    for (i, c) in CAPTIONS.into_iter().enumerate() {
-        let r = Rect::from_min_size(pos2(bar.right() - WIDTH + i as f32 * BUTTON_WIDTH, bar.top()), vec2(BUTTON_WIDTH, bar.height()));
-        let resp = ui.interact(r, caption_id(c), Sense::click());
-        let fill = match (resp.is_pointer_button_down_on(), resp.hovered()) {
-            (true, _) => t.app_bar_hover_subtle,
-            (_, true) => t.app_bar_hover_button,
-            _ if resp.has_focus() => t.app_bar_hover_button,
-            _ => Color32::TRANSPARENT,
-        };
-        ui.painter().rect_filled(r, 0.0, fill);
-        let ink = t.app_bar_text;
-        paint_glyph(ui, c, max, r.center(), Stroke::new(1.0, ink));
-        let tip = match c {
-            Caption::Minimize => "Minimize",
-            Caption::Maximize if max => "Restore",
-            Caption::Maximize => "Maximize",
-            Caption::Close => "Close",
-        };
-        if resp.on_hover_text(tip).clicked() {
-            clicked = Some(c);
+/// Runs a title-bar action as SolidCraft does.
+pub(crate) fn run(app: &mut SolveApp, ctx: &egui::Context, action: WindowAction) {
+    if action == WindowAction::Close {
+        // Unsaved designs are asked about first; the window closes once they are answered.
+        crate::documents::request_quit(app);
+        if !app.quit_requested {
+            return;
         }
     }
-    let action = match clicked {
-        Some(Caption::Minimize) => "minimize",
-        Some(Caption::Maximize) => "toggle",
-        Some(Caption::Close) => "close",
-        None => return,
-    };
-    let _ = window_action(app, &ui.ctx().clone(), action);
-}
-
-/// The resize border in physical pixels at `scale` (1.0 = 96 DPI): Windows' default, scaled and
-/// rounded, never less than a pixel.
-pub fn resize_border_px(scale: f32) -> f32 {
-    let s = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
-    (RESIZE_BORDER_AT_96_DPI * s).round().max(1.0)
-}
-
-/// The side of a corner zone for an edge `edge` wide: twice the edge, so a corner is easy to hit.
-pub fn corner_size(edge: f32) -> f32 {
-    2.0 * edge
-}
-
-/// The edge and corner zones of a window with rect `w`, edges `edge` wide: (zone, direction,
-/// cursor). Corners come last so they win where they overlap the edges.
-pub fn zones(w: Rect, edge: f32) -> [(Rect, ResizeDirection, CursorIcon); 8] {
-    use ResizeDirection::*;
-    let (e, c) = (edge, corner_size(edge));
-    [
-        (Rect::from_min_max(w.left_top(), pos2(w.right(), w.top() + e)), North, CursorIcon::ResizeVertical),
-        (Rect::from_min_max(pos2(w.left(), w.bottom() - e), w.right_bottom()), South, CursorIcon::ResizeVertical),
-        (Rect::from_min_max(w.left_top(), pos2(w.left() + e, w.bottom())), West, CursorIcon::ResizeHorizontal),
-        (Rect::from_min_max(pos2(w.right() - e, w.top()), w.right_bottom()), East, CursorIcon::ResizeHorizontal),
-        (Rect::from_min_size(w.left_top(), vec2(c, c)), NorthWest, CursorIcon::ResizeNwSe),
-        (Rect::from_min_size(w.right_top() - vec2(c, 0.0), vec2(c, c)), NorthEast, CursorIcon::ResizeNeSw),
-        (Rect::from_min_size(w.left_bottom() - vec2(0.0, c), vec2(c, c)), SouthWest, CursorIcon::ResizeNeSw),
-        (Rect::from_min_size(w.right_bottom() - vec2(c, c), vec2(c, c)), SouthEast, CursorIcon::ResizeNwSe),
-    ]
-}
-
-/// The resize direction at `p` in a window with rect `w` and edges `edge` wide, `None` away
-/// from the edges and outside the window. A point is in the window when `min <= p < max` (pixel
-/// rects: the right and bottom pixels are at `max - 1`). Corners win over edges.
-pub fn resize_hit(w: Rect, p: Pos2, edge: f32) -> Option<ResizeDirection> {
-    if !(w.is_positive() && edge > 0.0 && p.x >= w.left() && p.x < w.right() && p.y >= w.top() && p.y < w.bottom()) {
-        return None;
-    }
-    zones(w, edge).into_iter().rev().find(|(r, ..)| p.x >= r.left() && p.x < r.right() && p.y >= r.top() && p.y < r.bottom()).map(|(_, d, _)| d)
-}
-
-/// The window's new physical size when it moves from `old_dpi` to `new_dpi` (Windows'
-/// `WM_GETDPISCALEDSIZE`): the same logical size, rounded as winit rounds the size it then
-/// applies, so the rect the OS suggests mid-move is exactly the rect the window gets.
-pub fn dpi_scaled_size(size: (i32, i32), old_dpi: u32, new_dpi: u32) -> Option<(i32, i32)> {
-    if old_dpi == 0 || new_dpi == 0 || size.0 <= 0 || size.1 <= 0 {
-        return None;
-    }
-    let (old, new) = (f64::from(old_dpi) / 96.0, f64::from(new_dpi) / 96.0);
-    let scale = |v: i32| (f64::from(v) / old * new).round().clamp(1.0, f64::from(i32::MAX)) as i32;
-    Some((scale(size.0), scale(size.1)))
-}
-
-/// Invisible resize zones along the window's edges, above everything else; a press in one
-/// starts an OS resize in that direction. None while the window is maximized or fullscreen.
-pub fn resize_zones(ui: &mut Ui) {
-    let ctx = ui.ctx().clone();
-    if maximized(&ctx) || ctx.input(|i| i.viewport().fullscreen.unwrap_or(false)) {
-        return;
-    }
-    let w = ctx.content_rect();
-    let ppp = ctx.pixels_per_point();
-    let edge = resize_border_px(ctx.input(|i| i.viewport().native_pixels_per_point).unwrap_or(ppp)) / ppp;
-    let layer = LayerId::new(Order::Foreground, Id::new("titlebar-resize"));
-    let zui = ui.new_child(egui::UiBuilder::new().layer_id(layer).max_rect(w));
-    for (i, (r, dir, cursor)) in zones(w, edge).into_iter().enumerate() {
-        let resp = zui.interact(r, Id::new(("titlebar-resize", i)), Sense::drag()).on_hover_cursor(cursor);
-        if resp.drag_started_by(PointerButton::Primary) {
-            ctx.send_viewport_cmd(ViewportCommand::BeginResize(dir));
-        }
-    }
+    action.send(ctx);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use egui::{Event, Pos2, RawInput, ViewportId};
+    use crate::window_chrome::{BUTTON_WIDTH, CAPTIONS, caption, caption_id};
+    use egui::{Event, PointerButton, Pos2, RawInput, Rect, ResizeDirection, ViewportCommand, ViewportId, pos2, vec2};
     use solidcraft_engine::Session;
+    use solidcraft_theme::Tokens;
 
     /// A headless window `width` pt wide showing the application bar (as the title bar) and the
     /// resize zones.
@@ -214,6 +43,8 @@ mod tests {
         width: f32,
         time: f64,
         maximized: bool,
+        /// The native window it is shown in, as the desktop integration tells on Windows.
+        window: Option<u64>,
         /// Lay out the whole window (`SolveApp::ui`) rather than only the bar and the zones.
         full: bool,
     }
@@ -223,9 +54,34 @@ mod tests {
             let ctx = crate::fonts::test_context();
             let mut app = SolveApp::new(Session::default(), Default::default());
             app.custom_titlebar = true;
-            Self { ctx, app, width, time: 0.0, maximized: false, full: false }
+            Self { ctx, app, width, time: 0.0, maximized: false, window: None, full: false }
         }
 
+        /// A window the system answers for, as the Windows desktop app's are: shown in a native
+        /// window of its own (the list of them is one per process) whose title bar and frame are
+        /// the system's.
+        fn systems(width: f32) -> Self {
+            static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0x5C7B_0000);
+            let mut w = Self::new(width);
+            let window = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            caption::hooked(window);
+            w.window = Some(window);
+            w
+        }
+
+        /// The native window of a window made by [`Self::systems`] (0 for any other).
+        fn native(&self) -> u64 {
+            self.window.unwrap_or_default()
+        }
+
+        /// The client pixel of `p`, as the window procedure names points.
+        fn px(&self, p: Pos2) -> (i32, i32) {
+            let ppp = self.ctx.pixels_per_point();
+            ((p.x * ppp) as i32, (p.y * ppp) as i32)
+        }
+
+        /// One frame with `events`, the input going through `release_press_taken_by_os` first
+        /// as in the desktop app.
         fn frame(&mut self, events: Vec<Event>) -> egui::FullOutput {
             self.time += 0.05;
             let mut input = RawInput {
@@ -236,7 +92,10 @@ mod tests {
             };
             if let Some(v) = input.viewports.get_mut(&ViewportId::ROOT) {
                 v.maximized = Some(self.maximized);
+                v.native_window = self.window;
             }
+            // As the desktop app's raw-input hook does first.
+            crate::window_chrome::release_press_taken_by_os(&self.ctx, &mut input);
             let (app, full) = (&mut self.app, self.full);
             let mut out = self.ctx.run_ui(input, |ui| {
                 if full {
@@ -262,6 +121,16 @@ mod tests {
             events.into_iter().flat_map(|e| self.frame(e).viewport_output.remove(&ViewportId::ROOT).map(|v| v.commands).unwrap_or_default()).collect()
         }
 
+        /// A gesture whose release the OS keeps, as an X11 window manager does once a press
+        /// started a window move or resize: press, move along `path`, then one quiet frame.
+        fn gesture_os_keeps_release(&mut self, path: &[Pos2]) -> Vec<ViewportCommand> {
+            let press = Event::PointerButton { pos: path[0], button: PointerButton::Primary, pressed: true, modifiers: Default::default() };
+            let mut events = vec![vec![Event::PointerMoved(path[0])], vec![press]];
+            events.extend(path[1..].iter().map(|p| vec![Event::PointerMoved(*p)]));
+            events.push(vec![]);
+            events.into_iter().flat_map(|e| self.frame(e).viewport_output.remove(&ViewportId::ROOT).map(|v| v.commands).unwrap_or_default()).collect()
+        }
+
         fn click(&mut self, p: Pos2) -> Vec<ViewportCommand> {
             self.gesture(&[p])
         }
@@ -284,11 +153,27 @@ mod tests {
         v
     }
 
+    /// Home follows the preceding name or document button with the stack's one shared gap.
+    #[test]
+    fn home_follows_solidcrafts_name_with_the_uniform_gap() {
+        let mut w = Win::new(1600.0);
+        w.app.home.open = false;
+        w.frame(vec![]);
+        let out = w.frame(vec![]);
+        let name = texts(&out).into_iter().find(|(text, _)| text == "SolidCraft").map(|(_, rect)| rect).expect("the name is drawn");
+        let home = crate::scenario::rect_of("titlebar:home").expect("Home is drawn");
+        let previous = crate::scenario::rect_of("library:toggle").unwrap_or(name);
+        assert!((home.left() - previous.right() - solidcraft_ui_kit::app_bar_layout::application::GAP).abs() <= 0.5);
+        assert!(name.right() < home.left());
+    }
+
+    /// Report a bug and the link pills are not in this list: they are flat brand-coloured capsules
+    /// whose hover is a slightly lighter fill of their own colour, not the bar's translucent chrome.
     #[test]
     fn every_bar_control_uses_translucent_hover_chrome() {
-        let previous = crate::theme::is_dark();
+        let previous = solidcraft_theme::is_dark();
         for dark in [false, true] {
-            crate::theme::set_dark(dark);
+            solidcraft_theme::set_dark(dark);
             let mut w = Win::new(1600.0);
             w.app.home.open = false;
             w.frame(vec![]);
@@ -305,7 +190,6 @@ mod tests {
                 "titlebar:assistant",
                 "titlebar:preferences",
                 "appbar:help",
-                "titlebar:report",
             ]
             .into_iter()
             .map(|name| crate::scenario::rect_of(name).unwrap_or_else(|| panic!("{name}")))
@@ -328,7 +212,7 @@ mod tests {
                 );
             }
         }
-        crate::theme::set_dark(previous);
+        solidcraft_theme::set_dark(previous);
     }
 
     #[test]
@@ -347,6 +231,63 @@ mod tests {
             for (t, r) in &texts {
                 assert!(r.right() <= min.left() || r.top() >= min.bottom(), "`{t}` runs under the caption buttons at {width}");
             }
+        }
+    }
+
+    #[test]
+    fn the_link_pills_leave_the_caption_buttons_and_the_controls_alone() {
+        for width in [1280.0, 1600.0] {
+            let mut w = Win::new(width);
+            w.app.home.open = false;
+            w.frame(vec![]);
+            let out = w.frame(vec![]);
+            let [min, ..] = CAPTIONS.map(|c| w.caption(c));
+            let rect = |name: &str| crate::scenario::rect_of(name).unwrap_or_else(|| panic!("{name} at {width}"));
+            let (donate, discord, report) = (rect("titlebar:kofi"), rect("titlebar:discord"), rect("titlebar:report"));
+            assert_eq!(donate.height().max(discord.height()), solidcraft_ui_kit::app_bar::PILL_HEIGHT, "{width}");
+            assert!(
+                donate.right() < discord.left() && discord.right() < report.left() && report.right() <= min.left(),
+                "{width}: {donate:?} {discord:?} {report:?} {min:?}"
+            );
+            for hide in ["titlebar:kofi:hide", "titlebar:discord:hide"] {
+                let x = rect(hide);
+                assert!(x.right() <= report.left() && x.left() >= donate.left(), "{width}: {hide} inside its pill");
+            }
+            // The pills sit left of the assistant and the other controls, which keep their places.
+            if let Some(a) = crate::scenario::rect_of("titlebar:assistant") {
+                assert!(discord.right() <= a.left(), "{width}: the pills overlap the assistant: {discord:?} {a:?}");
+            }
+            for (t, r) in &texts(&out) {
+                assert!(r.right() <= min.left() || r.top() >= min.bottom(), "`{t}` runs under the caption buttons at {width}");
+            }
+            let tabs = crate::scenario::rect_of("tab:design:0");
+            if let Some(tabs) = tabs {
+                assert!(tabs.right() <= donate.left(), "{width}: tabs {tabs:?} run under the pills {donate:?}");
+            }
+            // Donate's label follows the width allocated by the uniform layout, not a
+            // window-width breakpoint: the same item can be placed in either stack.
+            let named = texts(&out).iter().any(|(t, r)| t == "Donate" && donate.contains_rect(*r));
+            assert_eq!(named, donate.width() > solidcraft_ui_kit::app_bar_layout::application::PILL_MIN, "{width}");
+        }
+    }
+
+    /// On a narrow bar the pills give way to the document tabs: they are left out, and where they
+    /// stay they clear the tabs and the caption buttons.
+    #[test]
+    fn narrow_bars_leave_the_pills_out_before_they_crowd_the_tabs() {
+        for width in [700.0, 900.0, 960.0, 1100.0] {
+            let mut w = Win::new(width);
+            w.app.home.open = false;
+            w.frame(vec![]);
+            w.frame(vec![]);
+            let [min, ..] = CAPTIONS.map(|c| w.caption(c));
+            let tabs = crate::scenario::rect_of("tab:design:0").expect("a tab");
+            for name in ["titlebar:kofi", "titlebar:discord"] {
+                if let Some(r) = crate::scenario::rect_of(name) {
+                    assert!(r.left() >= tabs.right() && r.right() <= min.left(), "{width}: {name} {r:?} crowds the tab {tabs:?}");
+                }
+            }
+            assert!(crate::scenario::rect_of("titlebar:report").is_some(), "{width}: Report a bug stays");
         }
     }
 
@@ -394,6 +335,79 @@ mod tests {
         assert!(!cmds.iter().any(|c| matches!(c, ViewportCommand::StartDrag)), "{cmds:?}");
     }
 
+    /// A drag that starts on a tab or an application bar button belongs to that control, in the
+    /// custom title bar (Windows, Linux) and the integrated one (macOS) alike: it never asks the OS
+    /// to move the window, whatever its direction and however many tabs there are. Empty bar space
+    /// still does.
+    #[test]
+    fn drags_from_tabs_and_bar_items_never_move_the_window() {
+        for integrated in [false, true] {
+            for tabs in [1, 3] {
+                let mut w = Win::new(1600.0);
+                w.app.custom_titlebar = !integrated;
+                w.app.integrated_titlebar = integrated;
+                w.app.home.open = false;
+                for _ in 1..tabs {
+                    assert!(crate::documents::open_tab(&mut w.app, Session::default()).is_ok());
+                }
+                w.frame(vec![]);
+                w.frame(vec![]);
+                let starts = |cmds: &[ViewportCommand]| cmds.iter().filter(|c| matches!(c, ViewportCommand::StartDrag)).count();
+                let mut names = vec!["tab:design:0", "appbar:file", "appbar:undo", "titlebar:home"];
+                if tabs > 1 {
+                    names.push("tab:design:2");
+                }
+                for name in names {
+                    let from = crate::scenario::handle_at(name).unwrap_or_else(|| panic!("{name}"));
+                    for by in [vec2(40.0, 0.0), vec2(-30.0, 0.0), vec2(4.0, 30.0), vec2(30.0, -2.0)] {
+                        w.time += 1.0;
+                        let cmds = w.gesture(&[from, from + by * 0.25, from + by * 0.5, from + by]);
+                        assert_eq!(starts(&cmds), 0, "integrated={integrated} tabs={tabs}: a drag from {name} by {by:?} moved the window: {cmds:?}");
+                    }
+                }
+                w.time += 1.0;
+                let empty = pos2(900.0, 17.0);
+                let cmds = w.gesture(&[empty, empty + vec2(12.0, 4.0), empty + vec2(30.0, 8.0)]);
+                assert_eq!(starts(&cmds), 1, "integrated={integrated} tabs={tabs}: empty bar space moves the window: {cmds:?}");
+            }
+        }
+    }
+
+    /// On X11 the window manager keeps the release of the press that started a window move or
+    /// resize: every drag on the bar or the design's tab still moves the window and every edge
+    /// drag still resizes, not every other one (#13334).
+    #[test]
+    fn a_move_whose_release_the_os_keeps_does_not_swallow_the_next_drag() {
+        let starts = |cmds: &[ViewportCommand]| cmds.iter().filter(|c| matches!(c, ViewportCommand::StartDrag)).count();
+        let mut w = Win::new(1600.0);
+        w.frame(vec![]);
+        let empty = pos2(900.0, 17.0);
+        for round in 1..=3 {
+            let cmds = w.gesture_os_keeps_release(&[empty, empty + vec2(12.0, 4.0), empty + vec2(30.0, 8.0)]);
+            assert_eq!(starts(&cmds), 1, "bar drag {round}: {cmds:?}");
+            w.time += 1.0;
+        }
+        let east = pos2(1598.0, 300.0);
+        for round in 1..=2 {
+            let cmds = w.gesture_os_keeps_release(&[east, east + vec2(6.0, 0.0)]);
+            assert_eq!(cmds, vec![ViewportCommand::BeginResize(ResizeDirection::East)], "resize {round}");
+        }
+        // A drag on the design's tab belongs to the tab: it never moves the window.
+        let tab = crate::scenario::handle_at("tab:design:0").expect("the design's tab");
+        for round in 1..=2 {
+            let cmds = w.gesture(&[tab, tab + vec2(4.0, 12.0), tab + vec2(8.0, 30.0)]); // no OS move starts, so the release arrives
+            assert_eq!(starts(&cmds), 0, "tab drag {round}: {cmds:?}");
+            w.time += 1.0;
+        }
+        let cmds = w.gesture_os_keeps_release(&[empty, empty + vec2(12.0, 4.0), empty + vec2(30.0, 8.0)]);
+        assert_eq!(starts(&cmds), 1, "bar drag after the tab drags: {cmds:?}");
+        w.time += 1.0;
+        // A real release that does arrive later is ignored: no click, so no maximize.
+        let mut cmds = w.gesture(&[empty, empty + vec2(12.0, 4.0), empty + vec2(30.0, 8.0)]);
+        cmds.extend(w.frame(vec![]).viewport_output.remove(&ViewportId::ROOT).map(|v| v.commands).unwrap_or_default());
+        assert!(!cmds.iter().any(|c| matches!(c, ViewportCommand::Maximized(_))), "{cmds:?}");
+    }
+
     #[test]
     fn edge_zones_resize_unless_maximized() {
         use ResizeDirection::*;
@@ -418,80 +432,6 @@ mod tests {
     }
 
     #[test]
-    fn resize_border_is_windows_default_for_the_scale() {
-        for (dpi, px) in [(96.0, 8.0), (120.0, 10.0), (144.0, 12.0), (168.0, 14.0), (192.0, 16.0), (288.0, 24.0)] {
-            assert_eq!(resize_border_px(dpi / 96.0), px, "at {dpi} DPI");
-        }
-        // Never 0 px, whatever the scale says.
-        for bad in [0.0, -1.0, f32::NAN, f32::INFINITY] {
-            assert_eq!(resize_border_px(bad), 8.0, "{bad}");
-        }
-        assert_eq!(resize_border_px(0.01), 1.0);
-        assert_eq!(corner_size(resize_border_px(1.5)), 24.0);
-    }
-
-    #[test]
-    fn hit_test_edges_corners_and_inside() {
-        use ResizeDirection::*;
-        // A window at (100, 50), 1000 x 700 px, at 150 %: 12 px edges, 24 px corners.
-        let w = Rect::from_min_size(pos2(100.0, 50.0), vec2(1000.0, 700.0));
-        let e = resize_border_px(1.5);
-        let (l, t, r, b) = (100.0, 50.0, 1099.0, 749.0); // the outermost pixels
-        for (p, want) in [
-            ((l, 400.0), Some(West)),
-            ((l + 11.0, 400.0), Some(West)),
-            ((l + 12.0, 400.0), None),
-            ((r, 400.0), Some(East)),
-            ((r - 11.0, 400.0), Some(East)),
-            ((r - 12.0, 400.0), None),
-            ((600.0, t), Some(North)),
-            ((600.0, t + 12.0), None),
-            ((600.0, b), Some(South)),
-            ((600.0, b - 11.0), Some(South)),
-            ((l, t), Some(NorthWest)),
-            ((r, t), Some(NorthEast)),
-            ((l, b), Some(SouthWest)),
-            ((r, b), Some(SouthEast)),
-            // Corners win over the edges, along both edges for the corner's length.
-            ((l + 23.0, t), Some(NorthWest)),
-            ((l, t + 23.0), Some(NorthWest)),
-            ((l + 24.0, t), Some(North)),
-            ((l, t + 24.0), Some(West)),
-            ((r - 23.0, b), Some(SouthEast)),
-            ((r, b - 23.0), Some(SouthEast)),
-            ((r - 23.0, t), Some(NorthEast)),
-            ((l, b - 23.0), Some(SouthWest)),
-            ((600.0, 400.0), None),
-            // Outside the window: not ours.
-            ((l - 1.0, 400.0), None),
-            ((r + 1.0, 400.0), None),
-            ((600.0, t - 1.0), None),
-            ((600.0, b + 1.0), None),
-        ] {
-            assert_eq!(resize_hit(w, pos2(p.0, p.1), e), want, "at {p:?}");
-        }
-        assert_eq!(resize_hit(w, pos2(l, 400.0), 0.0), None);
-        assert_eq!(resize_hit(Rect::NOTHING, pos2(l, 400.0), e), None);
-        // Every DPI has a zone on every edge.
-        for dpi in [96.0, 120.0, 144.0, 192.0] {
-            let e = resize_border_px(dpi / 96.0);
-            for (p, d) in [((l, 400.0), West), ((r, 400.0), East), ((600.0, t), North), ((600.0, b), South)] {
-                assert_eq!(resize_hit(w, pos2(p.0, p.1), e), Some(d), "{d:?} at {dpi} DPI");
-            }
-        }
-    }
-
-    #[test]
-    fn dpi_change_keeps_the_logical_size() {
-        assert_eq!(dpi_scaled_size((1600, 1000), 96, 144), Some((2400, 1500)));
-        assert_eq!(dpi_scaled_size((2400, 1500), 144, 96), Some((1600, 1000)));
-        assert_eq!(dpi_scaled_size((1001, 777), 120, 192), Some((1602, 1243)));
-        assert_eq!(dpi_scaled_size((1001, 777), 96, 96), Some((1001, 777)));
-        assert_eq!(dpi_scaled_size((1001, 777), 0, 96), None);
-        assert_eq!(dpi_scaled_size((0, 777), 96, 144), None);
-    }
-
-    #[test]
     fn edges_resize_on_the_start_page() {
         // At launch without a design the start page shows; its layout returned before the
         // resize zones were laid out, so the edges did nothing until a design opened (#1381).
@@ -512,5 +452,91 @@ mod tests {
         let p = pos2(1199.0, 350.0);
         let cmds = w.gesture(&[p, p + vec2(6.0, 0.0)]);
         assert!(!cmds.iter().any(|c| matches!(c, ViewportCommand::BeginResize(_))), "{cmds:?}");
+    }
+
+    /// Bare bar in a 1600 pt wide window, as the drag test above uses it.
+    const BARE: Pos2 = pos2(900.0, 17.0);
+
+    /// The whole window, a design open, 1600 pt wide.
+    fn whole(mut w: Win) -> Win {
+        w.full = true;
+        w.app.home.open = false;
+        w.frame(vec![]);
+        w.frame(vec![]);
+        w
+    }
+
+    /// Where Windows answers for the window (#13996), every frame hands it the bar: the bare bar
+    /// is Windows' caption (it drags the window, and snaps it), the maximize button is Windows'
+    /// own (snap layouts), and the bar's controls stay the UI's.
+    #[test]
+    fn the_app_bar_is_the_systems_caption_where_the_system_answers_for_the_window() {
+        use caption::CaptionHit;
+        let mut w = whole(Win::systems(1600.0));
+        let window = w.native();
+        for _ in 0..3 {
+            w.frame(vec![]);
+            let hit = |p: Pos2| {
+                let (x, y) = w.px(p);
+                caption::hit(window, x, y)
+            };
+            assert_eq!(hit(BARE), CaptionHit::Drag, "the bare bar");
+            assert_eq!(hit(w.caption(Caption::Maximize).center()), CaptionHit::MaximizeButton);
+            assert_eq!(hit(w.caption(Caption::Minimize).center()), CaptionHit::Client);
+            assert_eq!(hit(w.caption(Caption::Close).center()), CaptionHit::Client);
+            assert_eq!(hit(pos2(BARE.x, 400.0)), CaptionHit::Outside, "below the bar");
+        }
+        // The system's frame resizes the window: no zones of the UI's own, whoever draws it.
+        w.app.native_resize_border = false;
+        let p = pos2(1599.0, 350.0);
+        let cmds = w.gesture(&[p, p + vec2(6.0, 0.0)]);
+        assert!(!cmds.iter().any(|c| matches!(c, ViewportCommand::BeginResize(_))), "{cmds:?}");
+        caption::closed(window);
+    }
+
+    /// Where nothing answers for the window (other systems, the web), nothing is handed over and
+    /// the bar stays egui's: a drag on the bare bar moves the window through egui, once past its
+    /// drag threshold.
+    #[test]
+    fn without_a_system_that_answers_the_title_bar_stays_eguis() {
+        let starts = |cmds: &[ViewportCommand]| cmds.iter().filter(|c| matches!(c, ViewportCommand::StartDrag)).count();
+        let mut w = whole(Win::new(1600.0));
+        assert_eq!(starts(&w.gesture(&[BARE, BARE + vec2(2.0, 0.0)])), 0);
+        w.time += 1.0;
+        let cmds = w.gesture(&[BARE, BARE + vec2(12.0, 4.0), BARE + vec2(30.0, 8.0)]);
+        assert_eq!(starts(&cmds), 1, "{cmds:?}");
+    }
+
+    /// A right-click on the bare bar opens the application bar's own menu. Where Windows answers
+    /// for the window that click is Windows', and comes back from the window procedure to open
+    /// the same menu; a press Windows takes on the bare bar comes back too and closes it, as a
+    /// press on a bar of the UI's own does.
+    #[test]
+    fn a_right_click_on_the_systems_caption_opens_the_application_bars_menu_as_before() {
+        let app_bar_menu = |w: &Win| w.app.viewport.context_menu.is_some() && matches!(w.app.menu.target, crate::context_menu::Target::AppBar { .. });
+        // The bar is the UI's own: egui sees the click.
+        let mut own = whole(Win::new(1600.0));
+        let button = |pressed| Event::PointerButton { pos: BARE, button: PointerButton::Secondary, pressed, modifiers: Default::default() };
+        own.frame(vec![Event::PointerMoved(BARE), button(true), button(false)]);
+        own.frame(vec![]);
+        assert!(app_bar_menu(&own), "the application bar's menu");
+        // The system answers for the window: the window procedure hands the click back.
+        let mut w = whole(Win::systems(1600.0));
+        assert!(!app_bar_menu(&w));
+        let (x, y) = w.px(BARE);
+        caption::secondary_click(w.native(), x, y);
+        w.frame(vec![]);
+        w.frame(vec![]);
+        assert!(app_bar_menu(&w), "the same menu");
+        // The menu opened at the click and lies over the bar there: beside it the bar is still the
+        // system's caption. A press the system takes there is a press on the bar to the UI, as on
+        // a bar of its own: the menu closes by the code that closes it on any press elsewhere.
+        let (x, y) = w.px(BARE - vec2(60.0, 0.0));
+        assert_eq!(caption::hit(w.native(), x, y), caption::CaptionHit::Drag, "beside the menu");
+        caption::pressed(w.native(), x, y);
+        w.frame(vec![]);
+        w.frame(vec![]);
+        assert!(w.app.viewport.context_menu.is_none(), "a press on the caption closes it");
+        caption::closed(w.native());
     }
 }

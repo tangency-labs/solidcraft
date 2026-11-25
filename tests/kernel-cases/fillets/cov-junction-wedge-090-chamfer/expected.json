@@ -1,0 +1,11 @@
+{
+ "sources": [],
+ "what": "prism over a 90 degree triangle, apex edge chamfer 2",
+ "source": "analytic",
+ "method": "prism over a triangle with a 90 degree apex, sides 20, 30 long: V0 = 200 sin(a) * 30. The apex edge chamfered 2 along each face removes the triangle (1/2) 2^2 sin(a) along 30. V = 5940.000000000",
+ "body_count": 1,
+ "volume_mm3": 5940.0,
+ "tolerance": {
+  "rel": 1e-06
+ }
+}

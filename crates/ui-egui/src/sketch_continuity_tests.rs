@@ -1,5 +1,6 @@
 //! The Continuity Analysis toolbar tool (#770): the button shades every seam, a click on an edge
 //! pins its numbers, the button again turns the analysis off, and a legend names the colours.
+//! Also the labels of the other analysis markers (Mass Center).
 
 use super::*;
 
@@ -21,7 +22,7 @@ fn the_button_shades_every_seam_pins_an_edge_and_turns_off() {
     assert_eq!(h.app.session.continuity.len(), 12, "every edge of the box");
     assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("inspect.continuity"));
     h.step(&json!({"click": {"world": [10, 0, 20]}})).unwrap();
-    assert_eq!(marks(), ["G0 90.000\u{b0}"], "{:?}", h.app.status);
+    assert_eq!(marks(), ["Crease 90.000\u{b0}"], "{:?}", h.app.status);
     assert_eq!(h.app.session.continuity.len(), 12, "the clicked edge is measured again, not added twice");
     h.step(&json!({"start": "inspect.continuity"})).unwrap();
     assert!(h.app.session.continuity.is_empty() && h.app.tool.is_none());
@@ -29,7 +30,7 @@ fn the_button_shades_every_seam_pins_an_edge_and_turns_off() {
     assert!(marks().is_empty(), "the markers go with the tool");
 }
 
-/// A round's tangent seam reads G1 with its curvature jump (1 / 4 mm against the flat side).
+/// A round's tangent seam reads Tangent with its curvature jump (1 / 4 mm against the flat side).
 #[test]
 fn a_tangent_seam_is_labelled_with_its_curvature_jump() {
     let mut h = crate::scenario::Harness::new();
@@ -41,13 +42,14 @@ fn a_tangent_seam_is_labelled_with_its_curvature_jump() {
     h.step(&json!({"click": {"world": [16, 0, 10]}})).unwrap();
     let labels = marks();
     assert_eq!(labels.len(), 1, "{labels:?} {:?}", h.app.status);
-    assert!(labels[0].starts_with("G1 0.000\u{b0} \u{394}k 0.2500/mm"), "{labels:?}");
+    assert!(labels[0].starts_with("Tangent 0.000\u{b0} \u{394}k 0.2500/mm"), "{labels:?}");
 }
 
 /// The legend shows while seams are shaded and goes with the analysis.
 #[test]
 fn the_legend_shows_while_seams_are_shaded() {
     let mut h = crate::scenario::Harness::new();
+    h.app.preferences.viewport_status_details = false;
     h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20})).unwrap();
     h.settle();
     assert!(crate::scenario::rect_of("continuity_legend").is_none());
@@ -58,6 +60,21 @@ fn the_legend_shows_while_seams_are_shaded() {
     h.step(&json!({"start": "inspect.continuity"})).unwrap();
     h.frame();
     assert!(crate::scenario::rect_of("continuity_legend").is_none(), "gone with the analysis");
+}
+
+/// Mass Center's marker reads the centre's coordinates in the design's units, as Design
+/// Properties does, not only its name (#15233).
+#[test]
+fn the_mass_center_marker_shows_its_coordinates() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 20, "width": 10, "height": 40})).unwrap();
+    h.settle();
+    h.step(&json!({"start": "inspect.center_of_mass"})).unwrap();
+    h.frame();
+    let at = |v: f64| crate::prefs::show_mm_bare(&h.app, v);
+    let unit = crate::prefs::unit_scale(&h.app.session.doc.units).1;
+    let want = format!("Center of mass ({}, {}, {}) {unit}", at(10.0), at(5.0), at(20.0));
+    assert_eq!(marks(), [want], "{:?}", h.app.status);
 }
 
 /// While the tool runs, only what its click takes lights up under the pointer: an edge, never

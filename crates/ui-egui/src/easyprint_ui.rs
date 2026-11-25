@@ -73,10 +73,10 @@ pub fn request(app: &mut SolveApp, params: Value) {
 }
 
 fn go(app: &mut SolveApp, mut params: Value) {
-    let _language = crate::i18n::scope(&app.preferences.language);
+    let _language = solidcraft_ui_text::scope(&app.preferences.language);
     params["consent"] = json!(true);
     if app.run("file.open_in_easyprint", params).is_ok() {
-        app.set_status(crate::i18n::tr("ui.easyprint_uploading"), false);
+        app.set_status(solidcraft_ui_text::tr("ui.easyprint_uploading"), false);
     }
 }
 
@@ -90,7 +90,7 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     };
     app.easyprint.busy.store(false, Ordering::SeqCst);
-    let _language = crate::i18n::scope(&app.preferences.language);
+    let _language = solidcraft_ui_text::scope(&app.preferences.language);
     match answer {
         Ok(url) => {
             #[cfg(test)]
@@ -98,21 +98,22 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                 app.easyprint.opened = Some(url.clone());
             }
             ctx.open_url(egui::OpenUrl::new_tab(url));
-            app.set_status(crate::i18n::tr("ui.easyprint_opened"), false);
+            app.set_status(solidcraft_ui_text::tr("ui.easyprint_opened"), false);
         }
-        Err(e) => app.set_status(crate::i18n::format("ui.easyprint_failed", &[("error", &e)]), true),
+        Err(e) => app.set_status(solidcraft_ui_text::format("ui.easyprint_failed", &[("error", &e)]), true),
     }
 }
 
 /// The question: what is uploaded where, for how long.
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(params) = app.easyprint.ask.clone() else { return };
-    let _language = crate::i18n::scope(&app.preferences.language);
-    let (closed, action) = ui_kit::Confirm::new(egui::Id::new("sc_easyprint_confirm"), "mesh_export", crate::i18n::tr_label("Open with EasyPrint"))
-        .actions("Upload", "Cancel", None)
-        .show(ctx, true, |ui| {
-            ui_kit::text(ui, crate::i18n::tr("ui.easyprint_consent"), ui_kit::Text::Report("easyprint_consent", false));
-        });
+    let _language = solidcraft_ui_text::scope(&app.preferences.language);
+    let (closed, action) =
+        ui_kit::Confirm::new(egui::Id::unique("sc_easyprint_confirm"), "mesh_export", solidcraft_ui_text::tr_label("Open with EasyPrint"))
+            .actions("Upload", "Cancel", None)
+            .show(ctx, true, |ui| {
+                ui_kit::text(ui, solidcraft_ui_text::tr("ui.easyprint_consent"), ui_kit::Text::Report("easyprint_consent", false));
+            });
     match action {
         ui_kit::Action::Ok => {
             app.easyprint.ask = None;

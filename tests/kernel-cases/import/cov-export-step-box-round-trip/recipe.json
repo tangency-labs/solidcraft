@@ -1,0 +1,37 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 30,
+    "width": 20,
+    "height": 10,
+    "corner": [
+     5,
+     -10,
+     0
+    ],
+    "operation": "new",
+    "body_name": "Block"
+   }
+  },
+  {
+   "command": "file.export_step",
+   "params": {
+    "path": "$OUT/cov-export-step-box.step"
+   }
+  },
+  {
+   "command": "file.new",
+   "params": {
+    "name": "Reimported"
+   }
+  },
+  {
+   "command": "file.insert_step",
+   "params": {
+    "path": "$OUT/cov-export-step-box.step"
+   }
+  }
+ ]
+}

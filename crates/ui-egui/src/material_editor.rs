@@ -6,7 +6,8 @@ use solidcraft_engine::doc::physical_material::{
 };
 use solidcraft_engine::doc::{Document, UserMaterial, appearance::Look};
 
-use crate::{SolveApp, i18n::tr, ui_kit};
+use crate::{SolveApp, ui_kit};
+use solidcraft_ui_text::tr;
 
 const KINDS: [&str; 9] = [
     "density",
@@ -26,6 +27,9 @@ const SOURCE_KINDS: [SourceKind; 4] = [SourceKind::UserSupplied, SourceKind::Mea
 pub struct Editor {
     pub(crate) draft: Option<Draft>,
     error: Option<String>,
+    /// The design revision and the command Save was refused with (none when the draft did not
+    /// validate): `error` stays only while the draft would run it again on the same design.
+    refused: Option<(u64, Option<(&'static str, Value)>)>,
     note: Option<String>,
     chosen_material: Option<String>,
     observed_index: Option<usize>,
@@ -62,9 +66,22 @@ impl Editor {
         self.draft.is_some()
     }
 
+    #[cfg(test)]
+    pub(crate) fn error(&self) -> Option<&str> {
+        self.error.as_deref()
+    }
+
+    /// Show why Save was refused, for as long as the draft would run the same command on the
+    /// same design.
+    fn refuse(&mut self, error: String, revision: u64, doc: &Document) {
+        self.refused = Some((revision, self.draft.as_ref().and_then(|d| d.command(doc).ok().flatten())));
+        self.error = Some(error);
+    }
+
     pub(crate) fn begin(&mut self, doc: &Document, source: Option<&str>, duplicate: bool) {
         self.draft = Some(Draft::new(doc, source, duplicate));
         self.error = None;
+        self.refused = None;
         self.note = None;
     }
 
@@ -79,6 +96,7 @@ impl Editor {
         self.observed_index = Some(*index);
         self.draft = None;
         self.error = None;
+        self.refused = None;
         self.note = Some(tr("material.editor.saved").to_string());
         Ok(())
     }
@@ -99,7 +117,7 @@ impl Draft {
         let user = source.and_then(|name| doc.user_material(name)).cloned();
         let original = (!duplicate).then(|| user.clone()).flatten();
         let name = match source {
-            Some(name) if duplicate => crate::i18n::format("material.editor.copy_name", &[("name", name)]),
+            Some(name) if duplicate => solidcraft_ui_text::format("material.editor.copy_name", &[("name", name)]),
             Some(name) => name.to_string(),
             None => String::new(),
         };
@@ -182,6 +200,37 @@ impl CardDraft {
             properties: card.properties.iter().map(PropertyDraft::from_property).collect(),
             add_kind: 0,
         }
+    }
+    /// Add an empty property of `kind`, unless the card has one. A Density property starts at the
+    /// material's assigned density (`density_g_cm3`, as typed) in kg/m³. A card with no source gets
+    /// a User supplied one for it, which every property must name (#12219); it can be edited or
+    /// replaced like any other.
+    pub(crate) fn add_property(&mut self, kind: &'static str, density_g_cm3: &str) {
+        if self.properties.iter().any(|p| p.kind == kind) {
+            return;
+        }
+        if self.sources.is_empty() {
+            self.sources.push(Source {
+                id: "source-1".into(),
+                title: tr("material.editor.user_supplied").to_string(),
+                kind: SourceKind::UserSupplied,
+                license: None,
+                reference: None,
+            });
+        }
+        let mut property = PropertyDraft::empty(kind, self.sources.first().map(|s| s.id.clone()).unwrap_or_default());
+        if kind == "density"
+            && let Ok(g_cm3) = number(density_g_cm3, "density_g_cm3")
+            && solidcraft_engine::doc::valid_density(g_cm3)
+            && let Some(value) = property.values.first_mut()
+        {
+            // 7.85 g/cm³ is 7850 kg/m³, not 7849.999999999999; a density too small for six
+            // decimals keeps its unrounded value rather than becoming 0, which no card accepts.
+            let kg_m3 = g_cm3 * 1000.0;
+            let rounded = (kg_m3 * 1e6).round() / 1e6;
+            *value = if rounded > 0.0 { rounded } else { kg_m3 }.to_string();
+        }
+        self.properties.push(property);
     }
     pub(crate) fn build(&self) -> Result<MaterialCard, String> {
         let card = MaterialCard {
@@ -296,13 +345,14 @@ impl PropertyDraft {
 }
 
 fn number(value: &str, field: &str) -> Result<f64, String> {
-    crate::prefs::parse_number(value).ok_or_else(|| format!("{field}: {}", tr("material.editor.number_required")))
+    crate::ui_kit::parse_number(value).ok_or_else(|| format!("{field}: {}", tr("material.editor.number_required")))
 }
 
 fn field(ui: &mut egui::Ui, label: &str, id: &str, value: &mut String, unit: &str) {
     let label = if unit.is_empty() { label.to_string() } else { format!("{label} ({unit})") };
-    let response =
-        ui_kit::row(ui, &label, |ui| ui_kit::cell_editor(ui, egui::Id::new(("physical_editor", id)), value, tr("ui.material_review.unknown"), false));
+    let response = ui_kit::row(ui, &label, |ui| {
+        ui_kit::cell_editor(ui, egui::Id::unique(("physical_editor", id)), value, tr("ui.material_review.unknown"), false)
+    });
     crate::scenario::publish_handle(&format!("material:field:{id}"), response.rect.center());
 }
 
@@ -371,7 +421,7 @@ fn property_rows(ui: &mut egui::Ui, property: &mut PropertyDraft, sources: &[Sou
     });
 }
 
-fn card_rows(ui: &mut egui::Ui, card: &mut CardDraft) {
+fn card_rows(ui: &mut egui::Ui, card: &mut CardDraft, density_g_cm3: &str) {
     field(ui, tr("material.editor.designation"), "designation", &mut card.designation, "");
     let mut family = FAMILIES.iter().position(|v| v == &card.family).unwrap_or(0);
     let labels =
@@ -398,7 +448,7 @@ fn card_rows(ui: &mut egui::Ui, card: &mut CardDraft) {
                 optional_text(ui, tr("ui.design_properties.license"), &format!("source:{i}:license"), &mut source.license);
                 optional_text(ui, tr("material.editor.reference"), &format!("source:{i}:reference"), &mut source.reference);
                 let used = card.properties.iter().any(|p| p.source_id == source.id);
-                if ui_kit::button(ui, tr("Remove"), ui_kit::Button::Enabled(!used)).clicked() {
+                if ui_kit::button(ui, tr("material.editor.remove"), ui_kit::Button::Enabled(!used)).clicked() {
                     remove = Some(i);
                 }
             });
@@ -416,7 +466,7 @@ fn card_rows(ui: &mut egui::Ui, card: &mut CardDraft) {
         let label = format!("ui.material_review.{}", property.kind);
         ui_kit::section(ui, format!("physical:property:{}", property.kind), tr(&label), false, |ui| {
             property_rows(ui, property, &card.sources);
-            if ui_kit::button(ui, tr("Remove"), ui_kit::Button::Normal).clicked() {
+            if ui_kit::button(ui, tr("material.editor.remove"), ui_kit::Button::Normal).clicked() {
                 remove = Some(i);
             }
         });
@@ -429,7 +479,7 @@ fn card_rows(ui: &mut egui::Ui, card: &mut CardDraft) {
     ui_kit::choice_row(ui, tr("material.editor.add_property"), "physical:add_kind", &mut card.add_kind, &refs);
     let kind = KINDS.get(card.add_kind).copied().unwrap_or("density");
     if ui_kit::button(ui, tr("Add"), ui_kit::Button::Enabled(card.properties.iter().all(|p| p.kind != kind))).clicked() {
-        card.properties.push(PropertyDraft::empty(kind, card.sources.first().map(|s| s.id.clone()).unwrap_or_default()));
+        card.add_property(kind, density_g_cm3);
     }
 }
 
@@ -493,12 +543,22 @@ pub(crate) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, index: &mut usize, edi
             draft.card.designation = draft.name.clone();
         }
         if draft.card_enabled {
-            card_rows(ui, &mut draft.card);
+            card_rows(ui, &mut draft.card, &draft.density);
             ui_kit::text(ui, tr("ui.material_review.claims"), ui_kit::Text::Note("physical_claims"));
         } else {
             ui_kit::text(ui, tr("material.editor.unknown_card"), ui_kit::Text::Note("unknown_card"));
         }
         let validation = draft.command(&app.session.doc);
+        // A refused Save's message is about the command it ran and the design it ran on (#641):
+        // once the draft would run another, or the design changed, it goes.
+        if editor
+            .refused
+            .as_ref()
+            .is_some_and(|(revision, was)| (*revision, was.as_ref()) != (app.session.revision, validation.as_ref().ok().and_then(|c| c.as_ref())))
+        {
+            editor.error = None;
+            editor.refused = None;
+        }
         if let Err(error) = &validation {
             ui_kit::text(ui, error, ui_kit::Text::Report("physical_validation", true));
         }
@@ -514,9 +574,10 @@ pub(crate) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, index: &mut usize, edi
     if discard {
         editor.draft = None;
         editor.error = None;
+        editor.refused = None;
     }
     if save && let Err(error) = editor.save(app, index) {
-        editor.error = Some(error);
+        editor.refuse(error, app.session.revision, &app.session.doc);
     }
     if let Some(error) = &editor.error {
         ui_kit::text(ui, error, ui_kit::Text::Report("physical_save_error", true));

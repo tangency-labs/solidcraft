@@ -1,0 +1,226 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  15.0,
+                  10.0,
+                  10.0
+                ],
+                [
+                  45.0,
+                  10.0,
+                  10.0
+                ]
+              ],
+              "index": 5
+            },
+            {
+              "at": [
+                [
+                  45.0,
+                  30.0,
+                  10.0
+                ],
+                [
+                  15.0,
+                  30.0,
+                  10.0
+                ]
+              ],
+              "index": 7
+            },
+            {
+              "at": [
+                [
+                  15.0,
+                  30.0,
+                  10.0
+                ],
+                [
+                  15.0,
+                  10.0,
+                  10.0
+                ]
+              ],
+              "index": 6
+            },
+            {
+              "at": [
+                [
+                  45.0,
+                  10.0,
+                  10.0
+                ],
+                [
+                  45.0,
+                  30.0,
+                  10.0
+                ]
+              ],
+              "index": 4
+            }
+          ],
+          "points": [
+            [
+              30.0,
+              10.0,
+              10.0
+            ],
+            [
+              30.0,
+              30.0,
+              10.0
+            ],
+            [
+              15.0,
+              20.0,
+              10.0
+            ],
+            [
+              45.0,
+              20.0,
+              10.0
+            ]
+          ],
+          "tolerance": 3.6410549446402594
+        },
+        "kind": "round",
+        "sizes": [
+          2.0,
+          2.0,
+          2.0,
+          2.0
+        ]
+      }
+    }
+  ],
+  "case": "every-pocket-rim-edges-r2",
+  "expected": {
+    "bbox": {
+      "max": [
+        60,
+        40,
+        10
+      ],
+      "min": [
+        0,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "faces": 15,
+    "method": "plate 60x40x10 with the pocket 30x20x5 (x 15..45, y 10..30, floor z = 5, sharp vertical corners): V0 = 24000 - 3000 = 21000. Each convex rim edge loses the spandrel A = 0.858407 along its length (100 in all); at each corner of the pocket the two rounds run on past the corner into the material beyond it and meet in a mitre, so the quadrant there loses what both remove: the overlap of their spandrel prisms, r^3 (5/3 - pi/2) = 0.766963. Removed = 100 A + 4 overlap = 88.9086. V = 20911.0914. Faces 15.",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 20911.091414483082,
+    "what": "the four rim edges of a rectangular pocket rounded r2 (convex edges meeting at the pocket's concave corners)"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 32,
+      "faces": 15,
+      "vertices": 20
+    }
+  },
+  "records": "every-pocket-rim-edges-r2.bodies.json.gz",
+  "result": [
+    {
+      "body": "Plate",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 7216.424747816527,
+      "body_count": 1,
+      "edges": 32,
+      "faces": 15,
+      "vertices": 20,
+      "volume_mm3": 20911.091414706836
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "the four rim edges of a rectangular pocket rounded r2 (convex edges meeting at the pocket's concave corners)",
+  "why_not": []
+}

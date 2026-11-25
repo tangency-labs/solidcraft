@@ -4,6 +4,38 @@
 `xtask licences --check`, `xtask layers`, clippy with `-D warnings`, the tests with the `ci`
 profile and the wasm build check.
 
+`cargo xtask fast` is the check before a commit and a push: it checks only what your change
+touches. It compares your branch with `origin/main` (`--base REF` for another), counting
+committed, uncommitted and untracked files, and:
+
+- formats the code;
+- runs the quick checks of `cargo xtask ci` (assets, lists, skills, layers, ui-containers,
+  mesh-decisions; `shared`, `licences --check` and `icons` only when the change can affect them);
+- runs `cargo clippy --workspace --all-targets --profile ci -- -D warnings`, the same build as
+  `cargo xtask ci`, so a change that breaks another crate still fails;
+- tests only the packages whose files changed, as `scripts/ci/affected.py --owners` maps them,
+  with nextest's `ci` profile (no heavy tests);
+- when code in `solidcore/` changed, checks its own workspace as solidcore/AGENTS.md §4 asks:
+  `cargo clippy --workspace --all-targets -- -D warnings`; the tests of every solidcore crate
+  except `goldens` and `solidcore-ops`, which are tested only when the change touches them (a
+  break often shows in a crate the change did not touch); and the `solidcore` wasm check;
+- for a kernel change, runs the goldens of the units named with `--units` (the ids on your pull
+  request's `Units:` line, separated by commas: `cargo xtask fast --units <id,...>`); without
+  `--units` it prints a reminder instead. The kernel rig and the publish dry run are left to CI.
+
+`-p PACKAGE` (repeatable) picks the packages to test instead, `--list` only prints what would
+run, and arguments after `--` go to the test runner (`cargo xtask fast -- sketch`). Every step
+runs even after one fails, and the failures are listed at the end: check each against `main`
+before blaming your change. With cargo-nextest installed it runs the tests as pull-request CI
+does: without the heavy tests and the action matrix sample. Without it the tests fall back to
+`cargo test`, which runs the heavy tests and the doc tests too and takes much longer: install it
+first (`cargo install --locked cargo-nextest`, https://nexte.st).
+
+CI checks the rest. On the pull request it tests the packages that depend on yours and runs
+web-offline-test; the merge queue (and `main`) adds the wasm build of the application crates,
+the doc tests, the heavy tests and the action matrix sample, so a green pull request run does
+not show that those pass.
+
 | Harness | Where | What it catches |
 |---|---|---|
 | Unit and engine tests | next to the code, `*_tests.rs` | measured results: volume, area, topology counts against derived values |
@@ -17,8 +49,11 @@ profile and the wasm build check.
 
 ## Dependency advisories
 
-Scheduled and manually dispatched CI runs have a separate **Dependency advisories** job;
-new advisories do not fail unrelated pull requests. To run the same scan locally:
+Scheduled and manually dispatched CI runs have a separate **Dependency advisories** job that
+checks advisories, bans and sources. A pull request or merge group that changes `Cargo.lock` or
+any `Cargo.toml` runs the same job for advisories only, and `ci` requires it then; other pull
+requests skip it, so a new advisory does not fail an unrelated change. To run the nightly scan
+locally:
 
 ```sh
 cargo install cargo-deny --version 0.20.2 --locked
@@ -32,8 +67,8 @@ than adding broad ignores. The first scan prompted an update to quick-xml 0.41.0
 [RUSTSEC-2026-0194](https://rustsec.org/advisories/RUSTSEC-2026-0194) and
 [RUSTSEC-2026-0195](https://rustsec.org/advisories/RUSTSEC-2026-0195).
 
-Coverage excludes the version matching of local path patches: `truck-shapeops`,
-`truck-stepio`, `truck-meshalgo`, `matext4cgmath` and `egui-wgpu` in `vendor/`. Their checked-in
+Coverage excludes the version matching of local path patches: `egui-wgpu` and `winit` in
+`vendor/`, and the vendored kernel in `solidcore/`. Their checked-in
 code and patches still need comparison with their permissively licensed upstreams; a green
 scan does not establish their security or incorporate an upstream fix automatically.
 
@@ -59,9 +94,8 @@ the fix removes the step.
 ## CI profile
 
 CI runs the tests with `--profile ci`: light optimisation, line tables, no LTO and debug
-assertions off. Some truck debug assertions fail on valid geometry; the `ci` profile disables
-them while building faster than `--release`. If a test fails only in a plain debug build, say
-so in the PR.
+assertions off, which builds much faster than `--release`. If a test fails only in a plain
+debug build, say so in the PR.
 
 Run `cargo xtask test` to build with this profile and run the test binaries concurrently,
 with doc tests alongside. Arguments after `--` go to each test binary, for example
@@ -110,9 +144,7 @@ settings in `.config/nextest.toml`), the slowest tests first; doc tests run in t
 Pull requests skip a few heavy tests (each takes one to twelve minutes); they run on every push to
 `main`, nightly, and in `cargo xtask test`:
 
-- `solidcraft-engine`: `tests::hostile_params_never_panic`, everything in `tests::robustness` and
-  the seeds of `tests::robustness_goldens` (`seed_00` … `seed_95`; pull requests that change the kernel, truck or
-  the goldens run all but the slowest, `SLOW_SEEDS` in `ci.yml`),
+- `solidcraft-engine`: `tests::hostile_params_never_panic`, everything in `tests::robustness`,
   `pattern_suppress_tests::enclosure_arc_extinction_keeps_a_real_sharp_inner_lip_after_resize_and_reopen`,
   `pattern_suppress_tests::enclosure_datums_follow_wall_height_and_board_depth_with_material_proofs`,
   `cmd::plastic::tests::enclosure_snap_fit_follows_resized_front_wall`, the `atomic_commands` contract tests

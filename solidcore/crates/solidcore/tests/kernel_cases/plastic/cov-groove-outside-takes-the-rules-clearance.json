@@ -1,0 +1,163 @@
+{
+  "area": "plastic",
+  "bodies": {
+    "b8": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b9": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b9"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b10"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b10"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b11"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b12"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b11"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b14"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b14",
+        "b15"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "cov-groove-outside-takes-the-rules-clearance",
+  "expected": {
+    "bbox": {
+      "max": [
+        80,
+        50,
+        30
+      ],
+      "min": [
+        0,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "method": "a groove's gap defaults to the body's rule's clearance: ABS (1.5mm), 0.1 mm. The groove is the band along the outer edge (80 x 50) w + gap = 1.1 wide, cut h + gap = 2.1 deep: (80*50 - 77.8*47.8)*2.1 = 590.436000. V = 22112 - that = 21521.564000; the height stays 30",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 21521.564,
+    "what": "plastic.lip type groove, 1 wide and 2 deep along the outside edge of the shelled box's rim, with the ABS (1.5mm) rule active and no gap given"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 36,
+      "faces": 16,
+      "vertices": 24
+    }
+  },
+  "records": "cov-groove-outside-takes-the-rules-clearance.bodies.json.gz",
+  "result": [
+    {
+      "body": "Case",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 22613.52,
+      "body_count": 1,
+      "edges": 36,
+      "faces": 16,
+      "vertices": 24,
+      "volume_mm3": 21521.563999999962
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "shell",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "plastic.lip type groove, 1 wide and 2 deep along the outside edge of the shelled box's rim, with the ABS (1.5mm) rule active and no gap given",
+  "why_not": []
+}

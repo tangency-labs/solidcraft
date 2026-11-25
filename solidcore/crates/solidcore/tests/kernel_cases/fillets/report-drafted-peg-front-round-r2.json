@@ -1,0 +1,148 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  0.87488663525924,
+                  0.8748866352592405,
+                  10.0
+                ],
+                [
+                  40.0,
+                  0.87488663525924,
+                  10.0
+                ]
+              ],
+              "index": 10
+            }
+          ],
+          "points": [
+            [
+              20.43744331762962,
+              0.8748866352592402,
+              10.0
+            ]
+          ],
+          "tolerance": 2.721294101747089
+        },
+        "kind": "round",
+        "sizes": [
+          2.0
+        ]
+      }
+    }
+  ],
+  "case": "report-drafted-peg-front-round-r2",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "method": "the peg (a bar 40 x 16 whose far end is a half disc R8 about (40, 8)) extruded 10 with a 5 deg inward taper, then the top's end circle (R 8 - 10 tan 5 deg about (40, 8)) extruded 10 up with the same taper and joined: the bar's drafted front face runs tangent into the cone along its generator through x = 40, and the top's concave arc meets the front top edge where the two are tangent, as on the straight peg; the front top edge (y = 10 tan 5 deg, z = 10) rounded r2; no closed form: one valid body, every seam the round makes with its faces G1",
+    "source": "invariants",
+    "what": "the drafted peg's front top edge rounded r2: the round runs into the cone its drafted front face runs tangent into; reported from the app (2026-10-30, test-peg part), drafted"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 21,
+      "faces": 10,
+      "vertices": 13
+    }
+  },
+  "records": "report-drafted-peg-front-round-r2.bodies.json.gz",
+  "result": [
+    {
+      "body": "Peg",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 2921.396268643752,
+      "body_count": 1,
+      "edges": 17,
+      "faces": 9,
+      "vertices": 11,
+      "volume_mm3": 8265.751166686852
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": null,
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "the drafted peg's front top edge rounded r2: the round runs into the cone its drafted front face runs tangent into; reported from the app (2026-10-30, test-peg part), drafted",
+  "why_not": []
+}

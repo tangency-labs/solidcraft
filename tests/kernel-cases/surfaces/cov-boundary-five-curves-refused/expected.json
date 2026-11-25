@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "a boundary loop of five curves: refused, a loop patch takes 2 to 4",
+ "source": "invariants",
+ "method": "the loop patch is a Coons patch of opposite pairs (or a bridge of two); five sides have no pairing",
+ "outcome": "refused",
+ "refusal": "`curves` must list 2 to 4 sketch curves in loop order"
+}

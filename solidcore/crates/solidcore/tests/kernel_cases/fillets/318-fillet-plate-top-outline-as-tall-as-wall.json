@@ -1,0 +1,211 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  0.0,
+                  0.0,
+                  5.0
+                ],
+                [
+                  40.0,
+                  0.0,
+                  5.0
+                ]
+              ],
+              "index": 1
+            },
+            {
+              "at": [
+                [
+                  40.0,
+                  0.0,
+                  5.0
+                ],
+                [
+                  40.0,
+                  30.0,
+                  5.0
+                ]
+              ],
+              "index": 2
+            },
+            {
+              "at": [
+                [
+                  40.0,
+                  30.0,
+                  5.0
+                ],
+                [
+                  0.0,
+                  30.0,
+                  5.0
+                ]
+              ],
+              "index": 3
+            },
+            {
+              "at": [
+                [
+                  0.0,
+                  30.0,
+                  5.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  5.0
+                ]
+              ],
+              "index": 0
+            }
+          ],
+          "points": [
+            [
+              20.0,
+              0.0,
+              5.0
+            ],
+            [
+              40.0,
+              15.0,
+              5.0
+            ],
+            [
+              20.0,
+              30.0,
+              5.0
+            ],
+            [
+              0.0,
+              15.0,
+              5.0
+            ]
+          ],
+          "tolerance": 2.5134689052802224
+        },
+        "kind": "round",
+        "sizes": [
+          5.0,
+          5.0,
+          5.0,
+          5.0
+        ]
+      }
+    }
+  ],
+  "case": "318-fillet-plate-top-outline-as-tall-as-wall",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "method": "each round removes the spandrel (1-pi/4) r^2 = 5.365046; at a convex corner the two prisms end on the 45 deg mitre, so each is as long as its edge less twice its centroid's distance from the faces, c = r (10-3pi)/(3(4-pi)) = 1.116840: removed = (1-pi/4) 25 (140 - 8c). V = 6000 - removed.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#318",
+      "tangency-labs/solidcraft#190"
+    ],
+    "volume_mm3": 5296.828741826954,
+    "what": "a 40 x 30 x 5 plate's whole top outline rounded R5, as tall as its walls: each round uses its wall up, the four mitred at the corners"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 12,
+      "faces": 6,
+      "vertices": 8
+    }
+  },
+  "records": "318-fillet-plate-top-outline-as-tall-as-wall.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b6"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 2785.3981633991625,
+      "body_count": 1,
+      "edges": 12,
+      "faces": 6,
+      "vertices": 8,
+      "volume_mm3": 5296.828741852307
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#318",
+    "tangency-labs/solidcraft#190"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "a 40 x 30 x 5 plate's whole top outline rounded R5, as tall as its walls: each round uses its wall up, the four mitred at the corners",
+  "why_not": []
+}

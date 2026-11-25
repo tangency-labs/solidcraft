@@ -1,0 +1,472 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/4859",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+ "test": "none: open on SolidCraft's truck kernel (kernel work paused under tangency-labs/solidcraft#3992); geometry is the report's rectangle and the triage's 2 mm wall, reproduced on 0.19.0 in the issue's triage comment and on 0.29.0 with solidcraft-cli",
+ "summary": "A chamfer on an inside (concave) corner edge of a thin rectangular ring was refused on SolidCraft's truck kernel with 'not supported yet: <d> mm is too large for this chamfer: the result changes N mm^3 of the part, more than the chamfer can (at most M mm^3)' (#4859), although the chamfer only fills the corner of the hole. The report: a 25 x 15 rectangle and its 2 mm offset extruded 10 mm, a 1 mm chamfer on the vertical edge picked at mid-height refused ('changes 28 mm^3, at most 6 mm^3'), 0.6 mm the largest that built (0.19.0). Triage on 0.19.0 rebuilt it as a 2 mm wall (25 x 15 less 21 x 11): the inside corner was refused at 2 mm, the outside corner built at 0.6, 1 and 2. Replayed with solidcraft-cli 0.29.0 (truck), the two rectangles sketched and extruded 10 as one ring (sketching the inside one as the outer rectangle's 2 mm inward offset gives the same), one corner chamfered: on the 2 mm wall the inside corner builds at 1 and 1.2 and is refused at 1.5, 1.9, 1.99, 2, 2.01, 2.5, 3 and 3.5, and builds again at 4; all four inside corners build at 1 and are refused at 2; on a 1 mm wall it builds at 0.6 and is refused at 0.8, 1 and 2, at 1 with exactly the report's message (changes 28 mm^3, at most 6 mm^3); on a 3 mm wall it is refused at 2, on a 4 mm wall it builds at 2 and 3, and the inside corner of a solid L block builds at 2 and 3; the outside corner of the 2 mm wall builds at 1, 2 and 3. So the refusal follows the wall thickness, which the chamfer's geometry does not depend on: the material it adds lies in the hole and never reaches the outer faces. Not fixed on truck: kernel work is paused (tangency-labs/solidcraft#3992) and the `pr` link is the SMLib kernel move (tangency-labs/solidcraft#4012). Geometry: the ring spans x 0..25, y 0..15, z 0..10 and its hole x w..25-w, y w..15-w, both loops counter-clockwise (the inner one is the hole, as in 4058-walls-joined-flush-round-a-floor.json). The chamfer step is solidcore's linear-section blend: on a right-angle edge between planes its leg on each face is `distance`, so each chamfered inside corner adds the triangular prism 0.5 d^2 * 10 in the corner of the hole, ending flat in the top and bottom faces, which are at right angles to the edge. Each edge is picked at mid-height, (w, w, 5) for the first. The cases keep d below half the hole's shorter side, so the chamfers stay apart. Volumes are closed form, checked by the shoelace area of the chamfered hole outline and by a randomised QMC over the ring less its hole plus the corner triangles, within two of its standard errors. Tolerance 1e-4 mm^3 (every result is a polyhedron), as in 3655-chamfer-all-box-edges-pick-order.json.",
+ "cases": [
+  {
+   "name": "ring_wall_2",
+   "note": "Control: the ring of the triage's replay, a 2 mm wall (25 x 15 less 21 x 11) extruded 10 mm, no chamfer.",
+   "steps": [
+    {
+     "op": "extrude",
+     "id": "result",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         0.0,
+         0.0
+        ],
+        [
+         25.0,
+         0.0
+        ],
+        [
+         25.0,
+         15.0
+        ],
+        [
+         0.0,
+         15.0
+        ]
+       ]
+      },
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         2.0,
+         2.0
+        ],
+        [
+         23.0,
+         2.0
+        ],
+        [
+         23.0,
+         13.0
+        ],
+        [
+         2.0,
+         13.0
+        ]
+       ]
+      }
+     ],
+     "distance": 10.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 1440.0,
+     "tol": 0.0001,
+     "formula": "25*15*10 - 21*11*10 (the ring less its hole)"
+    }
+   }
+  },
+  {
+   "name": "wall_2_inside_corner_1",
+   "note": "Chamfer 1 on the inside corner edge at (2, 2) of the 2 mm wall. On SolidCraft 0.29.0 (truck) this builds.",
+   "steps": [
+    {
+     "op": "extrude",
+     "id": "ring",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         0.0,
+         0.0
+        ],
+        [
+         25.0,
+         0.0
+        ],
+        [
+         25.0,
+         15.0
+        ],
+        [
+         0.0,
+         15.0
+        ]
+       ]
+      },
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         2.0,
+         2.0
+        ],
+        [
+         23.0,
+         2.0
+        ],
+        [
+         23.0,
+         13.0
+        ],
+        [
+         2.0,
+         13.0
+        ]
+       ]
+      }
+     ],
+     "distance": 10.0
+    },
+    {
+     "op": "chamfer",
+     "id": "result",
+     "body": "ring",
+     "edges": [
+      [
+       2.0,
+       2.0,
+       5.0
+      ]
+     ],
+     "distance": 1.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 1445.0,
+     "tol": 0.0001,
+     "formula": "25*15*10 - 21*11*10 + 1*0.5*1^2*10 (the ring less its hole; the chamfered inside corner fills a right triangle of legs 1 in the hole's corner, over the whole height)"
+    }
+   }
+  },
+  {
+   "name": "wall_2_inside_corner_2",
+   "note": "The triage's case: chamfer 2, as thick as the wall, on the inside corner edge at (2, 2). Refused on SolidCraft 0.19.0 and 0.29.0 (changes 108 mm^3, at most 28 mm^3).",
+   "steps": [
+    {
+     "op": "extrude",
+     "id": "ring",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         0.0,
+         0.0
+        ],
+        [
+         25.0,
+         0.0
+        ],
+        [
+         25.0,
+         15.0
+        ],
+        [
+         0.0,
+         15.0
+        ]
+       ]
+      },
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         2.0,
+         2.0
+        ],
+        [
+         23.0,
+         2.0
+        ],
+        [
+         23.0,
+         13.0
+        ],
+        [
+         2.0,
+         13.0
+        ]
+       ]
+      }
+     ],
+     "distance": 10.0
+    },
+    {
+     "op": "chamfer",
+     "id": "result",
+     "body": "ring",
+     "edges": [
+      [
+       2.0,
+       2.0,
+       5.0
+      ]
+     ],
+     "distance": 2.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 1460.0,
+     "tol": 0.0001,
+     "formula": "25*15*10 - 21*11*10 + 1*0.5*2^2*10 (the ring less its hole; the chamfered inside corner fills a right triangle of legs 2 in the hole's corner, over the whole height)"
+    }
+   }
+  },
+  {
+   "name": "wall_2_inside_corner_3",
+   "note": "Chamfer 3, past the wall's thickness, on the inside corner edge at (2, 2). Refused on SolidCraft 0.29.0 (changes 177 mm^3, at most 72 mm^3).",
+   "steps": [
+    {
+     "op": "extrude",
+     "id": "ring",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         0.0,
+         0.0
+        ],
+        [
+         25.0,
+         0.0
+        ],
+        [
+         25.0,
+         15.0
+        ],
+        [
+         0.0,
+         15.0
+        ]
+       ]
+      },
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         2.0,
+         2.0
+        ],
+        [
+         23.0,
+         2.0
+        ],
+        [
+         23.0,
+         13.0
+        ],
+        [
+         2.0,
+         13.0
+        ]
+       ]
+      }
+     ],
+     "distance": 10.0
+    },
+    {
+     "op": "chamfer",
+     "id": "result",
+     "body": "ring",
+     "edges": [
+      [
+       2.0,
+       2.0,
+       5.0
+      ]
+     ],
+     "distance": 3.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 1485.0,
+     "tol": 0.0001,
+     "formula": "25*15*10 - 21*11*10 + 1*0.5*3^2*10 (the ring less its hole; the chamfered inside corner fills a right triangle of legs 3 in the hole's corner, over the whole height)"
+    }
+   }
+  },
+  {
+   "name": "wall_2_four_inside_corners_2",
+   "note": "Chamfer 2 on all four inside corner edges of the 2 mm wall in one step. Refused on SolidCraft 0.29.0 (changes 466 mm^3, at most 112 mm^3).",
+   "steps": [
+    {
+     "op": "extrude",
+     "id": "ring",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         0.0,
+         0.0
+        ],
+        [
+         25.0,
+         0.0
+        ],
+        [
+         25.0,
+         15.0
+        ],
+        [
+         0.0,
+         15.0
+        ]
+       ]
+      },
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         2.0,
+         2.0
+        ],
+        [
+         23.0,
+         2.0
+        ],
+        [
+         23.0,
+         13.0
+        ],
+        [
+         2.0,
+         13.0
+        ]
+       ]
+      }
+     ],
+     "distance": 10.0
+    },
+    {
+     "op": "chamfer",
+     "id": "result",
+     "body": "ring",
+     "edges": [
+      [
+       2.0,
+       2.0,
+       5.0
+      ],
+      [
+       23.0,
+       2.0,
+       5.0
+      ],
+      [
+       23.0,
+       13.0,
+       5.0
+      ],
+      [
+       2.0,
+       13.0,
+       5.0
+      ]
+     ],
+     "distance": 2.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 1520.0,
+     "tol": 0.0001,
+     "formula": "25*15*10 - 21*11*10 + 4*0.5*2^2*10 (the ring less its hole; each chamfered inside corner fills a right triangle of legs 2 in the hole's corner, over the whole height)"
+    }
+   }
+  },
+  {
+   "name": "wall_1_inside_corner_1",
+   "note": "A 1 mm wall (25 x 15 less 23 x 13) with chamfer 1 on the inside corner edge at (1, 1). Refused on SolidCraft 0.29.0 with exactly the report's message (changes 28 mm^3, at most 6 mm^3).",
+   "steps": [
+    {
+     "op": "extrude",
+     "id": "ring",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         0.0,
+         0.0
+        ],
+        [
+         25.0,
+         0.0
+        ],
+        [
+         25.0,
+         15.0
+        ],
+        [
+         0.0,
+         15.0
+        ]
+       ]
+      },
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         1.0,
+         1.0
+        ],
+        [
+         24.0,
+         1.0
+        ],
+        [
+         24.0,
+         14.0
+        ],
+        [
+         1.0,
+         14.0
+        ]
+       ]
+      }
+     ],
+     "distance": 10.0
+    },
+    {
+     "op": "chamfer",
+     "id": "result",
+     "body": "ring",
+     "edges": [
+      [
+       1.0,
+       1.0,
+       5.0
+      ]
+     ],
+     "distance": 1.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 765.0,
+     "tol": 0.0001,
+     "formula": "25*15*10 - 23*13*10 + 1*0.5*1^2*10 (the ring less its hole; the chamfered inside corner fills a right triangle of legs 1 in the hole's corner, over the whole height)"
+    }
+   }
+  }
+ ]
+}

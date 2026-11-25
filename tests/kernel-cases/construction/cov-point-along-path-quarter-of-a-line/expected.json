@@ -1,0 +1,18 @@
+{
+ "sources": [],
+ "what": "a point a quarter along a sketch line",
+ "source": "analytic",
+ "method": "the line l1 from (0,0,0) to (40,0,0): t 0.25 is (10,0,0); exact, graded to 1e-9 mm",
+ "construction": {
+  "P": {
+   "point": [
+    10,
+    0,
+    0
+   ]
+  }
+ },
+ "tolerance": {
+  "abs_mm": 1e-09
+ }
+}

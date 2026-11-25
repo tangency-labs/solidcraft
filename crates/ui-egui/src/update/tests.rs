@@ -27,6 +27,16 @@ fn nightlies_count_as_the_release_they_follow() {
     assert!(is_newer("v0.10.0", "0.9.0-nightly.20261014.36.1"));
 }
 
+#[test]
+fn test_builds_are_recognised() {
+    assert!(is_test_version("0.43.0-test+abc1234"));
+    assert!(is_test_version("0.43.0-test"));
+    assert!(!is_test_version("0.43.0"));
+    assert!(!is_test_version("0.43.0-rc.1"));
+    assert!(!is_test_version("0.43.0-nightly.20261115.7.1"));
+    assert!(!is_test_version("not a version"));
+}
+
 fn probe(os: &str, release: bool, env: &[(&str, &str)], exe: &str, files: &[&str]) -> InstallKind {
     let env: BTreeMap<String, String> = env.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
     let files: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
@@ -346,6 +356,25 @@ fn a_new_launch_checks_even_when_the_last_check_was_today() {
     assert!(h.app.updater.rx.is_none() && h.app.updater.status == Status::Idle);
 }
 
+/// The window froze for good when the check's thread asked for a repaint while a frame read egui's
+/// context inside its own read of it (the tab strip's `ctx.viewport_id()` inside `ctx.data`): the
+/// inner read waited on the repaint, which waited on the outer read (#21091). No frame nests them.
+#[test]
+fn the_window_never_locks_its_context_inside_its_own_lock_while_a_check_runs() {
+    let dir = scratch();
+    let (feed, version) = next_release_feed(&dir.0);
+    let (release, nested) = egui::Context::record_nested_locks(|| {
+        let mut h = crate::scenario::Harness::new();
+        h.app.updater.feed = Some(feed);
+        h.frame();
+        wait_for_check(&mut h);
+        h.frames(3);
+        h.app.updater.release.as_ref().map(|r| r.version().to_string())
+    });
+    assert_eq!(release, Some(version), "the check ran");
+    assert!(nested.is_empty(), "{} nested context locks, the first:\n{}", nested.len(), nested.first().map_or("", String::as_str));
+}
+
 #[test]
 fn turning_off_automatic_checks_stops_the_launch_check() {
     let dir = scratch();
@@ -356,6 +385,243 @@ fn turning_off_automatic_checks_stops_the_launch_check() {
     h.frames(3);
     assert_eq!(h.app.updater.status, Status::Idle);
     assert!(h.app.updater.release.is_none());
+}
+
+/// A computer whose administrator set `CheckForUpdates` to `on` (#10260).
+fn update_policy(on: bool) -> crate::policy::Policy {
+    crate::policy::Policy::from_json(&format!(r#"{{"CheckForUpdates": {}}}"#, u8::from(on)))
+}
+
+/// The person's own `check_updates`, as the preferences file keeps it under a policy.
+fn saved_check_updates(app: &SolveApp) -> Option<bool> {
+    serde_json::from_str::<serde_json::Value>(&app.prefs()).ok()?["preferences"]["check_updates"].as_bool()
+}
+
+#[test]
+fn an_organizations_policy_turns_update_checks_off_whatever_the_preference_says() {
+    let dir = scratch();
+    let (feed, _) = next_release_feed(&dir.0);
+    let mut h = crate::scenario::Harness::new();
+    assert_eq!(h.app.policy, crate::policy::Policy::default(), "no policy unless the host loads one");
+    h.app.preferences.check_updates = true;
+    h.app.updater.feed = Some(feed);
+    h.app.policy = update_policy(false);
+    h.frames(3);
+    assert!(!available(&mut h.app));
+    assert_eq!(h.app.updater.status, Status::Idle);
+    // Check now (Help, Preferences) asks nobody either.
+    let ctx = h.ctx.clone();
+    check_now(&mut h.app, &ctx);
+    h.frames(3);
+    assert!(h.app.updater.rx.is_none() && h.app.updater.release.is_none());
+    assert!(!h.app.preferences.check_updates, "the policy's value is in force");
+    assert_eq!(saved_check_updates(&h.app), Some(true), "the person's own choice is kept for when the policy goes");
+}
+
+#[test]
+fn an_organizations_policy_keeps_update_checks_on_whatever_the_preference_says() {
+    let dir = scratch();
+    let (feed, version) = next_release_feed(&dir.0);
+    let mut h = crate::scenario::Harness::new();
+    h.app.preferences.check_updates = false;
+    h.app.updater.feed = Some(feed);
+    h.app.policy = update_policy(true);
+    h.frame();
+    wait_for_check(&mut h);
+    assert_eq!(h.app.updater.release.as_ref().map(|r| r.version().to_string()), Some(version));
+    assert_eq!(saved_check_updates(&h.app), Some(false), "the person's own choice is kept");
+}
+
+#[test]
+fn a_setting_under_policy_shows_the_organizations_value_and_cannot_be_changed() {
+    use egui::accesskit::{Role, Toggled};
+    let _language = solidcraft_ui_text::scope("en");
+    for on in [false, true] {
+        let dir = scratch();
+        let (feed, _) = next_release_feed(&dir.0);
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.language = "en".into();
+        h.app.preferences.check_updates = !on;
+        h.app.updater.feed = Some(feed);
+        h.app.policy = update_policy(on);
+        let reply = h.call("ui.prefs", json!({"open":"General"}));
+        assert_eq!(
+            reply["result"]["policy"],
+            json!({"locked": ["check_updates"], "check_updates": on, "settings": {"check_updates": on}}),
+            "{reply}"
+        );
+        assert_eq!(reply["result"]["check_updates"], json!(!on), "the stored preference is reported as stored");
+        crate::prefs::reveal_preference(&mut h, "prefs:check_updates");
+        let tree = h.output.accesskit_update.as_ref().unwrap();
+        let boxes: Vec<_> =
+            tree.nodes.iter().filter(|(_, n)| n.role() == Role::CheckBox && n.label() == Some("Check at start and once a day")).collect();
+        assert_eq!(boxes.len(), 1);
+        assert!(boxes[0].1.is_disabled(), "policy {on}: the checkbox is locked");
+        assert_eq!(boxes[0].1.toggled(), Some(if on { Toggled::True } else { Toggled::False }), "it shows the organization's value");
+        assert!(h.widget("Set by your organization").is_some(), "the row says who set it");
+        assert_eq!(h.widget("Your organization turned off update checks on this computer.").is_some(), !on);
+        // The control channel cannot change it; sending back what it read is not a change.
+        let refused = h.call("ui.prefs", json!({"check_updates": on}));
+        assert_eq!(refused["ok"], json!(false), "{refused}");
+        assert!(refused["error"].as_str().unwrap().contains("set by your organization's policy"), "{refused}");
+        assert_eq!(h.call("ui.prefs", json!({"check_updates": !on}))["ok"], json!(true));
+        assert_eq!(h.app.preferences.check_updates, on, "the policy's value stays in force");
+        assert_eq!(saved_check_updates(&h.app), Some(!on));
+        // Restore page defaults leaves it too: the person's choice outlives the policy.
+        assert_eq!(h.call("ui.prefs", json!({"button":"defaults"}))["ok"], json!(true));
+        assert_eq!(h.app.preferences.check_updates, on);
+        assert_eq!(saved_check_updates(&h.app), Some(!on), "policy {on}: defaults keep the stored choice");
+    }
+    // Without a policy the reply names none, and the setting changes as before.
+    let mut h = crate::scenario::Harness::new();
+    let reply = h.call("ui.prefs", json!({"check_updates": false}));
+    assert_eq!(reply["ok"], json!(true));
+    assert!(reply["result"].get("policy").is_none());
+    assert!(!h.app.preferences.check_updates);
+}
+
+#[test]
+fn help_menu_checks_with_automatic_checks_off_and_offers_installation() {
+    let dir = scratch();
+    let (feed, version) = next_release_feed(&dir.0);
+    let mut h = crate::scenario::Harness::new();
+    h.app.preferences.check_updates = false;
+    h.app.preferences.update.skipped = format!("v{version}");
+    h.app.preferences.update.remind_after = unix_now() + REMIND_DELAY_S;
+    h.app.updater.feed = Some(feed);
+    h.app.updater.kind = Some(InstallKind::MacApp("/Applications/SolidCraft.app".into()));
+    h.app.updater.managed = Some(None);
+    h.app.services.http_get = Some(Arc::new(|_| panic!("the check must use the test feed")));
+    h.app.services.http_download = Some(Arc::new(|_, _, _| panic!("offering an update must not install it")));
+    h.app.help.menu = true;
+    h.frames(2);
+    let [x, y] = h.widget("Check for updates").expect("the Help menu has an update check");
+    h.call("ui.click", json!({"x": x, "y": y}));
+    wait_for_check(&mut h);
+    h.frames(2);
+    assert!(!h.app.help.menu);
+    assert!(h.app.updater.open);
+    assert!(h.app.preferences.update.skipped.is_empty());
+    assert_eq!(h.app.preferences.update.remind_after, 0.0);
+    assert!(h.widget(&format!("SolidCraft {version} is available")).is_some());
+    assert!(h.widget("Download and open").is_some(), "the macOS installation is offered immediately");
+    assert!(h.app.updater.job.is_none());
+}
+
+/// Hold an automatic check at its result channel so the manual request can join it without
+/// a second HTTP request or a wall-clock race.
+fn pending_check() -> (crate::scenario::Harness, std::sync::mpsc::Sender<Result<Release, FetchError>>) {
+    let mut h = crate::scenario::Harness::new();
+    h.app.preferences.check_updates = false;
+    h.app.updater.kind = Some(InstallKind::WindowsMsi);
+    h.app.services.http_get = Some(Arc::new(|_| panic!("do not start a second check")));
+    let (tx, rx) = std::sync::mpsc::channel();
+    h.app.updater.rx = Some((rx, false));
+    h.app.updater.status = Status::Checking;
+    (h, tx)
+}
+
+#[test]
+fn help_check_shows_progress_and_up_to_date_then_closes() {
+    let (mut h, tx) = pending_check();
+    h.call("ui.help", json!({"item": "updates"}));
+    assert!(h.app.updater.open);
+    assert!(h.app.updater.rx.as_ref().unwrap().1, "the in-flight automatic check becomes manual");
+    assert!(h.widget("Checking…").is_some());
+    let release = Release::parse(
+        json!({"tag_name": format!("v{}", comparable(&parse_version(current_version()).unwrap())), "assets": []}).to_string().as_bytes(),
+    )
+    .unwrap();
+    tx.send(Ok(release)).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.updater.status, Status::UpToDate);
+    assert!(h.widget("SolidCraft is up to date.").is_some());
+    assert!(h.widget("Download").is_none() && h.widget("Update now").is_none());
+    let [x, y] = h.widget("Close").unwrap();
+    h.call("ui.click", json!({"x": x, "y": y}));
+    assert!(!h.app.updater.open);
+    // Reopening during the cooldown still shows the result, without another request.
+    h.app.updater.last_manual = unix_now();
+    h.call("ui.help", json!({"item": "updates"}));
+    assert!(h.widget("SolidCraft is up to date.").is_some());
+    assert!(h.app.updater.rx.is_none());
+}
+
+#[test]
+fn help_check_reports_network_errors_and_rate_limits_in_the_window() {
+    for error in [FetchError::Failed("offline".into()), FetchError::RateLimited { retry_after_s: 3600 }] {
+        let (mut h, tx) = pending_check();
+        h.call("ui.help", json!({"item": "updates"}));
+        tx.send(Err(error.clone())).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.updater.status, Status::Failed(error.to_string()));
+        assert!(h.widget(&format!("Couldn't check: {error}")).is_some());
+        assert!(h.widget("SolidCraft is up to date.").is_none());
+        if matches!(error, FetchError::RateLimited { .. }) {
+            h.call("ui.help", json!({"item": "updates"}));
+            assert!(h.app.updater.rx.is_none(), "the server's rate limit is honoured");
+            assert!(matches!(h.app.updater.status, Status::Failed(_)));
+        }
+    }
+}
+
+#[test]
+fn help_check_result_follows_the_selected_language() {
+    let (mut h, tx) = pending_check();
+    h.call("ui.prefs", json!({"language": "de"}));
+    h.call("ui.help", json!({"item": "updates"}));
+    let release = Release::parse(json!({"tag_name": current_version(), "assets": []}).to_string().as_bytes()).unwrap();
+    tx.send(Ok(release)).unwrap();
+    h.frames(2);
+    assert!(h.widget("SolidCraft ist aktuell.").is_some());
+    for (language, title, message) in [
+        ("fr", "Rechercher des mises à jour", "SolidCraft est à jour."),
+        ("ja", "アップデートを確認", "SolidCraft は最新です。"),
+        ("zh-TW", "檢查更新", "SolidCraft 已是最新版本。"),
+    ] {
+        h.call("ui.prefs", json!({"language": language}));
+        assert!(h.widget(title).is_some(), "the window title follows {language}");
+        assert!(h.widget(message).is_some(), "the result follows {language}");
+        assert!(h.widget("SolidCraft is up to date.").is_none());
+    }
+}
+
+#[test]
+fn help_check_explains_when_checks_are_unavailable() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.updater.off = true;
+    h.call("ui.help", json!({"item": "updates"}));
+    assert!(h.widget("Update checks are not available for this installation.").is_some());
+    assert!(h.widget("SolidCraft is up to date.").is_none());
+    assert!(h.app.updater.rx.is_none());
+}
+
+#[test]
+fn closing_a_manual_check_does_not_reopen_it_when_an_update_arrives() {
+    let (mut h, tx) = pending_check();
+    h.call("ui.help", json!({"item": "updates"}));
+    let [x, y] = h.widget("Close").unwrap();
+    h.call("ui.click", json!({"x": x, "y": y}));
+    assert!(!h.app.updater.open);
+    let release = Release::parse(br#"{"tag_name":"v999.0.0","assets":[]}"#).unwrap();
+    tx.send(Ok(release)).unwrap();
+    h.frames(2);
+    assert!(!h.app.updater.open);
+    assert!(offered(&h.app).is_some(), "the update remains available from the title bar");
+}
+
+#[test]
+fn help_check_keeps_an_active_installation_on_screen() {
+    let (mut h, dir) = open_update_window(None);
+    let (_tx, rx) = std::sync::mpsc::channel();
+    h.app.updater.job = Some((rx, Arc::new(install::Progress::default())));
+    h.app.updater.open = false;
+    h.call("ui.help", json!({"item": "updates"}));
+    assert!(h.app.updater.open && h.app.updater.job.is_some());
+    assert!(h.app.updater.rx.is_none());
+    assert!(h.widget("Cancel").is_some());
+    drop(dir);
 }
 
 #[test]
@@ -369,15 +635,17 @@ fn the_title_bar_offers_the_new_version_and_opens_the_update_window() {
     h.frame();
     wait_for_check(&mut h);
     h.frames(2);
-    // An accent pill reading "Update to <version>", left of the Settings/Help/Report cluster.
+    // The transient Update pill follows the saved End items, rather than preceding Assistant.
     let label = format!("Update to {version}");
     let at = h.widget(&label).unwrap_or_else(|| panic!("no `{label}` in the title bar"));
     let pill = crate::scenario::rect_of("titlebar:update").unwrap();
     assert!(pill.contains(egui::pos2(at[0] as f32, at[1] as f32)));
-    let assistant = crate::scenario::rect_of("titlebar:assistant").unwrap();
-    assert!(pill.right() < assistant.left() && assistant.left() - pill.right() < 12.0, "beside Assistant: {pill:?} {assistant:?}");
+    let version_rect = crate::scenario::rect_of("titlebar:version").unwrap();
+    assert!((pill.left() - version_rect.right() - crate::ui_kit::app_bar_layout::application::GAP).abs() < 0.5);
     assert!((pill.center().y - report.center().y).abs() < 1.0 && pill.height() <= report.height());
-    assert_eq!(crate::scenario::rect_of("titlebar:report"), Some(report), "Report a bug stays where it was");
+    let shifted_report = crate::scenario::rect_of("titlebar:report").unwrap();
+    assert_eq!(shifted_report.size(), report.size(), "adding a transient keeps the Report control's size");
+    assert!(!shifted_report.intersects(pill), "End-stack neighbours move aside for the update pill");
     assert!(!h.app.updater.open, "no window pops up by itself");
     assert!(crate::scenario::rect_of("update:window").is_none());
     // Clicking it opens the Update window (not a modal: the bar stays usable).
@@ -393,6 +661,116 @@ fn the_title_bar_offers_the_new_version_and_opens_the_update_window() {
     assert!(h.widget(&label).is_none(), "Remind me later hides it");
 }
 
+/// #18688: the first update offer and the community links have distinct hit
+/// regions in the measured application-bar layout, including at narrower widths.
+#[test]
+fn an_update_notice_never_overlaps_community_links_or_document_tabs() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.check_updates = false;
+    h.app.preferences.show_donate_button = true;
+    h.app.preferences.show_discord_button = true;
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+    h.call("ui.resize", json!({"width":1920,"height":720}));
+    assert!(crate::scenario::rect_of("titlebar:update").is_none());
+
+    h.app.updater.release = Some(Release::parse(br#"{"tag_name":"v999.0.0","assets":[]}"#).unwrap());
+    assert!(offered(&h.app).is_some());
+    // Check the first actual update-offer frame; the registry is reset each frame.
+    h.frame();
+
+    for width in [1920.0, 1500.0, 1280.0, 1200.0, 1000.0, 850.0] {
+        if width != 1920.0 {
+            h.call("ui.resize", json!({"width":width,"height":720}));
+        }
+        let rect = crate::scenario::rect_of;
+        if width == 1920.0 {
+            assert!(rect("titlebar:update").is_some(), "wide title bar has a visible update offer");
+        }
+        let visible: Vec<_> = ["titlebar:kofi", "titlebar:discord", "titlebar:update", "titlebar:report", "titlebar:version", "titlebar:assistant"]
+            .into_iter()
+            .filter_map(|id| rect(id).map(|bounds| (id, bounds)))
+            .collect();
+        for (i, (a, ra)) in visible.iter().enumerate() {
+            for (b, rb) in visible.iter().skip(i + 1) {
+                assert!(!ra.intersects(*rb), "{width}: {a} overlaps {b}: {ra:?}, {rb:?}");
+            }
+        }
+        if let Some(tab) = rect("tab:design:0") {
+            for (id, bounds) in &visible {
+                assert!(!tab.intersects(*bounds), "{width}: document tab overlaps {id}: {tab:?}, {bounds:?}");
+            }
+        }
+    }
+}
+
+fn windows_update_offer(notes: &str) -> crate::scenario::Harness {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.check_updates = false;
+    h.app.updater.kind = Some(InstallKind::WindowsMsi);
+    h.app.updater.managed = Some(None);
+    h.app.services.http_get = Some(Arc::new(|_| panic!("the offer must not fetch anything")));
+    h.app.services.http_download = Some(Arc::new(|_, _, _| panic!("do not install in this test")));
+    h.app.updater.release = Some(Release::parse(json!({"tag_name":"v999.0.0","body":notes,"assets":[]}).to_string().as_bytes()).unwrap());
+    h.app.updater.open = true;
+    h
+}
+
+#[test]
+fn russian_update_actions_fit_when_the_window_is_narrow() {
+    let notes = "- Confirm the full footer stays visible even with a long list of release notes.\n".repeat(28);
+    for (width, action) in [(449, "cancel"), (220, "apply")] {
+        let mut h = windows_update_offer(&notes);
+        h.app.preferences.language = "ru".into();
+        h.call("ui.resize", json!({"width":width,"height":365}));
+        h.frames(3);
+        let footer = crate::scenario::rect_of("dialog:footer").unwrap();
+        let window = crate::scenario::rect_of("update:window").unwrap();
+        let screen = h.ctx.content_rect();
+        assert!(screen.contains_rect(footer) && window.contains_rect(footer), "{width}: footer {footer:?} is visible in {window:?}");
+        for (key, label) in
+            [("dialog:ok", "Установить (закроет SolidCraft)"), ("dialog:apply", "Пропустить эту версию"), ("dialog:cancel", "Напомнить позже")]
+        {
+            let target = crate::scenario::rect_of(key).unwrap();
+            assert!(footer.contains_rect(target), "{width}: {label} target {target:?} in {footer:?}");
+            let paint = h.shapes.iter().find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.job.text == label => Some((shape.clip_rect, text.visual_bounding_rect())),
+                _ => None,
+            });
+            let (clip, label_rect) = paint.unwrap_or_else(|| panic!("{width}: {label} is painted"));
+            assert!(clip.contains_rect(label_rect) && footer.contains_rect(label_rect), "{width}: {label} {label_rect:?} clipped to {clip:?}");
+        }
+        let point = crate::scenario::rect_of(&format!("dialog:{action}")).unwrap().center();
+        h.call("ui.click", json!({"x":point.x,"y":point.y}));
+        assert!(!h.app.updater.open);
+        if action == "apply" {
+            assert_eq!(h.app.preferences.update.skipped, "999.0.0");
+        } else {
+            assert!(h.app.preferences.update.remind_after > 0.0);
+            assert!(h.app.preferences.update.skipped.is_empty());
+        }
+    }
+}
+
+#[test]
+fn release_note_pr_numbers_are_painted_once_and_keep_their_link() {
+    let target = "https://github.com/tangency-labs/solidcraft/pull/16906";
+    let mut h = windows_update_offer(&format!("- Faster rebuilds by somebody in {target}."));
+    h.frames(3);
+    let mut labels = h.shapes.iter().filter_map(|shape| match &shape.shape {
+        egui::Shape::Text(text) if text.galley.job.text.contains("#16906") => Some(&text.galley.job),
+        _ => None,
+    });
+    let label = labels.next().expect("the release note shows its PR number");
+    assert!(labels.next().is_none(), "the PR number is painted only once");
+    assert_eq!(label.text, "#16906");
+    assert!(label.sections.iter().all(|section| section.format.color == Tokens::get().accent), "the link uses the theme accent");
+    let [x, y] = h.widget("#16906").expect("the visible PR number is a native link");
+    h.call("ui.click", json!({"x":x,"y":y}));
+    assert_eq!(h.take_opened(), [target]);
+}
+
 #[test]
 fn the_pill_shortens_in_a_narrow_title_bar() {
     let dir = scratch();
@@ -404,24 +782,29 @@ fn the_pill_shortens_in_a_narrow_title_bar() {
     let wide = crate::scenario::rect_of("titlebar:update").unwrap();
     let label = format!("Update to {version}");
     assert!(h.widget(&label).is_some());
-    // Narrower and narrower: the pill never grows, never reaches Report a bug, and its label gives
+    // Narrower and narrower: the pill never grows or overlaps Report a bug, and its label gives
     // way (to "Update", then the icon alone) before the document tabs run out of room.
     let mut last = wide.width();
     let mut shortened = false;
     for width in [1000.0, 800.0, 700.0, 600.0, 520.0, 440.0] {
         h.call("ui.resize", json!({"width": width, "height": 600}));
         h.frames(3);
-        let report = crate::scenario::rect_of("titlebar:report").unwrap();
+        // Report a bug itself may now sit behind the More menu in a very narrow bar.
+        let report = crate::scenario::rect_of("titlebar:report");
         // Icon alone, it keeps the full text for screen readers.
         let pill = crate::scenario::rect_of("titlebar:update").filter(|_| h.widget(&label).is_some() || h.widget("Update").is_some());
         if let Some(p) = pill {
             assert!(p.width() <= last + 0.5, "at {width}: {p:?} grew from {last}");
-            assert!(p.right() <= report.left(), "at {width}: {p:?} overlaps Report a bug {report:?}");
+            if let Some(report) = report {
+                // Saved-list End order puts the transient after Report, so check separation in either direction.
+                assert!(!p.intersects(report), "at {width}: {p:?} overlaps Report a bug {report:?}");
+            }
             last = p.width();
         }
         shortened |= pill.is_none_or(|p| p.width() < wide.width());
         if width == 1000.0 {
-            assert!(h.widget("Update").is_some() && h.widget(&label).is_none(), "the short label keeps room for the tabs");
+            // The bar now gives parts up only when they do not fit: at 1000 the full label still has room.
+            assert!(h.widget(&label).is_some(), "the full label still fits at 1000");
         }
     }
     assert!(shortened, "the long label gives way in a narrow bar");
@@ -479,6 +862,37 @@ fn release_notes_read_as_markdown() {
     assert_eq!(inline("**[x](y)**"), vec![Span::Strong("x".into())]);
 }
 
+#[test]
+fn a_pipe_table_reads_as_one_entry_per_row() {
+    let md = "## Files\n\n| File | Author | Licence |\n|---|---|---|\n| a.png | `cargo xtask` | MIT |\n| b.svg | | [CC0](https://x/cc0) |\n\nAfter.";
+    let b = parse_markdown(md);
+    let text = |s: &str| vec![Span::Text(s.into())];
+    assert_eq!(b.len(), 5, "{b:?}");
+    assert_eq!(b.get(1), Some(&Block::Row { header: true, cells: vec![text("File"), text("Author"), text("Licence")] }));
+    assert_eq!(b.get(2), Some(&Block::Row { header: false, cells: vec![text("a.png"), vec![Span::Code("cargo xtask".into())], text("MIT")] }));
+    assert_eq!(b.get(4), Some(&Block::Paragraph(text("After."))));
+    // A row reads as its first cell in bold, then the others between dots; an empty cell drops out.
+    let Some(Block::Row { header, cells }) = b.get(3) else { panic!("{b:?}") };
+    assert_eq!(
+        row_spans(cells, *header),
+        vec![Span::Strong("b.svg".into()), Span::Text(" · ".into()), Span::Link { text: "CC0".into(), url: Some("https://x/cc0".into()) }]
+    );
+    let Some(Block::Row { header, cells }) = b.get(1) else { panic!("{b:?}") };
+    assert_eq!(
+        row_spans(cells, *header),
+        vec![
+            Span::Text("File".into()),
+            Span::Text(" · ".into()),
+            Span::Text("Author".into()),
+            Span::Text(" · ".into()),
+            Span::Text("Licence".into())
+        ]
+    );
+    for s in ["|", "||", "|---|", "| a", "|-|-", "| é |"] {
+        let _ = parse_markdown(s);
+    }
+}
+
 /// #2943: a release note's links keep where they go, so the window can open them; only web
 /// addresses are kept (a relative or other link shows as text that opens nothing).
 #[test]
@@ -531,18 +945,421 @@ fn the_version_links_to_its_release_notes() {
 }
 
 #[test]
-fn web_preferences_explain_reload_without_update_controls() {
-    let mut h = crate::scenario::Harness::new();
-    h.app.updater.kind = Some(InstallKind::Web);
-    let mut texts = Vec::new();
-    for _ in 0..2 {
-        let mut output = h.ctx.run_ui(egui::RawInput::default(), |ui| prefs_rows(&mut h.app, ui));
-        output.textures_delta.clear();
-        texts =
-            output.shapes.iter().filter_map(|s| if let egui::Shape::Text(t) = &s.shape { Some(t.galley.text().to_string()) } else { None }).collect();
+fn unavailable_preferences_show_disabled_update_controls_and_real_values() {
+    use egui::accesskit::{Role, Toggled};
+    let _language = solidcraft_ui_text::scope("en");
+    for kind in [InstallKind::Dev, InstallKind::Web, InstallKind::Flatpak("io.solidcraft.SolidCraft".into())] {
+        for checked in [false, true] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.app.preferences.language = "en".into();
+            h.app.preferences.check_updates = checked;
+            h.app.updater.kind = Some(kind.clone());
+            h.app.updater.feed = None;
+            assert!(!available(&mut h.app));
+            let memo = h.app.preferences.update.clone();
+            let launch_checked = h.app.updater.launch_checked;
+            let last_manual = h.app.updater.last_manual;
+            h.call("ui.prefs", json!({"open":"General"}));
+            crate::prefs::reveal_preference(&mut h, "prefs:check_updates");
+            let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+            let button = crate::scenario::rect_of("prefs:check_now").unwrap();
+            assert!(body.contains_rect(button));
+            assert!(body.contains_rect(crate::scenario::rect_of("prefs:check_updates").unwrap()));
+            let tree = h.output.accesskit_update.as_ref().unwrap();
+            for (label, role) in [("Check now", Role::Button), ("Check at start and once a day", Role::CheckBox)] {
+                let controls: Vec<_> = tree.nodes.iter().filter(|(_, node)| node.role() == role && node.label() == Some(label)).collect();
+                assert_eq!(controls.len(), 1, "{kind:?}: one {label} control");
+                assert!(controls[0].1.is_disabled(), "{kind:?}: {label} is disabled");
+                if role == Role::CheckBox {
+                    assert_eq!(controls[0].1.toggled(), Some(if checked { Toggled::True } else { Toggled::False }));
+                }
+            }
+            let reason = solidcraft_ui_text::tr("update.check_unavailable");
+            assert_eq!(tree.nodes.iter().filter(|(_, node)| node.role() == Role::Label && node.value() == Some(reason)).count(), 1);
+            let texts: Vec<_> = h
+                .shapes
+                .iter()
+                .filter_map(|shape| if let egui::Shape::Text(text) = &shape.shape { Some(text.galley.text()) } else { None })
+                .collect();
+            assert!(texts.contains(&reason), "{kind:?}: the unavailable reason is painted");
+            assert!(h.widget("Up to date").is_none(), "unavailability is not a successful check");
+            let note = match &kind {
+                InstallKind::Web => solidcraft_ui_text::tr("update.prefs_web").to_string(),
+                InstallKind::Flatpak(id) => solidcraft_ui_text::format(
+                    "update.prefs_flatpak",
+                    &[("version", current_version()), ("command", &format!("flatpak update {id}"))],
+                ),
+                _ => solidcraft_ui_text::format("update.prefs_dev", &[("version", current_version())]),
+            };
+            assert!(
+                tree.nodes.iter().any(|(_, node)| node.role() == Role::Button && node.label() == Some(note.as_str()) && !node.is_disabled()),
+                "the platform help stays accessible as an enabled help button"
+            );
+            assert!(!texts.contains(&note.as_str()), "the longer explanation stays behind the help icon");
+            assert!(crate::scenario::rect_of("prefs:updates_help").is_some());
+            h.step(&json!({"click":{"handle":"prefs:check_now"}})).unwrap();
+            h.step(&json!({"widget":"Check at start and once a day"})).unwrap();
+            assert_eq!(h.app.preferences.check_updates, checked);
+            assert_eq!(h.app.preferences.update, memo);
+            assert_eq!(h.app.updater.status, Status::Idle);
+            assert_eq!(h.app.updater.launch_checked, launch_checked);
+            assert_eq!(h.app.updater.last_manual, last_manual);
+            assert!(h.app.updater.rx.is_none() && h.app.updater.job.is_none() && h.app.updater.release.is_none());
+            assert!(!h.app.updater.open, "attempting the disabled action does not open the checker");
+        }
     }
-    assert!(!texts.iter().any(|t| t.contains("development build")), "{texts:?}");
-    assert!(!texts.iter().any(|t| t == crate::i18n::tr("update.check_automatically")), "{texts:?}");
-    assert!(!texts.iter().any(|t| t == crate::i18n::tr("update.check_now")), "{texts:?}");
-    assert!(texts.iter().any(|t| t == crate::i18n::tr("update.prefs_web")), "{texts:?}");
+}
+
+#[test]
+fn general_updates_show_real_status_and_time_and_check_now_uses_the_existing_feed() {
+    let dir = scratch();
+    let (feed, version) = next_release_feed(&dir.0);
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.language = "en".into();
+    h.app.preferences.check_updates = false;
+    h.app.preferences.update.last_check = 1_700_000_000.0;
+    h.app.updater.feed = Some(feed);
+    h.app.updater.kind = Some(InstallKind::WindowsMsi);
+    h.app.updater.managed = Some(None);
+    h.app.updater.status = Status::UpToDate;
+    h.call("ui.prefs", json!({"open":"General"}));
+    crate::prefs::reveal_preference(&mut h, "prefs:check_now");
+    let tree = h.output.accesskit_update.as_ref().unwrap();
+    for (label, role) in [("Check now", egui::accesskit::Role::Button), ("Check at start and once a day", egui::accesskit::Role::CheckBox)] {
+        let controls: Vec<_> = tree.nodes.iter().filter(|(_, node)| node.role() == role && node.label() == Some(label)).collect();
+        assert_eq!(controls.len(), 1);
+        assert!(!controls[0].1.is_disabled(), "available update controls stay enabled");
+        if role == egui::accesskit::Role::CheckBox {
+            assert_eq!(controls[0].1.toggled(), Some(egui::accesskit::Toggled::False));
+        }
+    }
+    let checked = solidcraft_ui_text::format("prefs.general.last_check", &[("time", &solidcraft_engine::crash::utc(1_700_000_000))]);
+    assert!(h.widget(&checked).is_some(), "the persisted check time is shown");
+    let button = crate::scenario::rect_of("prefs:check_now").unwrap();
+    h.step(&json!({"click":[button.center().x, button.center().y]})).unwrap();
+    wait_for_check(&mut h);
+    assert_eq!(h.app.updater.release.as_ref().map(|r| r.version().to_string()), Some(version));
+    assert!(h.app.preferences.update.last_check > 1_700_000_000.0);
+    assert!(!h.app.preferences.check_updates, "a manual check keeps the schedule preference");
+}
+
+fn no_env(_: &str) -> Option<String> {
+    None
+}
+
+fn record(path: &str) -> Vec<u8> {
+    json!({"apps": {"solidcraft": {"version": "0.25.1", "kind": "AppImage", "path": path, "installed_at": 1}}}).to_string().into_bytes()
+}
+
+#[test]
+fn the_variable_names_the_manager() {
+    let nothing = |_: &Path| None;
+    let kind = InstallKind::LinuxTarball;
+    let with = |value: &'static str| {
+        let env = move |k: &str| (k == MANAGED_ENV).then(|| value.to_string());
+        managed_by("linux", &env, Some(Path::new("/opt/sc/solidcraft")), &kind, &nothing)
+    };
+    assert_eq!(with("ArtCraft Launcher").as_deref(), Some("ArtCraft Launcher"));
+    assert_eq!(with("  Other \u{7}Manager\n").as_deref(), Some("Other Manager"), "padding and control characters are dropped");
+    assert_eq!(with("   "), None, "an empty value is not a manager");
+    assert_eq!(with(&"x".repeat(500).leak()[..]).map(|n| n.len()), Some(64), "a long name is cut");
+    assert_eq!(managed_by("linux", &no_env, Some(Path::new("/opt/sc/solidcraft")), &kind, &nothing), None);
+}
+
+#[test]
+fn the_launchers_record_marks_the_install_it_made() {
+    let exe = Path::new("/home/me/Apps/SolidCraft.AppImage");
+    let appimage = InstallKind::AppImage(exe.to_path_buf());
+    let env = |k: &str| (k == "HOME").then(|| "/home/me".to_string());
+    let seen = std::cell::RefCell::new(Vec::new());
+    let read = |bytes: Vec<u8>| {
+        let seen = &seen;
+        move |p: &Path| {
+            seen.borrow_mut().push(p.to_path_buf());
+            Some(bytes.clone())
+        }
+    };
+    // The AppImage the launcher recorded; the running executable is inside its mount.
+    let run = |path: &str| managed_by("linux", &env, Some(Path::new("/tmp/.mount_SolidXYZ/usr/bin/solidcraft")), &appimage, &read(record(path)));
+    assert_eq!(run("/home/me/Apps/SolidCraft.AppImage").as_deref(), Some("ArtCraft Launcher"));
+    assert_eq!(seen.borrow().as_slice(), [PathBuf::from("/home/me/.local/share/artcraft-launcher/installed.json")]);
+    // Another copy, a prefix that is not a folder of ours, the root and a relative path are not ours.
+    assert_eq!(run("/home/me/Apps/Other.AppImage"), None);
+    assert_eq!(run("/home/me/Apps/SolidCraft.AppImage.old"), None);
+    assert_eq!(run("/"), None);
+    assert_eq!(run("Apps/SolidCraft.AppImage"), None);
+    // No record, a damaged one, one without SolidCraft, and a record file of any other shape.
+    let one = |bytes: &'static [u8]| managed_by("linux", &env, Some(exe), &appimage, &|_: &Path| Some(bytes.to_vec()));
+    assert_eq!(one(b"{not json"), None);
+    assert_eq!(one(br#"{"apps": {"photocraft": {"path": "/home/me/Apps/SolidCraft.AppImage"}}}"#), None);
+    assert_eq!(one(br#"{"apps": {"solidcraft": {"path": 7}}}"#), None);
+    assert_eq!(one(b"[]"), None);
+    assert_eq!(managed_by("linux", &env, Some(exe), &appimage, &|_: &Path| None), None);
+    // XDG_DATA_HOME moves the record.
+    let xdg = |k: &str| (k == "XDG_DATA_HOME").then(|| "/data".to_string());
+    let paths = std::cell::RefCell::new(Vec::new());
+    managed_by("linux", &xdg, Some(exe), &appimage, &|p: &Path| {
+        paths.borrow_mut().push(p.to_path_buf());
+        None
+    });
+    assert_eq!(paths.into_inner(), [PathBuf::from("/data/artcraft-launcher/installed.json")]);
+}
+
+#[test]
+fn the_record_matches_folders_bundles_and_windows_paths() {
+    let nothing_else = |bytes: Vec<u8>| move |_: &Path| Some(bytes.clone());
+    // An unpacked tarball: the record names the folder, and the launcher's own HOME is no help,
+    // so the record is found beside the `apps` folder the app runs from.
+    let exe = Path::new("/home/me/.local/share/artcraft-launcher/apps/solidcraft/bin/solidcraft");
+    let read = |p: &Path| {
+        (p == Path::new("/home/me/.local/share/artcraft-launcher/installed.json"))
+            .then(|| record("/home/me/.local/share/artcraft-launcher/apps/solidcraft"))
+    };
+    let home = |k: &str| (k == "HOME").then(|| "/home/me/.local/share/artcraft-launcher/apps/solidcraft/home".to_string());
+    assert_eq!(managed_by("linux", &home, Some(exe), &InstallKind::LinuxTarball, &read).as_deref(), Some("ArtCraft Launcher"));
+    // macOS: the bundle.
+    let bundle = PathBuf::from("/Applications/SolidCraft.app");
+    let mac = InstallKind::MacApp(bundle.clone());
+    let exe = Path::new("/Applications/SolidCraft.app/Contents/MacOS/solidcraft");
+    let home = |k: &str| (k == "HOME").then(|| "/Users/me".to_string());
+    let read = |p: &Path| {
+        assert_eq!(p, Path::new("/Users/me/Library/Application Support/ArtCraft Launcher/installed.json"));
+        Some(record("/Applications/SolidCraft.app"))
+    };
+    assert_eq!(managed_by("macos", &home, Some(exe), &mac, &read).as_deref(), Some("ArtCraft Launcher"));
+    // Windows: case and the verbatim prefix don't matter, and the record is under LOCALAPPDATA.
+    let local = |k: &str| (k == "LOCALAPPDATA").then(|| r"C:\Users\me\AppData\Local".to_string());
+    let exe = Path::new(r"C:\Users\me\AppData\Local\Programs\SolidCraft\solidcraft.exe");
+    let read = nothing_else(record(r"\\?\c:\users\me\appdata\local\programs\solidcraft\SOLIDCRAFT.EXE"));
+    assert_eq!(managed_by("windows", &local, Some(exe), &InstallKind::WindowsExe, &read).as_deref(), Some("ArtCraft Launcher"));
+    let read = nothing_else(record(r"C:\Users\me\AppData\Local\Programs\SolidCraft2"));
+    assert_eq!(managed_by("windows", &local, Some(exe), &InstallKind::WindowsExe, &read), None, "a folder whose name only starts the same");
+    // Linux paths are case-sensitive.
+    let read = nothing_else(record("/OPT/SC"));
+    assert_eq!(managed_by("linux", &no_env, Some(Path::new("/opt/sc/solidcraft")), &InstallKind::LinuxTarball, &read), None);
+}
+
+/// A harness with a newer release found and the Update window open, on an AppImage that a
+/// launcher may manage. The host can download, so the one-click update is on offer unless managed.
+fn open_update_window(managed: Option<&str>) -> (crate::scenario::Harness, Scratch) {
+    let dir = scratch();
+    let (feed, _) = next_release_feed(&dir.0);
+    let mut h = crate::scenario::Harness::new();
+    let get: HttpGet = Arc::new(|_| Err(FetchError::Failed("offline".into())));
+    let download: install::HttpDownload = Arc::new(|_, _, _| Err(FetchError::Failed("offline".into())));
+    h.app.services.http_get = Some(get);
+    h.app.services.http_download = Some(download);
+    h.app.updater.kind = Some(InstallKind::AppImage("/home/me/SolidCraft.AppImage".into()));
+    h.app.updater.managed = Some(managed.map(str::to_string));
+    h.app.updater.feed = Some(feed);
+    h.frame();
+    wait_for_check(&mut h);
+    h.frames(2);
+    h.app.updater.open = true;
+    h.frames(3);
+    (h, dir)
+}
+
+#[test]
+fn a_managed_install_points_to_its_manager_instead_of_updating_itself() {
+    let (mut h, _dir) = open_update_window(Some("ArtCraft Launcher"));
+    assert_eq!(install_method(&mut h.app), None, "no AppImage self-replace");
+    assert!(h.widget("Update available: update SolidCraft in ArtCraft Launcher").is_some());
+    for gone in ["Update now", "Download", "Open release page"] {
+        assert!(h.widget(gone).is_none(), "{gone} is not offered");
+    }
+    assert!(h.widget("Skip this version").is_some() && h.widget("Remind me later").is_some());
+    // It still checked and still shows the pill.
+    assert!(h.app.updater.release.is_some() && offered(&h.app).is_some());
+    assert!(crate::scenario::rect_of("titlebar:update").is_some());
+}
+
+#[test]
+fn an_unmanaged_install_updates_itself_as_before() {
+    let (mut h, _dir) = open_update_window(None);
+    assert_eq!(install_method(&mut h.app), Some(install::Method::AppImage("/home/me/SolidCraft.AppImage".into())));
+    assert!(h.widget("Update now").is_some());
+    assert!(h.widget("Download").is_some());
+    assert!(h.widget("Update available: update SolidCraft in ArtCraft Launcher").is_none());
+}
+
+#[test]
+fn periodic_checks_refresh_the_offered_label() {
+    let dir = scratch();
+    let (feed, first) = next_release_feed(&dir.0);
+    let mut h = crate::scenario::Harness::new();
+    h.app.updater.feed = Some(feed.clone());
+    h.frame();
+    wait_for_check(&mut h);
+    h.frames(2);
+    assert!(h.widget(&format!("Update to {first}")).is_some());
+    h.app.updater.installed = Some(Ok(install::Outcome::Restart(dir.0.join("SolidCraft.AppImage"))));
+    let v = parse_version(&first).unwrap();
+    let next = format!("{}.{}.0", v.major, v.minor + 1);
+    std::fs::write(feed, json!({"tag_name": format!("v{next}")}).to_string()).unwrap();
+    h.app.preferences.update.next_check = 0.0;
+    h.frame();
+    wait_for_check(&mut h);
+    h.frames(2);
+    assert!(h.widget(&format!("Update to {next}")).is_some());
+    assert!(h.widget(&format!("Update to {first}")).is_none());
+}
+
+#[test]
+fn install_selection_refreshes_the_button_and_progress_before_completion() {
+    let dir = scratch();
+    let target = dir.0.join("SolidCraft.AppImage");
+    let name = asset_name(&InstallKind::AppImage(target.clone()), std::env::consts::ARCH, "999.1.0").unwrap();
+    let mut h = crate::scenario::Harness::new();
+    h.app.preferences.check_updates = false;
+    let mut shown = release();
+    shown.tag = "v999.0.0".into();
+    h.app.updater.release = Some(shown);
+    h.app.updater.kind = Some(InstallKind::AppImage(target));
+    h.app.updater.open = true;
+    h.app.services.http_get = Some(Arc::new(move |url| {
+        if url == LATEST_API {
+            return Ok(json!({"tag_name":"v999.1.0", "assets":[
+                {"name": name, "browser_download_url":format!("https://github.com/tangency-labs/solidcraft/releases/download/v999.1.0/{name}")},
+                {"name": install::SUMS, "browser_download_url":"https://github.com/tangency-labs/solidcraft/releases/download/v999.1.0/SHA256SUMS.txt"}
+            ]}).to_string().into_bytes());
+        }
+        Ok(format!("{}  {name}\n", "a".repeat(64)).into_bytes())
+    }));
+    let (tx, rx) = std::sync::mpsc::channel();
+    let rx = std::sync::Mutex::new(rx);
+    h.app.services.http_download = Some(Arc::new(move |_, _, _| {
+        rx.lock().unwrap().recv().unwrap();
+        Err(FetchError::Failed("download stopped".into()))
+    }));
+    start_install(&mut h.app, &egui::Context::default());
+    for _ in 0..500 {
+        poll_install(&mut h.app);
+        if h.app.updater.release.as_ref().unwrap().version() == "999.1.0" {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    h.frames(2);
+    assert!(h.widget("Update to 999.1.0").is_some());
+    assert!(h.widget("Updating to 999.1.0.").is_some());
+    assert!(h.app.updater.installed.is_none());
+    tx.send(()).unwrap();
+}
+
+#[test]
+fn cancel_download_leaves_downloading_immediately() {
+    // Cancel must clear the job from the UI at once so the card leaves "Downloading" without
+    // waiting for a stalled feed or checksum GET (#8908).
+    let dir = scratch();
+    let target = dir.0.join("SolidCraft.AppImage");
+    let name = asset_name(&InstallKind::AppImage(target.clone()), std::env::consts::ARCH, "999.1.0").unwrap();
+    let mut h = crate::scenario::Harness::new();
+    h.app.preferences.check_updates = false;
+    let mut shown = release();
+    shown.tag = "v999.0.0".into();
+    h.app.updater.release = Some(shown);
+    h.app.updater.kind = Some(InstallKind::AppImage(target));
+    h.app.updater.open = true;
+    let (gate_tx, gate_rx) = std::sync::mpsc::channel();
+    let gate_rx = std::sync::Mutex::new(gate_rx);
+    h.app.services.http_get = Some(Arc::new(move |url| {
+        if url == LATEST_API {
+            return Ok(json!({"tag_name":"v999.1.0", "assets":[
+                {"name": name, "browser_download_url":format!("https://github.com/tangency-labs/solidcraft/releases/download/v999.1.0/{name}")},
+                {"name": install::SUMS, "browser_download_url":"https://github.com/tangency-labs/solidcraft/releases/download/v999.1.0/SHA256SUMS.txt"}
+            ]}).to_string().into_bytes());
+        }
+        // Stall checksum GET until the test ends so Cancel has to work before the body download.
+        let _ = gate_rx.lock().unwrap().recv();
+        Ok(format!("{}  {name}\n", "a".repeat(64)).into_bytes())
+    }));
+    h.app.services.http_download = Some(Arc::new(|_, _, _| Err(FetchError::Failed("download must not start".into()))));
+    start_install(&mut h.app, &egui::Context::default());
+    assert!(h.app.updater.job.is_some());
+    h.frames(2);
+    let cancel = h.widget("Cancel").expect("Cancel while Downloading");
+    h.call("ui.click", json!({"x": cancel[0], "y": cancel[1]}));
+    assert!(h.app.updater.job.is_none(), "Cancel clears the job immediately");
+    assert!(h.app.updater.installed.is_none());
+    assert!(h.app.updater.open, "Cancel leaves the Update window open on Offer");
+    h.frames(2);
+    assert!(
+        h.widget("Remind me later").is_some() || h.widget("Skip this version").is_some() || h.widget("Update now").is_some(),
+        "Offer returns after Cancel"
+    );
+    assert!(h.widget("Updating to 999.1.0.").is_none());
+    let _ = gate_tx.send(());
+}
+
+#[test]
+fn graphics_restart_asks_to_save_and_cancel_preserves_the_design() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.updater.started = true;
+    h.app.preferences.save_prompt_one_at_a_time = true;
+    let program = std::env::current_exe().unwrap();
+    h.app.services.graphics_restart = Some((program, Vec::new()));
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+    restart_graphics(&mut h.app);
+    assert!(!h.app.quit_requested);
+    assert!(h.app.docs.quitting.is_some());
+    assert!(h.app.session.is_dirty());
+    crate::documents::control(&mut h.app, &json!({"answer":"cancel"}));
+    tick(&mut h.app, &h.ctx);
+    assert!(!h.app.quit_requested && h.app.docs.quitting.is_none());
+    assert!(h.app.session.is_dirty());
+    assert!(!take_graphics_restart(&mut h.app));
+    assert!(take_launch(&mut h.app).is_none());
+}
+
+#[test]
+fn graphics_restart_uses_normal_quit_and_keeps_the_saved_tab_paths() {
+    let mut h = crate::scenario::Harness::new();
+    let program = std::env::current_exe().unwrap();
+    h.app.services.graphics_restart = Some((program.clone(), Vec::new()));
+    h.app.session.path = Some("/saved/design.sc".into());
+    h.app.session.mark_saved();
+    restart_graphics(&mut h.app);
+    assert!(h.app.quit_requested);
+    assert_eq!(h.app.preferences.open_designs, ["/saved/design.sc"]);
+    assert!(take_graphics_restart(&mut h.app));
+    assert_eq!(take_launch(&mut h.app), Some((program, Vec::new())));
+    assert!(!take_graphics_restart(&mut h.app));
+}
+
+#[test]
+fn an_installer_completing_during_graphics_restart_owns_the_pending_launch() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.preferences.check_updates = false;
+    h.app.preferences.save_prompt_one_at_a_time = true;
+    let program = std::env::current_exe().unwrap();
+    h.app.services.graphics_restart = Some((program.clone(), vec!["--control".into(), "7878".into()]));
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+    restart_graphics(&mut h.app);
+    assert!(h.app.updater.graphics_restart && h.app.docs.quitting.is_some() && !h.app.quit_requested);
+
+    let installer = PathBuf::from("solidcraft-installer");
+    let arguments = vec!["install-package".to_string()];
+    let (tx, rx) = std::sync::mpsc::channel();
+    h.app.updater.job = Some((rx, Arc::new(install::Progress::default())));
+    tx.send(Ok(install::Outcome::Installer(installer.clone(), arguments.clone()))).unwrap();
+    poll_install(&mut h.app);
+    assert!(!take_graphics_restart(&mut h.app), "the installer must not receive graphics restart options or design paths");
+    #[cfg(windows)]
+    let expected = install::relaunch_after(&installer, &arguments, &program);
+    #[cfg(not(windows))]
+    let expected = (installer, arguments);
+    assert_eq!(take_launch(&mut h.app), Some(expected));
+    assert!(h.app.docs.quitting.is_some() && !h.app.quit_requested, "the unsaved-design question still applies");
+}
+
+#[test]
+fn graphics_restart_without_a_native_host_never_closes_the_app() {
+    let mut h = crate::scenario::Harness::new();
+    restart_graphics(&mut h.app);
+    assert!(!h.app.quit_requested && h.app.docs.quitting.is_none());
+    assert!(take_launch(&mut h.app).is_none());
+    assert!(!take_graphics_restart(&mut h.app));
 }

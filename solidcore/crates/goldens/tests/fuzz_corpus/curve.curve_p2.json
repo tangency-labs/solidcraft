@@ -1,0 +1,7 @@
+{
+  "unit": "curve.curve_p2",
+  "cases": [
+    {"name": "fuzz00911_bad_index_count_9223372036854776000", "origin": "fuzz-out/n2000/curve.curve_p2/fuzz00911.json (timeout: rust: no result after 20 s)", "cpp": "harness: invalid argument: bad index/count 9223372036854776000", "rust": "harness: 9223372036854775807 samples", "inputs": {"a": 0.0, "b": 1.0, "curve": {"hermite": {"d1": [-24.5, 48.3, -35.8], "d2": [-12.3, 5.81, 25.6], "dim": 3, "p1": [0.0308, 3.15, -28.2], "p2": [-27.0, 34.7, 28.4]}}, "op": "approx_length", "samples": 9223372036854775807, "turn": true}},
+    {"name": "fuzz01494_value_10000000000000000000000000000000000000000000000000000000", "origin": "fuzz-out/n2000/curve.curve_p2/fuzz01494.json (panic: rust: capacity overflow)", "cpp": "harness: invalid argument: value -1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000 not finite or too large", "rust": "ok", "inputs": {"curve": {"hermite": {"d1": [0.54, 2.07, 2.85], "d2": [-0.351, -1e+300, -2.24], "dim": 3, "p1": [-1.99, 2.97, -1.36], "p2": [-1.39, 2.83, -2.91]}}, "left": true, "n": 9223372036854775807, "nonzero": true, "op": "eval", "t": 0.485}}
+  ]
+}

@@ -1,0 +1,30 @@
+{
+ "coverage": "tangency-labs/solidcore#1528: SmApiShellBrepFull 2 inward (extended convex edges, merged results) on a drilled plate, open at its far end. The source data/issue1528_plate.smb is a Rust-written ASCII .smb (data flows Rust to C++ only; each side reads the file with its own reader): crates/solidcore/tests/issue_1528_write_operand.rs (ignored test write_issue_1528_operand) builds it as create_linear_sweep of the profile (0,0)-(42.5,0)-(42.5,20)-(0,20) plus the half circle r 10 centred (0,10), 27.5 along +z, less SmApiCreateCylinder((-10,12.5,12.5), r 5, h 17.5) rotated 90 degrees about +y at its base (boolean_difference), and writes it with write_brep_to_file(ascii). The selected face is the planar face x = 42.5, at the index that test prints. Issue report: the C++ returns 1001.",
+ "cases": [
+  {
+   "name": "issue1528_plate_api_shell_2",
+   "upstream_ref": "tangency-labs/solidcore#1528 (operand: issue_1528_write_operand.rs)",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$repo_file": "fixtures/offset.offset_executive_p2/data/issue1528_plate.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -2.0,
+     "extend_convex": true,
+     "merge_results": true
+    }
+   }
+  }
+ ]
+}

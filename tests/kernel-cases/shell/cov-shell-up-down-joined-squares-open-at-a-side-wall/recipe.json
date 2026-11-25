@@ -1,0 +1,136 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Squares"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     0,
+     0
+    ],
+    "p1": [
+     10,
+     10
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -10,
+     0
+    ],
+    "p1": [
+     0,
+     10
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     0,
+     -10
+    ],
+    "p1": [
+     10,
+     0
+    ]
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -10,
+     -10
+    ],
+    "p1": [
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Squares",
+    "profiles": [
+     {
+      "point": [
+       -5,
+       5
+      ]
+     },
+     {
+      "point": [
+       -5,
+       -5
+      ]
+     },
+     {
+      "point": [
+       5,
+       -5
+      ]
+     }
+    ],
+    "distance": 10
+   }
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Squares",
+    "profiles": [
+     {
+      "point": [
+       5,
+       5
+      ]
+     },
+     {
+      "point": [
+       5,
+       -5
+      ]
+     },
+     {
+      "point": [
+       -5,
+       5
+      ]
+     }
+    ],
+    "distance": 10,
+    "direction": "negative",
+    "operation": "join"
+   }
+  },
+  {
+   "command": "solid.shell",
+   "params": {
+    "faces": [
+     [
+      6.666666666666666,
+      0.0,
+      1.6666666666666665
+     ]
+    ],
+    "thickness": 0.346
+   }
+  }
+ ]
+}

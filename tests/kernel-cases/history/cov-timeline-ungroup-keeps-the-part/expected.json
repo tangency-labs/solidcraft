@@ -1,0 +1,19 @@
+{
+ "sources": [],
+ "what": "timeline.ungroup of a folder leaves its features and the part",
+ "method": "folders are only the timeline's: round R2 on the whole 40 mm front top edge, then the 10x10x5 notch through it: V = 12000 - 500 - (1-pi/4) 4 (40-10) (the notch already holds the round's 10 mm in it); faces: 6 block + 4 notch (bottom, two sides, back) + the round in two pieces = 12",
+ "body_count": 1,
+ "volume_mm3": 11474.247779607695,
+ "faces": 12,
+ "results": [
+  {
+   "step": 8,
+   "json": {
+    "groups": [
+     5
+    ]
+   }
+  }
+ ],
+ "source": "analytic"
+}

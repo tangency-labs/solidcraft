@@ -1,0 +1,138 @@
+{
+ "commands": [
+  {
+   "command": "sheet.manage_rules",
+   "params": {
+    "name": "Rule",
+    "thickness": "2 mm",
+    "active": true,
+    "bend_radius": "2 mm",
+    "k_factor": 0.5
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 30,
+    "width": 30,
+    "height": 2,
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     6,
+     6,
+     2
+    ],
+    "diameter": 4
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     6,
+     15,
+     2
+    ],
+    "diameter": 4
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     6,
+     24,
+     2
+    ],
+    "diameter": 4
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     15,
+     6,
+     2
+    ],
+    "diameter": 4
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     15,
+     15,
+     2
+    ],
+    "diameter": 4
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     15,
+     24,
+     2
+    ],
+    "diameter": 4
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     24,
+     6,
+     2
+    ],
+    "diameter": 4
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     24,
+     15,
+     2
+    ],
+    "diameter": 4
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     24,
+     24,
+     2
+    ],
+    "diameter": 4
+   }
+  },
+  {
+   "command": "sheet.recognize",
+   "params": {
+    "body": "Plate",
+    "face": [
+     10.5,
+     10.5,
+     2
+    ],
+    "rule": "Rule"
+   }
+  },
+  {
+   "command": "inspect.measure",
+   "params": {}
+  }
+ ]
+}

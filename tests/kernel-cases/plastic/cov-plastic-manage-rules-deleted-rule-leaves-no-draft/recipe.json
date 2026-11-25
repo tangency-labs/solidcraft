@@ -1,0 +1,46 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 60,
+    "width": 40,
+    "height": 3,
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "plastic.manage_rules",
+   "params": {
+    "name": "Steep",
+    "draft": "5 deg",
+    "active": true
+   }
+  },
+  {
+   "command": "plastic.manage_rules",
+   "params": {
+    "name": "Steep",
+    "delete": true
+   }
+  },
+  {
+   "command": "plastic.rest",
+   "params": {
+    "position": [
+     30,
+     20,
+     3
+    ],
+    "width": 10,
+    "length": 16,
+    "along": [
+     1,
+     0,
+     0
+    ],
+    "height": 3
+   }
+  }
+ ]
+}

@@ -1,5 +1,5 @@
 //! Boundary surfaces (Surface › Boundary): one B-spline face through curves in one or two
-//! directions (`solidcraft_geom::network`: a loft between curves, a Coons patch inside four, a
+//! directions (`crate::network`: a loft between curves, a Coons patch inside four, a
 //! Gordon surface through a network), made from sketch curves, 3D sketch curves or a body's
 //! edges. A boundary curve that is a chain of open edges of a surface may carry a continuity
 //! condition with the face beside it: G1 (tangent) or G2 (curvature).
@@ -11,19 +11,17 @@
 //! The two-curve bridge with G0–G3 against a sketch's plane is [`crate::boundary`]; this is the
 //! general case: three or four sides, interior curves, 3D curves and edges.
 
-use std::collections::HashSet;
-
-use mt::{BoundedCurve, Cut, InnerSpace, ParametricCurve, ParametricSurface, SearchNearestParameter};
+use crate::network::{self, CrossFace, FaceFrame, NetCurve, NetworkCurve, PointCurve, Tolerances};
+use solidcore_record::brep::Brep;
+use solidcore_record::{Plane, Seg2, Vec3};
+use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
 use solidcraft_geom::bspline::{CurveN, NurbsSurface, SplineError};
-use solidcraft_geom::network::{self, CrossFace, FaceFrame, NetCurve, NetworkCurve, PointCurve, Tolerances};
-use solidcraft_geom::{Plane, Seg2, Vec3};
-use truck_modeling as mt;
+use solidcraft_geom::prelude::*;
 
-use crate::body::{Body, from_p3, p3};
-use crate::bridge::Continuity;
-use crate::plane_fit::EdgeSampler;
-use crate::record::Rebuild;
-use crate::{KernelError, Result, guard};
+use crate::body::Body;
+use crate::continuity_order::{Construction, Continuity};
+use crate::surfaces::{Chain, Parts, spline_curve, spline_surface, surface_body, uv_line};
+use crate::{KernelError, Result};
 
 /// How far apart curves of the two directions may pass and still cross (mm).
 pub const CROSS_TOLERANCE: f64 = 0.01;
@@ -36,13 +34,18 @@ pub const MAX_EDGE_PICKS: usize = 10_000;
 /// Most sketch curves one curve of a boundary surface chains.
 pub const MAX_CHAIN_CURVES: usize = 1000;
 
-/// The network's continuity for a curve's: G3 is refused (a network holds up to G2).
+/// The network's continuity for a curve's, refused past what a network builds
+/// ([`Construction::Network`]).
 fn net_order(c: &BoundaryCurve) -> Result<network::Continuity> {
-    match c.continuity {
+    let named = |e: KernelError| match e {
+        KernelError::Invalid(why) => KernelError::Invalid(format!("{}: {why}", c.label)),
+        other => other,
+    };
+    match c.continuity.built_by(Construction::Network).map_err(named)? {
         Continuity::G0 => Ok(network::Continuity::G0),
         Continuity::G1 => Ok(network::Continuity::G1),
         Continuity::G2 => Ok(network::Continuity::G2),
-        Continuity::G3 => Err(KernelError::Invalid(format!("not supported yet: G3 continuity on {} (a curve network holds up to G2)", c.label))),
+        higher => Err(KernelError::Failed(format!("a curve network has no {} condition yet", higher.code()))),
     }
 }
 
@@ -79,7 +82,7 @@ pub fn boundary_surface(u: &[BoundaryCurve], v: &[BoundaryCurve]) -> Result<Body
             body.require_brep("boundary surface")?;
         }
     }
-    guard("boundary surface", || {
+    {
         let mut corners: Vec<Vec3> = Vec::new();
         let mut to_net = |c: &BoundaryCurve| -> Result<NetworkCurve<'static>> {
             let (curve, face): (Box<dyn NetCurve>, Option<EdgeFaces>) = match &c.source {
@@ -101,12 +104,18 @@ pub fn boundary_surface(u: &[BoundaryCurve], v: &[BoundaryCurve]) -> Result<Body
                     }
                     // The chain's inner vertices: the face's sides are split there, so that a
                     // join shares the body's edges one for one.
-                    corners.extend(chain.iter().skip(1).map(|e| from_p3(e.front().point())));
+                    let r = body.record();
+                    for &(e, forward) in chain.iter().skip(1) {
+                        let start = r.edges.get(e).and_then(|x| r.vertices.get(x.vertices[if forward { 0 } else { 1 }] as usize));
+                        if let Some(v) = start {
+                            corners.push(Vec3::new(v.point[0], v.point[1], v.point[2]));
+                        }
+                    }
                     let face = match c.continuity {
                         Continuity::G0 => None,
                         _ => Some(EdgeFaces::new(&c.label, body, &chain)?),
                     };
-                    (Box::new(EdgeChain::new(&c.label, &chain)?), face)
+                    (Box::new(EdgeChain::new(&c.label, r, &chain)?), face)
                 }
             };
             if c.continuity != Continuity::G0 && face.is_none() {
@@ -122,20 +131,149 @@ pub fn boundary_surface(u: &[BoundaryCurve], v: &[BoundaryCurve]) -> Result<Body
             SplineError::TooLarge(m) => KernelError::TooLarge(m),
             SplineError::Invalid(m) => KernelError::Invalid(m),
         })?;
-        let face = face_of(&surface, &corners)?;
-        let mut rec = Rebuild::default();
-        rec.made(&face, Vec::new());
-        crate::surfaces::body_of(vec![face], &[], &rec)
-    })
+        // The surface is fitted to its curves (a non-rational surface cannot hold an arc
+        // exactly), so each side's edges carry the proved distance of its input curve from the
+        // surface as their tolerance: the B-rep states the construction's real error, and a
+        // body built on the same curve is sewn to it within that tolerance.
+        let (made, tolerance) = face_of(&surface, &corners, &[])?;
+        let mut boundary: Vec<&BoundaryCurve> = Vec::new();
+        for c in [u.first(), u.last(), v.first(), v.last()].into_iter().flatten() {
+            if !boundary.iter().any(|b| std::ptr::eq(*b, c)) {
+                boundary.push(c);
+            }
+        }
+        let mut inputs = Vec::new();
+        for c in boundary {
+            // (a record's tolerance is twice SMLib's: the import halves it into the zone
+            // tolerance the validity check holds a gap to)
+            if let Some((ends, gap)) = input_gap(c, &made, tolerance / 2.0)? {
+                inputs.push((ends, 2.0 * gap));
+            }
+        }
+        if inputs.iter().all(|(_, needed)| *needed <= tolerance) {
+            return Ok(made);
+        }
+        face_of(&surface, &corners, &inputs).map(|(body, _)| body)
+    }
+}
+
+/// The record curve `c` as a spline on its own parameter over `interval` (a line as a degree-1
+/// spline whose knots span `interval`, its parameter as the line's: `start + t * (end - start)`,
+/// which an edge's interval need not keep inside `[0, 1]`); `None` for a curve with no spline form
+/// here.
+fn as_spline(c: solidcore_record::brep::Curve, [t0, t1]: [f64; 2]) -> Option<solidcore_record::brep::Curve> {
+    use solidcore_record::brep::Curve as C;
+    match c {
+        C::Line { start, end } => {
+            let at = |t: f64| std::array::from_fn(|i| start[i] + t * (end[i] - start[i]));
+            Some(C::Spline { knots: vec![t0, t0, t1, t1], points: vec![at(t0), at(t1)] })
+        }
+        // a circle or ellipse has the exact rational form the kernel gives it where it is bounded
+        C::Spline { .. } | C::RationalSpline { .. } | C::Circle { .. } | C::Ellipse { .. } => Some(c),
+        _ => None,
+    }
+}
+
+/// The exact curves `c` is made of, each a spline over its interval; `None` only for a point (it has
+/// no edge to bound). A side with a curve that has no spline form (its gap cannot be enclosed),
+/// or with no curve at all, is refused by name.
+fn input_curves(c: &BoundaryCurve) -> Result<Option<Vec<(solidcore_record::brep::Curve, [f64; 2])>>> {
+    let mut out = Vec::new();
+    match &c.source {
+        CurveSource::Sketch { plane, segs } => {
+            for s in segs {
+                let (curve, _) = crate::freeform::segment(plane, s)?;
+                let Some(curve) = as_spline(curve, [0.0, 1.0]) else {
+                    return Err(unproved(&c.label, "a curve has no spline form"));
+                };
+                out.push((curve, [0.0, 1.0]));
+            }
+        }
+        CurveSource::Points(pts) => {
+            for w in pts.windows(2) {
+                if w[0].dist(w[1]) > 0.0 {
+                    let line = solidcore_record::brep::Curve::Line { start: [w[0].x, w[0].y, w[0].z], end: [w[1].x, w[1].y, w[1].z] };
+                    let Some(curve) = as_spline(line, [0.0, 1.0]) else {
+                        return Err(unproved(&c.label, "a curve has no spline form"));
+                    };
+                    out.push((curve, [0.0, 1.0]));
+                }
+            }
+        }
+        CurveSource::Edges { body, at } => {
+            let (chain, _) = crate::surfaces::picked_chain(body, at)?;
+            let r = body.record();
+            for (e, _) in chain {
+                let Some(edge) = r.edges.get(e) else {
+                    return Err(unproved(&c.label, "an edge reference"));
+                };
+                let Some(curve) = as_spline(edge.parameters().clone(), edge.interval) else {
+                    return Err(unproved(&c.label, "a curve has no spline form"));
+                };
+                out.push((curve, edge.interval));
+            }
+        }
+        CurveSource::Point(_) => return Ok(None),
+    }
+    if out.is_empty() {
+        return Err(unproved(&c.label, "no curve"));
+    }
+    Ok(Some(out))
+}
+
+/// The ends of the boundary curve `c` (the ends of its pieces that no other piece shares) and the
+/// proved distance of all of it from the face of `made`; `None` for a point, an error (naming the
+/// side) when the distance is not enclosed. A
+/// hundredth of `zone` (the edges' own zone tolerance) is the scale below which a tighter bound
+/// changes nothing.
+fn input_gap(c: &BoundaryCurve, made: &Body, zone: f64) -> Result<Option<([Vec3; 2], f64)>> {
+    let Some(curves) = input_curves(c)? else {
+        return Ok(None);
+    };
+    let smlib = made.smlib()?;
+    let mut ends: Vec<Vec3> = Vec::new();
+    let mut gap = 0.0_f64;
+    for (curve, interval) in &curves {
+        let bound = smlib.curve_face_gap_bound(curve, *interval, 0, 1e-2 * zone).map_err(|e| KernelError::smlib("SMLib curve/face gap", e))?;
+        gap = gap.max(proved_or_refused(&c.label, bound)?);
+        let eval = CurveEval::new(curve).map_err(|e| KernelError::Failed(format!("boundary surface: {e}")))?;
+        for t in *interval {
+            let p = eval.point(t).ok_or_else(|| unproved(&c.label, "an end is not evaluated"))?;
+            // a piece's end another piece starts or ends at is inside the chain
+            match ends.iter().position(|q| q.dist(p) <= CROSS_TOLERANCE) {
+                Some(i) => {
+                    ends.swap_remove(i);
+                }
+                None => ends.push(p),
+            }
+        }
+    }
+    match ends.as_slice() {
+        [a, z] => Ok(Some(([*a, *z], gap))),
+        // a side with other than two free ends is a closed chain: the network takes none (its
+        // corners are the sides' ends), so a bound that cannot reach the end vertices is refused
+        _ => Err(unproved(&c.label, "its ends")),
+    }
+}
+
+/// The proved distance of a boundary curve's piece from the surface. A side whose distance
+/// cannot be enclosed has no certificate for its edges' tolerance, so the construction is
+/// refused and names the side.
+fn proved_or_refused(label: &str, bound: Option<f64>) -> Result<f64> {
+    bound.ok_or_else(|| unproved(label, "the surface's gap is not enclosed"))
+}
+
+/// The refusal of a non-point side whose distance from the surface is not proved.
+fn unproved(label: &str, why: &str) -> KernelError {
+    KernelError::Failed(format!("boundary surface: {label}: its distance from the surface can't be proved ({why})"))
 }
 
 /// `made` (a boundary surface) sewn into `target` along the edges they share: one body, a solid
 /// when it closes the gap. Refused when they share no edge.
 pub fn boundary_join(target: &Body, made: &Body) -> Result<Body> {
     target.require_brep("join")?;
-    let edges = |b: &Body| b.solid.edge_iter().map(|e| e.id()).collect::<HashSet<_>>().len();
     let joined = crate::surfaces::stitch(&[target, made], CROSS_TOLERANCE)?;
-    if edges(&joined) == edges(target) + edges(made) {
+    if joined.edge_count() == target.edge_count() + made.edge_count() {
         return Err(KernelError::Invalid("the surface shares no edge with the body it joins".into()));
     }
     Ok(joined)
@@ -180,6 +318,24 @@ impl NetCurve for SketchChain {
         let local = if len > 0.0 { ((at - start) / len).clamp(0.0, 1.0) } else { 0.0 };
         let p = self.plane.to_world(seg.point_at(local));
         p.is_finite().then_some(p)
+    }
+
+    /// The joint whose two segments' tangents there differ most: the angle between the end
+    /// tangent of one and the start tangent of the next (a rigid map to the model keeps it).
+    fn sharpest_joint(&self) -> Option<(Vec3, f64)> {
+        let mut sharpest: Option<(Vec3, f64)> = None;
+        for w in self.segs.windows(2) {
+            let (a, b) = (w[0].end_tangent(), w[1].start_tangent());
+            let Ok(angle) = solidcore_ops::joint_turn::joint_turn([a.x, a.y], [b.x, b.y]) else { continue };
+            if sharpest.is_none_or(|(_, most)| angle > most) {
+                sharpest = Some((self.plane.to_world(w[0].end()), angle));
+            }
+        }
+        sharpest
+    }
+
+    fn joints(&self) -> Vec<f64> {
+        self.starts.iter().skip(1).map(|s| s / self.total).collect()
     }
 }
 
@@ -245,32 +401,42 @@ fn resample(pts: &[Vec3], max: usize) -> Vec<Vec3> {
         .collect()
 }
 
-/// A chain of edges (each turned to run along it), by their lengths.
+/// A chain of a body's edges (each walked the way the chain runs along it), by their lengths;
+/// a point a fraction of the way along an edge is at that fraction of its parameter interval.
 struct EdgeChain {
-    edges: Vec<EdgeSampler>,
+    edges: Vec<(CurveEval, [f64; 2])>,
     starts: Vec<f64>,
     total: f64,
 }
 
+/// The curves of `chain` (edges of `r`), each with its interval in the chain's direction.
+fn chain_curves(label: &str, r: &Brep, chain: &Chain) -> Result<Vec<(CurveEval, [f64; 2])>> {
+    chain
+        .iter()
+        .map(|&(e, forward)| {
+            let edge = r.edges.get(e).ok_or_else(|| KernelError::Invalid(format!("{label}: an edge reference")))?;
+            let c = CurveEval::new(edge.parameters()).map_err(|err| KernelError::Invalid(format!("{label}: {err}")))?;
+            let [t0, t1] = edge.interval;
+            Ok((c, if forward { [t0, t1] } else { [t1, t0] }))
+        })
+        .collect()
+}
+
+/// The point `f` (0…1) of the way along a directed interval of a curve.
+fn along((c, [a, z]): &(CurveEval, [f64; 2]), f: f64) -> Option<Vec3> {
+    c.point(a + (z - a) * f.clamp(0.0, 1.0))
+}
+
 impl EdgeChain {
-    fn new(label: &str, chain: &[mt::Edge]) -> Result<EdgeChain> {
-        let mut edges = Vec::with_capacity(chain.len());
-        let mut starts = Vec::with_capacity(chain.len());
+    fn new(label: &str, r: &Brep, chain: &Chain) -> Result<EdgeChain> {
+        let edges = chain_curves(label, r, chain)?;
+        let mut starts = Vec::with_capacity(edges.len());
         let mut total = 0.0;
-        for e in chain {
-            let mut s = EdgeSampler::new(e).ok_or_else(|| KernelError::Invalid(format!("{label}: an edge has no parameter range")))?;
-            let mut len = 0.0;
-            let mut last: Option<Vec3> = None;
-            for k in 0..=16 {
-                let p = s.at(k as f64 / 16.0).ok_or_else(|| KernelError::Invalid(format!("{label}: an edge can't be evaluated")))?;
-                if let Some(q) = last {
-                    len += p.dist(q);
-                }
-                last = Some(p);
-            }
+        for e in &edges {
+            let pts = (0..=16).map(|k| along(e, k as f64 / 16.0)).collect::<Option<Vec<_>>>();
+            let pts = pts.ok_or_else(|| KernelError::Invalid(format!("{label}: an edge can't be evaluated")))?;
             starts.push(total);
-            total += len;
-            edges.push(s);
+            total += pts.windows(2).map(|w| w[0].dist(w[1])).sum::<f64>();
         }
         if !(total > 0.0 && total.is_finite()) {
             return Err(KernelError::Invalid(format!("{label} has no length")));
@@ -286,7 +452,11 @@ impl NetCurve for EdgeChain {
         let start = *self.starts.get(k)?;
         let end = self.starts.get(k + 1).copied().unwrap_or(self.total);
         let local = if end > start { ((at - start) / (end - start)).clamp(0.0, 1.0) } else { 0.0 };
-        self.edges.get_mut(k)?.at(local)
+        along(self.edges.get(k)?, local)
+    }
+
+    fn joints(&self) -> Vec<f64> {
+        self.starts.iter().skip(1).map(|s| s / self.total).collect()
     }
 }
 
@@ -302,29 +472,34 @@ pub(crate) struct EdgeFaces {
 /// parameters found last (the next search starts there).
 struct EdgeSide {
     pts: Vec<Vec3>,
-    surface: mt::Surface,
+    surface: SurfaceEval,
     along: bool,
-    hint: Option<(f64, f64)>,
+    hint: Option<[f64; 2]>,
 }
 
 impl EdgeFaces {
-    pub(crate) fn new(label: &str, body: &Body, chain: &[mt::Edge]) -> Result<EdgeFaces> {
+    pub(crate) fn new(label: &str, body: &Body, chain: &Chain) -> Result<EdgeFaces> {
+        let r = body.record();
+        let curves = chain_curves(label, r, chain)?;
         let mut sides = Vec::with_capacity(chain.len());
-        for e in chain {
-            let mut faces = body.solid.face_iter().filter(|f| f.boundaries().iter().flatten().any(|x| x.id() == e.id()));
-            let (Some(face), None) = (faces.next(), faces.next()) else {
+        for (&(e, forward), curve) in chain.iter().zip(&curves) {
+            let edge = r.edges.get(e).ok_or_else(|| KernelError::Invalid(format!("{label}: an edge reference")))?;
+            let [u] = edge.uses.as_slice() else {
                 return Err(KernelError::Invalid(format!(
                     "{label}: G1 and G2 need an open edge of a surface (an edge with a face on one side only)"
                 )));
             };
-            // How the face's own (absolute) boundary runs this edge.
-            let in_wire = face.absolute_boundaries().iter().flatten().find(|x| x.id() == e.id()).cloned();
-            let in_wire = in_wire.ok_or_else(|| KernelError::Failed("boundary surface: an edge's face".into()))?;
-            let along = in_wire.front().id() == e.front().id();
-            let mut sampler = EdgeSampler::new(e).ok_or_else(|| KernelError::Invalid(format!("{label}: an edge has no parameter range")))?;
-            let pts = (0..=16).map(|k| sampler.at(k as f64 / 16.0)).collect::<Option<Vec<_>>>();
+            // How the face's loop (counter-clockwise about its surface's natural normal) runs the edge.
+            let face = r.faces.get(u.face as usize).ok_or_else(|| KernelError::Failed("boundary surface: an edge's face".into()))?;
+            let in_loop = match face.loops.get(u.r#loop as usize) {
+                Some(solidcore_record::brep::Loop::Edges { edges }) => edges.get(u.position as usize).map(|x| x.forward),
+                _ => None,
+            };
+            let in_loop = in_loop.ok_or_else(|| KernelError::Failed("boundary surface: an edge's face".into()))?;
+            let pts = (0..=16).map(|k| along(curve, k as f64 / 16.0)).collect::<Option<Vec<_>>>();
             let pts = pts.ok_or_else(|| KernelError::Invalid(format!("{label}: an edge can't be evaluated")))?;
-            sides.push(EdgeSide { pts, surface: face.surface(), along, hint: None });
+            let surface = SurfaceEval::new(face.parameters()).map_err(|err| KernelError::Failed(format!("boundary surface: {err}")))?;
+            sides.push(EdgeSide { pts, surface, along: in_loop == forward, hint: None });
         }
         Ok(EdgeFaces { sides })
     }
@@ -339,17 +514,12 @@ impl CrossFace for EdgeFaces {
         let seg = side.pts.windows(2).min_by(|a, b| at.dist_to_segment(a[0], a[1]).total_cmp(&at.dist_to_segment(b[0], b[1])))?;
         let chain_dir = seg[1] - seg[0];
         let s = &side.surface;
-        let (u, v) = s.search_nearest_parameter(p3(at), side.hint, 100).or_else(|| s.search_nearest_parameter(p3(at), None, 100))?;
-        side.hint = Some((u, v));
-        let (su, sv) = (s.uder(u, v), s.vder(u, v));
-        let n = su.cross(sv);
-        if !(n.magnitude2() > 0.0) {
-            return None;
-        }
-        let n = n.normalize();
-        let normal = Vec3::new(n.x, n.y, n.z);
-        // The face's boundary runs counter-clockwise about its surface's normal, so the face lies
-        // to the left of it: outward is the boundary's direction × the normal.
+        let [u, v] = s.project(at, side.hint, f64::INFINITY).or_else(|| s.project(at, None, f64::INFINITY))?;
+        side.hint = Some([u, v]);
+        let (_, su, sv) = s.derivs(u, v)?;
+        let normal = su.cross(sv).normalized()?;
+        // The face's loop runs counter-clockwise about its surface's normal, so the face lies to
+        // the left of it: outward is the loop's direction × the normal.
         let wire = if side.along { chain_dir } else { -chain_dir };
         let outward = wire.cross(normal).normalized()?;
         // The second fundamental form, in the basis of the tangent asked about and outward.
@@ -363,11 +533,10 @@ impl CrossFace for EdgeFaces {
         // II(w, w) = L·α² + 2M·αβ + N·β² for w = α·S_u + β·S_v, with L, M, N the surface's
         // second derivatives along its unit normal (do Carmo, §3-3): exact, rational surfaces
         // included, and with nothing sampled beyond the edge, where the face's domain ends.
-        let nv = mt::Vector3::new(normal.x, normal.y, normal.z);
-        let (l, m, nn) = (s.uuder(u, v).dot(nv), s.uvder(u, v).dot(nv), s.vvder(u, v).dot(nv));
+        let (suu, suv, svv) = s.second(u, v)?;
+        let (l, m, nn) = (suu.dot(normal), suv.dot(normal), svv.dot(normal));
         let ii = |w: Vec3| -> Option<f64> {
-            let wv = mt::Vector3::new(w.x, w.y, w.z);
-            let (p, q) = (wv.dot(su), wv.dot(sv));
+            let (p, q) = (w.dot(su), w.dot(sv));
             let (alpha, beta) = ((p * g - q * f) / det, (q * e - p * f) / det);
             let out = l * alpha * alpha + 2.0 * m * alpha * beta + nn * beta * beta;
             out.is_finite().then_some(out)
@@ -380,99 +549,160 @@ impl CrossFace for EdgeFaces {
 }
 
 /// The face of a network surface: its four sides from the surface's boundary rows, each split
-/// at the `corners` that lie on it (inner vertices of edge chains). Refused when a side shrinks to
-/// a point.
-fn face_of(s: &NurbsSurface, corners: &[Vec3]) -> Result<mt::Face> {
+/// at the `corners` that lie on it (inner vertices of edge chains), the pieces edges on the side's
+/// own curve over parts of its interval. A side collapsed to a point (a three-sided patch) is left
+/// out: the two sides beside it meet at one vertex there. Two sides shrunk to a point leave a
+/// lens of two edges; refused when fewer than two sides are left. A side between the ends of
+/// one of `inputs` takes at least its tolerance (record units); the face and the default
+/// tolerance of its edges are returned.
+fn face_of(s: &NurbsSurface, corners: &[Vec3], inputs: &[([Vec3; 2], f64)]) -> Result<(Body, f64)> {
     let fail = |m: &str| KernelError::Failed(format!("boundary surface: {m}"));
     let [nu, nv] = s.count();
-    let [ku, kv] = s.knots();
-    let rows: Vec<Vec<mt::Point3>> = (0..nu).map(|i| (0..nv).map(|j| p3(s.point(i, j).xyz())).collect()).collect();
-    let (uk, vk) = (mt::KnotVec::from(ku.clone()), mt::KnotVec::from(kv.clone()));
-    let surface = mt::BSplineSurface::try_new((uk.clone(), vk.clone()), rows.clone()).map_err(|e| fail(&e.to_string()))?;
-    let row = |pts: Vec<mt::Point3>, k: &mt::KnotVec| mt::BSplineCurve::try_new(k.clone(), pts).map_err(|e| fail(&e.to_string()));
-    let (Some(first), Some(last)) = (rows.first(), rows.last()) else { return Err(fail("control net")) };
-    let bottom = row(rows.iter().filter_map(|r| r.first().copied()).collect(), &uk)?;
-    let top = row(rows.iter().filter_map(|r| r.last().copied()).collect(), &uk)?;
-    let left = row(first.clone(), &vk)?;
-    let right = row(last.clone(), &vk)?;
-    let corner = |c: &mt::BSplineCurve<mt::Point3>, end: bool| {
-        let (t0, t1) = c.range_tuple();
-        c.subs(if end { t1 } else { t0 })
-    };
-    let (c00, c10, c11, c01) = (corner(&bottom, false), corner(&bottom, true), corner(&top, true), corner(&top, false));
-    let size = [c00, c10, c11, c01].iter().map(|p| from_p3(*p).dist(from_p3(c00))).fold(0.0, f64::max).max(1.0);
-    // A side collapsed to a point (a three-sided patch) is left out of the loop: the two sides
-    // beside it meet at one vertex there.
-    let sides = [(c00, c10), (c10, c11), (c01, c11), (c00, c01)];
-    let collapsed: Vec<bool> = sides.iter().map(|(a, b)| from_p3(*a).dist(from_p3(*b)) <= size * 1e-9).collect();
-    match collapsed.iter().filter(|c| **c).count() {
-        0 | 1 => {}
-        _ => return Err(KernelError::Invalid("not supported yet: a boundary surface with more than one side shrunk to a point".into())),
+    if nu < 2 || nv < 2 {
+        return Err(fail("control net"));
     }
-    let mut verts: Vec<mt::Vertex> = Vec::with_capacity(4);
-    for c in [c00, c10, c11, c01] {
-        let same = verts.iter().find(|v| from_p3(v.point()).dist(from_p3(c)) <= size * 1e-9).cloned();
-        verts.push(same.unwrap_or_else(|| mt::Vertex::new(c)));
+    let [ku, kv] = s.knots().clone();
+    let [[u0, u1], [v0, v1]] = s.domain();
+    let corner = |i: usize, j: usize| s.point(i, j).project().ok_or_else(|| fail("a corner has no position"));
+    let c = [corner(0, 0)?, corner(nu - 1, 0)?, corner(nu - 1, nv - 1)?, corner(0, nv - 1)?];
+    let size = c.iter().map(|p| p.dist(c[0])).fold(0.0, f64::max).max(1.0);
+    let row = |j: usize| (0..nu).map(|i| s.point(i, j)).collect::<Vec<_>>();
+    let column = |i: usize| (0..nv).map(|j| s.point(i, j)).collect::<Vec<_>>();
+    // Bottom (v0) and top (v1) along u, left (u0) and right (u1) along v, each from its first
+    // corner to its second; the loop runs bottom, right, top backwards, left backwards.
+    let sides = [
+        (row(0), ku.clone(), [0, 1], true, [None, Some(v0)]),
+        (column(nu - 1), kv.clone(), [1, 2], true, [Some(u1), None]),
+        (row(nv - 1), ku, [3, 2], false, [None, Some(v1)]),
+        (column(0), kv, [0, 3], false, [Some(u0), None]),
+    ];
+    let collapsed: Vec<bool> = sides.iter().map(|(_, _, [a, z], ..)| c[*a].dist(c[*z]) <= size * 1e-9).collect();
+    // Two sides left at least: a lens (the two opposite sides, or two beside each other, shrunk).
+    if collapsed.iter().filter(|x| !**x).count() < 2 {
+        return Err(KernelError::Invalid("not supported yet: a boundary surface with fewer than two sides left".into()));
     }
-    let (Some(v00), Some(v10), Some(v11), Some(v01)) = (verts.first(), verts.get(1), verts.get(2), verts.get(3)) else {
-        return Err(fail("corners"));
-    };
-    let is = |k: usize| collapsed.get(k).copied().unwrap_or(false);
-    let mut wire: Vec<mt::Edge> = Vec::new();
-    if !is(0) {
-        wire.extend(side_edges(bottom, v00, v10, corners));
+    // Vertices: the corners, a collapsed side's two ends one vertex (chains of them one vertex).
+    let mut vertex_of = [0usize, 1, 2, 3];
+    for _ in 0..4 {
+        for (k, (_, _, [a, z], ..)) in sides.iter().enumerate() {
+            if collapsed.get(k).copied().unwrap_or(false) {
+                let low = vertex_of[*a].min(vertex_of[*z]);
+                vertex_of[*a] = low;
+                vertex_of[*z] = low;
+            }
+        }
     }
-    if !is(1) {
-        wire.extend(side_edges(right, v10, v11, corners));
-    }
-    if !is(2) {
-        wire.extend(side_edges(top, v01, v11, corners).into_iter().rev().map(|e| e.inverse()));
-    }
-    if !is(3) {
-        wire.extend(side_edges(left, v00, v01, corners).into_iter().rev().map(|e| e.inverse()));
-    }
-    // u along the bottom, v up the left: counter-clockwise in (u, v).
-    mt::Face::try_new(vec![wire.into()], mt::Surface::BSplineSurface(surface)).map_err(|e| fail(&e.to_string()))
-}
-
-/// The edges of one side from `a` to `b`, split at the points of `corners` that lie on it
-/// (within [`CROSS_TOLERANCE`]) strictly between its ends.
-fn side_edges(mut curve: mt::BSplineCurve<mt::Point3>, a: &mt::Vertex, b: &mt::Vertex, corners: &[Vec3]) -> Vec<mt::Edge> {
-    let (t0, t1) = curve.range_tuple();
-    let margin = (t1 - t0) * 1e-6;
-    let mut cuts: Vec<f64> = corners
+    let base = (size * 1e-6).max(1e-5);
+    // Each side's tolerance: at least the one `inputs` gives the input curve that runs between
+    // its corners (within the crossing tolerance, either way round).
+    let side_tolerance: Vec<f64> = sides
         .iter()
-        .filter_map(|c| {
-            let t = curve.search_nearest_parameter(p3(*c), None, 100)?;
-            (t > t0 + margin && t < t1 - margin && from_p3(curve.subs(t)).dist(*c) <= CROSS_TOLERANCE).then_some(t)
+        .map(|(_, _, [a, z], ..)| {
+            let at = |p: Vec3, q: Vec3| p.dist(q) <= CROSS_TOLERANCE;
+            inputs
+                .iter()
+                .filter(|([p, q], _)| (at(*p, c[*a]) && at(*q, c[*z])) || (at(*p, c[*z]) && at(*q, c[*a])))
+                .fold(base, |t, (_, gap)| t.max(*gap))
         })
         .collect();
-    cuts.sort_by(f64::total_cmp);
-    cuts.dedup_by(|x, y| (*x - *y).abs() <= margin);
-    let mut edges = Vec::with_capacity(cuts.len() + 1);
-    let mut from = a.clone();
-    // Cut from the far end back, so the earlier parameters stay on the part kept.
-    let mut tails = Vec::with_capacity(cuts.len());
-    for &t in cuts.iter().rev() {
-        tails.push(curve.cut(t));
+    // A corner's tolerance is at least that of every side it ends.
+    let mut corner_tolerance = [base; 4];
+    for (k, (_, _, [a, z], ..)) in sides.iter().enumerate() {
+        if collapsed.get(k).copied().unwrap_or(false) {
+            continue;
+        }
+        let t = side_tolerance.get(k).copied().unwrap_or(base);
+        for i in [*a, *z] {
+            let j = vertex_of[i];
+            corner_tolerance[j] = corner_tolerance[j].max(t);
+        }
     }
-    let mut pieces = vec![curve];
-    pieces.extend(tails.into_iter().rev());
-    let count = pieces.len();
-    for (k, piece) in pieces.into_iter().enumerate() {
-        let to = if k + 1 == count { b.clone() } else { mt::Vertex::new(piece.subs(piece.range_tuple().1)) };
-        edges.push(mt::Edge::new(&from, &to, mt::Curve::BSplineCurve(piece)));
-        from = to;
+    let mut parts = Parts { tolerance: base, ..Parts::default() };
+    parts.vertices =
+        c.iter().zip(corner_tolerance).map(|(p, tolerance)| solidcore_record::brep::Vertex { point: [p.x, p.y, p.z], tolerance }).collect();
+    let mut uses = Vec::new();
+    for (k, (ctrl, knots, [a, z], forward, fixed)) in sides.into_iter().enumerate() {
+        if collapsed.get(k).copied().unwrap_or(false) {
+            continue;
+        }
+        let tolerance = side_tolerance.get(k).copied().unwrap_or(base);
+        let (curve, [t0, t1]) = spline_curve(&ctrl, knots)?;
+        let eval = CurveEval::new(&curve).map_err(|e| fail(&e.to_string()))?;
+        let cuts = cuts_on(&eval, [t0, t1], corners);
+        let mut breaks = vec![t0];
+        breaks.extend(cuts.iter().map(|(t, _)| *t));
+        breaks.push(t1);
+        let mut ends = vec![vertex_of[a]];
+        for (_, p) in &cuts {
+            ends.push(parts.vertices.len());
+            parts.vertices.push(solidcore_record::brep::Vertex { point: [p.x, p.y, p.z], tolerance });
+        }
+        ends.push(vertex_of[z]);
+        let uv = |t: f64| [fixed[0].unwrap_or(t), fixed[1].unwrap_or(t)];
+        let mut pieces = Vec::with_capacity(breaks.len());
+        for (w, e) in breaks.windows(2).zip(ends.windows(2)) {
+            let interval = [w[0], w[1]];
+            let edge = index(parts.edges.len())?;
+            let vertices = [index(e[0])?, index(e[1])?];
+            parts.edges.push(solidcore_record::brep::Edge { nurbs: None, curve: curve.clone(), interval, vertices, tolerance, uses: Vec::new() });
+            pieces.push(solidcore_record::brep::OrientedEdge { edge, forward, pcurve: uv_line(uv(w[0]), uv(w[1]), interval) });
+        }
+        if !forward {
+            pieces.reverse();
+        }
+        uses.extend(pieces);
     }
-    edges
+    let face = solidcore_record::brep::Face {
+        nurbs: None,
+        surface: spline_surface(s),
+        domain: s.domain(),
+        loops: vec![solidcore_record::brep::Loop::Edges { edges: uses }],
+    };
+    parts.faces.push((face, true));
+    let body = surface_body(&parts.canonical()?.brep)?;
+    Ok((crate::surfaces::all_new(body, &[])?, base))
+}
+
+/// The points of `corners` on a side's curve (within [`CROSS_TOLERANCE`]) strictly between its
+/// ends, with their parameters, in order: each found from its nearest of 256 samples by
+/// golden-section search.
+fn cuts_on(c: &CurveEval, [t0, t1]: [f64; 2], corners: &[Vec3]) -> Vec<(f64, Vec3)> {
+    const SAMPLES: usize = 256;
+    let margin = (t1 - t0) * 1e-6;
+    let mut cuts: Vec<(f64, Vec3)> = corners
+        .iter()
+        .filter_map(|p| {
+            let d = |t: f64| c.point(t).map_or(f64::INFINITY, |q| q.dist(*p));
+            let at = |i: usize| t0 + (t1 - t0) * i as f64 / SAMPLES as f64;
+            let i = (0..=SAMPLES).min_by(|a, b| d(at(*a)).total_cmp(&d(at(*b))))?;
+            let (mut lo, mut hi) = (at(i.saturating_sub(1)), at((i + 1).min(SAMPLES)));
+            let g = 0.5 * (5f64.sqrt() - 1.0);
+            for _ in 0..80 {
+                let (x, y) = (hi - g * (hi - lo), lo + g * (hi - lo));
+                if d(x) < d(y) {
+                    hi = y;
+                } else {
+                    lo = x;
+                }
+            }
+            let t = 0.5 * (lo + hi);
+            (t > t0 + margin && t < t1 - margin && d(t) <= CROSS_TOLERANCE).then(|| (t, c.point(t).unwrap_or(*p)))
+        })
+        .collect();
+    cuts.sort_by(|a, b| a.0.total_cmp(&b.0));
+    cuts.dedup_by(|x, y| (x.0 - y.0).abs() <= margin);
+    cuts
+}
+
+fn index(i: usize) -> Result<u32> {
+    u32::try_from(i).map_err(|_| KernelError::TooLarge("boundary surface: too many edges".into()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::patch_region;
-    use mt::ParametricSurface3D;
-    use solidcraft_geom::{Loop2, Region2, Vec2};
+    use solidcore_record::{Loop2, Region2, Vec2};
 
     fn sketch(label: &str, plane: Plane, segs: Vec<Seg2>) -> BoundaryCurve<'static> {
         BoundaryCurve { label: label.into(), source: CurveSource::Sketch { plane, segs }, continuity: Continuity::G0 }
@@ -482,8 +712,8 @@ mod tests {
         BoundaryCurve { label: label.into(), source: CurveSource::Points(vec![a, b]), continuity: Continuity::G0 }
     }
 
-    fn face_surface(b: &Body) -> mt::Surface {
-        b.solid.face_iter().next().unwrap().surface()
+    fn face_surface(b: &Body) -> SurfaceEval {
+        SurfaceEval::new(&b.record().faces[0].surface).unwrap()
     }
 
     /// The flat sheet y ∈ [−10, 0], x ∈ [0, 10] in z = 0, its edge along y = 0 open.
@@ -506,7 +736,7 @@ mod tests {
         let s = face_surface(&body);
         for i in 0..=10 {
             for j in 0..=10 {
-                let q = from_p3(s.subs(i as f64 / 10.0, j as f64 / 10.0));
+                let q = s.point([i as f64 / 10.0, j as f64 / 10.0]).unwrap();
                 assert!((q.z - q.x * q.y / 10.0).abs() < 1e-9, "{q:?}");
             }
         }
@@ -530,18 +760,18 @@ mod tests {
         let s = face_surface(&body);
         for i in 0..=8 {
             for j in 0..=8 {
-                assert!((s.subs(i as f64 / 8.0, j as f64 / 8.0).z - 3.0).abs() < 1e-9);
+                assert!((s.point([i as f64 / 8.0, j as f64 / 8.0]).unwrap().z - 3.0).abs() < 1e-9);
             }
         }
     }
 
     /// A stadium: two half-circle arcs (radius 5) bulging out of the 10 × 8 rectangle between two
-    /// lines. Each arc meets its lines at 180°, so the patch is singular at its corners, and the
-    /// reference mesher's walk round the boundary used to run from such a corner onto the
-    /// surface's extrapolation past its domain (a planar spline passes through every point of its
-    /// plane there): the face measured 289 mm² for its 158.5. The vendored mesher's bounded
-    /// projection (`nearest_projection`, vendor/README.md) keeps the walk on the domain. Its area
-    /// is the stadium's, 80 + 25π, by the faces, the measuring mesh and the display mesh.
+    /// lines. Each arc meets its lines at 180°, so the patch is singular at its corners, and a
+    /// boundary walk can run from such a corner onto the surface's extrapolation past its domain
+    /// (a planar spline passes through every point of its plane there): the face measured
+    /// 289 mm² for its 158.5. The mesher is SolidCraft's own (`crate::tess::plan`), which keeps
+    /// the walk on the domain. Its area is the stadium's, 80 + 25π, by the faces, the measuring
+    /// mesh and the display mesh.
     #[test]
     fn a_patch_with_straight_corners_measures_its_own_area() {
         use std::f64::consts::PI;
@@ -560,9 +790,9 @@ mod tests {
         let near = |a: f64| (a - want).abs() < 0.25;
         let faces = body.faces(0.01).unwrap();
         assert!(faces.len() == 1 && near(faces[0].area), "faces: {faces:?}");
-        let tess = body.tessellate(0.01).unwrap().measure().area;
+        let tess = body.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().measure().area;
         assert!(near(tess), "measuring mesh: {tess}");
-        let display = body.display_mesh(0.01).unwrap().measure().area;
+        let display = body.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().measure().area;
         assert!(near(display), "display mesh: {display}");
     }
 
@@ -580,31 +810,94 @@ mod tests {
         let apex = BoundaryCurve { label: "centre".into(), source: CurveSource::Point(Vec3::ZERO), continuity: Continuity::G0 };
         let body = boundary_surface(&[sketch("arc", pl, vec![arc]), apex], &[sketch("x", pl, vec![x]), sketch("y", pl, vec![y])]).unwrap();
         assert!(body.is_surface() && body.face_count() == 1);
-        let edges: std::collections::HashSet<_> = body.solid.edge_iter().map(|e| e.id()).collect();
-        assert_eq!(edges.len(), 3, "the collapsed side is no edge");
+        assert_eq!(body.edge_count(), 3, "the collapsed side is no edge");
         let want = PI * r * r / 4.0;
         let near = |a: f64| (a - want).abs() < 0.2;
         let faces = body.faces(0.01).unwrap();
         assert!(near(faces[0].area), "faces: {faces:?}");
-        let tess = body.tessellate(0.01).unwrap().measure().area;
+        let tess = body.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().measure().area;
         assert!(near(tess), "measuring mesh: {tess}");
-        let display = body.display_mesh(0.01).unwrap().measure().area;
+        let display = body.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().measure().area;
         assert!(near(display), "display mesh: {display}");
-        // Two collapsed sides are no patch.
         let p = |l: &str, q: Vec3| BoundaryCurve { label: l.into(), source: CurveSource::Point(q), continuity: Continuity::G0 };
-        assert!(
-            boundary_surface(&[sketch("arc", pl, vec![arc]), p("o", Vec3::ZERO)], &[p("a", Vec3::new(r, 0.0, 0.0)), sketch("y", pl, vec![y])])
-                .is_err()
-        );
         assert!(boundary_surface(&[sketch("arc", pl, vec![arc]), p("nan", Vec3::new(f64::NAN, 0.0, 0.0))], &[]).is_err());
     }
 
+    /// Two arcs that meet at both ends (#11878) are a lens: both side curves collapse to a point,
+    /// the face has the two arcs for its edges and the two ends for its vertices, and it measures
+    /// the lens's area, two segments of radius 10 over a 12 mm chord.
+    #[test]
+    fn two_curves_meeting_at_both_ends_are_a_lens() {
+        use std::f64::consts::PI;
+        let r = 10.0_f64;
+        let half = 6.0_f64;
+        let h = (r * r - half * half).sqrt();
+        let theta = (half / r).asin();
+        let up = Seg2::Arc { center: Vec2::new(0.0, -h), radius: r, start: PI / 2.0 + theta, sweep: -2.0 * theta };
+        let down = Seg2::Arc { center: Vec2::new(0.0, h), radius: r, start: -PI / 2.0 - theta, sweep: 2.0 * theta };
+        let pl = Plane::XY;
+        let body = boundary_surface(&[sketch("up", pl, vec![up]), sketch("down", pl, vec![down])], &[]).unwrap();
+        assert!(body.is_surface() && body.face_count() == 1);
+        assert_eq!(body.edge_count(), 2, "the two collapsed sides are no edges");
+        let want = 2.0 * (r * r * theta - half * h);
+        let faces = body.faces(0.01).unwrap();
+        assert!((faces[0].area - want).abs() < 0.25, "area {} vs {want}", faces[0].area);
+    }
+
+    /// #19578: three hull sections, each a natural spline through fit points on a plane X =
+    /// const, loft to one face. The bow section bends to a 34 mm radius near its foot, where its
+    /// Bézier pieces meet tangent (0°) at different speeds and with a jump in the rate of change
+    /// of curvature; it was refused as a sharp corner ("off by 2.09e-2 at the best fit"). Every
+    /// point of every section lies on the face: within ten times the fit tolerance, which the fit
+    /// meets at the points it checks.
+    #[test]
+    fn smooth_spline_sections_with_a_tight_bend_loft() {
+        let v = Vec2::new;
+        let sections: [(f64, Vec<Vec2>); 3] = [
+            (0.0, vec![v(40.0, 1200.0), v(45.373332545769244, -62.868622627622926), v(17.293450399707694, -155.24526595568008), v(0.0, -160.0)]),
+            (
+                3000.0,
+                vec![
+                    v(0.0, -524.378317598476),
+                    v(638.6560651833474, -421.88139234818084),
+                    v(926.5359184238416, -145.54937416764426),
+                    v(1187.1799350211795, 1200.0),
+                ],
+            ),
+            (10000.0, vec![v(0.0, 0.0), v(1377.2647194380875, 394.8316231623623), v(1500.0, 1200.0)]),
+        ];
+        let plane = |x: f64| Plane::new(Vec3::new(x, 0.0, 0.0), Vec3::Y, Vec3::Z).unwrap();
+        let segs = |pts: &[Vec2]| -> Vec<Seg2> {
+            solidcore_ops::fit_projection::fit_beziers(pts, false)
+                .unwrap()
+                .into_iter()
+                .map(|[p0, p1, p2, p3]| Seg2::Cubic { p0, p1, p2, p3 })
+                .collect()
+        };
+        let curves: Vec<BoundaryCurve> =
+            sections.iter().enumerate().map(|(i, (x, pts))| sketch(&format!("U{}", i + 1), plane(*x), segs(pts))).collect();
+        let body = boundary_surface(&curves, &[]).unwrap();
+        assert!(body.is_surface() && body.face_count() == 1);
+        let s = face_surface(&body);
+        for (x, pts) in &sections {
+            let pl = plane(*x);
+            for seg in segs(pts) {
+                for k in 0..=20 {
+                    let p = pl.to_world(seg.point_at(k as f64 / 20.0));
+                    let [u, w] = s.project(p, None, f64::INFINITY).unwrap();
+                    let d = s.point([u, w]).unwrap().dist(p);
+                    assert!(d < 10.0 * FIT_TOLERANCE, "{p:?} is {d} mm from the face");
+                }
+            }
+        }
+    }
+
     /// The angle between the two faces' normals across the edge at `p`.
-    fn normal_angle(a: &mt::Surface, b: &mt::Surface, p: Vec3) -> f64 {
-        let n = |s: &mt::Surface| {
-            let (u, v) = s.search_nearest_parameter(p3(p), None, 100).unwrap();
-            let n = s.normal(u, v);
-            Vec3::new(n.x, n.y, n.z)
+    fn normal_angle(a: &SurfaceEval, b: &SurfaceEval, p: Vec3) -> f64 {
+        let n = |s: &SurfaceEval| {
+            let [u, v] = s.project(p, None, f64::INFINITY).unwrap();
+            let (_, su, sv) = s.derivs(u, v).unwrap();
+            su.cross(sv).normalized().unwrap()
         };
         n(a).dot(n(b)).abs().clamp(0.0, 1.0).acos().to_degrees()
     }
@@ -650,11 +943,10 @@ mod tests {
 
     /// Normal curvature of `s` at the point nearest `p` in the direction `w` (projected into the
     /// tangent plane), signed against the unit normal `n`.
-    fn normal_curvature(s: &mt::Surface, p: Vec3, w: Vec3, n: Vec3) -> f64 {
-        let (u, v) = s.search_nearest_parameter(p3(p), None, 100).unwrap();
-        let v3 = |x: mt::Vector3| Vec3::new(x.x, x.y, x.z);
-        let (su, sv) = (v3(s.uder(u, v)), v3(s.vder(u, v)));
-        let (suu, suv, svv) = (v3(s.uuder(u, v)), v3(s.uvder(u, v)), v3(s.vvder(u, v)));
+    fn normal_curvature(s: &SurfaceEval, p: Vec3, w: Vec3, n: Vec3) -> f64 {
+        let [u, v] = s.project(p, None, f64::INFINITY).unwrap();
+        let (_, su, sv) = s.derivs(u, v).unwrap();
+        let (suu, suv, svv) = s.second(u, v).unwrap();
         let (e, f, g) = (su.dot(su), su.dot(sv), sv.dot(sv));
         let (l, m, nn) = (suu.dot(n), suv.dot(n), svv.dot(n));
         let (p1, q1) = (w.dot(su), w.dot(sv));
@@ -698,17 +990,16 @@ mod tests {
         assert!((k1 + 1.0 / r).abs() > 0.1 / r, "G1 alone does not carry the curvature: {k1}");
     }
 
-    /// G3 is more than a network holds: refused, never a panic.
+    /// G3 and G4 are more than a network holds: refused, naming the curve, never a panic.
     #[test]
     fn g3_is_not_supported() {
         let base = sheet();
-        let edge = BoundaryCurve {
-            label: "edge".into(),
-            source: CurveSource::Edges { body: &base, at: vec![Vec3::new(5.0, 0.0, 0.0)] },
-            continuity: Continuity::G3,
-        };
-        let e = boundary_surface(&[edge, line3("far", Vec3::new(0.0, 10.0, 5.0), Vec3::new(10.0, 10.0, 5.0))], &[]).unwrap_err();
-        assert!(e.to_string().contains("not supported yet"), "{e}");
+        for g in [Continuity::G3, Continuity::G4] {
+            let edge =
+                BoundaryCurve { label: "edge".into(), source: CurveSource::Edges { body: &base, at: vec![Vec3::new(5.0, 0.0, 0.0)] }, continuity: g };
+            let e = boundary_surface(&[edge, line3("far", Vec3::new(0.0, 10.0, 5.0), Vec3::new(10.0, 10.0, 5.0))], &[]).unwrap_err();
+            assert!(e.to_string().contains("not supported yet") && e.to_string().contains("edge") && e.to_string().contains(g.as_str()), "{e}");
+        }
     }
 
     /// Refusals: G1 on a sketch curve, on an edge between two faces, curves that miss.
@@ -740,5 +1031,14 @@ mod tests {
             continuity: Continuity::G0,
         };
         assert!(boundary_surface(&[nan, line3("b", Vec3::Y, Vec3::new(1.0, 1.0, 0.0))], &[]).is_err());
+    }
+
+    /// A side whose distance from the surface cannot be enclosed is refused by name; a proved
+    /// distance passes through.
+    #[test]
+    fn an_unproved_side_is_refused_by_name() {
+        let e = proved_or_refused("rim", None).unwrap_err();
+        assert!(e.to_string().contains("rim") && e.to_string().contains("can't be proved"), "{e}");
+        assert_eq!(proved_or_refused("rim", Some(0.25)).unwrap(), 0.25);
     }
 }

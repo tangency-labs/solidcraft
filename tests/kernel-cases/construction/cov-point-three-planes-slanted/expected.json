@@ -1,0 +1,15 @@
+{
+ "sources": [],
+ "what": "the point where three slanted planes meet",
+ "source": "analytic",
+ "method": "x + y = 10, y + z = 6, x + z = 8: adding, x + y + z = 12, so (6,4,2)",
+ "construction": {
+  "P": {
+   "point": [
+    6,
+    4,
+    2
+   ]
+  }
+ }
+}

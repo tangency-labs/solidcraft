@@ -1,0 +1,6 @@
+{
+  "unit": "nlib.srf_offset",
+  "cases": [
+    {"name": "fuzz01174_alloc_alloc", "origin": "fuzz-out/n2000/nlib.srf_offset/fuzz01174.json (enomem: rust: fit_arrays::alloc sized from a 2^31/2^32 argument, outcome depended on the machine memory)", "issue": "#505", "cpp": "harness: ffi rejected: bad index/count/flag 2147483648", "rust": "ok", "inputs": {"d": -0.25, "eps": 0.1, "par": 4, "pp": 2147483648, "qq": 3, "sur": {"sms": {"$upstream_file": "Surface.sms"}}, "tol": 0.01}}
+  ]
+}

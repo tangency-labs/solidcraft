@@ -1,0 +1,23 @@
+{
+ "sources": [],
+ "what": "timeline.suppress with no `suppressed` flips the hole off and back on",
+ "method": "two toggles leave the hole: V = 12000 - pi 5^2 10; faces 6 + 1 cylinder = 7",
+ "body_count": 1,
+ "volume_mm3": 11214.601836602551,
+ "faces": 7,
+ "results": [
+  {
+   "step": 3,
+   "json": {
+    "suppressed": true
+   }
+  },
+  {
+   "step": 4,
+   "json": {
+    "suppressed": false
+   }
+  }
+ ],
+ "source": "analytic"
+}

@@ -1,0 +1,151 @@
+{
+  "area": "sweeps",
+  "bodies": {
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b4": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b6"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "4008-symmetric-revolve-cut-end-faces-in-the-side-face",
+  "expected": {
+    "body_count": 1,
+    "method": "block 60 x 20 x 25 (x 0..60, y 0..20); the ring (radii 2.6..9.6, height 21 inside the 25) turns +-90 degrees about the edge x = 0, y = 20; only the quarter with y < 20 lies in the block: V = 30000 - pi (9.6^2 - 2.6^2) 21 / 4 = 28591.467.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#4008"
+    ],
+    "volume_mm3": 28591.466933763015,
+    "what": "a 7 x 21 rectangle 2.6 mm from a block vertical edge revolved as a symmetric 180 degree cut about that edge: both end faces of the tool lie in the block left face (refused as \"could not be computed reliably\")"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 24,
+      "faces": 10,
+      "vertices": 16
+    }
+  },
+  "records": "4008-symmetric-revolve-cut-end-faces-in-the-side-face.bodies.json.gz",
+  "result": [
+    {
+      "body": "Block",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 6642.584025239098,
+      "body_count": 1,
+      "edges": 24,
+      "faces": 10,
+      "vertices": 16,
+      "volume_mm3": 28591.466933742646
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#4008"
+  ],
+  "traced_ops": [
+    "extrude",
+    "revolve",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a 7 x 21 rectangle 2.6 mm from a block vertical edge revolved as a symmetric 180 degree cut about that edge: both end faces of the tool lie in the block left face (refused as \"could not be computed reliably\")",
+  "why_not": []
+}

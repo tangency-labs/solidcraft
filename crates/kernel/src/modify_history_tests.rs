@@ -2,10 +2,15 @@
 //! face and edge origin checked against the geometry of the operands (in tests only: the history
 //! itself is recorded, never sampled), and the exact origins asserted where the outcome is known.
 
-use solidcraft_geom::{Loop2, Plane, Region2, Vec2, Vec3};
+#[path = "../../../solidcore/crates/solidcore/tests/support/annular_samples.rs"]
+mod annular_samples;
+
+use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 
 use crate::body::Body;
 use crate::boolean_record::tests::{self, Reach, changes, to_edge, to_face};
+use crate::history::BodyHistory;
 use crate::history::{Change, EdgeOrigin, FaceOrigin, History};
 use crate::{BoolOp, boolean, box_solid, cylinder, extrude};
 
@@ -50,8 +55,12 @@ fn edge_at(b: &Body, p: Vec3) -> usize {
 
 /// The index of the face of `b` holding `p`.
 fn face_at(b: &Body, p: Vec3) -> usize {
-    let m = b.tessellate(TOL).unwrap();
+    let m = b.mesh(&crate::MeshTolerance::chord(TOL)).unwrap();
     (0..b.face_count()).min_by(|x, y| to_face(&m, *x, p).total_cmp(&to_face(&m, *y, p))).unwrap()
+}
+
+fn volume(b: &Body) -> f64 {
+    crate::measure(b).unwrap().volume
 }
 
 fn cube() -> Body {
@@ -226,6 +235,8 @@ fn shell_lines_the_walls_with_offsets() {
     let b = cube();
     let top = Vec3::new(20.0, 15.0, 20.0);
     let r = crate::shell(&b, &[top], 2.0).unwrap();
+    // The cavity is 36 x 26 x 18 (the floor 2 thick, the top open).
+    assert!((volume(&r) - (24000.0 - 36.0 * 26.0 * 18.0)).abs() < 1e-3, "{}", volume(&r));
     let h = verified(&r, &b, reach(2.0));
     // Five inner walls, each an offset of the face it lines; the top is left as a rim.
     let top = face_at(&b, top);
@@ -235,7 +246,7 @@ fn shell_lines_the_walls_with_offsets() {
         assert_eq!(h.faces[walls[0]].change, Change::Generated);
     }
     assert!(with(h, &[FaceOrigin::Offset { operand: 0, face: top }]).is_empty());
-    assert_eq!(changes(h), [0, 6, 0, 0, 5]);
+    assert_eq!(changes(h), [0, 6, 0, 0, 5], "{h:?}");
 }
 
 #[test]
@@ -262,15 +273,23 @@ fn shell_of_a_stepped_body_joins_its_walls() {
     assert_eq!(offsets, b.face_count() - 1, "{h:?}");
 }
 
-/// A shell of a painted block: its faces are used as they are (unhealed), keeping the paint's
-/// face order, with the history of that copy. Paint is an authored boundary, so the cavity Cut
-/// keeps the side faces it sews across the rim's level in pieces (Split).
+/// A shell of a painted block: the painted face (face 0) comes through as one face on its own
+/// support, so the paint has one face to follow, and each of the five inner walls is an offset of
+/// the face it lines, as on the plain block (`shell_lines_the_walls_with_offsets`).
 #[test]
 fn shell_of_a_painted_body() {
     let b = painted_cube();
-    let r = crate::shell(&b, &[Vec3::new(20.0, 15.0, 20.0)], 2.0).unwrap();
+    let top = Vec3::new(20.0, 15.0, 20.0);
+    let r = crate::shell(&b, &[top], 2.0).unwrap();
     let h = verified(&r, &b, reach(2.0));
-    assert_eq!(changes(h), [0, 2, 8, 0, 5], "{h:?}");
+    assert_eq!(with(h, &[face(0)]).len(), 1, "the painted face is one face: {h:?}");
+    let top = face_at(&b, top);
+    for f in (0..6).filter(|f| *f != top) {
+        let walls = with(h, &[FaceOrigin::Offset { operand: 0, face: f }]);
+        assert_eq!(walls.len(), 1, "{h:?}");
+        assert_eq!(h.faces[walls[0]].change, Change::Generated);
+    }
+    assert!(with(h, &[FaceOrigin::Offset { operand: 0, face: top }]).is_empty());
 }
 
 #[test]
@@ -279,7 +298,10 @@ fn draft_tilts_faces() {
     let side = Vec3::new(40.0, 15.0, 10.0);
     let r = crate::draft(&b, &[side], &Plane::XY, Vec3::Z, 5f64.to_radians()).unwrap();
     let h = verified(&r, &b, Reach { made: 0.0, moved: 2.0 });
-    assert_eq!(changes(h), [0, 6, 0, 0, 0]);
+    // The side tilts about its bottom edge (on the neutral plane z = 0); the top and the two
+    // faces beside it lose a wedge along their moved edges. The bottom and the opposite side
+    // are untouched.
+    assert_eq!(changes(h), [2, 4, 0, 0, 0]);
     assert_eq!(with(h, &[face(face_at(&b, side))]).len(), 1);
     // Walls of a body that is not convex.
     let l = ell();
@@ -294,10 +316,52 @@ fn offset_moves_a_face() {
     let b = ell();
     let top = Vec3::new(5.0, 5.0, 20.0);
     let r = crate::offset_faces(&b, &[top], 3.0).unwrap();
+    // The L's plan is 40 x 15 + 15 x 15 = 825; 23 high.
+    assert!((volume(&r) - 825.0 * 23.0).abs() < 1e-3, "{}", volume(&r));
     let h = verified(&r, &b, Reach { made: 0.0, moved: 3.0 * 1.1 });
     assert_eq!(h.faces.len(), b.face_count());
-    assert_eq!(with(h, &[face(face_at(&b, top))]).len(), 1);
+    let moved = with(h, &[face(face_at(&b, top))]);
+    assert_eq!(moved.len(), 1);
+    assert_eq!(h.faces[moved[0]].change, Change::Modified);
     assert!(h.edges.iter().all(|e| matches!(e.origins.as_slice(), [EdgeOrigin::Edge { .. }])));
+    // Into the body by its whole height: nothing is left behind the face.
+    let e = crate::offset_faces(&b, &[top], -20.0).unwrap_err();
+    assert!(e.to_string().contains("no room"), "{e}");
+}
+
+/// A narrow annular end must be picked on its exact trims, independently of the body's length
+/// (and hence the chord tolerance of the old picking mesh).
+#[test]
+fn offset_an_annular_end_near_either_circular_rim() {
+    let boss = cylinder(Vec3::ZERO, Vec3::Z, 3.5, 200.0).unwrap();
+    let bore = cylinder(Vec3::new(0.0, 0.0, -1.0), Vec3::Z, 1.75, 202.0).unwrap();
+    let b = boolean(&boss, &bore, BoolOp::Cut).unwrap().unwrap();
+    let centre = Vec3::new(2.625, 0.0, 200.0);
+    let end = b.face_at_point(centre).unwrap().unwrap();
+    let expected = crate::offset_faces(&b, &[centre], 4.0).unwrap();
+    // The bore and outer wall keep their radii; only the length grows, from 200 to 204 mm.
+    let want = annular_samples::annular_volume(204.0);
+    assert!((volume(&expected) - want).abs() < want * 1e-7);
+    for p in annular_samples::rim_points(200.0).into_iter().map(Vec3::from) {
+        let holders: Vec<usize> = (0..b.face_count()).filter(|&f| b.point_lies_on_face(f, p, b.record().tolerance).unwrap().is_some()).collect();
+        assert_eq!(holders, [end], "only the annular face holds {p:?}");
+        assert_eq!(b.face_at_point(p).unwrap(), Some(end), "{p:?}");
+        let moved = crate::offset_faces(&b, &[p], 4.0).unwrap();
+        assert_eq!(moved.record(), expected.record(), "{p:?}");
+    }
+    let tolerance = b.record().tolerance;
+    let within = centre + Vec3::Z * (tolerance * 0.5);
+    assert_eq!(b.face_at_point(within).unwrap(), Some(end));
+    assert_eq!(crate::offset_faces(&b, &[within], 4.0).unwrap().record(), expected.record());
+    // Just off the end (beyond modelling tolerance, within the pick's reach) still picks it.
+    let off = centre + Vec3::Z * (tolerance * 4.0);
+    assert_eq!(b.face_at_point(off).unwrap(), None);
+    assert_eq!(crate::offset_faces(&b, &[off], 4.0).unwrap().record(), expected.record());
+    // Far from every face: refused.
+    for p in [Vec3::new(0.0, 0.0, 200.0), Vec3::new(0.5, 0.0, 200.0), centre + Vec3::Z * 5.0, Vec3::new(9.0, 0.0, 200.0)] {
+        let e = crate::offset_faces(&b, &[p], 4.0).unwrap_err();
+        assert!(e.to_string().contains("no face at"), "{p:?}: {e}");
+    }
 }
 
 #[test]
@@ -366,10 +430,22 @@ fn surfaces_keep_their_faces() {
     let h = checked(&lid, &[&open], reach(0.0), &|_| true);
     assert_eq!(h.faces[0].change, Change::Generated);
     assert!(h.edges.iter().all(|e| matches!(e.origins.as_slice(), [EdgeOrigin::Edge { operand: 0, .. }])));
-    // Stitched: each face the one it was sewn from, the seam the edges sewn together.
+    // Stitched: each face the one it was sewn from (its geometry checked against it), the five
+    // walls each one of the open box's and the lid the patch, and the seam the edges sewn
+    // together.
     let closed = crate::stitch(&[&open, &lid], 0.0).unwrap();
     let h = checked(&closed, &[&open, &lid], reach(0.0), &|_| false);
-    assert!(h.faces.iter().all(|f| f.change == Change::Kept && f.origins.len() == 1));
+    let mut sewn: Vec<FaceOrigin> = h
+        .faces
+        .iter()
+        .map(|f| match f.origins[..] {
+            [o] => o,
+            _ => panic!("a stitched face from one face: {f:?}"),
+        })
+        .collect();
+    sewn.sort();
+    let want = [(0, 0), (0, 1), (0, 2), (0, 3), (0, 4), (1, 0)].map(|(operand, face)| FaceOrigin::Face { operand, face });
+    assert_eq!(sewn, want, "{h:?}");
     assert_eq!(h.edges.iter().filter(|e| e.origins.len() == 2).count(), 4);
     let patch = crate::patch_region(&Plane::XY, &Region2 { outer: square(0.0, 0.0, 10.0, 10.0), holes: vec![] }).unwrap();
     assert_eq!(patch.history().unwrap().operands, 0);
@@ -379,10 +455,24 @@ fn surfaces_keep_their_faces() {
 fn thicken_offsets_the_surface() {
     let s = crate::patch_region(&Plane::XY, &Region2 { outer: square(0.0, 0.0, 10.0, 10.0), holes: vec![] }).unwrap();
     let t = crate::thicken(&s, 2.0, false).unwrap();
+    assert!((volume(&t) - 200.0).abs() < 1e-6, "{}", volume(&t));
+    // Along the sheet's normal (+Z).
+    let m = t.mesh(&crate::MeshTolerance::chord(TOL)).unwrap();
+    let (lo, hi) = m.positions.iter().fold((f64::MAX, f64::MIN), |(lo, hi), p| (lo.min(p.z), hi.max(p.z)));
+    assert!(lo.abs() < 1e-9 && (hi - 2.0).abs() < 1e-9, "z {lo}..{hi}");
     let h = verified(&t, &s, reach(2.0));
-    assert_eq!(with(h, &[face(0)]).len(), 1);
-    assert_eq!(with(h, &[FaceOrigin::Offset { operand: 0, face: 0 }]).len(), 1);
-    assert_eq!(blends(h).len(), 4);
+    assert_eq!(with(h, &[face(0)]).len(), 1, "{h:?}");
+    assert_eq!(with(h, &[FaceOrigin::Offset { operand: 0, face: 0 }]).len(), 1, "{h:?}");
+    assert_eq!(blends(h).len(), 4, "{h:?}");
+    let both = crate::thicken(&s, 2.0, true).unwrap();
+    let m = both.mesh(&crate::MeshTolerance::chord(TOL)).unwrap();
+    let (lo, hi) = m.positions.iter().fold((f64::MAX, f64::MIN), |(lo, hi), p| (lo.min(p.z), hi.max(p.z)));
+    assert!((lo + 1.0).abs() < 1e-9 && (hi - 1.0).abs() < 1e-9, "z {lo}..{hi}");
+    let h = verified(&both, &s, reach(1.0));
+    assert_eq!(with(h, &[FaceOrigin::Offset { operand: 0, face: 0 }]).len(), 2, "{h:?}");
+    assert_eq!(blends(h).len(), 4, "{h:?}");
+    let against = crate::thicken(&s, -2.0, false).unwrap();
+    assert!((volume(&against) - 200.0).abs() < 1e-6);
 }
 
 #[test]
@@ -393,7 +483,7 @@ fn mirrored_copy_keeps_every_face_and_edge() {
     let h = r.history().unwrap();
     h.check(&r, &[&b]).unwrap();
     // Each edge is the mirror image of the one it says it is.
-    let (rm, bm) = (r.tessellate(TOL).unwrap(), b.tessellate(TOL).unwrap());
+    let (rm, bm) = (r.mesh(&crate::MeshTolerance::chord(TOL)).unwrap(), b.mesh(&crate::MeshTolerance::chord(TOL)).unwrap());
     for (j, e) in h.edges.iter().enumerate() {
         let [EdgeOrigin::Edge { edge, .. }] = e.origins[..] else { panic!("edge {j}: {e:?}") };
         for p in &rm.edges[j] {
@@ -405,7 +495,11 @@ fn mirrored_copy_keeps_every_face_and_edge() {
 /// The block with a face painted: an authored boundary, so the cuts leave the faces they split
 /// across their slabs in pieces (none of them joined on their common supports).
 fn painted_cube() -> Body {
-    cube().with_paint(Some(crate::Paint { opacity: 1., faces: vec![crate::FacePaint { face: 0, color: [1., 0., 0.], opacity: 1. }] }))
+    cube().with_paint(Some(crate::Paint {
+        opacity: 1.,
+        faces: vec![crate::FacePaint { face: 0, color: [1., 0., 0.], opacity: 1., name: None }],
+        name: None,
+    }))
 }
 
 /// The block `b` with box cuts of each common shape: a notch through the back, a pocket, a
@@ -428,29 +522,16 @@ fn box_cuts_of(b: &Body) -> Vec<(&'static str, Body, Body)> {
     .collect()
 }
 
-/// Meetings with a side of several origins (a face the modifier's heal merged).
-fn merged_meetings(h: &History) -> usize {
-    h.edges.iter().flat_map(|e| &e.origins).filter(|o| matches!(o, EdgeOrigin::Meet { a, b } if a.single().is_none() || b.single().is_none())).count()
-}
-
-/// A fillet right after a box cut. The cut joins the walls it sews in pieces across its slabs
-/// on their common supports, so the fillet finds whole faces. Where the block is painted the cut
-/// keeps those pieces (it has more faces), the fillet's heal merges them, and the edges where
-/// the round runs into such a face meet all of it. Composed with the cut, over the block and
-/// the tool.
+/// A fillet right after a box cut, on the plain and the painted block: the round stands in place
+/// of the picked edge, and composed with the cut its history holds over the block and the tool.
 #[test]
 fn fillet_after_box_cuts() {
     let at = Vec3::new(5.0, 0.0, 20.0);
-    let plain = box_cuts_of(&cube());
     for (b, painted) in [(cube(), false), (painted_cube(), true)] {
-        let cuts = if painted { box_cuts_of(&b) } else { plain.clone() };
-        for ((name, cut, tool), (_, whole, _)) in cuts.into_iter().zip(&plain) {
+        for (name, cut, tool) in box_cuts_of(&b) {
             let r = crate::fillet(&cut, &[at], 2.0).unwrap();
             let h = verified(&r, &cut, reach(2.0 * 1.5));
-            assert_eq!(blends(h), [vec![edge(edge_at(&cut, at))]], "{name}");
-            let pieces = cut.face_count() > whole.face_count();
-            assert_eq!(pieces, painted && name != "notch" && name != "hole", "{name} (painted: {painted})");
-            assert_eq!(merged_meetings(h) > 0, pieces, "{name} (painted: {painted}): {h:?}");
+            assert_eq!(blends(h), [vec![edge(edge_at(&cut, at))]], "{name} (painted: {painted})");
             let mut through = h.clone();
             through.substitute(0, cut.history().unwrap()).unwrap();
             through.check(&r, &[&b, &tool]).unwrap();
@@ -473,12 +554,162 @@ fn chamfer_after_box_cuts() {
         for (name, cut, tool) in box_cuts_of(&b) {
             let r = crate::chamfer(&cut, &[at], 2.0).unwrap();
             let h = verified(&r, &cut, reach(2.0 * 1.5));
-            // On the painted block the chamfer face keeps the boundaries the cut left.
-            let faces = with(h, &[edge(edge_at(&cut, at))]).len();
-            assert!(if painted { faces >= 1 } else { faces == 1 }, "{name} (painted: {painted}): {h:?}");
+            // The picked edge is one edge of the cut body on either block (its round is one face,
+            // `fillet_after_box_cuts`), so its chamfer is one face too.
+            assert_eq!(with(h, &[edge(edge_at(&cut, at))]).len(), 1, "{name} (painted: {painted}): {h:?}");
             let mut through = h.clone();
             through.substitute(0, cut.history().unwrap()).unwrap();
             through.check(&r, &[&b, &tool]).unwrap();
         }
+    }
+}
+
+/// Shell, offset faces and draft straight through `crate::offset_backend`: refusals, and their
+/// histories checked against the geometry and their numbers against the analytic ones.
+mod smlib {
+    use super::*;
+    use crate::offset_backend;
+
+    /// tangency-labs/solidcore#380: a closed shell whose wall leaves no room inside the body is
+    /// refused before SMLib's offset sees it, by the body's own inradius (the L's legs are 15
+    /// wide, the largest ball fits at the inner corner: 15 * sqrt(2) / (1 + sqrt(2)) = 8.79),
+    /// never by its box (whose half extent, 10, the old guard used).
+    #[test]
+    fn a_wall_with_no_room_inside_is_refused() {
+        let b = ell();
+        for t in [8.8, 9.5, 12.0] {
+            let e = offset_backend::shell(&b, &[], t).unwrap_err();
+            assert!(e.to_string().contains("no room"), "{t}: {e}");
+        }
+        let e = offset_backend::shell(&b, &[Vec3::new(5.0, 5.0, 20.0)], 8.8).unwrap_err();
+        assert!(e.to_string().contains("no room"), "{e}");
+    }
+
+    /// A hole's wall is stored as two halves; a pick on the line between them opens the whole
+    /// wall (kernel-cases shell/4010). The cavity is the plate inset by 2.5 less the hole's
+    /// cylinder, open to the hole.
+    #[test]
+    fn shell_open_at_a_hole_wall_opens_the_whole_wall() {
+        let hole = Loop2::circle(Vec2::new(20.0, 15.0), 5.0);
+        let plate = extrude(&Plane::XY, &[Region2 { outer: square(0.0, 0.0, 40.0, 30.0), holes: vec![hole] }], 0.0, 12.5).unwrap().pop().unwrap();
+        let r = offset_backend::shell(&plate, &[Vec3::new(25.0, 15.0, 6.25)], 2.5).unwrap();
+        let pi = std::f64::consts::PI;
+        let want = (15000.0 - pi * 25.0 * 12.5) - (35.0 * 25.0 * 7.5 - pi * 25.0 * 7.5);
+        // The measure is a mesh volume (within 1e-5 of the true one on this round hole).
+        assert!((volume(&r) - want).abs() < want * 1e-5, "{} vs {want}", volume(&r));
+        verified(&r, &plate, reach(2.5 * 1.5));
+    }
+
+    /// A 40 x 40 x 10 plate with an r2 hole 3 from its side, shelled 1.5 open at the top: the
+    /// hole's offset just reaches the side's, so the walls would meet along a line. Refused,
+    /// saying so and with the wall, never as SMLib's bare status.
+    #[test]
+    fn a_shell_whose_walls_would_meet_is_refused_saying_so() {
+        let hole = Loop2::circle(Vec2::new(5.0, 20.0), 2.0);
+        let plate = extrude(&Plane::XY, &[Region2 { outer: square(0.0, 0.0, 40.0, 40.0), holes: vec![hole] }], 0.0, 10.0).unwrap().pop().unwrap();
+        let e = offset_backend::shell(&plate, &[Vec3::new(35.0, 20.0, 10.0)], 1.5).unwrap_err().to_string();
+        assert!(e.contains("the 1.5 mm walls would meet along a line"), "{e}");
+    }
+
+    /// A wall refused for folding names a thinner wall only after building it (#20781): the
+    /// walls tried run from just under the largest the kernel names, and the first that builds
+    /// is the one the message gives; where none builds, the message says the wall is not the
+    /// obstacle and shows no kernel internals.
+    #[test]
+    fn a_refused_shell_names_only_a_wall_that_builds() {
+        use crate::offset_backend::{thinner_shell_hint, thinner_walls};
+        use solidcraft_smlib::Error as SmError;
+        let walls = thinner_walls(2.0, Some(0.8));
+        assert_eq!(walls.len(), 3);
+        assert!(walls.iter().all(|w| *w < 0.8 && *w > 0.0), "{walls:?}");
+        assert!(thinner_walls(2.0, None).iter().all(|w| *w <= 1.0));
+        let folds = SmError::WallFolds { largest: Some(0.8) };
+        let first = || crate::KernelError::Invalid("fold".into());
+        // The 0.95 wall fails, the 0.75 wall builds: that is the one named.
+        let e = thinner_shell_hint(2.0, &folds, first(), |w| w < 0.8 * 0.8).to_string();
+        assert!(e.contains("a wall of 0.6 mm builds"), "{e}");
+        let e = thinner_shell_hint(2.0, &folds, first(), |_| false).to_string();
+        assert!(e.contains("no thinner wall builds either"), "{e}");
+        assert!(!e.contains("shell_brep") && !e.contains("status") && !e.contains("1001"), "{e}");
+    }
+
+    /// A tube of outer radius 1 shelled open at the top by 2 mm cannot fit; whatever wall the
+    /// refusal offers builds when used (#20781).
+    #[test]
+    fn a_shell_hint_on_a_thin_rod_builds_when_used() {
+        let rod = cylinder(Vec3::ZERO, Vec3::Z, 1.0, 10.0).unwrap();
+        let top = Vec3::new(0.2, 0.2, 10.0);
+        match offset_backend::shell(&rod, &[top], 2.0) {
+            Ok(_) => {}
+            Err(e) => {
+                let e = e.to_string();
+                if let Some(at) = e.rfind("a wall of ").and_then(|i| e[i + 10..].find(" mm builds").map(|j| (i + 10, i + 10 + j))) {
+                    let w: f64 = e[at.0..at.1].parse().unwrap();
+                    assert!(offset_backend::shell(&rod, &[top], w).is_ok(), "{e}");
+                } else {
+                    assert!(!e.contains("shell_brep") && !e.contains("status 1001"), "{e}");
+                }
+            }
+        }
+    }
+
+    /// #20781's situation: the largest wall the kernel names is a face's own radius of
+    /// curvature, a wall that itself collapses. A post of radius 0.8276550758693992 stands on a
+    /// plate whose rim is many small flat faces (a curve cut as flat pieces). Shelled 2 mm
+    /// open at the post's top, the wall is refused, and whatever the refusal offers is strictly under
+    /// that radius and builds when used; where no wall builds it says so plainly.
+    #[test]
+    fn a_shell_wall_named_under_a_radius_limit_builds_when_used() {
+        const R: f64 = 0.8276550758693992;
+        let rim: Vec<Vec2> = (0..96)
+            .map(|i| {
+                let a = std::f64::consts::TAU * f64::from(i) / 96.0;
+                Vec2::new(8.0 * a.cos(), 8.0 * a.sin())
+            })
+            .collect();
+        let plate = extrude(&Plane::XY, &[Region2 { outer: Loop2::polygon(&rim), holes: vec![] }], 0.0, 10.0).unwrap().pop().unwrap();
+        let post = cylinder(Vec3::new(0.0, 0.0, 9.0), Vec3::Z, R, 7.0).unwrap();
+        let body = boolean(&plate, &post, BoolOp::Union).unwrap().unwrap();
+        let top = Vec3::new(0.1, 0.1, 16.0);
+        // The wall that is the radius itself collapses: it is never a wall to name.
+        assert!(offset_backend::shell(&body, &[top], R).is_err(), "a wall of the post's own radius builds");
+        let e = offset_backend::shell(&body, &[top], 2.0).unwrap_err().to_string();
+        let named = e.rfind("a wall of ").and_then(|i| e[i + 10..].find(" mm builds").map(|j| e[i + 10..i + 10 + j].to_string()));
+        match named {
+            Some(w) => {
+                let w: f64 = w.parse().unwrap();
+                assert!(w > 0.0 && w < R, "the wall named is not under the radius: {e}");
+                assert!(offset_backend::shell(&body, &[top], w).is_ok(), "the wall named does not build: {e}");
+            }
+            None => {
+                assert!(e.contains("no thinner wall builds either"), "{e}");
+                assert!(!e.contains("shell_brep") && !e.contains("status") && !e.contains("1001"), "{e}");
+            }
+        }
+    }
+
+    #[test]
+    fn draft_tilts_a_side_and_keeps_its_name() {
+        let b = cube();
+        let side = Vec3::new(40.0, 15.0, 10.0);
+        let deg = std::f64::consts::PI / 180.0;
+        let r = offset_backend::draft(&b, &[side], &Plane::XY, Vec3::Z, 5.0 * deg).unwrap();
+        // The side leans in 20 tan 5 deg at the top: a wedge of 20 x 20 tan 5 deg / 2 x 30 comes off.
+        let wedge = 0.5 * 20.0 * 20.0 * (5.0 * deg).tan() * 30.0;
+        assert!((volume(&r) - (24000.0 - wedge)).abs() < 1e-3, "{}", volume(&r));
+        let h = verified(&r, &b, Reach { made: 0.0, moved: 2.0 });
+        assert_eq!(h.faces.len(), 6);
+        let tilted = with(h, &[face(face_at(&b, side))]);
+        assert_eq!(tilted.len(), 1, "{h:?}");
+        assert_eq!(h.faces[tilted[0]].change, Change::Modified);
+        // A round wall along the pull leans in the same way: the rod drafts to a frustum, radius
+        // 5 at the neutral plane and 5 - 10 tan 5 deg at the top. The top isn't parallel to the pull.
+        let rod = cylinder(Vec3::ZERO, Vec3::Z, 5.0, 10.0).unwrap();
+        let frustum = offset_backend::draft(&rod, &[Vec3::new(5.0, 0.0, 5.0)], &Plane::XY, Vec3::Z, 5.0 * deg).unwrap();
+        let top = 5.0 - 10.0 * (5.0 * deg).tan();
+        let exact = std::f64::consts::PI * 10.0 * (25.0 + 5.0 * top + top * top) / 3.0;
+        assert!((volume(&frustum) - exact).abs() < 1e-3, "{} vs {exact}", volume(&frustum));
+        let e = offset_backend::draft(&b, &[Vec3::new(20.0, 15.0, 20.0)], &Plane::XY, Vec3::Z, 5.0 * deg).unwrap_err();
+        assert!(e.to_string().contains("not supported yet"), "{e}");
     }
 }

@@ -57,6 +57,116 @@ fn body_count(path: &Path) -> Value {
 }
 
 #[test]
+fn script_relative_keeps_script_files_beside_the_script_and_cli_files_in_the_callers_folder() {
+    for (relative_input, reporting) in
+        [(false, vec![]), (true, vec!["--results"]), (false, vec!["--timings"]), (true, vec!["--results", "--timings"])]
+    {
+        let dir = Scratch::new();
+        let scripts = dir.0.join("scripts");
+        std::fs::create_dir(&scripts).unwrap();
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance/cylinder.step");
+        std::fs::copy(&fixture, scripts.join("cap.step")).unwrap();
+        std::fs::copy(&fixture, dir.0.join("base.step")).unwrap();
+        let script = scripts.join("part.json");
+        std::fs::write(
+            &script,
+            json!({"commands": [
+                {"command": "file.insert_step", "params": {"path": "cap.step", "name": "cap"}},
+                {"command": "file.export", "params": {"path": "script-out.stl"}}
+            ]})
+            .to_string(),
+        )
+        .unwrap();
+        let input = if relative_input { Path::new("scripts/part.json") } else { script.as_path() };
+        let output = cli()
+            .current_dir(&dir.0)
+            .args(["run", "--script-relative"])
+            .arg(input)
+            .args(["--in", "base.step", "--out", "cli-out.stl", "--out", "cli-out.step", "--save", "cli-save.sc", "--json-out", "report.json"])
+            .args(&reporting)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{reporting:?}: {}", String::from_utf8_lossy(&output.stderr));
+        assert!(output.stdout.is_empty());
+        assert!(scripts.join("script-out.stl").is_file());
+        assert!(!dir.0.join("script-out.stl").exists());
+        for name in ["cli-out.stl", "cli-out.step", "cli-save.sc", "report.json"] {
+            assert!(dir.0.join(name).is_file(), "{name}");
+            assert!(!scripts.join(name).exists(), "{name}");
+        }
+        assert_eq!(body_count(&dir.0.join("cli-save.sc")), 2);
+        let report: Value = serde_json::from_slice(&std::fs::read(dir.0.join("report.json")).unwrap()).unwrap();
+        if reporting.contains(&"--timings") {
+            assert_eq!(report["timings"].as_array().unwrap().len(), 2);
+        } else if reporting.contains(&"--results") {
+            assert_eq!(report.as_array().unwrap().len(), 2);
+        } else {
+            assert_eq!(report["body_count"], 2);
+        }
+    }
+}
+
+#[test]
+fn script_relative_preserves_the_default_and_accepts_absolute_command_paths() {
+    let dir = Scratch::new();
+    let scripts = dir.0.join("scripts");
+    std::fs::create_dir(&scripts).unwrap();
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance/cylinder.step");
+    let source = scripts.join("cap.step");
+    std::fs::copy(fixture, &source).unwrap();
+    let script = scripts.join("part.json");
+    let write_script = |path: &Path| {
+        std::fs::write(&script, json!({"commands": [{"command": "file.insert_step", "params": {"path": path}}]}).to_string()).unwrap();
+    };
+    write_script(Path::new("cap.step"));
+    let output = cli().current_dir(&dir.0).arg("run").arg(&script).output().unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("cap.step"));
+    assert_eq!(json_output(cli().current_dir(&scripts).args(["run", "part.json"]).output().unwrap())["body_count"], 1);
+    write_script(&source);
+    assert_eq!(json_output(cli().current_dir(&dir.0).arg("run").arg(&script).arg("--script-relative").output().unwrap())["body_count"], 1);
+}
+
+#[test]
+fn script_relative_requires_a_positional_script_before_writing_outputs() {
+    let dir = Scratch::new();
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance/cylinder.step");
+    std::fs::copy(fixture, dir.0.join("base.step")).unwrap();
+    for args in [vec![], vec!["--in", "base.step"], vec!["base.step"], vec!["missing.json"]] {
+        let output = cli()
+            .current_dir(&dir.0)
+            .args(["run", "--script-relative"])
+            .args(&args)
+            .args(["--out", "out.stl", "--save", "out.sc", "--json-out", "report.json"])
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "{args:?}");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("--script-relative needs a positional command script"));
+        for name in ["out.stl", "out.sc", "report.json"] {
+            assert!(!dir.0.join(name).exists());
+        }
+    }
+}
+
+#[cfg(feature = "profile")]
+#[test]
+fn script_relative_restores_the_callers_folder_for_profiling_even_after_an_error() {
+    for fails in [false, true] {
+        let dir = Scratch::new();
+        let scripts = dir.0.join("scripts");
+        std::fs::create_dir(&scripts).unwrap();
+        let script = scripts.join("part.json");
+        let command = if fails { "not.a.command" } else { "solid.box" };
+        std::fs::write(&script, json!({"commands": [{"command": command, "params": {"length": 2, "width": 3, "height": 4}}]}).to_string()).unwrap();
+        let output =
+            cli().current_dir(&dir.0).args(["run", "--script-relative"]).arg(&script).args(["--profile-out", "trace.json"]).output().unwrap();
+        assert_eq!(output.status.success(), !fails, "{}", String::from_utf8_lossy(&output.stderr));
+        assert!(dir.0.join("trace.json").is_file());
+        assert!(!scripts.join("trace.json").exists());
+    }
+}
+
+#[test]
 fn run_rejects_invalid_options_before_script_execution_or_output_writes() {
     let dir = Scratch::new();
     let (script, script_saved) = dir.saving_script();
@@ -67,6 +177,9 @@ fn run_rejects_invalid_options_before_script_execution_or_output_writes() {
         (&["--out", "--quiet"][..], "--out needs a value"),
         (&["--ouut", "part.step"][..], "doesn't take --ouut"),
         (&["--unknown"][..], "doesn't take --unknown"),
+        (&["--quality"][..], "--quality needs a value"),
+        (&["--quality", "best"][..], "--quality must be standard, fine or finest, not `best`"),
+        (&["--quality", "standard", "--quality", "best"][..], "--quality is given more than once"),
     ];
     for existing in [false, true] {
         let saved = dir.0.join(format!("{existing}.solidcraft"));
@@ -145,7 +258,7 @@ fn eval_and_inspect_reject_invalid_options_before_script_execution_or_reporting(
 #[test]
 fn cli_loads_both_design_encodings_by_contents() {
     let dir = Scratch::new();
-    for extension in ["sc", "solidcraft", "solvecraft", "json"] {
+    for extension in ["sc", "solidcraft", "json"] {
         let saved = dir.0.join(format!("box.{extension}"));
         json_output(cli().arg("run").arg(dir.script()).arg("--save").arg(&saved).output().unwrap());
         let bytes = std::fs::read(&saved).unwrap();
@@ -159,7 +272,7 @@ fn cli_loads_both_design_encodings_by_contents() {
 }
 
 /// #1369: a pending concept that did not land in the numbered release must not be silently
-/// dropped on open/resave, in either encoding or before replacing an existing destination.
+/// dropped on open/resave, in either encoding: it opens with a warning, and saving keeps it.
 #[test]
 fn unknown_pending_concepts_preserve_the_open_design_and_output_files() {
     use solidcraft_engine::{Session, doc, io};
@@ -169,42 +282,76 @@ fn unknown_pending_concepts_preserve_the_open_design_and_output_files() {
         let mut experimental = doc::Document::new("Experimental");
         experimental.format = doc::format::format_string(version);
         experimental.format_pending.push("experimental-card".into());
-        for (extension, bytes) in [("json", io::write_design(&experimental)), ("solidcraft", io::write_design_container(&experimental).unwrap())] {
+        for (extension, bytes) in
+            [("json", io::write_design(&experimental).unwrap()), ("solidcraft", io::write_design_container(&experimental).unwrap())]
+        {
             let source = dir.0.join(format!("experimental-{version}.{extension}"));
             std::fs::write(&source, &bytes).unwrap();
             let mut session = Session::default();
-            session.execute("solid.box", &json!({"length": 2, "width": 3, "height": 4})).unwrap();
-            let original = session.doc.clone();
-            let original_path = session.path.clone();
-            let undo = session.undo.len();
-            let dirty = session.is_dirty();
-            let err = session.execute("doc.open", &json!({"path": source})).unwrap_err().to_string();
-            assert!(err.contains("experimental-card") && err.contains("update SolidCraft"), "{err}");
-            assert_eq!(session.doc, original);
-            assert_eq!(session.path, original_path);
-            assert_eq!(session.undo.len(), undo);
-            assert_eq!(session.is_dirty(), dirty);
+            // It opens, and the reply says what it is.
+            let reply = session.execute("doc.open", &json!({"path": source})).unwrap();
+            let notice = reply["newer_file"]["notice"].as_str().unwrap().to_string();
+            assert!(notice.contains("experimental-card") && notice.starts_with("Saved by a newer SolidCraft"), "{notice}");
+            assert_eq!(reply["warnings"][0], notice.as_str());
+            assert_eq!(session.doc.name, "Experimental");
 
             for existing in [false, true] {
                 let destination = dir.0.join(format!("output-{version}-{extension}-{existing}.{extension}"));
                 let backup = io::backup_path(&destination);
                 if existing {
                     std::fs::write(&destination, b"existing design").unwrap();
-                    std::fs::write(&backup, b"existing backup").unwrap();
                 }
                 let output = cli().args(["run", "--in"]).arg(&source).arg("--save").arg(&destination).output().unwrap();
-                assert_eq!(output.status.code(), Some(1));
                 let error = String::from_utf8_lossy(&output.stderr);
-                assert!(error.contains("experimental-card") && error.contains("update SolidCraft"), "{error}");
+                assert_eq!(output.status.code(), Some(0), "{error}");
+                assert!(error.contains("warning: Saved by a newer SolidCraft") && error.contains("experimental-card"), "{error}");
+                // Saved, it still says it has the change, and opens the same way.
+                let saved = io::read_design(&std::fs::read(&destination).unwrap()).unwrap();
+                assert!(saved.format_pending.iter().any(|name| name == "experimental-card"));
+                assert!(saved.newer_file.is_some());
                 if existing {
-                    assert_eq!(std::fs::read(&destination).unwrap(), b"existing design");
-                    assert_eq!(std::fs::read(&backup).unwrap(), b"existing backup");
-                } else {
-                    assert!(!destination.exists() && !backup.exists());
+                    assert_eq!(std::fs::read(&backup).unwrap(), b"existing design");
                 }
                 assert_eq!(std::fs::read(&source).unwrap(), bytes);
             }
         }
+    }
+}
+
+/// `eval` and `run` on a design one format newer, with a feature kind this version doesn't have:
+/// the rest builds, the reply names it, and the saved file still holds it, under the file's number.
+#[test]
+fn the_cli_opens_a_newer_design_and_saving_keeps_what_it_cant_read() {
+    use solidcraft_engine::{Session, doc, io};
+
+    let dir = Scratch::new();
+    let mut session = Session::default();
+    session.execute("solid.box", &json!({"length": 2, "width": 3, "height": 4})).unwrap();
+    let mut file: Value = serde_json::from_slice(&io::write_design(&session.doc).unwrap()).unwrap();
+    let newer = doc::format::format_string(doc::format::FORMAT + 1);
+    file["format"] = json!(newer);
+    let future = json!({"id": 900, "name": "Lattice1", "type": "gyroid_lattice", "cell": 2.5});
+    file["features"].as_array_mut().unwrap().push(future.clone());
+    let source = dir.0.join("newer.json");
+    std::fs::write(&source, file.to_string()).unwrap();
+
+    let output = cli().args(["eval"]).arg(&source).output().unwrap();
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(0), "{error}");
+    assert!(error.contains("warning: Saved by a newer SolidCraft") && error.contains("Lattice1"), "{error}");
+    let reply: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(reply["body_count"], 1);
+    assert!(reply["newer_file"]["not_understood"][0].as_str().unwrap().contains("gyroid_lattice"), "{reply}");
+    assert!(reply["warnings"][0].as_str().unwrap().starts_with("Saved by a newer SolidCraft"), "{reply}");
+
+    for extension in ["json", "sc"] {
+        let destination = dir.0.join(format!("saved.{extension}"));
+        let output = cli().args(["run", "--in"]).arg(&source).arg("--save").arg(&destination).output().unwrap();
+        assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+        let saved = io::read_design(&std::fs::read(&destination).unwrap()).unwrap();
+        assert_eq!(saved.format, newer, "never a lower number");
+        let again: Value = serde_json::from_slice(&io::write_design(&saved).unwrap()).unwrap();
+        assert_eq!(again["features"].as_array().unwrap().last().unwrap(), &future);
     }
 }
 
@@ -221,7 +368,7 @@ fn known_pending_concepts_and_released_files_round_trip_with_inert_metadata() {
     experimental.format_pending.push("reserved-body-names".into());
     for (index, mut document) in [current, released, experimental].into_iter().enumerate() {
         document.metadata.0.insert("com.example.tool".into(), json!({"format_pending": ["experimental-card"], "physical_card": {"density": 700}}));
-        for (extension, bytes) in [("json", io::write_design(&document)), ("solidcraft", io::write_design_container(&document).unwrap())] {
+        for (extension, bytes) in [("json", io::write_design(&document).unwrap()), ("solidcraft", io::write_design_container(&document).unwrap())] {
             let source = dir.0.join(format!("supported-{index}.{extension}"));
             let destination = dir.0.join(format!("resaved-{index}.{extension}"));
             std::fs::write(&source, &bytes).unwrap();
@@ -229,7 +376,9 @@ fn known_pending_concepts_and_released_files_round_trip_with_inert_metadata() {
             assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
             let reopened = io::read_design(&std::fs::read(&destination).unwrap()).unwrap();
             assert_eq!(reopened.metadata, document.metadata);
-            assert_eq!(reopened.name, document.name);
+            // #4907: `run --save` maps to Save As, and a borrowed design name
+            // follows the destination file's stem instead of keeping the old name.
+            assert_eq!(reopened.name, format!("resaved-{index}"));
             assert_eq!(reopened.features, document.features);
             assert_eq!(std::fs::read(&source).unwrap(), bytes);
         }
@@ -243,15 +392,61 @@ fn results_still_save_and_export_the_script_once() {
     let saved = dir.0.join("box.json");
     let stl = dir.0.join("box.stl");
     let obj = dir.0.join("box.obj");
+    let glb = dir.0.join("box.glb");
     let result = json_output(
-        cli().arg("run").arg(dir.script()).arg("--results").arg("--save").arg(&saved).arg("--out").arg(&stl).arg("--out").arg(&obj).output().unwrap(),
+        cli()
+            .arg("run")
+            .arg(dir.script())
+            .arg("--results")
+            .arg("--save")
+            .arg(&saved)
+            .arg("--out")
+            .arg(&stl)
+            .arg("--out")
+            .arg(&obj)
+            .arg("--out")
+            .arg(&glb)
+            .output()
+            .unwrap(),
     );
     assert_eq!(result.as_array().unwrap().len(), 1);
     assert_eq!(body_count(&saved), 1);
-    for exported in [&stl, &obj] {
+    for exported in [&stl, &obj, &glb] {
         assert!(std::fs::metadata(exported).unwrap().len() > 0);
         assert_eq!(body_count(exported), 1);
     }
+}
+
+/// The triangles of a binary STL: the count after its 80-byte header.
+fn stl_triangles(path: &Path) -> u32 {
+    let bytes = std::fs::read(path).unwrap();
+    u32::from_le_bytes(bytes[80..84].try_into().unwrap())
+}
+
+/// #12270: `run --out part.stl --quality fine` writes the mesh at that quality, as
+/// `file.export`'s `quality` does, without a script to say so.
+#[test]
+fn run_exports_meshes_at_the_quality_asked_for() {
+    let dir = Scratch::new();
+    let script = dir.0.join("cylinder.json");
+    std::fs::write(&script, json!({"commands": [{"command": "solid.cylinder", "params": {"diameter": 40, "height": 10}}]}).to_string()).unwrap();
+    let export = |name: &str, quality: Option<&str>| {
+        let stl = dir.0.join(name);
+        let mut command = cli();
+        command.arg("run").arg(&script).arg("--quiet").arg("--out").arg(&stl);
+        if let Some(q) = quality {
+            command.args(["--quality", q]);
+        }
+        let output = command.output().unwrap();
+        assert!(output.status.success(), "{quality:?}: {}", String::from_utf8_lossy(&output.stderr));
+        stl_triangles(&stl)
+    };
+    let default = export("default.stl", None);
+    let standard = export("standard.stl", Some("standard"));
+    let fine = export("fine.stl", Some("fine"));
+    let finest = export("finest.stl", Some("finest"));
+    assert_eq!(default, standard);
+    assert!(standard < fine && fine < finest, "standard {standard}, fine {fine}, finest {finest}");
 }
 
 #[test]
@@ -343,6 +538,26 @@ fn eval_propagates_script_errors_before_writing_a_report() {
     }
 }
 
+/// #20926: `eval` takes `--quiet` as `run` does: nothing on stdout, a `--json-out` report still
+/// written, and the exit status unchanged.
+#[test]
+fn eval_takes_quiet_like_run() {
+    let dir = Scratch::new();
+    let script = dir.script();
+    let report = dir.0.join("report.json");
+    for command in ["eval", "inspect"] {
+        let output = cli().arg(command).arg(&script).arg("--quiet").output().unwrap();
+        assert!(output.status.success(), "{command}: {}", String::from_utf8_lossy(&output.stderr));
+        assert!(output.stdout.is_empty(), "{command}: {}", String::from_utf8_lossy(&output.stdout));
+        let _ = std::fs::remove_file(&report);
+        let output = cli().arg(command).arg("--quiet").arg(&script).arg("--json-out").arg(&report).output().unwrap();
+        assert!(output.status.success(), "{command}: {}", String::from_utf8_lossy(&output.stderr));
+        assert!(output.stdout.is_empty());
+        let written: Value = serde_json::from_slice(&std::fs::read(&report).unwrap()).unwrap();
+        assert!(written["body_count"].is_number(), "{written}");
+    }
+}
+
 #[test]
 fn eval_rejects_unknown_options_and_missing_input_values_before_writing_a_report() {
     let dir = Scratch::new();
@@ -394,8 +609,8 @@ fn results_without_script_still_fail() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("--results needs a script"));
 }
 
-/// Compatibility shim (docs/compatibility.md): a design saved before the rename, with the
-/// legacy extension and format tag, still opens; re-saving writes the current tag.
+/// A design saved before the rename, with the old extension and format tag, still opens by its
+/// contents; re-saving writes the current tag.
 #[test]
 fn legacy_extension_and_format_tag_still_open() {
     let dir = Scratch::new();
@@ -417,6 +632,10 @@ fn legacy_extension_and_format_tag_still_open() {
     json_output(cli().args(["run", "--in"]).arg(&resaved).arg(dir.script()).arg("--save").arg(&current).output().unwrap());
     assert_eq!(body_count(&current), 3);
     assert!(solidcraft_engine::io::is_design_container(&std::fs::read(&current).unwrap()), "a .sc file is a design container");
+    // The pre-rename extension is no longer ours, but a container saved under it opens by contents.
+    let legacy_container = dir.0.join("container.solvecraft");
+    std::fs::copy(&current, &legacy_container).unwrap();
+    assert_eq!(body_count(&legacy_container), 3);
 }
 
 /// `snapshot` starts from `--in` as `run` does (its script runs on that design), and refuses an
@@ -438,7 +657,7 @@ fn snapshot_runs_its_script_on_the_in_design() {
         std::fs::read(&png).unwrap()
     };
     // Pictures are drawn on the GPU: without an adapter only the option checks below run.
-    match solidcraft_gpu::capture::shared() {
+    match solidcraft_viewport_gpu::capture::shared(solidcraft_gpu::env::policy().unwrap_or_else(|e| panic!("{e}"))) {
         Ok(_) => {
             let alone = shot("alone.png", &[shifted.as_os_str()]);
             let on_base = shot("on_base.png", &[shifted.as_os_str(), "--in".as_ref(), base.as_os_str()]);
@@ -446,7 +665,7 @@ fn snapshot_runs_its_script_on_the_in_design() {
             assert_ne!(alone, on_base, "the script ran on the --in design");
             assert_ne!(base_only, on_base);
         }
-        Err(e @ solidcraft_gpu::GpuError::NoAdapter(_)) if std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none() => {
+        Err(e @ solidcraft_viewport_gpu::GpuError::NoAdapter(_)) if std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none() => {
             eprintln!("pictures left out: {e}")
         }
         Err(e) => panic!("{e}"),
@@ -458,12 +677,27 @@ fn snapshot_runs_its_script_on_the_in_design() {
     }
 }
 
-/// An unknown command's error suggests the id that was meant.
+/// An unknown command's error suggests the id that was meant first; other close ids (such as
+/// `drawing.open`) may follow it.
 #[test]
 fn unknown_command_suggests_the_closest_id() {
+    let misspelled_window = cli().args(["exec", "tab.window.clsoe"]).output().unwrap();
+    assert_eq!(misspelled_window.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&misspelled_window.stderr).contains("did you mean `tab.window.close`"));
     let output = cli().args(["exec", "file.open"]).output().unwrap();
     assert_eq!(output.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("did you mean `doc.open`?"), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("did you mean `doc.open`, `panel.open` or `drawing.open`?"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    // An MCP tool's name suggests the command it stands for (#20925).
+    for (tool, command) in [("set_parameter", "parameters.change"), ("measure", "inspect.measure"), ("inspect-design", "document.inspect")] {
+        let output = cli().args(["exec", tool]).output().unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(&format!("(did you mean `{command}`")), "{tool}: {stderr}");
+    }
 }
 
 /// #1833: `--timings` reports each command's time instead of the measurement, `--profile` adds
@@ -494,6 +728,78 @@ fn timings_and_profile_report_each_command() {
     let output = cli().arg("run").arg("--in").arg(&saved).arg("--timings").output().unwrap();
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("--timings needs a script"));
+}
+
+/// #6921: `--param-check` checks a script's steps against their contracts on every path `run`
+/// takes (a script alone, on an `--in` design or script, with `--results`, `--timings` or
+/// `--profile`), and a warning reaches stderr even when a later step fails.
+#[test]
+fn param_check_reaches_every_script_run_takes() {
+    let dir = Scratch::new();
+    let typo = dir.0.join("typo.json");
+    let step = json!({"command": "solid.box", "params": {"length": 2, "width": 3, "height": 4, "operaton": "new"}});
+    std::fs::write(&typo, json!({"commands": [step.clone()]}).to_string()).unwrap();
+    let base = dir.0.join("base.solidcraft");
+    json_output(cli().arg("run").arg(dir.script()).arg("--save").arg(&base).output().unwrap());
+    let saved = dir.0.join("saved.solidcraft");
+    let start = dir.script();
+    let (typo, base, saved_arg, start) = (typo.to_str().unwrap(), base.to_str().unwrap(), saved.to_str().unwrap(), start.to_str().unwrap());
+    let paths = [&[][..], &["--in", base], &["--in", start], &["--results"], &["--timings"], &["--timings", "--profile"]];
+    let run = |level: Option<&str>, extra: &[&str]| {
+        std::fs::remove_file(&saved).ok();
+        let check = level.map(|l| ["--param-check", l]).into_iter().flatten();
+        cli().args(["run", typo, "--save", saved_arg]).args(check).args(extra).output().unwrap()
+    };
+
+    // Off, the default: the step runs as it always has, without a word.
+    let off = run(None, &[]);
+    assert!(off.status.success() && !String::from_utf8_lossy(&off.stderr).contains("operaton"), "{off:?}");
+    assert_eq!(body_count(&saved), 1);
+
+    // Warn: each path runs the step, saves, and reports it on stderr; `--results` keeps it too.
+    for extra in paths {
+        let output = run(Some("warn"), extra);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{extra:?}: {stderr}");
+        assert!(stderr.contains("step 1: unknown key `operaton`; did you mean `operation`?"), "{extra:?}: {stderr}");
+        assert!(saved.exists(), "{extra:?}");
+        if extra == ["--results"] {
+            let results: Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert!(results[0]["param_warnings"][0].as_str().is_some_and(|w| w.contains("operaton")), "{results}");
+        }
+    }
+
+    // Strict: on each path the run stops at the step, and nothing is written.
+    for extra in paths {
+        let output = run(Some("strict"), extra);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{extra:?}: {stderr}");
+        assert!(stderr.contains("unknown key `operaton`"), "{extra:?}: {stderr}");
+        assert!(!saved.exists(), "{extra:?}");
+    }
+
+    // Warn, with a later step that fails: the run fails, and the first step's warning is still
+    // reported, timed or not.
+    let failing = dir.0.join("failing.json");
+    let fail = json!({"command": "solid.extrude", "params": {"sketch": "Nope"}});
+    std::fs::write(&failing, json!({"commands": [step, fail]}).to_string()).unwrap();
+    for extra in [&[][..], &["--timings"]] {
+        let output = cli().arg("run").arg(&failing).args(["--param-check", "warn"]).args(extra).output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{extra:?}: {stderr}");
+        assert!(stderr.contains("step 1: unknown key `operaton`") && stderr.contains("no sketch `Nope`"), "{extra:?}: {stderr}");
+    }
+
+    // A level it doesn't know and a missing value fail.
+    for (bad, says) in [
+        (&["--param-check", "loud"][..], "--param-check wants off, warn or strict, not `loud`"),
+        (&["--param-check"], "run: --param-check wants off, warn or strict"),
+    ] {
+        let output = cli().args(["run", typo]).args(bad).output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{bad:?}: {stderr}");
+        assert!(stderr.contains(says), "{bad:?}: {stderr}");
+    }
 }
 
 fn render_setup_script(dir: &Scratch, job: Value) -> PathBuf {
@@ -528,6 +834,7 @@ fn render_uses_typed_cpu_setups_from_scripts_and_saved_designs() {
                 .unwrap(),
         );
         assert_eq!(result["preflight"]["resolved"]["executor"], "cpu-raytrace");
+        assert_eq!(result["preflight"]["admission"]["host_memory"]["policy"], "available_ram");
         assert_eq!(result["export"]["frame"]["executor"], "cpu-raytrace");
         assert_eq!(result["preflight"]["request"]["integrator"], "raytrace");
         assert_eq!(result["preflight"]["request"]["raytrace"].get("progressive"), options.get("progressive"));
@@ -544,11 +851,12 @@ fn render_uses_typed_cpu_setups_from_scripts_and_saved_designs() {
                 .arg(&saved)
                 .args(["--setup", "Portable setup", "--out"])
                 .arg(&overridden)
-                .args(["--width", "12", "--height", "8", "--exposure", "1.25"])
+                .args(["--width", "12", "--height", "8", "--exposure", "1.25", "--legacy-memory-admission"])
                 .env("SOLIDCRAFT_GPU", "must-not-be-read-for-cpu")
                 .output()
                 .unwrap(),
         );
+        assert_eq!(result["preflight"]["admission"]["host_memory"]["policy"], "software_pool_only");
         assert_eq!(result["preflight"]["request"]["width"], 12);
         assert_eq!(result["preflight"]["request"]["height"], 8);
         assert_eq!(result["preflight"]["request"]["raytrace"]["exposure_ev"], 1.25);
@@ -628,7 +936,13 @@ fn typed_gpu_render_selects_its_host_without_a_progressive_runtime_flag() {
         let script = render_setup_script(&dir, job.clone());
         let out = dir.0.join("gpu.png");
         let mut command = cli();
-        command.arg("render").arg(&script).args(["--setup", "Portable setup", "--out"]).arg(&out).env("SOLIDCRAFT_GPU", "not-a-gpu-policy");
+        command
+            .arg("render")
+            .arg(&script)
+            .args(["--setup", "Portable setup", "--out"])
+            .arg(&out)
+            .arg("--legacy-memory-admission")
+            .env("SOLIDCRAFT_GPU", "not-a-gpu-policy");
         if job.is_null() {
             command.arg("--progressive");
         }
@@ -665,5 +979,272 @@ fn render_setup_overrides_obey_shared_validation_before_host_initialization() {
         let error = String::from_utf8_lossy(&output.stderr);
         assert!(error.contains(message), "{error}");
         assert!(!out.exists());
+    }
+}
+
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+#[test]
+fn explicit_plugin_host_settings_allow_reviewed_larger_requests_and_reject_bad_policy() {
+    let scratch = Scratch::new();
+    let package = scratch.0.join("sample");
+    std::fs::create_dir(&package).unwrap();
+    let (package_id, version) = solidcraft_engine::plugin::API.split_once('@').unwrap();
+    let wat = include_str!("../../../crates/engine/src/plugin/fixture.wat")
+        .replace("\r\n", "\n")
+        .replace("__PACKAGE__", package_id)
+        .replace("__VERSION__", version)
+        .replace(
+            "      call $box\n      call $box\n",
+            "      call $box\n      call $box i32.const 2048 memory.grow i32.const -1 i32.eq if unreachable end\n",
+        );
+    assert!(wat.contains("memory.grow"), "the fixture must actually request more than 128 MiB");
+    std::fs::write(package.join("plugin.wasm"), wat::parse_str(wat).unwrap()).unwrap();
+    let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.1"],"runtime":{"module":"plugin.wasm","entries":["make"],"commands":["solid.box"],"limits":{"fuel":200_000_000_000_u64,"memory_mib":256,"deadline_ms":30000}}});
+    std::fs::write(package.join("plugin.json"), manifest.to_string()).unwrap();
+    let args = json!({"path":package}).to_string();
+    let inspected = json_output(cli().args(["exec", "plugin.inspect", &args]).output().unwrap());
+    assert_eq!(inspected["within_host_limits"], false);
+    let run = json!({"path":package,"approval":inspected["approval"],"entry":"make"}).to_string();
+    let refused = cli().args(["exec", "plugin.run", &run]).output().unwrap();
+    assert!(!refused.status.success());
+    // The refusal names the plugin, gives both numbers and the CLI setting that raises the ceiling.
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    assert!(stderr.contains("Sample: it asks for 200000000000 fuel, and plugins may use 100000000000."), "{stderr}");
+    assert!(stderr.contains("max_fuel in the --plugin-limits file"), "{stderr}");
+    let policy = scratch.0.join("limits.json");
+    std::fs::write(&policy, json!({"max_fuel":u64::MAX,"max_memory_mib":512}).to_string()).unwrap();
+    let high = json_output(cli().arg("--plugin-limits").arg(&policy).args(["exec", "plugin.inspect", &args]).output().unwrap());
+    assert_eq!(high["within_host_limits"], true);
+    assert_eq!(high["host_limits"]["max_fuel"].as_u64(), Some(u64::MAX));
+    let output = cli().env_remove("RUST_LOG").arg("--plugin-limits").arg(&policy).args(["exec", "plugin.run", &run]).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("fuel_consumed="), "fuel diagnostics are opt-in");
+    let debug = cli().env_remove("RUST_LOG").arg("--debug").arg("--plugin-limits").arg(&policy).args(["exec", "plugin.run", &run]).output().unwrap();
+    assert!(debug.status.success(), "{}", String::from_utf8_lossy(&debug.stderr));
+    let stderr = String::from_utf8_lossy(&debug.stderr);
+    let fuel = stderr.lines().find(|line| line.contains("craft_plugin_wasm") && line.contains("fuel_consumed="));
+    assert!(fuel.is_some(), "--debug must include shared plugin runtime diagnostics: {stderr}");
+    let fuel = fuel.unwrap();
+    let counter = |name: &str| fuel.split_once(&format!("{name}=")).unwrap().1.split([',', ' ']).next().unwrap().parse::<u64>().unwrap();
+    let (consumed, remaining, limit) = (counter("fuel_consumed"), counter("fuel_remaining"), counter("fuel_limit"));
+    assert!(consumed > 0 && remaining < limit);
+    assert_eq!(limit, 200_000_000_000);
+    assert_eq!(consumed + remaining, limit);
+    let mut bom = vec![0xef, 0xbb, 0xbf];
+    bom.extend(json!({"max_memory_mib":512}).to_string().as_bytes());
+    std::fs::write(&policy, bom).unwrap();
+    let high = json_output(cli().arg("--plugin-limits").arg(&policy).args(["exec", "plugin.inspect", &args]).output().unwrap());
+    assert_eq!(high["host_limits"]["max_fuel"].as_u64(), Some(100_000_000_000));
+    assert_eq!(high["host_limits"]["max_memory_mib"], 512);
+    assert_eq!(high["within_host_limits"], false, "omitted fields keep the original ceiling");
+    for extra in [vec!["exec", "plugin.inspect", "{}", "--connect", "127.0.0.1:1"], vec!["mcp"]] {
+        let output = cli().arg(format!("--plugin-limits={}", policy.display())).args(extra).output().unwrap();
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("controls local sessions"), "refuse before any connection attempt");
+    }
+    for bad in [json!({"max_fuel":0}), json!({"max_memory_mib":4097}), json!({"max_fuel":1.25}), json!({"unknown":true})] {
+        std::fs::write(&policy, bad.to_string()).unwrap();
+        let o = cli().arg("--plugin-limits").arg(&policy).args(["exec", "plugin.run", &run]).output().unwrap();
+        assert!(!o.status.success());
+    }
+}
+
+/// `--keep-plugin-approvals`: a plugin installed and approved in one run keeps its approvals in the
+/// next, until they are revoked. Without it (the default) approvals last for the run; nothing
+/// outside `--plugins-dir` is read or written.
+#[test]
+fn plugin_approvals_are_kept_between_runs_only_when_asked() {
+    let scratch = Scratch::new();
+    let plugins = scratch.0.join("plugins");
+    let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.1"],"runtime":{"module":"plugin.wasm","entries":["make"],"commands":["solid.box"],"limits":{"fuel":10_000_000_000_000_u64,"memory_mib":256,"deadline_ms":30000}}});
+    let zip = scratch.0.join("sample.zip");
+    let bytes = solidcraft_engine::io::safe_zip::write(&[("plugin.json", manifest.to_string().as_bytes()), ("plugin.wasm", b"inert bytes")]).unwrap();
+    std::fs::write(&zip, bytes).unwrap();
+    let run = |keep: bool, command: &str, params: Value| {
+        let mut cli = cli();
+        cli.arg("--plugins-dir").arg(&plugins);
+        if keep {
+            cli.arg("--keep-plugin-approvals");
+        }
+        cli.args(["exec", command, &params.to_string()]).output().unwrap()
+    };
+    let exec = |command: &str, params: Value| run(true, command, params);
+    let inspect = json!({"path": plugins.join("sample")});
+    // The default: approved for that run only, nothing stored.
+    json_output(run(false, "plugin.install", json!({"path": zip, "approve": {"fuel":10_000_000_000_000_u64,"memory_mib": 256}})));
+    assert!(plugins.join("sample").is_dir() && !plugins.join(".grants").exists());
+    assert_eq!(json_output(run(false, "plugin.inspect", inspect.clone()))["within_host_limits"], false);
+    json_output(exec("plugin.install", json!({"path": zip, "replace": true, "approve": {"fuel":10_000_000_000_000_u64,"memory_mib": 256}})));
+    assert!(plugins.join(".grants/sample.json").is_file());
+    assert_eq!(json_output(run(false, "plugin.inspect", inspect.clone()))["within_host_limits"], false, "not read without the flag");
+    assert_eq!(json_output(exec("plugin.inspect", inspect.clone()))["within_host_limits"], true, "the approved fuel and memory, in a later run");
+    let listed = json_output(exec("plugin.grants", json!({})));
+    assert_eq!((listed["grants"][0]["status"].as_str(), listed["grants"][0]["memory_mib"].as_u64()), (Some("current"), Some(256)));
+    assert_eq!(listed["grants"][0]["fuel"], 10_000_000_000_000_u64);
+    assert_eq!(json_output(exec("plugin.revoke", json!({"id": "sample"})))["revoked"], true);
+    assert_eq!(json_output(exec("plugin.inspect", inspect))["within_host_limits"], false, "revoked: the app's ceiling again");
+    assert_eq!(json_output(exec("plugin.grants", json!({})))["grants"], json!([]));
+    for bad in [vec!["--plugins-dir"], vec!["--plugins-dir=", "commands"], vec!["--plugins-dir", "a", "--plugins-dir", "b", "commands"]] {
+        let output = cli().args(bad).output().unwrap();
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("--plugins-dir"));
+    }
+    for flag in ["--plugins-dir", "--keep-plugin-approvals"] {
+        let mut connected = cli();
+        connected.arg(flag);
+        if flag == "--plugins-dir" {
+            connected.arg(&plugins);
+        }
+        let connected = connected.args(["exec", "plugin.grants", "{}", "--connect", "127.0.0.1:1"]).output().unwrap();
+        assert!(String::from_utf8_lossy(&connected.stderr).contains("control local sessions"), "{flag}: refused before any connection attempt");
+    }
+}
+
+/// `run --save` over a design another SolidCraft has open (#16199): the save still happens, and
+/// stderr names who has it open. A stale lock (its app is gone) and no lock say nothing.
+#[test]
+fn run_save_warns_when_another_solidcraft_has_the_design_open() {
+    let scratch = Scratch::new();
+    let script = scratch.script();
+    let design = scratch.0.join("b.sc");
+    let lock = scratch.0.join(".~b.sc.lock");
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    let save = || cli().arg("run").arg(&script).arg("--save").arg(&design).arg("--quiet").output().unwrap();
+
+    let none = save();
+    assert!(none.status.success(), "{}", String::from_utf8_lossy(&none.stderr));
+    assert!(none.stderr.is_empty(), "no lock: {}", String::from_utf8_lossy(&none.stderr));
+
+    let held = |refreshed: u64| {
+        let other = json!({"host": "WORKSHOP-PC", "user": "ada", "app": "0.41.0", "pid": 1, "opened": refreshed, "refreshed": refreshed});
+        std::fs::write(&lock, other.to_string()).unwrap();
+    };
+    held(now);
+    std::fs::remove_file(&design).unwrap();
+    let open = save();
+    assert!(open.status.success(), "{}", String::from_utf8_lossy(&open.stderr));
+    assert!(design.exists(), "saved all the same");
+    let warning = String::from_utf8_lossy(&open.stderr);
+    assert!(warning.contains("warning") && warning.contains("ada") && warning.contains("WORKSHOP-PC") && warning.contains("0.41.0"), "{warning}");
+
+    held(now - 3600);
+    let stale = save();
+    assert!(stale.status.success() && stale.stderr.is_empty(), "a stale lock: {}", String::from_utf8_lossy(&stale.stderr));
+}
+
+/// A saved design whose box is `width` by `depth` by 5 mm (20 by 10 mm to start with).
+fn parametric_design(scratch: &Scratch) -> PathBuf {
+    let script = scratch.0.join("parametric.json");
+    std::fs::write(
+        &script,
+        json!({"commands": [
+            {"command": "parameters.add", "params": {"name": "width", "expression": "20 mm"}},
+            {"command": "parameters.add", "params": {"name": "depth", "expression": "10 mm"}},
+            {"command": "solid.box", "params": {"length": "width", "width": "depth", "height": 5}}
+        ]})
+        .to_string(),
+    )
+    .unwrap();
+    let design = scratch.0.join("parametric.sc");
+    let saved = cli().arg("run").arg(&script).arg("--save").arg(&design).arg("--quiet").output().unwrap();
+    assert!(saved.status.success(), "{}", String::from_utf8_lossy(&saved.stderr));
+    design
+}
+
+fn volume(report: &Value) -> f64 {
+    report["total"]["volume_mm3"].as_f64().unwrap()
+}
+
+#[test]
+fn run_param_overrides_a_parameter_without_changing_the_file() {
+    let scratch = Scratch::new();
+    let design = parametric_design(&scratch);
+    let before = std::fs::read(&design).unwrap();
+    assert!((volume(&json_output(cli().arg("run").arg(&design).output().unwrap())) - 1000.0).abs() < 1e-6);
+    let changed = json_output(cli().arg("run").arg(&design).args(["--param", "width=30mm"]).output().unwrap());
+    assert!((volume(&changed) - 1500.0).abs() < 1e-6, "{changed}");
+    let evaluated = json_output(cli().arg("eval").arg(&design).args(["--param", "width=30mm"]).output().unwrap());
+    assert!((volume(&evaluated) - 1500.0).abs() < 1e-6, "{evaluated}");
+    assert_eq!(std::fs::read(&design).unwrap(), before);
+}
+
+#[test]
+fn run_param_applies_each_override_in_the_order_given() {
+    let scratch = Scratch::new();
+    let design = parametric_design(&scratch);
+    let both = json_output(cli().arg("run").arg(&design).args(["--param", "width=30mm", "--param", "depth=width / 3"]).output().unwrap());
+    assert!((volume(&both) - 1500.0).abs() < 1e-6, "{both}");
+    let again = json_output(
+        cli().arg("run").arg(&design).args(["--param", "width=30mm", "--param", "width=40mm", "--param", "depth=20mm"]).output().unwrap(),
+    );
+    assert!((volume(&again) - 4000.0).abs() < 1e-6, "{again}");
+}
+
+#[test]
+fn run_params_file_sets_parameters_and_a_param_after_it_wins() {
+    let scratch = Scratch::new();
+    let design = parametric_design(&scratch);
+    let file = scratch.0.join("params.json");
+    std::fs::write(&file, json!({"width": "30 mm", "depth": 20}).to_string()).unwrap();
+    let set = json_output(cli().arg("run").arg(&design).arg("--params-file").arg(&file).output().unwrap());
+    assert!((volume(&set) - 3000.0).abs() < 1e-6, "{set}");
+    let over = json_output(cli().arg("run").arg(&design).arg("--params-file").arg(&file).args(["--param", "depth=10mm"]).output().unwrap());
+    assert!((volume(&over) - 1500.0).abs() < 1e-6, "{over}");
+}
+
+#[test]
+fn run_param_overrides_the_design_given_with_in_before_the_script_runs() {
+    let scratch = Scratch::new();
+    let design = parametric_design(&scratch);
+    let script = scratch.0.join("more.json");
+    std::fs::write(
+        &script,
+        json!({"commands": [{"command": "solid.box", "params": {"length": 1, "width": 1, "height": 1, "corner": [100, 0, 0]}}]}).to_string(),
+    )
+    .unwrap();
+    let out = json_output(cli().arg("run").arg(&script).arg("--in").arg(&design).args(["--param", "width=30mm"]).output().unwrap());
+    assert!((volume(&out) - 1501.0).abs() < 1e-6, "{out}");
+}
+
+#[test]
+fn run_param_names_an_unknown_parameter_and_a_script_with_no_design() {
+    let scratch = Scratch::new();
+    let design = parametric_design(&scratch);
+    let unknown = cli().arg("run").arg(&design).args(["--param", "height_typo=3mm"]).output().unwrap();
+    assert!(!unknown.status.success());
+    assert!(String::from_utf8_lossy(&unknown.stderr).contains("height_typo"), "{}", String::from_utf8_lossy(&unknown.stderr));
+    let bad_name = scratch.0.join("never.sc");
+    let none = cli().arg("run").arg(scratch.script()).args(["--param", "width=30mm"]).arg("--save").arg(&bad_name).output().unwrap();
+    assert!(!none.status.success() && !bad_name.exists());
+    assert!(String::from_utf8_lossy(&none.stderr).contains("--param"), "{}", String::from_utf8_lossy(&none.stderr));
+    // A command script given as `--in` would run as it loads, before the override: refused, and
+    // nothing it would save is written.
+    let as_in = cli().arg("run").arg("--in").arg(scratch.script()).args(["--param", "width=30mm"]).arg("--save").arg(&bad_name).output().unwrap();
+    assert!(!as_in.status.success() && !bad_name.exists());
+    assert!(String::from_utf8_lossy(&as_in.stderr).contains("--param"), "{}", String::from_utf8_lossy(&as_in.stderr));
+}
+
+#[test]
+fn run_param_refuses_malformed_arguments_before_anything_is_written() {
+    let scratch = Scratch::new();
+    let design = parametric_design(&scratch);
+    let out = scratch.0.join("never.stl");
+    let missing = scratch.0.join("missing.json");
+    let list = scratch.0.join("list.json");
+    std::fs::write(&list, "[1, 2]").unwrap();
+    let cases: Vec<Vec<std::ffi::OsString>> = vec![
+        vec!["--param".into(), "width".into()],
+        vec!["--param".into(), "=30mm".into()],
+        vec!["--param".into(), "width=".into()],
+        vec!["--param".into(), "width=30 parsecs".into()],
+        vec!["--param".into()],
+        vec!["--params-file".into(), missing.into_os_string()],
+        vec!["--params-file".into(), list.into_os_string()],
+    ];
+    for extra in cases {
+        let output = cli().arg("run").arg(&design).args(&extra).arg("--out").arg(&out).output().unwrap();
+        assert!(!output.status.success(), "{extra:?} should fail");
+        assert!(!String::from_utf8_lossy(&output.stderr).trim().is_empty(), "{extra:?}");
+        assert!(!out.exists(), "{extra:?} wrote a file");
     }
 }

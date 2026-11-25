@@ -3,6 +3,7 @@
 use crate::dialogs::{Dialog, Kind};
 use crate::scenario::Harness;
 use serde_json::json;
+use solidcraft_engine::geom::prelude::*;
 
 const JOIN: usize = 1;
 const CUT: usize = 2;
@@ -16,13 +17,13 @@ fn state(h: &Harness) -> (usize, usize, bool) {
 }
 
 fn bounds_z(h: &Harness) -> (f64, f64) {
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let b = st.bodies.last().expect("a body").mesh().bounds();
     (b.min.z, b.max.z)
 }
 
 fn volume(h: &Harness) -> f64 {
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     st.bodies.iter().map(|b| solidcraft_engine::doc::kernel::measure(&b.body).unwrap().volume).sum()
 }
 
@@ -124,6 +125,44 @@ fn an_explicit_reverse_keeps_the_operation() {
     assert_eq!(state(&h), (1, JOIN, false));
 }
 
+/// Choose Operation › Cut in the open window, as a person does.
+fn choose_cut(h: &mut Harness) {
+    h.step(&json!({"click": {"handle": "dialog:Operation"}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"click": {"handle": "dialog:Operation:Cut"}})).unwrap();
+    h.frames(3);
+}
+
+/// #18243: choosing Cut by hand on a profile that sits on a body points the extrude into the body;
+/// a direction set by hand stays, and Extrude opens with its usual operation (no remembered one).
+#[test]
+fn choosing_cut_points_the_extrude_into_the_body() {
+    let mut h = box_with_top_extrude(false);
+    assert_eq!(state(&h), (0, JOIN, true), "it opens pointing away, with its usual operation");
+    choose_cut(&mut h);
+    assert_eq!(state(&h), (1, CUT, false), "Cut turns the direction into the box");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    let (lo, hi) = bounds_z(&h);
+    assert!((lo - 0.0).abs() < 1e-6 && (hi - 10.0).abs() < 1e-6, "the cut stays inside the box: z {lo}..{hi}");
+
+    // A direction chosen first is kept.
+    let mut h = box_with_top_extrude(false);
+    h.step(&json!({"widget":"Reverse Direction"})).unwrap();
+    h.step(&json!({"widget":"Reverse Direction"})).unwrap();
+    h.frames(2);
+    assert_eq!(state(&h).0, 0);
+    choose_cut(&mut h);
+    assert_eq!(state(&h), (0, CUT, false), "a direction set by hand stays");
+
+    // The next Extrude does not remember Cut.
+    let mut h = box_with_top_extrude(false);
+    choose_cut(&mut h);
+    h.step(&json!({"key":"Escape"})).unwrap();
+    h.step(&json!({"start":"solid.extrude"})).unwrap();
+    h.frames(2);
+    assert_ne!(state(&h).1, CUT, "Extrude keeps its normal default operation");
+}
+
 /// A Cut latched for a drag into the box gives way once the extrude starts from the bottom
 /// face: from there the same distance goes out of the box, so it joins (#467).
 #[test]
@@ -132,18 +171,19 @@ fn a_new_start_object_decides_the_operation_again() {
     drag_to(&mut h, 5.0);
     assert_eq!(state(&h), (0, CUT, true), "into the box: Cut");
     // Start: From Object, the box's bottom face (as the Start choice and a pick there make it).
-    let st = h.app.session.world_state();
+    let st = crate::open_meshing::session_world(&h.app.session);
     let b = st.bodies.first().expect("the box");
     let bottom =
         (0..64).find(|i| b.body.planar_face(*i).is_some_and(|p| p.normal().z < -0.99 && p.origin.z.abs() < 1e-9)).expect("the box's bottom face");
-    let face = solidcraft_engine::Sel::Face { body: b.name.clone(), index: bottom, point: solidcraft_engine::geom::Vec3::new(10.0, 10.0, 0.0) };
+    let face = solidcraft_engine::Sel::Face { body: b.name.clone(), index: bottom, point: solidcore_record::Vec3::new(10.0, 10.0, 0.0) };
     if let Some(d) = &mut h.app.dialog {
         let mut from = crate::selection::SelInput::new("From Object", crate::selection::FACES | crate::selection::VERTICES, false);
         from.items.push(face);
         d.inputs.push(from);
     }
     h.frames(2);
-    assert_eq!(h.app.dialog.as_ref().unwrap().inputs.last().unwrap().items.len(), 1, "the bottom face is the start");
+    let from = h.app.dialog.as_ref().unwrap().inputs.iter().find(|i| i.label == "From Object").unwrap();
+    assert_eq!(from.items.len(), 1, "the bottom face is the start");
     assert_eq!(state(&h), (0, JOIN, true), "from the bottom face, 5 mm down: Join");
     h.step(&json!({"key":"Enter"})).unwrap();
     assert!(h.app.dialog.is_none());
@@ -163,7 +203,7 @@ fn press_pull_drags_a_hole_wall() {
     h.step(&json!({"call":"ui.view","params":{"view":"home"}})).unwrap();
     h.step(&json!({"call":"ui.view","params":{"view":"fit"}})).unwrap();
     h.settle();
-    let p = solidcraft_engine::geom::Vec3::new(25.0, 15.0, 10.0);
+    let p = solidcore_record::Vec3::new(25.0, 15.0, 10.0);
     h.app.session.selection = vec![solidcraft_engine::Sel::Face { body: "Body1".into(), index: wall, point: p }];
     h.step(&json!({"start":"solid.press_pull"})).unwrap();
     h.frames(2);
@@ -242,4 +282,25 @@ fn pulling_a_face_down_into_the_body_cuts() {
     h.step(&json!({"drag":[{"world":[10,10,10]},{"world":[10,10,5]}]})).unwrap();
     h.frames(4);
     assert_eq!(state(&h).1, CUT, "pushed into the box: Cut");
+}
+
+/// The automatic operation probes the bodies' triangles: an open window asks for it once per
+/// change of its inputs or the design, not every frame.
+#[test]
+fn an_open_extrude_asks_for_its_operation_only_when_something_changes() {
+    let mut h = box_with_top_extrude(false);
+    let asked = crate::dialogs::auto_operation_asked();
+    h.frames(20);
+    assert_eq!(crate::dialogs::auto_operation_asked(), asked, "nothing changed: not asked again");
+    drag_to(&mut h, 5.0);
+    assert_eq!(state(&h), (0, CUT, true), "into the box: Cut");
+    let after_drag = crate::dialogs::auto_operation_asked();
+    assert!(after_drag > asked, "a new distance is asked about");
+    h.frames(20);
+    assert_eq!(crate::dialogs::auto_operation_asked(), after_drag, "held still: not asked again");
+    // A change to the design (another body, out of the extrude's way) is asked about again.
+    h.app.run("solid.box", json!({"length":5,"width":5,"height":5,"corner":[50,0,0]})).unwrap();
+    h.frames(2);
+    assert!(crate::dialogs::auto_operation_asked() > after_drag, "a changed design is asked about");
+    assert_eq!(state(&h), (0, CUT, true), "still into the box: Cut");
 }

@@ -1,0 +1,79 @@
+{
+ "cases": [
+  {
+   "name": "skin_from_faces_degree_0",
+   "inputs": {
+    "op": "skin_from_faces",
+    "circles": [
+     [
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      3.0
+     ],
+     [
+      [
+       0.0,
+       0.0,
+       10.0
+      ],
+      5.0
+     ]
+    ],
+    "degree": 0
+   }
+  },
+  {
+   "name": "skin_from_faces_degree_18",
+   "inputs": {
+    "op": "skin_from_faces",
+    "circles": [
+     [
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      3.0
+     ],
+     [
+      [
+       0.0,
+       0.0,
+       10.0
+      ],
+      5.0
+     ]
+    ],
+    "degree": 18
+   }
+  },
+  {
+   "name": "skin_from_faces_degree_1000",
+   "inputs": {
+    "op": "skin_from_faces",
+    "circles": [
+     [
+      [
+       0.0,
+       0.0,
+       0.0
+      ],
+      3.0
+     ],
+     [
+      [
+       0.0,
+       0.0,
+       10.0
+      ],
+      5.0
+     ]
+    ],
+    "degree": 1000
+   }
+  }
+ ]
+}

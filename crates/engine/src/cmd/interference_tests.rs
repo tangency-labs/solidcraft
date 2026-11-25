@@ -70,7 +70,7 @@ fn a_piece_of_a_body_inside_another_is_still_found() {
     run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [0, 0, 0], "body_name": "Block"}));
     run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [5, 5, 5], "operation": "new", "body_name": "Pieces"}));
     run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [30, 5, 5], "operation": "join", "targets": ["Pieces"]}));
-    let st = s.world_state();
+    let st = s.world_state().unwrap();
     let pieces = st.bodies.iter().find(|b| b.name == "Pieces").map(|b| b.body.shell_count());
     assert_eq!(pieces, Some(2), "the two cubes are one body in two pieces");
     let i = run(&mut s, "inspect.interference", json!({}));
@@ -122,7 +122,7 @@ pub(super) fn insert_two_mesh_cubes(s: &mut Session, tag: &str) -> Vec<String> {
         run(s, "file.insert_mesh", json!({"path": stl.to_string_lossy()}));
     }
     let _ = std::fs::remove_dir_all(&dir);
-    s.world_state().bodies.iter().filter(|b| b.body.is_mesh()).map(|b| b.name.clone()).collect()
+    s.world_state().unwrap().bodies.iter().filter(|b| b.body.is_mesh()).map(|b| b.name.clone()).collect()
 }
 
 /// #3249: mesh bodies (STL, 3MF, OBJ imports) are not intersected, but they used to vanish from
@@ -155,4 +155,171 @@ fn mesh_bodies_are_listed_as_unchecked_not_dropped() {
     let i = run(&mut s, "inspect.interference", json!({"bodies": ["A", meshes[0]]}));
     assert_eq!(i["checked"], 1, "{i}");
     assert_eq!(i["unchecked"][0]["a"].as_str(), Some(meshes[0].as_str()), "{i}");
+}
+
+/// A name that is no body is refused, as inspect.clearance refuses it. Dropped, a misspelled or
+/// wrongly cased body was never checked and two overlapping cubes read as no interference (#9740).
+#[test]
+fn a_body_name_that_is_no_body_is_refused() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "A"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [9, 0, 0], "operation": "new_body", "body_name": "B"}));
+    let i = run(&mut s, "inspect.interference", json!({"bodies": ["A", "B"]}));
+    assert_eq!((&i["count"], &i["checked"]), (&json!(1), &json!(2)), "{i}");
+    for (names, says) in
+        [(json!(["A", "Typo"]), "no body `Typo`"), (json!(["A", "b"]), "no body `b`; did you mean `B`?"), (json!(["Typo"]), "no body `Typo`")]
+    {
+        let e = s.execute("inspect.interference", &json!({"bodies": names})).map(|r| r.to_string()).unwrap_or_else(|e| e.to_string());
+        assert!(e.contains(says), "{names}: {e}");
+    }
+    assert!(
+        !s.execute("inspect.interference", &json!({"bodies": ["Typo"]})).unwrap_err().to_string().contains("did you mean"),
+        "nothing is near `Typo`"
+    );
+    // A long name a rename gives (100 CJK characters, 300 bytes) still gets its suggestion.
+    let long = "中".repeat(100);
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [50, 0, 0], "operation": "new_body", "body_name": long}));
+    let typo = format!("{}国", "中".repeat(99));
+    let e = s.execute("inspect.interference", &json!({"bodies": ["A", typo]})).unwrap_err().to_string();
+    assert!(e.contains(&format!("did you mean `{long}`?")), "{e}");
+}
+
+/// `exclude_pairs` leaves a pair out by body or by occurrence, and each pair reported says where
+/// its bodies sit (#5963).
+#[test]
+fn excluded_pairs_are_left_out_and_pairs_name_their_place() {
+    let mut s = Session::default();
+    for (name, x) in [("Pin", 0), ("Hole", 5)] {
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "component.create", json!({"name": name}));
+        run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 10, "base": [x, 0, 0], "body_name": name}));
+    }
+    let i = run(&mut s, "inspect.interference", json!({}));
+    assert_eq!((i["count"].as_u64(), i["pairs_excluded"].as_u64()), (Some(1), Some(0)), "{i}");
+    let hit = &i["interferences"][0];
+    for side in ["a", "b"] {
+        let part = &hit[format!("{side}_part")];
+        let component = part["component"].as_str().unwrap_or_default();
+        assert!(["Pin", "Hole"].contains(&component), "{hit}");
+        assert_eq!(part["path"], json!([format!("{component}:1")]), "{hit}");
+    }
+    for pair in [json!(["Pin", "Hole"]), json!(["Hole:1", "Pin:1"]), json!([hit["a"], hit["b"]])] {
+        let i = run(&mut s, "inspect.interference", json!({"exclude_pairs": [pair]}));
+        assert_eq!((i["count"].as_u64(), i["pairs_excluded"].as_u64()), (Some(0), Some(1)), "{pair}: {i}");
+    }
+    for bad in [json!("Pin"), json!([["Pin"]]), json!([["Pin", "Nope"]]), json!([["root", "Pin"]])] {
+        assert!(s.execute("inspect.interference", &json!({"exclude_pairs": bad})).is_err(), "{bad}");
+    }
+}
+
+/// A component's envelope is left out unless named, never meets a body inside it, and with
+/// `envelopes` is intersected instead of the bodies inside it: a 10 mm housing and a 4 mm insert
+/// sharing 8 mm³ in a component, and a lid that overlaps the envelope but neither part.
+#[test]
+fn an_envelope_stands_in_for_its_components_bodies_when_asked() {
+    let mut s = Session::default();
+    let cube = |s: &mut Session, name: &str, size: f64, corner: [f64; 3]| {
+        run(s, "solid.box", json!({"length": size, "width": size, "height": size, "corner": corner, "operation": "new", "body_name": name}));
+    };
+    run(&mut s, "component.create", json!({"name": "Bought"}));
+    cube(&mut s, "Housing", 10.0, [0.0, 0.0, 0.0]);
+    run(&mut s, "component.create", json!({"name": "Insert part"}));
+    cube(&mut s, "Insert", 4.0, [8.0, 3.0, 3.0]);
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "solid.bounding_solid", json!({"component": "Bought", "body_name": "Envelope"}));
+    // Over the insert's end (x 10..12), above the housing: inside the envelope only.
+    cube(&mut s, "Lid", 1.0, [10.5, 0.0, 0.0]);
+    let names = |i: &Value| -> Vec<[String; 2]> {
+        i["interferences"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|h| {
+                let mut p = [h["a"].as_str().unwrap_or("").to_string(), h["b"].as_str().unwrap_or("").to_string()];
+                p.sort();
+                p
+            })
+            .collect()
+    };
+    let all = run(&mut s, "inspect.interference", json!({}));
+    assert_eq!(names(&all), vec![["Housing".to_string(), "Insert".to_string()]], "{all}");
+    assert!((f(&all["interferences"][0]["volume_mm3"]) - 2.0 * 4.0 * 4.0).abs() < 1e-6, "{all}");
+    assert_eq!(all["checked"], 3, "{all}");
+    let env = run(&mut s, "inspect.interference", json!({"envelopes": true}));
+    assert_eq!(names(&env), vec![["Envelope".to_string(), "Lid".to_string()]], "{env}");
+    assert!((f(&env["interferences"][0]["volume_mm3"]) - 1.0).abs() < 1e-6, "{env}");
+    assert_eq!(env["checked"], 2, "{env}");
+    // A pair naming a body inside the envelope excludes the envelope's pair.
+    let excluded = run(&mut s, "inspect.interference", json!({"envelopes": true, "exclude_pairs": [["Housing", "Lid"]]}));
+    assert_eq!((excluded["count"].as_u64(), excluded["pairs_excluded"].as_u64()), (Some(0), Some(1)), "{excluded}");
+    // Named, the envelope is checked, but not against the housing it encloses.
+    let named = run(&mut s, "inspect.interference", json!({"bodies": ["Envelope", "Housing", "Lid"]}));
+    assert_eq!(names(&named), vec![["Envelope".to_string(), "Lid".to_string()]], "{named}");
+    assert_eq!(named["pairs_excluded"], 1, "{named}");
+}
+
+/// A body added to an enveloped component after its envelope, outside the box, is checked on its
+/// own with `envelopes`: the envelope doesn't stand in for what it doesn't hold.
+#[test]
+fn a_body_outside_its_components_envelope_is_checked_on_its_own() {
+    let mut s = Session::default();
+    let cube = |s: &mut Session, name: &str, size: f64, corner: [f64; 3]| {
+        run(s, "solid.box", json!({"length": size, "width": size, "height": size, "corner": corner, "operation": "new", "body_name": name}));
+    };
+    run(&mut s, "component.create", json!({"name": "Bought"}));
+    cube(&mut s, "Housing", 10.0, [0.0, 0.0, 0.0]);
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "solid.bounding_solid", json!({"component": "Bought", "body_name": "Envelope"}));
+    run(&mut s, "component.activate", json!({"component": "Bought"}));
+    cube(&mut s, "Late", 10.0, [100.0, 0.0, 0.0]);
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    cube(&mut s, "Other", 10.0, [105.0, 0.0, 0.0]);
+    let env = run(&mut s, "inspect.interference", json!({"envelopes": true}));
+    let hits: Vec<_> = env["interferences"].as_array().unwrap().iter().map(|h| (h["a"].as_str().unwrap(), h["b"].as_str().unwrap())).collect();
+    assert!(hits.iter().any(|&(a, b)| [a, b].contains(&"Late") && [a, b].contains(&"Other")), "{env}");
+}
+
+/// A small overlap with a large envelope is a finding, whichever order the pair comes in: the
+/// shared volume is measured against the smaller body, not the envelope's span.
+#[test]
+fn a_small_overlap_with_a_large_envelope_is_found() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Big"}));
+    run(&mut s, "solid.box", json!({"length": 2000, "width": 2000, "height": 2000, "corner": [0, 0, 0], "body_name": "Frame"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "solid.bounding_solid", json!({"component": "Big", "body_name": "Envelope"}));
+    // 2 x 4 x 4 = 32 mm³ inside the envelope, under the 41.6 mm³ a 2 m box's span allows.
+    run(&mut s, "solid.box", json!({"length": 4, "width": 4, "height": 4, "corner": [1998, 0, 0], "operation": "new", "body_name": "Small"}));
+    let env = run(&mut s, "inspect.interference", json!({"envelopes": true}));
+    assert_eq!(env["count"], 1, "{env}");
+    assert!((f(&env["interferences"][0]["volume_mm3"]) - 32.0).abs() < 1e-6, "{env}");
+}
+
+/// Two large envelopes sharing a sliver too small to count at their size are not passed as clear:
+/// the parts inside can be far smaller than the envelopes, so the pair is listed as not checked.
+#[test]
+fn a_sliver_shared_by_two_large_envelopes_is_listed_not_cleared() {
+    let mut s = Session::default();
+    for (name, corner) in [("A", [0.0, 0.0, 0.0]), ("B", [1999.5, 1999.5, 1999.5])] {
+        run(&mut s, "component.create", json!({"name": name}));
+        run(
+            &mut s,
+            "solid.box",
+            json!({"length": 2000, "width": 2000, "height": 2000, "corner": corner, "operation": "new", "body_name": format!("{name} Frame")}),
+        );
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "solid.bounding_solid", json!({"component": name, "body_name": format!("{name} Envelope")}));
+    }
+    // 0.5 mm cubed: 0.125 mm³, under the about 41.6 mm³ a 2 m box's span allows (1e-9 times
+    // the cube of its 3464 mm diagonal).
+    let env = run(&mut s, "inspect.interference", json!({"envelopes": true}));
+    assert_eq!(env["count"], 0, "{env}");
+    let unchecked = env["unchecked"].as_array().unwrap();
+    assert!(
+        unchecked.iter().any(|u| {
+            let pair = [u["a"].as_str().unwrap_or(""), u["b"].as_str().unwrap_or("")];
+            pair.contains(&"A Envelope") && pair.contains(&"B Envelope")
+        }),
+        "{env}"
+    );
 }

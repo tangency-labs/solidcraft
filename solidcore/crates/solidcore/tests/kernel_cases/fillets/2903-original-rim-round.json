@@ -1,0 +1,180 @@
+{
+  "area": "fillets",
+  "case": "2903-original-rim-round",
+  "sources": [
+    "https://github.com/tangency-labs/solidcore/issues/2903"
+  ],
+  "what": "60x40x30 extrusion, top-open inward shell3, four outer vertical R6 rounds, four inner vertical R3 rounds, inner floor tangent-chain R1; blend the complete eight-edge inner top rim from the first reported mirror, explicitly in the reproduced chain order. Record re-exported through solidcraft_smlib::Brep::read(seed0-input.smb,true).to_native(); the SMB captured the exact pre-final operand built by public SolidCraft kernel APIs at application PR #12413 head 2e8847512baf43c91ab4e2c407750d6f896b6053 with solidcore9856ffee5. This re-exported representation itself reproduces the refusal; it is not a synthetic Ops reconstruction. V0=60*40*30-54*34*27-4*A*6^2*30+4*A*3^2*27+L*A-2*pi*M, L=152+6*pi. The floor adds L*A-2*pi*M on the inward side of the already rounded cavity contour. A=1-pi/4 and M=5/6-pi/4 are the unit round section area and first moment. Outward parallel contours have Jacobian1+kappa*u and total turning2*pi. For the top inner round, subtract L*A*r^2+2*pi*M*r^3, at size0.47. Eight new strip faces, sixteen extra edges and eight extra vertices give counts(35, 80, 48); the existing annular top face remains annular.",
+  "bodies": {
+    "b0": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "records": "2903-original-rim-round.bodies.json.gz",
+  "calls": [
+    {
+      "op": "blend_dropping",
+      "inputs": [
+        "b0"
+      ],
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "kind": "round",
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "index": 31,
+              "at": [
+                [
+                  6.0,
+                  37.0,
+                  30.0
+                ],
+                [
+                  3.0,
+                  34.0,
+                  30.0
+                ]
+              ]
+            },
+            {
+              "index": 29,
+              "at": [
+                [
+                  54.0,
+                  37.0,
+                  30.0
+                ],
+                [
+                  6.0,
+                  37.0,
+                  30.0
+                ]
+              ]
+            },
+            {
+              "index": 33,
+              "at": [
+                [
+                  3.0,
+                  34.0,
+                  30.0
+                ],
+                [
+                  3.0,
+                  6.0,
+                  30.0
+                ]
+              ]
+            },
+            {
+              "index": 27,
+              "at": [
+                [
+                  57.0,
+                  34.0,
+                  30.0
+                ],
+                [
+                  54.0,
+                  37.0,
+                  30.0
+                ]
+              ]
+            },
+            {
+              "index": 35,
+              "at": [
+                [
+                  3.0,
+                  6.0,
+                  30.0
+                ],
+                [
+                  6.0,
+                  3.0,
+                  30.0
+                ]
+              ]
+            },
+            {
+              "index": 25,
+              "at": [
+                [
+                  57.0,
+                  6.0,
+                  30.0
+                ],
+                [
+                  57.0,
+                  34.0,
+                  30.0
+                ]
+              ]
+            },
+            {
+              "index": 37,
+              "at": [
+                [
+                  6.0,
+                  3.0,
+                  30.0
+                ],
+                [
+                  54.0,
+                  3.0,
+                  30.0
+                ]
+              ]
+            },
+            {
+              "index": 39,
+              "at": [
+                [
+                  54.0,
+                  3.0,
+                  30.0
+                ],
+                [
+                  57.0,
+                  6.0,
+                  30.0
+                ]
+              ]
+            }
+          ]
+        },
+        "sizes": [
+          0.47
+        ]
+      }
+    }
+  ],
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b1"
+    }
+  ],
+  "expected": {
+    "source": "analytic",
+    "body_count": 1,
+    "faces": 35,
+    "edges": 80,
+    "vertices": 48,
+    "volume_mm3": 21737.746007562786,
+    "tolerance": {
+      "rel": 1e-09
+    },
+    "method": "V0=60*40*30-54*34*27-4*A*6^2*30+4*A*3^2*27+L*A-2*pi*M, L=152+6*pi. The floor adds L*A-2*pi*M on the inward side of the already rounded cavity contour. A=1-pi/4 and M=5/6-pi/4 are the unit round section area and first moment. Outward parallel contours have Jacobian1+kappa*u and total turning2*pi. For the top inner round, subtract L*A*r^2+2*pi*M*r^3, at size0.47. Eight new strip faces, sixteen extra edges and eight extra vertices give counts(35, 80, 48); the existing annular top face remains annular."
+  },
+  "operation_expressible": true,
+  "expressible": true,
+  "why_not": [],
+  "ungraded": [],
+  "gallery_note": "The whole inner top rim builds from the formerly refused corner. Projecting to another corner endpoint no longer reports a distant rail as overlapping its blend band."
+}

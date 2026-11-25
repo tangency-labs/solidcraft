@@ -1,0 +1,412 @@
+{
+ "cases": [
+  {
+   "name": "offset_nurb.sms_par4_d0.5_tol0.001",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp (offset_nurb.sms); SmBSplineSurface::ApproximateOffsetSurface (deg 3, eps = 10*tol)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "d": 0.5,
+    "pp": 3,
+    "qq": 3,
+    "par": 4,
+    "eps": 0.01,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "offset_nurb.sms_par4_d-0.25_tol0.01",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp (offset_nurb.sms); SmBSplineSurface::ApproximateOffsetSurface (deg 3, eps = 10*tol)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "d": -0.25,
+    "pp": 3,
+    "qq": 3,
+    "par": 4,
+    "eps": 0.1,
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "offset_nurb.sms_par2_d0.5_tol0.001",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp (offset_nurb.sms); SmBSplineSurface::ApproximateOffsetSurface (deg 3, eps = 10*tol)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "d": 0.5,
+    "pp": 3,
+    "qq": 3,
+    "par": 2,
+    "eps": 0.01,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "offset_nurb.sms_par2_d-0.25_tol0.01",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp (offset_nurb.sms); SmBSplineSurface::ApproximateOffsetSurface (deg 3, eps = 10*tol)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "d": -0.25,
+    "pp": 3,
+    "qq": 3,
+    "par": 2,
+    "eps": 0.1,
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "offset_nurb.sms_par3_d0.5_tol0.001",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp (offset_nurb.sms); SmBSplineSurface::ApproximateOffsetSurface (deg 3, eps = 10*tol)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "d": 0.5,
+    "pp": 3,
+    "qq": 3,
+    "par": 3,
+    "eps": 0.01,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "offset_nurb.sms_par3_d-0.25_tol0.01",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp (offset_nurb.sms); SmBSplineSurface::ApproximateOffsetSurface (deg 3, eps = 10*tol)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "d": -0.25,
+    "pp": 3,
+    "qq": 3,
+    "par": 3,
+    "eps": 0.1,
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "offset_nurb.sms_par1_d0.5_tol0.001",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp (offset_nurb.sms); SmBSplineSurface::ApproximateOffsetSurface (deg 3, eps = 10*tol)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "d": 0.5,
+    "pp": 3,
+    "qq": 3,
+    "par": 1,
+    "eps": 0.01,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "offset_nurb.sms_par1_d-0.25_tol0.01",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp (offset_nurb.sms); SmBSplineSurface::ApproximateOffsetSurface (deg 3, eps = 10*tol)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "d": -0.25,
+    "pp": 3,
+    "qq": 3,
+    "par": 1,
+    "eps": 0.1,
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "Surface.sms_par4_d0.5_tol0.001",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "d": 0.5,
+    "pp": 3,
+    "qq": 3,
+    "par": 4,
+    "eps": 0.01,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "Surface.sms_par4_d-0.25_tol0.01",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "d": -0.25,
+    "pp": 3,
+    "qq": 3,
+    "par": 4,
+    "eps": 0.1,
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "Surface.sms_par2_d0.5_tol0.001",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "d": 0.5,
+    "pp": 3,
+    "qq": 3,
+    "par": 2,
+    "eps": 0.01,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "Surface.sms_par2_d-0.25_tol0.01",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "d": -0.25,
+    "pp": 3,
+    "qq": 3,
+    "par": 2,
+    "eps": 0.1,
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "Surface.sms_par3_d0.5_tol0.001",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "d": 0.5,
+    "pp": 3,
+    "qq": 3,
+    "par": 3,
+    "eps": 0.01,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "Surface.sms_par3_d-0.25_tol0.01",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "d": -0.25,
+    "pp": 3,
+    "qq": 3,
+    "par": 3,
+    "eps": 0.1,
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "Surface.sms_par1_d0.5_tol0.001",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "d": 0.5,
+    "pp": 3,
+    "qq": 3,
+    "par": 1,
+    "eps": 0.01,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "Surface.sms_par1_d-0.25_tol0.01",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (Surface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "d": -0.25,
+    "pp": 3,
+    "qq": 3,
+    "par": 1,
+    "eps": 0.1,
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_par4_d0.5_tol0.001",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (DropCurveSurface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "d": 0.5,
+    "pp": 3,
+    "qq": 3,
+    "par": 4,
+    "eps": 0.01,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_par4_d-0.25_tol0.01",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (DropCurveSurface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "d": -0.25,
+    "pp": 3,
+    "qq": 3,
+    "par": 4,
+    "eps": 0.1,
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_par2_d0.5_tol0.001",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (DropCurveSurface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "d": 0.5,
+    "pp": 3,
+    "qq": 3,
+    "par": 2,
+    "eps": 0.01,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_par2_d-0.25_tol0.01",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (DropCurveSurface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "d": -0.25,
+    "pp": 3,
+    "qq": 3,
+    "par": 2,
+    "eps": 0.1,
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_par3_d0.5_tol0.001",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (DropCurveSurface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "d": 0.5,
+    "pp": 3,
+    "qq": 3,
+    "par": 3,
+    "eps": 0.01,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_par3_d-0.25_tol0.01",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (DropCurveSurface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "d": -0.25,
+    "pp": 3,
+    "qq": 3,
+    "par": 3,
+    "eps": 0.1,
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_par1_d0.5_tol0.001",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (DropCurveSurface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "d": 0.5,
+    "pp": 3,
+    "qq": 3,
+    "par": 1,
+    "eps": 0.01,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_par1_d-0.25_tol0.01",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (DropCurveSurface.sms)",
+   "inputs": {
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "d": -0.25,
+    "pp": 3,
+    "qq": 3,
+    "par": 1,
+    "eps": 0.1,
+    "tol": 0.01
+   }
+  }
+ ]
+}

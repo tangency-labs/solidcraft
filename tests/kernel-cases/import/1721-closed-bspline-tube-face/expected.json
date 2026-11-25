@@ -1,0 +1,25 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1721",
+  "tangency-labs/solidcraft#3880"
+ ],
+ "what": "a cylinder r=10 h=30 whose side is a closed (rational B-spline) tube face wrapping all the way round a closed non-periodic surface: it must mesh and measure as the full tube",
+ "source": "analytic",
+ "method": "V = 3000 pi = 9424.7780; A = 2 pi r h + 2 pi r^2 = 2513.2741; 3 faces",
+ "body_count": 1,
+ "volume_mm3": 9424.778,
+ "area_mm2": 2513.2741,
+ "faces": 3,
+ "bbox": {
+  "min": [
+   -10,
+   -10,
+   0
+  ],
+  "max": [
+   10,
+   10,
+   30
+  ]
+ }
+}

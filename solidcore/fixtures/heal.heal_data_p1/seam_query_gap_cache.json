@@ -1,0 +1,59 @@
+{
+  "cases": [
+    {
+      "name": "sphere_stage2_retains_sibling_gap_invalidation",
+      "upstream_ref": "source/SMLib/src/SmVertexuse.cpp:1784-1836; PR #563 gen0125 seed=8971097847862315981",
+      "inputs": {
+        "case": "heal",
+        "brep": {"kind": "sphere", "radius": 1.1017911871514507, "swap": false},
+        "init_gaps": false,
+        "targets": {
+          "v": "all",
+          "e": {"list": [40250, 20647, 28194, 62667, 12774, 16331, 31491, 10460, 55697, 57139]},
+          "f": "all"
+        },
+        "steps": [
+          {"step": "cache_edge_props"},
+          {"step": "cache_vertex_props"},
+          {"step": "cache_face_props_gaps"},
+          {"step": "set_done_heal_op", "op": 5},
+          {"step": "cache_face_props_stage2"},
+          {"step": "face_snapshot"},
+          {"step": "fix_bad_sheets"},
+          {"step": "cache_face_props_stage3"},
+          {"step": "make_uv_trim_curves", "make": false}
+        ],
+        "validate_only": false,
+        "voxels": [12, 12, 12]
+      }
+    },
+    {
+      "name": "sphere_retargeted_stage2_retains_sibling_gap_invalidation",
+      "upstream_ref": "source/SMLib/src/SmVertexuse.cpp:1784-1836; PR #563 gen0164 seed=8971097847862316020",
+      "inputs": {
+        "case": "heal",
+        "brep": {"kind": "sphere", "radius": 38.77897466460957, "swap": false},
+        "init_gaps": false,
+        "targets": {"v": "all", "e": "all", "f": "none"},
+        "steps": [
+          {"step": "cache_edge_props"},
+          {"step": "cache_vertex_props"},
+          {"step": "cache_face_props_gaps"},
+          {"step": "set_done_heal_op", "op": 5},
+          {"step": "cache_face_props_stage2"},
+          {"step": "fix_bad_sheets"},
+          {"step": "cache_face_props_stage3"},
+          {"step": "make_uv_trim_curves", "make": false},
+          {"step": "load_targets", "targets": {"v": "none", "e": "all", "f": "all"}},
+          {"step": "set_old_counts", "counts": [0, 6, 0]},
+          {"step": "cache_face_props_gaps"},
+          {"step": "cache_face_props_stage2"},
+          {"step": "fix_bad_sheets"},
+          {"step": "cache_face_props_stage3"}
+        ],
+        "validate_only": false,
+        "voxels": [12, 12, 12]
+      }
+    }
+  ]
+}

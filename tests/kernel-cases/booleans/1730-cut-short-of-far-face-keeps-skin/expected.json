@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1730"
+ ],
+ "what": "an extrude cut whose profile stops 0.25 mm short of a wall's far face must leave that skin (it was grown through)",
+ "source": "analytic",
+ "method": "wall 200 x 3.75 x 95 = 71250. The profile (x -24..24, y -0.5..3.5) extruded 91 from z=-1 covers z 0..90 of the wall and y 0..3.5 of its 3.75: removes 48*3.5*90 = 15120. V = 56130",
+ "body_count": 1,
+ "volume_mm3": 56130.0
+}

@@ -5,10 +5,11 @@
 
 use std::f64::consts::PI;
 
-use solidcraft_geom::{Loop2, Plane, Region2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
+use solidcraft_geom::Seg2Geom;
 
 use crate::build::{box_solid, extrude, extrude_tapered};
-use crate::{Body, BoolOp, ChamferSide, KernelError, boolean, chamfer, chamfer_sides};
+use crate::{Body, BoolOp, ChamferSide, boolean, chamfer, chamfer_sides};
 
 const TOL: f64 = 1e-3;
 
@@ -167,7 +168,7 @@ fn boss_foot_fills() {
 fn cone_rim() {
     let taper = 10f64.to_radians();
     let region = Region2 { outer: Loop2::circle_from(Vec2::ZERO, 10.0, 0.0), holes: vec![] };
-    let f = extrude_tapered(&Plane::XY, &region, 20.0, 1.0, -taper).unwrap();
+    let f = extrude_tapered(&Plane::XY, &region, 20.0, 1.0, -taper, crate::DraftCorner::default()).unwrap();
     let base = volume(&f);
     let top = 10.0 - 20.0 * taper.tan();
     let rim = Vec3::new(top, 0.0, 20.0);
@@ -193,30 +194,13 @@ fn cone_rim() {
     assert!(rel(base - volume(&out), removed) < 3e-3, "{} vs {removed}", base - volume(&out));
 }
 
+/// A cylinder's seam is smooth: no edge there to chamfer. (The rim chamfers too large for the
+/// faces, past the bottom, past the wall and of an elliptical rim are the rig's
+/// fillets/2893-chamfer-* cases; the seam's place is the kernel's, so it stays here.)
 #[test]
 fn too_large_or_unsupported_is_refused() {
     let c = cylinder(0.0);
-    // Across the whole top: the cone would end in a point.
-    assert!(chamfer_sides(&c, &[RIM], 10.0, ChamferSide::Distance(3.0), false).is_err());
-    assert!(chamfer_sides(&c, &[RIM], 12.0, ChamferSide::Distance(3.0), false).is_err());
-    // Down past the bottom.
-    assert!(chamfer_sides(&c, &[RIM], 2.0, ChamferSide::Distance(25.0), false).is_err());
-    // An angle that runs past the wall.
-    assert!(chamfer_sides(&c, &[RIM], 2.0, ChamferSide::Angle(PI / 2.0 + 0.01), false).is_err());
-    // A cylinder's seam is smooth: nothing to chamfer.
     assert!(chamfer_sides(&c, &[Vec3::new(10.0, 0.0, 10.0)], 2.0, ChamferSide::Distance(3.0), false).is_err());
-    // A tilted cylinder cut flat: its rim on the cut is an ellipse, which the loop chamfer does
-    // not take. Refused as not supported, never a wrong solid.
-    let tilted = crate::build::cylinder(Vec3::new(0.0, 0.0, -10.0), Vec3::new(1.0, 0.0, 2.0), 5.0, 40.0).unwrap();
-    let cut = box_solid(Vec3::new(-50.0, -50.0, 10.0), Vec3::new(50.0, 50.0, 50.0)).unwrap();
-    let t = boolean(&tilted, &cut, BoolOp::Cut).unwrap().unwrap();
-    let solid = t.deep_copy();
-    let rim = crate::body::Body::unique_edges(&solid).iter().filter_map(crate::blend::edge_mid).find(|m| (m.z - 10.0).abs() < 1e-6).unwrap();
-    match chamfer_sides(&t, &[rim], 1.0, ChamferSide::Distance(2.0), false) {
-        Err(KernelError::Failed(m)) => assert!(m.starts_with("not supported yet"), "{m}"),
-        Err(e) => panic!("{e}"),
-        Ok(_) => panic!("an unequal chamfer of an elliptical rim was built"),
-    }
 }
 
 /// The top loop of a plate with rounded corners: lines and quarter circles, planar and
@@ -254,4 +238,47 @@ fn rounded_plate_top_loop() {
     let equal = chamfer(&b, &picks, 2.0).unwrap();
     let out = chamfer_sides(&b, &picks, 2.0, ChamferSide::Distance(2.0), false).unwrap();
     assert!(rel(volume(&out), volume(&equal)) < 1e-9);
+}
+
+/// A smooth oval of four cubic Béziers (no lines or arcs) round the origin, 40 × 28, extruded 10.
+fn bezier_oval() -> (Body, f64) {
+    let (a, b, k) = (20.0, 14.0, 0.5523);
+    let q = |x: f64, y: f64| Vec2::new(x, y);
+    let segs = vec![
+        Seg2::Cubic { p0: q(a, 0.0), p1: q(a, b * k), p2: q(a * k, b), p3: q(0.0, b) },
+        Seg2::Cubic { p0: q(0.0, b), p1: q(-a * k, b), p2: q(-a, b * k), p3: q(-a, 0.0) },
+        Seg2::Cubic { p0: q(-a, 0.0), p1: q(-a, -b * k), p2: q(-a * k, -b), p3: q(0.0, -b) },
+        Seg2::Cubic { p0: q(0.0, -b), p1: q(a * k, -b), p2: q(a, -b * k), p3: q(a, 0.0) },
+    ];
+    let perimeter = segs.iter().map(Seg2::length).sum();
+    let region = Region2 { outer: Loop2 { segs }, holes: vec![] };
+    (extrude(&Plane::XY, &[region], 0.0, 10.0).unwrap().pop().unwrap(), perimeter)
+}
+
+/// The volume a chamfer `across` the top and `down` the wall takes off a convex outline of length
+/// `perimeter` extruded square: at depth h the wall moves in by w = across·(1 − h/down), and the
+/// strip between a convex loop and its offset by w has area perimeter·w − π w².
+fn rim_volume(perimeter: f64, across: f64, down: f64) -> f64 {
+    perimeter * across * down / 2.0 - PI * across * across * down / 3.0
+}
+
+#[test]
+fn spline_outline_rim_by_two_distances() {
+    let (oval, perimeter) = bezier_oval();
+    let base = volume(&oval);
+    // The whole rim, as a pick takes it: the four Béziers' tangent chain.
+    let rim = crate::tangent_chain(&oval, &[Vec3::new(14.6, 10.2, 10.0)]).unwrap();
+    assert_eq!(rim.len(), 4);
+    // 1 across the top, 7 down the wall; flipped, 1 down the wall and 7 across the top.
+    for (flip, across, down) in [(false, 1.0, 7.0), (true, 7.0, 1.0)] {
+        let out = chamfer_sides(&oval, &rim, 1.0, ChamferSide::Distance(7.0), flip).unwrap();
+        sound(&out);
+        let expected = base - rim_volume(perimeter, across, down);
+        assert!(rel(volume(&out), expected) < 1e-4, "flip {flip}: {} vs {expected}", volume(&out));
+    }
+    // By an angle: 2 across the top at 60° from it, 2·tan 60° down the square wall.
+    let out = chamfer_sides(&oval, &rim, 2.0, ChamferSide::Angle(60f64.to_radians()), false).unwrap();
+    sound(&out);
+    let expected = base - rim_volume(perimeter, 2.0, 2.0 * 60f64.to_radians().tan());
+    assert!(rel(volume(&out), expected) < 1e-4, "{} vs {expected}", volume(&out));
 }

@@ -1,0 +1,66 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 245,
+    "width": 218,
+    "height": 236,
+    "body_name": "U"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     3,
+     -1,
+     -1
+    ],
+    "length": 239,
+    "width": 220,
+    "height": 234,
+    "operation": "cut",
+    "targets": [
+     "U"
+    ]
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "radius": 15,
+    "edges": [
+     [
+      3,
+      109,
+      233
+     ],
+     [
+      242,
+      109,
+      233
+     ]
+    ]
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "radius": 18,
+    "edges": [
+     [
+      0,
+      109,
+      236
+     ],
+     [
+      245,
+      109,
+      236
+     ]
+    ]
+   }
+  }
+ ]
+}

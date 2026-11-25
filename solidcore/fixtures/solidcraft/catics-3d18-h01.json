@@ -1,0 +1,104 @@
+{
+  "issue": "none: public CAD exercise drawing (Catics 3D18-H01), not a SolidCraft issue",
+  "pr": "none: public CAD exercise drawing (Catics 3D18-H01), not a SolidCraft issue",
+  "test": "none: public CAD exercise drawing (Catics 3D18-H01), not a SolidCraft issue",
+  "summary": "The exercise part \"Catics 3D18-H01\", a public CAD drawing whose printed answer is the volume 52011.64 mm^3, built on solidcore from format steps only (mm, axis Z, z up). Dimensions read from the drawing: bore r 20 through; disc r 35 z 0..5; plate r 40 z 5..8; ring r 25 z 8..16; wall r 23 z 16..70; ring r 25 z 70..78; cage cone outer r 25 at z 78 to r 15 at z 98, inner r 20 at z 78 to r 15 at z 91; top ring r 15 / r 7.5 z 91..98; five ribs 4 wide (cage shell intersected with a box, turned 72 degrees apart); three S-slots 5 wide with round ends, centreline z 18.5..67.5, patterned 120 degrees, each a one-sided flat cut from the XZ plane towards -Y; a pentagonal pocket 4 deep from below with 60 degree walls (loft of two pentagons, top inradius smaller by 4 tan 30); six R20 scallops through the plate. FITTED, not read from the drawing: the pocket circumradius 35 (vertices on the disc rim; 33 gives 53013, 34.61 gives 52242), the scallop centre distance 55.58 (55, tangent to the 70 disc, misses the printed green area 2685.6), the slot arc radius 17.91 (two equal tangent arcs with horizontal end tangents, so the turn is 111.6 degrees and the x extent +-16.65). The expected volume is the drawing's printed answer, not a closed form; the tolerance 52 mm^3 (0.1 percent) covers the fitted dimensions (solidcore measured 52000.83 while this part was first built). Known open mismatch: the r 23 wall patch between the slots measures 2200 against 2056 printed, so the slot outer footprint or that patch's definition is not fully understood. Bounding box (not checkable in this format): r 40 plate, z 0..98.",
+  "cases": [
+    {
+      "name": "catics_3d18_h01",
+      "note": "revolved body, pentagon pocket, six scallops, top ring, five ribs, three S-slots; expected volume is the drawing's printed 52011.64",
+      "steps": [
+        {
+          "op": "revolve",
+          "id": "body",
+          "plane": "xz",
+          "profile": [
+            { "kind": "polygon", "points": [[20, 0], [35, 0], [35, 5], [40, 5], [40, 8], [25, 8], [25, 16], [23, 16], [23, 70], [25, 70], [25, 78], [20, 78]] }
+          ],
+          "axis_point": [0, 0, 0],
+          "axis_dir": [0, 0, 1],
+          "angle_deg": 360
+        },
+        {
+          "op": "loft",
+          "id": "pocket",
+          "sections": [
+            { "profile": [{ "kind": "polygon", "points": [[35, 0], [10.8155948031232, 33.2869780703304], [-28.3155948031232, 20.5724838302366], [-28.3155948031232, -20.5724838302366], [10.8155948031232, -33.2869780703304]] }], "origin": [0, 0, 0] },
+            { "profile": [{ "kind": "polygon", "points": [[32.1454232818153, 0], [9.93348208545702, 30.5721142812364], [-26.0061937263647, 18.8946057337501], [-26.0061937263647, -18.8946057337501], [9.93348208545701, -30.5721142812364]] }], "origin": [0, 0, 4] }
+          ]
+        },
+        { "op": "difference", "id": "b1", "a": "body", "b": "pocket" },
+        { "op": "cylinder", "id": "scallop0", "origin": [3.40329345483049e-15, 55.58, 4], "radius": 20, "height": 5 },
+        { "op": "difference", "id": "b2", "a": "b1", "b": "scallop0" },
+        { "op": "cylinder", "id": "scallop1", "origin": [-48.1336919423391, 27.79, 4], "radius": 20, "height": 5 },
+        { "op": "difference", "id": "b3", "a": "b2", "b": "scallop1" },
+        { "op": "cylinder", "id": "scallop2", "origin": [-48.1336919423391, -27.79, 4], "radius": 20, "height": 5 },
+        { "op": "difference", "id": "b4", "a": "b3", "b": "scallop2" },
+        { "op": "cylinder", "id": "scallop3", "origin": [-1.02098803644915e-14, -55.58, 4], "radius": 20, "height": 5 },
+        { "op": "difference", "id": "b5", "a": "b4", "b": "scallop3" },
+        { "op": "cylinder", "id": "scallop4", "origin": [48.1336919423391, -27.79, 4], "radius": 20, "height": 5 },
+        { "op": "difference", "id": "b6", "a": "b5", "b": "scallop4" },
+        { "op": "cylinder", "id": "scallop5", "origin": [48.1336919423391, 27.79, 4], "radius": 20, "height": 5 },
+        { "op": "difference", "id": "b7", "a": "b6", "b": "scallop5" },
+        { "op": "cylinder", "id": "ring_outer", "origin": [0, 0, 91], "radius": 15, "height": 7 },
+        { "op": "cylinder", "id": "ring_hole", "origin": [0, 0, 90], "radius": 7.5, "height": 9 },
+        { "op": "difference", "id": "ring", "a": "ring_outer", "b": "ring_hole" },
+        { "op": "union", "id": "b8", "a": "b7", "b": "ring" },
+        {
+          "op": "revolve",
+          "id": "shell",
+          "plane": "xz",
+          "profile": [
+            { "kind": "polygon", "points": [[20, 78], [25, 78], [15, 98], [15, 91]] }
+          ],
+          "axis_point": [0, 0, 0],
+          "axis_dir": [0, 0, 1],
+          "angle_deg": 360
+        },
+        { "op": "box", "id": "rib_box", "origin": [0, -2, 70], "size": [30, 4, 30] },
+        { "op": "rotate", "id": "rib_box0", "body": "rib_box", "point": [0, 0, 0], "axis": [0, 0, 1], "degrees": 270 },
+        { "op": "intersection", "id": "rib0", "a": "shell", "b": "rib_box0" },
+        { "op": "union", "id": "b9", "a": "b8", "b": "rib0" },
+        { "op": "rotate", "id": "rib_box1", "body": "rib_box", "point": [0, 0, 0], "axis": [0, 0, 1], "degrees": 342 },
+        { "op": "intersection", "id": "rib1", "a": "shell", "b": "rib_box1" },
+        { "op": "union", "id": "b10", "a": "b9", "b": "rib1" },
+        { "op": "rotate", "id": "rib_box2", "body": "rib_box", "point": [0, 0, 0], "axis": [0, 0, 1], "degrees": 414 },
+        { "op": "intersection", "id": "rib2", "a": "shell", "b": "rib_box2" },
+        { "op": "union", "id": "b11", "a": "b10", "b": "rib2" },
+        { "op": "rotate", "id": "rib_box3", "body": "rib_box", "point": [0, 0, 0], "axis": [0, 0, 1], "degrees": 486 },
+        { "op": "intersection", "id": "rib3", "a": "shell", "b": "rib_box3" },
+        { "op": "union", "id": "b12", "a": "b11", "b": "rib3" },
+        { "op": "rotate", "id": "rib_box4", "body": "rib_box", "point": [0, 0, 0], "axis": [0, 0, 1], "degrees": 558 },
+        { "op": "intersection", "id": "rib4", "a": "shell", "b": "rib_box4" },
+        { "op": "union", "id": "b13", "a": "b12", "b": "rib4" },
+        {
+          "op": "extrude",
+          "id": "slot0",
+          "plane": "xz",
+          "distance": 30,
+          "profile": [
+            { "kind": "arc", "center": [-16.653528154718447, 36.409999999999997], "radius": 15.41, "start_deg": -90, "end_deg": 21.589297236063587 },
+            { "kind": "arc", "center": [16.653528154718447, 49.590000000000003], "radius": 20.41, "start_deg": 90, "end_deg": 201.5892972360636 },
+            { "kind": "arc", "center": [16.653528154718447, 67.5], "radius": 2.5, "start_deg": -90, "end_deg": 90 },
+            { "kind": "arc", "center": [16.653528154718447, 49.590000000000003], "radius": 15.41, "start_deg": 90, "end_deg": 201.5892972360636 },
+            { "kind": "arc", "center": [-16.653528154718447, 36.409999999999997], "radius": 20.41, "start_deg": -90, "end_deg": 21.589297236063587 },
+            { "kind": "arc", "center": [-16.653528154718447, 18.5], "radius": 2.5, "start_deg": 90, "end_deg": 270 }
+          ]
+        },
+        { "op": "rotate", "id": "slot1", "body": "slot0", "point": [0, 0, 0], "axis": [0, 0, 1], "degrees": 120 },
+        { "op": "rotate", "id": "slot2", "body": "slot0", "point": [0, 0, 0], "axis": [0, 0, 1], "degrees": 240 },
+        { "op": "difference", "id": "b14", "a": "b13", "b": "slot0" },
+        { "op": "difference", "id": "b15", "a": "b14", "b": "slot1" },
+        { "op": "difference", "id": "result", "a": "b15", "b": "slot2" }
+      ],
+      "expect": {
+        "lumps": 1,
+        "volume": {
+          "value": 52011.64,
+          "tol": 52,
+          "formula": "the drawing's printed answer (52011.64 mm^3), not derived here; tolerance 0.1 percent for the fitted pocket circumradius 35, scallop centre distance 55.58 and slot arc radius 17.91"
+        }
+      }
+    }
+  ]
+}

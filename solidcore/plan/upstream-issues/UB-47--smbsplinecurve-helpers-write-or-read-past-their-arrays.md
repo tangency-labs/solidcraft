@@ -1,0 +1,14 @@
+#### UB-47. `SmBSplineCurve` helpers write or read past their arrays
+- **Severity:** Crash / undefined behaviour
+- **Area:** Curves
+- **Location:**
+  - `SmBSplineCurve.cpp:5109` `GetControlPointsExpert`: writes two values per point for a dimension-1 curve.
+  - `SmBSplineCurveNLib.cpp:2723` `InterpolatePoints`: copies `cpOptParams->GetSize()` values into an array of `m + 1`.
+  - `SmBSplineCurveNLib.cpp:3038` `DeformToEndPointTargets`: ignores `DegreeElevate`'s status. On a zero-length knot interval it then runs degree-3 indexing on the degree-1 curve.
+  - `SmBSplineCurve.cpp:5922` `RemoveExtraKnots`: on a borrowed NURB, swaps the copy in but keeps `m_bNurbIsBorrowed = TRUE`, and its temporary frees the borrowed curve.
+- **What happens:** Out-of-bounds reads/writes and freeing memory the object does not own.
+- **Trigger:** `DeformToEndPointTargets` on a line whose NURB has knots `[a,a,a,a]`; `InterpolatePoints` with 3 points and 4 parameters.
+- **How found:** read during porting. The `DeformToEndPointTargets` case ran in the C++ build without a visible failure.
+- **Confirmed:** no.
+- **Severity:** crash/UB.
+- **Rust port:** Returns `InvalidInput`.

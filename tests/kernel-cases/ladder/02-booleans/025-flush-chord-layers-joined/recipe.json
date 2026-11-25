@@ -1,0 +1,792 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "S1"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 37
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -18.57417562100671,
+      -32
+     ],
+     [
+      18.57417562100671,
+      -32
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -22.978250586152114,
+      -29
+     ],
+     [
+      22.978250586152114,
+      -29
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -28.160255680657446,
+      -24
+     ],
+     [
+      28.160255680657446,
+      -24
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -30.463092423455635,
+      -21
+     ],
+     [
+      30.463092423455635,
+      -21
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -33.36165463522455,
+      -16
+     ],
+     [
+      33.36165463522455,
+      -16
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -34.64101615137755,
+      -13
+     ],
+     [
+      34.64101615137755,
+      -13
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -36.124783736376884,
+      -8
+     ],
+     [
+      36.124783736376884,
+      -8
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -36.66060555964672,
+      -5
+     ],
+     [
+      36.66060555964672,
+      -5
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -37.0,
+      0
+     ],
+     [
+      37.0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -36.87817782917155,
+      3
+     ],
+     [
+      36.87817782917155,
+      3
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -36.124783736376884,
+      8
+     ],
+     [
+      36.124783736376884,
+      8
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -35.32704346531139,
+      11
+     ],
+     [
+      35.32704346531139,
+      11
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -33.36165463522455,
+      16
+     ],
+     [
+      33.36165463522455,
+      16
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -31.74901573277509,
+      19
+     ],
+     [
+      31.74901573277509,
+      19
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -28.160255680657446,
+      24
+     ],
+     [
+      28.160255680657446,
+      24
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -25.298221281347036,
+      27
+     ],
+     [
+      25.298221281347036,
+      27
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -18.57417562100671,
+      32
+     ],
+     [
+      18.57417562100671,
+      32
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -12.0,
+      35
+     ],
+     [
+      12.0,
+      35
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "S3"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 37
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -18.57417562100671,
+      -32
+     ],
+     [
+      18.57417562100671,
+      -32
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -22.978250586152114,
+      -29
+     ],
+     [
+      22.978250586152114,
+      -29
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -28.160255680657446,
+      -24
+     ],
+     [
+      28.160255680657446,
+      -24
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -30.463092423455635,
+      -21
+     ],
+     [
+      30.463092423455635,
+      -21
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -33.36165463522455,
+      -16
+     ],
+     [
+      33.36165463522455,
+      -16
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -34.64101615137755,
+      -13
+     ],
+     [
+      34.64101615137755,
+      -13
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -36.124783736376884,
+      -8
+     ],
+     [
+      36.124783736376884,
+      -8
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -36.66060555964672,
+      -5
+     ],
+     [
+      36.66060555964672,
+      -5
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -37.0,
+      0
+     ],
+     [
+      37.0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -36.87817782917155,
+      3
+     ],
+     [
+      36.87817782917155,
+      3
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -36.124783736376884,
+      8
+     ],
+     [
+      36.124783736376884,
+      8
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -35.32704346531139,
+      11
+     ],
+     [
+      35.32704346531139,
+      11
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -33.36165463522455,
+      16
+     ],
+     [
+      33.36165463522455,
+      16
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -31.74901573277509,
+      19
+     ],
+     [
+      31.74901573277509,
+      19
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -28.160255680657446,
+      24
+     ],
+     [
+      28.160255680657446,
+      24
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -25.298221281347036,
+      27
+     ],
+     [
+      25.298221281347036,
+      27
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -18.57417562100671,
+      32
+     ],
+     [
+      18.57417562100671,
+      32
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -12.0,
+      35
+     ],
+     [
+      12.0,
+      35
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Rings"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 37
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 35
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Rings",
+    "profiles": "all",
+    "distance": 1.2,
+    "direction": "negative",
+    "body_name": "Body1"
+   }
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "S1",
+    "profiles": [
+     {
+      "point": [
+       0,
+       -34.5
+      ]
+     },
+     {
+      "point": [
+       0,
+       -30.5
+      ]
+     },
+     {
+      "point": [
+       0,
+       -22.5
+      ]
+     },
+     {
+      "point": [
+       0,
+       -18.5
+      ]
+     },
+     {
+      "point": [
+       0,
+       -14.5
+      ]
+     },
+     {
+      "point": [
+       0,
+       -6.5
+      ]
+     },
+     {
+      "point": [
+       0,
+       -2.5
+      ]
+     },
+     {
+      "point": [
+       0,
+       1.5
+      ]
+     },
+     {
+      "point": [
+       0,
+       5.5
+      ]
+     },
+     {
+      "point": [
+       0,
+       13.5
+      ]
+     },
+     {
+      "point": [
+       0,
+       17.5
+      ]
+     },
+     {
+      "point": [
+       0,
+       21.5
+      ]
+     },
+     {
+      "point": [
+       0,
+       29.5
+      ]
+     },
+     {
+      "point": [
+       0,
+       33.5
+      ]
+     },
+     {
+      "point": [
+       0,
+       36.0
+      ]
+     }
+    ],
+    "distance": 2.4,
+    "direction": "negative",
+    "from": [
+     0,
+     0,
+     -1.2
+    ],
+    "operation": "join"
+   }
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Rings",
+    "profiles": [
+     {
+      "point": [
+       36,
+       0
+      ]
+     }
+    ],
+    "distance": 2,
+    "direction": "negative",
+    "from": [
+     36,
+     0,
+     -3.6
+    ],
+    "operation": "new",
+    "body_name": "Body2"
+   }
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "S3",
+    "profiles": "all",
+    "distance": 2.4,
+    "direction": "negative",
+    "from": [
+     36,
+     0,
+     -5.6
+    ],
+    "operation": "new",
+    "body_name": "Body3"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Body2",
+    "tools": [
+     "Body3"
+    ],
+    "operation": "join"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Body1",
+    "tools": [
+     "Body2"
+    ],
+    "operation": "join"
+   }
+  }
+ ]
+}

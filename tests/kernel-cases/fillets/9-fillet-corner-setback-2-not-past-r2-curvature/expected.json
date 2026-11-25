@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#9"
+ ],
+ "what": "three r2 rounds at a box corner, curvature (g2) corner, set back 2: not past where the rounds meet (r): refused",
+ "source": "invariants",
+ "method": "a setback must reach past where the corner's rounds meet without one, past r = 2 on a corner of faces square to each other (smlib_blend_setback, solid.fillet `setbacks`); 2 is not, so the right answer is a refusal naming the least setback, before SMLib runs. A rolling-ball corner takes setbacks too (they replace the ball's corner by SMLib's set-back patch, ladder 07-fillets/013), so the rule holds for both corners",
+ "outcome": "refused",
+ "refusal": "the setback must be more than the radius (2 mm)"
+}

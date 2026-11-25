@@ -1,0 +1,31 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     60,
+     0,
+     0
+    ],
+    "radius": 5,
+    "height": 10,
+    "body_name": "Cyl",
+    "operation": "new"
+   }
+  },
+  {
+   "command": "construct.axis.edge",
+   "params": {
+    "edge": {
+     "edge": [
+      65,
+      0,
+      10
+     ]
+    },
+    "name": "A"
+   }
+  }
+ ]
+}

@@ -1,0 +1,157 @@
+{
+  "area": "ladder/09-shells-and-offsets",
+  "bodies": {
+    "b7": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b9"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b9"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b10"
+      ],
+      "op": "shell",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "open_faces": {
+          "kind": "face",
+          "picked": [
+            {
+              "at": [],
+              "index": 8
+            }
+          ],
+          "points": [
+            [
+              50.0,
+              22.22222222222222,
+              0.0
+            ]
+          ],
+          "tolerance": 0.07483414773547883
+        },
+        "thickness": -2.0
+      }
+    }
+  ],
+  "case": "010-shell-under-rounded-top",
+  "expected": {
+    "bbox": {
+      "max": [
+        60,
+        40,
+        20
+      ],
+      "min": [
+        0,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "edges": 40,
+    "faces": 19,
+    "method": "the vertical edges stay sharp, so each pair of top rounds meets in a mitre at a corner (08/011's identity): outside, (1-pi/4) 3^2 (2 60 + 2 40) removed, less 4 x 3^3 (5/3 - pi/2) counted twice; the cavity is the 56 x 36 x 18 box (open at z = 0) with its top edges rounded 3 - 2 = 1, mitred alike. V = outside - cavity. Faces: 9 outside (bottom ring aside: top, 4 sides, 4 rounds), 9 inside, the bottom ring; vertices: 8 at the mitres' ends outside, 8 inside, 8 round the ring; edges 40 (Euler-Poincare with the ring's two loops)",
+    "source": "analytic",
+    "sources": [],
+    "tolerance": {
+      "rel": 0.00001
+    },
+    "vertices": 24,
+    "volume_mm3": 11375.173947397,
+    "what": "the stock with r3 rounds on its four top edges, shelled 2 mm open at the bottom"
+  },
+  "expressible": true,
+  "golden": {
+    "measured": {
+      "area_mm2": 11769.840613405635,
+      "body_count": 1,
+      "edges": 40,
+      "faces": 19,
+      "vertices": 24,
+      "volume_mm3": 11375.17394738719
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 40,
+      "faces": 19,
+      "vertices": 24
+    }
+  },
+  "records": "010-shell-under-rounded-top.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 11769.84061387144,
+      "body_count": 1,
+      "edges": 40,
+      "faces": 19,
+      "vertices": 24,
+      "volume_mm3": 11375.173943655289
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "shell"
+  ],
+  "ungraded": [],
+  "what": "the stock with r3 rounds on its four top edges, shelled 2 mm open at the bottom",
+  "why_not": []
+}

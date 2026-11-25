@@ -1,0 +1,13 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1488",
+  "tangency-labs/solidcraft#1517"
+ ],
+ "what": "an R1 fillet on the end edge of a 3.5 mm slab after a pleated loft was joined flush with its inner face (the join needs a tool retry; later fillets must still work)",
+ "source": "invariants",
+ "method": "slab 120x3.5x95 with a 48 x 4.5 window, a pleated loft band joined flush into it, then R1 on the slab end edge at x=-60, 34 mm away from the join. The fillet edge is a plain straight convex edge between two large planar faces; the join must not leave slivers that make it fail. One closed valid solid is the right answer (the volume of the pleat band has no simple closed form).",
+ "body_count": 1,
+ "continuity": {
+  "order": "g1"
+ }
+}

@@ -1,0 +1,12 @@
+id = "geom.polynomial"
+upstream = ["source/SMLib/src/SmPolynomial.cpp"]
+rust_module = "geom::polynomial"
+depends_on = ["geom.vector3d"]
+soft_depends_on = []
+est_lines = 386
+layer = 3
+tests = ["prog_test:my_test_polynomial", "SM_API_test:TestSmPrincipalDirectionPairing", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
+status = "green"
+claimed_by = "swarm-geom.polynomial-a1"
+claimed_at = "2026-10-12T20:00:26Z"
+notes = "4 fns; largest: SmPolynomial::SolveQuarticEqn, SmPolynomial::SolveQuadraticEqn, SmPolynomial::SolveCubicEqn, sm_AddSolution; unit-SCC #22 (220 units); 319 upstream test entry points reach this unit; GREEN: difftest 6038 cases (38 fixture from my_test_polynomial + edge cases, 6000 generated), all bit-identical, 0 deferred, perturb SENSITIVE; no UNPORTED(geom.polynomial) stubs to wire"

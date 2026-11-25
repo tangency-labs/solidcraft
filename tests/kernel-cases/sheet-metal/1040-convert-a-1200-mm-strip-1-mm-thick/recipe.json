@@ -1,0 +1,39 @@
+{
+ "commands": [
+  {
+   "command": "sheet.manage_rules",
+   "params": {
+    "name": "Rule",
+    "thickness": "1 mm",
+    "active": true,
+    "bend_radius": "1 mm",
+    "k_factor": 0.5
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 1200,
+    "width": 100,
+    "height": 1,
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "sheet.recognize",
+   "params": {
+    "body": "Plate",
+    "face": [
+     480,
+     25,
+     1
+    ],
+    "rule": "Rule"
+   }
+  },
+  {
+   "command": "inspect.measure",
+   "params": {}
+  }
+ ]
+}

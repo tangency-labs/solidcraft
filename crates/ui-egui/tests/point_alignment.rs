@@ -4,10 +4,11 @@
 mod raster;
 
 use serde_json::json;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::sketch::ConstraintKind;
 use solidcraft_ui_egui::scenario::Harness;
 
-fn line_midpoint(sk: &solidcraft_engine::sketch::Sketch, id: &str) -> solidcraft_engine::geom::Vec2 {
+fn line_midpoint(sk: &solidcraft_engine::sketch::Sketch, id: &str) -> solidcore_record::Vec2 {
     let a = sk.point(sk.resolve_point(&format!("{id}.start")).unwrap()).unwrap();
     let b = sk.point(sk.resolve_point(&format!("{id}.end")).unwrap()).unwrap();
     (a + b) * 0.5
@@ -52,8 +53,24 @@ fn horizontal_vertical_uses_preselected_line_and_preserves_rejection() {
 #[test]
 fn horizontal_vertical_leaves_ambiguous_preselection_to_pick_tool() {
     use solidcraft_engine::Sel;
+    // A single preselected point seeds H/V point_picks so one more click aligns them.
+    {
+        let mut h = Harness::new();
+        h.app.session.execute("sketch.create", &json!({"plane":"XY"})).unwrap();
+        h.app.session.execute("sketch.circle.center", &json!({"center":[20,3],"radius":5})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.settle();
+        h.app.session.selection = vec![Sel::SketchPoint { id: "origin".into() }];
+        let undo = h.app.session.undo.len();
+        h.run(&json!([{"start":"sketch.constraint.horizontal_vertical"}])).unwrap();
+        assert_eq!(h.app.tool.as_ref().unwrap().point_picks, vec![json!("origin")]);
+        assert!(h.app.session.selection.is_empty());
+        assert_eq!(h.app.session.undo.len(), undo);
+        h.run(&json!([{"click":{"sketch":[20,3]}}])).unwrap();
+        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert!(h.app.tool.is_none());
+    }
     for selection in [
-        vec![Sel::SketchPoint { id: "origin".into() }],
         vec![Sel::SketchPoint { id: "origin".into() }, Sel::SketchCurve { id: "c1".into(), sketch: None }],
         vec![
             Sel::SketchPoint { id: "origin".into() },
@@ -64,12 +81,12 @@ fn horizontal_vertical_leaves_ambiguous_preselection_to_pick_tool() {
         let mut h = Harness::new();
         h.app.session.execute("sketch.create", &json!({"plane":"XY"})).unwrap();
         h.app.session.execute("sketch.circle.center", &json!({"center":[20,3],"radius":5})).unwrap();
-        h.app.session.selection = selection.clone();
+        h.app.session.selection = selection;
         let undo = h.app.session.undo.len();
         h.run(&json!([{"start":"sketch.constraint.horizontal_vertical"}])).unwrap();
         assert!(h.app.tool.as_ref().unwrap().point_picks.is_empty());
         assert_eq!(h.app.session.undo.len(), undo);
-        assert_eq!(h.app.session.selection, selection);
+        assert!(h.app.session.selection.is_empty());
         assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error));
     }
 }
@@ -191,6 +208,67 @@ fn horizontal_vertical_ignores_curves_and_cancels_a_pending_point() {
     let sk = &h.app.session.model.state().sketches[0].sketch;
     let p = sk.point(sk.resolve_point("c1.center").unwrap()).unwrap();
     assert!((p.y - 3.0).abs() < 1e-6);
+}
+
+/// #20442: the Horizontal/Vertical tool takes a line's middle as the second pick, the way it
+/// takes the line's ends: the circle's centre is aligned with that middle on the closer axis,
+/// instead of snapping onto the line.
+#[test]
+fn horizontal_vertical_takes_a_line_middle_without_shift() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[20,16],[20,44]],"infer":false,"connect":false})).unwrap();
+    h.app.run("sketch.circle.center", json!({"center":[34,32],"radius":7})).unwrap();
+    h.call("ui.view", json!({"view":"top"}));
+    h.app.fit_view();
+    h.frames(3);
+    h.step(&json!({"start":"sketch.constraint.horizontal_vertical"})).unwrap();
+    // The circle's centre, then the middle of the vertical line, with no Shift held.
+    h.step(&json!({"click":{"sketch":[34,32]}})).unwrap();
+    assert_eq!(h.app.tool.as_ref().unwrap().point_picks.len(), 1);
+    h.step(&json!({"click":{"sketch":[20,30]}})).unwrap();
+    assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error), "{:?}", h.app.status);
+    let sk = &h.app.session.model.state().sketches[0].sketch;
+    let p = sk.point(sk.resolve_point("c1.center").unwrap()).unwrap();
+    let mid = line_midpoint(sk, "l1");
+    // Level with the middle (the closer axis): the centre does not land on the line.
+    assert!((p.y - mid.y).abs() < 1e-6, "centre: {p:?}");
+    assert!((p.x - mid.x).abs() > 1.0, "centre: {p:?}");
+    assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::HorizontalPoints { .. })));
+}
+
+/// Review pictures of #20442: the circle's centre and the middle of a vertical line, with the
+/// Horizontal/Vertical tool taking that middle as the point it aligns.
+#[test]
+#[ignore = "writes review images; run explicitly for visual verification"]
+fn horizontal_vertical_line_middle_review_images() {
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/point-alignment-review");
+    std::fs::create_dir_all(&dir).unwrap();
+    solidcraft_engine::capture::install(std::sync::Arc::new(|scene, cam, w, h| {
+        let (rgba, renderer) = solidcraft_gpu::env::headless_rgba(scene, cam, w, h)?;
+        Ok(solidcraft_engine::capture::Picture { rgba, renderer })
+    }));
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", json!({"width":1100,"height":800}));
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[20,16],[20,44]],"infer":false,"connect":false})).unwrap();
+    h.app.run("sketch.circle.center", json!({"center":[34,32],"radius":7})).unwrap();
+    h.call("ui.view", json!({"view":"top"}));
+    h.app.fit_view();
+    h.frames(3);
+    h.step(&json!({"start":"sketch.constraint.horizontal_vertical"})).unwrap();
+    // The circle's centre, then the middle of the vertical line.
+    h.step(&json!({"click":{"sketch":[34,32]}})).unwrap();
+    h.step(&json!({"click":{"sketch":[20,30]}})).unwrap();
+    h.frames(3);
+    let mut textures = std::collections::HashMap::new();
+    for _ in 0..8 {
+        raster::paint(&mut h, &mut textures, vec![]);
+    }
+    let output = raster::paint(&mut h, &mut textures, vec![]);
+    raster::raster(&mut h, &textures, output).save(dir.join("line-middle.png")).unwrap();
+    std::fs::write(dir.join("line-middle-model.png"), solidcraft_ui_egui::control::view_png(&h.app, 1000, 700).unwrap()).unwrap();
 }
 
 #[test]
@@ -325,7 +403,7 @@ fn midpoint_aligns_to_the_fixed_origin_without_straightening_the_line() {
         let b = sk.point(sk.resolve_point("l1.end").unwrap()).unwrap();
         assert!(((a + b) * 0.5).x.abs() < 1e-6);
         assert!((b.x - a.x).abs() > 1. && (b.y - a.y).abs() > 1., "only the midpoint is aligned");
-        assert_eq!(sk.point(0).unwrap(), solidcraft_engine::geom::Vec2::ZERO);
+        assert_eq!(sk.point(0).unwrap(), solidcore_record::Vec2::ZERO);
     }
 }
 
@@ -464,11 +542,11 @@ fn context_menu_alignment_review_images() {
     use solidcraft_engine::Sel;
     use solidcraft_ui_egui::{
         context_menu::{self, Target},
-        fonts, theme,
+        fonts,
     };
     let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/point-alignment-review");
     std::fs::create_dir_all(&dir).unwrap();
-    let previous = theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
         let mut h = Harness::new();
         h.app.home.open = false;
@@ -480,13 +558,13 @@ fn context_menu_alignment_review_images() {
             h.app.run("sketch.point", json!({"point":point,"id":id})).unwrap();
         }
         h.call("ui.view", json!({"view":"top"}));
-        h.app.cam.target = solidcraft_engine::geom::Vec3::new(40.0, 22.0, 0.0);
+        h.app.cam.target = solidcore_record::Vec3::new(40.0, 22.0, 0.0);
         h.app.cam.distance = 180.0;
         h.app.cam_anim = None;
         h.frames(3);
         h.ctx = egui::Context::default();
         fonts::setup_fonts_for(&h.ctx, "ja", "");
-        theme::apply(&h.ctx);
+        solidcraft_theme::apply(&h.ctx);
         let mut textures = std::collections::HashMap::new();
         for _ in 0..8 {
             raster::paint(&mut h, &mut textures, vec![]);
@@ -508,7 +586,7 @@ fn context_menu_alignment_review_images() {
             raster::raster(&mut h, &textures, output).save(dir.join(format!("{mode}-{shot}.png"))).unwrap();
         }
     }
-    theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
@@ -707,15 +785,15 @@ fn midpoint_menu_aligns_rectangle_sides_and_refuses_conflicts_atomically() {
 fn midpoint_selection_review_images() {
     use solidcraft_ui_egui::{
         context_menu::{self, Target},
-        fonts, theme,
+        fonts,
     };
     let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/midpoint-selection-review");
     std::fs::create_dir_all(&dir).unwrap();
     solidcraft_engine::capture::install(std::sync::Arc::new(|scene, cam, w, h| {
-        let (rgba, renderer) = solidcraft_gpu::capture::headless_rgba(scene, cam, w, h)?;
+        let (rgba, renderer) = solidcraft_gpu::env::headless_rgba(scene, cam, w, h)?;
         Ok(solidcraft_engine::capture::Picture { rgba, renderer })
     }));
-    let previous = theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
         for horizontal in [false, true] {
             let mut h = Harness::new();
@@ -727,13 +805,13 @@ fn midpoint_selection_review_images() {
             h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[80,70]})).unwrap();
             h.app.run("sketch.rectangle.two_point", json!({"p0":[15,18],"p1":[50,58]})).unwrap();
             h.call("ui.view", json!({"view":"top"}));
-            h.app.cam.target = solidcraft_engine::geom::Vec3::new(40., 35., 0.);
+            h.app.cam.target = solidcore_record::Vec3::new(40., 35., 0.);
             h.app.cam.distance = 180.;
             h.app.cam_anim = None;
             h.frames(3);
             h.ctx = egui::Context::default();
             fonts::setup_fonts_for(&h.ctx, "ja", "");
-            theme::apply(&h.ctx);
+            solidcraft_theme::apply(&h.ctx);
             let mut textures = std::collections::HashMap::new();
             for _ in 0..8 {
                 raster::paint(&mut h, &mut textures, vec![]);
@@ -773,5 +851,5 @@ fn midpoint_selection_review_images() {
             }
         }
     }
-    theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }

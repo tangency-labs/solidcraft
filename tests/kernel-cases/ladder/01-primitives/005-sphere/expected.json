@@ -1,0 +1,22 @@
+{
+ "sources": [],
+ "what": "a sphere r10",
+ "source": "analytic",
+ "method": "V = 4/3 pi r^3; A = 4 pi r^2; one face",
+ "body_count": 1,
+ "volume_mm3": 4188.790204786,
+ "area_mm2": 1256.637061436,
+ "faces": 1,
+ "bbox": {
+  "min": [
+   -10,
+   -10,
+   -10
+  ],
+  "max": [
+   10,
+   10,
+   10
+  ]
+ }
+}

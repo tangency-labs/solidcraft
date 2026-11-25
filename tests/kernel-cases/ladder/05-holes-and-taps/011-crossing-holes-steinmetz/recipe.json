@@ -1,0 +1,27 @@
+{
+ "base": "../../01-primitives/001-box",
+ "commands": [
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     30,
+     20,
+     20
+    ],
+    "diameter": 10
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     30,
+     0,
+     10
+    ],
+    "diameter": 10
+   }
+  }
+ ]
+}

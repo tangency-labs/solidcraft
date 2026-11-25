@@ -1,0 +1,24 @@
+{
+ "sources": [],
+ "what": "the three edges at one box corner chamfered 2 together: three planar chamfers meeting at one point",
+ "source": "analytic",
+ "method": "box 40x30x20, the edges at (40,30,20) chamfered d = 2. In coordinates measured inward from the corner (u,v,w >= 0) each chamfer removes {v+w < d} (resp. u+w, u+v) along its edge; the body left is the intersection of the three half-spaces, whose planes meet at (d/2,d/2,d/2), so no corner face. Removed, by inclusion-exclusion: (d^2/2)(40+30+20) - 3 (pair overlaps, int_0^d (d-w)^2 dw = d^3/3 each) + (triple overlap: area (d-w)^2 less (d-2w)^2/2 for w < d/2, integrated: d^3/4) = 45 d^2 - (3/4) d^3 = 174.0000. V = 24000 - 174.0000 = 23826.0000. Faces 6 + 3 = 9; the chamfers meet the faces at creases (G0).",
+ "body_count": 1,
+ "volume_mm3": 23826.0,
+ "faces": 9,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   30,
+   20
+  ]
+ },
+ "continuity": {
+  "order": "g0"
+ }
+}

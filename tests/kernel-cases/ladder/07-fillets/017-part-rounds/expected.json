@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "the running part: r5 on the front vertical edges, r3 on the back wall's top front edge, r1 where the boss meets the top",
+ "source": "analytic",
+ "method": "removed 2 (1-pi/4) 25 20 + (1-pi/4) 9 60; the concave r1 at the boss adds (1-pi/4) 1 2 pi (8 + (10-3pi)/(12-3pi)); none of them reaches a hole, the slot or the window",
+ "body_count": 1,
+ "volume_mm3": 53151.022090693,
+ "faces": 24
+}

@@ -1,0 +1,7 @@
+# General: WR-453 `imprint_extends_edge_to_proto_vertex` changes no thread groove cut (2026-10-31)
+
+- **Flag:** `Kernel::fixes.imprint_extends_edge_to_proto_vertex` (WR-453 with WR-498's correction; fork tangency-labs/smlib@a8caccd, @ffaf4e8).
+- **Audit:** class B. Six thread and loft-union tests reach the guard, but none fails with the flag forced off; the sibling `imprint_trims_edge_to_proto_vertex` carries all their asserted effect.
+- **Tried (origin/main 36f1a9a67, instrumented):** the screw-motion thread groove of `tests/issue_410_435_thread_groove.rs` cut from a shaft, (pitch, radius, length) = (3.5, 16.5, 14), (1, 22, 4), (1.5, 5, 10), (2, 8, 12), (3, 12, 15), (1.25, 4, 8), (2.5, 10, 10), (3.5, 16.5, 10). Each was cut with no flag, extend only, trim only, and both.
+- **Result:** the worst edge-end-to-vertex gap is identical with and without the extension in every case, e.g. 1.5234e-5 (no flag, extend only) and 1.1803e-6 (trim, trim and extend) for M33x3.5. In these cuts no edge stops short of a proto vertex that lies ahead of it within a twentieth of its interval, the only case the extension handles.
+- **Waits on:** the record's internal thread (a nut minus a screw-swept groove, SolidCraft rig internal M10x1.5, #410), whose helical sweep the port's construction differs from, or another cut with an edge that ends short of its vertex. No fork fix is missing in front of the branch.

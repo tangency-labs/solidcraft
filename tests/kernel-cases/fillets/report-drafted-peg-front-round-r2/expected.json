@@ -1,0 +1,9 @@
+{
+ "what": "the drafted peg's front top edge rounded r2: the round runs into the cone its drafted front face runs tangent into; reported from the app (2026-10-30, test-peg part), drafted",
+ "source": "invariants",
+ "method": "the peg (a bar 40 x 16 whose far end is a half disc R8 about (40, 8)) extruded 10 with a 5 deg inward taper, then the top's end circle (R 8 - 10 tan 5 deg about (40, 8)) extruded 10 up with the same taper and joined: the bar's drafted front face runs tangent into the cone along its generator through x = 40, and the top's concave arc meets the front top edge where the two are tangent, as on the straight peg; the front top edge (y = 10 tan 5 deg, z = 10) rounded r2; no closed form: one valid body, every seam the round makes with its faces G1",
+ "body_count": 1,
+ "continuity": {
+  "order": "g1"
+ }
+}

@@ -1,0 +1,45 @@
+{
+  "area": "history",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-config-row-unknown-column-refused",
+  "expected": {
+    "method": "Depth is not a column: refused, saying how to add one",
+    "outcome": "refused",
+    "refusal": "`Depth` is not a column (config.column adds one)",
+    "source": "invariants",
+    "sources": [],
+    "what": "config.row with a value for a column the table does not have"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 6 (config.row): invalid parameters for `config.row`: `Depth` is not a column (config.column adds one)",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 6 (config.row): invalid parameters for `config.row`: `Depth` is not a column (config.column adds one)",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "config.row with a value for a column the table does not have",
+  "why_not": [
+    "the failure is SolidCraft's, not a kernel operation's: step 6 (config.row): invalid parameters for `config.row`: `Depth` is not a column (config.column adds one)"
+  ]
+}

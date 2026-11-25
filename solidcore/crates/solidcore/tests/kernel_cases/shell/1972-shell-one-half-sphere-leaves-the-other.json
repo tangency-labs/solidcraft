@@ -1,0 +1,232 @@
+{
+  "area": "shell",
+  "bodies": {
+    "b13": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b21": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b15"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b16"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b16"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b17"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b18"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b19"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b18",
+        "b19"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b20"
+      ],
+      "params": {
+        "op": "intersect"
+      }
+    },
+    {
+      "inputs": [
+        "b21"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b22"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b22"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b23"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b23"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b24"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b24"
+      ],
+      "op": "shell",
+      "outputs": [
+        "b25"
+      ],
+      "params": {
+        "open_faces": {
+          "kind": "face",
+          "picked": [
+            {
+              "at": [],
+              "index": 1
+            }
+          ],
+          "points": [
+            [
+              -0.291432932914347,
+              8.049448497615742,
+              0.0
+            ]
+          ],
+          "tolerance": 0.030001
+        },
+        "thickness": -2.0
+      }
+    }
+  ],
+  "case": "1972-shell-one-half-sphere-leaves-the-other",
+  "expected": {
+    "body_count": 2,
+    "method": "two hemispheres r10, flat faces coincident at z=0. The pick (3,2,0) lies on both flat faces, so the body is named. The named half becomes a hollow hemisphere with cavity r8 open at the flat face: V=2/3*pi*(10^3-8^3); the other half is untouched: 2/3*pi*10^3. Total of two bodies",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#1972"
+    ],
+    "volume_mm3": 3116.4599123610747,
+    "what": "a sphere split into two hemispheres; shelling the flat face of one must hollow that half only, the other half stays solid"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 9,
+      "faces": 5,
+      "vertices": 9
+    }
+  },
+  "records": "1972-shell-one-half-sphere-leaves-the-other.bodies.json.gz",
+  "result": [
+    {
+      "body": "Ball",
+      "made": "b25"
+    },
+    {
+      "body": "Ball (1)",
+      "made": "b20"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 2086.017521996169,
+      "body_count": 2,
+      "edges": 6,
+      "faces": 5,
+      "vertices": 6,
+      "volume_mm3": 3116.459912518782
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#1972"
+  ],
+  "traced_ops": [
+    "make_sphere",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "shell"
+  ],
+  "ungraded": [],
+  "what": "a sphere split into two hemispheres; shelling the flat face of one must hollow that half only, the other half stays solid",
+  "why_not": []
+}

@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "a 2 mm chamfer on the top edge of a cylinder r10 h20",
+ "source": "analytic",
+ "method": "a cone chamfer: Pappus on the triangle (area 2) with its centroid at radius 10 - 2/3",
+ "body_count": 1,
+ "volume_mm3": 6165.899181446,
+ "faces": 4
+}

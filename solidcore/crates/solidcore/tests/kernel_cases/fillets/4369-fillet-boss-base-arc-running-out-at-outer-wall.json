@@ -1,0 +1,174 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  4.000000000000007,
+                  38.0,
+                  9.999999999999998
+                ],
+                [
+                  20.178681931579774,
+                  37.75405612260174,
+                  10.0
+                ]
+              ],
+              "index": 26
+            },
+            {
+              "at": [
+                [
+                  20.178681931579774,
+                  37.75405612260174,
+                  10.0
+                ],
+                [
+                  18.0,
+                  40.0,
+                  10.0
+                ]
+              ],
+              "index": 27
+            }
+          ],
+          "points": [
+            [
+              11.851230025297363,
+              22.023429053131746,
+              9.999999999999998
+            ],
+            [
+              19.089340965789887,
+              38.87702806130087,
+              10.0
+            ]
+          ],
+          "tolerance": 3.7929480657763084
+        },
+        "kind": "round",
+        "sizes": [
+          2.0,
+          2.0
+        ]
+      }
+    }
+  ],
+  "case": "4369-fillet-boss-base-arc-running-out-at-outer-wall",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "method": "the round runs along the arc over the block and ends where the arc meets the block's outer wall; its end there has no closed form, so only the outcome is graded: one valid closed body (the reporter's standard test, rebuilt from its screenshot)",
+    "source": "invariants",
+    "sources": [
+      "tangency-labs/solidcraft#4369"
+    ],
+    "what": "the concave arc where a boss (r10) stands on a rounded block, the boss overhanging the block's corner so the arc runs out at the outer wall, filleted r2: refused ('a vertex of the edge chain where other faces meet: only straight edges can be blended')"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 38,
+      "faces": 15,
+      "vertices": 25
+    }
+  },
+  "records": "4369-fillet-boss-base-arc-running-out-at-outer-wall.bodies.json.gz",
+  "result": [
+    {
+      "body": "Base",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 7085.725014783505,
+      "body_count": 1,
+      "edges": 38,
+      "faces": 15,
+      "vertices": 25,
+      "volume_mm3": 26323.544148273562
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#4369"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "the concave arc where a boss (r10) stands on a rounded block, the boss overhanging the block's corner so the arc runs out at the outer wall, filleted r2: refused ('a vertex of the edge chain where other faces meet: only straight edges can be blended')",
+  "why_not": []
+}

@@ -1,0 +1,260 @@
+//! A paper scene as SVG (#4890, A3): one user unit a millimetre, the paper's size in mm, and the
+//! scene's own curves where SVG has them.
+//!
+//! - **Numbers** are the scene on the nanometre grid ([`Prepared::on_grid`], whose rules give the
+//!   joints, closures and merges), written as millimetres with up to six decimals: no exponent, no
+//!   "-0", nothing that depends on the locale.
+//! - **y is flipped** by writing the page height less y, exact on the grid, so the file's numbers
+//!   are page coordinates, with no transform. After the flip an anticlockwise arc turns the
+//!   negative way, so its sweep flag is 0.
+//! - **Curves:** lines `L`, circular arcs `A` in the grid's pieces of at most a quarter turn (a half
+//!   turn's centre is ill-conditioned once its ends are rounded), cubics `C`, parabolas `Q`.
+//! - **Paint:** strokes `stroke-width`, with butt caps, miter joins and a miter limit of 4 on the
+//!   root; fills black, even-odd, or in a coloured paper's ink. Text is its glyph outlines, one
+//!   `<path>` a run, filled in the same ink nonzero (SVG's default), so it looks the same without the
+//!   font and never reflows. One `<path>` per item, so each stays one object in an editor.
+//! - **Dashes** are the stroke's own `stroke-dasharray`, and `stroke-dashoffset` when its phase
+//!   isn't 0, in millimetres: SVG runs the pattern along the whole path and round a closed one.
+//! - **Groups** are `<g data-object="…" data-kind="…">`: object ids repeat and start with a digit,
+//!   so they can't be XML ids. No background: the page stays transparent, as cutters want. A
+//!   coloured paper is one `<rect>` under everything.
+//! - **Pictures** (#5624 S5) are `<image>`s holding a PNG as a data URI, on their own pixel grid
+//!   ([`Picture::grid`]) at the picture resolution the caller gives, cropped to the pixels on the
+//!   sheet. Their edges are the grid's, on the same nanometre grid as the lines, so they register.
+//!   One crossing its object's clip holds only the pixels that meet the clip's box, and is cut by a
+//!   `<clipPath>` on that grid too.
+
+use std::fmt::Write;
+
+use solidcore_record::Vec2;
+use solidcraft_geom::Aabb2;
+use solidcraft_geom::paper::{Clip, FillRule, GridDashes, GridItem, GridPath, GridPoint, GridReport, Picture, Pictures, Piece, Prepared};
+
+use super::png::{PICTURE_DPI, picture_png};
+use super::{NANOMETRES, PaperColour};
+use crate::{IoError, MAX_DRAWING_BYTES, Result};
+
+/// What writing a scene did that the scene didn't say: the grid's report.
+pub type SvgReport = GridReport;
+
+/// A scene's SVG document, its pictures' pixels from `pictures` at `picture_dpi`, and what
+/// writing it did.
+pub fn paper_svg(scene: &Prepared, pictures: &dyn Pictures, picture_dpi: f64) -> Result<(Vec<u8>, SvgReport)> {
+    paper_svg_on(scene, None, pictures, picture_dpi)
+}
+
+/// [`paper_svg`] on a coloured paper, or on none: a picture keeps its own colours on either.
+pub fn paper_svg_on(scene: &Prepared, paper: Option<PaperColour>, pictures: &dyn Pictures, picture_dpi: f64) -> Result<(Vec<u8>, SvgReport)> {
+    if !PICTURE_DPI.contains(&picture_dpi) {
+        return Err(IoError::Invalid(format!("an SVG's pictures are 25 to 1200 dpi, not {picture_dpi}")));
+    }
+    let on = scene.on_grid(NANOMETRES.grid()?).map_err(|e| IoError::Invalid(e.to_string()))?;
+    let ink = paper.map_or_else(|| "#000".to_string(), |_| hex(PaperColour::INK));
+    let mut w = Writer { out: String::new(), height: on.size.y, clips: 0, ink: ink.clone() };
+    let (width, height) = (number(on.size.x), number(on.size.y));
+    w.out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    let _ = writeln!(
+        w.out,
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}mm\" height=\"{height}mm\" viewBox=\"0 0 {width} {height}\" \
+         fill=\"none\" stroke=\"{ink}\" stroke-linecap=\"butt\" stroke-linejoin=\"miter\" stroke-miterlimit=\"4\">"
+    );
+    if let Some(paper) = paper {
+        let _ = writeln!(w.out, "<rect width=\"{width}\" height=\"{height}\" fill=\"{}\" stroke=\"none\"/>", hex(paper.rgb()));
+    }
+    for group in &on.groups {
+        let kind = serde_json::to_value(group.kind).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default();
+        let _ = writeln!(w.out, "<g data-object=\"{}\" data-kind=\"{kind}\">", group.object);
+        for item in &group.items {
+            match item {
+                GridItem::Stroke { width, path, dashes } => {
+                    w.out.push_str("<path stroke-width=\"");
+                    push_number(&mut w.out, *width);
+                    if let Some(dashes) = dashes {
+                        w.dashes(dashes);
+                    }
+                    w.out.push_str("\" d=\"");
+                    w.path(path);
+                }
+                GridItem::Fill { loops } => w.fill(loops, FillRule::EvenOdd),
+                GridItem::Text { loops, .. } => w.fill(loops, FillRule::NonZero),
+                GridItem::Picture { picture, clip, visible } => {
+                    if !w.picture(picture, clip.as_ref(), *visible, picture_dpi, pictures)? {
+                        continue;
+                    }
+                }
+            }
+            w.out.push_str("\"/>\n");
+            if w.out.len() > MAX_DRAWING_BYTES {
+                return Err(IoError::Invalid(format!("the SVG would be over {} MiB", MAX_DRAWING_BYTES >> 20)));
+            }
+        }
+        w.out.push_str("</g>\n");
+    }
+    w.out.push_str("</svg>\n");
+    Ok((w.out.into_bytes(), on.report))
+}
+
+/// An sRGB colour as SVG writes it.
+fn hex([r, g, b]: [u8; 3]) -> String {
+    format!("#{r:02X}{g:02X}{b:02X}")
+}
+
+/// Nanometres written as millimetres onto `out`, with up to six decimals.
+fn push_number(out: &mut String, n: i64) {
+    NANOMETRES.push(out, n);
+}
+
+/// [`push_number`] as its own text, for the numbers written once per document.
+fn number(n: i64) -> String {
+    let mut text = String::new();
+    push_number(&mut text, n);
+    text
+}
+
+struct Writer {
+    out: String,
+    /// The page height, in nanometres: y is written as this less y.
+    height: i64,
+    /// How many `<clipPath>`s so far: the next one's id is `clip` and one more.
+    clips: usize,
+    /// What fills are painted in: black, or a coloured paper's ink.
+    ink: String,
+}
+
+/// A point on the lines' grid.
+fn on_lines(p: Vec2) -> Result<GridPoint> {
+    NANOMETRES.grid()?.point(p).map_err(|e| IoError::Invalid(e.to_string()))
+}
+
+impl Writer {
+    /// Closed `loops` as one `<path>` in the ink up to its `d`, filled by `rule` (nonzero is SVG's default).
+    fn fill(&mut self, loops: &[GridPath], rule: FillRule) {
+        let rule = if rule == FillRule::EvenOdd { " fill-rule=\"evenodd\"" } else { "" };
+        let _ = write!(self.out, "<path fill=\"{}\" stroke=\"none\"{rule} d=\"", self.ink);
+        loops.iter().for_each(|l| self.path(l));
+    }
+
+    /// `clip`'s `<clipPath>`, and its id.
+    fn clip_path(&mut self, clip: &Clip) -> Result<usize> {
+        self.clips += 1;
+        let _ = write!(self.out, "<clipPath id=\"clip{}\">", self.clips);
+        match *clip {
+            Clip::Rect { min, max } => {
+                let (low, high) = (on_lines(min)?, on_lines(max)?);
+                let (x, y) = (number(low.x), number(self.height - high.y));
+                let _ = write!(self.out, "<rect x=\"{x}\" y=\"{y}\" width=\"{}\" height=\"{}\"/>", number(high.x - low.x), number(high.y - low.y));
+            }
+            Clip::Circle { center, radius } => {
+                let at = on_lines(center)?;
+                let r = NANOMETRES.grid()?.steps(radius).map_err(|e| IoError::Invalid(e.to_string()))?;
+                let _ = write!(self.out, "<circle cx=\"{}\" cy=\"{}\" r=\"{}\"/>", number(at.x), number(self.height - at.y), number(r));
+            }
+        }
+        self.out.push_str("</clipPath>\n");
+        Ok(self.clips)
+    }
+
+    /// Picture `picture`'s `<image>` up to its `href`'s closing quote, after its `clip`'s
+    /// `<clipPath>`: the pixels of its grid at `dpi` that meet `area`. False, with nothing written,
+    /// when none do.
+    fn picture(&mut self, picture: &Picture, clip: Option<&Clip>, area: Aabb2, dpi: f64, pictures: &dyn Pictures) -> Result<bool> {
+        let source = picture.source;
+        let grid = picture.grid(dpi).map_err(|e| IoError::Invalid(format!("picture {source}: {e}")))?;
+        let Some(window) = grid.window(area) else {
+            return Ok(false);
+        };
+        // The window's outer pixel edges, on the lines' grid: x0 + i·p across, y0 + j·p up.
+        let low = on_lines(Vec2::new(grid.column(window.x0).0, grid.row(window.y1 - 1).0))?;
+        let high = on_lines(Vec2::new(grid.column(window.x1 - 1).1, grid.row(window.y0).1))?;
+        // Base64 is 4 bytes for every 3.
+        let room = MAX_DRAWING_BYTES.saturating_sub(self.out.len()) / 4 * 3;
+        let png = picture_png(source, &grid, window, pictures, room)?;
+        let clip = clip.map(|clip| self.clip_path(clip)).transpose()?;
+        self.out.push_str("<image x=\"");
+        push_number(&mut self.out, low.x);
+        self.out.push_str("\" y=\"");
+        push_number(&mut self.out, self.height - high.y);
+        self.out.push_str("\" width=\"");
+        push_number(&mut self.out, high.x - low.x);
+        self.out.push_str("\" height=\"");
+        push_number(&mut self.out, high.y - low.y);
+        self.out.push_str("\" preserveAspectRatio=\"none\"");
+        if let Some(id) = clip {
+            let _ = write!(self.out, " clip-path=\"url(#clip{id})\"");
+        }
+        if picture.opacity < 1.0 {
+            // Written as millionths, as lengths are.
+            self.out.push_str(" opacity=\"");
+            push_number(&mut self.out, (picture.opacity * 1e6).round() as i64);
+            self.out.push('"');
+        }
+        self.out.push_str(" href=\"data:image/png;base64,");
+        self.out.push_str(&solidcraft_doc::canvas::base64_encode(&png));
+        Ok(true)
+    }
+
+    fn point(&mut self, p: GridPoint) {
+        push_number(&mut self.out, p.x);
+        self.out.push(' ');
+        push_number(&mut self.out, self.height - p.y);
+    }
+
+    /// A dashed stroke's attributes, written inside the open `stroke-width` value: it closes that
+    /// value and leaves its own last one open.
+    fn dashes(&mut self, dashes: &GridDashes) {
+        self.out.push_str("\" stroke-dasharray=\"");
+        for (i, length) in dashes.lengths.iter().enumerate() {
+            if i > 0 {
+                self.out.push(' ');
+            }
+            push_number(&mut self.out, *length);
+        }
+        if dashes.phase != 0 {
+            self.out.push_str("\" stroke-dashoffset=\"");
+            push_number(&mut self.out, dashes.phase);
+        }
+    }
+
+    /// A path's `d`: a closed one ends with `Z`, which draws its closing line.
+    fn path(&mut self, path: &GridPath) {
+        self.out.push('M');
+        self.point(path.start);
+        for piece in &path.pieces {
+            match *piece {
+                Piece::Line { to } => {
+                    self.out.push('L');
+                    self.point(to);
+                }
+                Piece::Arc { radius, clockwise, to } => {
+                    self.out.push('A');
+                    push_number(&mut self.out, radius);
+                    self.out.push(' ');
+                    push_number(&mut self.out, radius);
+                    let _ = write!(self.out, " 0 0 {} ", u8::from(clockwise));
+                    self.point(to);
+                }
+                Piece::Cubic { c1, c2, to } => {
+                    self.out.push('C');
+                    self.point(c1);
+                    self.out.push(' ');
+                    self.point(c2);
+                    self.out.push(' ');
+                    self.point(to);
+                }
+                Piece::Quadratic { c, to } => {
+                    self.out.push('Q');
+                    self.point(c);
+                    self.out.push(' ');
+                    self.point(to);
+                }
+            }
+        }
+        if path.closed {
+            self.out.push('Z');
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "svg_tests.rs"]
+mod tests;

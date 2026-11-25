@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "sheet.perforate with a pitch equal to the hole's diameter: the holes would touch",
+ "source": "invariants",
+ "method": "holes 2 mm across at a 2 mm pitch leave no web between them; the documented rule is pitch > diameter, so the field is refused",
+ "outcome": "refused",
+ "refusal": "pitch > diameter"
+}

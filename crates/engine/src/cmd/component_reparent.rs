@@ -3,8 +3,8 @@
 //! once is one definition: what goes in it goes in every instance, placed by the one instance
 //! named (`parent_path`, else the active placement) and in the same place in the others. Paths
 //! through the placement change: the session's paths (selection, active and hidden placements,
-//! hidden folders) follow it, and a move that would leave a feature failing that worked before
-//! (a face attachment found through the old path) is refused.
+//! hidden folders) and the design's face attachments found through it follow it, and a move that
+//! would still leave a feature failing that worked before is refused.
 
 use super::placing::{parent_path, placement_of};
 use super::*;
@@ -26,7 +26,7 @@ pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
     if s.doc.inside_component(to, o.component) {
         return Err(bad(cmd, format!("{} can't go inside itself or a component within it", o.name)));
     }
-    if s.doc.marker.is_some() {
+    if s.doc.marker.is_some_and(|m| m < s.doc.features.len()) {
         return Err(bad(cmd, "finish timeline rollback before moving placements"));
     }
     if s.held_by_rigid_group(id).is_some() {
@@ -35,7 +35,7 @@ pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
     // From the placement named (`path`), into the parent's placement named (`parent_path`).
     let moved = occurrence_path(s, p, id, cmd)?;
     let to_given = parent_path(p, cmd)?;
-    let doc = s.placed_document();
+    let doc = s.design_document();
     let (from_path, from_frame) = placement_of(s, &doc, o.parent, moved.split_last().map(|(_, up)| up), "path", cmd)?;
     let (to_path, to_frame) = placement_of(s, &doc, to, to_given.as_deref(), "parent_path", cmd)?;
     let local = doc.occurrences.iter().find(|x| x.id == id).map(|x| x.transform).unwrap_or(o.transform);
@@ -52,10 +52,12 @@ pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
     let mut scratch = s.scratch();
     // Pending moves along both parents and of the placement itself are kept: its new transform
     // was worked out from them.
+    // The exploded view is shown only: an ancestor it moves keeps its placement, and stays shown.
+    let uncaptured = s.uncaptured_moves().into_owned();
     for ancestor in from_path.iter().chain(&to_path) {
-        if let Some(pending) = scratch.pending_moves.remove(ancestor)
-            && let Some(x) = scratch.doc_mut().occurrences.iter_mut().find(|x| x.id == *ancestor)
-        {
+        let Some(pending) = uncaptured.get(ancestor).copied() else { continue };
+        scratch.pending_moves.remove(ancestor);
+        if let Some(x) = scratch.doc_mut().occurrences.iter_mut().find(|x| x.id == *ancestor) {
             x.transform = pending;
         }
     }
@@ -63,13 +65,81 @@ pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(x) = scratch.doc_mut().occurrences.iter_mut().find(|x| x.id == id) {
         x.parent = to;
         x.transform = transform;
+        // A move typed in world axes takes them into the new parent's frame.
+        if x.expressed_moves.iter().any(|m| m.world) {
+            let mut frame = inverse;
+            frame[3] = [0.0, 0.0, 0.0, 1.0];
+            for m in x.expressed_moves.iter_mut().filter(|m| m.world) {
+                m.frame = frame;
+            }
+        }
     }
+    let old_placed = s.placed_document();
     // Once all its placements sit in the new parent, the component belongs there too, so what
     // follows the component tree (the parent's eye, its bodies) takes it along.
     if scratch.doc.occurrences.iter().filter(|x| x.component == o.component).all(|x| x.parent == to)
         && let Some(c) = scratch.doc_mut().components.iter_mut().find(|c| c.id == o.component)
     {
         c.parent = to;
+    }
+    // Reparenting can change the common ancestor of a feature and its cross-component profile
+    // sketch; rebase stored `profile_frame` matrices so bodies keep their world position.
+    let new_placed = scratch.placed_document();
+    let rebased_frames: Vec<(u64, solidcraft_doc::Mat)> = scratch
+        .doc
+        .features
+        .iter()
+        .filter_map(|f| {
+            let m = f.profile_frame?;
+            let sketch_id = f.kind.constructor_profile_sketch()?;
+            let owner = old_placed.feature(sketch_id)?.component;
+            let old_lca = old_placed.common_ancestor(f.component, owner);
+            let new_lca = new_placed.common_ancestor(f.component, owner);
+            if old_lca == new_lca {
+                return None;
+            }
+            let old_owner_in_lca = old_placed.component_transform_in(owner, old_lca);
+            let new_owner_in_lca = new_placed.component_transform_in(owner, new_lca);
+            let inv_old_o = solidcraft_doc::mat_inverse(&old_owner_in_lca)?;
+            let updated = solidcraft_doc::mat_mul(&new_owner_in_lca, &solidcraft_doc::mat_mul(&inv_old_o, &m));
+            solidcraft_doc::is_placement(&updated).then_some((f.id, updated))
+        })
+        .collect();
+    for (fid, frame) in rebased_frames {
+        if let Some(f) = scratch.doc_mut().feature_mut(fid) {
+            f.profile_frame = Some(frame);
+        }
+    }
+    // Face attachments found through it follow it too (#11063): a sketch on a face of a body
+    // inside it kept the old path, which no longer starts at the design, and the move was refused.
+    // A path through it by way of any placement of its old parent (a parent placed more than once
+    // is one definition) now runs through its one new place. A path that would grow past the 64
+    // placements a design keeps is refused here rather than saved where it can't be read back.
+    let mut too_deep = false;
+    let mut rebase = |path: &mut Vec<u64>| {
+        if let Some(at) = path.iter().position(|x| *x == id) {
+            let moved: Vec<u64> = new_path.iter().chain(&path[at + 1..]).copied().collect();
+            too_deep |= moved.len() > 64;
+            *path = moved;
+        }
+    };
+    for f in &mut scratch.doc_mut().features {
+        match &mut f.kind {
+            FeatureKind::Emboss { face: Some(face), .. } => {
+                rebase(&mut face.path);
+                rebase(&mut face.author_path);
+            }
+            FeatureKind::Sketch { plane, .. } | FeatureKind::ConstructionPlane { plane } => {
+                if let Some(anchor) = crate::cmd::sketch::face::anchor_mut(plane) {
+                    rebase(&mut anchor.path);
+                    rebase(&mut anchor.author_path);
+                }
+            }
+            _ => {}
+        }
+    }
+    if too_deep {
+        return Err(bad(cmd, format!("moving {} would nest a face attachment more than 64 placements deep", o.name)));
     }
     // The paths through it follow it before the model is worked out again: that drops a selected
     // or active placement whose path no longer leads anywhere.
@@ -91,17 +161,23 @@ pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, format!("moving {} would break {}: {error}", o.name, f.name)));
         }
     }
-    s.accept_computed(scratch);
+    s.accept_computed(scratch)?;
+    follow_visibility(s, &old_path, &new_path);
+    Ok(json!({"occurrence": id, "parent": to, "path": new_path, "transform": transform}))
+}
+
+/// Hidden placements and folders under `old_path` follow it to `new_path`. `accept_computed` does
+/// not carry them, so whoever accepts a computed move into a session does this after.
+pub(super) fn follow_visibility(s: &mut Session, old_path: &[u64], new_path: &[u64]) {
     for hidden in &mut s.visibility.hidden_occurrences {
-        if let Some(moved) = rebased(hidden, &old_path, &new_path) {
+        if let Some(moved) = rebased(hidden, old_path, new_path) {
             *hidden = moved;
         }
     }
-    let (old_scope, new_scope) = (Session::folder_scope(&old_path), Session::folder_scope(&new_path));
+    let (old_scope, new_scope) = (Session::folder_scope(old_path), Session::folder_scope(new_path));
     for key in &mut s.visibility.hidden_folders {
         if let Some(rest) = key.strip_prefix(&old_scope).filter(|rest| rest.starts_with('/')) {
             *key = format!("{new_scope}{rest}");
         }
     }
-    Ok(json!({"occurrence": id, "parent": to, "path": new_path, "transform": transform}))
 }

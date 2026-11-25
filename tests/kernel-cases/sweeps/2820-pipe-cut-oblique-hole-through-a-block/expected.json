@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2820"
+ ],
+ "what": "a pipe of diameter 6 cut through a 40 x 40 x 20 block along a line leaning 30 degrees from the vertical",
+ "source": "analytic",
+ "method": "the cylinder between two parallel planes 20 apart, leaning 30 degrees from their normal, has volume pi r^2 h / cos(30) = pi 9 20 / 0.8660 = 653.0 (it crosses both faces well inside the block); V = 32000 - 653.0. Faces: 4 sides, top and bottom with an elliptical hole each, and the hole wall = 7.",
+ "body_count": 1,
+ "volume_mm3": 31347.032228875683,
+ "faces": 7
+}

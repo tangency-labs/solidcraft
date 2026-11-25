@@ -1,0 +1,78 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 66,
+    "height": 3,
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": "Y",
+    "body_name": "rim"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 63,
+    "height": 3,
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": "Y",
+    "operation": "cut",
+    "targets": [
+     "rim"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 12,
+    "height": 3,
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": "Y",
+    "body_name": "hub"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 53,
+    "width": 3,
+    "height": 2.5,
+    "corner": [
+     11,
+     0,
+     -1.25
+    ],
+    "operation": "join",
+    "targets": [
+     "rim",
+     "hub"
+    ],
+    "name": "spoke"
+   }
+  },
+  {
+   "command": "solid.pattern.circular",
+   "params": {
+    "features": [
+     "spoke"
+    ],
+    "axis": "Y",
+    "count": 5
+   }
+  }
+ ]
+}

@@ -1,0 +1,24 @@
+{
+ "sources": [],
+ "body_count": 1,
+ "what": "a plane continued by a surface extruded from a g2 blend curve: exactly G2",
+ "source": "invariants",
+ "method": "profile: lines (20,10)-(20,20)-(0,20)-(0,0)-(10,0) closed by sketch.blend_curve g2 from (10,0) to (20,10), extruded 10. The blend is one Bezier of degree 5 matching each line's derivatives through order 2 at its end; a line's derivatives past the first are 0, so the curve's derivatives 2..2 vanish there and its curvature vanish: G2 with each line, and its derivative of order 3 is not 0 (the control polygon bends there), so the next order fails. The extrusion carries the profile's continuity to both vertical seams (x=10, y=0 and x=20, y=10). No closed-form volume: 7 faces.",
+ "faces": 7,
+ "continuity": {
+  "order": "g2",
+  "exact": true,
+  "edges": [
+   [
+    10,
+    0,
+    5
+   ],
+   [
+    20,
+    10,
+    5
+   ]
+  ]
+ }
+}

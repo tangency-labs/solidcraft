@@ -1,5 +1,7 @@
 use crate::Session;
 use serde_json::{Value, json};
+use solidcore_record::{Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 
 fn run(s: &mut Session, cmd: &str, params: Value) -> Value {
     s.execute(cmd, &params).unwrap()
@@ -8,8 +10,12 @@ fn close(actual: &Value, expected: f64) {
     assert!((actual.as_f64().unwrap() - expected).abs() < 1e-6, "{actual} != {expected}");
 }
 fn box_in(s: &mut Session, name: &str) -> (u64, u64, String) {
+    box_at(s, name, 0.0)
+}
+/// A new component in the active one, holding a 10 mm cube with its corner at `x` on the X axis.
+fn box_at(s: &mut Session, name: &str, x: f64) -> (u64, u64, String) {
     let c = run(s, "component.create", json!({"name": name, "grounded": false}));
-    run(s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    run(s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]}));
     let body = s.model.state().bodies.last().unwrap().name.clone();
     (c["component"].as_u64().unwrap(), c["occurrence"].as_u64().unwrap(), body)
 }
@@ -76,6 +82,80 @@ fn nested_instances_require_a_path_and_can_exclude_descendants() {
     assert!(r["total"]["bbox"].is_null());
 }
 
+/// Study 8.5: a placement that counts as a reference (a fixture shown for context) adds nothing to
+/// what is measured, nor does anything inside it, as in the bill of materials; the placement asked
+/// for counts whatever its type. 10 mm cubes along X: a steel block (7.85 g at 0 mm) and a fixture
+/// (1.29 g, the default density, at 20 mm) holding a pin (1.29 g at 40 mm).
+#[test]
+fn a_reference_placement_below_the_one_measured_adds_nothing() {
+    let mut s = Session::default();
+    let (_, _, block) = box_at(&mut s, "Block", 0.0);
+    run(&mut s, "material.assign", json!({"bodies": [block], "material": "Steel"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let (fixture, fixture_occurrence, _) = box_at(&mut s, "Fixture", 20.0);
+    let (pin, pin_occurrence, _) = box_at(&mut s, "Pin", 40.0);
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let root = |s: &mut Session| run(s, "component.properties", json!({"component": "root"}));
+    let counted = |r: &Value| (r["body_count"].as_u64().unwrap(), r["placement_count"].as_u64().unwrap());
+    let fixture_type = |s: &mut Session, bom_type: &str| run(s, "component.metadata.set", json!({"component": fixture, "bom_type": bom_type}));
+    let occurrence_type = |s: &mut Session, occurrence: u64, bom_type: Value| {
+        run(s, "occurrence.bom_type", json!({"occurrence": occurrence, "bom_type": bom_type}));
+    };
+
+    let all = root(&mut s);
+    assert_eq!(counted(&all), (3, 4), "{all}");
+    close(&all["total"]["mass_g"], 7.85 + 1.29 + 1.29);
+    close(&all["total"]["center_of_mass"][0], (5.0 * 7.85 + 25.0 * 1.29 + 45.0 * 1.29) / 10.43);
+
+    // The fixture kept for reference: only the block counts.
+    fixture_type(&mut s, "reference");
+    let block_only = root(&mut s);
+    assert_eq!(counted(&block_only), (1, 2), "{block_only}");
+    assert_eq!(block_only["bodies"][0]["name"], block.as_str());
+    close(&block_only["total"]["mass_g"], 7.85);
+    close(&block_only["total"]["volume_mm3"], 1000.0);
+    close(&block_only["total"]["area_mm2"], 600.0);
+    close(&block_only["total"]["center_of_mass"][0], 5.0);
+    close(&block_only["total"]["bbox"]["max"][0], 10.0);
+    // Asked for, the fixture counts with the pin it holds, and the pin counts too.
+    let by_component = run(&mut s, "component.properties", json!({"component": fixture}));
+    let by_occurrence = run(&mut s, "occurrence.properties", json!({"occurrence": fixture_occurrence}));
+    for r in [by_component, by_occurrence] {
+        assert_eq!(counted(&r), (2, 2), "{r}");
+        close(&r["total"]["mass_g"], 2.58);
+        close(&r["total"]["center_of_mass"][0], 35.0);
+    }
+    let pin_by_component = run(&mut s, "component.properties", json!({"component": pin}));
+    let pin_by_occurrence = run(&mut s, "occurrence.properties", json!({"occurrence": pin_occurrence}));
+    for r in [pin_by_component, pin_by_occurrence] {
+        assert_eq!(counted(&r), (1, 1), "{r}");
+        close(&r["total"]["mass_g"], 1.29);
+    }
+
+    // The occurrence's own type counts, not its component's.
+    occurrence_type(&mut s, fixture_occurrence, json!("normal"));
+    assert_eq!(root(&mut s), all);
+    fixture_type(&mut s, "normal");
+    occurrence_type(&mut s, fixture_occurrence, json!("reference"));
+    assert_eq!(root(&mut s), block_only);
+
+    // A pin kept for reference inside the fixture: the fixture's own total is its own body.
+    occurrence_type(&mut s, fixture_occurrence, Value::Null);
+    occurrence_type(&mut s, pin_occurrence, json!("reference"));
+    let r = run(&mut s, "component.properties", json!({"component": fixture}));
+    assert_eq!(counted(&r), (1, 1), "{r}");
+    close(&r["total"]["mass_g"], 1.29);
+    let r = root(&mut s);
+    assert_eq!(counted(&r), (2, 3), "{r}");
+    close(&r["total"]["mass_g"], 7.85 + 1.29);
+    // The same pin placed again outside the fixture counts there.
+    run(&mut s, "occurrence.copy", json!({"component": pin, "parent": 0, "translate": [20, 0, 0]}));
+    let r = root(&mut s);
+    assert_eq!(counted(&r), (3, 4), "{r}");
+    close(&r["total"]["mass_g"], 7.85 + 1.29 + 1.29);
+    close(&r["total"]["bbox"]["max"][0], 70.0);
+}
+
 #[test]
 fn body_reassignment_offsets_preserve_world_properties() {
     let mut s = Session::default();
@@ -88,6 +168,252 @@ fn body_reassignment_offsets_preserve_world_properties() {
     close(&r["total"]["center_of_mass"][0], 5.0);
 }
 
+fn panel_blank(s: &mut Session, width: f64, height: f64) {
+    run(s, "sheet.manage_rules", json!({"name": "Panel 0.8", "thickness": "0.8", "active": true}));
+    run(s, "sketch.create", json!({"plane": "XY", "name": "Blank"}));
+    run(s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [width, height]}));
+    run(s, "sketch.finish", json!({}));
+    run(s, "sheet.flange", json!({"sketch": "Blank", "body_name": "Panel"}));
+}
+
+fn perforated_panel(s: &mut Session) {
+    panel_blank(s, 20.0, 10.0);
+    run(s, "sheet.perforate", json!({"diameter": "2", "pitch": "10", "margin": "1", "pattern": "square"}));
+    run(s, "material.assign", json!({"bodies": ["Panel"], "material": "Steel"}));
+}
+
+/// Two radius-1 holes centred at (2, 2) and (12, 2), through a 20 x 10 x 0.8 blank.
+fn perforated_panel_expected() -> (f64, f64, [f64; 3]) {
+    let removed = 2.0 * std::f64::consts::PI * 0.8;
+    let volume = 160.0 - removed;
+    let area = 448.0 - 0.8 * std::f64::consts::PI;
+    (volume, area, [(160.0 * 10.0 - removed * 7.0) / volume, (160.0 * 5.0 - removed * 2.0) / volume, 0.4])
+}
+
+#[test]
+fn perforated_sheet_properties_include_holes_and_their_off_centre_volume_moment() {
+    let mut s = Session::default();
+    perforated_panel(&mut s);
+    let (volume, area, center) = perforated_panel_expected();
+    let density = s.doc.density("Panel");
+    let doc = s.doc.clone();
+    let undo = s.undo.len();
+    for command in ["component.properties", "inspect.measure"] {
+        let result = run(&mut s, command, json!({}));
+        close(&result["total"]["volume_mm3"], volume);
+        close(&result["total"]["mass_g"], volume * density / 1000.0);
+        close(&result["total"]["area_mm2"], area);
+        for (axis, expected) in center.iter().enumerate() {
+            close(&result["bodies"][0]["center_of_mass"][axis], *expected);
+        }
+    }
+    let inspected = run(&mut s, "document.inspect", json!({"measure": true}));
+    close(&inspected["bodies"][0]["volume_mm3"], volume);
+    close(&inspected["bodies"][0]["area_mm2"], area);
+    for key in ["faces", "edges", "vertices"] {
+        assert_eq!(inspected["bodies"][0][key], inspected["bodies"][0]["kernel"][key], "document.inspect retains kernel {key}");
+    }
+    assert!(inspected["bodies"][0].get("sheet_metal").is_none());
+    let picked = run(&mut s, "inspect.measure", json!({"items": [{"type": "body", "name": "Panel"}]}));
+    close(&picked["items"][0]["volume_mm3"], volume);
+    assert!(std::sync::Arc::ptr_eq(&s.doc, &doc));
+    assert_eq!(s.undo.len(), undo, "measuring must not add an undo step");
+}
+
+#[test]
+fn perforated_sheet_instances_keep_physical_properties_in_nested_world_placements() {
+    let mut s = Session::default();
+    let parent = run(&mut s, "component.create", json!({"name": "Subassembly", "grounded": false}));
+    let child = run(&mut s, "component.create", json!({"name": "Sheet", "grounded": false}));
+    perforated_panel(&mut s);
+    let sheet_density = s.doc.density("Panel");
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let copy = run(&mut s, "occurrence.copy", json!({"component": parent["component"], "translate": [40, 0, 0]}));
+    run(
+        &mut s,
+        "occurrence.move",
+        json!({"occurrence": parent["occurrence"], "translate": [20, 0, 10], "axis": [0, 0, 1], "angle": "90 deg", "capture": false}),
+    );
+    box_in(&mut s, "Ballast");
+    let ballast_body = s.model.state().bodies.last().unwrap().name.clone();
+    run(&mut s, "material.assign", json!({"bodies": [ballast_body], "material": "Aluminum"}));
+    let ballast_mass = s.doc.density(&ballast_body);
+    let (volume, area, center) = perforated_panel_expected();
+    let sheet_mass = volume * sheet_density / 1000.0;
+    let first = [20.0 - center[1], center[0], 10.0 + center[2]];
+    let second = [40.0 + center[0], center[1], center[2]];
+    let doc = s.doc.clone();
+    let moves = s.pending_moves.clone();
+    let undo = s.undo.len();
+    for (parent_occurrence, expected) in [(&parent["occurrence"], first), (&copy["occurrence"], second)] {
+        let properties =
+            run(&mut s, "occurrence.properties", json!({"occurrence": child["occurrence"], "path": [parent_occurrence, child["occurrence"]]}));
+        close(&properties["total"]["volume_mm3"], volume);
+        close(&properties["total"]["mass_g"], sheet_mass);
+        close(&properties["total"]["area_mm2"], area);
+        for (axis, coordinate) in expected.iter().enumerate() {
+            close(&properties["total"]["center_of_mass"][axis], *coordinate);
+        }
+    }
+    let properties = run(&mut s, "component.properties", json!({"component": "root"}));
+    let mass = 2.0 * sheet_mass + ballast_mass;
+    close(&properties["total"]["volume_mm3"], 2.0 * volume + 1000.0);
+    close(&properties["total"]["mass_g"], mass);
+    for axis in 0..3 {
+        close(&properties["total"]["center_of_mass"][axis], (sheet_mass * (first[axis] + second[axis]) + ballast_mass * 5.0) / mass);
+    }
+    let measured = run(&mut s, "inspect.measure", json!({}));
+    close(&measured["total"]["volume_mm3"], 2.0 * volume + 1000.0);
+    close(&measured["total"]["mass_g"], mass);
+    assert_eq!(measured["bodies"].as_array().unwrap().iter().filter(|b| b["sheet_metal"] == true).count(), 2);
+    assert!(std::sync::Arc::ptr_eq(&s.doc, &doc));
+    assert_eq!(s.pending_moves, moves);
+    assert_eq!(s.undo.len(), undo);
+}
+
+#[test]
+fn perforated_sheet_centroid_follows_a_folded_panel_and_unfolds() {
+    use std::f64::consts::{FRAC_PI_2, PI};
+    let mut s = Session::default();
+    panel_blank(&mut s, 30.0, 10.0);
+    run(
+        &mut s,
+        "sheet.fold",
+        json!({"points": [[10, 0, 0], [10, 10, 0]], "angle": "90 deg", "radius": "0.8", "position": "centerline", "fixed": [2, 5, 0]}),
+    );
+    let before = run(&mut s, "component.properties", json!({"component": "root"}));
+    run(&mut s, "sheet.perforate", json!({"diameter": "2", "pitch": "10", "margin": "0", "pattern": "square"}));
+    let sheet = s.model.state().surface_sheets[0].shown();
+    let holes = sheet.perforation_holes(&sheet.perforations[0]);
+    assert_eq!(holes.len(), 2);
+    // Fold boundaries carry kernel roundoff; keep the analytic centres and the
+    // same sub-micrometre tolerance used by the property checks below.
+    for (hole, expected) in holes.iter().zip([Vec2::new(1.0, 1.0), Vec2::new(21.0, 1.0)]) {
+        assert!(hole.dist(expected) < 1e-6, "{hole:?} != {expected:?}");
+    }
+    // The right panel turns up by 90 degrees about a y-parallel bend axis at
+    // z = radius + thickness. Its mid-plane is radius + thickness/2 from that axis.
+    let allowance = FRAC_PI_2 * (0.8 + 0.44 * 0.8);
+    let bend_start = 10.0 - allowance / 2.0;
+    let right_hole = [bend_start + 1.2, 1.0, 1.6 + 21.0 - bend_start - allowance];
+    let old_volume = before["total"]["volume_mm3"].as_f64().unwrap();
+    let hole_volume = PI * 0.8;
+    let volume = old_volume - 2.0 * hole_volume;
+    let result = run(&mut s, "component.properties", json!({"component": "root"}));
+    close(&result["total"]["volume_mm3"], volume);
+    for (axis, left) in [1.0, 1.0, 0.4].iter().enumerate() {
+        let old = before["total"]["center_of_mass"][axis].as_f64().unwrap();
+        close(&result["total"]["center_of_mass"][axis], old + hole_volume * (2.0 * old - left - right_hole[axis]) / volume);
+    }
+    run(&mut s, "sheet.unfold", json!({}));
+    let result = run(&mut s, "component.properties", json!({"component": "root"}));
+    let volume = 240.0 - 2.0 * hole_volume;
+    close(&result["total"]["volume_mm3"], volume);
+    for (axis, expected) in [(240.0 * 15.0 - 2.0 * hole_volume * 11.0) / volume, (240.0 * 5.0 - 2.0 * hole_volume) / volume, 0.4].iter().enumerate() {
+        close(&result["total"]["center_of_mass"][axis], *expected);
+    }
+}
+
+#[test]
+fn perforated_sheet_correction_rejects_invalid_metadata_without_partial_changes() {
+    let mut s = Session::default();
+    perforated_panel(&mut s);
+    let state = s.model.state();
+    let measured = solidcraft_kernel::measure(&state.bodies[0].body).unwrap();
+    for pitch in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        let mut sheet = state.surface_sheets[0].clone();
+        sheet.perforations[0].pitch = pitch;
+        let mut actual = measured.clone();
+        assert!(sheet.correct_perforation_properties(&mut actual, &solidcraft_doc::IDENTITY).is_err());
+        assert_eq!(actual.volume, measured.volume);
+        assert_eq!(actual.area, measured.area);
+        assert_eq!(actual.centroid, measured.centroid);
+    }
+    let mut scaled = solidcraft_doc::IDENTITY;
+    scaled[0][0] = 2.0;
+    let mut sheared = solidcraft_doc::IDENTITY;
+    sheared[0][1] = 0.5;
+    for placement in [scaled, sheared] {
+        let mut actual = measured.clone();
+        assert!(state.surface_sheets[0].correct_perforation_properties(&mut actual, &placement).is_err());
+        assert_eq!((actual.volume, actual.area, actual.centroid), (measured.volume, measured.area, measured.centroid));
+    }
+}
+
+#[test]
+fn perforated_sheet_body_transfer_preserves_world_mass_and_centroid() {
+    let mut s = Session::default();
+    perforated_panel(&mut s);
+    let moved = run(&mut s, "component.create", json!({"name": "MovedSheet", "grounded": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": moved["occurrence"], "translate": [100, 0, 0]}));
+    run(&mut s, "component.move_bodies", json!({"bodies": ["Panel"], "component": moved["component"]}));
+    let (volume, _, center) = perforated_panel_expected();
+    let mass = volume * s.doc.density("Panel") / 1000.0;
+    for command in ["component.properties", "inspect.measure"] {
+        let result = run(&mut s, command, json!({"component": "root"}));
+        close(&result["total"]["volume_mm3"], volume);
+        close(&result["total"]["mass_g"], mass);
+        for (axis, expected) in center.iter().enumerate() {
+            close(&result["bodies"][0]["center_of_mass"][axis], *expected);
+        }
+    }
+}
+
+#[test]
+fn perforated_sheet_inertia_removes_analytic_hole_cylinders_and_turns_with_the_sheet() {
+    let mut s = Session::default();
+    let c = run(&mut s, "component.create", json!({"name": "Sheet", "grounded": false}));
+    perforated_panel(&mut s);
+    let (volume, _, center) = perforated_panel_expected();
+    let old_center = [10.0, 5.0, 0.4];
+    let mut expected = [[0.0; 3]; 3];
+    let dimensions: [f64; 3] = [20.0, 10.0, 0.8];
+    for i in 0..3 {
+        expected[i][i] = 160.0 * (dimensions[(i + 1) % 3].powi(2) + dimensions[(i + 2) % 3].powi(2)) / 12.0;
+    }
+    let hole_volume = std::f64::consts::PI * 0.8;
+    let own = [hole_volume * (3.0 + 0.64) / 12.0, hole_volume * (3.0 + 0.64) / 12.0, hole_volume / 2.0];
+    for hole in [[2.0, 2.0, 0.4], [12.0, 2.0, 0.4]] {
+        let d = [0, 1, 2].map(|i| hole[i] - old_center[i]);
+        let d2: f64 = d.iter().map(|v| v * v).sum();
+        for i in 0..3 {
+            for j in 0..3 {
+                expected[i][j] -= if i == j { own[i] + hole_volume * d2 } else { 0.0 } - hole_volume * d[i] * d[j];
+            }
+        }
+    }
+    let d = [0, 1, 2].map(|i| center[i] - old_center[i]);
+    let d2: f64 = d.iter().map(|v| v * v).sum();
+    for i in 0..3 {
+        for j in 0..3 {
+            expected[i][j] = (expected[i][j] - volume * (if i == j { d2 } else { 0.0 } - d[i] * d[j])) * s.doc.density("Panel") / 1000.0;
+        }
+    }
+    let first = run(&mut s, "component.properties", json!({}));
+    tensor_close(&first["total"]["inertia_g_mm2"], expected, 1e-9);
+    let verify_assembly = |s: &mut Session, tensor: [[f64; 3]; 3], center: [f64; 3]| {
+        let assembly = run(s, "assembly.mass_properties", json!({}));
+        let occurrence = assembly["occurrences"].as_array().unwrap().iter().find(|o| o["occurrence"] == c["occurrence"]).unwrap();
+        let mass = &occurrence["mass"];
+        assert!((mass["mass_kg"].as_f64().unwrap() - volume * s.doc.density("Panel") * 1e-6).abs() < 1e-12);
+        for (axis, coordinate) in center.iter().enumerate() {
+            close(&mass["center_of_mass_mm"][axis], *coordinate);
+        }
+        tensor_close(&mass["inertia_world_kg_mm2"], tensor.map(|row| row.map(|value| value / 1000.0)), 1e-9);
+    };
+    verify_assembly(&mut s, expected, center);
+    run(
+        &mut s,
+        "occurrence.move",
+        json!({"occurrence": c["occurrence"], "translate": [100, 40, 10], "axis": [0, 0, 1], "angle": "90 deg", "capture": false}),
+    );
+    let turned = run(&mut s, "component.properties", json!({}));
+    let rotation = [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]];
+    let rotated = solidcraft_geom::inertia::transformed(&expected, &rotation);
+    tensor_close(&turned["total"]["inertia_g_mm2"], rotated, 1e-9);
+    verify_assembly(&mut s, rotated, [100.0 - center[1], 40.0 + center[0], 10.0 + center[2]]);
+}
+
 #[test]
 fn properties_reject_hostile_identifiers_and_options() {
     let mut s = Session::default();
@@ -98,6 +424,317 @@ fn properties_reject_hostile_identifiers_and_options() {
     for path in [json!([]), json!(["bad"]), json!([0]), json!(vec![occurrence; 65])] {
         assert!(s.execute("occurrence.properties", &json!({"occurrence": occurrence, "path": path})).is_err());
     }
+    for about in [json!("origin"), json!([1, 2]), json!([1, 2, "z"]), json!([f64::MAX, 0, 0]), json!({"x": 1})] {
+        assert!(s.execute("component.properties", &json!({"about": about})).is_err(), "{about}");
+    }
+}
+
+fn tensor(v: &Value) -> [[f64; 3]; 3] {
+    [0, 1, 2].map(|r| [0, 1, 2].map(|c| v[r][c].as_f64().unwrap_or_else(|| panic!("no [{r}][{c}] in {v}"))))
+}
+
+/// A perforation hole that a fold made after its field runs through is bent with the sheet, as a
+/// press brake bends perforated stock: what it takes off is the bend's own map of it. The sheet
+/// weighs as with the same hole cut into its flat and folded with it, which the kernel measures
+/// exactly: a hole wholly in the bend's zone, and one across its tangent line. Physical
+/// Properties takes a body's inertia from its tessellation, so its number agrees to 2e-4; the
+/// hole's inertia is checked on SMLib's exact moments of both bodies.
+#[test]
+fn perforated_sheet_hole_a_later_fold_runs_through_weighs_as_the_same_hole_cut_and_folded() {
+    // A 60 x 40 x 0.8 plate folded 90° at R 8 about x = 30 (its zone about 13 wide), and a hole
+    // of radius 2: one field of a single hole, its outline a square round it.
+    let (r, m, x0, yc) = (2.0, 0.5, 30.0, 20.0);
+    let fold = json!({"points": [[x0, 0, 0], [x0, 40, 0]], "angle": "90 deg", "radius": "8", "position": "centerline", "fixed": [5, 20, 0]});
+    for (what, xc) in [("in the zone", x0), ("across the tangent line", x0 + 6.0)] {
+        let mut perforated = Session::default();
+        panel_blank(&mut perforated, 60.0, 40.0);
+        run(&mut perforated, "sketch.create", json!({"plane": "XY", "name": "Spot"}));
+        run(&mut perforated, "sketch.rectangle.two_point", json!({"p0": [xc - r - m, yc - r - m], "p1": [xc + r + m, yc + r + m]}));
+        run(&mut perforated, "sketch.finish", json!({}));
+        run(&mut perforated, "sheet.perforate", json!({"diameter": 2.0 * r, "pitch": 30, "margin": m, "pattern": "square", "sketch": "Spot"}));
+        run(&mut perforated, "sheet.fold", fold.clone());
+        assert_eq!(run(&mut perforated, "sheet.flat_pattern", json!({}))["perforations"][0]["count"], 1, "{what}");
+        let mut cut = Session::default();
+        panel_blank(&mut cut, 60.0, 40.0);
+        run(&mut cut, "sheet.fold", fold.clone());
+        run(&mut cut, "sheet.unfold", json!({}));
+        run(&mut cut, "solid.cylinder", json!({"radius": r, "height": 20, "base": [xc, yc, -10], "axis": "Z", "operation": "cut"}));
+        run(&mut cut, "sheet.refold", json!({}));
+        let (a, b) = (run(&mut perforated, "component.properties", json!({})), run(&mut cut, "component.properties", json!({})));
+        for key in ["volume_mm3", "area_mm2"] {
+            let (x, y) = (a["total"][key].as_f64().unwrap(), b["total"][key].as_f64().unwrap());
+            assert!((x - y).abs() < 1e-9 * y, "{what}: {key} {x} vs {y}");
+        }
+        for k in 0..3 {
+            let (x, y) = (a["total"]["center_of_mass"][k].as_f64().unwrap(), b["total"]["center_of_mass"][k].as_f64().unwrap());
+            assert!((x - y).abs() < 1e-8, "{what}: centre of mass {k}: {x} vs {y}");
+        }
+        tensor_close(&a["total"]["inertia_g_mm2"], tensor(&b["total"]["inertia_g_mm2"]), 2e-4);
+        // Exactly: the folded plate's moments less the bent hole are those of the plate with the
+        // hole cut and folded, to 1e-4 of the hole's own inertia about its own centre of mass
+        // (SMLib integrates each body to 1e-8 of its own).
+        let (plate, want) = (exact_mass(&perforated), exact_mass(&cut));
+        let mut got = plate;
+        perforated.model.state().surface_sheets[0].correct_perforation_mass_properties(&mut got, &solidcraft_doc::IDENTITY).unwrap();
+        // The hole: what the plate loses, taken about the hole's own centre.
+        let shifted = solidcraft_geom::inertia::shifted;
+        let v = plate.volume - got.volume;
+        let at = (plate.centroid * plate.volume - got.centroid * got.volume) / v;
+        let mut lost = shifted(&plate.inertia, plate.volume, got.centroid - plate.centroid);
+        for (row, g) in lost.iter_mut().zip(got.inertia) {
+            for (x, y) in row.iter_mut().zip(g) {
+                *x -= y;
+            }
+        }
+        let own = shifted(&lost, -v, got.centroid - at);
+        let hole = own.iter().flatten().fold(0.0f64, |m, x| m.max(x.abs()));
+        assert!(hole > 10.0 && hole < 30.0, "{what}: the hole's own inertia {own:?}");
+        for (g, w) in got.inertia.iter().flatten().zip(want.inertia.iter().flatten()) {
+            assert!((g - w).abs() <= 1e-4 * hole, "{what}: inertia {:?} vs {:?} (the hole's own {hole})", got.inertia, want.inertia);
+        }
+    }
+}
+
+/// The session's first body's volume, centre and inertia at unit density, integrated by SMLib on
+/// its exact faces (at `solidcraft_smlib::MEASURE_ACCURACY`, 1e-8).
+fn exact_mass(s: &Session) -> solidcraft_geom::MassProperties {
+    let state = s.model.state();
+    let m = state.bodies[0].body.smlib().unwrap().mass_properties(1e-8).unwrap();
+    let [x, y, z] = m.centroid;
+    solidcraft_geom::MassProperties { volume: m.volume, centroid: Vec3::new(x, y, z), inertia: m.inertia_tensor() }
+}
+
+/// A U plate folded across one arm, with a field on the other arm at the fold's height: its holes
+/// lie level with the bend's zone, beside its end, on the panel that stays flat. Each is a cylinder
+/// through that panel, so the sheet weighs as the plate less six of them.
+#[test]
+fn perforated_sheet_holes_beside_a_bends_end_level_with_its_zone_are_cylinders_on_their_panel() {
+    // The U: a base 60 x 15, arms 20 wide up to y = 40, the gap between them x 20…40. The left arm
+    // folds 90° at R 2 about y = 30, the line drawn across it alone, so the right arm stays.
+    let u = |s: &mut Session| {
+        run(s, "sheet.manage_rules", json!({"name": "Panel 0.8", "thickness": "0.8", "active": true}));
+        run(s, "sketch.create", json!({"plane": "XY", "name": "Blank"}));
+        run(s, "sketch.line", json!({"points": [[0, 0], [60, 0], [60, 40], [40, 40], [40, 15], [20, 15], [20, 40], [0, 40]], "closed": true}));
+        run(s, "sketch.finish", json!({}));
+        run(s, "sheet.flange", json!({"sketch": "Blank", "body_name": "Panel"}));
+    };
+    let fold = json!({"points": [[0, 30, 0], [20, 30, 0]], "angle": "90 deg", "radius": "2", "position": "centerline", "fixed": [30, 5, 0]});
+    let mut plain = Session::default();
+    u(&mut plain);
+    run(&mut plain, "sheet.fold", fold.clone());
+    let mut perforated = Session::default();
+    u(&mut perforated);
+    // Holes of radius 1 on a square grid of pitch 5, margin 0.5, inside x 41.5…58.5, y 28.5…36.5:
+    // from (41.5 + 1.5, 28.5 + 1.5), x 43, 48, 53 and y 30, 35. The row at y = 30 lies on the
+    // fold's line, its holes across the zone's whole width (about 3.7) but 23 past its end.
+    run(&mut perforated, "sketch.create", json!({"plane": "XY", "name": "Field"}));
+    run(&mut perforated, "sketch.rectangle.two_point", json!({"p0": [41.5, 28.5], "p1": [58.5, 36.5]}));
+    run(&mut perforated, "sketch.finish", json!({}));
+    run(&mut perforated, "sheet.perforate", json!({"diameter": 2, "pitch": 5, "margin": 0.5, "pattern": "square", "sketch": "Field"}));
+    run(&mut perforated, "sheet.fold", fold);
+    let sheet = perforated.model.state().surface_sheets[0].shown();
+    let mut holes: Vec<(f64, f64)> = sheet.perforation_holes(&sheet.perforations[0]).iter().map(|h| (h.x, h.y)).collect();
+    holes.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.total_cmp(&b.0)));
+    let want = [(43.0, 30.0), (48.0, 30.0), (53.0, 30.0), (43.0, 35.0), (48.0, 35.0), (53.0, 35.0)];
+    assert_eq!(holes.len(), want.len(), "{holes:?}");
+    for (h, w) in holes.iter().zip(want) {
+        assert!((h.0 - w.0).abs() < 1e-9 && (h.1 - w.1).abs() < 1e-9, "{holes:?}");
+    }
+    // Six cylinders of radius 1 through the 0.8 base, round (x, y, 0.4): each takes 0.8π of
+    // volume and adds 2π·0.8 of wall for 2π of faces. Σx = 2(43 + 48 + 53) = 288,
+    // Σy = 3(30 + 35) = 195, Σz = 6·0.4 = 2.4.
+    let (a, b) = (run(&mut perforated, "component.properties", json!({})), run(&mut plain, "component.properties", json!({})));
+    let pi = std::f64::consts::PI;
+    let (v0, a0) = (b["total"]["volume_mm3"].as_f64().unwrap(), b["total"]["area_mm2"].as_f64().unwrap());
+    let v = v0 - 6.0 * 0.8 * pi;
+    let area = a0 + 6.0 * (2.0 * pi * 0.8 - 2.0 * pi);
+    let got = (a["total"]["volume_mm3"].as_f64().unwrap(), a["total"]["area_mm2"].as_f64().unwrap());
+    assert!((got.0 - v).abs() < 1e-9 * v, "volume {} vs {v}", got.0);
+    assert!((got.1 - area).abs() < 1e-9 * area, "area {} vs {area}", got.1);
+    for (k, sum) in [288.0, 195.0, 2.4].into_iter().enumerate() {
+        let c0 = b["total"]["center_of_mass"][k].as_f64().unwrap();
+        let want = (v0 * c0 - 0.8 * pi * sum) / v;
+        let got = a["total"]["center_of_mass"][k].as_f64().unwrap();
+        assert!((got - want).abs() < 1e-8, "centre of mass {k}: {got} vs {want}");
+    }
+}
+
+/// The same on an L blank, its legs 60 x 20 and 30 x 20, with a flange on the short inner edge
+/// (y = 20, x 30…60) and then a field of round holes 2 across, every 4, margin 1: the leg beside
+/// the flange's end holds holes level with its zone, and each hole is a cylinder of 0.8π through
+/// the sheet, wherever it lies.
+#[test]
+fn perforated_sheet_round_holes_beside_a_flanges_end_are_cylinders_on_their_panel() {
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name": "Panel 0.8", "thickness": "0.8", "active": true}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Blank"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [60, 0], [60, 20], [30, 20], [30, 40], [0, 40]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Blank", "body_name": "Panel"}));
+    run(&mut s, "sheet.flange", json!({"edges": [[45, 20, 0.8]], "height": 10}));
+    let before = run(&mut s, "component.properties", json!({}));
+    run(&mut s, "sheet.perforate", json!({"diameter": "2", "pitch": "4", "margin": "1"}));
+    let flat = run(&mut s, "sheet.flat_pattern", json!({}));
+    let n = flat["perforations"][0]["count"].as_u64().unwrap();
+    // [min x, max x, min y, max y] of the zone in the flat.
+    let zone: Vec<f64> = (0..4).map(|k| flat["bend_zones"][0][k].as_f64().unwrap()).collect();
+    let sheet = s.model.state().surface_sheets[0].shown();
+    let holes = sheet.perforation_holes(&sheet.perforations[0]);
+    assert_eq!(holes.len() as u64, n);
+    let beside = holes.iter().filter(|c| (c.x + 1.0 < zone[0] || c.x - 1.0 > zone[1]) && c.y + 1.0 > zone[2] && c.y - 1.0 < zone[3]).count();
+    assert!(beside > 0, "no hole beside the zone's end: {zone:?}");
+    let result = run(&mut s, "component.properties", json!({}));
+    let v = before["total"]["volume_mm3"].as_f64().unwrap() - n as f64 * 0.8 * std::f64::consts::PI;
+    assert!((result["total"]["volume_mm3"].as_f64().unwrap() - v).abs() < 1e-9 * v, "{} vs {v}", result["total"]["volume_mm3"]);
+}
+
+/// A cut that leaves a piece of a bend's zone held by one panel leaves a tab, which lies flat with
+/// that panel: a hole of a field made before the fold that lands on it is a cylinder through the
+/// tab, not bent with the zone.
+#[test]
+fn perforated_sheet_hole_on_a_tab_a_cut_leaves_of_a_bend_is_a_cylinder_through_it() {
+    // A 60 x 40 x 0.8 plate folded 90° at R 8 about x = 30, its zone x 23.4…36.6. Unfolded, a C
+    // cut round x 23.4…31, y 4…12 (its arms 2 wide, opening onto the fixed panel) leaves that
+    // piece of the zone held by the fixed panel alone: a tab. One hole of radius 1 at (27, 6).
+    let fold = json!({"points": [[30, 0, 0], [30, 40, 0]], "angle": "90 deg", "radius": "8", "position": "centerline", "fixed": [5, 20, 0]});
+    let made = |field: bool| {
+        let mut s = Session::default();
+        panel_blank(&mut s, 60.0, 40.0);
+        if field {
+            run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Spot"}));
+            run(&mut s, "sketch.rectangle.two_point", json!({"p0": [25.5, 4.5], "p1": [28.5, 7.5]}));
+            run(&mut s, "sketch.finish", json!({}));
+            run(&mut s, "sheet.perforate", json!({"diameter": 2, "pitch": 30, "margin": 0.5, "pattern": "square", "sketch": "Spot"}));
+        }
+        run(&mut s, "sheet.fold", fold.clone());
+        run(&mut s, "sheet.unfold", json!({}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "C"}));
+        let c = json!([[22, 2], [33, 2], [33, 14], [22, 14], [22, 12], [31, 12], [31, 4], [22, 4]]);
+        run(&mut s, "sketch.line", json!({"points": c, "closed": true}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "C", "through_all": true, "direction": "symmetric", "operation": "cut"}));
+        run(&mut s, "sheet.refold", json!({}));
+        s
+    };
+    let (mut perforated, mut plain) = (made(true), made(false));
+    assert!(perforated.model.state().surface_sheets[0].bends.iter().any(|b| !b.tabs.is_empty()), "the cut leaves a tab");
+    assert_eq!(run(&mut perforated, "sheet.flat_pattern", json!({}))["perforations"][0]["count"], 1);
+    // One cylinder of radius 1 through the fixed panel's plane, round (27, 6, 0.4).
+    let (a, b) = (run(&mut perforated, "component.properties", json!({})), run(&mut plain, "component.properties", json!({})));
+    let pi = std::f64::consts::PI;
+    let (v0, a0) = (b["total"]["volume_mm3"].as_f64().unwrap(), b["total"]["area_mm2"].as_f64().unwrap());
+    let v = v0 - 0.8 * pi;
+    let area = a0 + 2.0 * pi * 0.8 - 2.0 * pi;
+    let got = (a["total"]["volume_mm3"].as_f64().unwrap(), a["total"]["area_mm2"].as_f64().unwrap());
+    assert!((got.0 - v).abs() < 1e-9 * v, "volume {} vs {v}", got.0);
+    assert!((got.1 - area).abs() < 1e-9 * area, "area {} vs {area}", got.1);
+    for (k, at) in [27.0, 6.0, 0.4].into_iter().enumerate() {
+        let c0 = b["total"]["center_of_mass"][k].as_f64().unwrap();
+        let want = (v0 * c0 - 0.8 * pi * at) / v;
+        let got = a["total"]["center_of_mass"][k].as_f64().unwrap();
+        assert!((got - want).abs() < 1e-8, "centre of mass {k}: {got} vs {want}");
+    }
+}
+
+fn tensor_close(actual: &Value, want: [[f64; 3]; 3], rel: f64) {
+    let got = tensor(actual);
+    let scale = want.iter().flatten().fold(0.0f64, |m, x| m.max(x.abs()));
+    for (g, w) in got.iter().flatten().zip(want.iter().flatten()) {
+        assert!((g - w).abs() <= rel * scale, "{got:?} != {want:?}");
+    }
+}
+
+/// #8095: a 10 × 20 × 30 mm steel box's inertia tensor about its centre of mass is
+/// m (b² + c²) / 12 … on the diagonal, its principal axes are its edges, and turning its
+/// placement turns the tensor with it.
+#[test]
+fn box_inertia_matches_the_closed_form_and_turns_with_its_placement() {
+    let mut s = Session::default();
+    let c = run(&mut s, "component.create", json!({"name": "Block", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 30, "body_name": "Block"}));
+    run(&mut s, "material.assign", json!({"bodies": ["Block"], "material": "Steel"}));
+    let r = run(&mut s, "component.properties", json!({"component": c["component"]}));
+    let total = &r["total"];
+    close(&total["bbox"]["max"][1], 20.0);
+    let m = total["mass_g"].as_f64().unwrap();
+    close(&total["mass_g"], 6000.0 * s.doc.density("Block") / 1000.0);
+    let (a, b, h) = (10.0, 20.0, 30.0);
+    let (ixx, iyy, izz) = (m * (b * b + h * h) / 12.0, m * (a * a + h * h) / 12.0, m * (a * a + b * b) / 12.0);
+    tensor_close(&total["inertia_g_mm2"], [[ixx, 0.0, 0.0], [0.0, iyy, 0.0], [0.0, 0.0, izz]], 1e-9);
+    tensor_close(&r["bodies"][0]["inertia_g_mm2"], [[ixx, 0.0, 0.0], [0.0, iyy, 0.0], [0.0, 0.0, izz]], 1e-9);
+    // Smallest first: about the longest edge (z), largest about the shortest (x).
+    for (k, want) in [izz, iyy, ixx].into_iter().enumerate() {
+        assert!((total["principal_moments_g_mm2"][k].as_f64().unwrap() - want).abs() < 1e-9 * ixx, "{total}");
+    }
+    // Right-handed: z × y is −x.
+    assert_eq!(total["principal_axes"], json!([[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]]));
+    for (k, want) in [5.0, 10.0, 15.0].iter().enumerate() {
+        close(&total["first_moment_g_mm"][k], m * want);
+    }
+    // A quarter turn about z swaps the x and y moments; the principal moments stay.
+    run(&mut s, "occurrence.move", json!({"occurrence": c["occurrence"], "axis": [0, 0, 1], "angle": "90 deg", "capture": false}));
+    let turned = run(&mut s, "component.properties", json!({"component": c["component"]}));
+    tensor_close(&turned["total"]["inertia_g_mm2"], [[iyy, 0.0, 0.0], [0.0, ixx, 0.0], [0.0, 0.0, izz]], 1e-9);
+    assert_eq!(turned["total"]["principal_moments_g_mm2"], total["principal_moments_g_mm2"]);
+    let x_axis = &turned["total"]["principal_axes"][2];
+    assert!(x_axis[0].as_f64().unwrap().abs() < 1e-9 && (x_axis[1].as_f64().unwrap().abs() - 1.0).abs() < 1e-9, "{turned}");
+}
+
+/// #8095: an assembly's tensor adds each placement's own about the shared centre of mass by
+/// parallel axes, and `about` takes it about any point; a cylinder's comes from its
+/// tessellation, close to m r² / 2 about its axis.
+#[test]
+fn assembly_inertia_adds_placements_by_parallel_axes_and_about_any_point() {
+    let mut s = Session::default();
+    let (component, _, body) = box_in(&mut s, "Block");
+    run(&mut s, "occurrence.copy", json!({"component": component, "translate": [20, 0, 0]}));
+    let root = run(&mut s, "component.properties", json!({"component": "root", "about": [0, 0, 0]}));
+    let total = &root["total"];
+    let m = s.doc.density(&body);
+    close(&total["mass_g"], 2.0 * m);
+    // Each 10 mm cube: m (10² + 10²) / 12 on its diagonal; each sits 10 mm along x from (15, 5, 5).
+    let own = m * 200.0 / 12.0;
+    let at_centre = [[2.0 * own, 0.0, 0.0], [0.0, 2.0 * own + 2.0 * m * 100.0, 0.0], [0.0, 0.0, 2.0 * own + 2.0 * m * 100.0]];
+    tensor_close(&total["inertia_g_mm2"], at_centre, 1e-9);
+    // About the origin: the parallel-axis term of the whole mass at (15, 5, 5).
+    let (mm, cv) = (2.0 * m, [15.0, 5.0, 5.0]);
+    let c2: f64 = cv.iter().map(|x| x * x).sum();
+    let at_origin = [0, 1, 2].map(|r| [0, 1, 2].map(|k| at_centre[r][k] + mm * (if r == k { c2 } else { 0.0 } - cv[r] * cv[k])));
+    assert_eq!(total["inertia_about"]["point"], json!([0.0, 0.0, 0.0]));
+    tensor_close(&total["inertia_about"]["inertia_g_mm2"], at_origin, 1e-9);
+    assert!(total.get("inertia_about").is_some() && run(&mut s, "component.properties", json!({}))["total"].get("inertia_about").is_none());
+
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 8, "height": 10, "body_name": "Pin"}));
+    let r = run(&mut s, "component.properties", json!({}));
+    let (m, r2) = (r["total"]["mass_g"].as_f64().unwrap(), 64.0);
+    let i = tensor(&r["total"]["inertia_g_mm2"]);
+    assert!((i[2][2] - m * r2 / 2.0).abs() < 1e-3 * m * r2 / 2.0, "{i:?}");
+    assert!((i[0][0] - m * (3.0 * r2 + 100.0) / 12.0).abs() < 1e-3 * i[0][0], "{i:?}");
+}
+
+/// #8095: an open surface has no volume, so no tensor; the closed bodies beside it keep theirs.
+#[test]
+fn open_bodies_have_no_inertia_and_leave_the_closed_ones_alone() {
+    let mut s = Session::default();
+    for (command, params) in [
+        ("sketch.create", json!({"plane": "XY", "name": "Profile"})),
+        ("sketch.line", json!({"points": [[30, 0], [30, 40]], "ids": ["side"]})),
+        ("sketch.finish", json!({})),
+        ("surface.revolve", json!({"sketch": "Profile", "curves": ["side"], "axis": "y", "angle": "270 deg", "body_name": "Tube"})),
+    ] {
+        run(&mut s, command, params);
+    }
+    let open = run(&mut s, "component.properties", json!({"about": [1, 2, 3]}));
+    assert_eq!(open["bodies"][0]["inertia_g_mm2"], Value::Null);
+    for key in ["inertia_g_mm2", "principal_moments_g_mm2", "principal_axes"] {
+        assert_eq!(open["total"][key], Value::Null, "{key}");
+    }
+    assert_eq!(open["total"]["inertia_about"]["inertia_g_mm2"], Value::Null);
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [100, 0, 0], "body_name": "Box"}));
+    let both = run(&mut s, "component.properties", json!({}));
+    let m = both["total"]["mass_g"].as_f64().unwrap();
+    tensor_close(&both["total"]["inertia_g_mm2"], [[m * 200.0 / 12.0, 0.0, 0.0], [0.0, m * 200.0 / 12.0, 0.0], [0.0, 0.0, m * 200.0 / 12.0]], 1e-9);
 }
 
 #[test]
@@ -113,7 +750,7 @@ fn compact_exponentially_instanced_assembly_refuses_partial_totals() {
     }
     for command in ["component.properties", "occurrence.properties"] {
         let error = s.execute(command, &json!({"component": 0, "occurrence": last_occurrence})).unwrap_err();
-        assert!(error.to_string().contains("traversal limits"), "{error}");
+        assert!(error.to_string().contains("more than 100000 placements"), "{error}");
     }
 }
 
@@ -125,7 +762,7 @@ fn excessively_nested_assembly_refuses_partial_totals() {
         s.active_component = s.doc_mut().add_component(None, parent).unwrap();
     }
     let error = s.execute("component.properties", &json!({"component": 0})).unwrap_err();
-    assert!(error.to_string().contains("traversal limits"), "{error}");
+    assert!(error.to_string().contains("deeper than 64 levels"), "{error}");
 }
 
 /// #532: a product BOM needs materials outside the built-in library (walnut, polypropylene,
@@ -313,4 +950,83 @@ fn configurations_switch_to_a_user_defined_material() {
     assert_eq!(s.doc.materials.get("Slat").map(String::as_str), Some("Black Walnut"));
     run(&mut s, "material.delete", json!({"material": "Black Walnut", "replace": "Default"}));
     assert!(!s.doc.materials.contains_key("Slat"));
+}
+
+/// #8706: Properties of a large assembly took minutes because every placed copy of a body was
+/// transformed and measured again (three fine tessellations each). Every placement of a body now
+/// reuses one measurement of it: 41 placements measure no placed copy afresh and tessellate
+/// each distinct body's inertia spread (#8095) once, exactly as one placement does, and the
+/// answer is the same when measured again.
+#[test]
+fn repeated_placements_reuse_one_measurement_of_their_body() {
+    let mut s = Session::default();
+    let (component, _, _) = box_in(&mut s, "Block");
+    run(&mut s, "solid.cylinder", json!({"diameter": 4, "height": 30}));
+    for i in 1..40 {
+        run(&mut s, "occurrence.copy", json!({"component": component, "translate": [20 * i, 0, 0]}));
+    }
+    let turned = run(&mut s, "occurrence.copy", json!({"component": component, "translate": [0, 50, 0]}));
+    run(&mut s, "occurrence.move", json!({"occurrence": turned["occurrence"], "translate": [0, 0, 0], "axis": [1, 1, 1], "angle": "30 deg"}));
+    let first = run(&mut s, "component.properties", json!({"component": "root"}));
+    assert_eq!(first["body_count"], 82, "{first}");
+    let (again, all) = super::work::capture(|| run(&mut s, "component.properties", json!({"component": "root"})));
+    assert_eq!(first, again);
+    let (block, one) = super::work::capture(|| run(&mut s, "occurrence.properties", json!({"occurrence": turned["occurrence"]})));
+    // Before, every placed copy was transformed and tessellated afresh (82 here); now no copy
+    // is, and the work is the same for 41 placements as for one: one spread per distinct body.
+    let per_body = super::work::Work { placed_measures: 0, spreads: 2 };
+    assert_eq!(all, per_body, "41 placements");
+    assert_eq!(one, per_body, "one placement");
+    close(&first["total"]["volume_mm3"], 41.0 * block["total"]["volume_mm3"].as_f64().unwrap());
+}
+
+/// #8706: a body measured where a rigid placement puts it, from its own measurement, matches its
+/// placed copy measured afresh: volume, area, centre and counts, and the box (to the chord of
+/// the meshes it is taken from) also when the placement turns it off the axes.
+#[test]
+fn a_placed_body_measures_as_its_placed_copy() {
+    use solidcore_record::Vec3;
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"diameter": 4, "height": 30}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 5}));
+    let state = s.model.state();
+    let placements = [
+        solidcraft_doc::IDENTITY,
+        solidcraft_doc::rigid(Vec3::new(5.0, -3.0, 7.0), Vec3::ZERO, Vec3::Z, std::f64::consts::FRAC_PI_2),
+        solidcraft_doc::rigid(Vec3::new(100.0, 0.0, 0.0), Vec3::new(1.0, 2.0, 3.0), Vec3::new(1.0, 1.0, 1.0), 0.5),
+    ];
+    for body in &state.bodies {
+        for m in placements {
+            let fast = super::measure_placed(body, m).unwrap();
+            let placed = solidcraft_kernel::transform_matrix(&body.body, m).unwrap();
+            let slow = solidcraft_kernel::measure(&placed).unwrap();
+            let near = |a: f64, b: f64, tol: f64| assert!((a - b).abs() <= tol * b.abs().max(1.0), "{} {a} != {b}", body.name);
+            near(fast.volume, slow.volume, 1e-4);
+            near(fast.area, slow.area, 1e-4);
+            assert!((fast.centroid - slow.centroid).len() < 1e-3, "{} centre {:?} != {:?}", body.name, fast.centroid, slow.centroid);
+            let box_near = (fast.bbox.min - slow.bbox.min).len() < 0.05 && (fast.bbox.max - slow.bbox.max).len() < 0.05;
+            assert!(box_near, "{} box {:?} != {:?}", body.name, fast.bbox, slow.bbox);
+            assert_eq!((fast.faces, fast.edges, fast.vertices), (slow.merged.faces, slow.merged.edges, slow.merged.vertices));
+            assert_eq!(fast.closed, crate::cmd::inspect::encloses_volume(&placed));
+        }
+    }
+}
+
+/// #8706: a window waiting for the properties sees how many bodies are measured and can stop the
+/// measuring part way.
+#[test]
+fn a_watcher_sees_the_bodies_measured_and_can_stop_them() {
+    use std::sync::Arc;
+    let mut s = Session::default();
+    let (component, _, _) = box_in(&mut s, "Block");
+    for i in 1..4 {
+        run(&mut s, "occurrence.copy", json!({"component": component, "translate": [20 * i, 0, 0]}));
+    }
+    let progress = Arc::new(solidcraft_doc::progress::Progress::default());
+    let r = solidcraft_doc::progress::watch(progress.clone(), || s.execute("component.properties", &json!({"component": "root"})));
+    assert_eq!(r.unwrap()["body_count"], 4);
+    assert_eq!(progress.work(), Some(("measuring", 4, 4)));
+    progress.cancel();
+    let stopped = solidcraft_doc::progress::watch(progress, || s.execute("component.properties", &json!({"component": "root"})));
+    assert!(stopped.unwrap_err().to_string().contains("cancelled"));
 }

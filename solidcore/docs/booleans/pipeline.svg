@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="800" height="292" viewBox="0 0 800 292">
+  <title>pipeline</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path d="M0 0 L800 0 L800 292 L0 292 Z" fill="#ffffff"/>
+    <text transform="matrix(1 0 0 1 32 40)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">The boolean pipeline</tspan></text>
+    <text transform="matrix(1 0 0 1 32 74)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#555555"><tspan x="0" y="0">kernel (crates/solidcore): every computation</tspan></text>
+    <path d="M32 84 L162 84 L162 168 L32 168 Z" fill="#f0f0f0" stroke="#000000" stroke-miterlimit="10"/>
+    <path d="M184 84 L314 84 L314 168 L184 168 Z" fill="#f0f0f0" stroke="#000000" stroke-miterlimit="10"/>
+    <path d="M336 84 L466 84 L466 168 L336 168 Z" fill="#f0f0f0" stroke="#000000" stroke-miterlimit="10"/>
+    <path d="M488 84 L618 84 L618 168 L488 168 Z" fill="#f0f0f0" stroke="#000000" stroke-miterlimit="10"/>
+    <path d="M640 84 L770 84 L770 168 L640 168 Z" fill="#f0f0f0" stroke="#000000" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 44 110)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">1 Intersect</tspan></text>
+    <text transform="matrix(1 0 0 1 44 136)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">face pairs: SSI,</tspan></text>
+    <text transform="matrix(1 0 0 1 44 152)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">coincidence</tspan></text>
+    <text transform="matrix(1 0 0 1 196 110)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">2 Imprint</tspan></text>
+    <text transform="matrix(1 0 0 1 196 136)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">curves become</tspan></text>
+    <text transform="matrix(1 0 0 1 196 152)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">edges in both</tspan></text>
+    <text transform="matrix(1 0 0 1 348 110)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">3 Classify</tspan></text>
+    <text transform="matrix(1 0 0 1 348 136)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">faces: inside,</tspan></text>
+    <text transform="matrix(1 0 0 1 348 152)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">outside or on</tspan></text>
+    <text transform="matrix(1 0 0 1 500 110)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">4 Select</tspan></text>
+    <text transform="matrix(1 0 0 1 500 136)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">keep or delete</tspan></text>
+    <text transform="matrix(1 0 0 1 500 152)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">per operation</tspan></text>
+    <text transform="matrix(1 0 0 1 652 110)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">5 Merge</tspan></text>
+    <text transform="matrix(1 0 0 1 652 136)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">copy, delete,</tspan></text>
+    <text transform="matrix(1 0 0 1 652 152)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">merge regions</tspan></text>
+    <g>
+      <g>
+        <path d="M162 125.25 L181 125.25 L181 126.75 L162 126.75 Z" fill="#000000"/>
+        <path d="M184 126 L178 129 L178 123 Z" fill="#000000"/>
+      </g>
+    </g>
+    <g>
+      <g>
+        <path d="M314 125.25 L333 125.25 L333 126.75 L314 126.75 Z" fill="#000000"/>
+        <path d="M336 126 L330 129 L330 123 Z" fill="#000000"/>
+      </g>
+    </g>
+    <g>
+      <g>
+        <path d="M466 125.25 L485 125.25 L485 126.75 L466 126.75 Z" fill="#000000"/>
+        <path d="M488 126 L482 129 L482 123 Z" fill="#000000"/>
+      </g>
+    </g>
+    <g>
+      <g>
+        <path d="M618 125.25 L637 125.25 L637 126.75 L618 126.75 Z" fill="#000000"/>
+        <path d="M640 126 L634 129 L634 123 Z" fill="#000000"/>
+      </g>
+    </g>
+    <text transform="matrix(1 0 0 1 336 250)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#555555"><tspan x="0" y="0">ops (crates/solidcore-ops):</tspan></text>
+    <text transform="matrix(1 0 0 1 336 266)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#555555"><tspan x="0" y="0">decides and checks</tspan></text>
+    <path d="M32 224 L314 224 L314 268 L32 268 Z" fill="#f0f0f0" stroke="#000000" stroke-miterlimit="10"/>
+    <path d="M488 224 L770 224 L770 268 L488 268 Z" fill="#f0f0f0" stroke="#000000" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 116 251)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">boolean(): the operands</tspan></text>
+    <text transform="matrix(1 0 0 1 500 251)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">finish(): result or refusal</tspan></text>
+    <g>
+      <g>
+        <path d="M96.25 224 L96.25 171 L97.75 171 L97.75 224 Z" fill="#000000"/>
+        <path d="M97 168 L100 174 L94 174 Z" fill="#000000"/>
+      </g>
+    </g>
+    <g>
+      <g>
+        <path d="M705.75 168 L705.75 221 L704.25 221 L704.25 168 Z" fill="#000000"/>
+        <path d="M705 224 L702 218 L708 218 Z" fill="#000000"/>
+      </g>
+    </g>
+  </g>
+</svg>

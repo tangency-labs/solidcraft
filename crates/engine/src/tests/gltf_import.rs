@@ -62,6 +62,7 @@ impl Cube {
 fn shown_boxes(s: &Session) -> Vec<[i64; 6]> {
     let mut out: Vec<[i64; 6]> = s
         .world_state()
+        .unwrap()
         .bodies
         .iter()
         .map(|b| {
@@ -143,10 +144,11 @@ fn a_gltf_node_tree_comes_in_as_components_with_instances() {
 
     // Rigid until unlocked.
     let robot = id("robot");
-    assert_eq!(s.contents_joints(robot).len(), 5, "one for each placement");
+    let group = s.doc.rigid_group_of(robot).expect("one rigid group holds the robot's parts");
+    assert_eq!(s.doc.rigid_group_members(group).len(), 5, "it holds each placement");
     let r = run(&mut s, "component.unlock", json!({"component": "robot"}));
-    assert_eq!(r["joints"].as_array().unwrap().len(), 5, "{r}");
-    assert!(s.contents_joints(robot).is_empty());
+    assert!(r["rigid_group"].is_u64(), "{r}");
+    assert!(!s.contents_held(robot));
     run(&mut s, "edit.undo", json!({}));
 
     // Saved and opened again, it is the same (nothing new is saved for glTF).

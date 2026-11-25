@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#487",
+  "tangency-labs/solidcraft#490"
+ ],
+ "what": "a disc cut by the body made from two adjacent profiles revolved on the axis, around the disc flat end",
+ "source": "analytic",
+ "method": "Hand = cylinder r 20 from x = 0 to 60; Holder = disc r 40 from x = -1 to 1; keep_tools keeps Hand. Cut removes r < 20, x in [0,1] from the disc: V(Holder) = pi 40^2 2 - pi 20^2 1. Both bodies exist at the end: Holder 8796.46 and Hand 75398.22; the totals below add them.",
+ "body_count": 2,
+ "volume_mm3": 84194.68311620646
+}

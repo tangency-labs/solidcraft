@@ -1,0 +1,7195 @@
+{
+  "cases": [
+    {
+      "name": "self_vertex_1e-07_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              -1e-07,
+              1e-07
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "self_vertex_1e-07_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              -1e-07,
+              1e-07
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 0,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "self_vertex_1e-07_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              -1e-07,
+              1e-07
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 0,
+          "candidates": [
+            -1
+          ]
+        }
+      }
+    },
+    {
+      "name": "illegal_vertex_1e-07_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              -1e-07,
+              1e-07
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 1,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "illegal_vertex_1e-07_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              -1e-07,
+              1e-07
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 1,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "illegal_vertex_1e-07_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              -1e-07,
+              1e-07
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 1,
+          "candidates": [
+            -1
+          ]
+        }
+      }
+    },
+    {
+      "name": "vertex_to_empty_1e-07_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              -1e-07,
+              1e-07
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 2,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "vertex_to_empty_1e-07_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              -1e-07,
+              1e-07
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 2,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "vertex_to_empty_1e-07_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              -1e-07,
+              1e-07
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 2,
+          "candidates": [
+            -1
+          ]
+        }
+      }
+    },
+    {
+      "name": "empty_to_vertex_1e-07_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              -1e-07,
+              1e-07
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "empty_to_vertex_1e-07_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              -1e-07,
+              1e-07
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 0,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "empty_to_vertex_1e-07_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              -1e-07,
+              1e-07
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 0,
+          "candidates": [
+            -1
+          ]
+        }
+      }
+    },
+    {
+      "name": "empty_to_empty_1e-07_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              -1e-07,
+              1e-07
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 2,
+          "source": 2,
+          "recipient": 3,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "empty_to_empty_1e-07_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1e-07,
+              -1e-07,
+              1e-07
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 2,
+          "source": 2,
+          "recipient": 3,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "self_face_1e-07_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1e-07,
+                -1e-07,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1e-07,
+            -1e-07,
+            1e-07,
+            1e-07
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "self_face_1e-07_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1e-07,
+                -1e-07,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1e-07,
+            -1e-07,
+            1e-07,
+            1e-07
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 0,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "face_to_empty_1e-07_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1e-07,
+                -1e-07,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1e-07,
+            -1e-07,
+            1e-07,
+            1e-07
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "face_to_empty_1e-07_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1e-07,
+                -1e-07,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1e-07,
+            -1e-07,
+            1e-07,
+            1e-07
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "empty_to_face_1e-07_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1e-07,
+                -1e-07,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1e-07,
+            -1e-07,
+            1e-07,
+            1e-07
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "empty_to_face_1e-07_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1e-07,
+                -1e-07,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1e-07,
+            -1e-07,
+            1e-07,
+            1e-07
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "self_vertex_1_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              -1,
+              1
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "self_vertex_1_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              -1,
+              1
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 0,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "self_vertex_1_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              -1,
+              1
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 0,
+          "candidates": [
+            -1
+          ]
+        }
+      }
+    },
+    {
+      "name": "illegal_vertex_1_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              -1,
+              1
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 1,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "illegal_vertex_1_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              -1,
+              1
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 1,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "illegal_vertex_1_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              -1,
+              1
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 1,
+          "candidates": [
+            -1
+          ]
+        }
+      }
+    },
+    {
+      "name": "vertex_to_empty_1_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              -1,
+              1
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 2,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "vertex_to_empty_1_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              -1,
+              1
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 2,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "vertex_to_empty_1_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              -1,
+              1
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 2,
+          "candidates": [
+            -1
+          ]
+        }
+      }
+    },
+    {
+      "name": "empty_to_vertex_1_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              -1,
+              1
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "empty_to_vertex_1_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              -1,
+              1
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 0,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "empty_to_vertex_1_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              -1,
+              1
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 0,
+          "candidates": [
+            -1
+          ]
+        }
+      }
+    },
+    {
+      "name": "empty_to_empty_1_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              -1,
+              1
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 2,
+          "source": 2,
+          "recipient": 3,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "empty_to_empty_1_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              -1,
+              1
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 2,
+          "source": 2,
+          "recipient": 3,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "self_face_1_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1,
+                -1,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1,
+            -1,
+            1,
+            1
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "self_face_1_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1,
+                -1,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1,
+            -1,
+            1,
+            1
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 0,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "face_to_empty_1_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1,
+                -1,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1,
+            -1,
+            1,
+            1
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "face_to_empty_1_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1,
+                -1,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1,
+            -1,
+            1,
+            1
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "empty_to_face_1_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1,
+                -1,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1,
+            -1,
+            1,
+            1
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "empty_to_face_1_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1,
+                -1,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1,
+            -1,
+            1,
+            1
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "self_vertex_1000000.0_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              -1000000.0,
+              1000000.0
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "self_vertex_1000000.0_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              -1000000.0,
+              1000000.0
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 0,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "self_vertex_1000000.0_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              -1000000.0,
+              1000000.0
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 0,
+          "candidates": [
+            -1
+          ]
+        }
+      }
+    },
+    {
+      "name": "illegal_vertex_1000000.0_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              -1000000.0,
+              1000000.0
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 1,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "illegal_vertex_1000000.0_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              -1000000.0,
+              1000000.0
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 1,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "illegal_vertex_1000000.0_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              -1000000.0,
+              1000000.0
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 1,
+          "candidates": [
+            -1
+          ]
+        }
+      }
+    },
+    {
+      "name": "vertex_to_empty_1000000.0_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              -1000000.0,
+              1000000.0
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 2,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "vertex_to_empty_1000000.0_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              -1000000.0,
+              1000000.0
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 2,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "vertex_to_empty_1000000.0_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              -1000000.0,
+              1000000.0
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 2,
+          "candidates": [
+            -1
+          ]
+        }
+      }
+    },
+    {
+      "name": "empty_to_vertex_1000000.0_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              -1000000.0,
+              1000000.0
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "empty_to_vertex_1000000.0_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              -1000000.0,
+              1000000.0
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 0,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "empty_to_vertex_1000000.0_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              -1000000.0,
+              1000000.0
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 0,
+          "candidates": [
+            -1
+          ]
+        }
+      }
+    },
+    {
+      "name": "empty_to_empty_1000000.0_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              -1000000.0,
+              1000000.0
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 2,
+          "source": 2,
+          "recipient": 3,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "empty_to_empty_1000000.0_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1000000.0,
+              -1000000.0,
+              1000000.0
+            ]
+          ]
+        },
+        "transfer": {
+          "extra_empty": 2,
+          "source": 2,
+          "recipient": 3,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "self_face_1000000.0_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1000000.0,
+                -1000000.0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1000000.0,
+            -1000000.0,
+            1000000.0,
+            1000000.0
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "self_face_1000000.0_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1000000.0,
+                -1000000.0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1000000.0,
+            -1000000.0,
+            1000000.0,
+            1000000.0
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 0,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "face_to_empty_1000000.0_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1000000.0,
+                -1000000.0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1000000.0,
+            -1000000.0,
+            1000000.0,
+            1000000.0
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "face_to_empty_1000000.0_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1000000.0,
+                -1000000.0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1000000.0,
+            -1000000.0,
+            1000000.0,
+            1000000.0
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "empty_to_face_1000000.0_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1000000.0,
+                -1000000.0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1000000.0,
+            -1000000.0,
+            1000000.0,
+            1000000.0
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "empty_to_face_1000000.0_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1000000.0,
+                -1000000.0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            -1000000.0,
+            -1000000.0,
+            1000000.0,
+            1000000.0
+          ]
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "self_wire_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "self_wire_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 0,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "self_wire_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 0,
+          "candidates": [
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "self_wire_3",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 0,
+          "candidates": [
+            0,
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "self_wire_4",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 0,
+          "candidates": [
+            4,
+            2,
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "self_wire_5",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 0,
+          "candidates": [
+            4,
+            3,
+            2,
+            1,
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "wire_to_empty_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "wire_to_empty_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "wire_to_empty_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": [
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "wire_to_empty_3",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": [
+            0,
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "wire_to_empty_4",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": [
+            4,
+            2,
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "wire_to_empty_5",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": [
+            4,
+            3,
+            2,
+            1,
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "empty_to_wire_0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "empty_to_wire_1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "empty_to_wire_2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": [
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "empty_to_wire_3",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": [
+            0,
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "empty_to_wire_4",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": [
+            4,
+            2,
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "empty_to_wire_5",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; native self-transfer probe",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": [
+            4,
+            3,
+            2,
+            1,
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "existing_faceuses_Mouse.smb_0_1_0",
+      "upstream_ref": "fixtures/topology.edgeuse_p1/upstream_files.json; source/SMLib/src/SmShell.cpp:TransferChildrenTo",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 1,
+          "candidates": null,
+          "require_faceuse_pair": true
+        }
+      }
+    },
+    {
+      "name": "existing_faceuses_Mouse.smb_0_1_1",
+      "upstream_ref": "fixtures/topology.edgeuse_p1/upstream_files.json; source/SMLib/src/SmShell.cpp:TransferChildrenTo",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 1,
+          "candidates": [],
+          "require_faceuse_pair": true
+        }
+      }
+    },
+    {
+      "name": "existing_faceuses_Mouse.smb_1_0_0",
+      "upstream_ref": "fixtures/topology.edgeuse_p1/upstream_files.json; source/SMLib/src/SmShell.cpp:TransferChildrenTo",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 1,
+          "recipient": 0,
+          "candidates": null,
+          "require_faceuse_pair": true
+        }
+      }
+    },
+    {
+      "name": "existing_faceuses_Mouse.smb_1_0_1",
+      "upstream_ref": "fixtures/topology.edgeuse_p1/upstream_files.json; source/SMLib/src/SmShell.cpp:TransferChildrenTo",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 1,
+          "recipient": 0,
+          "candidates": [],
+          "require_faceuse_pair": true
+        }
+      }
+    },
+    {
+      "name": "existing_faceuses_Endcap.smb_0_1_0",
+      "upstream_ref": "fixtures/topology.edgeuse_p1/upstream_files.json; source/SMLib/src/SmShell.cpp:TransferChildrenTo; SmOwningTopology::Remove/PostInsert builds two nonempty baseline shells",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Endcap.smb"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": null,
+          "require_faceuse_pair": true,
+          "split_faceuse": true
+        }
+      }
+    },
+    {
+      "name": "existing_faceuses_Endcap.smb_0_1_1",
+      "upstream_ref": "fixtures/topology.edgeuse_p1/upstream_files.json; source/SMLib/src/SmShell.cpp:TransferChildrenTo; SmOwningTopology::Remove/PostInsert builds two nonempty baseline shells",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Endcap.smb"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": [],
+          "require_faceuse_pair": true,
+          "split_faceuse": true
+        }
+      }
+    },
+    {
+      "name": "existing_faceuses_Endcap.smb_1_0_0",
+      "upstream_ref": "fixtures/topology.edgeuse_p1/upstream_files.json; source/SMLib/src/SmShell.cpp:TransferChildrenTo; SmOwningTopology::Remove/PostInsert builds two nonempty baseline shells",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Endcap.smb"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": null,
+          "require_faceuse_pair": true,
+          "split_faceuse": true
+        }
+      }
+    },
+    {
+      "name": "existing_faceuses_Endcap.smb_1_0_1",
+      "upstream_ref": "fixtures/topology.edgeuse_p1/upstream_files.json; source/SMLib/src/SmShell.cpp:TransferChildrenTo; SmOwningTopology::Remove/PostInsert builds two nonempty baseline shells",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Endcap.smb"
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": [],
+          "require_faceuse_pair": true,
+          "split_faceuse": true
+        }
+      }
+    },
+    {
+      "name": "existing_faceuses_box_with_large_fillet.smb_0_1_0",
+      "upstream_ref": "fixtures/topology.edgeuse_p1/upstream_files.json; source/SMLib/src/SmShell.cpp:TransferChildrenTo",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "box_with_large_fillet.smb"
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 1,
+          "candidates": null,
+          "require_faceuse_pair": true
+        }
+      }
+    },
+    {
+      "name": "existing_faceuses_box_with_large_fillet.smb_0_1_1",
+      "upstream_ref": "fixtures/topology.edgeuse_p1/upstream_files.json; source/SMLib/src/SmShell.cpp:TransferChildrenTo",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "box_with_large_fillet.smb"
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 0,
+          "recipient": 1,
+          "candidates": [],
+          "require_faceuse_pair": true
+        }
+      }
+    },
+    {
+      "name": "existing_faceuses_box_with_large_fillet.smb_1_0_0",
+      "upstream_ref": "fixtures/topology.edgeuse_p1/upstream_files.json; source/SMLib/src/SmShell.cpp:TransferChildrenTo",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "box_with_large_fillet.smb"
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 1,
+          "recipient": 0,
+          "candidates": null,
+          "require_faceuse_pair": true
+        }
+      }
+    },
+    {
+      "name": "existing_faceuses_box_with_large_fillet.smb_1_0_1",
+      "upstream_ref": "fixtures/topology.edgeuse_p1/upstream_files.json; source/SMLib/src/SmShell.cpp:TransferChildrenTo",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "box_with_large_fillet.smb"
+        },
+        "transfer": {
+          "extra_empty": 0,
+          "source": 1,
+          "recipient": 0,
+          "candidates": [],
+          "require_faceuse_pair": true
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_0to0_all",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_0to0_wires",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 0,
+          "candidates": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_0to0_empty_list",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 0,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_0to1_all",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_0to1_wires",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_0to1_empty_list",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_0to2_all",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 2,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_0to2_wires",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 2,
+          "candidates": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_0to2_empty_list",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 2,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_1to0_all",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_1to0_wires",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_1to0_empty_list",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_1to1_all",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 1,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_1to1_wires",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 1,
+          "candidates": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_1to1_empty_list",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 1,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_1to2_all",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 2,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_1to2_wires",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 2,
+          "candidates": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_1to2_empty_list",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 2,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_2to0_all",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_2to0_wires",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 0,
+          "candidates": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_2to0_empty_list",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 0,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_2to1_all",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 1,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_2to1_wires",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 1,
+          "candidates": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_2to1_empty_list",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 1,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_2to2_all",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 2,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_2to2_wires",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 2,
+          "candidates": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_2to2_empty_list",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 2,
+          "candidates": []
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n2_0to0_all",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 2
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n2_0to1_all",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 2
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n2_0to2_all",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 2
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 2,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n2_0to3_all",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 2
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 3,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n2_1to0_all",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 2
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n2_1to1_all",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 2
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 1,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n2_1to2_all",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 2
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 2,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n2_1to3_all",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 2
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 3,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n2_2to0_all",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 2
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n2_2to1_all",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 2
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 1,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n2_2to2_all",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 2
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 2,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n2_2to3_all",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 2
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 3,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n2_3to0_all",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 2
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 3,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n2_3to1_all",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 2
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 3,
+          "recipient": 1,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n2_3to2_all",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 2
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 3,
+          "recipient": 2,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n2_3to3_all",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 2
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 3,
+          "recipient": 3,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "mixed_n2_0to0_all",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "networks": 2
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "mixed_n2_0to0_subset",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "networks": 2
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 0,
+          "candidates": [
+            0,
+            2,
+            2,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_n2_0to1_all",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "networks": 2
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "mixed_n2_0to1_subset",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "networks": 2
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": [
+            0,
+            2,
+            2,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_n2_0to2_all",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "networks": 2
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 2,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "mixed_n2_0to2_subset",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "networks": 2
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 2,
+          "candidates": [
+            0,
+            2,
+            2,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_n2_1to0_all",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "networks": 2
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "mixed_n2_1to0_subset",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "networks": 2
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": [
+            0,
+            2,
+            2,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_n2_1to1_all",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "networks": 2
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 1,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "mixed_n2_1to1_subset",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "networks": 2
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 1,
+          "candidates": [
+            0,
+            2,
+            2,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_n2_1to2_all",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "networks": 2
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 2,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "mixed_n2_1to2_subset",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "networks": 2
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 2,
+          "candidates": [
+            0,
+            2,
+            2,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_n2_2to0_all",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "networks": 2
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 0,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "mixed_n2_2to0_subset",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "networks": 2
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 0,
+          "candidates": [
+            0,
+            2,
+            2,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_n2_2to1_all",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "networks": 2
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 1,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "mixed_n2_2to1_subset",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "networks": 2
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 1,
+          "candidates": [
+            0,
+            2,
+            2,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_n2_2to2_all",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "networks": 2
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 2,
+          "candidates": null
+        }
+      }
+    },
+    {
+      "name": "mixed_n2_2to2_subset",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "networks": 2
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 2,
+          "candidates": [
+            0,
+            2,
+            2,
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre0to1_0to0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 0,
+          "candidates": null,
+          "pre": [
+            [
+              0,
+              1
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre0to1_0to1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": null,
+          "pre": [
+            [
+              0,
+              1
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre0to1_0to2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 2,
+          "candidates": null,
+          "pre": [
+            [
+              0,
+              1
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre0to1_1to0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": null,
+          "pre": [
+            [
+              0,
+              1
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre0to1_1to1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 1,
+          "candidates": null,
+          "pre": [
+            [
+              0,
+              1
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre0to1_1to2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 2,
+          "candidates": null,
+          "pre": [
+            [
+              0,
+              1
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre0to1_2to0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 0,
+          "candidates": null,
+          "pre": [
+            [
+              0,
+              1
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre0to1_2to1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 1,
+          "candidates": null,
+          "pre": [
+            [
+              0,
+              1
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre0to1_2to2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 2,
+          "candidates": null,
+          "pre": [
+            [
+              0,
+              1
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre0to2_0to0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 0,
+          "candidates": null,
+          "pre": [
+            [
+              0,
+              2
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre0to2_0to1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": null,
+          "pre": [
+            [
+              0,
+              2
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre0to2_0to2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 2,
+          "candidates": null,
+          "pre": [
+            [
+              0,
+              2
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre0to2_1to0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": null,
+          "pre": [
+            [
+              0,
+              2
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre0to2_1to1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 1,
+          "candidates": null,
+          "pre": [
+            [
+              0,
+              2
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre0to2_1to2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 2,
+          "candidates": null,
+          "pre": [
+            [
+              0,
+              2
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre0to2_2to0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 0,
+          "candidates": null,
+          "pre": [
+            [
+              0,
+              2
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre0to2_2to1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 1,
+          "candidates": null,
+          "pre": [
+            [
+              0,
+              2
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre0to2_2to2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 2,
+          "candidates": null,
+          "pre": [
+            [
+              0,
+              2
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre1to0_0to0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 0,
+          "candidates": null,
+          "pre": [
+            [
+              1,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre1to0_0to1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": null,
+          "pre": [
+            [
+              1,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre1to0_0to2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 2,
+          "candidates": null,
+          "pre": [
+            [
+              1,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre1to0_1to0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": null,
+          "pre": [
+            [
+              1,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre1to0_1to1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 1,
+          "candidates": null,
+          "pre": [
+            [
+              1,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre1to0_1to2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 2,
+          "candidates": null,
+          "pre": [
+            [
+              1,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre1to0_2to0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 0,
+          "candidates": null,
+          "pre": [
+            [
+              1,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre1to0_2to1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 1,
+          "candidates": null,
+          "pre": [
+            [
+              1,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre1to0_2to2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 2,
+          "candidates": null,
+          "pre": [
+            [
+              1,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre1to2_0to0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 0,
+          "candidates": null,
+          "pre": [
+            [
+              1,
+              2
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre1to2_0to1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": null,
+          "pre": [
+            [
+              1,
+              2
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre1to2_0to2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 2,
+          "candidates": null,
+          "pre": [
+            [
+              1,
+              2
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre1to2_1to0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": null,
+          "pre": [
+            [
+              1,
+              2
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre1to2_1to1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 1,
+          "candidates": null,
+          "pre": [
+            [
+              1,
+              2
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre1to2_1to2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 2,
+          "candidates": null,
+          "pre": [
+            [
+              1,
+              2
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre1to2_2to0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 0,
+          "candidates": null,
+          "pre": [
+            [
+              1,
+              2
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre1to2_2to1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 1,
+          "candidates": null,
+          "pre": [
+            [
+              1,
+              2
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre1to2_2to2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 2,
+          "candidates": null,
+          "pre": [
+            [
+              1,
+              2
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre2to0_0to0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 0,
+          "candidates": null,
+          "pre": [
+            [
+              2,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre2to0_0to1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": null,
+          "pre": [
+            [
+              2,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre2to0_0to2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 2,
+          "candidates": null,
+          "pre": [
+            [
+              2,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre2to0_1to0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": null,
+          "pre": [
+            [
+              2,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre2to0_1to1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 1,
+          "candidates": null,
+          "pre": [
+            [
+              2,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre2to0_1to2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 2,
+          "candidates": null,
+          "pre": [
+            [
+              2,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre2to0_2to0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 0,
+          "candidates": null,
+          "pre": [
+            [
+              2,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre2to0_2to1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 1,
+          "candidates": null,
+          "pre": [
+            [
+              2,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre2to0_2to2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 2,
+          "candidates": null,
+          "pre": [
+            [
+              2,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre2to1_0to0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 0,
+          "candidates": null,
+          "pre": [
+            [
+              2,
+              1
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre2to1_0to1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": null,
+          "pre": [
+            [
+              2,
+              1
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre2to1_0to2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 2,
+          "candidates": null,
+          "pre": [
+            [
+              2,
+              1
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre2to1_1to0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": null,
+          "pre": [
+            [
+              2,
+              1
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre2to1_1to1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 1,
+          "candidates": null,
+          "pre": [
+            [
+              2,
+              1
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre2to1_1to2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 2,
+          "candidates": null,
+          "pre": [
+            [
+              2,
+              1
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre2to1_2to0",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 0,
+          "candidates": null,
+          "pre": [
+            [
+              2,
+              1
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre2to1_2to1",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 1,
+          "candidates": null,
+          "pre": [
+            [
+              2,
+              1
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_pre2to1_2to2",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 2,
+          "candidates": null,
+          "pre": [
+            [
+              2,
+              1
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n2_chain_wire_wire_face",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 2
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 3,
+          "candidates": null,
+          "pre": [
+            [
+              1,
+              2
+            ],
+            [
+              2,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n2_chain_wire_face_empty",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 2
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 3,
+          "candidates": null,
+          "pre": [
+            [
+              1,
+              0
+            ],
+            [
+              2,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_0to0_null_candidate",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 0,
+          "candidates": [
+            -1
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_0to1_null_candidate",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 1,
+          "candidates": [
+            -1
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_0to2_null_candidate",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 0,
+          "recipient": 2,
+          "candidates": [
+            -1
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_1to0_null_candidate",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 0,
+          "candidates": [
+            -1
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_1to1_null_candidate",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 1,
+          "candidates": [
+            -1
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_1to2_null_candidate",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 1,
+          "recipient": 2,
+          "candidates": [
+            -1
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_2to0_null_candidate",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 0,
+          "candidates": [
+            -1
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_2to1_null_candidate",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 1,
+          "candidates": [
+            -1
+          ]
+        }
+      }
+    },
+    {
+      "name": "mixed_f1n1_2to2_null_candidate",
+      "upstream_ref": "source/SMLib/src/SmShell.cpp:364 TransferChildrenTo; mixed face-use + wire shells (native constructors)",
+      "inputs": {
+        "brep": {
+          "kind": "mixed",
+          "face": {
+            "surface": {
+              "plane": {
+                "o": [
+                  0,
+                  0,
+                  0
+                ],
+                "n": [
+                  0.25,
+                  -0.5,
+                  1
+                ]
+              }
+            },
+            "dom": [
+              -1,
+              -1,
+              1,
+              1
+            ]
+          },
+          "networks": 1
+        },
+        "transfer": {
+          "extra_empty": 1,
+          "source": 2,
+          "recipient": 2,
+          "candidates": [
+            -1
+          ]
+        }
+      }
+    }
+  ]
+}

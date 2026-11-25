@@ -1,0 +1,118 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     0,
+     0
+    ],
+    "p1": [
+     40,
+     30
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 12.5,
+    "operation": "new"
+   }
+  },
+  {
+   "command": "solid.chamfer",
+   "params": {
+    "edges": [
+     [
+      40,
+      15,
+      12.5
+     ],
+     [
+      20,
+      0,
+      0
+     ],
+     [
+      0,
+      30,
+      6
+     ],
+     [
+      0,
+      15,
+      12.5
+     ],
+     [
+      40,
+      30,
+      6
+     ],
+     [
+      0,
+      0,
+      6
+     ],
+     [
+      40,
+      15,
+      0
+     ],
+     [
+      40,
+      0,
+      6
+     ],
+     [
+      20,
+      30,
+      12.5
+     ],
+     [
+      0,
+      15,
+      0
+     ],
+     [
+      20,
+      0,
+      12.5
+     ],
+     [
+      20,
+      30,
+      0
+     ]
+    ],
+    "distance": 2.5
+   }
+  }
+ ]
+}

@@ -1,0 +1,3214 @@
+{
+  "cases": [
+    {
+      "name": "box_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 0
+      }
+    },
+    {
+      "name": "box_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 1
+      }
+    },
+    {
+      "name": "box_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2
+      }
+    },
+    {
+      "name": "box_level3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 3
+      }
+    },
+    {
+      "name": "box_level4",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 4
+      }
+    },
+    {
+      "name": "box_level2_no_walk",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "walk": false
+      }
+    },
+    {
+      "name": "box_capi_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 0,
+        "capi": true
+      }
+    },
+    {
+      "name": "box_capi_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 1,
+        "capi": true
+      }
+    },
+    {
+      "name": "box_capi_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "level": 2,
+        "capi": true
+      }
+    },
+    {
+      "name": "box_offset_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            -3,
+            1.5,
+            2
+          ],
+          "size": [
+            0.5,
+            4,
+            1
+          ]
+        },
+        "level": 0
+      }
+    },
+    {
+      "name": "box_offset_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            -3,
+            1.5,
+            2
+          ],
+          "size": [
+            0.5,
+            4,
+            1
+          ]
+        },
+        "level": 1
+      }
+    },
+    {
+      "name": "box_offset_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            -3,
+            1.5,
+            2
+          ],
+          "size": [
+            0.5,
+            4,
+            1
+          ]
+        },
+        "level": 2
+      }
+    },
+    {
+      "name": "box_offset_level3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            -3,
+            1.5,
+            2
+          ],
+          "size": [
+            0.5,
+            4,
+            1
+          ]
+        },
+        "level": 3
+      }
+    },
+    {
+      "name": "box_offset_level4",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            -3,
+            1.5,
+            2
+          ],
+          "size": [
+            0.5,
+            4,
+            1
+          ]
+        },
+        "level": 4
+      }
+    },
+    {
+      "name": "box_offset_level2_no_walk",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            -3,
+            1.5,
+            2
+          ],
+          "size": [
+            0.5,
+            4,
+            1
+          ]
+        },
+        "level": 2,
+        "walk": false
+      }
+    },
+    {
+      "name": "box_offset_capi_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            -3,
+            1.5,
+            2
+          ],
+          "size": [
+            0.5,
+            4,
+            1
+          ]
+        },
+        "level": 0,
+        "capi": true
+      }
+    },
+    {
+      "name": "box_offset_capi_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            -3,
+            1.5,
+            2
+          ],
+          "size": [
+            0.5,
+            4,
+            1
+          ]
+        },
+        "level": 1,
+        "capi": true
+      }
+    },
+    {
+      "name": "box_offset_capi_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            -3,
+            1.5,
+            2
+          ],
+          "size": [
+            0.5,
+            4,
+            1
+          ]
+        },
+        "level": 2,
+        "capi": true
+      }
+    },
+    {
+      "name": "network_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 0
+      }
+    },
+    {
+      "name": "network_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 1
+      }
+    },
+    {
+      "name": "network_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2
+      }
+    },
+    {
+      "name": "network_level3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 3
+      }
+    },
+    {
+      "name": "network_level4",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 4
+      }
+    },
+    {
+      "name": "network_level2_no_walk",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "walk": false
+      }
+    },
+    {
+      "name": "network_capi_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 0,
+        "capi": true
+      }
+    },
+    {
+      "name": "network_capi_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 1,
+        "capi": true
+      }
+    },
+    {
+      "name": "network_capi_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "level": 2,
+        "capi": true
+      }
+    },
+    {
+      "name": "vertices_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ],
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "level": 0
+      }
+    },
+    {
+      "name": "vertices_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ],
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "level": 1
+      }
+    },
+    {
+      "name": "vertices_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ],
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "level": 2
+      }
+    },
+    {
+      "name": "vertices_level3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ],
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "level": 3
+      }
+    },
+    {
+      "name": "vertices_level4",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ],
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "level": 4
+      }
+    },
+    {
+      "name": "vertices_level2_no_walk",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ],
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "level": 2,
+        "walk": false
+      }
+    },
+    {
+      "name": "vertices_capi_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ],
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "level": 0,
+        "capi": true
+      }
+    },
+    {
+      "name": "vertices_capi_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ],
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "level": 1,
+        "capi": true
+      }
+    },
+    {
+      "name": "vertices_capi_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ],
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "level": 2,
+        "capi": true
+      }
+    },
+    {
+      "name": "points_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 0
+      }
+    },
+    {
+      "name": "points_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 1
+      }
+    },
+    {
+      "name": "points_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2
+      }
+    },
+    {
+      "name": "points_level3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 3
+      }
+    },
+    {
+      "name": "points_level4",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 4
+      }
+    },
+    {
+      "name": "points_level2_no_walk",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "walk": false
+      }
+    },
+    {
+      "name": "points_capi_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 0,
+        "capi": true
+      }
+    },
+    {
+      "name": "points_capi_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 1,
+        "capi": true
+      }
+    },
+    {
+      "name": "points_capi_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "level": 2,
+        "capi": true
+      }
+    },
+    {
+      "name": "sphere_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 0
+      }
+    },
+    {
+      "name": "sphere_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 1
+      }
+    },
+    {
+      "name": "sphere_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2
+      }
+    },
+    {
+      "name": "sphere_level3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 3
+      }
+    },
+    {
+      "name": "sphere_level4",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 4
+      }
+    },
+    {
+      "name": "sphere_level2_no_walk",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "walk": false
+      }
+    },
+    {
+      "name": "sphere_capi_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 0,
+        "capi": true
+      }
+    },
+    {
+      "name": "sphere_capi_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 1,
+        "capi": true
+      }
+    },
+    {
+      "name": "sphere_capi_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "sphere",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1
+        },
+        "level": 2,
+        "capi": true
+      }
+    },
+    {
+      "name": "cylinder_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 0
+      }
+    },
+    {
+      "name": "cylinder_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 1
+      }
+    },
+    {
+      "name": "cylinder_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2
+      }
+    },
+    {
+      "name": "cylinder_level3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 3
+      }
+    },
+    {
+      "name": "cylinder_level4",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 4
+      }
+    },
+    {
+      "name": "cylinder_level2_no_walk",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "walk": false
+      }
+    },
+    {
+      "name": "cylinder_capi_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 0,
+        "capi": true
+      }
+    },
+    {
+      "name": "cylinder_capi_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 1,
+        "capi": true
+      }
+    },
+    {
+      "name": "cylinder_capi_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "cylinder",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius": 1,
+          "height": 2
+        },
+        "level": 2,
+        "capi": true
+      }
+    },
+    {
+      "name": "cone_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cone",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius_base": 1,
+          "radius_top": 0,
+          "height": 2
+        },
+        "level": 0
+      }
+    },
+    {
+      "name": "cone_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cone",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius_base": 1,
+          "radius_top": 0,
+          "height": 2
+        },
+        "level": 1
+      }
+    },
+    {
+      "name": "cone_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cone",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius_base": 1,
+          "radius_top": 0,
+          "height": 2
+        },
+        "level": 2
+      }
+    },
+    {
+      "name": "cone_level3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cone",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius_base": 1,
+          "radius_top": 0,
+          "height": 2
+        },
+        "level": 3
+      }
+    },
+    {
+      "name": "cone_level4",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cone",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius_base": 1,
+          "radius_top": 0,
+          "height": 2
+        },
+        "level": 4
+      }
+    },
+    {
+      "name": "cone_level2_no_walk",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cone",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius_base": 1,
+          "radius_top": 0,
+          "height": 2
+        },
+        "level": 2,
+        "walk": false
+      }
+    },
+    {
+      "name": "cone_capi_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "cone",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius_base": 1,
+          "radius_top": 0,
+          "height": 2
+        },
+        "level": 0,
+        "capi": true
+      }
+    },
+    {
+      "name": "cone_capi_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "cone",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius_base": 1,
+          "radius_top": 0,
+          "height": 2
+        },
+        "level": 1,
+        "capi": true
+      }
+    },
+    {
+      "name": "cone_capi_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "cone",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "radius_base": 1,
+          "radius_top": 0,
+          "height": 2
+        },
+        "level": 2,
+        "capi": true
+      }
+    },
+    {
+      "name": "frustum_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cone",
+          "origin": [
+            1,
+            1,
+            1
+          ],
+          "radius_base": 2,
+          "radius_top": 0.5,
+          "height": 1
+        },
+        "level": 0
+      }
+    },
+    {
+      "name": "frustum_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cone",
+          "origin": [
+            1,
+            1,
+            1
+          ],
+          "radius_base": 2,
+          "radius_top": 0.5,
+          "height": 1
+        },
+        "level": 1
+      }
+    },
+    {
+      "name": "frustum_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cone",
+          "origin": [
+            1,
+            1,
+            1
+          ],
+          "radius_base": 2,
+          "radius_top": 0.5,
+          "height": 1
+        },
+        "level": 2
+      }
+    },
+    {
+      "name": "frustum_level3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cone",
+          "origin": [
+            1,
+            1,
+            1
+          ],
+          "radius_base": 2,
+          "radius_top": 0.5,
+          "height": 1
+        },
+        "level": 3
+      }
+    },
+    {
+      "name": "frustum_level4",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cone",
+          "origin": [
+            1,
+            1,
+            1
+          ],
+          "radius_base": 2,
+          "radius_top": 0.5,
+          "height": 1
+        },
+        "level": 4
+      }
+    },
+    {
+      "name": "frustum_level2_no_walk",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "cone",
+          "origin": [
+            1,
+            1,
+            1
+          ],
+          "radius_base": 2,
+          "radius_top": 0.5,
+          "height": 1
+        },
+        "level": 2,
+        "walk": false
+      }
+    },
+    {
+      "name": "frustum_capi_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "cone",
+          "origin": [
+            1,
+            1,
+            1
+          ],
+          "radius_base": 2,
+          "radius_top": 0.5,
+          "height": 1
+        },
+        "level": 0,
+        "capi": true
+      }
+    },
+    {
+      "name": "frustum_capi_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "cone",
+          "origin": [
+            1,
+            1,
+            1
+          ],
+          "radius_base": 2,
+          "radius_top": 0.5,
+          "height": 1
+        },
+        "level": 1,
+        "capi": true
+      }
+    },
+    {
+      "name": "frustum_capi_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "cone",
+          "origin": [
+            1,
+            1,
+            1
+          ],
+          "radius_base": 2,
+          "radius_top": 0.5,
+          "height": 1
+        },
+        "level": 2,
+        "capi": true
+      }
+    },
+    {
+      "name": "torus_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "torus",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "major": 3,
+          "minor": 1
+        },
+        "level": 0
+      }
+    },
+    {
+      "name": "torus_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "torus",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "major": 3,
+          "minor": 1
+        },
+        "level": 1
+      }
+    },
+    {
+      "name": "torus_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "torus",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "major": 3,
+          "minor": 1
+        },
+        "level": 2
+      }
+    },
+    {
+      "name": "torus_level3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "torus",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "major": 3,
+          "minor": 1
+        },
+        "level": 3
+      }
+    },
+    {
+      "name": "torus_level4",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "torus",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "major": 3,
+          "minor": 1
+        },
+        "level": 4
+      }
+    },
+    {
+      "name": "torus_level2_no_walk",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "torus",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "major": 3,
+          "minor": 1
+        },
+        "level": 2,
+        "walk": false
+      }
+    },
+    {
+      "name": "torus_capi_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "torus",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "major": 3,
+          "minor": 1
+        },
+        "level": 0,
+        "capi": true
+      }
+    },
+    {
+      "name": "torus_capi_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "torus",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "major": 3,
+          "minor": 1
+        },
+        "level": 1,
+        "capi": true
+      }
+    },
+    {
+      "name": "torus_capi_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "torus",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "major": 3,
+          "minor": 1
+        },
+        "level": 2,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_Solids_box_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 0
+      }
+    },
+    {
+      "name": "file_Solids_box_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 1
+      }
+    },
+    {
+      "name": "file_Solids_box_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2
+      }
+    },
+    {
+      "name": "file_Solids_box_level3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 3
+      }
+    },
+    {
+      "name": "file_Solids_box_level4",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 4
+      }
+    },
+    {
+      "name": "file_Solids_box_level2_no_walk",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "walk": false
+      }
+    },
+    {
+      "name": "file_Solids_box_capi_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 0,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_Solids_box_capi_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 1,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_Solids_box_capi_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/box.smb"
+        },
+        "level": 2,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_Solids_cylinder_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/cylinder.smb"
+        },
+        "level": 0
+      }
+    },
+    {
+      "name": "file_Solids_cylinder_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/cylinder.smb"
+        },
+        "level": 1
+      }
+    },
+    {
+      "name": "file_Solids_cylinder_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/cylinder.smb"
+        },
+        "level": 2
+      }
+    },
+    {
+      "name": "file_Solids_cylinder_level3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/cylinder.smb"
+        },
+        "level": 3
+      }
+    },
+    {
+      "name": "file_Solids_cylinder_level4",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/cylinder.smb"
+        },
+        "level": 4
+      }
+    },
+    {
+      "name": "file_Solids_cylinder_level2_no_walk",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/cylinder.smb"
+        },
+        "level": 2,
+        "walk": false
+      }
+    },
+    {
+      "name": "file_Solids_cylinder_capi_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/cylinder.smb"
+        },
+        "level": 0,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_Solids_cylinder_capi_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/cylinder.smb"
+        },
+        "level": 1,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_Solids_cylinder_capi_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/cylinder.smb"
+        },
+        "level": 2,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_Solids_extrusion_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/extrusion.smb"
+        },
+        "level": 0
+      }
+    },
+    {
+      "name": "file_Solids_extrusion_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/extrusion.smb"
+        },
+        "level": 1
+      }
+    },
+    {
+      "name": "file_Solids_extrusion_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/extrusion.smb"
+        },
+        "level": 2
+      }
+    },
+    {
+      "name": "file_Solids_extrusion_level3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/extrusion.smb"
+        },
+        "level": 3
+      }
+    },
+    {
+      "name": "file_Solids_extrusion_level4",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/extrusion.smb"
+        },
+        "level": 4
+      }
+    },
+    {
+      "name": "file_Solids_extrusion_level2_no_walk",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/extrusion.smb"
+        },
+        "level": 2,
+        "walk": false
+      }
+    },
+    {
+      "name": "file_Solids_extrusion_capi_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/extrusion.smb"
+        },
+        "level": 0,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_Solids_extrusion_capi_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/extrusion.smb"
+        },
+        "level": 1,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_Solids_extrusion_capi_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/extrusion.smb"
+        },
+        "level": 2,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_Solids_fillet_cut_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/fillet_cut.smb"
+        },
+        "level": 0
+      }
+    },
+    {
+      "name": "file_Solids_fillet_cut_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/fillet_cut.smb"
+        },
+        "level": 1
+      }
+    },
+    {
+      "name": "file_Solids_fillet_cut_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/fillet_cut.smb"
+        },
+        "level": 2
+      }
+    },
+    {
+      "name": "file_Solids_fillet_cut_level3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/fillet_cut.smb"
+        },
+        "level": 3
+      }
+    },
+    {
+      "name": "file_Solids_fillet_cut_level4",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/fillet_cut.smb"
+        },
+        "level": 4
+      }
+    },
+    {
+      "name": "file_Solids_fillet_cut_level2_no_walk",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/fillet_cut.smb"
+        },
+        "level": 2,
+        "walk": false
+      }
+    },
+    {
+      "name": "file_Solids_fillet_cut_capi_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/fillet_cut.smb"
+        },
+        "level": 0,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_Solids_fillet_cut_capi_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/fillet_cut.smb"
+        },
+        "level": 1,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_Solids_fillet_cut_capi_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/fillet_cut.smb"
+        },
+        "level": 2,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_Solids_l_shape_with_boss_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/l_shape_with_boss.smb"
+        },
+        "level": 0
+      }
+    },
+    {
+      "name": "file_Solids_l_shape_with_boss_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/l_shape_with_boss.smb"
+        },
+        "level": 1
+      }
+    },
+    {
+      "name": "file_Solids_l_shape_with_boss_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/l_shape_with_boss.smb"
+        },
+        "level": 2
+      }
+    },
+    {
+      "name": "file_Solids_l_shape_with_boss_level3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/l_shape_with_boss.smb"
+        },
+        "level": 3
+      }
+    },
+    {
+      "name": "file_Solids_l_shape_with_boss_level4",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/l_shape_with_boss.smb"
+        },
+        "level": 4
+      }
+    },
+    {
+      "name": "file_Solids_l_shape_with_boss_level2_no_walk",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/l_shape_with_boss.smb"
+        },
+        "level": 2,
+        "walk": false
+      }
+    },
+    {
+      "name": "file_Solids_l_shape_with_boss_capi_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/l_shape_with_boss.smb"
+        },
+        "level": 0,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_Solids_l_shape_with_boss_capi_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/l_shape_with_boss.smb"
+        },
+        "level": 1,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_Solids_l_shape_with_boss_capi_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Solids/l_shape_with_boss.smb"
+        },
+        "level": 2,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_sphere_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "sphere.smb"
+        },
+        "level": 0
+      }
+    },
+    {
+      "name": "file_sphere_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "sphere.smb"
+        },
+        "level": 1
+      }
+    },
+    {
+      "name": "file_sphere_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "sphere.smb"
+        },
+        "level": 2
+      }
+    },
+    {
+      "name": "file_sphere_level3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "sphere.smb"
+        },
+        "level": 3
+      }
+    },
+    {
+      "name": "file_sphere_level4",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "sphere.smb"
+        },
+        "level": 4
+      }
+    },
+    {
+      "name": "file_sphere_level2_no_walk",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "sphere.smb"
+        },
+        "level": 2,
+        "walk": false
+      }
+    },
+    {
+      "name": "file_sphere_capi_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "sphere.smb"
+        },
+        "level": 0,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_sphere_capi_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "sphere.smb"
+        },
+        "level": 1,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_sphere_capi_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "sphere.smb"
+        },
+        "level": 2,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_cone_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb"
+        },
+        "level": 0
+      }
+    },
+    {
+      "name": "file_cone_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb"
+        },
+        "level": 1
+      }
+    },
+    {
+      "name": "file_cone_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb"
+        },
+        "level": 2
+      }
+    },
+    {
+      "name": "file_cone_level3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb"
+        },
+        "level": 3
+      }
+    },
+    {
+      "name": "file_cone_level4",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb"
+        },
+        "level": 4
+      }
+    },
+    {
+      "name": "file_cone_level2_no_walk",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb"
+        },
+        "level": 2,
+        "walk": false
+      }
+    },
+    {
+      "name": "file_cone_capi_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb"
+        },
+        "level": 0,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_cone_capi_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb"
+        },
+        "level": 1,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_cone_capi_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb"
+        },
+        "level": 2,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_disk_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "disk.smb"
+        },
+        "level": 0
+      }
+    },
+    {
+      "name": "file_disk_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "disk.smb"
+        },
+        "level": 1
+      }
+    },
+    {
+      "name": "file_disk_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "disk.smb"
+        },
+        "level": 2
+      }
+    },
+    {
+      "name": "file_disk_level3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "disk.smb"
+        },
+        "level": 3
+      }
+    },
+    {
+      "name": "file_disk_level4",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "disk.smb"
+        },
+        "level": 4
+      }
+    },
+    {
+      "name": "file_disk_level2_no_walk",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "disk.smb"
+        },
+        "level": 2,
+        "walk": false
+      }
+    },
+    {
+      "name": "file_disk_capi_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "disk.smb"
+        },
+        "level": 0,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_disk_capi_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "disk.smb"
+        },
+        "level": 1,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_disk_capi_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "disk.smb"
+        },
+        "level": 2,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_plane_square_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "plane_square.smb"
+        },
+        "level": 0
+      }
+    },
+    {
+      "name": "file_plane_square_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "plane_square.smb"
+        },
+        "level": 1
+      }
+    },
+    {
+      "name": "file_plane_square_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "plane_square.smb"
+        },
+        "level": 2
+      }
+    },
+    {
+      "name": "file_plane_square_level3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "plane_square.smb"
+        },
+        "level": 3
+      }
+    },
+    {
+      "name": "file_plane_square_level4",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "plane_square.smb"
+        },
+        "level": 4
+      }
+    },
+    {
+      "name": "file_plane_square_level2_no_walk",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "plane_square.smb"
+        },
+        "level": 2,
+        "walk": false
+      }
+    },
+    {
+      "name": "file_plane_square_capi_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "plane_square.smb"
+        },
+        "level": 0,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_plane_square_capi_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "plane_square.smb"
+        },
+        "level": 1,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_plane_square_capi_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "plane_square.smb"
+        },
+        "level": 2,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_plane_circ_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "plane_circ.smb"
+        },
+        "level": 0
+      }
+    },
+    {
+      "name": "file_plane_circ_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "plane_circ.smb"
+        },
+        "level": 1
+      }
+    },
+    {
+      "name": "file_plane_circ_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "plane_circ.smb"
+        },
+        "level": 2
+      }
+    },
+    {
+      "name": "file_plane_circ_level3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "plane_circ.smb"
+        },
+        "level": 3
+      }
+    },
+    {
+      "name": "file_plane_circ_level4",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "plane_circ.smb"
+        },
+        "level": 4
+      }
+    },
+    {
+      "name": "file_plane_circ_level2_no_walk",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "plane_circ.smb"
+        },
+        "level": 2,
+        "walk": false
+      }
+    },
+    {
+      "name": "file_plane_circ_capi_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "plane_circ.smb"
+        },
+        "level": 0,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_plane_circ_capi_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "plane_circ.smb"
+        },
+        "level": 1,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_plane_circ_capi_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "plane_circ.smb"
+        },
+        "level": 2,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_ellips_ts2_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "ellips_ts2.smb"
+        },
+        "level": 0
+      }
+    },
+    {
+      "name": "file_ellips_ts2_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "ellips_ts2.smb"
+        },
+        "level": 1
+      }
+    },
+    {
+      "name": "file_ellips_ts2_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "ellips_ts2.smb"
+        },
+        "level": 2
+      }
+    },
+    {
+      "name": "file_ellips_ts2_level3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "ellips_ts2.smb"
+        },
+        "level": 3
+      }
+    },
+    {
+      "name": "file_ellips_ts2_level4",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "ellips_ts2.smb"
+        },
+        "level": 4
+      }
+    },
+    {
+      "name": "file_ellips_ts2_level2_no_walk",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "ellips_ts2.smb"
+        },
+        "level": 2,
+        "walk": false
+      }
+    },
+    {
+      "name": "file_ellips_ts2_capi_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "ellips_ts2.smb"
+        },
+        "level": 0,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_ellips_ts2_capi_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "ellips_ts2.smb"
+        },
+        "level": 1,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_ellips_ts2_capi_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "ellips_ts2.smb"
+        },
+        "level": 2,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_Mouse_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "level": 0
+      }
+    },
+    {
+      "name": "file_Mouse_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "level": 1
+      }
+    },
+    {
+      "name": "file_Mouse_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "level": 2
+      }
+    },
+    {
+      "name": "file_Mouse_level3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "level": 3
+      }
+    },
+    {
+      "name": "file_Mouse_level4",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "level": 4
+      }
+    },
+    {
+      "name": "file_Mouse_level2_no_walk",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "level": 2,
+        "walk": false
+      }
+    },
+    {
+      "name": "file_Mouse_capi_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "level": 0,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_Mouse_capi_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "level": 1,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_Mouse_capi_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb"
+        },
+        "level": 2,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_Endcap_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Endcap.smb"
+        },
+        "level": 0
+      }
+    },
+    {
+      "name": "file_Endcap_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Endcap.smb"
+        },
+        "level": 1
+      }
+    },
+    {
+      "name": "file_Endcap_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Endcap.smb"
+        },
+        "level": 2
+      }
+    },
+    {
+      "name": "file_Endcap_level3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Endcap.smb"
+        },
+        "level": 3
+      }
+    },
+    {
+      "name": "file_Endcap_level4",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Endcap.smb"
+        },
+        "level": 4
+      }
+    },
+    {
+      "name": "file_Endcap_level2_no_walk",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Endcap.smb"
+        },
+        "level": 2,
+        "walk": false
+      }
+    },
+    {
+      "name": "file_Endcap_capi_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Endcap.smb"
+        },
+        "level": 0,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_Endcap_capi_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Endcap.smb"
+        },
+        "level": 1,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_Endcap_capi_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Endcap.smb"
+        },
+        "level": 2,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_box_with_large_fillet_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "box_with_large_fillet.smb"
+        },
+        "level": 0
+      }
+    },
+    {
+      "name": "file_box_with_large_fillet_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "box_with_large_fillet.smb"
+        },
+        "level": 1
+      }
+    },
+    {
+      "name": "file_box_with_large_fillet_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "box_with_large_fillet.smb"
+        },
+        "level": 2
+      }
+    },
+    {
+      "name": "file_box_with_large_fillet_level3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "box_with_large_fillet.smb"
+        },
+        "level": 3
+      }
+    },
+    {
+      "name": "file_box_with_large_fillet_level4",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "box_with_large_fillet.smb"
+        },
+        "level": 4
+      }
+    },
+    {
+      "name": "file_box_with_large_fillet_level2_no_walk",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "box_with_large_fillet.smb"
+        },
+        "level": 2,
+        "walk": false
+      }
+    },
+    {
+      "name": "file_box_with_large_fillet_capi_level0",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "box_with_large_fillet.smb"
+        },
+        "level": 0,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_box_with_large_fillet_capi_level1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "box_with_large_fillet.smb"
+        },
+        "level": 1,
+        "capi": true
+      }
+    },
+    {
+      "name": "file_box_with_large_fillet_capi_level2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers/AssertValid (capi smlib_brep_check sequence)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "box_with_large_fillet.smb"
+        },
+        "level": 2,
+        "capi": true
+      }
+    }
+  ]
+}

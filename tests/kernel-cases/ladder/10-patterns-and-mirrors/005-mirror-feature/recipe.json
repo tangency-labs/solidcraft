@@ -1,0 +1,37 @@
+{
+ "base": "../../01-primitives/001-box",
+ "commands": [
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     20,
+     20,
+     20
+    ],
+    "diameter": 10,
+    "name": "H"
+   }
+  },
+  {
+   "command": "solid.mirror",
+   "params": {
+    "features": [
+     "H"
+    ],
+    "plane": {
+     "origin": [
+      30,
+      0,
+      0
+     ],
+     "normal": [
+      1,
+      0,
+      0
+     ]
+    }
+   }
+  }
+ ]
+}

@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="800" height="400" viewBox="0 0 800 400">
+  <title>tolerance-tube</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path d="M0 0 L800 0 L800 400 L0 400 Z" fill="#ffffff"/>
+    <path d="M30 300 L220 300 L330 190 L370 190 L370 375 L30 375 Z" fill="#f0f0f0"/>
+    <path d="M30 300 L236 300" fill="none" stroke="#dce9f5" stroke-width="40" stroke-miterlimit="10"/>
+    <path d="M206 314 L330 190" fill="none" stroke="#dce9f5" stroke-width="40" stroke-miterlimit="10"/>
+    <path d="M30 300 L220 300" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <path d="M220 300 L330 190" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <path d="M218 262 C218 249.85 227.85 240 240 240 C252.15 240 262 249.85 262 262 C262 274.15 252.15 284 240 284 C227.85 284 218 274.15 218 262 Z" fill="#dce9f5" stroke="#555555" stroke-miterlimit="10"/>
+    <path d="M240 262 L240 300" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="4 3"/>
+    <path d="M240 262 L218 262" fill="none" stroke="#000000" stroke-miterlimit="10"/>
+    <path d="M236 262 C236 259.791 237.791 258 240 258 C242.209 258 244 259.791 244 262 C244 264.209 242.209 266 240 266 C237.791 266 236 264.209 236 262 Z" fill="#000000"/>
+    <path d="M217 300 C217 298.343 218.343 297 220 297 C221.657 297 223 298.343 223 300 C223 301.657 221.657 303 220 303 C218.343 303 217 301.657 217 300 Z" fill="#ffffff" stroke="#000000" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 30 40)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">a  Across the edge</tspan></text>
+    <text transform="matrix(1 0 0 1 430 40)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">b  Along the edge</tspan></text>
+    <text transform="matrix(1 0 0 1 30 80)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">The edge is valid on face i when g_i ≤ τ_e + τ_f.</tspan></text>
+    <text transform="matrix(1 0 0 1 430 80)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">The edge lies somewhere in the tube, which ends in the vertex balls.</tspan></text>
+    <text transform="matrix(1 0 0 1 36 272)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">S1&apos;s band, ±τ_f</tspan></text>
+    <text transform="matrix(1 0 0 1 194 267)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">τ_e</tspan></text>
+    <text transform="matrix(1 0 0 1 245 296)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">g_1</tspan></text>
+    <text transform="matrix(1 0 0 1 40 226)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">C, the stored curve</tspan></text>
+    <path d="M176 224 L235 257" fill="none" stroke="#000000" stroke-width="0.75" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 150 354)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">S1 ∩ S2</tspan></text>
+    <path d="M202 342 L219 304" fill="none" stroke="#000000" stroke-width="0.75" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 40 354)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">S1, face F1</tspan></text>
+    <text transform="matrix(1 0 0 1 236 178)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">S2, face F2</tspan></text>
+    <path d="M470 220 C530 190 600 250 650 222 C700 194 720 205 750 215" fill="none" stroke="#dce9f5" stroke-width="44" stroke-linecap="round" stroke-miterlimit="10"/>
+    <path d="M440 220 C440 203.431 453.431 190 470 190 C486.569 190 500 203.431 500 220 C500 236.569 486.569 250 470 250 C453.431 250 440 236.569 440 220 Z" fill="#dce9f5" stroke="#555555" stroke-miterlimit="10"/>
+    <path d="M720 215 C720 198.431 733.431 185 750 185 C766.569 185 780 198.431 780 215 C780 231.569 766.569 245 750 245 C733.431 245 720 231.569 720 215 Z" fill="#dce9f5" stroke="#555555" stroke-miterlimit="10"/>
+    <path d="M472 236 C540 214 600 236 652 236 C704 236 720 218 748 228" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <path d="M470 220 C530 190 600 250 650 222 C700 194 720 205 750 215" fill="none" stroke="#555555" stroke-width="2" stroke-miterlimit="10"/>
+    <path d="M466 220 C466 217.791 467.791 216 470 216 C472.209 216 474 217.791 474 220 C474 222.209 472.209 224 470 224 C467.791 224 466 222.209 466 220 Z" fill="#000000"/>
+    <path d="M746 215 C746 212.791 747.791 211 750 211 C752.209 211 754 212.791 754 215 C754 217.209 752.209 219 750 219 C747.791 219 746 217.209 746 215 Z" fill="#000000"/>
+    <text transform="matrix(1 0 0 1 470 140)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">tube of radius τ_e about C</tspan></text>
+    <path d="M560 146 L560 184" fill="none" stroke="#000000" stroke-width="0.75" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 600 166)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">C, the stored curve</tspan></text>
+    <path d="M705 172 L707 201" fill="none" stroke="#000000" stroke-width="0.75" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 560 290)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">S1 ∩ S2, the exact edge</tspan></text>
+    <path d="M600 278 L600 236" fill="none" stroke="#000000" stroke-width="0.75" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 420 330)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">vertex ball, radius τ_v ≥ τ_e</tspan></text>
+    <path d="M470 316 L470 251" fill="none" stroke="#000000" stroke-width="0.75" stroke-miterlimit="10"/>
+  </g>
+</svg>

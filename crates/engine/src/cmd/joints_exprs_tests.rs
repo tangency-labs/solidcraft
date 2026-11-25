@@ -1,7 +1,8 @@
 //! Joints whose offset, angle or values are typed as expressions follow the parameters they name.
 
 use serde_json::json;
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use super::tests::{occ, place, run};
 use crate::Session;
@@ -66,6 +67,60 @@ fn an_offset_and_an_angle_typed_as_expressions_follow_their_parameters() {
     run(&mut s, "parameters.change", json!({"name": "gap", "expression": "30 mm"}));
     assert!((z(&s) - 14.0).abs() < 1e-6, "{}", z(&s));
     assert!(s.doc.assembly.joints.first().is_some_and(|j| j.exprs.offset.is_none() && j.exprs.angle.is_some()));
+}
+
+/// X and Y lateral offsets typed as expressions follow their parameters, survive save/open,
+/// rename with parameters, block deleting parameters they use, and drop when given a plain number.
+#[test]
+fn lateral_joint_offset_expressions_follow_their_parameters() {
+    let mut s = cubes();
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type":"rigid", "name":"Seat", "a":{"face":[5,5,10]}, "b":{"face":[25,5,0]},
+            "offset_x":"gap * 2", "offset_y":"-gap", "offset":"gap"}),
+    );
+    let pos = |s: &Session| place(s, "B", Vec3::new(25.0, 5.0, 0.0));
+    assert_eq!(s.doc.assembly.joints[0].offset_xy, [10.0, -5.0]);
+    // Face [5, 5, 10] has normal +Z; its frame axes are x = +Y and y = -X.
+    assert!(near(pos(&s), Vec3::new(10.0, 15.0, 15.0)), "{:?}", pos(&s));
+
+    // Parameter changes move B along X, Y and Z together.
+    run(&mut s, "parameters.change", json!({"name":"gap","expression":"12 mm"}));
+    assert_eq!(s.doc.assembly.joints[0].offset_xy, [24.0, -12.0]);
+    assert_eq!(s.doc.assembly.joints[0].offset, 12.0);
+    assert!(near(pos(&s), Vec3::new(17.0, 29.0, 22.0)), "{:?}", pos(&s));
+
+    // Expressions are kept in the document and reported by joint.list.
+    let j = &s.doc.assembly.joints[0];
+    assert_eq!((j.exprs.offset_x.as_deref(), j.exprs.offset_y.as_deref(), j.exprs.offset.as_deref()), (Some("gap * 2"), Some("-gap"), Some("gap")));
+    let listed = run(&mut s, "joint.list", json!({}));
+    assert_eq!(listed["joints"][0]["expressions"]["offset_x"], json!("gap * 2"), "{listed}");
+    assert_eq!(listed["joints"][0]["expressions"]["offset_y"], json!("-gap"), "{listed}");
+
+    // Renaming carries into offset_x and offset_y, and deleting a referenced parameter is refused.
+    run(&mut s, "parameters.rename", json!({"name": "gap", "new_name": "shift"}));
+    assert_eq!(s.doc.assembly.joints[0].exprs.offset_x.as_deref(), Some("shift * 2"));
+    assert_eq!(s.doc.assembly.joints[0].exprs.offset_y.as_deref(), Some("-shift"));
+    let err = s.execute("parameters.delete", &json!({"name": "shift"})).unwrap_err().to_string();
+    assert!(err.contains("joint Seat (offset_x)"), "{err}");
+
+    // Editing offset_x to a new expression updates it; a plain number drops only that expression.
+    run(&mut s, "joint.edit", json!({"joint":"Seat","offset_x":"shift / 2"}));
+    assert_eq!(s.doc.assembly.joints[0].offset_xy, [6.0, -12.0]);
+    assert_eq!(s.doc.assembly.joints[0].exprs.offset_x.as_deref(), Some("shift / 2"));
+    run(&mut s, "joint.edit", json!({"joint":"Seat","offset_x": 3}));
+    run(&mut s, "parameters.change", json!({"name":"shift","expression":"10 mm"}));
+    assert_eq!(s.doc.assembly.joints[0].offset_xy, [3.0, -10.0]);
+    assert_eq!(s.doc.assembly.joints[0].exprs.offset_x, None);
+    assert_eq!(s.doc.assembly.joints[0].exprs.offset_y.as_deref(), Some("-shift"));
+    assert_eq!(s.doc.assembly.joints[0].exprs.offset.as_deref(), Some("shift"));
+
+    // An expression that stops working out (wrong unit) leaves the joint out with a reason.
+    run(&mut s, "parameters.change", json!({"name": "shift", "expression": "30 deg", "unit": "deg"}));
+    let solve = run(&mut s, "joint.solve", json!({}));
+    let why = solve["errors"][0]["why"].as_str().unwrap_or_default().to_string();
+    assert!(why.contains("Seat") && why.contains("offset_y"), "{solve}");
 }
 
 #[test]
@@ -143,4 +198,93 @@ fn text_that_names_no_parameter_is_kept_as_a_number() {
     let j = s.doc.assembly.joints.first().cloned().unwrap_or_else(|| panic!("no joint"));
     assert!(j.exprs.is_empty(), "{:?}", j.exprs);
     assert!((j.offset - 3.0).abs() < 1e-12 && j.values.first().is_some_and(|v| (v - 4.0).abs() < 1e-12), "{j:?}");
+}
+
+/// A limit typed as an expression follows its parameter, and the value is held inside the new
+/// limits (#20242).
+#[test]
+fn a_limit_typed_as_an_expression_follows_its_parameter() {
+    let mut s = cubes();
+    run(&mut s, "parameters.add", json!({"name": "stop", "expression": "15 mm"}));
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "values": [10], "limits": [[0, "stop"]], "name": "Rail"}),
+    );
+    let z = |s: &Session| place(s, "B", Vec3::new(25.0, 5.0, 0.0)).z;
+    let limits = |s: &Session| s.doc.assembly.joints.first().and_then(|j| j.limits.first().copied().flatten());
+    assert_eq!(limits(&s), Some((0.0, 15.0)));
+    assert!((z(&s) - 20.0).abs() < 1e-6, "{}", z(&s));
+    // The stop comes in below the value: the limit follows and holds the slider at it.
+    run(&mut s, "parameters.change", json!({"name": "stop", "expression": "6 mm"}));
+    assert_eq!(limits(&s), Some((0.0, 6.0)));
+    assert!((z(&s) - 16.0).abs() < 1e-6, "{}", z(&s));
+    // It moves out again: the limit follows, and the value stays where the limit put it.
+    run(&mut s, "parameters.change", json!({"name": "stop", "expression": "30 mm"}));
+    assert_eq!(limits(&s), Some((0.0, 30.0)));
+    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 40}));
+    assert!((z(&s) - 40.0).abs() < 1e-6, "{}", z(&s));
+    // The design and joint.list keep the expression; the minimum, a number, has none.
+    let j = s.doc.assembly.joints.first().cloned().unwrap_or_else(|| panic!("no joint"));
+    assert_eq!(j.exprs.limit(0), [None, Some("stop")]);
+    let saved = serde_json::to_value(&j).unwrap_or_default();
+    assert_eq!(saved["exprs"]["limits"], json!([[null, "stop"]]), "{saved}");
+    let listed = run(&mut s, "joint.list", json!({}));
+    assert_eq!(listed["joints"][0]["expressions"]["limits"], json!([[null, "stop"]]), "{listed}");
+    // Renaming the parameter carries into the limit, and deleting it is refused.
+    run(&mut s, "parameters.rename", json!({"name": "stop", "new_name": "travel"}));
+    assert_eq!(s.doc.assembly.joints.first().map(|j| j.exprs.limit(0)), Some([None, Some("travel")]));
+    let e = s.execute("parameters.delete", &json!({"name": "travel"})).unwrap_err().to_string();
+    assert!(e.contains("joint Rail") && e.contains("maximum"), "{e}");
+    // Numbers typed over the limits drop the expression: the limit stays when the parameter changes.
+    run(&mut s, "joint.limits", json!({"joint": "Rail", "min": 0, "max": 25}));
+    run(&mut s, "parameters.change", json!({"name": "travel", "expression": "5 mm"}));
+    assert_eq!(limits(&s), Some((0.0, 25.0)));
+    assert!(s.doc.assembly.joints.first().is_some_and(|j| j.exprs.is_empty()));
+    // joint.limits keeps an expression too.
+    run(&mut s, "joint.limits", json!({"joint": "Rail", "min": "-travel", "max": "travel"}));
+    run(&mut s, "parameters.change", json!({"name": "travel", "expression": "3 mm"}));
+    assert_eq!(limits(&s), Some((-3.0, 3.0)));
+    assert!((z(&s) - 13.0).abs() < 1e-6, "{}", z(&s));
+}
+
+/// Limits whose expressions no longer work out (the minimum above the maximum, or a length that
+/// became an angle) leave the joint out of the solve with the reason, as its other expressions do.
+#[test]
+fn a_limit_whose_expression_stops_working_out_is_left_out_with_the_reason() {
+    let mut s = cubes();
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "values": [2], "limits": [["gap", 20]], "name": "Rail"}),
+    );
+    let z = |s: &Session| place(s, "B", Vec3::new(25.0, 5.0, 0.0)).z;
+    assert!((z(&s) - 15.0).abs() < 1e-6, "{}", z(&s));
+    run(&mut s, "parameters.change", json!({"name": "gap", "expression": "25 mm"}));
+    let r = run(&mut s, "joint.solve", json!({}));
+    let why = r["errors"][0]["why"].as_str().unwrap_or_default().to_string();
+    assert!(why.contains("Rail") && why.contains("minimum comes out above the maximum"), "{r}");
+    run(&mut s, "parameters.change", json!({"name": "gap", "expression": "30 deg", "unit": "deg"}));
+    let r = run(&mut s, "joint.solve", json!({}));
+    let why = r["errors"][0]["why"].as_str().unwrap_or_default().to_string();
+    assert!(why.contains("Rail") && why.contains("minimum `gap`"), "{r}");
+    // Fixed again, the joint is solved with the limit the parameter gives.
+    run(&mut s, "parameters.change", json!({"name": "gap", "expression": "4 mm", "unit": "mm"}));
+    assert_eq!(run(&mut s, "joint.solve", json!({}))["errors"], json!([]));
+    assert_eq!(s.doc.assembly.joints.first().and_then(|j| j.limits.first().copied().flatten()), Some((4.0, 20.0)));
+}
+
+/// A limit given only one end sets no limit, so it keeps no expression either: one kept would be
+/// worked out against a missing other end and leave the joint out of the solve.
+#[test]
+fn a_limit_given_one_end_keeps_no_expression() {
+    let mut s = cubes();
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "values": [2], "limits": [["gap"]], "name": "Rail"}),
+    );
+    assert_eq!(run(&mut s, "joint.solve", json!({}))["errors"], json!([]));
+    let j = s.doc.assembly.joints.first().cloned().unwrap_or_else(|| panic!("no joint"));
+    assert!(j.exprs.is_empty() && j.limits.first().copied().flatten().is_none(), "{j:?}");
 }

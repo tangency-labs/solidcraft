@@ -1,0 +1,598 @@
+{
+ "heatsink": {
+  "spec": "A finned heatsink as one solid. Base plate: x 0..80, y 0..60, z 0..5. Sixteen identical fins stand on the base, each 2 mm thick in X, running the full depth y 0..60, from z=5 up to z=30. Fin number i (i = 0..15) spans x = 1.5+5i .. 3.5+5i (so the first fin is x 1.5..3.5 and the last is x 76.5..78.5).",
+  "bodies": [
+   {
+    "name": "heatsink",
+    "volume": 72000,
+    "bbox": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      80,
+      60,
+      30
+     ]
+    ]
+   }
+  ]
+ },
+ "standoffs": {
+  "spec": "A circuit board on standoffs: an assembly of 16 separate parts (each its own part/component, or its own separate solid if your tools have no parts). Board: x 0..100, y 0..80, z 10..11.6, with fifteen 3.2 mm diameter through holes along Z, one at every combination of x = 10, 30, 50, 70, 90 and y = 10, 40, 70. Under each hole stands a standoff (15 standoffs, named S1..S15): a cylinder of diameter 6 mm from z=0 to z=10 on the same centre, with a 3 mm diameter hole through it along Z. The parts stay separate solids; do not merge them.",
+  "bodies": [
+   {
+    "name": "Board",
+    "volume": 12606.9805,
+    "bbox": [
+     [
+      0,
+      0,
+      10
+     ],
+     [
+      100,
+      80,
+      11.6
+     ]
+    ]
+   },
+   {
+    "name": "S1",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      7,
+      7,
+      0
+     ],
+     [
+      13,
+      13,
+      10
+     ]
+    ]
+   },
+   {
+    "name": "S2",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      27,
+      7,
+      0
+     ],
+     [
+      33,
+      13,
+      10
+     ]
+    ]
+   },
+   {
+    "name": "S3",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      47,
+      7,
+      0
+     ],
+     [
+      53,
+      13,
+      10
+     ]
+    ]
+   },
+   {
+    "name": "S4",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      67,
+      7,
+      0
+     ],
+     [
+      73,
+      13,
+      10
+     ]
+    ]
+   },
+   {
+    "name": "S5",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      87,
+      7,
+      0
+     ],
+     [
+      93,
+      13,
+      10
+     ]
+    ]
+   },
+   {
+    "name": "S6",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      7,
+      37,
+      0
+     ],
+     [
+      13,
+      43,
+      10
+     ]
+    ]
+   },
+   {
+    "name": "S7",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      27,
+      37,
+      0
+     ],
+     [
+      33,
+      43,
+      10
+     ]
+    ]
+   },
+   {
+    "name": "S8",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      47,
+      37,
+      0
+     ],
+     [
+      53,
+      43,
+      10
+     ]
+    ]
+   },
+   {
+    "name": "S9",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      67,
+      37,
+      0
+     ],
+     [
+      73,
+      43,
+      10
+     ]
+    ]
+   },
+   {
+    "name": "S10",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      87,
+      37,
+      0
+     ],
+     [
+      93,
+      43,
+      10
+     ]
+    ]
+   },
+   {
+    "name": "S11",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      7,
+      67,
+      0
+     ],
+     [
+      13,
+      73,
+      10
+     ]
+    ]
+   },
+   {
+    "name": "S12",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      27,
+      67,
+      0
+     ],
+     [
+      33,
+      73,
+      10
+     ]
+    ]
+   },
+   {
+    "name": "S13",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      47,
+      67,
+      0
+     ],
+     [
+      53,
+      73,
+      10
+     ]
+    ]
+   },
+   {
+    "name": "S14",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      67,
+      67,
+      0
+     ],
+     [
+      73,
+      73,
+      10
+     ]
+    ]
+   },
+   {
+    "name": "S15",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      87,
+      67,
+      0
+     ],
+     [
+      93,
+      73,
+      10
+     ]
+    ]
+   }
+  ]
+ },
+ "rack": {
+  "spec": "A shelving rack: an assembly of 8 separate parts (each its own part/component, or its own separate solid if your tools have no parts). Four square posts named P1..P4, each 20 x 20 mm in section and 400 mm tall (z 0..400), occupying x 0..20 or 280..300 and y 0..20 or 180..200 (one post at each of the four corners). Four shelves named Shelf1..Shelf4, each a 10 mm thick board covering x 0..300, y 0..200, with their bottom faces at z = 50, 150, 250 and 350; each shelf has a 20 x 20 mm square notch cut out at each of its four corners where the posts pass, so shelves and posts do not overlap. The parts stay separate solids; do not merge them.",
+  "bodies": [
+   {
+    "name": "P1",
+    "volume": 160000,
+    "bbox": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      20,
+      20,
+      400
+     ]
+    ]
+   },
+   {
+    "name": "P2",
+    "volume": 160000,
+    "bbox": [
+     [
+      280,
+      0,
+      0
+     ],
+     [
+      300,
+      20,
+      400
+     ]
+    ]
+   },
+   {
+    "name": "P3",
+    "volume": 160000,
+    "bbox": [
+     [
+      0,
+      180,
+      0
+     ],
+     [
+      20,
+      200,
+      400
+     ]
+    ]
+   },
+   {
+    "name": "P4",
+    "volume": 160000,
+    "bbox": [
+     [
+      280,
+      180,
+      0
+     ],
+     [
+      300,
+      200,
+      400
+     ]
+    ]
+   },
+   {
+    "name": "Shelf1",
+    "volume": 584000,
+    "bbox": [
+     [
+      0,
+      0,
+      50
+     ],
+     [
+      300,
+      200,
+      60
+     ]
+    ]
+   },
+   {
+    "name": "Shelf2",
+    "volume": 584000,
+    "bbox": [
+     [
+      0,
+      0,
+      150
+     ],
+     [
+      300,
+      200,
+      160
+     ]
+    ]
+   },
+   {
+    "name": "Shelf3",
+    "volume": 584000,
+    "bbox": [
+     [
+      0,
+      0,
+      250
+     ],
+     [
+      300,
+      200,
+      260
+     ]
+    ]
+   },
+   {
+    "name": "Shelf4",
+    "volume": 584000,
+    "bbox": [
+     [
+      0,
+      0,
+      350
+     ],
+     [
+      300,
+      200,
+      360
+     ]
+    ]
+   }
+  ]
+ },
+ "flangepair": {
+  "spec": "A bolted flange joint on the Z axis: an assembly of 11 separate parts (each its own part/component, or its own separate solid if your tools have no parts). FlangeA: a disc of diameter 120 mm from z=0 to z=12, centred on the Z axis, with a 50 mm diameter bore through it along Z and eight 10 mm diameter bolt holes through it along Z, equally spaced on a 95 mm diameter circle with the first centred at (47.5, 0). Gasket: a ring of outside diameter 80 mm and inside diameter 50 mm from z=12 to z=14. FlangeB: identical to FlangeA but from z=14 to z=26 (holes in the same places). Eight bolts named B1..B8: plain cylinders of diameter 10 mm from z=-5 to z=31, one in each bolt hole. The parts stay separate solids; do not merge them.",
+  "bodies": [
+   {
+    "name": "FlangeA",
+    "volume": 104615.0354,
+    "bbox": [
+     [
+      -60,
+      -60,
+      0
+     ],
+     [
+      60,
+      60,
+      12
+     ]
+    ]
+   },
+   {
+    "name": "Gasket",
+    "volume": 6126.1057,
+    "bbox": [
+     [
+      -40,
+      -40,
+      12
+     ],
+     [
+      40,
+      40,
+      14
+     ]
+    ]
+   },
+   {
+    "name": "FlangeB",
+    "volume": 104615.0354,
+    "bbox": [
+     [
+      -60,
+      -60,
+      14
+     ],
+     [
+      60,
+      60,
+      26
+     ]
+    ]
+   },
+   {
+    "name": "B1",
+    "volume": 2827.4334,
+    "bbox": [
+     [
+      42.5,
+      -5.0,
+      -5
+     ],
+     [
+      52.5,
+      5.0,
+      31
+     ]
+    ]
+   },
+   {
+    "name": "B2",
+    "volume": 2827.4334,
+    "bbox": [
+     [
+      28.5876,
+      28.5876,
+      -5
+     ],
+     [
+      38.5876,
+      38.5876,
+      31
+     ]
+    ]
+   },
+   {
+    "name": "B3",
+    "volume": 2827.4334,
+    "bbox": [
+     [
+      -5.0,
+      42.5,
+      -5
+     ],
+     [
+      5.0,
+      52.5,
+      31
+     ]
+    ]
+   },
+   {
+    "name": "B4",
+    "volume": 2827.4334,
+    "bbox": [
+     [
+      -38.5876,
+      28.5876,
+      -5
+     ],
+     [
+      -28.5876,
+      38.5876,
+      31
+     ]
+    ]
+   },
+   {
+    "name": "B5",
+    "volume": 2827.4334,
+    "bbox": [
+     [
+      -52.5,
+      -5.0,
+      -5
+     ],
+     [
+      -42.5,
+      5.0,
+      31
+     ]
+    ]
+   },
+   {
+    "name": "B6",
+    "volume": 2827.4334,
+    "bbox": [
+     [
+      -38.5876,
+      -38.5876,
+      -5
+     ],
+     [
+      -28.5876,
+      -28.5876,
+      31
+     ]
+    ]
+   },
+   {
+    "name": "B7",
+    "volume": 2827.4334,
+    "bbox": [
+     [
+      -5.0,
+      -52.5,
+      -5
+     ],
+     [
+      5.0,
+      -42.5,
+      31
+     ]
+    ]
+   },
+   {
+    "name": "B8",
+    "volume": 2827.4334,
+    "bbox": [
+     [
+      28.5876,
+      -38.5876,
+      -5
+     ],
+     [
+      38.5876,
+      -28.5876,
+      31
+     ]
+    ]
+   }
+  ]
+ }
+}

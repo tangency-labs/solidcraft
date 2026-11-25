@@ -1,0 +1,168 @@
+{
+  "area": "sweeps",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "revolve",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "angle": 6.283185307179586,
+        "cap": true,
+        "direction": [
+          -0.0,
+          -1.0,
+          -0.0
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          10.0
+        ],
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                0.0,
+                0.0,
+                10.0
+              ],
+              "end": 1.5707963267948966,
+              "radius": 40.0,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": -1.5707963267948966
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                18.5,
+                10.0
+              ],
+              "start": [
+                0.0,
+                40.0,
+                10.0
+              ]
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                -0.0,
+                -0.0,
+                -1.0
+              ],
+              "center": [
+                0.0,
+                0.0,
+                10.0
+              ],
+              "end": 1.5707963267948966,
+              "radius": 18.5,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": -1.5707963267948966
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                -40.0,
+                10.0
+              ],
+              "start": [
+                0.0,
+                -18.5,
+                10.0
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "case": "450-revolve-spherical-shell-sketched-off-the-origin",
+  "expected": {
+    "area_mm2": 24407.033325739103,
+    "bbox": {
+      "max": [
+        40,
+        40,
+        50
+      ],
+      "min": [
+        -40,
+        -40,
+        -30
+      ]
+    },
+    "body_count": 1,
+    "faces": 2,
+    "method": "the revolve is a hollow ball of radii 40 and 18.5 centred at (0,0,10): V = 4/3 pi (40^3 - 18.5^3), A = 4 pi (40^2 + 18.5^2); two spherical faces, one body with an inner shell. The inner sphere bounds the void, so the body has two shells.",
+    "shells": 2,
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#450",
+      "tangency-labs/solidcraft#452"
+    ],
+    "volume_mm3": 241560.72432594837,
+    "what": "a half ring between two arcs (both radial lines on the axis) revolved a full turn from a sketch plane 10 mm above the origin (volume +34 %)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 2,
+      "faces": 2,
+      "vertices": 4
+    }
+  },
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b1"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 24407.03332594259,
+      "body_count": 1,
+      "edges": 2,
+      "faces": 2,
+      "vertices": 4,
+      "volume_mm3": 241560.72432248594
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#450",
+    "tangency-labs/solidcraft#452"
+  ],
+  "traced_ops": [
+    "revolve"
+  ],
+  "ungraded": [],
+  "what": "a half ring between two arcs (both radial lines on the axis) revolved a full turn from a sketch plane 10 mm above the origin (volume +34 %)",
+  "why_not": []
+}

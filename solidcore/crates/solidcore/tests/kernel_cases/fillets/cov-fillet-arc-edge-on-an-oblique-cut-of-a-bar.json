@@ -1,0 +1,152 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b4": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  147.44069999999996,
+                  -461.7409807592111,
+                  849.9500185730554
+                ],
+                [
+                  150.39518170904788,
+                  -455.3183854279042,
+                  847.4708967751711
+                ]
+              ],
+              "index": 11
+            }
+          ],
+          "points": [
+            [
+              149.60309403593646,
+              -458.8726913074691,
+              848.842858844683
+            ]
+          ],
+          "tolerance": 21.878605161432862
+        },
+        "kind": "round",
+        "sizes": [
+          0.1
+        ]
+      }
+    }
+  ],
+  "case": "cov-fillet-arc-edge-on-an-oblique-cut-of-a-bar",
+  "expected": {
+    "body_count": 2,
+    "method": "an R0.1 round fits along that edge (the faces meet at a finite angle and the arc's radius is 3); the section along an elliptical edge on a cylinder has no closed form here: one closed valid solid is the right answer",
+    "source": "invariants",
+    "sources": [],
+    "what": "a thin bar with a 3 mm concave arc in its profile, its end cut by a plane tilted 21 deg (examples/regressions/oblique_cut_of_cylinder): the edge where the arc's cylinder meets the cut (part of an ellipse) rounded R0.1 (action matrix (apps/solidcraft-cli/tests/action_matrix.rs): regressions/oblique_cut_of_cylinder, Tool F2:side:a1|F4:side:l1 edge.fillet)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 33,
+      "faces": 15,
+      "vertices": 22
+    }
+  },
+  "records": "cov-fillet-arc-edge-on-an-oblique-cut-of-a-bar.bodies.json.gz",
+  "result": [
+    {
+      "body": "Tool",
+      "made": "b16"
+    },
+    {
+      "body": "ClipBody",
+      "operand": "b4"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 132528.6393733284,
+      "body_count": 2,
+      "edges": 33,
+      "faces": 15,
+      "vertices": 22,
+      "volume_mm3": 967467.9929996555
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [],
+  "what": "a thin bar with a 3 mm concave arc in its profile, its end cut by a plane tilted 21 deg (examples/regressions/oblique_cut_of_cylinder): the edge where the arc's cylinder meets the cut (part of an ellipse) rounded R0.1 (action matrix (apps/solidcraft-cli/tests/action_matrix.rs): regressions/oblique_cut_of_cylinder, Tool F2:side:a1|F4:side:l1 edge.fillet)",
+  "why_not": []
+}

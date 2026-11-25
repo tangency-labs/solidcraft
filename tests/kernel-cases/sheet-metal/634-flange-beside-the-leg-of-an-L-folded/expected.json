@@ -1,0 +1,21 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#634"
+ ],
+ "what": "the same bar with its leg and a 15 mm inside flange on the bar's top edge, folded",
+ "source": "analytic",
+ "method": "the leg stays: bbox y 0..60; the flange stands on the top face of the bar from the base's underside z = 0 to its height 15 (x 0..160 covers the bar and the leg)",
+ "body_count": 1,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   160,
+   60,
+   15
+  ]
+ }
+}

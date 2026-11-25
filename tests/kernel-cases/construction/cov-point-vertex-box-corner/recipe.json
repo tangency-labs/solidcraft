@@ -1,0 +1,26 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 30,
+    "height": 20,
+    "body_name": "Box"
+   }
+  },
+  {
+   "command": "construct.point.vertex",
+   "params": {
+    "point": {
+     "vertex": [
+      39,
+      29,
+      19
+     ]
+    },
+    "name": "P"
+   }
+  }
+ ]
+}

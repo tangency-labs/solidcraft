@@ -1,0 +1,83 @@
+{
+ "commands": [
+  {
+   "command": "sheet.manage_rules",
+   "params": {
+    "name": "Rule",
+    "thickness": "1 mm",
+    "active": true,
+    "bend_radius": "1 mm",
+    "k_factor": 0.5
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 990,
+    "width": 100,
+    "height": 1,
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     100,
+     50,
+     1
+    ],
+    "diameter": 10
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     300,
+     50,
+     1
+    ],
+    "diameter": 4
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     500,
+     50,
+     1
+    ],
+    "diameter": 2
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     700,
+     50,
+     1
+    ],
+    "diameter": 1
+   }
+  },
+  {
+   "command": "sheet.recognize",
+   "params": {
+    "body": "Plate",
+    "face": [
+     480,
+     25,
+     1
+    ],
+    "rule": "Rule"
+   }
+  },
+  {
+   "command": "inspect.measure",
+   "params": {}
+  }
+ ]
+}

@@ -1,0 +1,96 @@
+{
+ "commands": [
+  {
+   "command": "sheet.manage_rules",
+   "params": {
+    "name": "Sheet 2 mm",
+    "thickness": "2 mm",
+    "active": true,
+    "bend_radius": "1 mm",
+    "k_factor": 0.5,
+    "gap": "0.5 mm",
+    "corner_relief_shape": "notch"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Base"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     0,
+     0
+    ],
+    "p1": [
+     120,
+     90
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sheet.flange",
+   "params": {
+    "type": "base",
+    "sketch": "Base"
+   }
+  },
+  {
+   "command": "sheet.flange",
+   "params": {
+    "type": "edge",
+    "height": 38.6,
+    "angle": 75,
+    "edges": [
+     [
+      60,
+      0,
+      2
+     ],
+     {
+      "point": [
+       120,
+       45,
+       2
+      ],
+      "angle": "90 deg"
+     },
+     {
+      "point": [
+       60,
+       90,
+       2
+      ],
+      "angle": "105 deg",
+      "height": "30 mm"
+     },
+     {
+      "point": [
+       0,
+       45,
+       2
+      ],
+      "angle": "120 deg",
+      "height": "25 mm"
+     }
+    ]
+   }
+  },
+  {
+   "command": "sheet.unfold",
+   "params": {}
+  },
+  {
+   "command": "inspect.measure",
+   "params": {}
+  }
+ ]
+}

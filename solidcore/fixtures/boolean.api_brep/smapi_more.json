@@ -1,0 +1,2474 @@
+{
+ "cases": [
+  {
+   "name": "b2d_planar_union",
+   "note": "tests/SM_API_test/src/TestSmBrep.cpp TestSmBoolean2DPlanarUnion: 10 x 10 sheets at x = 0 and x = 5, union (area 150, box [0,15]x[0,10]).",
+   "inputs": {
+    "api": "boolean2d",
+    "a": {
+     "kind": "plane",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      5.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10
+     ]
+    },
+    "operation": 0
+   }
+  },
+  {
+   "name": "b2d_status_propagation",
+   "note": "tests/SM_API_test/src/TestSmBrep.cpp TestSmBoolean2DStatusPropagation: sheets at z = 0 and z = 1 are rejected (SM_ERR_INVALID_INPUT), both left intact.",
+   "inputs": {
+    "api": "boolean2d",
+    "a": {
+     "kind": "plane",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      0.0,
+      0,
+      1
+     ],
+     "size": [
+      10.0,
+      10
+     ]
+    },
+    "operation": 0
+   }
+  },
+  {
+   "name": "b2d_disk_minus_hole",
+   "note": "tests/SM_API_test/src/TestSmBrep.cpp precise property selection case 3: SmApiCreatePlanarCircle r 5 minus r 2 (SM_2D_DIFFERENCE), an annulus.",
+   "inputs": {
+    "api": "boolean2d",
+    "a": {
+     "kind": "disk",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "radius": 5.0
+    },
+    "b": {
+     "kind": "disk",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "radius": 2.0
+    },
+    "operation": 2
+   }
+  },
+  {
+   "name": "b2d_overlap_union",
+   "note": "Overlapping 10 x 10 sheets at x = 0 and x = 5, each Sm2DBooleanOperationType.",
+   "inputs": {
+    "api": "boolean2d",
+    "a": {
+     "kind": "plane",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      5.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10
+     ]
+    },
+    "operation": 0
+   }
+  },
+  {
+   "name": "b2d_disk_sheet_union",
+   "note": "A disk r 4 at (10,5) over the sheet [0,10]^2, each Sm2DBooleanOperationType.",
+   "inputs": {
+    "api": "boolean2d",
+    "a": {
+     "kind": "plane",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10
+     ]
+    },
+    "b": {
+     "kind": "disk",
+     "origin": [
+      10.0,
+      5,
+      0
+     ],
+     "radius": 4.0
+    },
+    "operation": 0
+   }
+  },
+  {
+   "name": "b2d_overlap_intersection",
+   "note": "Overlapping 10 x 10 sheets at x = 0 and x = 5, each Sm2DBooleanOperationType.",
+   "inputs": {
+    "api": "boolean2d",
+    "a": {
+     "kind": "plane",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      5.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10
+     ]
+    },
+    "operation": 1
+   }
+  },
+  {
+   "name": "b2d_disk_sheet_intersection",
+   "note": "A disk r 4 at (10,5) over the sheet [0,10]^2, each Sm2DBooleanOperationType.",
+   "inputs": {
+    "api": "boolean2d",
+    "a": {
+     "kind": "plane",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10
+     ]
+    },
+    "b": {
+     "kind": "disk",
+     "origin": [
+      10.0,
+      5,
+      0
+     ],
+     "radius": 4.0
+    },
+    "operation": 1
+   }
+  },
+  {
+   "name": "b2d_overlap_difference",
+   "note": "Overlapping 10 x 10 sheets at x = 0 and x = 5, each Sm2DBooleanOperationType.",
+   "inputs": {
+    "api": "boolean2d",
+    "a": {
+     "kind": "plane",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      5.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10
+     ]
+    },
+    "operation": 2
+   }
+  },
+  {
+   "name": "b2d_disk_sheet_difference",
+   "note": "A disk r 4 at (10,5) over the sheet [0,10]^2, each Sm2DBooleanOperationType.",
+   "inputs": {
+    "api": "boolean2d",
+    "a": {
+     "kind": "plane",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10
+     ]
+    },
+    "b": {
+     "kind": "disk",
+     "origin": [
+      10.0,
+      5,
+      0
+     ],
+     "radius": 4.0
+    },
+    "operation": 2
+   }
+  },
+  {
+   "name": "b2d_overlap_exclusive_or",
+   "note": "Overlapping 10 x 10 sheets at x = 0 and x = 5, each Sm2DBooleanOperationType.",
+   "inputs": {
+    "api": "boolean2d",
+    "a": {
+     "kind": "plane",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      5.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10
+     ]
+    },
+    "operation": 3
+   }
+  },
+  {
+   "name": "b2d_disk_sheet_exclusive_or",
+   "note": "A disk r 4 at (10,5) over the sheet [0,10]^2, each Sm2DBooleanOperationType.",
+   "inputs": {
+    "api": "boolean2d",
+    "a": {
+     "kind": "plane",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10
+     ]
+    },
+    "b": {
+     "kind": "disk",
+     "origin": [
+      10.0,
+      5,
+      0
+     ],
+     "radius": 4.0
+    },
+    "operation": 3
+   }
+  },
+  {
+   "name": "b2d_overlap_merge",
+   "note": "Overlapping 10 x 10 sheets at x = 0 and x = 5, each Sm2DBooleanOperationType.",
+   "inputs": {
+    "api": "boolean2d",
+    "a": {
+     "kind": "plane",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      5.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10
+     ]
+    },
+    "operation": 4
+   }
+  },
+  {
+   "name": "b2d_disk_sheet_merge",
+   "note": "A disk r 4 at (10,5) over the sheet [0,10]^2, each Sm2DBooleanOperationType.",
+   "inputs": {
+    "api": "boolean2d",
+    "a": {
+     "kind": "plane",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10
+     ]
+    },
+    "b": {
+     "kind": "disk",
+     "origin": [
+      10.0,
+      5,
+      0
+     ],
+     "radius": 4.0
+    },
+    "operation": 4
+   }
+  },
+  {
+   "name": "b2d_disjoint_union",
+   "note": "Disjoint sheets on one plane, union.",
+   "inputs": {
+    "api": "boolean2d",
+    "a": {
+     "kind": "plane",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      20.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10
+     ]
+    },
+    "operation": 0
+   }
+  },
+  {
+   "name": "b2d_solid_operand",
+   "note": "A box is not a planar sheet: Boolean2D's input checks.",
+   "inputs": {
+    "api": "boolean2d",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10
+     ]
+    },
+    "operation": 0
+   }
+  },
+  {
+   "name": "nm_box_sphere_union",
+   "note": "tests/SM_API_test/src/TestSmBrep.cpp TestSmNonManifoldBoolean: box [0,10]^3 union sphere r 5 at (5,5,5).",
+   "inputs": {
+    "api": "non_manifold",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      5.0,
+      5,
+      5
+     ],
+     "radius": 5.0
+    },
+    "operation": 1
+   }
+  },
+  {
+   "name": "nm_boxes_union",
+   "note": "Boxes [0,10]^3 and [5,15]x[0,10]^2 through SmApiNonManifoldBoolean.",
+   "inputs": {
+    "api": "non_manifold",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      5.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "operation": 1
+   }
+  },
+  {
+   "name": "curves_box_sphere_union",
+   "note": "SmApiBooleanWithCurves of box [0,10]^3 and sphere r 6 at (10,5,5): the circle edges of the intersection.",
+   "inputs": {
+    "api": "with_curves",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      10.0,
+      5,
+      5
+     ],
+     "radius": 6.0
+    },
+    "operation": 1
+   }
+  },
+  {
+   "name": "nm_boxes_intersection",
+   "note": "Boxes [0,10]^3 and [5,15]x[0,10]^2 through SmApiNonManifoldBoolean.",
+   "inputs": {
+    "api": "non_manifold",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      5.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "operation": 2
+   }
+  },
+  {
+   "name": "curves_box_sphere_intersection",
+   "note": "SmApiBooleanWithCurves of box [0,10]^3 and sphere r 6 at (10,5,5): the circle edges of the intersection.",
+   "inputs": {
+    "api": "with_curves",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      10.0,
+      5,
+      5
+     ],
+     "radius": 6.0
+    },
+    "operation": 2
+   }
+  },
+  {
+   "name": "nm_boxes_difference",
+   "note": "Boxes [0,10]^3 and [5,15]x[0,10]^2 through SmApiNonManifoldBoolean.",
+   "inputs": {
+    "api": "non_manifold",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      5.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "operation": 3
+   }
+  },
+  {
+   "name": "curves_box_sphere_difference",
+   "note": "SmApiBooleanWithCurves of box [0,10]^3 and sphere r 6 at (10,5,5): the circle edges of the intersection.",
+   "inputs": {
+    "api": "with_curves",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      10.0,
+      5,
+      5
+     ],
+     "radius": 6.0
+    },
+    "operation": 3
+   }
+  },
+  {
+   "name": "nm_boxes_merge",
+   "note": "Boxes [0,10]^3 and [5,15]x[0,10]^2 through SmApiNonManifoldBoolean.",
+   "inputs": {
+    "api": "non_manifold",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      5.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "operation": 5
+   }
+  },
+  {
+   "name": "curves_box_sphere_merge",
+   "note": "SmApiBooleanWithCurves of box [0,10]^3 and sphere r 6 at (10,5,5): the circle edges of the intersection.",
+   "inputs": {
+    "api": "with_curves",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      10.0,
+      5,
+      5
+     ],
+     "radius": 6.0
+    },
+    "operation": 5
+   }
+  },
+  {
+   "name": "nm_boxes_partial_merge",
+   "note": "Boxes [0,10]^3 and [5,15]x[0,10]^2 through SmApiNonManifoldBoolean.",
+   "inputs": {
+    "api": "non_manifold",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      5.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "operation": 8
+   }
+  },
+  {
+   "name": "curves_box_sphere_partial_merge",
+   "note": "SmApiBooleanWithCurves of box [0,10]^3 and sphere r 6 at (10,5,5): the circle edges of the intersection.",
+   "inputs": {
+    "api": "with_curves",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      10.0,
+      5,
+      5
+     ],
+     "radius": 6.0
+    },
+    "operation": 8
+   }
+  },
+  {
+   "name": "nm_boxes_slice",
+   "note": "Boxes [0,10]^3 and [5,15]x[0,10]^2 through SmApiNonManifoldBoolean.",
+   "inputs": {
+    "api": "non_manifold",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      5.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "operation": 10
+   }
+  },
+  {
+   "name": "curves_box_sphere_slice",
+   "note": "SmApiBooleanWithCurves of box [0,10]^3 and sphere r 6 at (10,5,5): the circle edges of the intersection.",
+   "inputs": {
+    "api": "with_curves",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      10.0,
+      5,
+      5
+     ],
+     "radius": 6.0
+    },
+    "operation": 10
+   }
+  },
+  {
+   "name": "nm_sheet_box_merge",
+   "note": "A sheet through a box: SmApiNonManifoldBoolean takes the non-manifold path whatever the operands.",
+   "inputs": {
+    "api": "non_manifold",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      -5.0,
+      -5,
+      5
+     ],
+     "size": [
+      20.0,
+      20
+     ]
+    },
+    "operation": 5
+   }
+  },
+  {
+   "name": "nm_extract_separate",
+   "note": "SM_BO_EXTRACT_SEPARATE is rejected by SmApiValidateBooleanOperands.",
+   "inputs": {
+    "api": "non_manifold",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      5.0,
+      5,
+      5
+     ]
+    },
+    "operation": 9
+   }
+  },
+  {
+   "name": "curves_boxes_union",
+   "note": "SmApiBooleanWithCurves of overlapping boxes (manifold path).",
+   "inputs": {
+    "api": "with_curves",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      5.0,
+      5,
+      5
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "operation": 1
+   }
+  },
+  {
+   "name": "curves_sheet_box",
+   "note": "SmApiBooleanWithCurves of a box and a sheet (non-manifold path), merge.",
+   "inputs": {
+    "api": "with_curves",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      -5.0,
+      -5,
+      5
+     ],
+     "size": [
+      20.0,
+      20
+     ]
+    },
+    "operation": 5
+   }
+  },
+  {
+   "name": "curves_extract_separate",
+   "note": "SM_BO_EXTRACT_SEPARATE is rejected.",
+   "inputs": {
+    "api": "with_curves",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      5.0,
+      5,
+      5
+     ]
+    },
+    "operation": 9
+   }
+  },
+  {
+   "name": "piecewise_boxes",
+   "note": "tests/SM_API_test/src/TestSmBrep.cpp TestSmPiecewiseMerge: boxes at 0 and (5,0,0), bCreateNewBrepsForFaces FALSE.",
+   "inputs": {
+    "api": "piecewise_merge",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      5.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "create_new": false
+   }
+  },
+  {
+   "name": "piecewise_boxes_new_breps",
+   "note": "As piecewise_boxes with bCreateNewBrepsForFaces TRUE.",
+   "inputs": {
+    "api": "piecewise_merge",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      5.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "create_new": true
+   }
+  },
+  {
+   "name": "piecewise_box_sphere",
+   "note": "Box [0,10]^3 and sphere r 5 at (10,5,5), each face merged in turn.",
+   "inputs": {
+    "api": "piecewise_merge",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      10.0,
+      5,
+      5
+     ],
+     "radius": 5.0
+    },
+    "create_new": false
+   }
+  },
+  {
+   "name": "piecewise_box_sheet",
+   "note": "Box and a crossing sheet, bCreateNewBrepsForFaces TRUE.",
+   "inputs": {
+    "api": "piecewise_merge",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      -5.0,
+      -5,
+      5
+     ],
+     "size": [
+      20.0,
+      20
+     ]
+    },
+    "create_new": true
+   }
+  },
+  {
+   "name": "sweep_face0",
+   "note": "tests/SM_API_test/src/TestSmBrep.cpp TestSmNonManifoldSweep: box 10, its first face swept.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "faces": [
+      0
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0
+   }
+  },
+  {
+   "name": "sweep_null_face",
+   "note": "tests/SM_API_test/src/TestSmBrep.cpp TestNonManifoldSweepNullEntry: a live face and a NULL one: SM_ERR_INVALID_INPUT, the box untouched.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "faces": [
+      0,
+      null
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0
+   }
+  },
+  {
+   "name": "sweep_null_edge",
+   "note": "tests/SM_API_test/src/TestSmBrep.cpp TestNonManifoldSweepNullEntry, edges.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "edges": [
+      0,
+      null
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0
+   }
+  },
+  {
+   "name": "sweep_null_vertex",
+   "note": "tests/SM_API_test/src/TestSmBrep.cpp TestNonManifoldSweepNullEntry, vertices.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "vertices": [
+      0,
+      null
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0
+   }
+  },
+  {
+   "name": "sweep_whole_box",
+   "note": "tests/SM_API_test/src/TestSmBrep.cpp TestNonManifoldSweepDistinctTarget's whole-B-rep pass, with pRegionBrep = pBrepToSweep.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {},
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0
+   }
+  },
+  {
+   "name": "sweep_edge",
+   "note": "One edge of a box swept into a face.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "edges": [
+      3
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0
+   }
+  },
+  {
+   "name": "sweep_vertex",
+   "note": "One vertex of a box swept into an edge.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "vertices": [
+      5
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0
+   }
+  },
+  {
+   "name": "sweep_sheet",
+   "note": "A sheet swept whole.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "plane",
+     "origin": [
+      1.0,
+      1,
+      0
+     ],
+     "size": [
+      4.0,
+      3
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {},
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0
+   }
+  },
+  {
+   "name": "sweep_sheet_face_merge",
+   "note": "A sheet's face swept with bDoMerge.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "plane",
+     "origin": [
+      1.0,
+      1,
+      0
+     ],
+     "size": [
+      4.0,
+      3
+     ]
+    },
+    "stitch": true,
+    "merge": true,
+    "selection": {
+     "faces": [
+      0
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0
+   }
+  },
+  {
+   "name": "sweep_disk_no_stitch",
+   "note": "A disk swept whole without stitching.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "disk",
+     "origin": [
+      3.0,
+      3,
+      0
+     ],
+     "radius": 2.0
+    },
+    "stitch": false,
+    "merge": false,
+    "selection": {},
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0
+   }
+  },
+  {
+   "name": "sweep_empty_lists",
+   "note": "Empty (non-NULL) selection arrays: nothing selected.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "faces": [],
+     "edges": [],
+     "vertices": []
+    },
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0
+   }
+  },
+  {
+   "name": "rotational_sweep_face0",
+   "note": "tests/SM_API_test/src/TestSmBrep.cpp TestSmNonManifoldRotationalSweep: box 5, its first face swept.",
+   "inputs": {
+    "api": "rotational_sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      5.0,
+      5,
+      5
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "faces": [
+      0
+     ]
+    },
+    "base": [
+     0.0,
+     0,
+     0
+    ],
+    "axis": [
+     0.0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0
+   }
+  },
+  {
+   "name": "rotational_sweep_null_face",
+   "note": "tests/SM_API_test/src/TestSmBrep.cpp TestNonManifoldSweepNullEntry: a live face and a NULL one: SM_ERR_INVALID_INPUT, the box untouched.",
+   "inputs": {
+    "api": "rotational_sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "faces": [
+      0,
+      null
+     ]
+    },
+    "base": [
+     0.0,
+     0,
+     0
+    ],
+    "axis": [
+     0.0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0
+   }
+  },
+  {
+   "name": "rotational_sweep_null_edge",
+   "note": "tests/SM_API_test/src/TestSmBrep.cpp TestNonManifoldSweepNullEntry, edges.",
+   "inputs": {
+    "api": "rotational_sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "edges": [
+      0,
+      null
+     ]
+    },
+    "base": [
+     0.0,
+     0,
+     0
+    ],
+    "axis": [
+     0.0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0
+   }
+  },
+  {
+   "name": "rotational_sweep_null_vertex",
+   "note": "tests/SM_API_test/src/TestSmBrep.cpp TestNonManifoldSweepNullEntry, vertices.",
+   "inputs": {
+    "api": "rotational_sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "vertices": [
+      0,
+      null
+     ]
+    },
+    "base": [
+     0.0,
+     0,
+     0
+    ],
+    "axis": [
+     0.0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0
+   }
+  },
+  {
+   "name": "rotational_sweep_whole_box",
+   "note": "tests/SM_API_test/src/TestSmBrep.cpp TestNonManifoldSweepDistinctTarget's whole-B-rep pass, with pRegionBrep = pBrepToSweep.",
+   "inputs": {
+    "api": "rotational_sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {},
+    "base": [
+     0.0,
+     0,
+     0
+    ],
+    "axis": [
+     0.0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0
+   }
+  },
+  {
+   "name": "rotational_sweep_edge",
+   "note": "One edge of a box swept into a face.",
+   "inputs": {
+    "api": "rotational_sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "edges": [
+      3
+     ]
+    },
+    "base": [
+     0.0,
+     0,
+     0
+    ],
+    "axis": [
+     0.0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0
+   }
+  },
+  {
+   "name": "rotational_sweep_vertex",
+   "note": "One vertex of a box swept into an edge.",
+   "inputs": {
+    "api": "rotational_sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "vertices": [
+      5
+     ]
+    },
+    "base": [
+     0.0,
+     0,
+     0
+    ],
+    "axis": [
+     0.0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0
+   }
+  },
+  {
+   "name": "rotational_sweep_sheet",
+   "note": "A sheet swept whole.",
+   "inputs": {
+    "api": "rotational_sweep",
+    "brep": {
+     "kind": "plane",
+     "origin": [
+      1.0,
+      1,
+      0
+     ],
+     "size": [
+      4.0,
+      3
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {},
+    "base": [
+     0.0,
+     0,
+     0
+    ],
+    "axis": [
+     0.0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0
+   }
+  },
+  {
+   "name": "rotational_sweep_sheet_face_merge",
+   "note": "A sheet's face swept with bDoMerge.",
+   "inputs": {
+    "api": "rotational_sweep",
+    "brep": {
+     "kind": "plane",
+     "origin": [
+      1.0,
+      1,
+      0
+     ],
+     "size": [
+      4.0,
+      3
+     ]
+    },
+    "stitch": true,
+    "merge": true,
+    "selection": {
+     "faces": [
+      0
+     ]
+    },
+    "base": [
+     0.0,
+     0,
+     0
+    ],
+    "axis": [
+     0.0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0
+   }
+  },
+  {
+   "name": "rotational_sweep_disk_no_stitch",
+   "note": "A disk swept whole without stitching.",
+   "inputs": {
+    "api": "rotational_sweep",
+    "brep": {
+     "kind": "disk",
+     "origin": [
+      3.0,
+      3,
+      0
+     ],
+     "radius": 2.0
+    },
+    "stitch": false,
+    "merge": false,
+    "selection": {},
+    "base": [
+     0.0,
+     0,
+     0
+    ],
+    "axis": [
+     0.0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0
+   }
+  },
+  {
+   "name": "rotational_sweep_empty_lists",
+   "note": "Empty (non-NULL) selection arrays: nothing selected.",
+   "inputs": {
+    "api": "rotational_sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "faces": [],
+     "edges": [],
+     "vertices": []
+    },
+    "base": [
+     0.0,
+     0,
+     0
+    ],
+    "axis": [
+     0.0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0
+   }
+  },
+  {
+   "name": "sweep_zero_dir",
+   "note": "tests/SM_API_test/src/TestSmBrep.cpp TestSmNonManifoldSweep: a zero direction is SM_ERR_INVALID_INPUT before the box is touched.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     0
+    ],
+    "dist": 5.0,
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "faces": [
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "sweep_long_dir",
+   "note": "tests/SM_API_test/src/TestSmBrep.cpp TestSmNonManifoldSweep: direction (0,0,3) sweeps the same distance as (0,0,1).",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     3
+    ],
+    "dist": 5.0,
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "faces": [
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "sweep_negative_dist",
+   "note": "A negative distance sweeps against the direction.",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": -5.0,
+    "stitch": true,
+    "merge": false,
+    "selection": {
+     "faces": [
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "rotational_sweep_full_turn",
+   "note": "A sheet swept a full turn about an axis off it.",
+   "inputs": {
+    "api": "rotational_sweep",
+    "brep": {
+     "kind": "plane",
+     "origin": [
+      2.0,
+      0,
+      0
+     ],
+     "size": [
+      3.0,
+      3
+     ]
+    },
+    "base": [
+     0.0,
+     0,
+     0
+    ],
+    "axis": [
+     0.0,
+     1,
+     0
+    ],
+    "angle_deg": 360.0,
+    "stitch": true,
+    "merge": false,
+    "selection": {}
+   }
+  },
+  {
+   "name": "sweep_region_null_face0",
+   "note": "tests/SM_API_test/src/TestSmBrep.cpp TestNonManifoldSweepDistinctTarget, face0: NULL pRegionBrep: the swept B-rep's infinite region (accepted).",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "region": "null",
+    "selection": {
+     "faces": [
+      0
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0
+   }
+  },
+  {
+   "name": "sweep_region_null_whole",
+   "note": "tests/SM_API_test/src/TestSmBrep.cpp TestNonManifoldSweepDistinctTarget, whole: NULL pRegionBrep: the swept B-rep's infinite region (accepted).",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "region": "null",
+    "selection": {},
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0
+   }
+  },
+  {
+   "name": "sweep_region_swept_face0",
+   "note": "tests/SM_API_test/src/TestSmBrep.cpp TestNonManifoldSweepDistinctTarget, face0: pRegionBrep = pBrepToSweep (accepted).",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "region": "swept",
+    "selection": {
+     "faces": [
+      0
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0
+   }
+  },
+  {
+   "name": "sweep_region_swept_whole",
+   "note": "tests/SM_API_test/src/TestSmBrep.cpp TestNonManifoldSweepDistinctTarget, whole: pRegionBrep = pBrepToSweep (accepted).",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "region": "swept",
+    "selection": {},
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0
+   }
+  },
+  {
+   "name": "sweep_region_other_face0",
+   "note": "tests/SM_API_test/src/TestSmBrep.cpp TestNonManifoldSweepDistinctTarget, face0: pRegionBrep a second B-rep (SmApiCreateBox(origin, 1, 1, 1)): SM_ERR_INVALID_INPUT at SmApiBrep.cpp:1822, the swept B-rep untouched (TestNonManifoldSweepDistinctTarget).",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "region": "other",
+    "selection": {
+     "faces": [
+      0
+     ]
+    },
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0
+   }
+  },
+  {
+   "name": "sweep_region_other_whole",
+   "note": "tests/SM_API_test/src/TestSmBrep.cpp TestNonManifoldSweepDistinctTarget, whole: pRegionBrep a second B-rep (SmApiCreateBox(origin, 1, 1, 1)): SM_ERR_INVALID_INPUT at SmApiBrep.cpp:1822, the swept B-rep untouched (TestNonManifoldSweepDistinctTarget).",
+   "inputs": {
+    "api": "sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "region": "other",
+    "selection": {},
+    "dir": [
+     0.0,
+     0,
+     1
+    ],
+    "dist": 5.0
+   }
+  },
+  {
+   "name": "rotational_sweep_region_null_face0",
+   "note": "tests/SM_API_test/src/TestSmBrep.cpp TestNonManifoldSweepDistinctTarget, face0: NULL pRegionBrep: the swept B-rep's infinite region (accepted).",
+   "inputs": {
+    "api": "rotational_sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "region": "null",
+    "selection": {
+     "faces": [
+      0
+     ]
+    },
+    "base": [
+     0.0,
+     0,
+     0
+    ],
+    "axis": [
+     0.0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0
+   }
+  },
+  {
+   "name": "rotational_sweep_region_null_whole",
+   "note": "tests/SM_API_test/src/TestSmBrep.cpp TestNonManifoldSweepDistinctTarget, whole: NULL pRegionBrep: the swept B-rep's infinite region (accepted).",
+   "inputs": {
+    "api": "rotational_sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "region": "null",
+    "selection": {},
+    "base": [
+     0.0,
+     0,
+     0
+    ],
+    "axis": [
+     0.0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0
+   }
+  },
+  {
+   "name": "rotational_sweep_region_swept_face0",
+   "note": "tests/SM_API_test/src/TestSmBrep.cpp TestNonManifoldSweepDistinctTarget, face0: pRegionBrep = pBrepToSweep (accepted).",
+   "inputs": {
+    "api": "rotational_sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "region": "swept",
+    "selection": {
+     "faces": [
+      0
+     ]
+    },
+    "base": [
+     0.0,
+     0,
+     0
+    ],
+    "axis": [
+     0.0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0
+   }
+  },
+  {
+   "name": "rotational_sweep_region_swept_whole",
+   "note": "tests/SM_API_test/src/TestSmBrep.cpp TestNonManifoldSweepDistinctTarget, whole: pRegionBrep = pBrepToSweep (accepted).",
+   "inputs": {
+    "api": "rotational_sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "region": "swept",
+    "selection": {},
+    "base": [
+     0.0,
+     0,
+     0
+    ],
+    "axis": [
+     0.0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0
+   }
+  },
+  {
+   "name": "rotational_sweep_region_other_face0",
+   "note": "tests/SM_API_test/src/TestSmBrep.cpp TestNonManifoldSweepDistinctTarget, face0: pRegionBrep a second B-rep (SmApiCreateBox(origin, 1, 1, 1)): SM_ERR_INVALID_INPUT at SmApiBrep.cpp:1881, the swept B-rep untouched (TestNonManifoldSweepDistinctTarget).",
+   "inputs": {
+    "api": "rotational_sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "region": "other",
+    "selection": {
+     "faces": [
+      0
+     ]
+    },
+    "base": [
+     0.0,
+     0,
+     0
+    ],
+    "axis": [
+     0.0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0
+   }
+  },
+  {
+   "name": "rotational_sweep_region_other_whole",
+   "note": "tests/SM_API_test/src/TestSmBrep.cpp TestNonManifoldSweepDistinctTarget, whole: pRegionBrep a second B-rep (SmApiCreateBox(origin, 1, 1, 1)): SM_ERR_INVALID_INPUT at SmApiBrep.cpp:1881, the swept B-rep untouched (TestNonManifoldSweepDistinctTarget).",
+   "inputs": {
+    "api": "rotational_sweep",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0,
+      0
+     ],
+     "size": [
+      10.0,
+      10,
+      10
+     ]
+    },
+    "stitch": true,
+    "merge": false,
+    "region": "other",
+    "selection": {},
+    "base": [
+     0.0,
+     0,
+     0
+    ],
+    "axis": [
+     0.0,
+     0,
+     1
+    ],
+    "angle_deg": 90.0
+   }
+  }
+ ]
+}

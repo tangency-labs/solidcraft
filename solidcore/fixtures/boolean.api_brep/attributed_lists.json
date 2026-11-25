@@ -1,0 +1,5010 @@
+{
+ "cases": [
+  {
+   "name": "attributed_copy_merge_p3_empty_forest",
+   "note": "#1462: merge_p3_empty_forest (merge_p3-trees.json) with every input B-rep face and edge tagged with its own copy long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 0,
+    "call": {
+     "api": "trees",
+     "breps": [],
+     "tree": []
+    }
+   }
+  },
+  {
+   "name": "attributed_reference_merge_p3_empty_forest",
+   "note": "#1462: merge_p3_empty_forest (merge_p3-trees.json) with every input B-rep face and edge tagged with its own reference long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 1,
+    "call": {
+     "api": "trees",
+     "breps": [],
+     "tree": []
+    }
+   }
+  },
+  {
+   "name": "attributed_temp_merge_p3_empty_forest",
+   "note": "#1462: merge_p3_empty_forest (merge_p3-trees.json) with every input B-rep face and edge tagged with its own temp long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 4,
+    "call": {
+     "api": "trees",
+     "breps": [],
+     "tree": []
+    }
+   }
+  },
+  {
+   "name": "attributed_copy_merge_p3_defined_null_leaf_result",
+   "note": "#1462: merge_p3_defined_null_leaf_result (merge_p3-trees.json) with every input B-rep face and edge tagged with its own copy long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 0,
+    "call": {
+     "api": "trees",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        1.0,
+        2.0,
+        3.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        4.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        3.0,
+        2.0,
+        1.0
+       ]
+      }
+     ],
+     "tree": [
+      0,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "attributed_reference_merge_p3_defined_null_leaf_result",
+   "note": "#1462: merge_p3_defined_null_leaf_result (merge_p3-trees.json) with every input B-rep face and edge tagged with its own reference long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 1,
+    "call": {
+     "api": "trees",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        1.0,
+        2.0,
+        3.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        4.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        3.0,
+        2.0,
+        1.0
+       ]
+      }
+     ],
+     "tree": [
+      0,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "attributed_temp_merge_p3_defined_null_leaf_result",
+   "note": "#1462: merge_p3_defined_null_leaf_result (merge_p3-trees.json) with every input B-rep face and edge tagged with its own temp long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 4,
+    "call": {
+     "api": "trees",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        1.0,
+        2.0,
+        3.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        4.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        3.0,
+        2.0,
+        1.0
+       ]
+      }
+     ],
+     "tree": [
+      0,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "attributed_copy_merge_p3_unreachable_bad_leaf",
+   "note": "#1462: merge_p3_unreachable_bad_leaf (merge_p3-trees.json) with every input B-rep face and edge tagged with its own copy long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 0,
+    "call": {
+     "api": "trees",
+     "breps": [],
+     "tree": [
+      -1,
+      64
+     ]
+    }
+   }
+  },
+  {
+   "name": "attributed_reference_merge_p3_unreachable_bad_leaf",
+   "note": "#1462: merge_p3_unreachable_bad_leaf (merge_p3-trees.json) with every input B-rep face and edge tagged with its own reference long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 1,
+    "call": {
+     "api": "trees",
+     "breps": [],
+     "tree": [
+      -1,
+      64
+     ]
+    }
+   }
+  },
+  {
+   "name": "attributed_temp_merge_p3_unreachable_bad_leaf",
+   "note": "#1462: merge_p3_unreachable_bad_leaf (merge_p3-trees.json) with every input B-rep face and edge tagged with its own temp long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 4,
+    "call": {
+     "api": "trees",
+     "breps": [],
+     "tree": [
+      -1,
+      64
+     ]
+    }
+   }
+  },
+  {
+   "name": "attributed_copy_merge_breps_empty",
+   "note": "#1462: merge_breps_empty (upstream_tests.json) with every input B-rep face and edge tagged with its own copy long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 0,
+    "call": {
+     "api": "merge_breps",
+     "breps": [],
+     "operation": 1
+    }
+   }
+  },
+  {
+   "name": "attributed_reference_merge_breps_empty",
+   "note": "#1462: merge_breps_empty (upstream_tests.json) with every input B-rep face and edge tagged with its own reference long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 1,
+    "call": {
+     "api": "merge_breps",
+     "breps": [],
+     "operation": 1
+    }
+   }
+  },
+  {
+   "name": "attributed_temp_merge_breps_empty",
+   "note": "#1462: merge_breps_empty (upstream_tests.json) with every input B-rep face and edge tagged with its own temp long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 4,
+    "call": {
+     "api": "merge_breps",
+     "breps": [],
+     "operation": 1
+    }
+   }
+  },
+  {
+   "name": "attributed_copy_merge_breps_singleton",
+   "note": "#1462: merge_breps_singleton (upstream_tests.json) with every input B-rep face and edge tagged with its own copy long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 0,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        1,
+        2,
+        3
+       ],
+       "size": [
+        4,
+        5,
+        6
+       ]
+      }
+     ],
+     "operation": 1
+    }
+   }
+  },
+  {
+   "name": "attributed_reference_merge_breps_singleton",
+   "note": "#1462: merge_breps_singleton (upstream_tests.json) with every input B-rep face and edge tagged with its own reference long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 1,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        1,
+        2,
+        3
+       ],
+       "size": [
+        4,
+        5,
+        6
+       ]
+      }
+     ],
+     "operation": 1
+    }
+   }
+  },
+  {
+   "name": "attributed_temp_merge_breps_singleton",
+   "note": "#1462: merge_breps_singleton (upstream_tests.json) with every input B-rep face and edge tagged with its own temp long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 4,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        1,
+        2,
+        3
+       ],
+       "size": [
+        4,
+        5,
+        6
+       ]
+      }
+     ],
+     "operation": 1
+    }
+   }
+  },
+  {
+   "name": "attributed_copy_merge_breps_bad_operation_unknown",
+   "note": "#1462: merge_breps_bad_operation_unknown (upstream_tests.json) with every input B-rep face and edge tagged with its own copy long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 0,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        2,
+        3,
+        4
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        10,
+        0,
+        0
+       ],
+       "size": [
+        3,
+        4,
+        5
+       ]
+      }
+     ],
+     "operation": 0
+    }
+   }
+  },
+  {
+   "name": "attributed_reference_merge_breps_bad_operation_unknown",
+   "note": "#1462: merge_breps_bad_operation_unknown (upstream_tests.json) with every input B-rep face and edge tagged with its own reference long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 1,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        2,
+        3,
+        4
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        10,
+        0,
+        0
+       ],
+       "size": [
+        3,
+        4,
+        5
+       ]
+      }
+     ],
+     "operation": 0
+    }
+   }
+  },
+  {
+   "name": "attributed_temp_merge_breps_bad_operation_unknown",
+   "note": "#1462: merge_breps_bad_operation_unknown (upstream_tests.json) with every input B-rep face and edge tagged with its own temp long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 4,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        2,
+        3,
+        4
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        10,
+        0,
+        0
+       ],
+       "size": [
+        3,
+        4,
+        5
+       ]
+      }
+     ],
+     "operation": 0
+    }
+   }
+  },
+  {
+   "name": "attributed_copy_merge_breps_bad_operation_exclusive_or",
+   "note": "#1462: merge_breps_bad_operation_exclusive_or (upstream_tests.json) with every input B-rep face and edge tagged with its own copy long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 0,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        2,
+        3,
+        4
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        10,
+        0,
+        0
+       ],
+       "size": [
+        3,
+        4,
+        5
+       ]
+      }
+     ],
+     "operation": 4
+    }
+   }
+  },
+  {
+   "name": "attributed_reference_merge_breps_bad_operation_exclusive_or",
+   "note": "#1462: merge_breps_bad_operation_exclusive_or (upstream_tests.json) with every input B-rep face and edge tagged with its own reference long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 1,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        2,
+        3,
+        4
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        10,
+        0,
+        0
+       ],
+       "size": [
+        3,
+        4,
+        5
+       ]
+      }
+     ],
+     "operation": 4
+    }
+   }
+  },
+  {
+   "name": "attributed_temp_merge_breps_bad_operation_exclusive_or",
+   "note": "#1462: merge_breps_bad_operation_exclusive_or (upstream_tests.json) with every input B-rep face and edge tagged with its own temp long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 4,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        2,
+        3,
+        4
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        10,
+        0,
+        0
+       ],
+       "size": [
+        3,
+        4,
+        5
+       ]
+      }
+     ],
+     "operation": 4
+    }
+   }
+  },
+  {
+   "name": "attributed_copy_merge_breps_bad_operation_partial_merge",
+   "note": "#1462: merge_breps_bad_operation_partial_merge (upstream_tests.json) with every input B-rep face and edge tagged with its own copy long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 0,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        2,
+        3,
+        4
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        10,
+        0,
+        0
+       ],
+       "size": [
+        3,
+        4,
+        5
+       ]
+      }
+     ],
+     "operation": 6
+    }
+   }
+  },
+  {
+   "name": "attributed_reference_merge_breps_bad_operation_partial_merge",
+   "note": "#1462: merge_breps_bad_operation_partial_merge (upstream_tests.json) with every input B-rep face and edge tagged with its own reference long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 1,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        2,
+        3,
+        4
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        10,
+        0,
+        0
+       ],
+       "size": [
+        3,
+        4,
+        5
+       ]
+      }
+     ],
+     "operation": 6
+    }
+   }
+  },
+  {
+   "name": "attributed_temp_merge_breps_bad_operation_partial_merge",
+   "note": "#1462: merge_breps_bad_operation_partial_merge (upstream_tests.json) with every input B-rep face and edge tagged with its own temp long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 4,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        2,
+        3,
+        4
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        10,
+        0,
+        0
+       ],
+       "size": [
+        3,
+        4,
+        5
+       ]
+      }
+     ],
+     "operation": 6
+    }
+   }
+  },
+  {
+   "name": "attributed_copy_merge_breps_bad_operation_imprint",
+   "note": "#1462: merge_breps_bad_operation_imprint (upstream_tests.json) with every input B-rep face and edge tagged with its own copy long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 0,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        2,
+        3,
+        4
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        10,
+        0,
+        0
+       ],
+       "size": [
+        3,
+        4,
+        5
+       ]
+      }
+     ],
+     "operation": 7
+    }
+   }
+  },
+  {
+   "name": "attributed_reference_merge_breps_bad_operation_imprint",
+   "note": "#1462: merge_breps_bad_operation_imprint (upstream_tests.json) with every input B-rep face and edge tagged with its own reference long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 1,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        2,
+        3,
+        4
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        10,
+        0,
+        0
+       ],
+       "size": [
+        3,
+        4,
+        5
+       ]
+      }
+     ],
+     "operation": 7
+    }
+   }
+  },
+  {
+   "name": "attributed_temp_merge_breps_bad_operation_imprint",
+   "note": "#1462: merge_breps_bad_operation_imprint (upstream_tests.json) with every input B-rep face and edge tagged with its own temp long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 4,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        2,
+        3,
+        4
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        10,
+        0,
+        0
+       ],
+       "size": [
+        3,
+        4,
+        5
+       ]
+      }
+     ],
+     "operation": 7
+    }
+   }
+  },
+  {
+   "name": "attributed_copy_merge_breps_bad_operation_imprint_classify",
+   "note": "#1462: merge_breps_bad_operation_imprint_classify (upstream_tests.json) with every input B-rep face and edge tagged with its own copy long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 0,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        2,
+        3,
+        4
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        10,
+        0,
+        0
+       ],
+       "size": [
+        3,
+        4,
+        5
+       ]
+      }
+     ],
+     "operation": 8
+    }
+   }
+  },
+  {
+   "name": "attributed_reference_merge_breps_bad_operation_imprint_classify",
+   "note": "#1462: merge_breps_bad_operation_imprint_classify (upstream_tests.json) with every input B-rep face and edge tagged with its own reference long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 1,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        2,
+        3,
+        4
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        10,
+        0,
+        0
+       ],
+       "size": [
+        3,
+        4,
+        5
+       ]
+      }
+     ],
+     "operation": 8
+    }
+   }
+  },
+  {
+   "name": "attributed_temp_merge_breps_bad_operation_imprint_classify",
+   "note": "#1462: merge_breps_bad_operation_imprint_classify (upstream_tests.json) with every input B-rep face and edge tagged with its own temp long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 4,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        2,
+        3,
+        4
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        10,
+        0,
+        0
+       ],
+       "size": [
+        3,
+        4,
+        5
+       ]
+      }
+     ],
+     "operation": 8
+    }
+   }
+  },
+  {
+   "name": "attributed_copy_merge_breps_bad_operation_extract_separate",
+   "note": "#1462: merge_breps_bad_operation_extract_separate (upstream_tests.json) with every input B-rep face and edge tagged with its own copy long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 0,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        2,
+        3,
+        4
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        10,
+        0,
+        0
+       ],
+       "size": [
+        3,
+        4,
+        5
+       ]
+      }
+     ],
+     "operation": 9
+    }
+   }
+  },
+  {
+   "name": "attributed_reference_merge_breps_bad_operation_extract_separate",
+   "note": "#1462: merge_breps_bad_operation_extract_separate (upstream_tests.json) with every input B-rep face and edge tagged with its own reference long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 1,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        2,
+        3,
+        4
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        10,
+        0,
+        0
+       ],
+       "size": [
+        3,
+        4,
+        5
+       ]
+      }
+     ],
+     "operation": 9
+    }
+   }
+  },
+  {
+   "name": "attributed_temp_merge_breps_bad_operation_extract_separate",
+   "note": "#1462: merge_breps_bad_operation_extract_separate (upstream_tests.json) with every input B-rep face and edge tagged with its own temp long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 4,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        2,
+        3,
+        4
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        10,
+        0,
+        0
+       ],
+       "size": [
+        3,
+        4,
+        5
+       ]
+      }
+     ],
+     "operation": 9
+    }
+   }
+  },
+  {
+   "name": "attributed_copy_merge_breps_bad_operation_slice",
+   "note": "#1462: merge_breps_bad_operation_slice (upstream_tests.json) with every input B-rep face and edge tagged with its own copy long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 0,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        2,
+        3,
+        4
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        10,
+        0,
+        0
+       ],
+       "size": [
+        3,
+        4,
+        5
+       ]
+      }
+     ],
+     "operation": 10
+    }
+   }
+  },
+  {
+   "name": "attributed_reference_merge_breps_bad_operation_slice",
+   "note": "#1462: merge_breps_bad_operation_slice (upstream_tests.json) with every input B-rep face and edge tagged with its own reference long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 1,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        2,
+        3,
+        4
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        10,
+        0,
+        0
+       ],
+       "size": [
+        3,
+        4,
+        5
+       ]
+      }
+     ],
+     "operation": 10
+    }
+   }
+  },
+  {
+   "name": "attributed_temp_merge_breps_bad_operation_slice",
+   "note": "#1462: merge_breps_bad_operation_slice (upstream_tests.json) with every input B-rep face and edge tagged with its own temp long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 4,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        2,
+        3,
+        4
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        10,
+        0,
+        0
+       ],
+       "size": [
+        3,
+        4,
+        5
+       ]
+      }
+     ],
+     "operation": 10
+    }
+   }
+  },
+  {
+   "name": "attributed_copy_merge_breps_union",
+   "note": "#1462: merge_breps_union (upstream_tests.json) with every input B-rep face and edge tagged with its own copy long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 0,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        8,
+        6,
+        3
+       ],
+       "size": [
+        4,
+        8,
+        6
+       ]
+      }
+     ],
+     "operation": 1
+    }
+   }
+  },
+  {
+   "name": "attributed_reference_merge_breps_union",
+   "note": "#1462: merge_breps_union (upstream_tests.json) with every input B-rep face and edge tagged with its own reference long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 1,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        8,
+        6,
+        3
+       ],
+       "size": [
+        4,
+        8,
+        6
+       ]
+      }
+     ],
+     "operation": 1
+    }
+   }
+  },
+  {
+   "name": "attributed_temp_merge_breps_union",
+   "note": "#1462: merge_breps_union (upstream_tests.json) with every input B-rep face and edge tagged with its own temp long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 4,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        8,
+        6,
+        3
+       ],
+       "size": [
+        4,
+        8,
+        6
+       ]
+      }
+     ],
+     "operation": 1
+    }
+   }
+  },
+  {
+   "name": "attributed_copy_merge_breps_intersection",
+   "note": "#1462: merge_breps_intersection (upstream_tests.json) with every input B-rep face and edge tagged with its own copy long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 0,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        8,
+        6,
+        3
+       ],
+       "size": [
+        4,
+        8,
+        6
+       ]
+      }
+     ],
+     "operation": 2
+    }
+   }
+  },
+  {
+   "name": "attributed_reference_merge_breps_intersection",
+   "note": "#1462: merge_breps_intersection (upstream_tests.json) with every input B-rep face and edge tagged with its own reference long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 1,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        8,
+        6,
+        3
+       ],
+       "size": [
+        4,
+        8,
+        6
+       ]
+      }
+     ],
+     "operation": 2
+    }
+   }
+  },
+  {
+   "name": "attributed_temp_merge_breps_intersection",
+   "note": "#1462: merge_breps_intersection (upstream_tests.json) with every input B-rep face and edge tagged with its own temp long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 4,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        8,
+        6,
+        3
+       ],
+       "size": [
+        4,
+        8,
+        6
+       ]
+      }
+     ],
+     "operation": 2
+    }
+   }
+  },
+  {
+   "name": "attributed_copy_merge_breps_difference",
+   "note": "#1462: merge_breps_difference (upstream_tests.json) with every input B-rep face and edge tagged with its own copy long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 0,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        8,
+        6,
+        3
+       ],
+       "size": [
+        4,
+        8,
+        6
+       ]
+      }
+     ],
+     "operation": 3
+    }
+   }
+  },
+  {
+   "name": "attributed_reference_merge_breps_difference",
+   "note": "#1462: merge_breps_difference (upstream_tests.json) with every input B-rep face and edge tagged with its own reference long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 1,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        8,
+        6,
+        3
+       ],
+       "size": [
+        4,
+        8,
+        6
+       ]
+      }
+     ],
+     "operation": 3
+    }
+   }
+  },
+  {
+   "name": "attributed_temp_merge_breps_difference",
+   "note": "#1462: merge_breps_difference (upstream_tests.json) with every input B-rep face and edge tagged with its own temp long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 4,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        8,
+        6,
+        3
+       ],
+       "size": [
+        4,
+        8,
+        6
+       ]
+      }
+     ],
+     "operation": 3
+    }
+   }
+  },
+  {
+   "name": "attributed_copy_merge_breps_merge",
+   "note": "#1462: merge_breps_merge (upstream_tests.json) with every input B-rep face and edge tagged with its own copy long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 0,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        8,
+        6,
+        3
+       ],
+       "size": [
+        4,
+        8,
+        6
+       ]
+      }
+     ],
+     "operation": 5
+    }
+   }
+  },
+  {
+   "name": "attributed_reference_merge_breps_merge",
+   "note": "#1462: merge_breps_merge (upstream_tests.json) with every input B-rep face and edge tagged with its own reference long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 1,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        8,
+        6,
+        3
+       ],
+       "size": [
+        4,
+        8,
+        6
+       ]
+      }
+     ],
+     "operation": 5
+    }
+   }
+  },
+  {
+   "name": "attributed_temp_merge_breps_merge",
+   "note": "#1462: merge_breps_merge (upstream_tests.json) with every input B-rep face and edge tagged with its own temp long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 4,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        8,
+        6,
+        3
+       ],
+       "size": [
+        4,
+        8,
+        6
+       ]
+      }
+     ],
+     "operation": 5
+    }
+   }
+  },
+  {
+   "name": "attributed_copy_merge_breps_three_union",
+   "note": "#1462: merge_breps_three_union (upstream_tests.json) with every input B-rep face and edge tagged with its own copy long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 0,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        5,
+        5,
+        5
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        8,
+        8,
+        8
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "operation": 1
+    }
+   }
+  },
+  {
+   "name": "attributed_reference_merge_breps_three_union",
+   "note": "#1462: merge_breps_three_union (upstream_tests.json) with every input B-rep face and edge tagged with its own reference long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 1,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        5,
+        5,
+        5
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        8,
+        8,
+        8
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "operation": 1
+    }
+   }
+  },
+  {
+   "name": "attributed_temp_merge_breps_three_union",
+   "note": "#1462: merge_breps_three_union (upstream_tests.json) with every input B-rep face and edge tagged with its own temp long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 4,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        5,
+        5,
+        5
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        8,
+        8,
+        8
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "operation": 1
+    }
+   }
+  },
+  {
+   "name": "attributed_copy_merge_breps_three_difference",
+   "note": "#1462: merge_breps_three_difference (upstream_tests.json) with every input B-rep face and edge tagged with its own copy long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 0,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        1,
+        1,
+        1.5
+       ],
+       "size": [
+        2,
+        2,
+        2
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        8,
+        6,
+        3
+       ],
+       "size": [
+        4,
+        8,
+        6
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "operation": 3
+    }
+   }
+  },
+  {
+   "name": "attributed_reference_merge_breps_three_difference",
+   "note": "#1462: merge_breps_three_difference (upstream_tests.json) with every input B-rep face and edge tagged with its own reference long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 1,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        1,
+        1,
+        1.5
+       ],
+       "size": [
+        2,
+        2,
+        2
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        8,
+        6,
+        3
+       ],
+       "size": [
+        4,
+        8,
+        6
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "operation": 3
+    }
+   }
+  },
+  {
+   "name": "attributed_temp_merge_breps_three_difference",
+   "note": "#1462: merge_breps_three_difference (upstream_tests.json) with every input B-rep face and edge tagged with its own temp long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 4,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        1,
+        1,
+        1.5
+       ],
+       "size": [
+        2,
+        2,
+        2
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        8,
+        6,
+        3
+       ],
+       "size": [
+        4,
+        8,
+        6
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "operation": 3
+    }
+   }
+  },
+  {
+   "name": "attributed_copy_lists_op0",
+   "note": "#1462: lists_op0 (upstream_tests.json) with every input B-rep face and edge tagged with its own copy long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 0,
+    "call": {
+     "api": "lists",
+     "breps1": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "breps2": [
+      {
+       "kind": "box",
+       "origin": [
+        5,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "operation": 0
+    }
+   }
+  },
+  {
+   "name": "attributed_reference_lists_op0",
+   "note": "#1462: lists_op0 (upstream_tests.json) with every input B-rep face and edge tagged with its own reference long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 1,
+    "call": {
+     "api": "lists",
+     "breps1": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "breps2": [
+      {
+       "kind": "box",
+       "origin": [
+        5,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "operation": 0
+    }
+   }
+  },
+  {
+   "name": "attributed_temp_lists_op0",
+   "note": "#1462: lists_op0 (upstream_tests.json) with every input B-rep face and edge tagged with its own temp long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 4,
+    "call": {
+     "api": "lists",
+     "breps1": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "breps2": [
+      {
+       "kind": "box",
+       "origin": [
+        5,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "operation": 0
+    }
+   }
+  },
+  {
+   "name": "attributed_copy_lists_op1",
+   "note": "#1462: lists_op1 (upstream_tests.json) with every input B-rep face and edge tagged with its own copy long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 0,
+    "call": {
+     "api": "lists",
+     "breps1": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "breps2": [
+      {
+       "kind": "box",
+       "origin": [
+        5,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "operation": 1
+    }
+   }
+  },
+  {
+   "name": "attributed_reference_lists_op1",
+   "note": "#1462: lists_op1 (upstream_tests.json) with every input B-rep face and edge tagged with its own reference long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 1,
+    "call": {
+     "api": "lists",
+     "breps1": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "breps2": [
+      {
+       "kind": "box",
+       "origin": [
+        5,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "operation": 1
+    }
+   }
+  },
+  {
+   "name": "attributed_temp_lists_op1",
+   "note": "#1462: lists_op1 (upstream_tests.json) with every input B-rep face and edge tagged with its own temp long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 4,
+    "call": {
+     "api": "lists",
+     "breps1": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "breps2": [
+      {
+       "kind": "box",
+       "origin": [
+        5,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "operation": 1
+    }
+   }
+  },
+  {
+   "name": "attributed_copy_lists_op2",
+   "note": "#1462: lists_op2 (upstream_tests.json) with every input B-rep face and edge tagged with its own copy long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 0,
+    "call": {
+     "api": "lists",
+     "breps1": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "breps2": [
+      {
+       "kind": "box",
+       "origin": [
+        5,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "operation": 2
+    }
+   }
+  },
+  {
+   "name": "attributed_reference_lists_op2",
+   "note": "#1462: lists_op2 (upstream_tests.json) with every input B-rep face and edge tagged with its own reference long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 1,
+    "call": {
+     "api": "lists",
+     "breps1": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "breps2": [
+      {
+       "kind": "box",
+       "origin": [
+        5,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "operation": 2
+    }
+   }
+  },
+  {
+   "name": "attributed_temp_lists_op2",
+   "note": "#1462: lists_op2 (upstream_tests.json) with every input B-rep face and edge tagged with its own temp long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 4,
+    "call": {
+     "api": "lists",
+     "breps1": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "breps2": [
+      {
+       "kind": "box",
+       "origin": [
+        5,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "operation": 2
+    }
+   }
+  },
+  {
+   "name": "attributed_copy_lists_op3",
+   "note": "#1462: lists_op3 (upstream_tests.json) with every input B-rep face and edge tagged with its own copy long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 0,
+    "call": {
+     "api": "lists",
+     "breps1": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "breps2": [
+      {
+       "kind": "box",
+       "origin": [
+        5,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "operation": 3
+    }
+   }
+  },
+  {
+   "name": "attributed_reference_lists_op3",
+   "note": "#1462: lists_op3 (upstream_tests.json) with every input B-rep face and edge tagged with its own reference long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 1,
+    "call": {
+     "api": "lists",
+     "breps1": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "breps2": [
+      {
+       "kind": "box",
+       "origin": [
+        5,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "operation": 3
+    }
+   }
+  },
+  {
+   "name": "attributed_temp_lists_op3",
+   "note": "#1462: lists_op3 (upstream_tests.json) with every input B-rep face and edge tagged with its own temp long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 4,
+    "call": {
+     "api": "lists",
+     "breps1": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "breps2": [
+      {
+       "kind": "box",
+       "origin": [
+        5,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "operation": 3
+    }
+   }
+  },
+  {
+   "name": "attributed_copy_lists_op4",
+   "note": "#1462: lists_op4 (upstream_tests.json) with every input B-rep face and edge tagged with its own copy long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 0,
+    "call": {
+     "api": "lists",
+     "breps1": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "breps2": [
+      {
+       "kind": "box",
+       "origin": [
+        5,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "operation": 4
+    }
+   }
+  },
+  {
+   "name": "attributed_reference_lists_op4",
+   "note": "#1462: lists_op4 (upstream_tests.json) with every input B-rep face and edge tagged with its own reference long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 1,
+    "call": {
+     "api": "lists",
+     "breps1": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "breps2": [
+      {
+       "kind": "box",
+       "origin": [
+        5,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "operation": 4
+    }
+   }
+  },
+  {
+   "name": "attributed_temp_lists_op4",
+   "note": "#1462: lists_op4 (upstream_tests.json) with every input B-rep face and edge tagged with its own temp long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 4,
+    "call": {
+     "api": "lists",
+     "breps1": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "breps2": [
+      {
+       "kind": "box",
+       "origin": [
+        5,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "operation": 4
+    }
+   }
+  },
+  {
+   "name": "attributed_copy_lists_empty",
+   "note": "#1462: lists_empty (upstream_tests.json) with every input B-rep face and edge tagged with its own copy long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 0,
+    "call": {
+     "api": "lists",
+     "breps1": [],
+     "breps2": [],
+     "operation": 1
+    }
+   }
+  },
+  {
+   "name": "attributed_reference_lists_empty",
+   "note": "#1462: lists_empty (upstream_tests.json) with every input B-rep face and edge tagged with its own reference long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 1,
+    "call": {
+     "api": "lists",
+     "breps1": [],
+     "breps2": [],
+     "operation": 1
+    }
+   }
+  },
+  {
+   "name": "attributed_temp_lists_empty",
+   "note": "#1462: lists_empty (upstream_tests.json) with every input B-rep face and edge tagged with its own temp long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 4,
+    "call": {
+     "api": "lists",
+     "breps1": [],
+     "breps2": [],
+     "operation": 1
+    }
+   }
+  },
+  {
+   "name": "attributed_copy_trees_union",
+   "note": "#1462: trees_union (upstream_tests.json) with every input B-rep face and edge tagged with its own copy long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 0,
+    "call": {
+     "api": "trees",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        5,
+        5,
+        5
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "tree": [
+      0,
+      1,
+      -1
+     ]
+    }
+   }
+  },
+  {
+   "name": "attributed_reference_trees_union",
+   "note": "#1462: trees_union (upstream_tests.json) with every input B-rep face and edge tagged with its own reference long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 1,
+    "call": {
+     "api": "trees",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        5,
+        5,
+        5
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "tree": [
+      0,
+      1,
+      -1
+     ]
+    }
+   }
+  },
+  {
+   "name": "attributed_temp_trees_union",
+   "note": "#1462: trees_union (upstream_tests.json) with every input B-rep face and edge tagged with its own temp long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 4,
+    "call": {
+     "api": "trees",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        5,
+        5,
+        5
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "tree": [
+      0,
+      1,
+      -1
+     ]
+    }
+   }
+  },
+  {
+   "name": "attributed_copy_trees_two_trees",
+   "note": "#1462: trees_two_trees (upstream_tests.json) with every input B-rep face and edge tagged with its own copy long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 0,
+    "call": {
+     "api": "trees",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        5,
+        5,
+        5
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        30,
+        0,
+        0
+       ],
+       "size": [
+        2,
+        2,
+        2
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        31,
+        1,
+        1
+       ],
+       "size": [
+        2,
+        2,
+        2
+       ]
+      }
+     ],
+     "tree": [
+      0,
+      1,
+      -1,
+      2,
+      3,
+      -3
+     ]
+    }
+   }
+  },
+  {
+   "name": "attributed_reference_trees_two_trees",
+   "note": "#1462: trees_two_trees (upstream_tests.json) with every input B-rep face and edge tagged with its own reference long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 1,
+    "call": {
+     "api": "trees",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        5,
+        5,
+        5
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        30,
+        0,
+        0
+       ],
+       "size": [
+        2,
+        2,
+        2
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        31,
+        1,
+        1
+       ],
+       "size": [
+        2,
+        2,
+        2
+       ]
+      }
+     ],
+     "tree": [
+      0,
+      1,
+      -1,
+      2,
+      3,
+      -3
+     ]
+    }
+   }
+  },
+  {
+   "name": "attributed_temp_trees_two_trees",
+   "note": "#1462: trees_two_trees (upstream_tests.json) with every input B-rep face and edge tagged with its own temp long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 4,
+    "call": {
+     "api": "trees",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        5,
+        5,
+        5
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        30,
+        0,
+        0
+       ],
+       "size": [
+        2,
+        2,
+        2
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        31,
+        1,
+        1
+       ],
+       "size": [
+        2,
+        2,
+        2
+       ]
+      }
+     ],
+     "tree": [
+      0,
+      1,
+      -1,
+      2,
+      3,
+      -3
+     ]
+    }
+   }
+  },
+  {
+   "name": "attributed_copy_trees_not_binary",
+   "note": "#1462: trees_not_binary (upstream_tests.json) with every input B-rep face and edge tagged with its own copy long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 0,
+    "call": {
+     "api": "trees",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        5,
+        5,
+        5
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "tree": [
+      0,
+      -1
+     ]
+    }
+   }
+  },
+  {
+   "name": "attributed_reference_trees_not_binary",
+   "note": "#1462: trees_not_binary (upstream_tests.json) with every input B-rep face and edge tagged with its own reference long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 1,
+    "call": {
+     "api": "trees",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        5,
+        5,
+        5
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "tree": [
+      0,
+      -1
+     ]
+    }
+   }
+  },
+  {
+   "name": "attributed_temp_trees_not_binary",
+   "note": "#1462: trees_not_binary (upstream_tests.json) with every input B-rep face and edge tagged with its own temp long attribute; compares the output B-reps' attribute sets.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 4,
+    "call": {
+     "api": "trees",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0,
+        0,
+        0
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        5,
+        5,
+        5
+       ],
+       "size": [
+        10,
+        10,
+        10
+       ]
+      }
+     ],
+     "tree": [
+      0,
+      -1
+     ]
+    }
+   }
+  },
+  {
+   "name": "attributed_issue_1462_merge_breps_three_boxes_union_b0",
+   "note": "#1462 (P2): 3-box merge_breps fold (union) of A (0,0,0)+10^3, B (5,5,5)+10^3, C (-5,-5,-5)+10^3; behavior 0.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 0,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        5.0,
+        5.0,
+        5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        -5.0,
+        -5.0,
+        -5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "operation": 1
+    }
+   }
+  },
+  {
+   "name": "attributed_issue_1462_merge_breps_three_boxes_union_b1",
+   "note": "#1462 (P2): 3-box merge_breps fold (union) of A (0,0,0)+10^3, B (5,5,5)+10^3, C (-5,-5,-5)+10^3; behavior 1.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 1,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        5.0,
+        5.0,
+        5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        -5.0,
+        -5.0,
+        -5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "operation": 1
+    }
+   }
+  },
+  {
+   "name": "attributed_issue_1462_merge_breps_three_boxes_union_b2",
+   "note": "#1462 (P2): 3-box merge_breps fold (union) of A (0,0,0)+10^3, B (5,5,5)+10^3, C (-5,-5,-5)+10^3; behavior 2.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 2,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        5.0,
+        5.0,
+        5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        -5.0,
+        -5.0,
+        -5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "operation": 1
+    }
+   }
+  },
+  {
+   "name": "attributed_issue_1462_merge_breps_three_boxes_union_b3",
+   "note": "#1462 (P2): 3-box merge_breps fold (union) of A (0,0,0)+10^3, B (5,5,5)+10^3, C (-5,-5,-5)+10^3; behavior 3.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 3,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        5.0,
+        5.0,
+        5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        -5.0,
+        -5.0,
+        -5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "operation": 1
+    }
+   }
+  },
+  {
+   "name": "attributed_issue_1462_merge_breps_three_boxes_union_b4",
+   "note": "#1462 (P2): 3-box merge_breps fold (union) of A (0,0,0)+10^3, B (5,5,5)+10^3, C (-5,-5,-5)+10^3; behavior 4.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 4,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        5.0,
+        5.0,
+        5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        -5.0,
+        -5.0,
+        -5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "operation": 1
+    }
+   }
+  },
+  {
+   "name": "attributed_issue_1462_merge_breps_three_boxes_difference_b0",
+   "note": "#1462 (P2): 3-box merge_breps fold (difference); behavior 0.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 0,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        5.0,
+        5.0,
+        5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        -5.0,
+        -5.0,
+        -5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "operation": 3
+    }
+   }
+  },
+  {
+   "name": "attributed_issue_1462_merge_breps_three_boxes_difference_b1",
+   "note": "#1462 (P2): 3-box merge_breps fold (difference); behavior 1.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 1,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        5.0,
+        5.0,
+        5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        -5.0,
+        -5.0,
+        -5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "operation": 3
+    }
+   }
+  },
+  {
+   "name": "attributed_issue_1462_merge_breps_three_boxes_difference_b2",
+   "note": "#1462 (P2): 3-box merge_breps fold (difference); behavior 2.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 2,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        5.0,
+        5.0,
+        5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        -5.0,
+        -5.0,
+        -5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "operation": 3
+    }
+   }
+  },
+  {
+   "name": "attributed_issue_1462_merge_breps_three_boxes_difference_b3",
+   "note": "#1462 (P2): 3-box merge_breps fold (difference); behavior 3.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 3,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        5.0,
+        5.0,
+        5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        -5.0,
+        -5.0,
+        -5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "operation": 3
+    }
+   }
+  },
+  {
+   "name": "attributed_issue_1462_merge_breps_three_boxes_difference_b4",
+   "note": "#1462 (P2): 3-box merge_breps fold (difference); behavior 4.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 4,
+    "call": {
+     "api": "merge_breps",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        5.0,
+        5.0,
+        5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        -5.0,
+        -5.0,
+        -5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "operation": 3
+    }
+   }
+  },
+  {
+   "name": "attributed_issue_1462_trees_union_then_difference_b0",
+   "note": "#1462 (P2): tree ((A u B) - C); behavior 0.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 0,
+    "call": {
+     "api": "trees",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        5.0,
+        5.0,
+        5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        -5.0,
+        -5.0,
+        -5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "tree": [
+      0,
+      1,
+      -1,
+      2,
+      -3
+     ]
+    }
+   }
+  },
+  {
+   "name": "attributed_issue_1462_trees_union_then_difference_b1",
+   "note": "#1462 (P2): tree ((A u B) - C); behavior 1.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 1,
+    "call": {
+     "api": "trees",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        5.0,
+        5.0,
+        5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        -5.0,
+        -5.0,
+        -5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "tree": [
+      0,
+      1,
+      -1,
+      2,
+      -3
+     ]
+    }
+   }
+  },
+  {
+   "name": "attributed_issue_1462_trees_union_then_difference_b2",
+   "note": "#1462 (P2): tree ((A u B) - C); behavior 2.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 2,
+    "call": {
+     "api": "trees",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        5.0,
+        5.0,
+        5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        -5.0,
+        -5.0,
+        -5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "tree": [
+      0,
+      1,
+      -1,
+      2,
+      -3
+     ]
+    }
+   }
+  },
+  {
+   "name": "attributed_issue_1462_trees_union_then_difference_b3",
+   "note": "#1462 (P2): tree ((A u B) - C); behavior 3.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 3,
+    "call": {
+     "api": "trees",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        5.0,
+        5.0,
+        5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        -5.0,
+        -5.0,
+        -5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "tree": [
+      0,
+      1,
+      -1,
+      2,
+      -3
+     ]
+    }
+   }
+  },
+  {
+   "name": "attributed_issue_1462_trees_union_then_difference_b4",
+   "note": "#1462 (P2): tree ((A u B) - C); behavior 4.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 4,
+    "call": {
+     "api": "trees",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        5.0,
+        5.0,
+        5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        -5.0,
+        -5.0,
+        -5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "tree": [
+      0,
+      1,
+      -1,
+      2,
+      -3
+     ]
+    }
+   }
+  },
+  {
+   "name": "attributed_issue_1462_trees_intersection_union_b0",
+   "note": "#1462 (P2): tree ((A n B) u C); behavior 0.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 0,
+    "call": {
+     "api": "trees",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        5.0,
+        5.0,
+        5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        -5.0,
+        -5.0,
+        -5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "tree": [
+      0,
+      1,
+      -2,
+      2,
+      -1
+     ]
+    }
+   }
+  },
+  {
+   "name": "attributed_issue_1462_trees_intersection_union_b1",
+   "note": "#1462 (P2): tree ((A n B) u C); behavior 1.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 1,
+    "call": {
+     "api": "trees",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        5.0,
+        5.0,
+        5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        -5.0,
+        -5.0,
+        -5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "tree": [
+      0,
+      1,
+      -2,
+      2,
+      -1
+     ]
+    }
+   }
+  },
+  {
+   "name": "attributed_issue_1462_trees_intersection_union_b2",
+   "note": "#1462 (P2): tree ((A n B) u C); behavior 2.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 2,
+    "call": {
+     "api": "trees",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        5.0,
+        5.0,
+        5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        -5.0,
+        -5.0,
+        -5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "tree": [
+      0,
+      1,
+      -2,
+      2,
+      -1
+     ]
+    }
+   }
+  },
+  {
+   "name": "attributed_issue_1462_trees_intersection_union_b3",
+   "note": "#1462 (P2): tree ((A n B) u C); behavior 3.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 3,
+    "call": {
+     "api": "trees",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        5.0,
+        5.0,
+        5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        -5.0,
+        -5.0,
+        -5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "tree": [
+      0,
+      1,
+      -2,
+      2,
+      -1
+     ]
+    }
+   }
+  },
+  {
+   "name": "attributed_issue_1462_trees_intersection_union_b4",
+   "note": "#1462 (P2): tree ((A n B) u C); behavior 4.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 4,
+    "call": {
+     "api": "trees",
+     "breps": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        5.0,
+        5.0,
+        5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        -5.0,
+        -5.0,
+        -5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "tree": [
+      0,
+      1,
+      -2,
+      2,
+      -1
+     ]
+    }
+   }
+  },
+  {
+   "name": "attributed_issue_1462_lists_union_two_components_b0",
+   "note": "#1462 (P2): lists [A, far box] u [B]: two output solids; behavior 0.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 0,
+    "call": {
+     "api": "lists",
+     "breps1": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        100.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "breps2": [
+      {
+       "kind": "box",
+       "origin": [
+        5.0,
+        5.0,
+        5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "operation": 1
+    }
+   }
+  },
+  {
+   "name": "attributed_issue_1462_lists_union_two_components_b1",
+   "note": "#1462 (P2): lists [A, far box] u [B]: two output solids; behavior 1.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 1,
+    "call": {
+     "api": "lists",
+     "breps1": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        100.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "breps2": [
+      {
+       "kind": "box",
+       "origin": [
+        5.0,
+        5.0,
+        5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "operation": 1
+    }
+   }
+  },
+  {
+   "name": "attributed_issue_1462_lists_union_two_components_b2",
+   "note": "#1462 (P2): lists [A, far box] u [B]: two output solids; behavior 2.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 2,
+    "call": {
+     "api": "lists",
+     "breps1": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        100.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "breps2": [
+      {
+       "kind": "box",
+       "origin": [
+        5.0,
+        5.0,
+        5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "operation": 1
+    }
+   }
+  },
+  {
+   "name": "attributed_issue_1462_lists_union_two_components_b3",
+   "note": "#1462 (P2): lists [A, far box] u [B]: two output solids; behavior 3.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 3,
+    "call": {
+     "api": "lists",
+     "breps1": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        100.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "breps2": [
+      {
+       "kind": "box",
+       "origin": [
+        5.0,
+        5.0,
+        5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "operation": 1
+    }
+   }
+  },
+  {
+   "name": "attributed_issue_1462_lists_union_two_components_b4",
+   "note": "#1462 (P2): lists [A, far box] u [B]: two output solids; behavior 4.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 4,
+    "call": {
+     "api": "lists",
+     "breps1": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        100.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "breps2": [
+      {
+       "kind": "box",
+       "origin": [
+        5.0,
+        5.0,
+        5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "operation": 1
+    }
+   }
+  },
+  {
+   "name": "attributed_issue_1462_lists_difference_b0",
+   "note": "#1462 (P2): lists [A] - [B]; behavior 0.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 0,
+    "call": {
+     "api": "lists",
+     "breps1": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "breps2": [
+      {
+       "kind": "box",
+       "origin": [
+        5.0,
+        5.0,
+        5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "operation": 3
+    }
+   }
+  },
+  {
+   "name": "attributed_issue_1462_lists_difference_b1",
+   "note": "#1462 (P2): lists [A] - [B]; behavior 1.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 1,
+    "call": {
+     "api": "lists",
+     "breps1": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "breps2": [
+      {
+       "kind": "box",
+       "origin": [
+        5.0,
+        5.0,
+        5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "operation": 3
+    }
+   }
+  },
+  {
+   "name": "attributed_issue_1462_lists_difference_b2",
+   "note": "#1462 (P2): lists [A] - [B]; behavior 2.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 2,
+    "call": {
+     "api": "lists",
+     "breps1": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "breps2": [
+      {
+       "kind": "box",
+       "origin": [
+        5.0,
+        5.0,
+        5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "operation": 3
+    }
+   }
+  },
+  {
+   "name": "attributed_issue_1462_lists_difference_b3",
+   "note": "#1462 (P2): lists [A] - [B]; behavior 3.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 3,
+    "call": {
+     "api": "lists",
+     "breps1": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "breps2": [
+      {
+       "kind": "box",
+       "origin": [
+        5.0,
+        5.0,
+        5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "operation": 3
+    }
+   }
+  },
+  {
+   "name": "attributed_issue_1462_lists_difference_b4",
+   "note": "#1462 (P2): lists [A] - [B]; behavior 4.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 4,
+    "call": {
+     "api": "lists",
+     "breps1": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "breps2": [
+      {
+       "kind": "box",
+       "origin": [
+        5.0,
+        5.0,
+        5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "operation": 3
+    }
+   }
+  },
+  {
+   "name": "attributed_issue_1462_lists_b_minus_a_b0",
+   "note": "#1462 (P2): lists [A] , [B, C] B minus A; behavior 0.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 0,
+    "call": {
+     "api": "lists",
+     "breps1": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "breps2": [
+      {
+       "kind": "box",
+       "origin": [
+        5.0,
+        5.0,
+        5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        -5.0,
+        -5.0,
+        -5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "operation": 4
+    }
+   }
+  },
+  {
+   "name": "attributed_issue_1462_lists_b_minus_a_b1",
+   "note": "#1462 (P2): lists [A] , [B, C] B minus A; behavior 1.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 1,
+    "call": {
+     "api": "lists",
+     "breps1": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "breps2": [
+      {
+       "kind": "box",
+       "origin": [
+        5.0,
+        5.0,
+        5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        -5.0,
+        -5.0,
+        -5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "operation": 4
+    }
+   }
+  },
+  {
+   "name": "attributed_issue_1462_lists_b_minus_a_b2",
+   "note": "#1462 (P2): lists [A] , [B, C] B minus A; behavior 2.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 2,
+    "call": {
+     "api": "lists",
+     "breps1": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "breps2": [
+      {
+       "kind": "box",
+       "origin": [
+        5.0,
+        5.0,
+        5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        -5.0,
+        -5.0,
+        -5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "operation": 4
+    }
+   }
+  },
+  {
+   "name": "attributed_issue_1462_lists_b_minus_a_b3",
+   "note": "#1462 (P2): lists [A] , [B, C] B minus A; behavior 3.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 3,
+    "call": {
+     "api": "lists",
+     "breps1": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "breps2": [
+      {
+       "kind": "box",
+       "origin": [
+        5.0,
+        5.0,
+        5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        -5.0,
+        -5.0,
+        -5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "operation": 4
+    }
+   }
+  },
+  {
+   "name": "attributed_issue_1462_lists_b_minus_a_b4",
+   "note": "#1462 (P2): lists [A] , [B, C] B minus A; behavior 4.",
+   "inputs": {
+    "api": "attributed_list",
+    "behavior": 4,
+    "call": {
+     "api": "lists",
+     "breps1": [
+      {
+       "kind": "box",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "breps2": [
+      {
+       "kind": "box",
+       "origin": [
+        5.0,
+        5.0,
+        5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "box",
+       "origin": [
+        -5.0,
+        -5.0,
+        -5.0
+       ],
+       "size": [
+        10.0,
+        10.0,
+        10.0
+       ]
+      }
+     ],
+     "operation": 4
+    }
+   }
+  }
+ ]
+}

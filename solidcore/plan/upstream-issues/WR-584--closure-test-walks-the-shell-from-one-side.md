@@ -1,0 +1,11 @@
+#### WR-584. `TestClosureSplitRegion`'s closure test walks the whole shell from one side for a face that closes nothing
+- **Severity:** Performance (quadratic in the shell's size over a boolean; the result is unchanged)
+- **Area:** Booleans / topology (region splitting)
+- **Location:** `source/SMLib/src/SmBrep.cpp`, `SmBrep::TestClosureSplitRegion(SmFaceuse*)`: it asks `SmTopologyTraverser::ClosureTraversal` (`source/SMLib/src/SmTopologyTraverser.cpp`, via `FaceuseTraversal`) whether the new face use's mate is reachable through edge-use radials.
+- **What happens:** the traversal is a depth-first walk from one side of the face that stops only when it reaches the mate. A face that does not split its region (nearly every face a boolean makes) can walk, and mark, most of the shell before it comes back to its own mate. `SmMerge` makes every face of the other body this way, so a union costs the number of new faces times the size of the shell: joining two level-3 Menger sponges (7326 faces each) made 1001 such faces, 1000 of them open with their mates 3 or 5 steps away, and the walks visited 5.47 million face uses.
+- **Trigger:** any boolean whose new faces lie in a large shell; smallest repro an open box (a cube with its top face deleted, all face uses in one shell), whose bottom face's closure test walks the walls before it meets its mate.
+- **How found:** SolidCraft. The fork's fix is tangency-labs/smlib@69c5198 ("booleans: a new face's closure test searches from both of its sides"), which is not merged upstream: `ClosureTraversalFromBothSides` runs two breadth-first searches, from the face use and from its mate, one face use each in turn, and stops when they meet (open) or one runs out (closed). It visits at most twice the face uses on the smaller side, marks nothing, and gives `ClosureTraversal`'s answer.
+- **Confirmed:** no C++ run was made here. The Rust port follows the pinned C++ (`3fd5b95`).
+- **Rust port:** behaves as upstream by default. With `Kernel::fixes.boolean_new_face_closure_both_sides`, `topology::brep::p6::test_closure_split_region` uses `topology::topology_traverser::closure_traversal_from_both_sides`; the caller's marks are left untouched and one fewer mark is claimed.
+
+  Test: `crates/solidcore/tests/fork_69c5198_closure_both_sides.rs`.

@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "two M6 tapped holes (d5) crossing with axes 2 mm apart",
+ "source": "analytic",
+ "method": "common part of perpendicular cylinders r=2.5 with axes 2 apart: int 2 sqrt(r^2-u^2) 2 sqrt(r^2-(u-2)^2) du = 48.316350808",
+ "body_count": 1,
+ "volume_mm3": 46870.219105712
+}

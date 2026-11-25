@@ -1,6 +1,7 @@
-# Two quick checks on every pull request (CONTRIBUTING.md, "Sending a change"): no second open PR
-# for an issue a lower-numbered one already closes, and the "Changes a default:" line is filled in.
-# Neither is a required status check. The logic is in scripts/pr-checks/pr-checks.js (tested in ci.yml).
+# Four quick checks on every pull request (CONTRIBUTING.md, "Sending a change"): no second open PR
+# for an issue a lower-numbered one already closes, the "Changes a default:" line is filled in, a PR
+# adding to the showcase shows a picture, and a kernel fix that changes or deletes existing test or
+# golden lines says why on a "Test change:" line. None is a required status check. The logic is in scripts/pr-checks/pr-checks.js (tested in ci.yml).
 name: PR checks
 
 on:
@@ -14,13 +15,14 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: pr-checks-${{ github.event.pull_request.number }}
+  # A re-run (attempt 2 or later, often of an older commit) gets a group of its own, so it never cancels the live run for the PR's current head.
+  group: pr-checks-${{ github.event.pull_request.number }}${{ github.run_attempt > 1 && format('-rerun-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 jobs:
   duplicate:
     name: Duplicate PR check
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -35,7 +37,7 @@ jobs:
 
   defaults:
     name: Defaults line check
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -48,11 +50,42 @@ jobs:
             const r = await checks.checkDefaults({ github, context, core });
             core.info(JSON.stringify(r));
 
+  picture:
+    name: Picture check
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: scripts/pr-checks
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const checks = require('./scripts/pr-checks/pr-checks.js');
+            const r = await checks.checkPicture({ github, context, core });
+            core.info(JSON.stringify(r));
+
+  test-change:
+    name: Test change check
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: scripts/pr-checks
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const checks = require('./scripts/pr-checks/pr-checks.js');
+            const r = await checks.checkTestChange({ github, context, core });
+            core.info(JSON.stringify(r));
+
   # Labelling needs write access, which a fork PR's token never has, so it is its own job and best
   # effort: a fork PR just doesn't get the `changes-default` label from here.
   label:
     name: Label changes-default
-    runs-on: ubuntu-24.04
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     continue-on-error: true
     permissions:

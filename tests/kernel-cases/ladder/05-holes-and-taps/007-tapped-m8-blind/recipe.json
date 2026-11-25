@@ -1,0 +1,19 @@
+{
+ "base": "../../01-primitives/001-box",
+ "commands": [
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     30,
+     20,
+     20
+    ],
+    "thread": "M8",
+    "depth": 12,
+    "type": "drilled",
+    "tip_angle": 118
+   }
+  }
+ ]
+}

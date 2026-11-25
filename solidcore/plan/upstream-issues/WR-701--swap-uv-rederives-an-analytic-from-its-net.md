@@ -1,0 +1,14 @@
+#### WR-701. `SmBSplineSurface::SwapUV` re-derives an analytic surface's definition from its transposed net
+- **Severity:** Wrong result (accuracy: an exact surface's frame moved)
+- **Area:** Surfaces
+- **Location:** `source/SMLib/src/SmBSplineSurface.cpp`, `SmBSplineSurface::SwapUV`. It transposes the net, toggles the swap bit and sets the net through `SetCanonical`, whose virtual `RebuildSTEPFromNURBParameters` rebuilds every analytic's definition from the net. A cone's, cylinder's, sphere's or torus's frame is fitted again to its iso-circles, and a plane's to its control points.
+- **What happens:** the surface is the same, but its definition comes back fitted to the net. `SmBrep::OrientTrimmedSurfaces` turns faces this way, so an exact round came back with its axis moved.
+- **Trigger:** the fork's capi `analytic_frames_survive_swap_uv`. A cone, cylinder, sphere, torus and plane on one oblique frame 45 from the origin, each swapped once and back. On the fork's base, every frame came back 3.6e-15 (plane) to 2.7e-14 (torus) off.
+- **How found:** the SolidCraft fork's tangency-labs/smlib@0c00de7 (`SwapUVDefinition`). Part of tangency-labs/smlib#79, step 4. Tracking: tangency-labs/solidcore#2273.
+- **Confirmed:** in the Rust port (`crates/solidcore/tests/wr701_swap_uv_keeps_analytic_definition.rs`), on the fork's cone, sphere, torus and plane.
+  - Without the flag, all four frames move.
+  - With it, frame and radii are exactly as made after one swap and after two (a plane's axes swapped), and the net's points are where they were, u and v swapped, to 1e-13.
+- **Rust port (opt-in):** `Kernel::fixes.swap_uv_keeps_analytic_definition` (`UpstreamFixes`, default `false`).
+  - In `Surface::swap_uv_notifying`, a cone, sphere, torus or surface of revolution rebuilds only its polar converter after the swap (`SmSurfOfRevolution::SwapUVDefinition`, status passed on). Upstream rebuilds the definition and ignores the status.
+  - A plane keeps the definition its `toggle_swap_uv_bit` swapped (`Plane::swap_uv_notifying_keeping`).
+  - Every other kind is as upstream.

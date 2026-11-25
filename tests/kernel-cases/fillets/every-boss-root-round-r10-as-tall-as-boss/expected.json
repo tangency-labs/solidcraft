@@ -1,0 +1,24 @@
+{
+ "sources": [],
+ "what": "the root circle of a 10 mm tall boss rounded r10: the round uses up the boss's wall and meets its top face at its rim",
+ "source": "analytic",
+ "method": "plate 60x40x10 with a boss R8 x 10 on its top at (30, 20): V0 = 24000 + 640 pi = 26010.6193. The concave root (rho = 8, z = 10) rounded r10 adds the spandrel (1-pi/4) r^2 = 21.460184 outside the boss, its first moment about the wall r^3 (5/6-pi/4) = 47.935170, revolved once (Pappus): 2 pi (8 A + M) = 1379.8920. V = 27390.5113. The round is tangent to the wall at z = 20, the boss's top rim: the wall is used up (a round may use up a face). Faces 8 - 1 + 1 = 8.",
+ "body_count": 1,
+ "volume_mm3": 27390.511339043704,
+ "faces": 8,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   40,
+   20
+  ]
+ },
+ "continuity": {
+  "order": "g1"
+ }
+}

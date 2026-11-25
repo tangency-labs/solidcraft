@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "a cylinder r10 along X dipping 1e-6 mm into the top face, cut",
+ "source": "invariants",
+ "method": "a groove 1e-6 deep (V change ~1e-8) is at the kernels' tolerance: a groove or no change are both right; graded: one valid body, V = 48000",
+ "body_count": 1,
+ "volume_mm3": 48000
+}

@@ -1,0 +1,23 @@
+{
+ "sources": [],
+ "what": "a modelled R 1/2 taper pipe thread (ISO 7-1, 55 deg, 1 in 16) on a 21.3 mm pipe (ISO 65), its standard 13.2 mm from the pipe's end",
+ "source": "analytic",
+ "method": "ISO 7-1 / ASME B1.20.1 taper 1 in 16 on the diameter. The thread starts at its free end with the standard's diameter there and its diameters grow into the material (the external major d0 + y/16 at y mm in; the internal minor d1 - y/16). The crests are the cone's: the material outside the external major cone (inside the internal minor cone) along the thread is cut as the die (tap) cuts it. The groove is the sweep of the profile's section, rising P a turn and moving P/32 a turn off the axis, so a point (rho, zeta) of the section at turn t lies at r = rho + c t, z = z0 + zeta + P t, the volume element is 2 pi r dA dt, and the groove removes 2 pi int_0^T (int int r dA over the section within the material) dt, exact while turns don't overlap (Gauss on 400 panels a turn: the integrand is piecewise polynomial in t). the space between the teeth is a groove of straight flanks, its tooth (H - h) tan(half angle) wide at the crest and its groove as wide at the root (the truncations split equally); the standard's crest and root rounds are flats here. ISO 7-1 R 1/2 (Table 1): gauge diameter d = 20.955 a basic gauge length 8.2 from the small end, so d0 = 20.955 - 8.2/16 = 20.4425 at the pipe's end; 14 threads per inch, H = 0.960237 P, h = 0.640327 P; useful thread 13.2. The pipe is ISO 65's 21.3 OD, outside the major cone over the whole thread (21.2675 at its end). It starts at the free top end z = 25 and runs the standard length L = 13.2000 down to z = 11.8000, where it stops square inside the face (the groove's section centred there, the cut below it bounded by the pipe's surface only). V = pi R^2 25 - the ring outside the cone (pi int (R^2 - r_cone^2) where the cone is inside the pipe) - the groove (481.264581). Bbox: the pipe's",
+ "body_count": 1,
+ "volume_mm3": 8233.026663883,
+ "bbox": {
+  "min": [
+   -10.65,
+   -10.65,
+   0
+  ],
+  "max": [
+   10.65,
+   10.65,
+   25
+  ]
+ },
+ "tolerance": {
+  "rel": 0.0001
+ }
+}

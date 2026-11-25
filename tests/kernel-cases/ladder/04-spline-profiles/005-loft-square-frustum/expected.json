@@ -1,0 +1,10 @@
+{
+ "sources": [],
+ "what": "a loft between a 40 square at z=0 and a 20 square at z=30",
+ "source": "analytic",
+ "method": "two sections loft ruled: a square frustum, V = h/3 (A0 + A1 + sqrt(A0 A1)); sides 4 trapezoids (40+20)/2 * sqrt(30^2+10^2)",
+ "body_count": 1,
+ "volume_mm3": 28000.0,
+ "area_mm2": 5794.733192202,
+ "faces": 6
+}

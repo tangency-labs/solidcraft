@@ -1,0 +1,101 @@
+{
+ "coverage": "A cylinder sheet (one SmCylinder face from CreateFaceFromSurface, closed round along a seam) thickened by ShellBrep with bCreateOffsetSolid, outward and inward: a tube whose end rings are the ruled side walls on the sheet's two circles (SmSurfOfRevolution upstream, not SmPlane; tangency-labs/solidcore#1599, WR-564).",
+ "cases": [
+  {
+   "name": "static_shell_thicken_cylinder_sheet_out",
+   "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp ShellBrep (bCreateOffsetSolid on a sheet: BuildSideWallOfEdgeuse walls on the two circles; tangency-labs/solidcore#1599)",
+   "inputs": {
+    "operation": "static_shell",
+    "source": {
+     "kind": "cylinder_sheet",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 10,
+     "height": 20
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": 2,
+     "extend_convex": true,
+     "merge_results": true,
+     "create_offset_solid": true
+    }
+   }
+  },
+  {
+   "name": "static_shell_thicken_cylinder_sheet_in",
+   "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp ShellBrep (bCreateOffsetSolid on a sheet: BuildSideWallOfEdgeuse walls on the two circles; tangency-labs/solidcore#1599)",
+   "inputs": {
+    "operation": "static_shell",
+    "source": {
+     "kind": "cylinder_sheet",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 10,
+     "height": 20
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -2,
+     "extend_convex": true,
+     "merge_results": true,
+     "create_offset_solid": true
+    }
+   }
+  },
+  {
+   "name": "static_shell_thicken_cylinder_sheet_small_out",
+   "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp ShellBrep (bCreateOffsetSolid on a sheet: BuildSideWallOfEdgeuse walls on the two circles; tangency-labs/solidcore#1599)",
+   "inputs": {
+    "operation": "static_shell",
+    "source": {
+     "kind": "cylinder_sheet",
+     "origin": [
+      0.5,
+      -1,
+      2
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": 0.1,
+     "extend_convex": true,
+     "merge_results": true,
+     "create_offset_solid": true
+    }
+   }
+  },
+  {
+   "name": "static_shell_thicken_cylinder_sheet_small_in",
+   "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp ShellBrep (bCreateOffsetSolid on a sheet: BuildSideWallOfEdgeuse walls on the two circles; tangency-labs/solidcore#1599)",
+   "inputs": {
+    "operation": "static_shell",
+    "source": {
+     "kind": "cylinder_sheet",
+     "origin": [
+      0.5,
+      -1,
+      2
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -0.1,
+     "extend_convex": true,
+     "merge_results": true,
+     "create_offset_solid": true
+    }
+   }
+  }
+ ]
+}

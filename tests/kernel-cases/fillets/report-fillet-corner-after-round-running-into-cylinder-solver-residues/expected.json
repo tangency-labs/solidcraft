@@ -1,0 +1,7 @@
+{
+ "what": "as report-fillet-corner-after-round-running-into-cylinder, with the sketch solver's residues of the reported design; reported from the app (2026-10-30, test-peg part)",
+ "source": "analytic",
+ "method": "the same bar with the sketch solver's residues of the reported design (~1e-10 mm: the front side's ends differ by 3.0e-10 in y, the arc's centre 5.7e-11 off the disc's), corner (0.489294, 0.057925), length L = 41.160417754, V0 = L * 16.0000000000762 * 10 + 960 pi; the three r2 rounds at the bar's other top corner (0, 0, 10): the front round's spandrel from x = 2 to the wall (30.5896671706), the vertical edge's and the left top edge's (1 - pi/4) r^2 over 8 and 14, the corner cube of side 2 less the rolling ball's eighth, 8 - 4 pi/3: removed 53.2858385868; the bar being L long, the front round runs (L - 40) further: removed + (L - 40)(1 - pi/4) r^2",
+ "body_count": 1,
+ "volume_mm3": 9547.313838420392
+}

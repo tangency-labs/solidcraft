@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4654"
+ ],
+ "what": "Split Body of an L-shaped body with one of its own faces as the tool (the column's side x = 15, its surface extended through the base): truck panicked ('split body: Option::unwrap() on None')",
+ "source": "analytic",
+ "method": "the plane x = 15 cuts the base under the column: the column with the base's left part (15*20*30 = 9000) and the base's right part (25*20*10 = 5000). Two bodies, V = 14000",
+ "body_count": 2,
+ "volume_mm3": 14000.0
+}

@@ -1,0 +1,186 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 76.8,
+    "width": 89.3,
+    "height": 2.4,
+    "corner": [
+     100,
+     0,
+     0
+    ],
+    "body_name": "Lid"
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      100,
+      0,
+      1.2
+     ],
+     [
+      176.8,
+      0,
+      1.2
+     ],
+     [
+      100,
+      89.3,
+      1.2
+     ],
+     [
+      176.8,
+      89.3,
+      1.2
+     ]
+    ],
+    "radius": 3
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 71.5,
+    "width": 84,
+    "height": 3,
+    "corner": [
+     102.65,
+     2.65,
+     2.4
+    ],
+    "operation": "join",
+    "targets": [
+     "Lid"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 68,
+    "width": 61,
+    "height": 8,
+    "corner": [
+     104.4,
+     5.4,
+     -1
+    ],
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 44,
+    "width": 10,
+    "height": 8,
+    "corner": [
+     116.4,
+     72,
+     -1
+    ],
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 22,
+    "width": 6,
+    "height": 4,
+    "corner": [
+     127.4,
+     84,
+     2.4
+    ],
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 1.6,
+    "width": 6,
+    "height": 11.7,
+    "corner": [
+     102.8,
+     14,
+     2.4
+    ],
+    "operation": "join",
+    "targets": [
+     "Lid"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 1.6,
+    "width": 6,
+    "height": 11.7,
+    "corner": [
+     102.8,
+     48,
+     2.4
+    ],
+    "operation": "join",
+    "targets": [
+     "Lid"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 1.6,
+    "width": 6,
+    "height": 11.7,
+    "corner": [
+     172.4,
+     14,
+     2.4
+    ],
+    "operation": "join",
+    "targets": [
+     "Lid"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 1.6,
+    "width": 6,
+    "height": 11.7,
+    "corner": [
+     172.4,
+     48,
+     2.4
+    ],
+    "operation": "join",
+    "targets": [
+     "Lid"
+    ]
+   }
+  },
+  {
+   "command": "solid.shell",
+   "params": {
+    "faces": [
+     [
+      102.8,
+      17,
+      6.85
+     ]
+    ],
+    "thickness": 0.5
+   }
+  }
+ ]
+}

@@ -1,0 +1,26 @@
+{
+  "cases": [
+    {
+      "name": "ellipse_cp_dist_at_interior_full_jacobian",
+      "upstream_ref": "source/SMLib/src/SmCurve.cpp:18425-18606 (SmCPDistAtENFO::Evaluate); source/SMLib/src/SmEllipse.cpp:1059-1143 (genuine SmEllipse constructor)",
+      "inputs": {
+        "op": "cp_dist_at",
+        "curve": {
+          "ellipse": {
+            "c": [0.0, 0.0, 0.0],
+            "x": [1.0, 0.0, 0.0],
+            "y": [0.0, 1.0, 0.0],
+            "domain": [0.0, 180.0],
+            "radii": [2.0, 1.0],
+            "inside_out": false
+          }
+        },
+        "p": [0.25, -0.5, 0.25],
+        "dsq": 1.0,
+        "sqtol": 0.0,
+        "x": [0.5, 0.1, 0.2, 0.3],
+        "jac": true
+      }
+    }
+  ]
+}

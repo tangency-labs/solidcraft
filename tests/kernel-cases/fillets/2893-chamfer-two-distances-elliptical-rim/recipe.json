@@ -1,0 +1,49 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 5,
+    "height": 40,
+    "base": [
+     0,
+     0,
+     -10
+    ],
+    "axis": [
+     1,
+     0,
+     2
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 100,
+    "width": 100,
+    "height": 40,
+    "corner": [
+     -50,
+     -50,
+     10
+    ],
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "solid.chamfer",
+   "params": {
+    "edges": [
+     [
+      10,
+      5,
+      10
+     ]
+    ],
+    "distance": 1,
+    "distance2": 2
+   }
+  }
+ ]
+}

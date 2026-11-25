@@ -1,0 +1,20 @@
+{
+ "sources": [],
+ "what": "plastic.rest, round, 12 across, 4 high, a hollow ring with a 1.5 mm wall, drafted 2 degrees, on a 60 x 40 x 3 plate",
+ "source": "analytic",
+ "method": "sized at the face; the draft takes s = h tan 2 deg = 0.139683078 off each side of the wall by the top (the outer radius 6 to 6 - s, the bore 4.5 to 4.5 + s). V = 60*40*3 + (pi h/3)(R0^2 + R0 R1 + R1^2) for the outer minus that of the bore = 7379.489589",
+ "body_count": 1,
+ "volume_mm3": 7379.489589250136,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   40,
+   7
+  ]
+ }
+}

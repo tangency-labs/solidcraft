@@ -1,0 +1,6 @@
+{
+  "unit": "intersect.surface_intersector_p5",
+  "cases": [
+    {"name": "fuzz00950_shim_invalid_argument_plane_domain_must", "origin": "fuzz-out/n2000/intersect.surface_intersector_p5/fuzz00950.json (crash: cpp: killed by signal 11)", "issue": "UB-68", "cpp": "harness: shim: invalid argument: plane domain must have positive extent", "rust": "ok", "inputs": {"a": {"domain": [0.0, 0.0, -1.0, 1.09], "kind": "plane", "o": [-0.949, 0.734, -0.366], "scale": [1.0, 1.0], "x": [-0.143, -0.647, -0.749], "y": [-0.42, -0.646, 0.638]}, "dom1": [0.546, 0.0, 1.09, 1.09], "dom2": [-0.218, -0.109, 1.31, 1.09], "edges": [false, false]}}
+  ]
+}

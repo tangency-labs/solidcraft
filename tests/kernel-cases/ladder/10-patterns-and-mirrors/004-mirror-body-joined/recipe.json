@@ -1,0 +1,50 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     0,
+     0,
+     0
+    ],
+    "length": 30,
+    "width": 40,
+    "height": 20,
+    "body_name": "Part"
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     20,
+     20,
+     20
+    ],
+    "diameter": 10
+   }
+  },
+  {
+   "command": "solid.mirror",
+   "params": {
+    "bodies": [
+     "Part"
+    ],
+    "plane": {
+     "origin": [
+      30,
+      0,
+      0
+     ],
+     "normal": [
+      1,
+      0,
+      0
+     ]
+    },
+    "combine": true
+   }
+  }
+ ]
+}

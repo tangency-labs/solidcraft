@@ -1,0 +1,46 @@
+{
+  "cases": [
+    {
+      "name": "uv_domain_partial_late_disjoint_error",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:1275-1417",
+      "inputs": {
+        "brep": {"kind": "face","surface": {"bspline": {"net": [[[0,0,0,1],[0,1,0,1]],[[1,0,0,1],[1,1,0,1]]],"p": 1,"q": 1,"u": [0,0,1,1],"v": [0,0,1,1]}},"dom": [0,0,1,1]},
+        "face": 0,
+        "op": "uv_domain_after_trim_shift",
+        "limit": true,
+        "want_max": true,
+        "want_2nd": true,
+        "domain": [-1, -1, 2, 2],
+        "shift": [3.0, 3.0]
+      }
+    },
+    {
+      "name": "uv_domain_partial_shifted_unlimited_success",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:1275-1417",
+      "inputs": {
+        "brep": {"kind": "face","surface": {"bspline": {"net": [[[0,0,0,1],[0,1,0,1]],[[1,0,0,1],[1,1,0,1]]],"p": 1,"q": 1,"u": [0,0,1,1],"v": [0,0,1,1]}},"dom": [0,0,1,1]},
+        "face": 0,
+        "op": "uv_domain_after_trim_shift",
+        "limit": false,
+        "want_max": true,
+        "want_2nd": true,
+        "domain": [-1, -1, 2, 2],
+        "shift": [3.0, 3.0]
+      }
+    },
+    {
+      "name": "uv_domain_partial_clipped_success",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:1275-1417",
+      "inputs": {
+        "brep": {"kind": "face","surface": {"bspline": {"net": [[[0,0,0,1],[0,1,0,1]],[[1,0,0,1],[1,1,0,1]]],"p": 1,"q": 1,"u": [0,0,1,1],"v": [0,0,1,1]}},"dom": [0,0,1,1]},
+        "face": 0,
+        "op": "uv_domain_after_trim_shift",
+        "limit": true,
+        "want_max": true,
+        "want_2nd": true,
+        "domain": [-1, -1, 2, 2],
+        "shift": [0.0, 0.0]
+      }
+    }
+  ]
+}

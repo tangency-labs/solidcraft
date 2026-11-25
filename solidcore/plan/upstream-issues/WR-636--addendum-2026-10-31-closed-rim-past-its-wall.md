@@ -1,0 +1,9 @@
+Updates: WR-636
+
+The SolidCraft fork's tangency-labs/smlib@db4a655 extends the cliff overflow (WR-631, WR-635, WR-636) to a closed rim blended past the far end of its wall (solidcraft#190's disc R13 x 2 rounded R2.5, a hole's top rim through a plate, a cylinder's top rim chamfered), which was not closed three ways:
+
+- The rail on the wall lies past the wall's own domain, and a host surface other than a plane was taken only within its domain ("lies on no face's exact continuation", `NotExact`). A cylinder, cone, sphere or torus now continues as itself (`SmOffsetSurface::ContinueAsItself`, new and public: `sm_ExtendAsItself` with the analytic kind given back) as far as the points it must hold reach (`sm_ContinuedSurface`), for the distance to a host's surface and for the closing face's surface.
+- A chain of the sheet's boundary that is one closed edge (a closed rim's rail, one circle) was taken as open and its ends found no side edge: it is closed at once.
+- A closed chain closed only on a plane, round a loop of the host all blended. On a full turn of a surface of revolution the closing face is now the band of the surface continued between the rail and the host's blended rim, each a circle round the axis and a parameter line of it (`sm_CloseBand`); off those lines it is `NotExact`, no curve fitted.
+
+The Rust port follows it under the same flag, `Kernel::fixes.fillet_cliff_overflow` (`continued_surface`, `close_band`, the closed one-edge chain in `lamina_chains`, in `blend/fillet_cliff_overflow.rs`; `OffsetSurface::continues_as_itself` and `continue_as_itself` in `surface/offset_surface.rs`). The disc case also needs tangency-labs/smlib@779cb9b (WR-610 addendum of the same date) for its closed corner. Regression test: `crates/solidcore/tests/wr636_db4a655_closed_rim_past_its_wall.rs` (957.6922564 against the analytic 957.692238945; refused before).

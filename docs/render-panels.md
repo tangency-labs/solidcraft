@@ -297,22 +297,26 @@ Approved by the owner. Each changes something the earlier design said, or a defa
 
 **Path tracing  (GPU)**
 
-- Samples per pixel (1–4096, powers of two) · maximum path depth · random seed
-- Reduce noise in the finished image (denoise)
+- Samples per pixel (1–4096, exact counts; legacy edits round to powers of two) · maximum path depth · random seed
+- Reduce noise in progressive images and the final result (denoise)
 
-**Adaptive  (GPU)**
+**Adaptive  (CPU / GPU)**
 
 - Allocate samples with independent pilots · pilot samples · minimum production samples
 - Relative RGB error · absolute floor · coverage error
 
-**Glass transport  (GPU)**
+**Glass transport  (CPU / GPU)**
 
-- Conditional Fresnel strata 1, 2, 4 · certified nested dielectrics
+- CPU: certified Glass limits · Use progressive sampling for a fixed setup ·
+  Enable Indirect lighting, or show the current path depth
+- GPU: conditional Fresnel strata 1, 2, 4 · certified nested dielectrics
 
 **CPU ray tracing**
 
 - Resource profile: Compact, Studio, Workstation · limits: memory, triangles, bodies, samples
-- Sampling mode: single image | progressive · edge samples per pixel 1, 4, 16 · progressive samples and seed
+- New setups: progressive samples per pixel and seed
+- Saved fixed setups: keep edge samples per pixel 1, 4, 16 until explicit Use progressive sampling
+- The previous Single image / Progressive selector remains available through Use previous Render image defaults
 - Reflection depth 1–8 · reflection samples 1–64
 
 ### Effects

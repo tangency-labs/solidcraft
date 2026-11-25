@@ -1,0 +1,2507 @@
+{
+ "cases": [
+  {
+   "name": "Surface_remove_all_d1_tol1e-09",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "tol": 1e-09,
+    "dir": 1
+   }
+  },
+  {
+   "name": "Surface_remove_all_d1_tol0.001",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "tol": 0.001,
+    "dir": 1
+   }
+  },
+  {
+   "name": "Surface_remove_all_d1_tol1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "tol": 1.0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "Surface_remove_all_d2_tol1e-09",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "tol": 1e-09,
+    "dir": 2
+   }
+  },
+  {
+   "name": "Surface_remove_all_d2_tol0.001",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "tol": 0.001,
+    "dir": 2
+   }
+  },
+  {
+   "name": "Surface_remove_all_d2_tol1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "tol": 1.0,
+    "dir": 2
+   }
+  },
+  {
+   "name": "Surface_remove_all_d3_tol1e-09",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "tol": 1e-09,
+    "dir": 3
+   }
+  },
+  {
+   "name": "Surface_remove_all_d3_tol0.001",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "tol": 0.001,
+    "dir": 3
+   }
+  },
+  {
+   "name": "Surface_remove_all_d3_tol1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "tol": 1.0,
+    "dir": 3
+   }
+  },
+  {
+   "name": "Surface_remove_all_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "tol": 0.001,
+    "dir": 3,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_refined_remove_all_d1_tol1e-09",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "base": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "elevate_v": 1,
+     "insert_u": [
+      0.3,
+      0.3,
+      0.61
+     ],
+     "insert_v": [
+      0.20700296280090316,
+      0.46545034410871433
+     ]
+    },
+    "tol": 1e-09,
+    "dir": 1
+   }
+  },
+  {
+   "name": "Surface_refined_remove_all_d1_tol1e-06",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "base": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "elevate_v": 1,
+     "insert_u": [
+      0.3,
+      0.3,
+      0.61
+     ],
+     "insert_v": [
+      0.20700296280090316,
+      0.46545034410871433
+     ]
+    },
+    "tol": 1e-06,
+    "dir": 1
+   }
+  },
+  {
+   "name": "Surface_refined_remove_all_d2_tol1e-09",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "base": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "elevate_v": 1,
+     "insert_u": [
+      0.3,
+      0.3,
+      0.61
+     ],
+     "insert_v": [
+      0.20700296280090316,
+      0.46545034410871433
+     ]
+    },
+    "tol": 1e-09,
+    "dir": 2
+   }
+  },
+  {
+   "name": "Surface_refined_remove_all_d2_tol1e-06",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "base": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "elevate_v": 1,
+     "insert_u": [
+      0.3,
+      0.3,
+      0.61
+     ],
+     "insert_v": [
+      0.20700296280090316,
+      0.46545034410871433
+     ]
+    },
+    "tol": 1e-06,
+    "dir": 2
+   }
+  },
+  {
+   "name": "Surface_refined_remove_all_d3_tol1e-09",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "base": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "elevate_v": 1,
+     "insert_u": [
+      0.3,
+      0.3,
+      0.61
+     ],
+     "insert_v": [
+      0.20700296280090316,
+      0.46545034410871433
+     ]
+    },
+    "tol": 1e-09,
+    "dir": 3
+   }
+  },
+  {
+   "name": "Surface_refined_remove_all_d3_tol1e-06",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "base": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "elevate_v": 1,
+     "insert_u": [
+      0.3,
+      0.3,
+      0.61
+     ],
+     "insert_v": [
+      0.20700296280090316,
+      0.46545034410871433
+     ]
+    },
+    "tol": 1e-06,
+    "dir": 3
+   }
+  },
+  {
+   "name": "DropCurveSurface_remove_all_d1_tol1e-09",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "tol": 1e-09,
+    "dir": 1
+   }
+  },
+  {
+   "name": "DropCurveSurface_remove_all_d1_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "tol": 0.001,
+    "dir": 1
+   }
+  },
+  {
+   "name": "DropCurveSurface_remove_all_d1_tol1",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "tol": 1.0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "DropCurveSurface_remove_all_d2_tol1e-09",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "tol": 1e-09,
+    "dir": 2
+   }
+  },
+  {
+   "name": "DropCurveSurface_remove_all_d2_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "tol": 0.001,
+    "dir": 2
+   }
+  },
+  {
+   "name": "DropCurveSurface_remove_all_d2_tol1",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "tol": 1.0,
+    "dir": 2
+   }
+  },
+  {
+   "name": "DropCurveSurface_remove_all_d3_tol1e-09",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "tol": 1e-09,
+    "dir": 3
+   }
+  },
+  {
+   "name": "DropCurveSurface_remove_all_d3_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "tol": 0.001,
+    "dir": 3
+   }
+  },
+  {
+   "name": "DropCurveSurface_remove_all_d3_tol1",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "tol": 1.0,
+    "dir": 3
+   }
+  },
+  {
+   "name": "DropCurveSurface_remove_all_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "tol": 0.001,
+    "dir": 3,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_refined_remove_all_d1_tol1e-09",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "base": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "elevate_v": 1,
+     "insert_u": [
+      0.3,
+      0.61
+     ],
+     "insert_v": [
+      0.25,
+      0.7
+     ]
+    },
+    "tol": 1e-09,
+    "dir": 1
+   }
+  },
+  {
+   "name": "DropCurveSurface_refined_remove_all_d1_tol1e-06",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "base": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "elevate_v": 1,
+     "insert_u": [
+      0.3,
+      0.61
+     ],
+     "insert_v": [
+      0.25,
+      0.7
+     ]
+    },
+    "tol": 1e-06,
+    "dir": 1
+   }
+  },
+  {
+   "name": "DropCurveSurface_refined_remove_all_d2_tol1e-09",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "base": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "elevate_v": 1,
+     "insert_u": [
+      0.3,
+      0.61
+     ],
+     "insert_v": [
+      0.25,
+      0.7
+     ]
+    },
+    "tol": 1e-09,
+    "dir": 2
+   }
+  },
+  {
+   "name": "DropCurveSurface_refined_remove_all_d2_tol1e-06",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "base": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "elevate_v": 1,
+     "insert_u": [
+      0.3,
+      0.61
+     ],
+     "insert_v": [
+      0.25,
+      0.7
+     ]
+    },
+    "tol": 1e-06,
+    "dir": 2
+   }
+  },
+  {
+   "name": "DropCurveSurface_refined_remove_all_d3_tol1e-09",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "base": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "elevate_v": 1,
+     "insert_u": [
+      0.3,
+      0.61
+     ],
+     "insert_v": [
+      0.25,
+      0.7
+     ]
+    },
+    "tol": 1e-09,
+    "dir": 3
+   }
+  },
+  {
+   "name": "DropCurveSurface_refined_remove_all_d3_tol1e-06",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "base": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "elevate_v": 1,
+     "insert_u": [
+      0.3,
+      0.61
+     ],
+     "insert_v": [
+      0.25,
+      0.7
+     ]
+    },
+    "tol": 1e-06,
+    "dir": 3
+   }
+  },
+  {
+   "name": "offset_nurb_remove_all_d1_tol1e-09",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "tol": 1e-09,
+    "dir": 1
+   }
+  },
+  {
+   "name": "offset_nurb_remove_all_d1_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "tol": 0.001,
+    "dir": 1
+   }
+  },
+  {
+   "name": "offset_nurb_remove_all_d1_tol1",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "tol": 1.0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "offset_nurb_remove_all_d2_tol1e-09",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "tol": 1e-09,
+    "dir": 2
+   }
+  },
+  {
+   "name": "offset_nurb_remove_all_d2_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "tol": 0.001,
+    "dir": 2
+   }
+  },
+  {
+   "name": "offset_nurb_remove_all_d2_tol1",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "tol": 1.0,
+    "dir": 2
+   }
+  },
+  {
+   "name": "offset_nurb_remove_all_d3_tol1e-09",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "tol": 1e-09,
+    "dir": 3
+   }
+  },
+  {
+   "name": "offset_nurb_remove_all_d3_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "tol": 0.001,
+    "dir": 3
+   }
+  },
+  {
+   "name": "offset_nurb_remove_all_d3_tol1",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "tol": 1.0,
+    "dir": 3
+   }
+  },
+  {
+   "name": "offset_nurb_remove_all_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "tol": 0.001,
+    "dir": 3,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_refined_remove_all_d1_tol1e-09",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "base": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     },
+     "elevate_v": 1,
+     "insert_u": [
+      -3.8327099524776695,
+      -3.8327099524776695,
+      -2.135366973523273
+     ],
+     "insert_v": [
+      2.5,
+      7.0
+     ]
+    },
+    "tol": 1e-09,
+    "dir": 1
+   }
+  },
+  {
+   "name": "offset_nurb_refined_remove_all_d1_tol1e-06",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "base": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     },
+     "elevate_v": 1,
+     "insert_u": [
+      -3.8327099524776695,
+      -3.8327099524776695,
+      -2.135366973523273
+     ],
+     "insert_v": [
+      2.5,
+      7.0
+     ]
+    },
+    "tol": 1e-06,
+    "dir": 1
+   }
+  },
+  {
+   "name": "offset_nurb_refined_remove_all_d2_tol1e-09",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "base": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     },
+     "elevate_v": 1,
+     "insert_u": [
+      -3.8327099524776695,
+      -3.8327099524776695,
+      -2.135366973523273
+     ],
+     "insert_v": [
+      2.5,
+      7.0
+     ]
+    },
+    "tol": 1e-09,
+    "dir": 2
+   }
+  },
+  {
+   "name": "offset_nurb_refined_remove_all_d2_tol1e-06",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "base": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     },
+     "elevate_v": 1,
+     "insert_u": [
+      -3.8327099524776695,
+      -3.8327099524776695,
+      -2.135366973523273
+     ],
+     "insert_v": [
+      2.5,
+      7.0
+     ]
+    },
+    "tol": 1e-06,
+    "dir": 2
+   }
+  },
+  {
+   "name": "offset_nurb_refined_remove_all_d3_tol1e-09",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "base": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     },
+     "elevate_v": 1,
+     "insert_u": [
+      -3.8327099524776695,
+      -3.8327099524776695,
+      -2.135366973523273
+     ],
+     "insert_v": [
+      2.5,
+      7.0
+     ]
+    },
+    "tol": 1e-09,
+    "dir": 3
+   }
+  },
+  {
+   "name": "offset_nurb_refined_remove_all_d3_tol1e-06",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "remove_all",
+    "sur": {
+     "base": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     },
+     "elevate_v": 1,
+     "insert_u": [
+      -3.8327099524776695,
+      -3.8327099524776695,
+      -2.135366973523273
+     ],
+     "insert_v": [
+      2.5,
+      7.0
+     ]
+    },
+    "tol": 1e-06,
+    "dir": 3
+   }
+  },
+  {
+   "name": "join_Surface_Surface_d1_m0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms) + tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dir": 1,
+    "tol": 1e-06,
+    "mode": 0
+   }
+  },
+  {
+   "name": "join_Surface_Surface_d1_m1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms) + tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dir": 1,
+    "tol": 1e-06,
+    "mode": 1
+   }
+  },
+  {
+   "name": "join_Surface_Surface_d1_m2",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms) + tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dir": 1,
+    "tol": 1e-06,
+    "mode": 2
+   }
+  },
+  {
+   "name": "join_Surface_Surface_d2_m0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms) + tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dir": 2,
+    "tol": 1e-06,
+    "mode": 0
+   }
+  },
+  {
+   "name": "join_Surface_Surface_d2_m1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms) + tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dir": 2,
+    "tol": 1e-06,
+    "mode": 1
+   }
+  },
+  {
+   "name": "join_Surface_Surface_d2_m2",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms) + tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dir": 2,
+    "tol": 1e-06,
+    "mode": 2
+   }
+  },
+  {
+   "name": "join_Surface_DropCurveSurface_d1_m0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms) + TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dir": 1,
+    "tol": 1e-06,
+    "mode": 0
+   }
+  },
+  {
+   "name": "join_Surface_DropCurveSurface_d1_m1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms) + TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dir": 1,
+    "tol": 1e-06,
+    "mode": 1
+   }
+  },
+  {
+   "name": "join_Surface_DropCurveSurface_d1_m2",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms) + TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dir": 1,
+    "tol": 1e-06,
+    "mode": 2
+   }
+  },
+  {
+   "name": "join_Surface_DropCurveSurface_d2_m0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms) + TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dir": 2,
+    "tol": 1e-06,
+    "mode": 0
+   }
+  },
+  {
+   "name": "join_Surface_offset_nurb_d1_m0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms) + TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dir": 1,
+    "tol": 1e-06,
+    "mode": 0
+   }
+  },
+  {
+   "name": "join_Surface_offset_nurb_d1_m1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms) + TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dir": 1,
+    "tol": 1e-06,
+    "mode": 1
+   }
+  },
+  {
+   "name": "join_Surface_offset_nurb_d1_m2",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms) + TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dir": 1,
+    "tol": 1e-06,
+    "mode": 2
+   }
+  },
+  {
+   "name": "join_Surface_offset_nurb_d2_m0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms) + TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dir": 2,
+    "tol": 1e-06,
+    "mode": 0
+   }
+  },
+  {
+   "name": "join_DropCurveSurface_Surface_d1_m0",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data) + tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dir": 1,
+    "tol": 1e-06,
+    "mode": 0
+   }
+  },
+  {
+   "name": "join_DropCurveSurface_Surface_d1_m1",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data) + tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dir": 1,
+    "tol": 1e-06,
+    "mode": 1
+   }
+  },
+  {
+   "name": "join_DropCurveSurface_Surface_d1_m2",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data) + tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dir": 1,
+    "tol": 1e-06,
+    "mode": 2
+   }
+  },
+  {
+   "name": "join_DropCurveSurface_Surface_d2_m0",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data) + tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dir": 2,
+    "tol": 1e-06,
+    "mode": 0
+   }
+  },
+  {
+   "name": "join_DropCurveSurface_DropCurveSurface_d1_m0",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data) + TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dir": 1,
+    "tol": 1e-06,
+    "mode": 0
+   }
+  },
+  {
+   "name": "join_DropCurveSurface_DropCurveSurface_d1_m1",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data) + TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dir": 1,
+    "tol": 1e-06,
+    "mode": 1
+   }
+  },
+  {
+   "name": "join_DropCurveSurface_DropCurveSurface_d1_m2",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data) + TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dir": 1,
+    "tol": 1e-06,
+    "mode": 2
+   }
+  },
+  {
+   "name": "join_DropCurveSurface_DropCurveSurface_d2_m0",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data) + TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dir": 2,
+    "tol": 1e-06,
+    "mode": 0
+   }
+  },
+  {
+   "name": "join_DropCurveSurface_DropCurveSurface_d2_m1",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data) + TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dir": 2,
+    "tol": 1e-06,
+    "mode": 1
+   }
+  },
+  {
+   "name": "join_DropCurveSurface_DropCurveSurface_d2_m2",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data) + TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dir": 2,
+    "tol": 1e-06,
+    "mode": 2
+   }
+  },
+  {
+   "name": "join_DropCurveSurface_offset_nurb_d1_m0",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data) + TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dir": 1,
+    "tol": 1e-06,
+    "mode": 0
+   }
+  },
+  {
+   "name": "join_DropCurveSurface_offset_nurb_d1_m1",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data) + TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dir": 1,
+    "tol": 1e-06,
+    "mode": 1
+   }
+  },
+  {
+   "name": "join_DropCurveSurface_offset_nurb_d1_m2",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data) + TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dir": 1,
+    "tol": 1e-06,
+    "mode": 2
+   }
+  },
+  {
+   "name": "join_DropCurveSurface_offset_nurb_d2_m0",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data) + TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dir": 2,
+    "tol": 1e-06,
+    "mode": 0
+   }
+  },
+  {
+   "name": "join_offset_nurb_Surface_d1_m0",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data) + tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dir": 1,
+    "tol": 1e-06,
+    "mode": 0
+   }
+  },
+  {
+   "name": "join_offset_nurb_Surface_d1_m1",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data) + tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dir": 1,
+    "tol": 1e-06,
+    "mode": 1
+   }
+  },
+  {
+   "name": "join_offset_nurb_Surface_d1_m2",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data) + tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dir": 1,
+    "tol": 1e-06,
+    "mode": 2
+   }
+  },
+  {
+   "name": "join_offset_nurb_Surface_d2_m0",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data) + tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "dir": 2,
+    "tol": 1e-06,
+    "mode": 0
+   }
+  },
+  {
+   "name": "join_offset_nurb_DropCurveSurface_d1_m0",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data) + TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dir": 1,
+    "tol": 1e-06,
+    "mode": 0
+   }
+  },
+  {
+   "name": "join_offset_nurb_DropCurveSurface_d1_m1",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data) + TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dir": 1,
+    "tol": 1e-06,
+    "mode": 1
+   }
+  },
+  {
+   "name": "join_offset_nurb_DropCurveSurface_d1_m2",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data) + TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dir": 1,
+    "tol": 1e-06,
+    "mode": 2
+   }
+  },
+  {
+   "name": "join_offset_nurb_DropCurveSurface_d2_m0",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data) + TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "dir": 2,
+    "tol": 1e-06,
+    "mode": 0
+   }
+  },
+  {
+   "name": "join_offset_nurb_offset_nurb_d1_m0",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data) + TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dir": 1,
+    "tol": 1e-06,
+    "mode": 0
+   }
+  },
+  {
+   "name": "join_offset_nurb_offset_nurb_d1_m1",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data) + TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dir": 1,
+    "tol": 1e-06,
+    "mode": 1
+   }
+  },
+  {
+   "name": "join_offset_nurb_offset_nurb_d1_m2",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data) + TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dir": 1,
+    "tol": 1e-06,
+    "mode": 2
+   }
+  },
+  {
+   "name": "join_offset_nurb_offset_nurb_d2_m0",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data) + TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dir": 2,
+    "tol": 1e-06,
+    "mode": 0
+   }
+  },
+  {
+   "name": "join_offset_nurb_offset_nurb_d2_m1",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data) + TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dir": 2,
+    "tol": 1e-06,
+    "mode": 1
+   }
+  },
+  {
+   "name": "join_offset_nurb_offset_nurb_d2_m2",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data) + TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "sur2": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "dir": 2,
+    "tol": 1e-06,
+    "mode": 2
+   }
+  },
+  {
+   "name": "Surface_split_join_d1_tol1e-09",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "base": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "split": [
+      0.45,
+      1,
+      0
+     ]
+    },
+    "sur2": {
+     "base": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "split": [
+      0.45,
+      1,
+      1
+     ]
+    },
+    "dir": 1,
+    "tol": 1e-09
+   }
+  },
+  {
+   "name": "Surface_split_join_d1_tol0.001",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "base": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "split": [
+      0.45,
+      1,
+      0
+     ]
+    },
+    "sur2": {
+     "base": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "split": [
+      0.45,
+      1,
+      1
+     ]
+    },
+    "dir": 1,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "Surface_split_join_d2_tol1e-09",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "base": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "split": [
+      0.3218684656043749,
+      2,
+      0
+     ]
+    },
+    "sur2": {
+     "base": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "split": [
+      0.3218684656043749,
+      2,
+      1
+     ]
+    },
+    "dir": 2,
+    "tol": 1e-09
+   }
+  },
+  {
+   "name": "Surface_split_join_d2_tol0.001",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "base": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "split": [
+      0.3218684656043749,
+      2,
+      0
+     ]
+    },
+    "sur2": {
+     "base": {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     "split": [
+      0.3218684656043749,
+      2,
+      1
+     ]
+    },
+    "dir": 2,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "DropCurveSurface_split_join_d1_tol1e-09",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "base": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "split": [
+      0.45,
+      1,
+      0
+     ]
+    },
+    "sur2": {
+     "base": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "split": [
+      0.45,
+      1,
+      1
+     ]
+    },
+    "dir": 1,
+    "tol": 1e-09
+   }
+  },
+  {
+   "name": "DropCurveSurface_split_join_d1_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "base": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "split": [
+      0.45,
+      1,
+      0
+     ]
+    },
+    "sur2": {
+     "base": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "split": [
+      0.45,
+      1,
+      1
+     ]
+    },
+    "dir": 1,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "DropCurveSurface_split_join_d2_tol1e-09",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "base": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "split": [
+      0.45,
+      2,
+      0
+     ]
+    },
+    "sur2": {
+     "base": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "split": [
+      0.45,
+      2,
+      1
+     ]
+    },
+    "dir": 2,
+    "tol": 1e-09
+   }
+  },
+  {
+   "name": "DropCurveSurface_split_join_d2_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "base": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "split": [
+      0.45,
+      2,
+      0
+     ]
+    },
+    "sur2": {
+     "base": {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     "split": [
+      0.45,
+      2,
+      1
+     ]
+    },
+    "dir": 2,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "offset_nurb_split_join_d1_tol1e-09",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "base": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     },
+     "split": [
+      -3.011414962661026,
+      1,
+      0
+     ]
+    },
+    "sur2": {
+     "base": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     },
+     "split": [
+      -3.011414962661026,
+      1,
+      1
+     ]
+    },
+    "dir": 1,
+    "tol": 1e-09
+   }
+  },
+  {
+   "name": "offset_nurb_split_join_d1_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "base": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     },
+     "split": [
+      -3.011414962661026,
+      1,
+      0
+     ]
+    },
+    "sur2": {
+     "base": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     },
+     "split": [
+      -3.011414962661026,
+      1,
+      1
+     ]
+    },
+    "dir": 1,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "offset_nurb_split_join_d2_tol1e-09",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "base": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     },
+     "split": [
+      4.5,
+      2,
+      0
+     ]
+    },
+    "sur2": {
+     "base": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     },
+     "split": [
+      4.5,
+      2,
+      1
+     ]
+    },
+    "dir": 2,
+    "tol": 1e-09
+   }
+  },
+  {
+   "name": "offset_nurb_split_join_d2_tol0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "join",
+    "sur1": {
+     "base": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     },
+     "split": [
+      4.5,
+      2,
+      0
+     ]
+    },
+    "sur2": {
+     "base": {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     },
+     "split": [
+      4.5,
+      2,
+      1
+     ]
+    },
+    "dir": 2,
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "compatible_Surface_d1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "compatible",
+    "surs": [
+     {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    ],
+    "dir": 1
+   }
+  },
+  {
+   "name": "compatible_Surface_d2",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "compatible",
+    "surs": [
+     {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    ],
+    "dir": 2
+   }
+  },
+  {
+   "name": "compatible_Surface_d3",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "compatible",
+    "surs": [
+     {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    ],
+    "dir": 3
+   }
+  },
+  {
+   "name": "compatible_Surface_refined_d3",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "compatible",
+    "surs": [
+     {
+      "base": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      },
+      "insert_u": [
+       0.3,
+       0.3,
+       0.61
+      ],
+      "elevate_u": 0
+     }
+    ],
+    "dir": 3
+   }
+  },
+  {
+   "name": "compatible_Surface_DropCurveSurface_d1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms) + TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "compatible",
+    "surs": [
+     {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    ],
+    "dir": 1
+   }
+  },
+  {
+   "name": "compatible_Surface_DropCurveSurface_d2",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms) + TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "compatible",
+    "surs": [
+     {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    ],
+    "dir": 2
+   }
+  },
+  {
+   "name": "compatible_Surface_DropCurveSurface_d3",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms) + TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "compatible",
+    "surs": [
+     {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     }
+    ],
+    "dir": 3
+   }
+  },
+  {
+   "name": "compatible_Surface_DropCurveSurface_refined_d3",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms) + TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "compatible",
+    "surs": [
+     {
+      "base": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      },
+      "insert_u": [
+       0.3,
+       0.3,
+       0.61
+      ],
+      "elevate_u": 0
+     },
+     {
+      "base": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      },
+      "insert_u": [
+       0.3,
+       0.61
+      ],
+      "elevate_u": 1
+     }
+    ],
+    "dir": 3
+   }
+  },
+  {
+   "name": "compatible_Surface_offset_nurb_d1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms) + TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "compatible",
+    "surs": [
+     {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    ],
+    "dir": 1
+   }
+  },
+  {
+   "name": "compatible_Surface_offset_nurb_d2",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms) + TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "compatible",
+    "surs": [
+     {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    ],
+    "dir": 2
+   }
+  },
+  {
+   "name": "compatible_Surface_offset_nurb_d3",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms) + TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "compatible",
+    "surs": [
+     {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     },
+     {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     }
+    ],
+    "dir": 3
+   }
+  },
+  {
+   "name": "compatible_Surface_offset_nurb_refined_d3",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms) + TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data)",
+   "inputs": {
+    "op": "compatible",
+    "surs": [
+     {
+      "base": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      },
+      "insert_u": [
+       0.3,
+       0.3,
+       0.61
+      ],
+      "elevate_u": 0
+     },
+     {
+      "base": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      },
+      "insert_u": [
+       -3.8327099524776695,
+       -3.8327099524776695,
+       -2.135366973523273
+      ],
+      "elevate_u": 1
+     }
+    ],
+    "dir": 3
+   }
+  },
+  {
+   "name": "compatible_DropCurveSurface_offset_nurb_Surface_d1",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data) + TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data) + tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "compatible",
+    "surs": [
+     {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     },
+     {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    ],
+    "dir": 1
+   }
+  },
+  {
+   "name": "compatible_DropCurveSurface_offset_nurb_Surface_d2",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data) + TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data) + tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "compatible",
+    "surs": [
+     {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     },
+     {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    ],
+    "dir": 2
+   }
+  },
+  {
+   "name": "compatible_DropCurveSurface_offset_nurb_Surface_d3",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data) + TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data) + tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "compatible",
+    "surs": [
+     {
+      "sms": {
+       "$upstream_file": "DropCurveSurface.sms"
+      }
+     },
+     {
+      "sms": {
+       "$upstream_file": "offset_nurb.sms"
+      }
+     },
+     {
+      "sms": {
+       "$upstream_file": "Surface.sms"
+      }
+     }
+    ],
+    "dir": 3
+   }
+  },
+  {
+   "name": "compatible_DropCurveSurface_offset_nurb_Surface_refined_d3",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data) + TestFiles/pt_TestFiles/offset_nurb.sms (my_test_ss_nurb offset surface data) + tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "compatible",
+    "surs": [
+     {
+      "base": {
+       "sms": {
+        "$upstream_file": "DropCurveSurface.sms"
+       }
+      },
+      "insert_u": [
+       0.3,
+       0.61
+      ],
+      "elevate_u": 0
+     },
+     {
+      "base": {
+       "sms": {
+        "$upstream_file": "offset_nurb.sms"
+       }
+      },
+      "insert_u": [
+       -3.8327099524776695,
+       -3.8327099524776695,
+       -2.135366973523273
+      ],
+      "elevate_u": 1
+     },
+     {
+      "base": {
+       "sms": {
+        "$upstream_file": "Surface.sms"
+       }
+      },
+      "insert_u": [
+       0.3,
+       0.3,
+       0.61
+      ],
+      "elevate_u": 0
+     }
+    ],
+    "dir": 3
+   }
+  }
+ ]
+}

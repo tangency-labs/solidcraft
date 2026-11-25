@@ -1,0 +1,10 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#2896"
+  ],
+  "what": "a join of a ring (R30/R24, 6 tall) and an arm with a convex R5 end whose tip runs 0.1 mm into the ring's outer wall (curved faces that nearly graze)",
+  "source": "analytic",
+  "method": "ring pi*(30^2-24^2)*6; arm = box 35x10x6 plus the half disc r5 at its end, 6*(350+12.5*pi); the arm's end circle (centre x=34.9, r5) meets the ring's outer circle R30 in a lens of area 0.1232 (closed-form circle-circle lens), so the overlap is 0.739 mm^3 and V = ring + arm - overlap = 8442.14. The overlap is real material, so one fused body",
+  "body_count": 1,
+  "volume_mm3": 8442.136556424508
+}

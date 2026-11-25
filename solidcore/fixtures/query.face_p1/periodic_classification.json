@@ -1,0 +1,1180 @@
+{
+  "cases": [
+    {
+      "name": "periodic_cone_0_dz-1.01e-07_guess0",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 1.0,
+        "v": 0.5,
+        "offset": [
+          0.0,
+          0.0,
+          -1.01e-07
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07
+      }
+    },
+    {
+      "name": "periodic_cone_0_dz-1.01e-07_guess1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 1.0,
+        "v": 0.5,
+        "offset": [
+          0.0,
+          0.0,
+          -1.01e-07
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07,
+        "guess": {
+          "du": 0.0,
+          "dv": 0.0
+        }
+      }
+    },
+    {
+      "name": "periodic_cone_0_dz0.0_guess0",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 1.0,
+        "v": 0.5,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07
+      }
+    },
+    {
+      "name": "periodic_cone_0_dz0.0_guess1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 1.0,
+        "v": 0.5,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07,
+        "guess": {
+          "du": 0.0,
+          "dv": 0.0
+        }
+      }
+    },
+    {
+      "name": "periodic_cone_0_dz1.01e-07_guess0",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 1.0,
+        "v": 0.5,
+        "offset": [
+          0.0,
+          0.0,
+          1.01e-07
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07
+      }
+    },
+    {
+      "name": "periodic_cone_0_dz1.01e-07_guess1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 1.0,
+        "v": 0.5,
+        "offset": [
+          0.0,
+          0.0,
+          1.01e-07
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07,
+        "guess": {
+          "du": 0.0,
+          "dv": 0.0
+        }
+      }
+    },
+    {
+      "name": "periodic_cone_1_dz-1.01e-07_guess0",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 0.9999999999,
+        "v": 0.5,
+        "offset": [
+          0.0,
+          0.0,
+          -1.01e-07
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07
+      }
+    },
+    {
+      "name": "periodic_cone_1_dz-1.01e-07_guess1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 0.9999999999,
+        "v": 0.5,
+        "offset": [
+          0.0,
+          0.0,
+          -1.01e-07
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07,
+        "guess": {
+          "du": 0.0,
+          "dv": 0.0
+        }
+      }
+    },
+    {
+      "name": "periodic_cone_1_dz0.0_guess0",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 0.9999999999,
+        "v": 0.5,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07
+      }
+    },
+    {
+      "name": "periodic_cone_1_dz0.0_guess1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 0.9999999999,
+        "v": 0.5,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07,
+        "guess": {
+          "du": 0.0,
+          "dv": 0.0
+        }
+      }
+    },
+    {
+      "name": "periodic_cone_1_dz1.01e-07_guess0",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 0.9999999999,
+        "v": 0.5,
+        "offset": [
+          0.0,
+          0.0,
+          1.01e-07
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07
+      }
+    },
+    {
+      "name": "periodic_cone_1_dz1.01e-07_guess1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 0.9999999999,
+        "v": 0.5,
+        "offset": [
+          0.0,
+          0.0,
+          1.01e-07
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07,
+        "guess": {
+          "du": 0.0,
+          "dv": 0.0
+        }
+      }
+    },
+    {
+      "name": "periodic_cone_2_dz-1.01e-07_guess0",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 1.0000000001,
+        "v": 0.5,
+        "offset": [
+          0.0,
+          0.0,
+          -1.01e-07
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07
+      }
+    },
+    {
+      "name": "periodic_cone_2_dz-1.01e-07_guess1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 1.0000000001,
+        "v": 0.5,
+        "offset": [
+          0.0,
+          0.0,
+          -1.01e-07
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07,
+        "guess": {
+          "du": 0.0,
+          "dv": 0.0
+        }
+      }
+    },
+    {
+      "name": "periodic_cone_2_dz0.0_guess0",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 1.0000000001,
+        "v": 0.5,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07
+      }
+    },
+    {
+      "name": "periodic_cone_2_dz0.0_guess1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 1.0000000001,
+        "v": 0.5,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07,
+        "guess": {
+          "du": 0.0,
+          "dv": 0.0
+        }
+      }
+    },
+    {
+      "name": "periodic_cone_2_dz1.01e-07_guess0",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 1.0000000001,
+        "v": 0.5,
+        "offset": [
+          0.0,
+          0.0,
+          1.01e-07
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07
+      }
+    },
+    {
+      "name": "periodic_cone_2_dz1.01e-07_guess1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "cone.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 1.0000000001,
+        "v": 0.5,
+        "offset": [
+          0.0,
+          0.0,
+          1.01e-07
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07,
+        "guess": {
+          "du": 0.0,
+          "dv": 0.0
+        }
+      }
+    },
+    {
+      "name": "periodic_sphere_0_dz0.0_guess0",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "sphere.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 0,
+        "v": 0.5,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07
+      }
+    },
+    {
+      "name": "periodic_sphere_0_dz0.0_guess1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "sphere.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 0,
+        "v": 0.5,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07,
+        "guess": {
+          "du": 0.0,
+          "dv": 0.0
+        }
+      }
+    },
+    {
+      "name": "periodic_sphere_1_dz0.0_guess0",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "sphere.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 1,
+        "v": 0.5,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07
+      }
+    },
+    {
+      "name": "periodic_sphere_1_dz0.0_guess1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "sphere.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 1,
+        "v": 0.5,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07,
+        "guess": {
+          "du": 0.0,
+          "dv": 0.0
+        }
+      }
+    },
+    {
+      "name": "periodic_sphere_2_dz0.0_guess0",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "sphere.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 0.5,
+        "v": 0,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07
+      }
+    },
+    {
+      "name": "periodic_sphere_2_dz0.0_guess1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "sphere.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 0.5,
+        "v": 0,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07,
+        "guess": {
+          "du": 0.0,
+          "dv": 0.0
+        }
+      }
+    },
+    {
+      "name": "periodic_sphere_3_dz0.0_guess0",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "sphere.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 0.5,
+        "v": 1,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07
+      }
+    },
+    {
+      "name": "periodic_sphere_3_dz0.0_guess1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "sphere.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 0.5,
+        "v": 1,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07,
+        "guess": {
+          "du": 0.0,
+          "dv": 0.0
+        }
+      }
+    },
+    {
+      "name": "periodic_torus_0_dz0.0_guess0",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "torus.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 0,
+        "v": 0.5,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07
+      }
+    },
+    {
+      "name": "periodic_torus_0_dz0.0_guess1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "torus.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 0,
+        "v": 0.5,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07,
+        "guess": {
+          "du": 0.0,
+          "dv": 0.0
+        }
+      }
+    },
+    {
+      "name": "periodic_torus_1_dz0.0_guess0",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "torus.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 1,
+        "v": 0.5,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07
+      }
+    },
+    {
+      "name": "periodic_torus_1_dz0.0_guess1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "torus.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 1,
+        "v": 0.5,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07,
+        "guess": {
+          "du": 0.0,
+          "dv": 0.0
+        }
+      }
+    },
+    {
+      "name": "periodic_torus_2_dz0.0_guess0",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "torus.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 0.5,
+        "v": 0,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07
+      }
+    },
+    {
+      "name": "periodic_torus_2_dz0.0_guess1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "torus.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 0.5,
+        "v": 0,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07,
+        "guess": {
+          "du": 0.0,
+          "dv": 0.0
+        }
+      }
+    },
+    {
+      "name": "periodic_torus_3_dz0.0_guess0",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "torus.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 0.5,
+        "v": 1,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07
+      }
+    },
+    {
+      "name": "periodic_torus_3_dz0.0_guess1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "torus.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 0.5,
+        "v": 1,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07,
+        "guess": {
+          "du": 0.0,
+          "dv": 0.0
+        }
+      }
+    },
+    {
+      "name": "periodic_surf_rev_0_dz0.0_guess0",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "surf_rev.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 0,
+        "v": 0.5,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07
+      }
+    },
+    {
+      "name": "periodic_surf_rev_0_dz0.0_guess1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "surf_rev.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 0,
+        "v": 0.5,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07,
+        "guess": {
+          "du": 0.0,
+          "dv": 0.0
+        }
+      }
+    },
+    {
+      "name": "periodic_surf_rev_1_dz0.0_guess0",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "surf_rev.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 1,
+        "v": 0.5,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07
+      }
+    },
+    {
+      "name": "periodic_surf_rev_1_dz0.0_guess1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "surf_rev.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 1,
+        "v": 0.5,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07,
+        "guess": {
+          "du": 0.0,
+          "dv": 0.0
+        }
+      }
+    },
+    {
+      "name": "periodic_surf_rev_2_dz0.0_guess0",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "surf_rev.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 0.5,
+        "v": 0,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07
+      }
+    },
+    {
+      "name": "periodic_surf_rev_2_dz0.0_guess1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "surf_rev.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 0.5,
+        "v": 0,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07,
+        "guess": {
+          "du": 0.0,
+          "dv": 0.0
+        }
+      }
+    },
+    {
+      "name": "periodic_surf_rev_3_dz0.0_guess0",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "surf_rev.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 0.5,
+        "v": 1,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07
+      }
+    },
+    {
+      "name": "periodic_surf_rev_3_dz0.0_guess1",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp:Point3DClassify; source/SMLib/src/SmSurfOfRevolution.cpp:DropPointFast",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "surf_rev.smb",
+          "rebuild": false
+        },
+        "face": 0,
+        "u": 0.5,
+        "v": 1,
+        "offset": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "src_tol": 1e-07,
+        "do_bnd": true,
+        "tgt_only": false,
+        "has_loops": false,
+        "loops": [],
+        "uv_ok": true,
+        "pc_tol": 1e-07,
+        "guess": {
+          "du": 0.0,
+          "dv": 0.0
+        }
+      }
+    }
+  ]
+}

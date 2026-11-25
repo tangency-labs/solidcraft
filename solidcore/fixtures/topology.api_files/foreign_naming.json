@@ -1,0 +1,64 @@
+{
+  "cases": [
+    {
+      "name": "round_trip_foreign_naming_ascii",
+      "upstream_ref": "PR #1832 follow-up; SmBrep::GetSurfaces ownership is independent of caller keys",
+      "inputs": {
+        "op": "round_trip",
+        "size": [
+          2.0,
+          3.0,
+          4.0
+        ],
+        "ascii": true,
+        "rebuild": false,
+        "foreign_naming": true
+      }
+    },
+    {
+      "name": "round_trip_foreign_naming_ascii_rebuild",
+      "upstream_ref": "PR #1832 follow-up; SmBrep::GetSurfaces ownership is independent of caller keys",
+      "inputs": {
+        "op": "round_trip",
+        "size": [
+          2.0,
+          3.0,
+          4.0
+        ],
+        "ascii": true,
+        "rebuild": true,
+        "foreign_naming": true
+      }
+    },
+    {
+      "name": "round_trip_foreign_naming_binary",
+      "upstream_ref": "PR #1832 follow-up; SmBrep::GetSurfaces ownership is independent of caller keys",
+      "inputs": {
+        "op": "round_trip",
+        "size": [
+          2.0,
+          3.0,
+          4.0
+        ],
+        "ascii": false,
+        "rebuild": false,
+        "foreign_naming": true
+      }
+    },
+    {
+      "name": "round_trip_foreign_naming_binary_rebuild",
+      "upstream_ref": "PR #1832 follow-up; SmBrep::GetSurfaces ownership is independent of caller keys",
+      "inputs": {
+        "op": "round_trip",
+        "size": [
+          2.0,
+          3.0,
+          4.0
+        ],
+        "ascii": false,
+        "rebuild": true,
+        "foreign_naming": true
+      }
+    }
+  ]
+}

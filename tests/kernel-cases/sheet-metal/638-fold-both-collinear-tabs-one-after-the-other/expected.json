@@ -1,0 +1,12 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#638",
+  "tangency-labs/solidcraft#652",
+  "tangency-labs/solidcraft#963"
+ ],
+ "what": "two collinear tabs folded in two features on the same line; the second fold used to be refused as crossing a slanted edge",
+ "source": "analytic",
+ "method": "blank area 4210 mm2 at t = 0.8, two folds of width 7: a fold keeps the flat length of the blank, so a fold of angle th, inner radius R, thickness t and K-factor K over a width w takes a flat strip of BA = th(R+Kt) and puts a bend of volume th((R+t)^2-R^2)w/2 in its place: V = V_flat + th w t^2 (1/2 - K) (the bend's mid-surface lies at R+t/2, the neutral axis at R+Kt). V = 4210*0.8 + 2*(pi/2)*7*0.64*0.06",
+ "body_count": 1,
+ "volume_mm3": 3368.8444601052847
+}

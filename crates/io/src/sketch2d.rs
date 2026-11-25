@@ -1,7 +1,8 @@
 //! 2D drawing exchange for sketches: DXF (ASCII, read and write) and SVG (read). Readers produce
 //! plain 2D geometry in millimetres; the engine turns it into sketch curves.
 
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 
 /// One imported 2D entity (millimetres, y up).
 #[derive(Clone, Debug, PartialEq)]
@@ -26,6 +27,14 @@ pub enum Geom2 {
         pts: Vec<Vec2>,
         control: bool,
         degree: u8,
+    },
+    /// Spline over the control points with its own clamped knots (`pts.len() + degree + 1`)
+    /// and weights (empty: all 1), as a DXF SPLINE gives it (#9355).
+    Nurbs {
+        pts: Vec<Vec2>,
+        degree: u8,
+        knots: Vec<f64>,
+        weights: Vec<f64>,
     },
     /// Quadratic Bézier / conic.
     Conic {

@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1280"
+ ],
+ "what": "a 5 mm hole drilled square to the face of a 45 degree flange: the drill cap's certificate refused it by 1e-11 mm",
+ "source": "analytic",
+ "method": "T = 2.5, R = 2.5, K = 0.44, 100 x 60 base and a 15 mm flange at 45 degrees, setback s = 5*tan(22.5 deg) = 2.0711: V45 = 100*(60 - s)*2.5 + 100*(15 - s)*2.5 + (pi/4)(25 - 6.25)*100/2 = 18450.78; the hole removes pi*2.5^2*2.5 = 49.087 of the flange: V = V45 - 15.625*pi",
+ "body_count": 1,
+ "volume_mm3": 18401.68948704003
+}

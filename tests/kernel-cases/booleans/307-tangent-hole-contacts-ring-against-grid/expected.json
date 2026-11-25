@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#307"
+ ],
+ "what": "four pairs of through holes whose circles touch at exactly one point (ring holes at (+-25,0),(0,+-25) against grid holes at (+-15,0),(0,+-15)); the symmetric contacts must be treated alike and split no cylinder face",
+ "source": "analytic",
+ "method": "plate 100x100x5 minus eight O10 through holes (centres 10 apart = 2r in the four pairs, so they only touch along a line): V = 50000 - 8*pi*25*5 = 50000 - 1000 pi = 46858.41. Faces by merged count: 6 planes + 8 cylinders = 14, a tangent line contact splits nothing. NOT SURE: the touching holes leave the plate pinched along four vertical lines, so a strict manifold check may reject the right answer",
+ "body_count": 1,
+ "volume_mm3": 46858.407346410204,
+ "faces": 14
+}

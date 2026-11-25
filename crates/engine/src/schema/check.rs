@@ -28,12 +28,24 @@ pub enum ParamCheck {
 }
 
 impl ParamCheck {
+    /// Every level, least checking first.
+    pub const ALL: [ParamCheck; 3] = [ParamCheck::Off, ParamCheck::Warn, ParamCheck::Strict];
+
     pub fn parse(s: &str) -> Option<ParamCheck> {
         match s.trim().to_ascii_lowercase().as_str() {
             "off" => Some(ParamCheck::Off),
             "warn" => Some(ParamCheck::Warn),
             "strict" => Some(ParamCheck::Strict),
             _ => None,
+        }
+    }
+
+    /// The level's word, as [`ParamCheck::parse`] reads it (the control channel's `param_check`).
+    pub fn name(self) -> &'static str {
+        match self {
+            ParamCheck::Off => "off",
+            ParamCheck::Warn => "warn",
+            ParamCheck::Strict => "strict",
         }
     }
 }
@@ -45,7 +57,34 @@ pub fn input_schema_for<T: JsonSchema>() -> Schema {
 
 /// The JSON Schema (2020-12) of what `T` serializes to: a command's result.
 pub fn output_schema_for<T: JsonSchema>() -> Schema {
-    SchemaSettings::draft2020_12().for_serialize().into_generator().into_root_schema_for::<T>()
+    let schema = SchemaSettings::draft2020_12().for_serialize().into_generator().into_root_schema_for::<T>();
+    let mut value = schema.clone().to_value();
+    // All object replies share optional command-dispatch metadata. Describe it here rather
+    // than duplicating a transport field in every operation's domain result type.
+    fn common(node: &mut Value) {
+        if let Some(object) = node.as_object_mut() {
+            if (object.get("type").and_then(Value::as_str) == Some("object") || object.contains_key("properties"))
+                && let Some(properties) = object.entry("properties").or_insert_with(|| json!({})).as_object_mut()
+            {
+                properties
+                    .insert("finished_sketch".into(), json!({"type":"string","description":"Name of the sketch finished before this edit started."}));
+            }
+            for key in ["anyOf", "oneOf", "allOf"] {
+                if let Some(branches) = object.get_mut(key).and_then(Value::as_array_mut) {
+                    for branch in branches {
+                        common(branch);
+                    }
+                }
+            }
+        }
+    }
+    common(&mut value);
+    if let Some(definitions) = value.get_mut("$defs").and_then(Value::as_object_mut) {
+        for definition in definitions.values_mut() {
+            common(definition);
+        }
+    }
+    Schema::try_from(value).unwrap_or(schema)
 }
 
 /// One way a call breaks a contract.
@@ -127,6 +166,16 @@ const WHOLE: char = '\u{1}';
 /// `message`, marked as complete (see [`WHOLE`]).
 pub(crate) fn whole(message: impl std::fmt::Display) -> String {
     format!("{WHOLE}{message}")
+}
+
+/// Marks a deserializer's message that the handler gives after the key and a colon, as it is
+/// (serde's own wording for a saved reference, such as "missing field `at`", which
+/// [`parse_issue`] would otherwise reword).
+const KEYED: char = '\u{3}';
+
+/// `message`, to follow the key and a colon as it is (see [`KEYED`]).
+pub(crate) fn keyed(message: impl std::fmt::Display) -> String {
+    format!("{KEYED}{message}")
 }
 
 /// Marks a deserializer's message that carries its own path: an error from a flattened
@@ -223,6 +272,12 @@ fn nearest(key: &str, allowed: &BTreeSet<String>) -> Option<String> {
         .map(|(_, a)| a.clone())
 }
 
+/// The command `cmd`'s parameters `p` as its contract type `P`, refused in the words the contract
+/// check uses, so the handler and the check say the same thing about the same mistake.
+pub(crate) fn read<P: DeserializeOwned>(cmd: &str, p: &Value) -> Result<P> {
+    serde_path_to_error::deserialize(p).map_err(|e| bad(cmd, parse_issue(&e).message))
+}
+
 /// A deserialization failure as an issue, in the engine's style.
 pub(crate) fn parse_issue(e: &serde_path_to_error::Error<serde_json::Error>) -> Issue {
     let path = error_path(e);
@@ -233,6 +288,9 @@ pub(crate) fn parse_issue(e: &serde_path_to_error::Error<serde_json::Error>) -> 
         Some((field, inner)) => (format!("{path}.{field}"), inner),
         None => (path, inner),
     };
+    if let Some(after) = inner.strip_prefix(KEYED) {
+        return Issue { path: path.clone(), message: truncate(&format!("`{path}`: {after}"), MAX_WHOLE_LEN), suggestion: None };
+    }
     if let Some(complete) = inner.strip_prefix(WHOLE) {
         // The handler's own message, which names the caller's value: in full up to a generous
         // cap, since the contract also checks keys the handler ignores (`side` without `thin`).
@@ -258,6 +316,14 @@ pub(crate) fn parse_issue(e: &serde_path_to_error::Error<serde_json::Error>) -> 
     };
     // serde quotes the caller's value, which may be long.
     Issue { path, message: truncate(&message, MAX_MESSAGE_LEN), suggestion: None }
+}
+
+/// What is wrong with `params` for the command `id` by its typed contract: the issues a call gets
+/// at [`ParamCheck::Warn`] (the first is the refusal at [`ParamCheck::Strict`]). None for a
+/// command without a contract, or an id the registry lacks (a runner in another process may be
+/// another version).
+pub fn issues(id: &str, params: &Value) -> Vec<Issue> {
+    crate::cmd::find_command(id).and_then(|c| c.contract).map(|c| c.check(params)).unwrap_or_default()
 }
 
 /// Run `handler` as the command `id`, checking the call against the contract `id` publishes
@@ -298,7 +364,13 @@ pub fn run_checked(s: &mut Session, p: &Value, id: &str, contract: &dyn Contract
     }
     match result {
         Ok(Value::Object(mut o)) if level == ParamCheck::Warn && !issues.is_empty() => {
-            o.insert("param_warnings".into(), json!(issues.iter().map(|i| i.message.as_str()).collect::<Vec<_>>()));
+            // A command that runs another checked command keeps that one's warnings too.
+            let mut warnings = match o.remove("param_warnings") {
+                Some(Value::Array(inner)) => inner,
+                _ => Vec::new(),
+            };
+            warnings.extend(issues.iter().map(|i| json!(i.message)));
+            o.insert("param_warnings".into(), Value::Array(warnings));
             Ok(Value::Object(o))
         }
         other => other,

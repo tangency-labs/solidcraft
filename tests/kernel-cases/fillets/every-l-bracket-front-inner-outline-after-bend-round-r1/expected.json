@@ -1,0 +1,24 @@
+{
+ "sources": [],
+ "what": "an L-bracket's inside bend rounded r3, then the front edge of its upright's inner face rounded r1: the round runs on along the bend round's front arc and the foot's front top edge",
+ "source": "analytic",
+ "method": "L-bracket: the legs 40x20x5 (x 0..40, z 0..5) and 5x20x40 (x 0..5, z 0..40) joined, 20 deep in y: V0 = 4000 + 4000 - 500 = 7500, 8 faces. The bend r3 adds 20 (1-pi/4) 9 = 38.6283. The edge x = 5, y = 0 (z 8..40) rounded r1 with its tangent chain: the bend round's arc on y = 0 and the edge y = 0, z = 5 (x 8..40). Straight parts 32 + 32 remove (1-pi/4) each mm; along the arc the ball rolls between y = 0 and the concave r3 cylinder (axis (8, y, 8)), the material away from the axis: the spandrel with its corner 3 from the axis turned a quarter turn, (pi/2)(3 A1 + M1), M1 = 5/6 - pi/4. V = 7500 + 20 A3 - 64 A1 - (pi/2)(3 A1 + M1) = 7523.8072. Faces 9 + 3 = 12.",
+ "body_count": 1,
+ "volume_mm3": 7523.80722932706,
+ "faces": 12,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   20,
+   40
+  ]
+ },
+ "continuity": {
+  "order": "g1"
+ }
+}

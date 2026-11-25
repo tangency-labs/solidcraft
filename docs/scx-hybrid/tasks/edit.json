@@ -1,0 +1,1159 @@
+{
+ "edit_move": {
+  "spec": "The design open in SolidCraft is a shelving rack: four 20 x 20 mm posts P1..P4 at the corners of a 300 x 200 mm footprint, and four 10 mm shelves Shelf1..Shelf4 (with corner notches for the posts) at z = 50, 150, 250, 350. A circuit board named Board sits on fifteen standoffs S1..S15 that stand on Shelf1. Each is its own part. Change it: move the board together with all fifteen standoffs up so the standoffs stand on Shelf2 instead of Shelf1 (same x and y positions), and raise Shelf4 by 20 mm. Change nothing else.",
+  "setup": "for i,(x,y) in enumerate([(0,0),(280,0),(0,180),(280,180)]):\n    with part(f'P{i+1}'): box(20,20,400,at=(x,y,0),name=f'P{i+1}')\nfor i,z in enumerate((50,150,250,350)):\n    with part(f'Shelf{i+1}'):\n        box(300,200,10,at=(0,0,z),name=f'Shelf{i+1}')\n        for x,y in [(0,0),(280,0),(0,180),(280,180)]: box(20,20,10,at=(x,y,z),op='cut')\nwith part('Board'):\n    box(100,80,1.6,at=(100,60,70),name='Board')\n    for y in (70,100,130):\n        for x in (110,130,150,170,190): hole(at=(x,y,71.6),d=3.2)\ni=0\nfor y in (70,100,130):\n    for x in (110,130,150,170,190):\n        i+=1\n        with part(f'S{i}'):\n            cylinder(10,d=6,at=(x,y,60),name=f'S{i}')\n            hole(at=(x,y,70),d=3)",
+  "edit": true,
+  "bodies": [
+   {
+    "name": "P1",
+    "volume": 160000,
+    "bbox": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      20,
+      20,
+      400
+     ]
+    ]
+   },
+   {
+    "name": "P2",
+    "volume": 160000,
+    "bbox": [
+     [
+      280,
+      0,
+      0
+     ],
+     [
+      300,
+      20,
+      400
+     ]
+    ]
+   },
+   {
+    "name": "P3",
+    "volume": 160000,
+    "bbox": [
+     [
+      0,
+      180,
+      0
+     ],
+     [
+      20,
+      200,
+      400
+     ]
+    ]
+   },
+   {
+    "name": "P4",
+    "volume": 160000,
+    "bbox": [
+     [
+      280,
+      180,
+      0
+     ],
+     [
+      300,
+      200,
+      400
+     ]
+    ]
+   },
+   {
+    "name": "Shelf1",
+    "volume": 584000,
+    "bbox": [
+     [
+      0,
+      0,
+      50
+     ],
+     [
+      300,
+      200,
+      60
+     ]
+    ]
+   },
+   {
+    "name": "Shelf2",
+    "volume": 584000,
+    "bbox": [
+     [
+      0,
+      0,
+      150
+     ],
+     [
+      300,
+      200,
+      160
+     ]
+    ]
+   },
+   {
+    "name": "Shelf3",
+    "volume": 584000,
+    "bbox": [
+     [
+      0,
+      0,
+      250
+     ],
+     [
+      300,
+      200,
+      260
+     ]
+    ]
+   },
+   {
+    "name": "Shelf4",
+    "volume": 584000,
+    "bbox": [
+     [
+      0,
+      0,
+      370
+     ],
+     [
+      300,
+      200,
+      380
+     ]
+    ]
+   },
+   {
+    "name": "Board",
+    "volume": 12606.9805,
+    "bbox": [
+     [
+      100,
+      60,
+      170
+     ],
+     [
+      200,
+      140,
+      171.6
+     ]
+    ]
+   },
+   {
+    "name": "S1",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      107,
+      67,
+      160
+     ],
+     [
+      113,
+      73,
+      170
+     ]
+    ]
+   },
+   {
+    "name": "S2",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      127,
+      67,
+      160
+     ],
+     [
+      133,
+      73,
+      170
+     ]
+    ]
+   },
+   {
+    "name": "S3",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      147,
+      67,
+      160
+     ],
+     [
+      153,
+      73,
+      170
+     ]
+    ]
+   },
+   {
+    "name": "S4",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      167,
+      67,
+      160
+     ],
+     [
+      173,
+      73,
+      170
+     ]
+    ]
+   },
+   {
+    "name": "S5",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      187,
+      67,
+      160
+     ],
+     [
+      193,
+      73,
+      170
+     ]
+    ]
+   },
+   {
+    "name": "S6",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      107,
+      97,
+      160
+     ],
+     [
+      113,
+      103,
+      170
+     ]
+    ]
+   },
+   {
+    "name": "S7",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      127,
+      97,
+      160
+     ],
+     [
+      133,
+      103,
+      170
+     ]
+    ]
+   },
+   {
+    "name": "S8",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      147,
+      97,
+      160
+     ],
+     [
+      153,
+      103,
+      170
+     ]
+    ]
+   },
+   {
+    "name": "S9",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      167,
+      97,
+      160
+     ],
+     [
+      173,
+      103,
+      170
+     ]
+    ]
+   },
+   {
+    "name": "S10",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      187,
+      97,
+      160
+     ],
+     [
+      193,
+      103,
+      170
+     ]
+    ]
+   },
+   {
+    "name": "S11",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      107,
+      127,
+      160
+     ],
+     [
+      113,
+      133,
+      170
+     ]
+    ]
+   },
+   {
+    "name": "S12",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      127,
+      127,
+      160
+     ],
+     [
+      133,
+      133,
+      170
+     ]
+    ]
+   },
+   {
+    "name": "S13",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      147,
+      127,
+      160
+     ],
+     [
+      153,
+      133,
+      170
+     ]
+    ]
+   },
+   {
+    "name": "S14",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      167,
+      127,
+      160
+     ],
+     [
+      173,
+      133,
+      170
+     ]
+    ]
+   },
+   {
+    "name": "S15",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      187,
+      127,
+      160
+     ],
+     [
+      193,
+      133,
+      170
+     ]
+    ]
+   }
+  ]
+ },
+ "edit_add": {
+  "spec": "The design open in SolidCraft is a shelving rack: four 20 x 20 mm posts P1..P4 at the corners of a 300 x 200 mm footprint, and four 10 mm shelves Shelf1..Shelf4 (with corner notches for the posts) at z = 50, 150, 250, 350. A circuit board named Board sits on fifteen standoffs S1..S15 that stand on Shelf1. Each is its own part. Change it: make the four posts 450 mm tall instead of 400 (still starting at z=0), and add a fifth shelf named Shelf5, the same as the other shelves (including the corner notches), with its bottom face at z=430. Change nothing else.",
+  "setup": "for i,(x,y) in enumerate([(0,0),(280,0),(0,180),(280,180)]):\n    with part(f'P{i+1}'): box(20,20,400,at=(x,y,0),name=f'P{i+1}')\nfor i,z in enumerate((50,150,250,350)):\n    with part(f'Shelf{i+1}'):\n        box(300,200,10,at=(0,0,z),name=f'Shelf{i+1}')\n        for x,y in [(0,0),(280,0),(0,180),(280,180)]: box(20,20,10,at=(x,y,z),op='cut')\nwith part('Board'):\n    box(100,80,1.6,at=(100,60,70),name='Board')\n    for y in (70,100,130):\n        for x in (110,130,150,170,190): hole(at=(x,y,71.6),d=3.2)\ni=0\nfor y in (70,100,130):\n    for x in (110,130,150,170,190):\n        i+=1\n        with part(f'S{i}'):\n            cylinder(10,d=6,at=(x,y,60),name=f'S{i}')\n            hole(at=(x,y,70),d=3)",
+  "edit": true,
+  "bodies": [
+   {
+    "name": "P1",
+    "volume": 180000,
+    "bbox": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      20,
+      20,
+      450
+     ]
+    ]
+   },
+   {
+    "name": "P2",
+    "volume": 180000,
+    "bbox": [
+     [
+      280,
+      0,
+      0
+     ],
+     [
+      300,
+      20,
+      450
+     ]
+    ]
+   },
+   {
+    "name": "P3",
+    "volume": 180000,
+    "bbox": [
+     [
+      0,
+      180,
+      0
+     ],
+     [
+      20,
+      200,
+      450
+     ]
+    ]
+   },
+   {
+    "name": "P4",
+    "volume": 180000,
+    "bbox": [
+     [
+      280,
+      180,
+      0
+     ],
+     [
+      300,
+      200,
+      450
+     ]
+    ]
+   },
+   {
+    "name": "Shelf1",
+    "volume": 584000,
+    "bbox": [
+     [
+      0,
+      0,
+      50
+     ],
+     [
+      300,
+      200,
+      60
+     ]
+    ]
+   },
+   {
+    "name": "Shelf2",
+    "volume": 584000,
+    "bbox": [
+     [
+      0,
+      0,
+      150
+     ],
+     [
+      300,
+      200,
+      160
+     ]
+    ]
+   },
+   {
+    "name": "Shelf3",
+    "volume": 584000,
+    "bbox": [
+     [
+      0,
+      0,
+      250
+     ],
+     [
+      300,
+      200,
+      260
+     ]
+    ]
+   },
+   {
+    "name": "Shelf4",
+    "volume": 584000,
+    "bbox": [
+     [
+      0,
+      0,
+      350
+     ],
+     [
+      300,
+      200,
+      360
+     ]
+    ]
+   },
+   {
+    "name": "Shelf5",
+    "volume": 584000,
+    "bbox": [
+     [
+      0,
+      0,
+      430
+     ],
+     [
+      300,
+      200,
+      440
+     ]
+    ]
+   },
+   {
+    "name": "Board",
+    "volume": 12606.9805,
+    "bbox": [
+     [
+      100,
+      60,
+      70
+     ],
+     [
+      200,
+      140,
+      71.6
+     ]
+    ]
+   },
+   {
+    "name": "S1",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      107,
+      67,
+      60
+     ],
+     [
+      113,
+      73,
+      70
+     ]
+    ]
+   },
+   {
+    "name": "S2",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      127,
+      67,
+      60
+     ],
+     [
+      133,
+      73,
+      70
+     ]
+    ]
+   },
+   {
+    "name": "S3",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      147,
+      67,
+      60
+     ],
+     [
+      153,
+      73,
+      70
+     ]
+    ]
+   },
+   {
+    "name": "S4",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      167,
+      67,
+      60
+     ],
+     [
+      173,
+      73,
+      70
+     ]
+    ]
+   },
+   {
+    "name": "S5",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      187,
+      67,
+      60
+     ],
+     [
+      193,
+      73,
+      70
+     ]
+    ]
+   },
+   {
+    "name": "S6",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      107,
+      97,
+      60
+     ],
+     [
+      113,
+      103,
+      70
+     ]
+    ]
+   },
+   {
+    "name": "S7",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      127,
+      97,
+      60
+     ],
+     [
+      133,
+      103,
+      70
+     ]
+    ]
+   },
+   {
+    "name": "S8",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      147,
+      97,
+      60
+     ],
+     [
+      153,
+      103,
+      70
+     ]
+    ]
+   },
+   {
+    "name": "S9",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      167,
+      97,
+      60
+     ],
+     [
+      173,
+      103,
+      70
+     ]
+    ]
+   },
+   {
+    "name": "S10",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      187,
+      97,
+      60
+     ],
+     [
+      193,
+      103,
+      70
+     ]
+    ]
+   },
+   {
+    "name": "S11",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      107,
+      127,
+      60
+     ],
+     [
+      113,
+      133,
+      70
+     ]
+    ]
+   },
+   {
+    "name": "S12",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      127,
+      127,
+      60
+     ],
+     [
+      133,
+      133,
+      70
+     ]
+    ]
+   },
+   {
+    "name": "S13",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      147,
+      127,
+      60
+     ],
+     [
+      153,
+      133,
+      70
+     ]
+    ]
+   },
+   {
+    "name": "S14",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      167,
+      127,
+      60
+     ],
+     [
+      173,
+      133,
+      70
+     ]
+    ]
+   },
+   {
+    "name": "S15",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      187,
+      127,
+      60
+     ],
+     [
+      193,
+      133,
+      70
+     ]
+    ]
+   }
+  ]
+ },
+ "edit_holes": {
+  "spec": "The design open in SolidCraft is a shelving rack: four 20 x 20 mm posts P1..P4 at the corners of a 300 x 200 mm footprint, and four 10 mm shelves Shelf1..Shelf4 (with corner notches for the posts) at z = 50, 150, 250, 350. A circuit board named Board sits on fifteen standoffs S1..S15 that stand on Shelf1. Each is its own part. Change it: drill a 6 mm diameter hole through each of the four shelves along Z, centred at x=150, y=170. Also delete the standoffs S1 and S15 (the board keeps its holes). Change nothing else.",
+  "setup": "for i,(x,y) in enumerate([(0,0),(280,0),(0,180),(280,180)]):\n    with part(f'P{i+1}'): box(20,20,400,at=(x,y,0),name=f'P{i+1}')\nfor i,z in enumerate((50,150,250,350)):\n    with part(f'Shelf{i+1}'):\n        box(300,200,10,at=(0,0,z),name=f'Shelf{i+1}')\n        for x,y in [(0,0),(280,0),(0,180),(280,180)]: box(20,20,10,at=(x,y,z),op='cut')\nwith part('Board'):\n    box(100,80,1.6,at=(100,60,70),name='Board')\n    for y in (70,100,130):\n        for x in (110,130,150,170,190): hole(at=(x,y,71.6),d=3.2)\ni=0\nfor y in (70,100,130):\n    for x in (110,130,150,170,190):\n        i+=1\n        with part(f'S{i}'):\n            cylinder(10,d=6,at=(x,y,60),name=f'S{i}')\n            hole(at=(x,y,70),d=3)",
+  "edit": true,
+  "bodies": [
+   {
+    "name": "P1",
+    "volume": 160000,
+    "bbox": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      20,
+      20,
+      400
+     ]
+    ]
+   },
+   {
+    "name": "P2",
+    "volume": 160000,
+    "bbox": [
+     [
+      280,
+      0,
+      0
+     ],
+     [
+      300,
+      20,
+      400
+     ]
+    ]
+   },
+   {
+    "name": "P3",
+    "volume": 160000,
+    "bbox": [
+     [
+      0,
+      180,
+      0
+     ],
+     [
+      20,
+      200,
+      400
+     ]
+    ]
+   },
+   {
+    "name": "P4",
+    "volume": 160000,
+    "bbox": [
+     [
+      280,
+      180,
+      0
+     ],
+     [
+      300,
+      200,
+      400
+     ]
+    ]
+   },
+   {
+    "name": "Shelf1",
+    "volume": 583717.2567,
+    "bbox": [
+     [
+      0,
+      0,
+      50
+     ],
+     [
+      300,
+      200,
+      60
+     ]
+    ]
+   },
+   {
+    "name": "Shelf2",
+    "volume": 583717.2567,
+    "bbox": [
+     [
+      0,
+      0,
+      150
+     ],
+     [
+      300,
+      200,
+      160
+     ]
+    ]
+   },
+   {
+    "name": "Shelf3",
+    "volume": 583717.2567,
+    "bbox": [
+     [
+      0,
+      0,
+      250
+     ],
+     [
+      300,
+      200,
+      260
+     ]
+    ]
+   },
+   {
+    "name": "Shelf4",
+    "volume": 583717.2567,
+    "bbox": [
+     [
+      0,
+      0,
+      350
+     ],
+     [
+      300,
+      200,
+      360
+     ]
+    ]
+   },
+   {
+    "name": "Board",
+    "volume": 12606.9805,
+    "bbox": [
+     [
+      100,
+      60,
+      70
+     ],
+     [
+      200,
+      140,
+      71.6
+     ]
+    ]
+   },
+   {
+    "name": "S2",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      127,
+      67,
+      60
+     ],
+     [
+      133,
+      73,
+      70
+     ]
+    ]
+   },
+   {
+    "name": "S3",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      147,
+      67,
+      60
+     ],
+     [
+      153,
+      73,
+      70
+     ]
+    ]
+   },
+   {
+    "name": "S4",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      167,
+      67,
+      60
+     ],
+     [
+      173,
+      73,
+      70
+     ]
+    ]
+   },
+   {
+    "name": "S5",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      187,
+      67,
+      60
+     ],
+     [
+      193,
+      73,
+      70
+     ]
+    ]
+   },
+   {
+    "name": "S6",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      107,
+      97,
+      60
+     ],
+     [
+      113,
+      103,
+      70
+     ]
+    ]
+   },
+   {
+    "name": "S7",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      127,
+      97,
+      60
+     ],
+     [
+      133,
+      103,
+      70
+     ]
+    ]
+   },
+   {
+    "name": "S8",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      147,
+      97,
+      60
+     ],
+     [
+      153,
+      103,
+      70
+     ]
+    ]
+   },
+   {
+    "name": "S9",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      167,
+      97,
+      60
+     ],
+     [
+      173,
+      103,
+      70
+     ]
+    ]
+   },
+   {
+    "name": "S10",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      187,
+      97,
+      60
+     ],
+     [
+      193,
+      103,
+      70
+     ]
+    ]
+   },
+   {
+    "name": "S11",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      107,
+      127,
+      60
+     ],
+     [
+      113,
+      133,
+      70
+     ]
+    ]
+   },
+   {
+    "name": "S12",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      127,
+      127,
+      60
+     ],
+     [
+      133,
+      133,
+      70
+     ]
+    ]
+   },
+   {
+    "name": "S13",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      147,
+      127,
+      60
+     ],
+     [
+      153,
+      133,
+      70
+     ]
+    ]
+   },
+   {
+    "name": "S14",
+    "volume": 212.0575,
+    "bbox": [
+     [
+      167,
+      127,
+      60
+     ],
+     [
+      173,
+      133,
+      70
+     ]
+    ]
+   }
+  ]
+ }
+}

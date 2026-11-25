@@ -1,0 +1,184 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  0.0,
+                  0.0,
+                  10.0
+                ],
+                [
+                  40.0,
+                  0.0,
+                  10.0
+                ]
+              ],
+              "index": 9
+            },
+            {
+              "at": [
+                [
+                  40.0,
+                  16.0,
+                  10.0
+                ],
+                [
+                  40.0,
+                  0.0,
+                  10.0
+                ]
+              ],
+              "index": 12
+            }
+          ],
+          "points": [
+            [
+              20.0,
+              0.0,
+              10.0
+            ],
+            [
+              32.0,
+              7.999999999999995,
+              10.0
+            ]
+          ],
+          "tolerance": 2.721294101747089
+        },
+        "kind": "chamfer",
+        "sizes": [
+          2.0,
+          2.0
+        ]
+      }
+    }
+  ],
+  "case": "report-peg-front-and-concave-chamfers-together-d2",
+  "expected": {
+    "bbox": {
+      "max": [
+        48,
+        16,
+        20
+      ],
+      "min": [
+        0,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "continuity": {
+      "order": "g0"
+    },
+    "method": "a bar 40 x 16 x 10 whose far end is a half disc R8 about (40, 8), a disc R8 about the same centre sketched on its top (the top's outline projected) and extruded 10 up, joined: the bar's front face y = 0 runs tangent into the cylinder along x = 40, V0 = 6400 + 960 pi; the front top edge and the concave arc chamfered 2 in one chamfer; the planes of the front face y = 0, the back y = 16, the bottom, the left end and the cylinder's top bound the whole body (the cylinder's wall runs tangent into the front and back faces), and every blend lies within them, so the body's exact box (SMLib's tight box) is the unblended body's, (0, 0, 0) .. (48, 16, 20); graded to 4e-5, the blends' approximation tolerance: a corner patch or an end that stands out of the front face fails; every seam a chamfer makes with its faces G0",
+    "source": "invariants",
+    "tolerance": {
+      "abs_mm": 0.00004
+    },
+    "what": "the peg's front top edge and its concave arc chamfered 2 together, the convex and the concave chamfer meeting where the front face runs tangent into the cylinder; reported from the app (2026-10-30, test-peg part)"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 26,
+      "faces": 11,
+      "vertices": 17
+    }
+  },
+  "records": "report-peg-front-and-concave-chamfers-together-d2.bodies.json.gz",
+  "result": [
+    {
+      "body": "Peg",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 3134.694873865144,
+      "body_count": 1,
+      "edges": 25,
+      "faces": 11,
+      "vertices": 16,
+      "volume_mm3": 9383.4506602363
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": null,
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "the peg's front top edge and its concave arc chamfered 2 together, the convex and the concave chamfer meeting where the front face runs tangent into the cylinder; reported from the app (2026-10-30, test-peg part)",
+  "why_not": []
+}

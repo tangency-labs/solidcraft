@@ -1,0 +1,159 @@
+{
+  "area": "sweeps",
+  "bodies": {
+    "b13": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b16": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b15"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b16"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b17"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b18"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b19"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b20"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b19",
+        "b20"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b21"
+      ],
+      "params": {
+        "op": "union"
+      }
+    }
+  ],
+  "case": "1490-loft-joined-into-a-window-of-a-wall-that-it-overhangs",
+  "expected": {
+    "body_count": 1,
+    "method": "the loft section is larger than the window at every depth inside the wall, and lies inside the wall face, so inside the 2.5 mm slab the window is filled and nothing else changes: the body is the plain 2.5 x 60 x 40 wall (6000) plus the two overhanging strips of the loft, x from -0.5 to 0 and from 2.5 to 3.0, of area w(x) h(x) with w = 34 + 4 (x + 0.5)/3.5 and h = 24 + 4 (x + 0.5)/3.5: V = 6000 + 938.966.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#1490"
+    ],
+    "volume_mm3": 6938.965986394556,
+    "what": "a wall 2.5 mm thick with a 30 x 20 window cut through it and a loft (34 x 24 growing to 38 x 28 over 3.5 mm) joined into the window so that its strips overhang the wall on both faces (\"Union: no result\" at some wall thicknesses)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 36,
+      "faces": 16,
+      "vertices": 24
+    }
+  },
+  "records": "1490-loft-joined-into-a-window-of-a-wall-that-it-overhangs.bodies.json.gz",
+  "result": [
+    {
+      "body": "Wall",
+      "made": "b21"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 5446.735504602512,
+      "body_count": 1,
+      "edges": 36,
+      "faces": 16,
+      "vertices": 24,
+      "volume_mm3": 6938.965986394556
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#1490"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "loft",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a wall 2.5 mm thick with a 30 x 20 window cut through it and a loft (34 x 24 growing to 38 x 28 over 3.5 mm) joined into the window so that its strips overhang the wall on both faces (\"Union: no result\" at some wall thicknesses)",
+  "why_not": []
+}

@@ -1,0 +1,1 @@
+measures a cylindrical face's extent and side from mesh normals

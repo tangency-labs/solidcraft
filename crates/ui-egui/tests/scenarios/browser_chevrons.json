@@ -1,4 +1,5 @@
 [
+  {"call": "ui.prefs", "params": {"browser_components_open": true}},
  {
   "note": "A design with every kind of browser folder: bodies in a group, a component, a sketch, a construction plane, a canvas and named views."
  },

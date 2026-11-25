@@ -1,0 +1,208 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b22": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b22"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b23"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b23"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b24"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b24"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b25"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b25"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b26"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  62.166666666666664,
+                  0.0,
+                  10.0
+                ],
+                [
+                  41.166666666666664,
+                  -21.0,
+                  10.0
+                ]
+              ],
+              "index": 1
+            },
+            {
+              "at": [
+                [
+                  41.166666666666664,
+                  -21.0,
+                  0.0
+                ],
+                [
+                  41.166666666666664,
+                  -21.0,
+                  10.0
+                ]
+              ],
+              "index": 10
+            }
+          ],
+          "points": [
+            [
+              47.317424261749146,
+              -6.150757595082487,
+              9.999999999999998
+            ],
+            [
+              41.166666666666664,
+              -21.0,
+              5.0
+            ]
+          ],
+          "tolerance": 3.3197702709152845
+        },
+        "kind": "round",
+        "sizes": [
+          2.0,
+          2.0
+        ]
+      }
+    }
+  ],
+  "case": "851-fillet-arc-and-upright",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "edges": [
+        [
+          45.903210699376075,
+          -4.736544032709407,
+          10
+        ],
+        [
+          47.31742426174917,
+          -6.150757595082501,
+          8
+        ],
+        [
+          39.253788191887466,
+          -21,
+          5
+        ],
+        [
+          41.24621240708566,
+          -19.17391304347826,
+          5
+        ]
+      ],
+      "order": "g1"
+    },
+    "method": "the rolling ball of R2 fits on every one of these edges and where they meet; the corner between rounds that end in each other has no closed form here: one closed valid solid whose display mesh closes. Each round meets the faces it rolls on G1: graded at its seams' middles (the top front round's at z = 8 on the front and y = -19 on the top; the arc's at rho 23 on the top and rho 21, z = 8 on the wall; the uprights' at their contacts, z = 5). Where a round ends on a face or on another round the seam is a crease by construction and is not graded.",
+    "source": "invariants",
+    "sources": [
+      "tangency-labs/solidcraft#851",
+      "tangency-labs/solidcraft#854"
+    ],
+    "watertight": true,
+    "what": "on #851's knife-edge part (tessellation/1263): the arc's top edge and the front upright at the arc, R2 together"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 18,
+      "faces": 8,
+      "vertices": 12
+    }
+  },
+  "records": "851-fillet-arc-and-upright.bodies.json.gz",
+  "result": [
+    {
+      "body": "Plate",
+      "made": "b26"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 3444.333110017479,
+      "body_count": 1,
+      "edges": 18,
+      "faces": 8,
+      "vertices": 12,
+      "volume_mm3": 9559.097190272134
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#851",
+    "tangency-labs/solidcraft#854"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it",
+    "watertight: SolidCraft computes it"
+  ],
+  "what": "on #851's knife-edge part (tessellation/1263): the arc's top edge and the front upright at the arc, R2 together",
+  "why_not": []
+}

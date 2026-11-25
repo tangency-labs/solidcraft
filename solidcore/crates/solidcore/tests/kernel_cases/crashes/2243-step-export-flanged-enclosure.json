@@ -1,0 +1,197 @@
+{
+  "area": "crashes",
+  "bodies": {
+    "b43": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b46": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b43"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b44"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b44"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b45"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b46"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b47"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b47"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b48"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b45"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b49"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b48"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b50"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b49",
+        "b50"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b51"
+      ],
+      "params": {
+        "op": "union"
+      }
+    }
+  ],
+  "case": "2243-step-export-flanged-enclosure",
+  "expected": {
+    "bbox": {
+      "max": [
+        90.0,
+        79.0,
+        32.5
+      ],
+      "min": [
+        -10.0,
+        0.0,
+        0.0
+      ]
+    },
+    "body_count": 1,
+    "method": "one connected part: the export finishes and the part is one valid closed solid. Body sketch: the rounded rectangle 0..80 x 0..79, corners r 3, area 80*79 - (4 - pi)*9 = 6312.274, extruded 32.5. Flange: the rounded rectangle -10..90 x 0..79, corners r 3, area 7892.274, 2.5 thick, holding the body's footprint (its own corners lie outside the body's), so the two give 7892.274*2.5 + 6312.274*30. Cavity box (3,3,2.5) 74 x 73, open at the top: - 74*73*30 = 162060. Gusset (69,68,2.5) 8 x 8 x 30: + 1920. Two standoffs r 2.5, 3 high at (31.11, 70.04) and (59.05, 70.04): + 2 * 58.905. V = 49076.73. Box: the flange's -10..90 x 0..79, z 0..32.5",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#2243",
+      "tangency-labs/solidcraft#1985"
+    ],
+    "volume_mm3": 49076.73,
+    "what": "a flanged enclosure with two standoffs and no screw hole whose STEP export also never finished"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 72,
+      "faces": 29,
+      "vertices": 48
+    }
+  },
+  "records": "2243-step-export-flanged-enclosure.bodies.json.gz",
+  "result": [
+    {
+      "body": "Unterteil",
+      "made": "b51"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 34966.40701481655,
+      "body_count": 1,
+      "edges": 72,
+      "faces": 29,
+      "vertices": 48,
+      "volume_mm3": 49076.72557619869
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#2243",
+    "tangency-labs/solidcraft#1985"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a flanged enclosure with two standoffs and no screw hole whose STEP export also never finished",
+  "why_not": []
+}

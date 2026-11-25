@@ -1,0 +1,740 @@
+{
+ "cases": [
+  {
+   "name": "attributed_curve_sweep_from_faces_disc",
+   "note": "#1462 P6: curve_sweep_from_faces_disc with every disc face and edge tagged by its own SM_AB_COPY long attribute first. Upstream copies only the edge curves (SmPrimitiveCreation::CreateCurveSweepFromFaces / FromEdges), so the result carries none and the borrowed discs keep theirs.",
+   "inputs": {
+    "op": "from_faces",
+    "circles": [
+     [
+      [
+       0,
+       0,
+       0
+      ],
+      2.0
+     ]
+    ],
+    "sweep": {
+     "path": {
+      "kind": "curve",
+      "points": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        0,
+        0,
+        3
+       ],
+       [
+        0,
+        0,
+        7
+       ],
+       [
+        0,
+        0,
+        10
+       ]
+      ]
+     }
+    },
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_curve_sweep_from_faces_disc_reference",
+   "note": "#1462 P6: curve_sweep_from_faces_disc with every disc face and edge tagged by its own SM_AB_REFERENCE long attribute first. Upstream copies only the edge curves (SmPrimitiveCreation::CreateCurveSweepFromFaces / FromEdges), so the result carries none and the borrowed discs keep theirs.",
+   "inputs": {
+    "op": "from_faces",
+    "circles": [
+     [
+      [
+       0,
+       0,
+       0
+      ],
+      2.0
+     ]
+    ],
+    "sweep": {
+     "path": {
+      "kind": "curve",
+      "points": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        0,
+        0,
+        3
+       ],
+       [
+        0,
+        0,
+        7
+       ],
+       [
+        0,
+        0,
+        10
+       ]
+      ]
+     }
+    },
+    "attributed": 1
+   }
+  },
+  {
+   "name": "attributed_curve_sweep_from_faces_disc_standalone_copy",
+   "note": "#1462 P6: curve_sweep_from_faces_disc with every disc face and edge tagged by its own SM_AB_STANDALONE_COPY long attribute first. Upstream copies only the edge curves (SmPrimitiveCreation::CreateCurveSweepFromFaces / FromEdges), so the result carries none and the borrowed discs keep theirs.",
+   "inputs": {
+    "op": "from_faces",
+    "circles": [
+     [
+      [
+       0,
+       0,
+       0
+      ],
+      2.0
+     ]
+    ],
+    "sweep": {
+     "path": {
+      "kind": "curve",
+      "points": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        0,
+        0,
+        3
+       ],
+       [
+        0,
+        0,
+        7
+       ],
+       [
+        0,
+        0,
+        10
+       ]
+      ]
+     }
+    },
+    "attributed": 2
+   }
+  },
+  {
+   "name": "attributed_curve_sweep_from_faces_disc_standalone_reference",
+   "note": "#1462 P6: curve_sweep_from_faces_disc with every disc face and edge tagged by its own SM_AB_STANDALONE_REFERENCE long attribute first. Upstream copies only the edge curves (SmPrimitiveCreation::CreateCurveSweepFromFaces / FromEdges), so the result carries none and the borrowed discs keep theirs.",
+   "inputs": {
+    "op": "from_faces",
+    "circles": [
+     [
+      [
+       0,
+       0,
+       0
+      ],
+      2.0
+     ]
+    ],
+    "sweep": {
+     "path": {
+      "kind": "curve",
+      "points": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        0,
+        0,
+        3
+       ],
+       [
+        0,
+        0,
+        7
+       ],
+       [
+        0,
+        0,
+        10
+       ]
+      ]
+     }
+    },
+    "attributed": 3
+   }
+  },
+  {
+   "name": "attributed_curve_sweep_from_faces_disc_temp",
+   "note": "#1462 P6: curve_sweep_from_faces_disc with every disc face and edge tagged by its own SM_AB_TEMP long attribute first. Upstream copies only the edge curves (SmPrimitiveCreation::CreateCurveSweepFromFaces / FromEdges), so the result carries none and the borrowed discs keep theirs.",
+   "inputs": {
+    "op": "from_faces",
+    "circles": [
+     [
+      [
+       0,
+       0,
+       0
+      ],
+      2.0
+     ]
+    ],
+    "sweep": {
+     "path": {
+      "kind": "curve",
+      "points": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        0,
+        0,
+        3
+       ],
+       [
+        0,
+        0,
+        7
+       ],
+       [
+        0,
+        0,
+        10
+       ]
+      ]
+     }
+    },
+    "attributed": 4
+   }
+  },
+  {
+   "name": "attributed_curve_sweep_from_edges_disc",
+   "note": "#1462 P6: curve_sweep_from_edges_disc with every disc face and edge tagged by its own SM_AB_COPY long attribute first. Upstream copies only the edge curves (SmPrimitiveCreation::CreateCurveSweepFromFaces / FromEdges), so the result carries none and the borrowed discs keep theirs.",
+   "inputs": {
+    "op": "from_edges",
+    "circles": [
+     [
+      [
+       0,
+       0,
+       0
+      ],
+      2.0
+     ]
+    ],
+    "sweep": {
+     "path": {
+      "kind": "curve",
+      "points": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        0,
+        0,
+        3
+       ],
+       [
+        0,
+        0,
+        7
+       ],
+       [
+        0,
+        0,
+        10
+       ]
+      ]
+     }
+    },
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_curve_sweep_from_edges_disc_reference",
+   "note": "#1462 P6: curve_sweep_from_edges_disc with every disc face and edge tagged by its own SM_AB_REFERENCE long attribute first. Upstream copies only the edge curves (SmPrimitiveCreation::CreateCurveSweepFromFaces / FromEdges), so the result carries none and the borrowed discs keep theirs.",
+   "inputs": {
+    "op": "from_edges",
+    "circles": [
+     [
+      [
+       0,
+       0,
+       0
+      ],
+      2.0
+     ]
+    ],
+    "sweep": {
+     "path": {
+      "kind": "curve",
+      "points": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        0,
+        0,
+        3
+       ],
+       [
+        0,
+        0,
+        7
+       ],
+       [
+        0,
+        0,
+        10
+       ]
+      ]
+     }
+    },
+    "attributed": 1
+   }
+  },
+  {
+   "name": "attributed_curve_sweep_from_edges_disc_standalone_copy",
+   "note": "#1462 P6: curve_sweep_from_edges_disc with every disc face and edge tagged by its own SM_AB_STANDALONE_COPY long attribute first. Upstream copies only the edge curves (SmPrimitiveCreation::CreateCurveSweepFromFaces / FromEdges), so the result carries none and the borrowed discs keep theirs.",
+   "inputs": {
+    "op": "from_edges",
+    "circles": [
+     [
+      [
+       0,
+       0,
+       0
+      ],
+      2.0
+     ]
+    ],
+    "sweep": {
+     "path": {
+      "kind": "curve",
+      "points": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        0,
+        0,
+        3
+       ],
+       [
+        0,
+        0,
+        7
+       ],
+       [
+        0,
+        0,
+        10
+       ]
+      ]
+     }
+    },
+    "attributed": 2
+   }
+  },
+  {
+   "name": "attributed_curve_sweep_from_edges_disc_standalone_reference",
+   "note": "#1462 P6: curve_sweep_from_edges_disc with every disc face and edge tagged by its own SM_AB_STANDALONE_REFERENCE long attribute first. Upstream copies only the edge curves (SmPrimitiveCreation::CreateCurveSweepFromFaces / FromEdges), so the result carries none and the borrowed discs keep theirs.",
+   "inputs": {
+    "op": "from_edges",
+    "circles": [
+     [
+      [
+       0,
+       0,
+       0
+      ],
+      2.0
+     ]
+    ],
+    "sweep": {
+     "path": {
+      "kind": "curve",
+      "points": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        0,
+        0,
+        3
+       ],
+       [
+        0,
+        0,
+        7
+       ],
+       [
+        0,
+        0,
+        10
+       ]
+      ]
+     }
+    },
+    "attributed": 3
+   }
+  },
+  {
+   "name": "attributed_curve_sweep_from_edges_disc_temp",
+   "note": "#1462 P6: curve_sweep_from_edges_disc with every disc face and edge tagged by its own SM_AB_TEMP long attribute first. Upstream copies only the edge curves (SmPrimitiveCreation::CreateCurveSweepFromFaces / FromEdges), so the result carries none and the borrowed discs keep theirs.",
+   "inputs": {
+    "op": "from_edges",
+    "circles": [
+     [
+      [
+       0,
+       0,
+       0
+      ],
+      2.0
+     ]
+    ],
+    "sweep": {
+     "path": {
+      "kind": "curve",
+      "points": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        0,
+        0,
+        3
+       ],
+       [
+        0,
+        0,
+        7
+       ],
+       [
+        0,
+        0,
+        10
+       ]
+      ]
+     }
+    },
+    "attributed": 4
+   }
+  },
+  {
+   "name": "attributed_from_faces_none",
+   "note": "#1462 P6: from_faces_none with every disc face and edge tagged by its own SM_AB_COPY long attribute first. Upstream copies only the edge curves (SmPrimitiveCreation::CreateCurveSweepFromFaces / FromEdges), so the result carries none and the borrowed discs keep theirs.",
+   "inputs": {
+    "op": "from_faces",
+    "circles": [],
+    "sweep": {
+     "path": {
+      "kind": "curve",
+      "points": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        0,
+        0,
+        3
+       ],
+       [
+        0,
+        0,
+        7
+       ],
+       [
+        0,
+        0,
+        10
+       ]
+      ]
+     }
+    },
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_from_edges_none",
+   "note": "#1462 P6: from_edges_none with every disc face and edge tagged by its own SM_AB_COPY long attribute first. Upstream copies only the edge curves (SmPrimitiveCreation::CreateCurveSweepFromFaces / FromEdges), so the result carries none and the borrowed discs keep theirs.",
+   "inputs": {
+    "op": "from_edges",
+    "circles": [],
+    "sweep": {
+     "path": {
+      "kind": "curve",
+      "points": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        0,
+        0,
+        3
+       ],
+       [
+        0,
+        0,
+        7
+       ],
+       [
+        0,
+        0,
+        10
+       ]
+      ]
+     }
+    },
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_from_faces_no_path",
+   "note": "#1462 P6: from_faces_no_path with every disc face and edge tagged by its own SM_AB_COPY long attribute first. Upstream copies only the edge curves (SmPrimitiveCreation::CreateCurveSweepFromFaces / FromEdges), so the result carries none and the borrowed discs keep theirs.",
+   "inputs": {
+    "op": "from_faces",
+    "circles": [
+     [
+      [
+       0,
+       0,
+       0
+      ],
+      2.0
+     ]
+    ],
+    "sweep": {
+     "path": {
+      "kind": "null"
+     }
+    },
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_review_from_edges_two_discs_nullpath",
+   "note": "#1462 P6: review_from_edges_two_discs_nullpath with every disc face and edge tagged by its own SM_AB_COPY long attribute first. Upstream copies only the edge curves (SmPrimitiveCreation::CreateCurveSweepFromFaces / FromEdges), so the result carries none and the borrowed discs keep theirs.",
+   "inputs": {
+    "op": "from_edges",
+    "circles": [
+     [
+      [
+       0,
+       0,
+       0
+      ],
+      1
+     ],
+     [
+      [
+       0,
+       0,
+       5
+      ],
+      2
+     ]
+    ],
+    "sweep": {
+     "path": {
+      "kind": "null"
+     }
+    },
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_review_from_faces_disc_line_path",
+   "note": "#1462 P6: review_from_faces_disc_line_path with every disc face and edge tagged by its own SM_AB_COPY long attribute first. Upstream copies only the edge curves (SmPrimitiveCreation::CreateCurveSweepFromFaces / FromEdges), so the result carries none and the borrowed discs keep theirs.",
+   "inputs": {
+    "op": "from_faces",
+    "circles": [
+     [
+      [
+       0,
+       0,
+       0
+      ],
+      1
+     ]
+    ],
+    "sweep": {
+     "path": {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       0
+      ],
+      "end": [
+       0,
+       0,
+       5
+      ]
+     },
+     "options": [
+      true,
+      false,
+      false,
+      false,
+      false
+     ]
+    },
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_from_faces_two_discs_capped",
+   "note": "#1462 P6: from_faces_two_discs_capped with every disc face and edge tagged by its own SM_AB_COPY long attribute first. Upstream copies only the edge curves (SmPrimitiveCreation::CreateCurveSweepFromFaces / FromEdges), so the result carries none and the borrowed discs keep theirs.",
+   "inputs": {
+    "op": "from_faces",
+    "circles": [
+     [
+      [
+       0,
+       0,
+       0
+      ],
+      1
+     ],
+     [
+      [
+       0,
+       0,
+       5
+      ],
+      2
+     ]
+    ],
+    "sweep": {
+     "path": {
+      "kind": "curve",
+      "points": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        1,
+        0,
+        3
+       ],
+       [
+        1,
+        0,
+        7
+       ],
+       [
+        0,
+        0,
+        10
+       ]
+      ]
+     },
+     "options": [
+      true,
+      false,
+      false,
+      false,
+      false
+     ]
+    },
+    "attributed": 0
+   }
+  },
+  {
+   "name": "attributed_from_edges_two_discs_capped",
+   "note": "#1462 P6: from_edges_two_discs_capped with every disc face and edge tagged by its own SM_AB_COPY long attribute first. Upstream copies only the edge curves (SmPrimitiveCreation::CreateCurveSweepFromFaces / FromEdges), so the result carries none and the borrowed discs keep theirs.",
+   "inputs": {
+    "op": "from_edges",
+    "circles": [
+     [
+      [
+       0,
+       0,
+       0
+      ],
+      1
+     ],
+     [
+      [
+       0,
+       0,
+       5
+      ],
+      2
+     ]
+    ],
+    "sweep": {
+     "path": {
+      "kind": "curve",
+      "points": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        1,
+        0,
+        3
+       ],
+       [
+        1,
+        0,
+        7
+       ],
+       [
+        0,
+        0,
+        10
+       ]
+      ]
+     },
+     "options": [
+      true,
+      false,
+      false,
+      false,
+      false
+     ]
+    },
+    "attributed": 0
+   }
+  }
+ ]
+}

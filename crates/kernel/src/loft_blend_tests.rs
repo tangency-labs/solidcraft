@@ -2,14 +2,12 @@
 //! measured back off the face it built (a grid of points, five-point differences along the run).
 
 use super::*;
-use crate::body::from_p3;
 use crate::bridge::{bridge, sample_grid};
-use truck_modeling as mt;
-use truck_modeling::ParametricSurface;
+use solidcraft_geom::brep::eval::SurfaceEval;
 
 /// The blend's surface: it is one face.
-fn surface_of(body: &Body) -> mt::Surface {
-    body.solid.face_iter().next().unwrap().surface()
+fn surface_of(body: &Body) -> SurfaceEval {
+    SurfaceEval::new(&body.record().faces[0].surface).unwrap()
 }
 
 /// Position and the run direction's first three derivatives at `(t, v)` of the face, read with the
@@ -18,10 +16,9 @@ fn surface_of(body: &Body) -> mt::Surface {
 /// the parameter falling and turns the odd derivatives round, so every value is a derivative in
 /// the run direction `u`.
 fn run_derivs(body: &Body, t: f64, v: f64, backwards: bool, h: f64) -> (Vec3, Vec3, Vec3, Vec3) {
-    let face = body.solid.face_iter().next().unwrap();
-    let surf = face.surface();
+    let surf = surface_of(body);
     let dir = if backwards { -1.0 } else { 1.0 };
-    let q: Vec<Vec3> = (0..5).map(|k| from_p3(surf.subs(t + dir * k as f64 * h, v))).collect();
+    let q: Vec<Vec3> = (0..5).map(|k| surf.point([t + dir * k as f64 * h, v]).unwrap()).collect();
     let d1 = (q[0] * -25.0 + q[1] * 48.0 + q[2] * -36.0 + q[3] * 16.0 + q[4] * -3.0) * (dir / (12.0 * h));
     let d2 = (q[0] * 35.0 + q[1] * -104.0 + q[2] * 114.0 + q[3] * -56.0 + q[4] * 11.0) * (1.0 / (12.0 * h * h));
     let d3 = (q[0] * -5.0 + q[1] * 18.0 + q[2] * -24.0 + q[3] * 14.0 + q[4] * -3.0) * (dir / (2.0 * h * h * h));
@@ -308,14 +305,47 @@ fn four_sections_join_at_c3() {
         let p = |k: usize| sections[k][s].p;
         let d1 = (p(i + 1) - p(i - 1)) * (1.0 / (2.0 * h));
         let d2 = (p(i + 1) - p(i) * 2.0 + p(i - 1)) * (1.0 / (h * h));
-        let d3 = if i == 1 {
-            (p(0) * -1.0 + p(1) * 3.0 - p(2) * 3.0 + p(3)) * (1.0 / (h * h * h))
-        } else {
-            (p(0) - p(1) * 3.0 + p(2) * 3.0 - p(3)) * (1.0 / (h * h * h))
-        };
+        // Both joints read the same four sections, ahead of the first and behind the second, so
+        // they hold the same third difference (#13447).
+        let d3 = (p(0) * -1.0 + p(1) * 3.0 - p(2) * 3.0 + p(3)) * (1.0 / (h * h * h));
         assert!((left1 - d1).len() < 1e-7 * (1.0 + d1.len()), "the tangent is the secant: {left1:?} vs {d1:?}");
         assert!((left2 - d2).len() < 1e-4 * (1.0 + d2.len()), "the curvature is the second difference: {left2:?} vs {d2:?}");
         assert!((left3 - d3).len() < 2e-2 * (1.0 + d3.len()), "the change of curvature is the third difference: {left3:?} vs {d3:?}");
+    }
+}
+
+/// Five sections of the cubic cylinder `(2 v, t, t³)` at `t = 0, ¼, …, 1`, held at G0. A third
+/// difference is exact on a cubic, so at every interior section (the forward stencil at the second,
+/// the central one at the middle, the backward one at the last-but-one) the face's change of
+/// curvature along the run is `d³/du³ = (0, 0, 6)` at every station (#13447: the backward one held
+/// `(0, 0, −6)`).
+#[test]
+fn interior_sections_hold_a_cubics_third_derivative() {
+    let n = 3;
+    let sections: Vec<Vec<Frame>> = (0..5)
+        .map(|i| {
+            let t = i as f64 / 4.0;
+            let leave = if i == 4 { Vec3::new(0.0, -1.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) };
+            (0..n)
+                .map(|s| {
+                    let v = s as f64 / (n - 1) as f64;
+                    Frame { p: Vec3::new(2.0 * v, t, t * t * t), leave, bend: Vec3::ZERO, bend_change: Vec3::ZERO }
+                })
+                .collect()
+        })
+        .collect();
+    let body = loft_blend(&sections, [Continuity::G0, Continuity::G0], [0.0, 0.0], n).unwrap();
+    assert_runs_through(&body, &sections, n);
+    let want = Vec3::new(0.0, 0.0, 6.0);
+    for (u, stencil) in [(0.25, "forward"), (0.5, "central"), (0.75, "backward")] {
+        for s in 0..n {
+            let v = s as f64 / (n - 1) as f64;
+            // Read from both sides: the joint is C³, so they agree as far as the step tells.
+            for backwards in [true, false] {
+                let (_, _, _, d3) = run_derivs(&body, u, v, backwards, 1e-4);
+                assert!((d3 - want).len() < 2e-2 * (1.0 + want.len()), "the {stencil} difference at ({u}, {v}): {d3:?}");
+            }
+        }
     }
 }
 
@@ -354,8 +384,8 @@ fn a_two_section_blend_is_the_bridge() {
     // The blend runs with the sections, the bridge crosses from one boundary to the other: the
     // same face, its two parameters the other way round.
     for (run, station) in [(0.0, 0.0), (0.25, 0.3), (0.5, 0.7), (0.75, 0.1), (1.0, 1.0)] {
-        let x = from_p3(surface_of(&made).subs(run, station));
-        let y = from_p3(surface_of(&other).subs(station, run));
+        let x = surface_of(&made).point([run, station]).unwrap();
+        let y = surface_of(&other).point([station, run]).unwrap();
         assert!(x.dist(y) < 1e-9, "run {run} station {station}: {x:?} vs {y:?}");
     }
     let grid = sample_grid(&other, 9, 7).unwrap();
@@ -378,7 +408,7 @@ fn crown_shapes_the_middle_without_moving_the_joints() {
         assert!(p.dist(sections[1][4].p) < 1e-9, "the crown left the joint where the sections put it");
         joints.push((d1, d2));
         // Halfway up the first span is where a fuller crown reaches further.
-        heights.push(from_p3(surface_of(&body).subs(0.25, 0.5)).z);
+        heights.push(surface_of(&body).point([0.25, 0.5]).unwrap().z);
         assert_runs_through(&body, &sections, n);
     }
     for (d1, d2) in &joints {

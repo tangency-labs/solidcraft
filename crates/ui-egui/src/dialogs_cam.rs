@@ -4,6 +4,7 @@
 //! where it touches) or a flat face. Picking the profile on a part chooses the joint that part
 //! turns on. Play turns the cam a full turn so the follower shows its motion before OK.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use egui::RichText;
 use serde_json::{Value, json};
 use solidcraft_engine::Sel;
@@ -14,8 +15,8 @@ use super::{ROUND, joint_row, occurrence, pick, picked_radius, trim, turn};
 use crate::SolveApp;
 use crate::dialogs::{combo, field, form_row};
 use crate::dialogs_assembly::Asm;
-use crate::selection::{EDGES, FACES, PROFILES, SelInput, SelectionExt as _, VERTICES};
-use crate::theme::Tokens;
+use crate::selection::{EDGES, FACES, PROFILES, SNAP_POINTS, SelInput, SelectionExt as _, VERTICES, point_value};
+use solidcraft_theme::Tokens;
 
 /// The follower types, as `joint.cam` takes them, and their labels.
 const FOLLOWERS: [&str; 3] = ["knife", "roller", "flat"];
@@ -42,11 +43,13 @@ pub struct CamForm {
     pub animate: bool,
     /// Animation phase, 0…1.
     pub phase: f64,
+    /// Editing motion link this instead of adding a new one (#6825).
+    pub editing: Option<usize>,
 }
 
 /// Joints of a kind: (id, label).
 fn joints_of(s: &Session, kinds: &[JointKind]) -> Vec<(u64, String)> {
-    s.doc.assembly.joints.iter().filter(|j| kinds.contains(&j.kind)).map(|j| (j.id, format!("{} ({:?})", j.name, j.kind))).collect()
+    s.doc.assembly.joints.iter().filter(|j| kinds.contains(&j.kind)).map(|j| (j.id, crate::dialogs_assembly::joint_choice(&j.name, j.kind))).collect()
 }
 
 pub fn start(app: &SolveApp) -> (Asm, Vec<SelInput>) {
@@ -59,6 +62,7 @@ pub fn start(app: &SolveApp) -> (Asm, Vec<SelInput>) {
     let f = CamForm {
         a,
         b,
+        editing: None,
         follower: 0,
         radius: crate::dialogs::length_default(&app.session, "5"),
         flip: false,
@@ -69,7 +73,7 @@ pub fn start(app: &SolveApp) -> (Asm, Vec<SelInput>) {
     let inputs = vec![
         SelInput::new("Profile", PROFILES | EDGES, true),
         SelInput::new("Roller (optional)", ROUND, false),
-        SelInput::new("Tip (optional)", FACES | EDGES | VERTICES, false),
+        SelInput::new("Tip (optional)", FACES | EDGES | VERTICES | SNAP_POINTS, false),
     ];
     (Asm::Cam(Box::new(f)), inputs)
 }
@@ -94,9 +98,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut CamForm, inputs: &[Se
     let s = &app.session;
     let (cams, followers) = (joints_of(s, &[JointKind::Revolute]), joints_of(s, &[JointKind::Slider, JointKind::Revolute]));
     if cams.is_empty() || followers.len() < 2 && followers.iter().all(|j| cams.iter().any(|c| c.0 == j.0)) {
-        form_row(ui, "", |ui| {
-            ui.label(RichText::new(crate::i18n::tr_label("needs a joint that turns and one that slides or swings")).color(t.text_dim));
-        });
+        crate::ui_kit::status_line(ui, "needs a joint that turns and one that slides or swings", crate::ui_kit::StatusTone::Dim);
         return false;
     }
     // A profile picked on a part chooses the joint that part turns on, once.
@@ -117,25 +119,25 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut CamForm, inputs: &[Se
     joint_row(ui, "Cam", "cam_a", &cams, &mut f.a);
     joint_row(ui, "Follower", "cam_b", &followers, &mut f.b);
     form_row(ui, "Type", |ui| {
-        let labels: Vec<&str> = FOLLOWER_LABELS.iter().map(|l| crate::i18n::tr_label(l)).collect();
+        let labels: Vec<&str> = FOLLOWER_LABELS.iter().map(|l| solidcraft_ui_text::tr_label(l)).collect();
         combo(ui, "cam_follower", &labels, &mut f.follower);
     });
     if FOLLOWERS.get(f.follower) == Some(&"roller") {
         form_row(ui, "Radius", |ui| match (pick(inputs, ROLLER), picked_radius(s, inputs, ROLLER)) {
             (_, Some(r)) => {
-                ui.label(format!("{} mm  ({})", trim(r), crate::i18n::tr_label("picked")));
+                ui.label(format!("{} mm  ({})", trim(r), solidcraft_ui_text::tr_label("picked")));
             }
             (Some(_), None) => {
-                ui.label(RichText::new(crate::i18n::tr_label("not a round face")).color(t.warning));
+                ui.label(RichText::new(solidcraft_ui_text::tr_label("not a round face")).color(t.warning));
             }
             (None, None) => enter |= field(ui, &mut f.radius),
         });
     }
     crate::ui_kit::options(ui, "cam_options", &mut [("Other side", &mut f.flip)]);
     form_row(ui, "Animate", |ui| {
-        let label = if f.animate { "■ Stop" } else { "▶ Play" };
+        let label = solidcraft_ui_text::tr(if f.animate { "ui.joint_stop" } else { "ui.joint_play" });
         let r = crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal)
-            .on_hover_text(crate::i18n::tr_label("Play the joint's motion in the view"));
+            .backing_on_hover_text(solidcraft_ui_text::tr_label("Play the joint's motion in the view"));
         crate::scenario::publish_handle("dialog:Animate", r.rect.center());
         if r.clicked() {
             f.animate = !f.animate;
@@ -158,34 +160,53 @@ pub fn commands(app: &SolveApp, f: &CamForm, inputs: &[SelInput]) -> Result<Vec<
     };
     let (a, b) = (joint(f.a)?, joint(f.b)?);
     let items = inputs.get(PROFILE).map(|i| i.items.as_slice()).unwrap_or_default();
+    // Editing a cam and picking a new profile is optional: without one, the link keeps its
+    // current profile (the engine keeps what the command does not give it).
     let profile = match items.first() {
-        Some(Sel::Profile { sketch, index }) => json!({"sketch": sketch, "index": index}),
+        Some(Sel::Profile { sketch, index }) => Some(json!({"sketch": sketch, "index": index})),
         Some(Sel::Edge { body, .. }) => {
             let pts: Vec<Value> = items.edge_points().into_iter().map(crate::selection::point_value).collect();
             let mut p = json!({ "edges": pts });
             if let Some(o) = occurrence(s, body) {
                 p["occurrence"] = json!(o);
             }
-            p
+            Some(p)
         }
+        None if f.editing.is_some() => None,
         _ => return Err("select the cam's profile (a sketch profile or the cam's edges)".into()),
     };
     let follower = FOLLOWERS.get(f.follower).copied().unwrap_or("knife");
-    let mut p = json!({"a": a, "b": b, "profile": profile, "follower": follower, "flip": f.flip});
-    if follower == "roller" {
-        p["radius"] = match pick(inputs, ROLLER) {
-            Some((body, at)) => {
-                let mut v = json!({"circle": [at.x, at.y, at.z]});
-                if let Some(o) = occurrence(s, body) {
-                    v["occurrence"] = json!(o);
-                }
-                v
-            }
-            None => json!(f.radius.trim()),
-        };
+    let mut p = json!({"a": a, "b": b, "follower": follower, "flip": f.flip});
+    if let Some(profile) = profile {
+        p["profile"] = profile;
     }
-    if let Some(snap) = inputs.get(TIP).and_then(|i| i.items.first()).and_then(|x| crate::dialogs_assembly::snap_of(s, x)) {
-        p["tip"] = snap.param;
+    if follower == "roller" {
+        let keep = f.editing.is_some() && pick(inputs, ROLLER).is_none() && f.radius.trim().is_empty();
+        if !keep {
+            p["radius"] = match pick(inputs, ROLLER) {
+                Some((body, at)) => {
+                    let mut v = json!({"circle": [at.x, at.y, at.z]});
+                    if let Some(o) = occurrence(s, body) {
+                        v["occurrence"] = json!(o);
+                    }
+                    v
+                }
+                None => json!(f.radius.trim()),
+            };
+        }
+    }
+    match inputs.get(TIP).and_then(|i| i.items.first()) {
+        // A snap point (an edge's middle, a face's centre) is the point itself, on the part there.
+        Some(Sel::Vertex { body, point }) if body.is_empty() => p["tip"] = json!({"point": point_value(*point)}),
+        Some(x) => {
+            if let Some(snap) = crate::dialogs_assembly::snap_of(s, x) {
+                p["tip"] = snap.param;
+            }
+        }
+        None => {}
+    }
+    if let Some(index) = f.editing {
+        p["link"] = json!(index);
     }
     Ok(vec![("joint.cam".to_string(), p)])
 }

@@ -2,7 +2,8 @@
 //! the design changes, instead of holding the frame where it was made.
 
 use serde_json::json;
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use super::tests::{occ, place, run};
 use crate::Session;

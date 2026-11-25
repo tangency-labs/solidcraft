@@ -1,0 +1,10 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#3378"
+  ],
+  "what": "a circular pattern of a join whose two targets (rim and hub) were merged into one body by that join",
+  "source": "analytic",
+  "method": "ring pi*(66^2-63^2)*3 + hub pi*12^2*3 + 5 spokes. A spoke is the box 53x3x2.5 (x 11..64, z +-1.25, y 0..3; the issue starts it at x=12, tangent to the hub, which joins the hub by a line only, so it starts at 11 here to overlap it). It overlaps the ring where x >= sqrt(63^2-z^2): 7.531, and the hub where x <= sqrt(12^2-z^2): 7.337 (both = width * Int over z in -1.25..1.25). Neighbouring spokes (72 deg apart) do not meet. V = ring + hub + 5*(397.5 - overlaps), one body",
+  "body_count": 1,
+  "volume_mm3": 6917.717209884256
+}

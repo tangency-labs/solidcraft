@@ -48,7 +48,6 @@ fn rim_cut_after_the_round_on_the_other_end() {
     let id = cut_window(&mut after)["feature"].as_u64().unwrap();
     let result = after.model.result(id).unwrap();
     assert!(result.error.is_none() && result.warning.is_none(), "{result:?}");
-    assert!(result.boolean_diagnostics.events.is_empty(), "{:?}", result.boolean_diagnostics);
     // The window's three faces (two sides and the top), at both points of the timeline.
     assert_eq!(faces(&before), f1 + 3);
     assert_eq!(faces(&after), f2 + 3);

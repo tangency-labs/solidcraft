@@ -1,0 +1,20 @@
+{
+ "sources": [],
+ "what": "an in-plane rib (the default direction): a diagonal line across the inside corner of an L bracket fills to the two faces",
+ "source": "analytic",
+ "method": "L bracket: base 60x40x5 + wall 5x40x35 above it = 19000; the line (5,25)-(25,5) in the plane y=20 closes with the wall x=5 and the base top z=5 a right triangle of legs 20: 200 mm^2, 2 thick across the plane: + 400",
+ "body_count": 1,
+ "volume_mm3": 19400.0,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   40,
+   40
+  ]
+ }
+}

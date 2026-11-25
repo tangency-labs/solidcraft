@@ -1,0 +1,22 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#3243"
+  ],
+  "what": "a join of a cylindrical rim (r 15.27..16.65, to z=5) and a rounded tooth trimmed to the same two cylinders that overlaps it by 0.01 mm in Z",
+  "source": "analytic",
+  "method": "rim: pi*16.65^2*5 - pi*15.27^2*(5 - 1.76) = 1981.190. Tooth: the profile (flanks from x = +-3 at z 4.99 to x = +-0.1706 at z 7.6327, tip arc through (0, 7.7): centre z 7.45012, radius 0.24988) extruded along +y from y 14.9624 (inside r 15.27 for every |x| <= 3, as sqrt(15.27^2 - 9) = 14.9724) to y 16.65 (outside r 16.65), so trimming to the two cylinders leaves exactly {15.27 <= r <= 16.65} over the profile: V = int over the profile of sqrt(16.65^2 - x^2) - sqrt(15.27^2 - x^2) dx dz = 11.6193 (Simpson, converged to 1e-6). The part of it below z 5 (z 4.99..5) lies inside the rim: 0.0831. Join: 1981.190 + 11.619 - 0.083 = 1992.726 (a join that dropped the tooth gives 1981.19, outside the tolerance). Box: the rim's r 16.65 disc, z 0 to the tooth tip 7.7",
+  "body_count": 1,
+  "volume_mm3": 1992.726,
+  "bbox": {
+    "min": [
+      -16.65,
+      -16.65,
+      0.0
+    ],
+    "max": [
+      16.65,
+      16.65,
+      7.7
+    ]
+  }
+}

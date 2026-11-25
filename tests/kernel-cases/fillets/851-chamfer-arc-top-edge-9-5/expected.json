@@ -1,0 +1,15 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#851",
+  "tangency-labs/solidcraft#1113",
+  "tangency-labs/solidcraft#854"
+ ],
+ "what": "the top edge of #851's concave R21 wall chamfered 9.5, just under its height",
+ "source": "analytic",
+ "method": "plate x 0..41.1667, y -21..0 and the corner x 41.1667..62.1667 less the cylinder r 21 about (62.1667, -21), 10 high (tessellation/1263): V0 = 10 (62.1667 x 21 - pi 21^2/4) = 9591.394099. The blend's section in (rho, z) about the wall's axis, the triangle (rho - 21) + (10 - z) <= 9.5, is swept round it from the front face (square to the arc) to the back face y = 0, which the arc runs into tangent at the tip: at radius rho the part spans the angle asin(21/rho), so the blend takes Int_21^30.5 rho asin(21/rho) h(rho) drho with h(rho) = s - (rho - 21): 1180.944160. V = 8410.449939",
+ "body_count": 1,
+ "volume_mm3": 8410.449939154401,
+ "continuity": {
+  "order": "g0"
+ }
+}

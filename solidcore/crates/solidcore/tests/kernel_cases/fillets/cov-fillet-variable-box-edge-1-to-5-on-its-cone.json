@@ -1,0 +1,171 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "fillet_variable",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "degree": 1,
+        "edge": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  20.0,
+                  30.0,
+                  20.0
+                ],
+                [
+                  0.0,
+                  30.0,
+                  20.0
+                ]
+              ],
+              "index": 3
+            }
+          ],
+          "points": [
+            [
+              10.0,
+              30.0,
+              20.0
+            ]
+          ],
+          "tolerance": 2.06255281280883
+        },
+        "knots": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "radii": [
+          1.0,
+          5.0
+        ],
+        "start": [
+          0.0,
+          30.0,
+          20.0
+        ]
+      }
+    }
+  ],
+  "case": "cov-fillet-variable-box-edge-1-to-5-on-its-cone",
+  "expected": {
+    "bbox": {
+      "max": [
+        20,
+        30,
+        20
+      ],
+      "min": [
+        0,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "continuity": {
+      "exact": true,
+      "order": "g1"
+    },
+    "faces": 7,
+    "method": "box 20x30x20, the top back edge (y = 30, z = 20) with r = 1 + x/5 from x = 0 to 20. The balls' centres (x, 30 - r, 20 - r) run on a line, r proportional to their distance from the apex (-5, 30, 20): their envelope is the circular cone about that line with sin(phi) = 1/sqrt(27). Each ball touches it along the circle square to the line of centres, offset -r r'/|c'| from the centre, not along the great circle (whose middle is 0.0101 off the cone at x = 10). In each plane x = const the cone's section cuts off the corner, between the contact lines, the area found by rays from the corner (each meets the cone at the root of a quadratic); integrated over x it is 43.777573: V = 12000 - 43.777573 = 11956.2224. Faces 7; both seams G1, not G2.",
+    "source": "analytic",
+    "sources": [],
+    "tolerance": {
+      "rel": 0.00001
+    },
+    "volume_mm3": 11956.2224267359,
+    "what": "a variable round from r1 to r5 along a box's top back edge: the balls' envelope, a circular cone, not their great circles"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 15,
+      "faces": 7,
+      "vertices": 10
+    }
+  },
+  "records": "cov-fillet-variable-box-edge-1-to-5-on-its-cone.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b6"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 3169.07325623622,
+      "body_count": 1,
+      "edges": 15,
+      "faces": 7,
+      "vertices": 10,
+      "volume_mm3": 11956.222432476181
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "fillet_variable"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "a variable round from r1 to r5 along a box's top back edge: the balls' envelope, a circular cone, not their great circles",
+  "why_not": []
+}

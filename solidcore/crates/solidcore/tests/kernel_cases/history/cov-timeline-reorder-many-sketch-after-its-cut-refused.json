@@ -1,0 +1,53 @@
+{
+  "area": "history",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-timeline-reorder-many-sketch-after-its-cut-refused",
+  "expected": {
+    "method": "the cut comes before its sketch: it breaks, so the move is refused",
+    "outcome": "refused",
+    "refusal": "moving the selected features there breaks Notch",
+    "source": "invariants",
+    "sources": [],
+    "what": "timeline.reorder_many of a sketch to behind the cut that uses it"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 7 (timeline.reorder_many): invalid parameters for `timeline.reorder_many`: moving the selected features there breaks Notch (unknown sketch 2 (it must come earlier in the timeline))",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 7 (timeline.reorder_many): invalid parameters for `timeline.reorder_many`: moving the selected features there breaks Notch (unknown sketch 2 (it must come earlier in the timeline))",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [],
+  "what": "timeline.reorder_many of a sketch to behind the cut that uses it",
+  "why_not": [
+    "the failure is SolidCraft's, not a kernel operation's: step 7 (timeline.reorder_many): invalid parameters for `timeline.reorder_many`: moving the selected features there breaks Notch (unknown sketch 2 (it must come earlier in the timeline))"
+  ]
+}

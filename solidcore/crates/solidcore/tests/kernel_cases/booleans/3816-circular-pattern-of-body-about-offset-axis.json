@@ -1,0 +1,145 @@
+{
+  "area": "booleans",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 4.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                41.5,
+                13.0,
+                -50.0
+              ],
+              "start": [
+                37.5,
+                13.0,
+                -50.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                41.5,
+                17.0,
+                -50.0
+              ],
+              "start": [
+                41.5,
+                13.0,
+                -50.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                37.5,
+                17.0,
+                -50.0
+              ],
+              "start": [
+                41.5,
+                17.0,
+                -50.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                37.5,
+                13.0,
+                -50.0
+              ],
+              "start": [
+                37.5,
+                17.0,
+                -50.0
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "case": "3816-circular-pattern-of-body-about-offset-axis",
+  "expected": {
+    "center_of_mass": [
+      17.5,
+      15.0,
+      -48.0
+    ],
+    "method": "a 4x4x4 box centred at (39.5,15,-48), 22 mm from the vertical axis through (17.5,15,-48); nine copies 40 deg apart (chord 15 mm > the box diagonal 5.7, no overlap): V = 9*64 = 576. By the 9-fold symmetry the centre of mass lies on the axis: (17.5, 15, -48)",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#3816"
+    ],
+    "volume_mm3": 576.0,
+    "what": "circular pattern of a body about an axis {origin,dir} that does not pass through the world origin"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 108,
+      "faces": 54,
+      "vertices": 72
+    }
+  },
+  "result": [
+    {
+      "body": "Part",
+      "made": "b1"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 864.0000000000007,
+      "body_count": 9,
+      "edges": 108,
+      "faces": 54,
+      "vertices": 72,
+      "volume_mm3": 576.0000000000005
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#3816"
+  ],
+  "traced_ops": [
+    "extrude"
+  ],
+  "ungraded": [],
+  "what": "circular pattern of a body about an axis {origin,dir} that does not pass through the world origin",
+  "why_not": [
+    "body \"Part (2)\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+    "body \"Part (3)\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+    "body \"Part (4)\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+    "body \"Part (5)\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+    "body \"Part (6)\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+    "body \"Part (7)\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+    "body \"Part (8)\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+    "body \"Part (9)\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+  ]
+}

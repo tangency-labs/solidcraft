@@ -1,0 +1,35 @@
+[package]
+name = "solidcore-tess"
+description = "Geometry made drawable: each face of a B-rep record meshed in its own (u, v), edges sampled once so faces meet exactly, as a plan the CPU or a GPU evaluates, plus display levels of detail"
+edition = "2024"
+license.workspace = true
+version.workspace = true
+publish = false
+# Let chains (edition 2024, Rust 1.88).
+rust-version = "1.88"
+repository = "https://github.com/tangency-labs/solidcore"
+keywords = ["cad", "brep", "nurbs", "tessellation", "mesh"]
+categories = ["graphics", "mathematics"]
+
+# Layers §3: tess depends on the kernel and the record only (and their one conversion).
+[dependencies]
+solidcore = { path = "../solidcore" }
+solidcore-record = { path = "../solidcore-record" }
+solidcore-convert = { path = "../solidcore-convert" }
+serde = { version = "1", features = ["derive"] }
+thiserror.workspace = true
+# Constrained Delaunay triangulation, the general face method.
+spade = { version = "2.15", default-features = false, features = ["std"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rayon = "1.12"
+
+[dev-dependencies]
+serde_json = { version = "1", features = ["float_roundtrip"] }
+# The frozen records under tests/data are gzipped JSON.
+flate2 = "1.1"
+# The mesh path's tests model their bodies (a box joined with a sphere) through the modelling API.
+solidcore-ops = { path = "../solidcore-ops" }
+
+[lints]
+workspace = true

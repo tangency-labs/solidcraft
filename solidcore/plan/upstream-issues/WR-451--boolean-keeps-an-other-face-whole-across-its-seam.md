@@ -1,0 +1,27 @@
+#### WR-451. A Boolean keeps an operand face whole where its seam lies on the other operand's edge, then fails to place it (no radial sector)
+- **Severity:** Wrong result (the Boolean returns `SM_ERR`, 1001, on valid input)
+- **Area:** Boolean
+- **Location:**
+  - `source/SMLib/src/SmMerge.cpp`, `sm_FindBrepRegionOfOtherFace` (def. `:186`). Its quick path (`:212`-`261`) takes the region of the radial sector found for the *first* edge use of the face that has a mated Brep edge (`FindRadialSector(pEU, NULL, SM_OT_SAME, …)` at `:225`, then `break` at `:261`). It is reached from `SmMerge::MakeFaceuse` (`:6895`), which then calls `MakeFace` with that region (`:7171`).
+  - `source/SMLib/src/SmBrep.cpp`, `SmBrep::MakeFaceTopology`'s radial-sector recovery for an edge the new face uses twice. `FindRadialSector(pTmpEU, pRegion, SM_OT_SAME, …)` is at `:14522`. When it finds nothing, the recovery records `SM_ERR` and carries on (`:14563`).
+- **What happens:**
+  - A ruled skin's side face is periodic, with a seam edge that the face uses twice.
+  - When that seam lies exactly on an edge of the other operand, the intersection gives a mate (the seam edge and the primary edge are related) instead of a new edge. The face is not split there, so it is kept whole although it lies on both sides of the primary's boundary at that edge.
+  - `sm_FindBrepRegionOfOtherFace` classifies only the first of the two seam uses. That gives the region on that use's side; here it is the primary's region 0, the outside.
+  - `MakeFaceTopology` then inserts the face's other seam use, whose side is the primary's solid region 1, and finds no sector of region 0 for it. All candidates classify `Outside`, the recovery records `SM_ERR`, and the Boolean fails.
+- **Trigger:** `SmApiBooleanDifference(outer, inner)` of two capped degree-1 skins (`SmApiCreateSkinPrimitive`) through closed cubic sections: the rain-cover lofts of tangency-labs/solidcore#948, 7 + 7 sections (`min7.txt`). On this input the recovery fails 3 times, all on the same kept face (traced in detail at the first of those edges).
+- **How found:** tangency-labs/solidcore#948, then traced in the Rust port with gdb on the same input:
+  - The kept other face's first mated edge use (a use of its seam edge) is classified `Inside` the sector of a region-0 edge use of the primary edge. Its step-off binormal is (−0.954, 0.233, 0.188).
+  - In `MakeFaceTopology`, the temporary edge use for the same face at the same edge steps off along (+0.954, −0.233, −0.188), into the primary's region 1. There, both region-0 candidate sectors classify `Outside`.
+- **Confirmed:** no (read at c9c5979 `source/SMLib/src/SmMerge.cpp:186`-`261`, `:6895`, `:7171` and `source/SMLib/src/SmBrep.cpp:14522`-`14563`). The reporter of #948 ran the same input on the pinned C++ build (c9c5979, `harness/cpp/build.sh`) and on usd-brep 1.0.1 (`3fd5b95`), and saw 1001 at the same sites with the same counts. It was traced in the faithful Rust port, which fails identically. Not run on our harness's C++.
+- **usd-brep 1.0.1 (`3fd5b95`):** not fixed there.
+  - The issue's reporter saw the same 1001 at the same sites on 1.0.1.
+  - By reading 1.0.1's `source/SMLib`:
+    - `sm_FindBrepRegionOfOtherFace` is unchanged.
+    - `SmMerge.cpp`'s only change is the `CloseIntersectionLoop` bookkeeping: deleted vertices and edges are dropped from `m_sIntersectionVertices` and `m_sIntersectionEdges`, at 1.0.1 `SmMerge.cpp:2958`-`2965`. That is in the vertex-marking loop, not on this path.
+    - `SmBrep::MakeFaceTopology`'s recovery (`:14522`-`14563` at the pin) has no change.
+  - 1.0.1's other `SmBrep.cpp` change on a nearby path, a "first nonseparating periodic seam" case in `MakeEdgeInFaceWithVU`, concerns inserting a natural-boundary seam curve. It does not change how an other face's region is found or how its seam uses are placed.
+- **Fix (direction, not ported):** a face kept whole across the primary's boundary at a seam-coincident edge has to be split along that seam before it is placed, or the seam crossing handled as a boundary crossing. Skipping seam uses in `sm_FindBrepRegionOfOtherFace` alone would only move the failure, since the face still spans two regions.
+- **Rust port:** ported as is (`boolean/merge/p1.rs` `find_brep_region_of_other_face`, `topology/brep/p6.rs` `connect_edge_loops` / `find_sector`). It fails at the same sites. Test: `crates/solidcore/tests/issue_948_ruled_skin_difference.rs` (pins the `SM_ERR`; rechecked on the 1.0.1 port (3fd5b95), where it still fails the same way).
+- **Test data provenance:** `crates/solidcore/tests/data/issue_948_min7.txt` is third-party data: the inline `min7.txt` block posted by GitHub user `meros` in https://github.com/NVIDIA-Omniverse/usd-brep/issues/32 on 2026-10-25, copied verbatim. It is the reporter's model input, not usd-brep source. No licence is stated in the post.
+- tangency-labs/solidcore#948; reported upstream as NVIDIA-Omniverse/usd-brep#32.

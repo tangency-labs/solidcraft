@@ -1,0 +1,644 @@
+{
+ "cases": [
+  {
+   "name": "generators_coincident_lines_touching_end_to_end",
+   "upstream_ref": "source/SMLib/src/SmSurfOfExtrusion.cpp:3042 (coverage: crates/solidcore/src/surface/surf_of_extrusion/p1.rs:1959)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       0
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "generators",
+    "other": {
+     "kind": "line",
+     "a": [
+      0.5,
+      0,
+      1
+     ],
+     "b": [
+      1.5,
+      0,
+      1
+     ]
+    },
+    "vec": [
+     0,
+     0,
+     1
+    ],
+    "ivl": [
+     0,
+     1
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "generators_coincident_lines_touching_end_to_end_scaled",
+   "upstream_ref": "source/SMLib/src/SmSurfOfExtrusion.cpp:3042 (coverage: crates/solidcore/src/surface/surf_of_extrusion/p1.rs:1959)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       0
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "generators",
+    "other": {
+     "kind": "line",
+     "a": [
+      0.5,
+      0,
+      1
+     ],
+     "b": [
+      1.5,
+      0,
+      1
+     ]
+    },
+    "vec": [
+     0,
+     0,
+     1
+    ],
+    "ivl": [
+     0,
+     0.5
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "generators_coincident_lines_touching_reversed",
+   "upstream_ref": "source/SMLib/src/SmSurfOfExtrusion.cpp:3042 (coverage: crates/solidcore/src/surface/surf_of_extrusion/p1.rs:1959)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       0
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "generators",
+    "other": {
+     "kind": "line",
+     "a": [
+      0.5,
+      0,
+      0
+     ],
+     "b": [
+      1.5,
+      0,
+      0
+     ]
+    },
+    "vec": [
+     0,
+     0,
+     -1
+    ],
+    "ivl": [
+     0,
+     1
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "generators_coincident_lines_touching_reversed_scaled",
+   "upstream_ref": "source/SMLib/src/SmSurfOfExtrusion.cpp:3042 (coverage: crates/solidcore/src/surface/surf_of_extrusion/p1.rs:1959)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       0
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "generators",
+    "other": {
+     "kind": "line",
+     "a": [
+      0.5,
+      0,
+      0
+     ],
+     "b": [
+      1.5,
+      0,
+      0
+     ]
+    },
+    "vec": [
+     0,
+     0,
+     -1
+    ],
+    "ivl": [
+     0,
+     0.5
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "generators_coincident_lines_overlapping",
+   "upstream_ref": "source/SMLib/src/SmSurfOfExtrusion.cpp:2977 (coverage: crates/solidcore/src/surface/surf_of_extrusion/p1.rs:1971)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       0
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "generators",
+    "other": {
+     "kind": "line",
+     "a": [
+      0.5,
+      0,
+      0.5
+     ],
+     "b": [
+      1.5,
+      0,
+      0.5
+     ]
+    },
+    "vec": [
+     0,
+     0,
+     1
+    ],
+    "ivl": [
+     0,
+     1
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "generators_coincident_lines_overlapping_scaled",
+   "upstream_ref": "source/SMLib/src/SmSurfOfExtrusion.cpp:2977 (coverage: crates/solidcore/src/surface/surf_of_extrusion/p1.rs:1971)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       0
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "generators",
+    "other": {
+     "kind": "line",
+     "a": [
+      0.5,
+      0,
+      0.5
+     ],
+     "b": [
+      1.5,
+      0,
+      0.5
+     ]
+    },
+    "vec": [
+     0,
+     0,
+     1
+    ],
+    "ivl": [
+     0,
+     0.5
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "generators_coincident_lines_disjoint_heights",
+   "upstream_ref": "source/SMLib/src/SmSurfOfExtrusion.cpp:3108 (coverage: crates/solidcore/src/surface/surf_of_extrusion/p1.rs:2012)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       0
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "generators",
+    "other": {
+     "kind": "line",
+     "a": [
+      0.5,
+      0,
+      5
+     ],
+     "b": [
+      1.5,
+      0,
+      5
+     ]
+    },
+    "vec": [
+     0,
+     0,
+     1
+    ],
+    "ivl": [
+     0,
+     1
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "generators_coincident_lines_disjoint_heights_scaled",
+   "upstream_ref": "source/SMLib/src/SmSurfOfExtrusion.cpp:3108 (coverage: crates/solidcore/src/surface/surf_of_extrusion/p1.rs:2012)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       0
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "generators",
+    "other": {
+     "kind": "line",
+     "a": [
+      0.5,
+      0,
+      5
+     ],
+     "b": [
+      1.5,
+      0,
+      5
+     ]
+    },
+    "vec": [
+     0,
+     0,
+     1
+    ],
+    "ivl": [
+     0,
+     0.5
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "generators_coincident_lines_disjoint_heights_reversed",
+   "upstream_ref": "source/SMLib/src/SmSurfOfExtrusion.cpp:3108 (coverage: crates/solidcore/src/surface/surf_of_extrusion/p1.rs:2012)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       0
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "generators",
+    "other": {
+     "kind": "line",
+     "a": [
+      0.5,
+      0,
+      -3
+     ],
+     "b": [
+      1.5,
+      0,
+      -3
+     ]
+    },
+    "vec": [
+     0,
+     0,
+     -1
+    ],
+    "ivl": [
+     0,
+     1
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "generators_coincident_lines_disjoint_heights_reversed_scaled",
+   "upstream_ref": "source/SMLib/src/SmSurfOfExtrusion.cpp:3108 (coverage: crates/solidcore/src/surface/surf_of_extrusion/p1.rs:2012)",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "line",
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       0
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "op": "generators",
+    "other": {
+     "kind": "line",
+     "a": [
+      0.5,
+      0,
+      -3
+     ],
+     "b": [
+      1.5,
+      0,
+      -3
+     ]
+    },
+    "vec": [
+     0,
+     0,
+     -1
+    ],
+    "ivl": [
+     0,
+     0.5
+    ],
+    "tol": 1e-06
+   }
+  }
+ ]
+}

@@ -2,6 +2,7 @@
 //! them, so a face sketch whose projected outline is rebuilt still extrudes the same region.
 
 use serde_json::{Value, json};
+use solidcraft_geom::MeshGeom;
 
 use crate::Session;
 
@@ -41,7 +42,12 @@ fn enclosure() -> Session {
 }
 
 fn bodies(s: &Session) -> Vec<(String, f64)> {
-    s.model.state().bodies.iter().map(|b| (b.name.clone(), b.body.tessellate(1e-2).unwrap().measure().volume)).collect()
+    s.model
+        .state()
+        .bodies
+        .iter()
+        .map(|b| (b.name.clone(), b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-2)).unwrap().measure().volume))
+        .collect()
 }
 
 #[test]
@@ -61,16 +67,16 @@ fn a_port_picked_by_index_stays_a_cut_after_a_width_change() {
     assert!(s.model.result(id).is_some_and(|r| r.error.is_none()), "{:?}", s.model.result(id));
     let port = s.doc.find_feature("USB port").unwrap().id;
     assert!((s.model.state().sketch(port).unwrap().plane.origin.x - 50.).abs() < 1e-6);
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let mesh = world.body("Enclosure").unwrap().mesh();
-    assert!(!mesh.contains(solidcraft_geom::Vec3::new(49., 0., 12.)));
-    assert!(mesh.contains(solidcraft_geom::Vec3::new(49., 0., 20.)));
+    assert!(!mesh.contains(solidcore_record::Vec3::new(49., 0., 12.)));
+    assert!(mesh.contains(solidcore_record::Vec3::new(49., 0., 20.)));
     let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
     assert!(reopened.model.result(id).unwrap().error.is_none());
-    let world = reopened.world_state();
+    let world = reopened.world_state().unwrap();
     let mesh = world.body("Enclosure").unwrap().mesh();
-    assert!(!mesh.contains(solidcraft_geom::Vec3::new(49., 0., 12.)));
-    assert!(mesh.contains(solidcraft_geom::Vec3::new(49., 0., 20.)));
+    assert!(!mesh.contains(solidcore_record::Vec3::new(49., 0., 12.)));
+    assert!(mesh.contains(solidcore_record::Vec3::new(49., 0., 20.)));
 }
 
 /// A pick the sketch no longer has is an error on the feature, never a different profile.
@@ -78,7 +84,7 @@ fn a_port_picked_by_index_stays_a_cut_after_a_width_change() {
 fn a_lost_profile_is_an_error_not_another_pick() {
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
-    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10], "ids": ["a", "b", "c", "d"]}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
     run(&mut s, "sketch.circle.center", json!({"center": [30, 5], "radius": 3, "id": "ring"}));
     run(&mut s, "sketch.finish", json!({}));
     let ring = s.model.state().sketches[0].profiles.iter().position(|p| p.outer_curves == ["ring"]).unwrap();
@@ -97,4 +103,95 @@ fn a_lost_profile_is_an_error_not_another_pick() {
     assert!(s.model.state().bodies.is_empty(), "no silent re-pick: {:?}", bodies(&s));
     let id = s.doc.features.last().unwrap().id;
     assert!(s.model.result(id).is_some_and(|r| r.error.is_some()), "{:?}", s.model.result(id));
+}
+
+/// A disc with two equal round holes and a thin layer over the whole face outline of a sketch on
+/// its top face. At `a = 2` the holes sit at (-2, 0) and (2, 0); at `a = 0`, at (0, -2) and (0, 2):
+/// each hole is as near to either old place, so the refreshed outline cannot be matched to the old
+/// one and the sketch keeps its last outline, whatever else refreshes do.
+fn skinned_disc(a: &str) -> Session {
+    let mut s = Session::default();
+    let script = json!([
+        {"command": "parameters.add", "params": {"name": "a", "expression": a}},
+        {"command": "solid.cylinder", "params": {"radius": 10, "height": 5, "base": [0, 0, 0], "body_name": "Disc"}},
+        {"command": "solid.cylinder", "params": {"radius": 1, "height": 7, "base": ["0 - a", "a - 2", -1], "operation": "cut", "targets": ["Disc"]}},
+        {"command": "solid.cylinder", "params": {"radius": 1, "height": 7, "base": ["a", "2 - a", -1], "operation": "cut", "targets": ["Disc"]}},
+        {"command": "sketch.create", "params": {"plane": {"face": [0, 0, 5]}, "name": "OnTop"}},
+        {"command": "sketch.finish", "params": {}},
+        {"command": "solid.extrude", "params": {"sketch": "OnTop", "distance": "0.3 mm", "operation": "join", "profiles": [{"point": [0, 0]}], "name": "Skin"}}
+    ]);
+    s.run_script(&script).unwrap();
+    s
+}
+
+/// The disc with its holes moved so the sketch's face outline is ambiguous: its link is lost.
+fn lost_link() -> Session {
+    let mut s = skinned_disc("2");
+    let skin = s.doc.find_feature("Skin").unwrap().id;
+    assert!(s.model.result(skin).is_some_and(|r| r.error.is_none() && r.warning.is_none()), "{:?}", s.model.result(skin));
+    run(&mut s, "parameters.change", json!({"name": "a", "expression": "0"}));
+    assert!(retained(&s, "OnTop"), "the sketch keeps its last outline");
+    s
+}
+
+/// Whether the sketch named `name` has a lost link.
+fn retained(s: &Session, name: &str) -> bool {
+    let sketch = s.doc.find_feature(name).map(|f| f.id).unwrap_or_default();
+    s.model.state().sketch(sketch).is_some_and(|ss| ss.sketch.links.iter().any(|l| l.lost))
+}
+
+fn skin_warning(model: &solidcraft_doc::Model, s: &Session) -> Option<String> {
+    let skin = s.doc.find_feature("Skin").unwrap().id;
+    model.result(skin).and_then(|r| r.warning.clone())
+}
+
+fn says(w: &Option<String>, sketch: &str) -> bool {
+    w.as_deref().is_some_and(|w| w.contains(&format!("built from Sketch {sketch}'s last outline")))
+}
+
+/// A feature built from a sketch whose face outline could not be refreshed says so on its own
+/// row.
+#[test]
+fn a_feature_built_from_a_retained_outline_says_so() {
+    let s = lost_link();
+    let warning = skin_warning(&s.model, &s);
+    assert!(says(&warning, "OnTop"), "{warning:?}");
+}
+
+/// A design saved before the note existed (its record has no warning) says so on reopening.
+#[test]
+fn a_saved_model_without_the_retained_outline_note_gets_it_on_reopening() {
+    let s = lost_link();
+    let mut saved = s.model.saved(&s.doc).expect("the model saves");
+    if let Some(features) = saved.records.get_mut("features").and_then(Value::as_array_mut) {
+        for f in features {
+            if let Some(f) = f.as_object_mut() {
+                f.remove("warning");
+            }
+        }
+    }
+    let reopened = solidcraft_doc::Model::adopt(&s.doc, &saved).expect("the saved model is adopted");
+    let warning = skin_warning(&reopened, &s);
+    assert!(says(&warning, "OnTop"), "{warning:?}");
+}
+
+/// Renaming the sketch renames it in the note, whether the model follows the rename or evaluates
+/// again with its cache (its entries from before the rename).
+#[test]
+fn the_retained_outline_note_follows_a_renamed_sketch() {
+    let mut s = lost_link();
+    run(&mut s, "timeline.rename", json!({"feature": "OnTop", "name": "Lid"}));
+    assert!(retained(&s, "Lid") && !retained(&s, "OnTop"));
+    let warning = skin_warning(&s.model, &s);
+    assert!(says(&warning, "Lid") && !warning.as_deref().is_some_and(|w| w.contains("OnTop")), "{warning:?}");
+    // Evaluated again with nothing changed: results restored from the cache keep the note too.
+    s.model.evaluate(&s.doc);
+    assert!(retained(&s, "Lid"));
+    let warning = skin_warning(&s.model, &s);
+    assert!(says(&warning, "Lid") && !warning.as_deref().is_some_and(|w| w.contains("OnTop")), "{warning:?}");
+    // And a model saved and reopened after the rename.
+    let saved = s.model.saved(&s.doc).expect("the model saves");
+    let reopened = solidcraft_doc::Model::adopt(&s.doc, &saved).expect("the saved model is adopted");
+    let warning = skin_warning(&reopened, &s);
+    assert!(says(&warning, "Lid"), "{warning:?}");
 }

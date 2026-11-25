@@ -1,0 +1,71 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 10,
+    "height": 40,
+    "base": [
+     -20,
+     0,
+     -10
+    ],
+    "axis": "X",
+    "operation": "new",
+    "body_name": "Pipes"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 5,
+    "height": 40,
+    "base": [
+     0,
+     -20,
+     -5
+    ],
+    "axis": "Y",
+    "operation": "join",
+    "targets": [
+     "Pipes"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 100,
+    "width": 100,
+    "height": 50,
+    "corner": [
+     -50,
+     -50,
+     -2
+    ],
+    "operation": "cut",
+    "targets": [
+     "Pipes"
+    ]
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      4.207354924039483,
+      9.732263392975257,
+      -7.701511529340699
+     ],
+     [
+      -4.207354924039483,
+      9.732263392975257,
+      -7.701511529340699
+     ]
+    ],
+    "radius": 1
+   }
+  }
+ ]
+}

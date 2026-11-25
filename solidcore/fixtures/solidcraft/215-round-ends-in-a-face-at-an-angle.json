@@ -1,0 +1,120 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/215",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/362",
+ "test": "crates/kernel/src/tests.rs: fillet_ends_in_an_end_face_at_an_angle",
+ "summary": "A round must end in an end face that is not square to its edge, along that face's section of the round (#215). A prism on a trapezoid, 10 high, has the top edge along y = 0 rounded r 2; one end face is square, the other leans in (far 30) or out (far 50). The removed section's length at depth y into the top face is 40 + (far - 40) y / 20, linear, so the removed volume is the section's area times the length at its centroid: closed form. SolidCraft checked 2e-4 relative on a mesh; these check 1e-4 mm^3. The test's chamfer-mitre case (a Monte Carlo estimate) is not ported.",
+ "cases": [
+  {
+   "name": "end_face_at_an_angle_far_30",
+   "note": "Prism on the trapezoid (0,0) (40,0) (30,20) (0,20), 10 high; the top edge along y = 0 rounded r 2. It ends square at x = 0 and in the face through (40,0) and (30,20) at an angle.",
+   "steps": [
+    {
+     "op": "extrude",
+     "id": "prism",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         0,
+         0
+        ],
+        [
+         40,
+         0
+        ],
+        [
+         30.0,
+         20
+        ],
+        [
+         0,
+         20
+        ]
+       ]
+      }
+     ],
+     "distance": 10
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "prism",
+     "edges": [
+      [
+       20,
+       0,
+       10
+      ]
+     ],
+     "radius": 2.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "removed": {
+     "from": "prism",
+     "value": 34.144553176664736,
+     "tol": 0.0001,
+     "formula": "(1 - pi/4)*2^2 * (40 + (30 - 40)*c/20), c = 2*(10 - 3*pi)/(3*(4 - pi)) (the section's length is linear in its depth y, so its mean is the length at the centroid)"
+    }
+   }
+  },
+  {
+   "name": "end_face_at_an_angle_far_50",
+   "note": "Prism on the trapezoid (0,0) (40,0) (50,20) (0,20), 10 high; the top edge along y = 0 rounded r 2. It ends square at x = 0 and in the face through (40,0) and (50,20) at an angle.",
+   "steps": [
+    {
+     "op": "extrude",
+     "id": "prism",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         0,
+         0
+        ],
+        [
+         40,
+         0
+        ],
+        [
+         50.0,
+         20
+        ],
+        [
+         0,
+         20
+        ]
+       ]
+      }
+     ],
+     "distance": 10
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "prism",
+     "edges": [
+      [
+       20,
+       0,
+       10
+      ]
+     ],
+     "radius": 2.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "removed": {
+     "from": "prism",
+     "value": 34.528034536151814,
+     "tol": 0.0001,
+     "formula": "(1 - pi/4)*2^2 * (40 + (50 - 40)*c/20), c = 2*(10 - 3*pi)/(3*(4 - pi)) (the section's length is linear in its depth y, so its mean is the length at the centroid)"
+    }
+   }
+  }
+ ]
+}

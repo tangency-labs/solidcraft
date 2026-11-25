@@ -1,0 +1,152 @@
+{
+  "area": "shell",
+  "bodies": {
+    "b17": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b18"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b19"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b19"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b20"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b20"
+      ],
+      "op": "shell",
+      "outputs": [
+        "b21"
+      ],
+      "params": {
+        "open_faces": {
+          "kind": "face",
+          "picked": [
+            {
+              "at": [],
+              "index": 17
+            }
+          ],
+          "points": [
+            [
+              9.043596016562848,
+              42.62959561814686,
+              30.0
+            ]
+          ],
+          "tolerance": 0.07681245747868608
+        },
+        "thickness": -2.0
+      }
+    }
+  ],
+  "case": "1525-shell-box-with-rounds-chamfer-and-fillet",
+  "expected": {
+    "bbox": {
+      "max": [
+        50,
+        50,
+        30
+      ],
+      "min": [
+        0,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "faces": 51,
+    "method": "the body is convex (every edge convex), so the 2 mm shell's cavity is its exact inward offset, open at the top. Body = the square Q = [10,40]^2 swept by a profile at distance f(z) from Q: horizontal section area A(z) = 900 + 120 f + pi f^2. Body: f = 5 + z (chamfer) to z = 4 sqrt2 - 1.828 = 3.828, then the r4 fillet centred at (6, zc), zc = 1 + 4 sqrt2, f = 6 + sqrt(16 - (z - zc)^2) up to zc, then f = 10 (r10 rounds) to z = 30. Cavity (every face moved 2 in: floor z = 2, chamfer plane by 2 along its normal, fillet r2 about the same centre, rounds r8): f = z + 5 - 2 sqrt2 to zc - sqrt2, then 6 + sqrt(4 - (z - zc)^2) to zc, then 8, from z = 2 to 30. V = int_0^30 A_body - int_2^30 A_cavity = 70207.8635 - 56506.1293. Faces: the body's 26 (top, bottom, 4 walls, 4 rounds, 4 + 4 chamfer planes and cones, 4 + 4 fillet cylinders and tori) less the top, their 25 inner copies and the rim",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#1525"
+    ],
+    "volume_mm3": 13701.734185296977,
+    "what": "a 50x50x30 box with r10 vertical rounds, a 5 mm chamfer round the base and a 4 mm fillet where the chamfer meets the wall, shelled 2 mm open at the top"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 112,
+      "faces": 51,
+      "vertices": 64
+    }
+  },
+  "records": "1525-shell-box-with-rounds-chamfer-and-fillet.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b21"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 14063.419596794924,
+      "body_count": 1,
+      "edges": 112,
+      "faces": 51,
+      "vertices": 64,
+      "volume_mm3": 13701.734209235923
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#1525"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "shell"
+  ],
+  "ungraded": [],
+  "what": "a 50x50x30 box with r10 vertical rounds, a 5 mm chamfer round the base and a 4 mm fillet where the chamfer meets the wall, shelled 2 mm open at the top",
+  "why_not": []
+}

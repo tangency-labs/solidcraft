@@ -5,8 +5,10 @@ follow-ups. The personal rendering branch now ports that work onto the combined
 CPU/GPU2 snapshot described in
 [advanced CPU integration](render-cpu-advanced-integration.md). VNDF, spatial AA,
 surface effects, visible emission and the bounded dielectric path are integrated
-source, but their exact-revision execution and visual acceptance remain pending.
-Historical checks do not qualify this new combination.
+source. The combined CPU renderer has since executed the corresponding
+numerical, bounded-work and image-consumer checks; current combined engine/UI
+and native visual qualification remain pending. Historical checks do not qualify
+those remaining gates.
 
 ## Disjoint lighting paths
 
@@ -39,7 +41,7 @@ Explicit mirrors retain their declared ideal-reflection/Fresnel intent.
 The foundation retained the pinned reflection unit's projected-NDF GGX proposal.
 The separate [VNDF follow-up](render-vndf-prototype.md) replaces its production
 proposal and outgoing PDF together, with the same BSDF and null accounting;
-its source-only checks do not transfer foundation validation. The integrated
+its separate numerical checks do not transfer foundation validation. The integrated
 planar anisotropic adjunct replaces only the selected face's matched rough sampler
 and directional direct BRDF. There is no retry, PDF renormalization or diffuse-over-
 specular-PDF mixture. Both samplers preserve the same HDR miss contract.
@@ -91,7 +93,7 @@ metadata as the reflection cursor state grows. It is not another decoder, cache,
 loader, worker or pool. Actual vector capacity must be one. Completion drops that
 slot; decoded/scanline capacities and source capacities retain their prior checks.
 A source regression checks the combined image task fits its 4096-byte host slot;
-that test has NOT RUN.
+that renderer layout test has executed in the combined CPU-feature build.
 
 Preparation, traversal and reflection continuation charge the shared cumulative
 work budget and observe cancellation. Cursor-to-shading transitions yield before
@@ -108,7 +110,7 @@ GGX sample weights and deterministic variates; a broad bright cell rotating in
 world space; rejection of mixed/diffuse rough responses; retained selector
 capacities/task layout; and cancellation/work exhaustion during secondary
 transport. All previous HDR and reflection test sources are retained unchanged.
-These tests have NOT RUN, and the prepared PNG comparisons are not screenshots.
+These renderer tests have executed; their decoded PNG checks are not native screenshots or visual acceptance.
 
 Before publication, integrate real prerequisite history, run the combined
 default/feature checks, Clippy/wasm and required project gates, then produce and
@@ -147,5 +149,6 @@ equal-axis HDR reflection matches isotropic PNG bytes; unsupported direct/mirror
 combinations refuse; and an actual anisotropic secondary hit into another body
 yields within one unit (four per public quantum) and observes cancellation.
 Kernel's core/face tests and v4 continuation regressions are also retained from
-pinned source. Every added/adopted test is NOT RUN in this integration. Independent
-source review and the combined execution/visual gates remain pending.
+pinned source. The corresponding CPU renderer combination tests have executed;
+this does not transfer validation to kernel changes or qualify current combined
+engine/UI/native visual gates.

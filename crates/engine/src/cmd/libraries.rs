@@ -1,65 +1,33 @@
 //! Local material libraries: inspect/export files and copy exact revisions into a design.
 use super::CommandSpec;
+use crate::schema::libraries::{
+    LibraryApplied, LibraryApplyParams, LibraryExportParams, LibraryExported, LibraryInspectParams, LibraryInspected, LibraryTargets,
+};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session, params::bad};
-use serde::Deserialize;
 use serde_json::{Value, json};
-use solidcraft_io::catalog::{Catalog, Definition, Provenance};
+use solidcraft_io::catalog::{Catalog, Definition};
+
+const INSPECT_CONTRACT: TypedContract<LibraryInspectParams> = TypedContract::new();
+const EXPORT_CONTRACT: TypedContract<LibraryExportParams> = TypedContract::new();
+const APPLY_CONTRACT: TypedContract<LibraryApplyParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("library.inspect", "Inspect Local Library", inspect).icon("inspect").noundo().doc_only()
+    CommandSpec::new("library.inspect", "Inspect Local Library", crate::checked!("library.inspect", inspect)).icon("inspect").noundo().doc_only()
+        .contract(&INSPECT_CONTRACT)
+        .output(output_schema_for::<LibraryInspected>)
         .params("path: v1/v2 library JSON; returns validated catalog and exact entry revisions, without changing the design"),
-    CommandSpec::new("library.export", "Export Design Library", export).icon("export").noundo().doc_only()
+    CommandSpec::new("library.export", "Export Design Library", crate::checked!("library.export", export)).icon("export").noundo().doc_only()
+        .contract(&EXPORT_CONTRACT)
+        .output(output_schema_for::<LibraryExported>)
         .params("path: .json; id? (default user.local), name?, provenance?, overwrite? false, format? solidcraft-library/2 (default) | solidcraft-library/1 (refuses PBR/cards). Copies assigned looks and design-local physical definitions; never changes the design"),
-    CommandSpec::new("library.apply", "Apply Local Library Entry", apply).icon("import").enabled(super::not_in_sketch)
+    CommandSpec::new("library.apply", "Apply Local Library Entry", crate::checked!("library.apply", apply)).icon("import").enabled(super::not_in_sketch)
+        .contract(&APPLY_CONTRACT)
+        .output(output_schema_for::<LibraryApplied>)
         .params("path, entry: qualified ID, revision: exact content SHA-256; targets?: {bodies?, faces?: [{body,point}], components?}; name?: physical material name on import. Copies values in one undo step; material conflicts are explicit"),
 ];
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Inspect {
-    path: String,
-}
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Export {
-    path: String,
-    #[serde(default = "default_id")]
-    id: String,
-    #[serde(default = "default_name")]
-    name: String,
-    #[serde(default)]
-    provenance: Provenance,
-    #[serde(default)]
-    overwrite: bool,
-    #[serde(default = "default_format")]
-    format: String,
-}
-fn default_format() -> String {
-    solidcraft_io::catalog::FORMAT.into()
-}
-fn default_id() -> String {
-    "user.local".into()
-}
-fn default_name() -> String {
-    "My library".into()
-}
-#[derive(Default, Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
-struct Targets {
-    #[serde(default)]
-    bodies: Vec<String>,
-    #[serde(default)]
-    faces: Vec<Face>,
-    #[serde(default)]
-    components: Vec<String>,
-}
-#[derive(Deserialize, serde::Serialize)]
-#[serde(deny_unknown_fields)]
-struct Face {
-    body: String,
-    point: [f64; 3],
-}
-impl Targets {
+impl LibraryTargets {
     fn validate(&self) -> Result<()> {
         let cmd = "library.apply";
         if self.bodies.len().saturating_add(self.faces.len()).saturating_add(self.components.len()) > 1024 {
@@ -79,35 +47,28 @@ impl Targets {
         self.bodies.is_empty() && self.faces.is_empty() && self.components.is_empty()
     }
 }
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Apply {
-    path: String,
-    entry: String,
-    revision: String,
-    #[serde(default)]
-    targets: Targets,
-    name: Option<String>,
-}
 fn path(cmd: &str, value: &str) -> Result<()> {
     if value.is_empty() || value.len() > 4096 || value.chars().any(char::is_control) {
         return Err(bad(cmd, "invalid library path"));
     }
     solidcraft_io::vfs::check(value).map_err(|e| bad(cmd, e.to_string()))
 }
+fn reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
+}
 fn nested(s: &mut Session, id: &str, p: &Value) -> Result<Value> {
     crate::find_command(id).ok_or_else(|| bad("library.apply", "required assignment command is unavailable"))?.run_nested(s, p)
 }
 fn inspect(_s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "library.inspect";
-    let request: Inspect = serde_json::from_value(p.clone()).map_err(|e| bad(cmd, e.to_string()))?;
+    let request: LibraryInspectParams = serde_json::from_value(p.clone()).map_err(|e| bad(cmd, e.to_string()))?;
     path(cmd, &request.path)?;
     let catalog = Catalog::read(&request.path).map_err(|e| bad(cmd, e.to_string()))?;
-    Ok(json!({"catalog":catalog}))
+    reply(cmd, LibraryInspected { catalog, param_warnings: Vec::new() })
 }
 fn export(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "library.export";
-    let request: Export = serde_json::from_value(p.clone()).map_err(|e| bad(cmd, e.to_string()))?;
+    let request: LibraryExportParams = serde_json::from_value(p.clone()).map_err(|e| bad(cmd, e.to_string()))?;
     path(cmd, &request.path)?;
     if !request.path.to_ascii_lowercase().ends_with(".json") {
         return Err(bad(cmd, "library export path must end in .json"));
@@ -129,11 +90,12 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         solidcraft_io::vfs::write(&request.path, &bytes)
     };
     result.map_err(|e| bad(cmd, format!("could not export library: {e}")))?;
-    Ok(json!({"path":request.path,"entries":catalog.entries.len(),"bytes":bytes.len(),"catalog":catalog}))
+    let entries = catalog.entries.len();
+    reply(cmd, LibraryExported { path: request.path, entries, bytes: bytes.len(), catalog, param_warnings: Vec::new() })
 }
 fn apply(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "library.apply";
-    let request: Apply = serde_json::from_value(p.clone()).map_err(|e| bad(cmd, e.to_string()))?;
+    let request: LibraryApplyParams = serde_json::from_value(p.clone()).map_err(|e| bad(cmd, e.to_string()))?;
     path(cmd, &request.path)?;
     request.targets.validate()?;
     if request.entry.len() > 129 || request.revision.len() != 64 {
@@ -205,7 +167,7 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
             json!({"material":name,"reused":reused,"bodies":request.targets.bodies})
         }
     };
-    Ok(json!({"entry":entry.id,"revision":entry.revision,"copied":true,"result":result}))
+    reply(cmd, LibraryApplied { entry: entry.id.clone(), revision: entry.revision.clone(), copied: true, result, param_warnings: Vec::new() })
 }
 
 #[cfg(test)]

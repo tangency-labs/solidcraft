@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "a 4x4 square swept along the same Bezier path",
+ "source": "analytic",
+ "method": "the square's centre is on the planar path and it stays square to it: V = A L; side faces: the inner and outer walls have s(L -/+ a dtheta), the two others s L each, total 4 s L; + 2 ends",
+ "body_count": 1,
+ "volume_mm3": 739.529208687,
+ "area_mm2": 771.529208687
+}

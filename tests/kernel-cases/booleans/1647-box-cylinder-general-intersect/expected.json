@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1647"
+ ],
+ "what": "a box and a cylinder in general position (nothing coincident or tangent): Intersect refused as an implausible volume",
+ "source": "analytic",
+ "method": "axis along z, so V = (area of the box's xy rectangle inside the cylinder's disc) * (z overlap). Rectangle x 11.4838..16.2729, y 4.8016..7.8016; disc centre (29.2481, 8.3683) r 13.5029; area = integral over x of the y-length inside both (clipped chord) = 1.019217 mm2 (integrated with 4e6 midpoint steps and cross-checked with Simpson). z overlap: max(3.6313, 6.9479)=6.9479 .. min(14.0507, 26.667)=14.0507 -> 7.102761. V = 1.019217 * 7.102761 = 7.2393",
+ "body_count": 1,
+ "volume_mm3": 7.2392536
+}

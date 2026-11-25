@@ -1,0 +1,12 @@
+id = "nlib.srf_tool_p3"
+upstream = ["source/SMLib/src/NL_SrfTool.cpp"]
+rust_module = "nurbs::srf_tool::p3"
+depends_on = ["nlib.math", "nlib.srf_basic", "nlib.srf_tool_p2"]
+soft_depends_on = ["nlib.basis_basic", "nlib.knots", "nlib.srf_nurb", "nlib.srf_tool_p1"]
+est_lines = 1380
+layer = 12
+tests = ["SM_API_test:TestSmCreateSurfaceFromRandomPoints", "SM_API_test:TestSmCreateExtrude", "prog_test:my_test_ss_nurb", "prog_test:my_test_surface_point_intersect", "prog_test:my_test_GlobalCC_intersect", "prog_test:my_test_GlobalCSI"]
+status = "green"
+claimed_by = "swarm-nlib.srf_tool_p3-a1"
+claimed_at = "2026-10-12T23:00:00Z"
+notes = "difftest green: 2518 cases (118 fixture + 2400 generated), 0 deferred, max_rel_err 0; 3 fns; largest: N_SrfRemoveAllKnots, N_SrfJoin, N_MakeSrfsCompatible; unit-SCC #22 (220 units); 199 upstream test entry points reach this unit"

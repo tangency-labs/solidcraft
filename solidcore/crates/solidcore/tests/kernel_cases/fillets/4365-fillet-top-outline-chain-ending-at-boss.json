@@ -1,0 +1,302 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  10.0,
+                  0.0,
+                  10.0
+                ],
+                [
+                  50.0,
+                  0.0,
+                  10.0
+                ]
+              ],
+              "index": 9
+            },
+            {
+              "at": [
+                [
+                  0.0,
+                  10.0,
+                  10.0
+                ],
+                [
+                  10.0,
+                  0.0,
+                  10.0
+                ]
+              ],
+              "index": 6
+            },
+            {
+              "at": [
+                [
+                  50.0,
+                  0.0,
+                  10.0
+                ],
+                [
+                  60.0,
+                  10.000000000000004,
+                  10.0
+                ]
+              ],
+              "index": 12
+            },
+            {
+              "at": [
+                [
+                  0.0,
+                  30.0,
+                  10.0
+                ],
+                [
+                  0.0,
+                  10.0,
+                  10.0
+                ]
+              ],
+              "index": 3
+            },
+            {
+              "at": [
+                [
+                  60.0,
+                  10.000000000000004,
+                  10.0
+                ],
+                [
+                  60.0,
+                  30.0,
+                  10.0
+                ]
+              ],
+              "index": 15
+            },
+            {
+              "at": [
+                [
+                  4.000000000000007,
+                  38.0,
+                  9.999999999999998
+                ],
+                [
+                  0.0,
+                  30.0,
+                  10.0
+                ]
+              ],
+              "index": 24
+            },
+            {
+              "at": [
+                [
+                  60.0,
+                  30.0,
+                  10.0
+                ],
+                [
+                  50.0,
+                  40.0,
+                  10.0
+                ]
+              ],
+              "index": 18
+            },
+            {
+              "at": [
+                [
+                  50.0,
+                  40.0,
+                  10.0
+                ],
+                [
+                  18.0,
+                  40.0,
+                  10.0
+                ]
+              ],
+              "index": 22
+            }
+          ],
+          "points": [
+            [
+              30.0,
+              0.0,
+              10.0
+            ],
+            [
+              2.928932188134525,
+              2.9289321881345245,
+              10.0
+            ],
+            [
+              57.07106781186547,
+              2.92893218813453,
+              10.0
+            ],
+            [
+              0.0,
+              20.0,
+              10.0
+            ],
+            [
+              60.0,
+              20.0,
+              10.0
+            ],
+            [
+              1.0725461224153747,
+              34.46135962597048,
+              10.0
+            ],
+            [
+              57.071067811865476,
+              37.071067811865476,
+              10.0
+            ],
+            [
+              34.0,
+              40.0,
+              10.0
+            ]
+          ],
+          "tolerance": 3.7929480657763084
+        },
+        "kind": "round",
+        "sizes": [
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0
+        ]
+      }
+    }
+  ],
+  "case": "4365-fillet-top-outline-chain-ending-at-boss",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "method": "the round runs round the outline from the boss's wall to its wall and ends against it; how the rolling ball closes on the boss's cylinder has no closed form, so only the outcome is graded: one valid closed body (the reporter's standard test, rebuilt from its screenshot)",
+    "source": "invariants",
+    "sources": [
+      "tangency-labs/solidcraft#4365",
+      "tangency-labs/solidcraft#4222"
+    ],
+    "what": "the top outline of a 60x40 r10 rounded block filleted r2 along its tangent chain, where a boss (r10, 10 high) standing over a corner of the outline interrupts it: refused ('a vertex of the edge chain where other faces meet')"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 50,
+      "faces": 21,
+      "vertices": 31
+    }
+  },
+  "records": "4365-fillet-top-outline-chain-ending-at-boss.bodies.json.gz",
+  "result": [
+    {
+      "body": "Base",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 6978.643555336402,
+      "body_count": 1,
+      "edges": 50,
+      "faces": 21,
+      "vertices": 31,
+      "volume_mm3": 26142.508347372383
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#4365",
+    "tangency-labs/solidcraft#4222"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "the top outline of a 60x40 r10 rounded block filleted r2 along its tangent chain, where a boss (r10, 10 high) standing over a corner of the outline interrupts it: refused ('a vertex of the edge chain where other faces meet')",
+  "why_not": []
+}

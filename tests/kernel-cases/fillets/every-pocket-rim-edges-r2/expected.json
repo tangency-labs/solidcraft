@@ -1,0 +1,27 @@
+{
+ "sources": [],
+ "what": "the four rim edges of a rectangular pocket rounded r2 with the default turn, Auto: the convex rim rounds turn round the pocket's concave upright corners swept",
+ "source": "analytic",
+ "method": "plate 60x40x10 with the pocket 30x20x5 (x 15..45, y 10..30, floor z = 5, sharp vertical corners): V0 = 24000 - 3000 = 21000. Each convex rim edge loses the spandrel A = r^2 (1 - pi/4) = 0.858407 along its length (100 in all). The rounds are convex and the pocket's upright corner edges concave, so Auto sweeps each corner: the ball centre turns a quarter circle about the corner edge, and the quadrant of material beyond the corner loses the spandrel revolved a quarter turn about that edge, at distance u from it: (pi/2) M, M = r^3 (5/6 - pi/4) = 0.383481 the spandrel's first moment about the edge (Pappus). (Mitred, the two rounds would run on past the corner and the quadrant would lose the overlap of their spandrel prisms, r^3 (5/3 - pi/2) = 2 M.) Removed = 100 A + 2 pi M = 88.2502. V = 20911.7498. Faces 15 + a torus piece at each of the 4 corners = 19. Graded to 1e-7 relative: the Mitre and Swept turns differ by (8 - 2 pi) M = 0.6584 mm^3 at these four corners, 3.1e-05 of the volume, inside the default 1e-3.",
+ "body_count": 1,
+ "volume_mm3": 20911.749780915474,
+ "faces": 19,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   40,
+   10
+  ]
+ },
+ "continuity": {
+  "order": "g1"
+ },
+ "tolerance": {
+  "rel": 1e-07
+ }
+}

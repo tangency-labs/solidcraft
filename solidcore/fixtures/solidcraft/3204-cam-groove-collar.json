@@ -1,0 +1,71 @@
+{
+  "issue": "https://github.com/tangency-labs/solidcraft/issues/3204",
+  "pr": "https://github.com/tangency-labs/solidcraft/pull/3594",
+  "test": "crates/engine/src/cmd/features_more_tests.rs: a_cam_groove_is_cut_on_a_wall_a_collar_interrupts",
+  "summary": "SolidCraft #3594 (fixing #3204) wraps a 2D sketch onto a cylinder wall and cuts a cam groove along it. Its kernel test a_cam_groove_is_cut_on_a_wall_a_collar_interrupts cuts a depth 1, width 4 groove on the wall of a stepped shaft - a wall cylinder (r 10, z 0..18) with a smaller coaxial collar (r 8, z 18..20) joined on top - and checks the groove stays in its own span and the collar stays intact. SM_API has neither the wrap nor the cam groove, so the case carries the same bodies through union/difference: a full-turn annular band for the wrapped groove (depth 1, width 4, whose volume is the same Pappus law the SolidCraft test binds, 2*pi*R*width*depth*(1-1/(2R))), a band whose planes cross the shoulder, and one drawn on the collar span as a control. Volumes are closed form; the wrapped helix and the point-on-wall face selection are SolidCraft operations above the kernel.",
+  "cases": [
+    {
+      "name": "groove_on_the_wall_below_the_collar",
+      "note": "#3594's own groove, over the full turn: the band is r 9..12, z 7..11, centred on the touch point z 9 that the wrap command anchors on, so the cut removes the shaft's r 9..10 ring behind the wrapped band. The collar above (r 8, z 18..20) must stay whole; the SolidCraft test's Pappus law over the full circle gives 2*pi*10*4*1*(1-1/20) = 76*pi.",
+      "steps": [
+        { "op": "cylinder", "id": "sleeve", "origin": [0, 0, 0], "radius": 10.0, "height": 18.0 },
+        { "op": "cylinder", "id": "collar", "origin": [0, 0, 18], "radius": 8.0, "height": 2.0 },
+        { "op": "union", "id": "joined", "a": "sleeve", "b": "collar" },
+        { "op": "cylinder", "id": "band_outer", "origin": [0, 0, 7], "radius": 12.0, "height": 4.0 },
+        { "op": "cylinder", "id": "band_inner", "origin": [0, 0, 7], "radius": 9.0, "height": 4.0 },
+        { "op": "difference", "id": "band", "a": "band_outer", "b": "band_inner" },
+        { "op": "difference", "id": "result", "a": "joined", "b": "band" }
+      ],
+      "expect": {
+        "lumps": 1,
+        "volume": {
+          "value": 5818.2295944483,
+          "tol": 0.01,
+          "formula": "pi*(10^2*18 + 8^2*2) - 4*pi*(10^2-9^2) = 1852*pi"
+        }
+      }
+    },
+    {
+      "name": "groove_beside_the_shoulder",
+      "note": "the same groove drawn against the shoulder: the band (r 9..12, z 16..20) crosses the shoulder plane z 18, its top plane sits exactly on the collar's top face z 20, and its inner cylinder is the exact post-cut groove wall. Cutting the wall's top ring (r 9..10, z 16..18) must stop where the collar's rim meets the shoulder annulus and leave the collar whole.",
+      "steps": [
+        { "op": "cylinder", "id": "sleeve", "origin": [0, 0, 0], "radius": 10.0, "height": 18.0 },
+        { "op": "cylinder", "id": "collar", "origin": [0, 0, 18], "radius": 8.0, "height": 2.0 },
+        { "op": "union", "id": "joined", "a": "sleeve", "b": "collar" },
+        { "op": "cylinder", "id": "band_outer", "origin": [0, 0, 16], "radius": 12.0, "height": 4.0 },
+        { "op": "cylinder", "id": "band_inner", "origin": [0, 0, 16], "radius": 9.0, "height": 4.0 },
+        { "op": "difference", "id": "band", "a": "band_outer", "b": "band_inner" },
+        { "op": "difference", "id": "result", "a": "joined", "b": "band" }
+      ],
+      "expect": {
+        "lumps": 1,
+        "volume": {
+          "value": 5937.6101152847,
+          "tol": 0.01,
+          "formula": "pi*(10^2*18 + 8^2*2) - 2*pi*(10^2-9^2) = 1890*pi"
+        }
+      }
+    },
+    {
+      "name": "groove_on_the_collar_span",
+      "note": "control, the span rule: the band drawn on the collar's span (r 7..9, z 18..22, its top plane above the collar's end) removes exactly the collar's own ring, 2*pi*(8^2-7^2)/2*2 = 30*pi. Cutting the wall's span instead would read the other cases' values, so the file pins which span the band lands on, the way SolidCraft's wrapped groove pinned it through the touch point.",
+      "steps": [
+        { "op": "cylinder", "id": "sleeve", "origin": [0, 0, 0], "radius": 10.0, "height": 18.0 },
+        { "op": "cylinder", "id": "collar", "origin": [0, 0, 18], "radius": 8.0, "height": 2.0 },
+        { "op": "union", "id": "joined", "a": "sleeve", "b": "collar" },
+        { "op": "cylinder", "id": "band_outer", "origin": [0, 0, 18], "radius": 9.0, "height": 4.0 },
+        { "op": "cylinder", "id": "band_inner", "origin": [0, 0, 18], "radius": 7.0, "height": 4.0 },
+        { "op": "difference", "id": "band", "a": "band_outer", "b": "band_inner" },
+        { "op": "difference", "id": "result", "a": "joined", "b": "band" }
+      ],
+      "expect": {
+        "lumps": 1,
+        "volume": {
+          "value": 5962.7428565134,
+          "tol": 0.01,
+          "formula": "pi*(10^2*18 + 8^2*2) - 2*pi*(8^2-7^2) = 1898*pi"
+        }
+      }
+    }
+  ]
+}

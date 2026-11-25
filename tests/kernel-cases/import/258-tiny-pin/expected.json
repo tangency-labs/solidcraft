@@ -1,0 +1,24 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#258"
+  ],
+  "what": "a STEP pin 0.5 mm across, 2 mm long: meshed 1.16 mm off at a 0.5 mm tolerance",
+  "source": "analytic",
+  "method": "cylinder r=0.25, h=2: V = pi*0.0625*2 = pi/8; area = 2*pi*r*h + 2*pi*r^2 = 3.5343; bbox [-0.25,-0.25,0]..[0.25,0.25,2]; faces: side + two ends",
+  "body_count": 1,
+  "volume_mm3": 0.39269908169872414,
+  "area_mm2": 3.5342917352885173,
+  "faces": 3,
+  "bbox": {
+    "min": [
+      -0.25,
+      -0.25,
+      0
+    ],
+    "max": [
+      0.25,
+      0.25,
+      2
+    ]
+  }
+}

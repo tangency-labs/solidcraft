@@ -1,0 +1,4 @@
+# Source files whose change must rerun the solids area (cones, scale, align, bounding solids).
+crates/doc/src/eval_more.rs
+crates/engine/src/cmd/features_more.rs
+tests/kernel-cases/solids/**

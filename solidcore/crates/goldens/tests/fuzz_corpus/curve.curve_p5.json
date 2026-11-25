@@ -1,0 +1,6 @@
+{
+  "unit": "curve.curve_p5",
+  "cases": [
+    {"name": "fuzz00892_bad_index_count_9223372036854776000", "origin": "fuzz-out/n2000/curve.curve_p5/fuzz00892.json (timeout: rust: no result after 20 s)", "cpp": "harness: invalid argument: bad index/count 9223372036854776000", "rust": "harness: 9223372036854775807 samples", "inputs": {"curve": {"ellipse": {"c": [3.09, 1.16, 2.25], "domain": [30.0, 390.0], "radii": [7.22, 5.68], "x": [1.0, 0.0, 0.0], "y": [0.0, 1.0, 0.0]}}, "n": 9223372036854775807, "op": "is_arc", "tol": 1e-06}}
+  ]
+}

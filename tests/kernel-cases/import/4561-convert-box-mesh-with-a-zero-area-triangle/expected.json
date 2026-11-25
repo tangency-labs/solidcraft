@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4561"
+ ],
+ "what": "Convert Mesh of a 20x10x5 box STL (12 triangles) with one extra zero-area triangle lying on an edge ((0,0,0) (10,0,0) (20,0,0)): refused with 'mesh conversion: degenerate triangle'",
+ "source": "analytic",
+ "method": "the zero-area triangle adds no surface; the mesh is the closed box, a constant-section prism, so it converts: V = 20*10*5 = 1000, 6 faces. The STL is written by hand (box-degenerate.stl, the triage's mesh)",
+ "body_count": 1,
+ "faces": 6,
+ "volume_mm3": 1000.0
+}

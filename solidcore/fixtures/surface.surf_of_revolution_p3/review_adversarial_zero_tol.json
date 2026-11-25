@@ -1,0 +1,2890 @@
+{
+"cases": [
+{
+"name": "rev3_drop_torus_near_3",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "circle",
+"c": [
+3,
+0,
+0
+],
+"x": [
+1,
+0,
+0
+],
+"y": [
+0,
+0,
+1
+],
+"d": [
+0,
+360
+],
+"r": 1
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 3,
+"point": [
+2.5,
+0.5,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_torus_near_0",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "circle",
+"c": [
+3,
+0,
+0
+],
+"x": [
+1,
+0,
+0
+],
+"y": [
+0,
+0,
+1
+],
+"d": [
+0,
+360
+],
+"r": 1
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 0,
+"point": [
+2.5,
+0.5,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_torus_near_5",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "circle",
+"c": [
+3,
+0,
+0
+],
+"x": [
+1,
+0,
+0
+],
+"y": [
+0,
+0,
+1
+],
+"d": [
+0,
+360
+],
+"r": 1
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 5,
+"point": [
+2.5,
+0.5,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_torus_near_4",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "circle",
+"c": [
+3,
+0,
+0
+],
+"x": [
+1,
+0,
+0
+],
+"y": [
+0,
+0,
+1
+],
+"d": [
+0,
+360
+],
+"r": 1
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 4,
+"point": [
+2.5,
+0.5,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_torus_on_3",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "circle",
+"c": [
+3,
+0,
+0
+],
+"x": [
+1,
+0,
+0
+],
+"y": [
+0,
+0,
+1
+],
+"d": [
+0,
+360
+],
+"r": 1
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 3,
+"point": [
+2,
+0,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_torus_on_0",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "circle",
+"c": [
+3,
+0,
+0
+],
+"x": [
+1,
+0,
+0
+],
+"y": [
+0,
+0,
+1
+],
+"d": [
+0,
+360
+],
+"r": 1
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 0,
+"point": [
+2,
+0,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_torus_on_5",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "circle",
+"c": [
+3,
+0,
+0
+],
+"x": [
+1,
+0,
+0
+],
+"y": [
+0,
+0,
+1
+],
+"d": [
+0,
+360
+],
+"r": 1
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 5,
+"point": [
+2,
+0,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_torus_on_4",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "circle",
+"c": [
+3,
+0,
+0
+],
+"x": [
+1,
+0,
+0
+],
+"y": [
+0,
+0,
+1
+],
+"d": [
+0,
+360
+],
+"r": 1
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 4,
+"point": [
+2,
+0,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_torus_axis_3",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "circle",
+"c": [
+3,
+0,
+0
+],
+"x": [
+1,
+0,
+0
+],
+"y": [
+0,
+0,
+1
+],
+"d": [
+0,
+360
+],
+"r": 1
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 3,
+"point": [
+0,
+0,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_torus_axis_0",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "circle",
+"c": [
+3,
+0,
+0
+],
+"x": [
+1,
+0,
+0
+],
+"y": [
+0,
+0,
+1
+],
+"d": [
+0,
+360
+],
+"r": 1
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 0,
+"point": [
+0,
+0,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_torus_axis_5",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "circle",
+"c": [
+3,
+0,
+0
+],
+"x": [
+1,
+0,
+0
+],
+"y": [
+0,
+0,
+1
+],
+"d": [
+0,
+360
+],
+"r": 1
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 5,
+"point": [
+0,
+0,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_torus_axis_4",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "circle",
+"c": [
+3,
+0,
+0
+],
+"x": [
+1,
+0,
+0
+],
+"y": [
+0,
+0,
+1
+],
+"d": [
+0,
+360
+],
+"r": 1
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 4,
+"point": [
+0,
+0,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_torus_seam_3",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "circle",
+"c": [
+3,
+0,
+0
+],
+"x": [
+1,
+0,
+0
+],
+"y": [
+0,
+0,
+1
+],
+"d": [
+0,
+360
+],
+"r": 1
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 3,
+"point": [
+3,
+0,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_torus_seam_0",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "circle",
+"c": [
+3,
+0,
+0
+],
+"x": [
+1,
+0,
+0
+],
+"y": [
+0,
+0,
+1
+],
+"d": [
+0,
+360
+],
+"r": 1
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 0,
+"point": [
+3,
+0,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_torus_seam_5",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "circle",
+"c": [
+3,
+0,
+0
+],
+"x": [
+1,
+0,
+0
+],
+"y": [
+0,
+0,
+1
+],
+"d": [
+0,
+360
+],
+"r": 1
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 5,
+"point": [
+3,
+0,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_torus_seam_4",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "circle",
+"c": [
+3,
+0,
+0
+],
+"x": [
+1,
+0,
+0
+],
+"y": [
+0,
+0,
+1
+],
+"d": [
+0,
+360
+],
+"r": 1
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 4,
+"point": [
+3,
+0,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_isect_torus_cyl3",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "circle",
+"c": [
+3,
+0,
+0
+],
+"x": [
+1,
+0,
+0
+],
+"y": [
+0,
+0,
+1
+],
+"d": [
+0,
+360
+],
+"r": 1
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "intersect",
+"other": {
+"kind": "revolution",
+"surf": {
+"gen": {
+"kind": "line",
+"a": [
+3,
+0,
+-2
+],
+"b": [
+3,
+0,
+2
+]
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+}
+},
+"tol": 0.0
+}
+},
+{
+"name": "rev3_isect_torus_cyl2",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "circle",
+"c": [
+3,
+0,
+0
+],
+"x": [
+1,
+0,
+0
+],
+"y": [
+0,
+0,
+1
+],
+"d": [
+0,
+360
+],
+"r": 1
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "intersect",
+"other": {
+"kind": "revolution",
+"surf": {
+"gen": {
+"kind": "line",
+"a": [
+2,
+0,
+-2
+],
+"b": [
+2,
+0,
+2
+]
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+}
+},
+"tol": 0.0
+}
+},
+{
+"name": "rev3_drop_cyl_near_3",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "line",
+"a": [
+2,
+0,
+0
+],
+"b": [
+2,
+0,
+5
+]
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 3,
+"point": [
+2.5,
+0.5,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_cyl_near_0",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "line",
+"a": [
+2,
+0,
+0
+],
+"b": [
+2,
+0,
+5
+]
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 0,
+"point": [
+2.5,
+0.5,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_cyl_near_5",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "line",
+"a": [
+2,
+0,
+0
+],
+"b": [
+2,
+0,
+5
+]
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 5,
+"point": [
+2.5,
+0.5,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_cyl_near_4",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "line",
+"a": [
+2,
+0,
+0
+],
+"b": [
+2,
+0,
+5
+]
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 4,
+"point": [
+2.5,
+0.5,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_cyl_on_3",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "line",
+"a": [
+2,
+0,
+0
+],
+"b": [
+2,
+0,
+5
+]
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 3,
+"point": [
+2,
+0,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_cyl_on_0",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "line",
+"a": [
+2,
+0,
+0
+],
+"b": [
+2,
+0,
+5
+]
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 0,
+"point": [
+2,
+0,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_cyl_on_5",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "line",
+"a": [
+2,
+0,
+0
+],
+"b": [
+2,
+0,
+5
+]
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 5,
+"point": [
+2,
+0,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_cyl_on_4",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "line",
+"a": [
+2,
+0,
+0
+],
+"b": [
+2,
+0,
+5
+]
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 4,
+"point": [
+2,
+0,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_cyl_axis_3",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "line",
+"a": [
+2,
+0,
+0
+],
+"b": [
+2,
+0,
+5
+]
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 3,
+"point": [
+0,
+0,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_cyl_axis_0",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "line",
+"a": [
+2,
+0,
+0
+],
+"b": [
+2,
+0,
+5
+]
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 0,
+"point": [
+0,
+0,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_cyl_axis_5",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "line",
+"a": [
+2,
+0,
+0
+],
+"b": [
+2,
+0,
+5
+]
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 5,
+"point": [
+0,
+0,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_cyl_axis_4",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "line",
+"a": [
+2,
+0,
+0
+],
+"b": [
+2,
+0,
+5
+]
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 4,
+"point": [
+0,
+0,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_cyl_seam_3",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "line",
+"a": [
+2,
+0,
+0
+],
+"b": [
+2,
+0,
+5
+]
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 3,
+"point": [
+3,
+0,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_cyl_seam_0",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "line",
+"a": [
+2,
+0,
+0
+],
+"b": [
+2,
+0,
+5
+]
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 0,
+"point": [
+3,
+0,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_cyl_seam_5",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "line",
+"a": [
+2,
+0,
+0
+],
+"b": [
+2,
+0,
+5
+]
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 5,
+"point": [
+3,
+0,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_cyl_seam_4",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "line",
+"a": [
+2,
+0,
+0
+],
+"b": [
+2,
+0,
+5
+]
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 4,
+"point": [
+3,
+0,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_isect_cyl_cyl3",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "line",
+"a": [
+2,
+0,
+0
+],
+"b": [
+2,
+0,
+5
+]
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "intersect",
+"other": {
+"kind": "revolution",
+"surf": {
+"gen": {
+"kind": "line",
+"a": [
+3,
+0,
+-2
+],
+"b": [
+3,
+0,
+2
+]
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+}
+},
+"tol": 0.0
+}
+},
+{
+"name": "rev3_isect_cyl_cyl2",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "line",
+"a": [
+2,
+0,
+0
+],
+"b": [
+2,
+0,
+5
+]
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "intersect",
+"other": {
+"kind": "revolution",
+"surf": {
+"gen": {
+"kind": "line",
+"a": [
+2,
+0,
+-2
+],
+"b": [
+2,
+0,
+2
+]
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+}
+},
+"tol": 0.0
+}
+},
+{
+"name": "rev3_drop_sphere_near_3",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "circle",
+"c": [
+0,
+0,
+0
+],
+"x": [
+1,
+0,
+0
+],
+"y": [
+0,
+0,
+1
+],
+"d": [
+-90,
+90
+],
+"r": 2
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 3,
+"point": [
+2.5,
+0.5,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_sphere_near_0",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "circle",
+"c": [
+0,
+0,
+0
+],
+"x": [
+1,
+0,
+0
+],
+"y": [
+0,
+0,
+1
+],
+"d": [
+-90,
+90
+],
+"r": 2
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 0,
+"point": [
+2.5,
+0.5,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_sphere_near_5",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "circle",
+"c": [
+0,
+0,
+0
+],
+"x": [
+1,
+0,
+0
+],
+"y": [
+0,
+0,
+1
+],
+"d": [
+-90,
+90
+],
+"r": 2
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 5,
+"point": [
+2.5,
+0.5,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_sphere_near_4",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "circle",
+"c": [
+0,
+0,
+0
+],
+"x": [
+1,
+0,
+0
+],
+"y": [
+0,
+0,
+1
+],
+"d": [
+-90,
+90
+],
+"r": 2
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 4,
+"point": [
+2.5,
+0.5,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_sphere_on_3",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "circle",
+"c": [
+0,
+0,
+0
+],
+"x": [
+1,
+0,
+0
+],
+"y": [
+0,
+0,
+1
+],
+"d": [
+-90,
+90
+],
+"r": 2
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 3,
+"point": [
+2,
+0,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_sphere_on_0",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "circle",
+"c": [
+0,
+0,
+0
+],
+"x": [
+1,
+0,
+0
+],
+"y": [
+0,
+0,
+1
+],
+"d": [
+-90,
+90
+],
+"r": 2
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 0,
+"point": [
+2,
+0,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_sphere_on_5",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "circle",
+"c": [
+0,
+0,
+0
+],
+"x": [
+1,
+0,
+0
+],
+"y": [
+0,
+0,
+1
+],
+"d": [
+-90,
+90
+],
+"r": 2
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 5,
+"point": [
+2,
+0,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_sphere_on_4",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "circle",
+"c": [
+0,
+0,
+0
+],
+"x": [
+1,
+0,
+0
+],
+"y": [
+0,
+0,
+1
+],
+"d": [
+-90,
+90
+],
+"r": 2
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 4,
+"point": [
+2,
+0,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_sphere_axis_3",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "circle",
+"c": [
+0,
+0,
+0
+],
+"x": [
+1,
+0,
+0
+],
+"y": [
+0,
+0,
+1
+],
+"d": [
+-90,
+90
+],
+"r": 2
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 3,
+"point": [
+0,
+0,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_sphere_axis_0",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "circle",
+"c": [
+0,
+0,
+0
+],
+"x": [
+1,
+0,
+0
+],
+"y": [
+0,
+0,
+1
+],
+"d": [
+-90,
+90
+],
+"r": 2
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 0,
+"point": [
+0,
+0,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_sphere_axis_5",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "circle",
+"c": [
+0,
+0,
+0
+],
+"x": [
+1,
+0,
+0
+],
+"y": [
+0,
+0,
+1
+],
+"d": [
+-90,
+90
+],
+"r": 2
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 5,
+"point": [
+0,
+0,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_sphere_axis_4",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "circle",
+"c": [
+0,
+0,
+0
+],
+"x": [
+1,
+0,
+0
+],
+"y": [
+0,
+0,
+1
+],
+"d": [
+-90,
+90
+],
+"r": 2
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 4,
+"point": [
+0,
+0,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_sphere_seam_3",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "circle",
+"c": [
+0,
+0,
+0
+],
+"x": [
+1,
+0,
+0
+],
+"y": [
+0,
+0,
+1
+],
+"d": [
+-90,
+90
+],
+"r": 2
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 3,
+"point": [
+3,
+0,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_sphere_seam_0",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "circle",
+"c": [
+0,
+0,
+0
+],
+"x": [
+1,
+0,
+0
+],
+"y": [
+0,
+0,
+1
+],
+"d": [
+-90,
+90
+],
+"r": 2
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 0,
+"point": [
+3,
+0,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_sphere_seam_5",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "circle",
+"c": [
+0,
+0,
+0
+],
+"x": [
+1,
+0,
+0
+],
+"y": [
+0,
+0,
+1
+],
+"d": [
+-90,
+90
+],
+"r": 2
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 5,
+"point": [
+3,
+0,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_drop_sphere_seam_4",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "circle",
+"c": [
+0,
+0,
+0
+],
+"x": [
+1,
+0,
+0
+],
+"y": [
+0,
+0,
+1
+],
+"d": [
+-90,
+90
+],
+"r": 2
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "drop",
+"operation": 4,
+"point": [
+3,
+0,
+1
+],
+"tol": 0.0,
+"requested": 1
+}
+},
+{
+"name": "rev3_isect_sphere_cyl3",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "circle",
+"c": [
+0,
+0,
+0
+],
+"x": [
+1,
+0,
+0
+],
+"y": [
+0,
+0,
+1
+],
+"d": [
+-90,
+90
+],
+"r": 2
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "intersect",
+"other": {
+"kind": "revolution",
+"surf": {
+"gen": {
+"kind": "line",
+"a": [
+3,
+0,
+-2
+],
+"b": [
+3,
+0,
+2
+]
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+}
+},
+"tol": 0.0
+}
+},
+{
+"name": "rev3_isect_sphere_cyl2",
+"upstream_ref": "review adversarial (zero tolerance)",
+"inputs": {
+"surf": {
+"gen": {
+"kind": "circle",
+"c": [
+0,
+0,
+0
+],
+"x": [
+1,
+0,
+0
+],
+"y": [
+0,
+0,
+1
+],
+"d": [
+-90,
+90
+],
+"r": 2
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+},
+"op": "intersect",
+"other": {
+"kind": "revolution",
+"surf": {
+"gen": {
+"kind": "line",
+"a": [
+2,
+0,
+-2
+],
+"b": [
+2,
+0,
+2
+]
+},
+"build": {
+"mode": "canonical",
+"point": [
+0,
+0,
+0
+],
+"axis": [
+0,
+0,
+1
+]
+},
+"swap": false
+}
+},
+"tol": 0.0
+}
+}
+]
+}

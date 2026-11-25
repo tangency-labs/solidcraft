@@ -1,0 +1,533 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/5747",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+ "test": "none: not fixed on truck (kernel work paused under tangency-labs/solidcraft#3992); geometry is the reporter's description and the report's edge points, reproduced on 0.21.0 in the issue's triage comment and on 0.29.0 with solidcraft-cli",
+ "summary": "A 2 mm fillet on the concave edge where a cylindrical boss meets the top face of a block cut a groove into the top face instead of adding a cove, with no error, on SolidCraft's truck kernel. The reporter built a block 26.8 x 48 x 10, joined a cylinder of radius 5.64 and height 10 on its top, extruded the block's top face 4 mm (joined) and rounded the six top edges at z = 14 with r 2: the four outer edges rounded, the two edges of the boss circle got a groove (about 32.8 mm^3 removed, the cove's own volume; triage on 0.21.0 with the reporter's design). Not fixed on truck: kernel work is paused (tangency-labs/solidcraft#3992) and the `pr` link is the SMLib kernel move (tangency-labs/solidcraft#4012). Geometry is the reporter's description and the report's edge points: the block spans x -13.4..13.4, y -24..24; the boss is centred on the Z axis with R = 5.635601121442153, the distance of the report's points (0, +-R, 14) from the axis, standing on z = 10 to z = 20 (only its 6 mm above z = 14 shows, more than the round, so the cove does not depend on it). The report picks the boss circle at (0, +-R, 14), its two halves on truck; on solidcore it is one closed edge, so the cases pick it once at (0, R, 14) (naming the same edge twice stops the fillet with upstream status 1001). The face extrusion is the slab of the top face, the rectangle less the boss's disc, joined: SolidCraft's join unites the tool with the target (crates/doc/src/eval.rs), so the steps are union(union(block, boss), slab), and the slab's hole wall lies on the boss's side between z 10 and 14. That history matters: replayed with solidcraft-cli 0.29.0 (truck), the cove alone measures V0 - 32.9 and the six edges V0 - O - 32.9 on the joined body, while the same fillets on a block built 14 mm tall in one step give the cove, as do the outer edges alone on either body. Volumes are closed form: V0 is the block and the boss above it; each outer round removes (1 - pi/4) r^2 per length, the two at a corner overlap in (5/3 - pi/2) r^3 since the vertical edges stay sharp (the mitred rounds of 1080-blends-that-fit-beside-a-pocket.json's cube_top_fillets_meet_at_corners); the cove is its section r^2 (1 - pi/4) turned about the axis at R + c (Pappus, as in 3468-offset-face-next-to-fillet.json's boss_wall_out_1). The outer rounds and the cove are apart (the cove reaches R + 2 = 7.64 from the axis, the outer rounds start 11.4 and 22 from it), so they add up. Each round was checked by quadrature, and every result by a randomised QMC over the CSG of its block, boss, rounds and cove within its standard error. Tolerance: 0.1 % of the rounds' volume, 0.01 mm^3 for the join alone.",
+ "cases": [
+  {
+   "name": "block_14_tall_six_edges",
+   "note": "Control: the block built 14 mm tall in one step and the boss joined on it, so no face lies on the boss's side below the top face; the report's six edges (the boss circle picked once) rounded r 2. On SolidCraft 0.29.0 (truck) this builds right: a cove round the boss, the outer edges rounded.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      -13.4,
+      -24.0,
+      0.0
+     ],
+     "size": [
+      26.8,
+      48.0,
+      14.0
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "boss",
+     "origin": [
+      0.0,
+      0.0,
+      10.0
+     ],
+     "radius": 5.635601121442153,
+     "height": 10.0
+    },
+    {
+     "op": "union",
+     "id": "raised",
+     "a": "block",
+     "b": "boss"
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "raised",
+     "edges": [
+      [
+       0.0,
+       -24.0,
+       14.0
+      ],
+      [
+       13.4,
+       0.0,
+       14.0
+      ],
+      [
+       0.0,
+       24.0,
+       14.0
+      ],
+      [
+       -13.4,
+       0.0,
+       14.0
+      ],
+      [
+       0.0,
+       5.635601121442153,
+       14.0
+      ]
+     ],
+     "radius": 2.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 18515.717289756052,
+     "tol": 0.15815516998211812,
+     "formula": "V0 - O + C; V0 = 26.8*48*14 + pi*R^2*(20 - 14), R = 5.635601121442153 (the boss's 6 mm above the top face); O = (1 - pi/4)*2^2*2*(26.8 + 48) - 4*(5/3 - pi/2)*2^3 (the four top edges' rounds over their whole length, less their overlap at each mitred corner: int_0^2 (2 - sqrt(4 - s^2))^2 ds); C = 2*pi*(R + c)*2^2*(1 - pi/4), c = 2*(10 - 3*pi)/(3*(4 - pi)) (Pappus: the cove's section and its centroid's distance from the boss wall) (tol: 0.1 % of the rounds)"
+    }
+   }
+  },
+  {
+   "name": "slab_joined",
+   "note": "The issue's body before the fillet: the block 10 mm tall, the boss joined on its top, then the top face (the rectangle less the boss's disc) extruded 4 mm and joined, so the slab's hole wall lies on the boss's side between z 10 and 14 and its bottom on the block's top.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      -13.4,
+      -24.0,
+      0.0
+     ],
+     "size": [
+      26.8,
+      48.0,
+      10.0
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "boss",
+     "origin": [
+      0.0,
+      0.0,
+      10.0
+     ],
+     "radius": 5.635601121442153,
+     "height": 10.0
+    },
+    {
+     "op": "union",
+     "id": "part",
+     "a": "block",
+     "b": "boss"
+    },
+    {
+     "op": "extrude",
+     "id": "slab",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         -13.4,
+         -24.0
+        ],
+        [
+         13.4,
+         -24.0
+        ],
+        [
+         13.4,
+         24.0
+        ],
+        [
+         -13.4,
+         24.0
+        ]
+       ]
+      },
+      {
+       "kind": "circle",
+       "center": [
+        0.0,
+        0.0
+       ],
+       "radius": 5.635601121442153
+      }
+     ],
+     "origin": [
+      0.0,
+      0.0,
+      10.0
+     ],
+     "distance": 4.0
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "part",
+     "b": "slab"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 18608.261896068074,
+     "tol": 0.01,
+     "formula": "26.8*48*14 + pi*R^2*(20 - 14), R = 5.635601121442153 (the boss's 6 mm above the top face)"
+    }
+   }
+  },
+  {
+   "name": "slab_joined_outer_edges",
+   "note": "Control on the joined body: only the four outer top edges rounded r 2. Right on truck (0.21.0 in the triage, 0.29.0).",
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      -13.4,
+      -24.0,
+      0.0
+     ],
+     "size": [
+      26.8,
+      48.0,
+      10.0
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "boss",
+     "origin": [
+      0.0,
+      0.0,
+      10.0
+     ],
+     "radius": 5.635601121442153,
+     "height": 10.0
+    },
+    {
+     "op": "union",
+     "id": "part",
+     "a": "block",
+     "b": "boss"
+    },
+    {
+     "op": "extrude",
+     "id": "slab",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         -13.4,
+         -24.0
+        ],
+        [
+         13.4,
+         -24.0
+        ],
+        [
+         13.4,
+         24.0
+        ],
+        [
+         -13.4,
+         24.0
+        ]
+       ]
+      },
+      {
+       "kind": "circle",
+       "center": [
+        0.0,
+        0.0
+       ],
+       "radius": 5.635601121442153
+      }
+     ],
+     "origin": [
+      0.0,
+      0.0,
+      10.0
+     ],
+     "distance": 4.0
+    },
+    {
+     "op": "union",
+     "id": "raised",
+     "a": "part",
+     "b": "slab"
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "raised",
+     "edges": [
+      [
+       0.0,
+       -24.0,
+       14.0
+      ],
+      [
+       13.4,
+       0.0,
+       14.0
+      ],
+      [
+       0.0,
+       24.0,
+       14.0
+      ],
+      [
+       -13.4,
+       0.0,
+       14.0
+      ]
+     ],
+     "radius": 2.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 18482.912007921004,
+     "tol": 0.1253498881470703,
+     "formula": "V0 - O; V0 = 26.8*48*14 + pi*R^2*(20 - 14), R = 5.635601121442153 (the boss's 6 mm above the top face); O = (1 - pi/4)*2^2*2*(26.8 + 48) - 4*(5/3 - pi/2)*2^3 (the four top edges' rounds over their whole length, less their overlap at each mitred corner: int_0^2 (2 - sqrt(4 - s^2))^2 ds) (tol: 0.1 % of the rounds)"
+    }
+   }
+  },
+  {
+   "name": "slab_joined_cove",
+   "note": "Only the concave edge where the boss meets the joined slab's top, rounded r 2: a cove adding C. On SolidCraft 0.29.0 (truck) a groove is cut into the top face instead, V0 - 32.9.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      -13.4,
+      -24.0,
+      0.0
+     ],
+     "size": [
+      26.8,
+      48.0,
+      10.0
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "boss",
+     "origin": [
+      0.0,
+      0.0,
+      10.0
+     ],
+     "radius": 5.635601121442153,
+     "height": 10.0
+    },
+    {
+     "op": "union",
+     "id": "part",
+     "a": "block",
+     "b": "boss"
+    },
+    {
+     "op": "extrude",
+     "id": "slab",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         -13.4,
+         -24.0
+        ],
+        [
+         13.4,
+         -24.0
+        ],
+        [
+         13.4,
+         24.0
+        ],
+        [
+         -13.4,
+         24.0
+        ]
+       ]
+      },
+      {
+       "kind": "circle",
+       "center": [
+        0.0,
+        0.0
+       ],
+       "radius": 5.635601121442153
+      }
+     ],
+     "origin": [
+      0.0,
+      0.0,
+      10.0
+     ],
+     "distance": 4.0
+    },
+    {
+     "op": "union",
+     "id": "raised",
+     "a": "part",
+     "b": "slab"
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "raised",
+     "edges": [
+      [
+       0.0,
+       5.635601121442153,
+       14.0
+      ]
+     ],
+     "radius": 2.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 18641.06717790312,
+     "tol": 0.03280528183504783,
+     "formula": "V0 + C; V0 = 26.8*48*14 + pi*R^2*(20 - 14), R = 5.635601121442153 (the boss's 6 mm above the top face); C = 2*pi*(R + c)*2^2*(1 - pi/4), c = 2*(10 - 3*pi)/(3*(4 - pi)) (Pappus: the cove's section and its centroid's distance from the boss wall) (tol: 0.1 % of the rounds)"
+    }
+   }
+  },
+  {
+   "name": "slab_joined_six_edges",
+   "note": "#5747: the report's six edges (the four outer ones and the two halves of the boss circle, one closed edge here, picked once) rounded r 2 on the joined body. On truck the outer edges rounded and the boss circle got a groove instead of a cove (about 32.8 mm^3 removed, triage on 0.21.0; V0 - O - 32.9 on 0.29.0).",
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      -13.4,
+      -24.0,
+      0.0
+     ],
+     "size": [
+      26.8,
+      48.0,
+      10.0
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "boss",
+     "origin": [
+      0.0,
+      0.0,
+      10.0
+     ],
+     "radius": 5.635601121442153,
+     "height": 10.0
+    },
+    {
+     "op": "union",
+     "id": "part",
+     "a": "block",
+     "b": "boss"
+    },
+    {
+     "op": "extrude",
+     "id": "slab",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         -13.4,
+         -24.0
+        ],
+        [
+         13.4,
+         -24.0
+        ],
+        [
+         13.4,
+         24.0
+        ],
+        [
+         -13.4,
+         24.0
+        ]
+       ]
+      },
+      {
+       "kind": "circle",
+       "center": [
+        0.0,
+        0.0
+       ],
+       "radius": 5.635601121442153
+      }
+     ],
+     "origin": [
+      0.0,
+      0.0,
+      10.0
+     ],
+     "distance": 4.0
+    },
+    {
+     "op": "union",
+     "id": "raised",
+     "a": "part",
+     "b": "slab"
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "raised",
+     "edges": [
+      [
+       0.0,
+       -24.0,
+       14.0
+      ],
+      [
+       13.4,
+       0.0,
+       14.0
+      ],
+      [
+       0.0,
+       24.0,
+       14.0
+      ],
+      [
+       -13.4,
+       0.0,
+       14.0
+      ],
+      [
+       0.0,
+       5.635601121442153,
+       14.0
+      ]
+     ],
+     "radius": 2.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 18515.717289756052,
+     "tol": 0.15815516998211812,
+     "formula": "V0 - O + C; V0 = 26.8*48*14 + pi*R^2*(20 - 14), R = 5.635601121442153 (the boss's 6 mm above the top face); O = (1 - pi/4)*2^2*2*(26.8 + 48) - 4*(5/3 - pi/2)*2^3 (the four top edges' rounds over their whole length, less their overlap at each mitred corner: int_0^2 (2 - sqrt(4 - s^2))^2 ds); C = 2*pi*(R + c)*2^2*(1 - pi/4), c = 2*(10 - 3*pi)/(3*(4 - pi)) (Pappus: the cove's section and its centroid's distance from the boss wall) (tol: 0.1 % of the rounds)"
+    }
+   }
+  }
+ ]
+}

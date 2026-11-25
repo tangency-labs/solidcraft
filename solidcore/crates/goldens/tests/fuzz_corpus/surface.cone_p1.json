@@ -1,0 +1,6 @@
+{
+  "unit": "surface.cone_p1",
+  "cases": [
+    {"name": "fuzz01891_cone_apex_height_overflows", "origin": "fuzz-out/n2000/surface.cone_p1/fuzz01891.json (crash: cpp: killed by signal 6 (fatal runtime error: stack overflow, aborting))", "issue": "UB-230", "cpp": "harness: invalid argument: cone: apex height overflows", "rust": "ok", "inputs": {"cone": {"mode": {"bot": 1e+300, "kind": "canonical_semi", "semi": 6e-11}, "origin": [0.0, 0.0, 0.0], "x": [2.0, 0.0, 0.0], "y": [0.3, 0.5, 0.0]}, "op": "build"}}
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "area": "assemblies",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-occurrence-drag-grounded-refused",
+  "expected": {
+    "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); a grounded part is refused",
+    "outcome": "refused",
+    "refusal": "grounded",
+    "source": "analytic",
+    "sources": [],
+    "what": "occurrence.drag of the grounded base"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 8 (occurrence.drag): invalid parameters for `occurrence.drag`: Base:1 is grounded",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 8 (occurrence.drag): invalid parameters for `occurrence.drag`: Base:1 is grounded",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude"
+  ],
+  "ungraded": [],
+  "what": "occurrence.drag of the grounded base",
+  "why_not": [
+    "the failure is SolidCraft's, not a kernel operation's: step 8 (occurrence.drag): invalid parameters for `occurrence.drag`: Base:1 is grounded"
+  ]
+}

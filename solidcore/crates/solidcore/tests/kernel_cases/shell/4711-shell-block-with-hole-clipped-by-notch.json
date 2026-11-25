@@ -1,0 +1,128 @@
+{
+  "area": "shell",
+  "bodies": {
+    "b22": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b22"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b23"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b23"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b24"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b24"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b25"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "error": "the offset's walls would meet along a line, which leaves no solid there",
+      "inputs": [
+        "b25"
+      ],
+      "op": "shell",
+      "params": {
+        "open_faces": {
+          "kind": "face",
+          "picked": [
+            {
+              "at": [],
+              "index": 7
+            }
+          ],
+          "points": [
+            [
+              9.685261650541158,
+              17.12906375529892,
+              0.0
+            ]
+          ],
+          "tolerance": 0.07280209889280519
+        },
+        "thickness": -2.0
+      }
+    }
+  ],
+  "case": "4711-shell-block-with-hole-clipped-by-notch",
+  "expected": {
+    "method": "the hole (centre (22.5, 7), r3) is 7 - 3 = 4 mm from the front face y = 0, and two 2 mm walls take 4 = 2 x 2 mm: the hole wall's offset (r 3 + 2 = 5) is tangent to the front's (y = 2) at (22.5, 2), so the cavity pinches to zero thickness along the line x = 22.5, y = 2, which bounds no solid. A thinner wall leaves the walls apart, a thicker one makes them cross and merge; at exactly 2 mm the shell is refused, naming the cause. Expected message: \"shell: the 2 mm walls would meet along a line (between a hole and the side, for example), which leaves no solid there; use a thinner or thicker wall, or move the feature\".",
+    "outcome": "refused",
+    "refusal": "shell: the 2 mm walls would meet along a line (between a hole and the side, for example), which leaves no solid there; use a thinner or thicker wall, or move the feature",
+    "source": "invariants",
+    "sources": [
+      "tangency-labs/solidcraft#4711"
+    ],
+    "what": "a 2 mm shell, open at the bottom, of a 60x40x10 block with an r3 through hole 4 mm from its front face, beside a 10x10 notch at that edge: the walls from the hole and from the front would meet along a line, so the right answer is a refusal that says so (truck took 75 s and failed ('boolean Cut: no result'); SMLib refused it, but as 'status 1027')"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "engine_error": "step 4 (solid.shell): invalid input: shell: the 2 mm walls would meet along a line (between a hole and the side, for example), which leaves no solid there; use a thinner or thicker wall, or move the feature",
+    "kernel_error": "the offset's walls would meet along a line, which leaves no solid there",
+    "ran": false
+  },
+  "records": "4711-shell-block-with-hole-clipped-by-notch.bodies.json.gz",
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 4 (solid.shell): invalid input: shell: the 2 mm walls would meet along a line (between a hole and the side, for example), which leaves no solid there; use a thinner or thicker wall, or move the feature",
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#4711"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "shell"
+  ],
+  "ungraded": [
+    "refusal \"shell: the 2 mm walls would meet along a line (between a hole and the side, for example), which leaves no solid there; use a thinner or thicker wall, or move the feature\": SolidCraft's wording of the kernel's error"
+  ],
+  "what": "a 2 mm shell, open at the bottom, of a 60x40x10 block with an r3 through hole 4 mm from its front face, beside a 10x10 notch at that edge: the walls from the hole and from the front would meet along a line, so the right answer is a refusal that says so (truck took 75 s and failed ('boolean Cut: no result'); SMLib refused it, but as 'status 1027')",
+  "why_not": []
+}

@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#13"
+ ],
+ "what": "split a body by a plane (the split-by-a-face path tripped a debug assertion, 'Two same vertices cannot construct an edge')",
+ "source": "analytic",
+ "method": "20 cube split by z=10 into two 20x20x10 blocks: total V = 8000, two bodies",
+ "body_count": 2,
+ "volume_mm3": 8000.0
+}

@@ -465,6 +465,98 @@ fn pattern_edits_retain_surviving_ids_and_work_after_undo_and_reopen() {
 }
 
 #[test]
+fn pattern_edits_can_add_and_remove_seed_entities_but_not_copy_their_own_copies() {
+    for circular in [false, true] {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.line", json!({"points":[[10,0],[20,0]],"ids":["a"]}));
+        run(&mut s, "sketch.line", json!({"points":[[10,5],[20,5]],"ids":["b"]}));
+        let cmd = if circular { "sketch.pattern.circular" } else { "sketch.pattern.rectangular" };
+        let params = if circular { json!({"entities":["a"],"center":"origin","count":4}) } else { json!({"entities":["a"],"count":4,"spacing":10}) };
+        let original = run(&mut s, cmd, params);
+        let pattern = original["pattern"].as_str().unwrap();
+        let first_copies = ids(&original["curves"]);
+        assert_eq!(first_copies.len(), 3);
+        // Where the first copy of a seed line starting at `start` begins.
+        let moved = |start: Vec2| if circular { Vec2::new(-start.y, start.x) } else { start + Vec2::new(10.0, 0.0) };
+        let starts = |s: &Session, copies: &[String]| -> Vec<Vec2> { copies.iter().map(|id| point(&sketch(s), &format!("{id}.start"))).collect() };
+
+        let before = s.doc.to_json();
+        let added = run(&mut s, cmd, json!({"pattern":pattern,"entities":["a","b"]}));
+        let copies = ids(&added["curves"]);
+        assert_eq!(copies.len(), 6, "{cmd}: three copies of each seed");
+        assert_eq!(sketch(&s).curves.len(), 8, "{cmd}: the old copies are gone, not kept beside the new ones");
+        for seed in [Vec2::new(10.0, 0.0), Vec2::new(10.0, 5.0)] {
+            assert!(starts(&s, &copies).iter().any(|p| p.dist(moved(seed)) < 1e-6), "{cmd}: a copy of the seed at {seed:?}");
+        }
+        check_relations(&s);
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(s.doc.to_json(), before);
+        run(&mut s, "edit.redo", json!({}));
+
+        let removed = run(&mut s, cmd, json!({"pattern":pattern,"entities":["b"]}));
+        let copies = ids(&removed["curves"]);
+        assert_eq!(copies.len(), 3);
+        assert_eq!(sketch(&s).curves.len(), 5, "{cmd}: both seeds stay, only b is copied");
+        assert!(starts(&s, &copies).iter().any(|p| p.dist(moved(Vec2::new(10.0, 5.0))) < 1e-6));
+        assert!(!starts(&s, &copies).iter().any(|p| p.dist(moved(Vec2::new(10.0, 0.0))) < 1e-6), "{cmd}: a is no longer copied");
+        assert!(point(&sketch(&s), "a.start").dist(Vec2::new(10.0, 0.0)) < 1e-6);
+        check_relations(&s);
+
+        let before = s.doc.to_json();
+        let own_copy = copies[0].clone();
+        assert!(s.execute(cmd, &json!({"pattern":pattern,"entities":["b", own_copy]})).is_err(), "{cmd}: a copy cannot seed its own pattern");
+        assert_eq!(s.doc.to_json(), before);
+    }
+}
+
+/// A line drawn from a copy's end point shares that point: a changed seed list removes the copy
+/// but leaves the line where it was.
+#[test]
+fn a_changed_seed_list_keeps_a_line_drawn_from_a_copys_end_point() {
+    for circular in [false, true] {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.line", json!({"points":[[10,0],[20,0]],"ids":["a"]}));
+        run(&mut s, "sketch.line", json!({"points":[[10,5],[20,5]],"ids":["b"]}));
+        let cmd = if circular { "sketch.pattern.circular" } else { "sketch.pattern.rectangular" };
+        let params = if circular { json!({"entities":["a"],"center":"origin","count":4}) } else { json!({"entities":["a"],"count":4,"spacing":10}) };
+        let original = run(&mut s, cmd, params);
+        let pattern = original["pattern"].as_str().unwrap();
+        let copy_end = format!("{}.end", ids(&original["curves"])[0]);
+        run(&mut s, "sketch.line", json!({"points":[copy_end, [50,50]],"ids":["tail"]}));
+        let sk = sketch(&s);
+        assert_eq!(sk.resolve_point("tail.start"), sk.resolve_point(&copy_end), "{cmd}: the line shares the copy's point");
+        let start = point(&sk, "tail.start");
+
+        run(&mut s, cmd, json!({"pattern":pattern,"entities":["a","b"]}));
+        let sk = sketch(&s);
+        assert!(sk.curve_index("tail").is_some(), "{cmd}: the line stays");
+        assert!(point(&sk, "tail.start").dist(start) < 1e-6, "{cmd}: the line's start stays");
+        assert!(point(&sk, "tail.end").dist(Vec2::new(50.0, 50.0)) < 1e-6, "{cmd}: the line's end stays");
+        assert_eq!(sk.curves.len(), 9, "{cmd}: two seeds, the line and six new copies");
+        check_relations(&s);
+    }
+}
+
+#[test]
+fn a_changed_seed_list_survives_retiring_an_earlier_pattern_seeded_by_a_copy() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points":[[10,0],[20,0]],"ids":["a"]}));
+    run(&mut s, "sketch.line", json!({"points":[[10,5],[20,5]],"ids":["b"]}));
+    run(&mut s, "sketch.line", json!({"points":[[10,-50],[20,-50]],"ids":["x"]}));
+    let earlier = run(&mut s, "sketch.pattern.rectangular", json!({"entities":["x"],"count":2,"spacing":10,"dir":[0,-1]}));
+    let later = run(&mut s, "sketch.pattern.rectangular", json!({"entities":["a"],"count":3,"spacing":10}));
+    let copy = ids(&later["curves"])[0].clone();
+    run(&mut s, "sketch.pattern.rectangular", json!({"pattern":earlier["pattern"],"entities":[copy]}));
+
+    let out = run(&mut s, "sketch.pattern.rectangular", json!({"pattern":later["pattern"],"entities":["a","b"]}));
+    assert_eq!(ids(&out["curves"]).len(), 4);
+    let sk = sketch(&s);
+    assert_eq!(sk.patterns.len(), 1, "the earlier pattern lost its seed");
+    assert_eq!(json!(sk.patterns[0].id), later["pattern"]);
+    check_relations(&s);
+}
+
+#[test]
 fn malformed_pattern_edits_roll_back_and_deleted_seed_does_not_panic() {
     let mut s = new_sketch();
     run(&mut s, "sketch.line", json!({"points":[[10,0],[20,0]],"ids":["l1"]}));
@@ -535,6 +627,16 @@ fn patterned_arc_ellipse_spline_and_conic_follow_seed_geometry_exactly() {
         let mut s = new_sketch();
         let seed = ids(&run(&mut s, cmd, params)["curves"])[0].clone();
         let out = run(&mut s, "sketch.pattern.rectangular", json!({"entities":[seed],"count":3,"spacing":40}));
+        if cmd == "sketch.spline.fit_point" {
+            let sk = sketch(&s);
+            let helper_count = sk.curves.iter().filter(|curve| curve.spline_handle_of.as_deref() == Some(seed.as_str())).count();
+            assert_eq!(helper_count, 0, "a spline has tangent handles only when it is given them");
+            for copy in ids(&out["curves"]) {
+                let copy_id = &sk.curves[sk.curve_index(&copy).unwrap()].id;
+                assert_eq!(sk.curves.iter().filter(|curve| curve.spline_handle_of.as_deref() == Some(copy_id.as_str())).count(), helper_count);
+            }
+            assert!(sk.validate_spline_handles().is_ok());
+        }
         run(&mut s, "sketch.scale", json!({"entities":[seed],"base":"origin","factor":1.5}));
         let sk = sketch(&s);
         if matches!(sk.curves[sk.curve_index(&seed).unwrap()].kind, CurveKind::Conic { .. }) {
@@ -698,7 +800,7 @@ fn rectangular_pattern_expressions_follow_parameters_and_survive_reopening() {
     s.refresh();
     run(&mut s, "parameters.change", json!({"name":"pitch","expression":"40"}));
     run(&mut s, "parameters.change", json!({"name":"copies","expression":"4"}));
-    let state = s.world_state();
+    let state = s.world_state().unwrap();
     let sk = &state.sketch(1).unwrap().sketch;
     assert_eq!(sk.patterns[0].instances.len(), 7);
     assert_eq!(sk.patterns[0].instances[0].curves[0], first);
@@ -706,7 +808,7 @@ fn rectangular_pattern_expressions_follow_parameters_and_survive_reopening() {
     let last = &sk.patterns[0].instances.last().unwrap().curves[0];
     assert!(point(sk, &format!("{last}.center")).dist(Vec2::new(125., 25.)) < 1e-6);
     run(&mut s, "parameters.change", json!({"name":"copies","expression":"2"}));
-    assert_eq!(s.world_state().sketch(1).unwrap().sketch.patterns[0].instances.len(), 3);
+    assert_eq!(s.world_state().unwrap().sketch(1).unwrap().sketch.patterns[0].instances.len(), 3);
     run(&mut s, "parameters.change", json!({"name":"pitch","new_name":"step"}));
     assert_eq!(serde_json::to_value(&s.doc.sketch(1).unwrap().patterns[0]).unwrap()["expressions"]["spacing"], "step");
     assert!(s.execute("parameters.change", &json!({"delete":"step"})).is_err());
@@ -749,7 +851,7 @@ fn circular_pattern_expressions_validate_inputs_and_keep_numeric_compatibility()
     let before = sketch(&s);
     let mut s = Session { doc: reopened.into(), ..Default::default() };
     s.refresh();
-    let state = s.world_state();
+    let state = s.world_state().unwrap();
     let after = &state.sketch(1).unwrap().sketch;
     for (a, b) in before.points.iter().zip(&after.points) {
         assert!(a.id == b.id && a.pos.dist(b.pos) < 1e-9, "{} moved", a.id);

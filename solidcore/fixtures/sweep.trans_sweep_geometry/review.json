@@ -1,0 +1,1420 @@
+{
+  "cases": [
+    {
+      "name": "ellipse_5_0_0",
+      "inputs": {
+        "op": 5,
+        "kind": 5,
+        "sweep": [
+          0,
+          0,
+          3
+        ],
+        "points": [
+          [
+            1,
+            -2,
+            0,
+            2
+          ],
+          [
+            0,
+            0,
+            0,
+            1
+          ]
+        ],
+        "interval": [
+          0.1,
+          0.8
+        ],
+        "swap": false,
+        "analytics": false
+      }
+    },
+    {
+      "name": "ellipse_5_0_1",
+      "inputs": {
+        "op": 5,
+        "kind": 5,
+        "sweep": [
+          0,
+          0,
+          3
+        ],
+        "points": [
+          [
+            1,
+            -2,
+            0,
+            2
+          ],
+          [
+            0,
+            0,
+            0,
+            1
+          ]
+        ],
+        "interval": [
+          0.1,
+          0.8
+        ],
+        "swap": false,
+        "analytics": true
+      }
+    },
+    {
+      "name": "ellipse_5_1_0",
+      "inputs": {
+        "op": 5,
+        "kind": 5,
+        "sweep": [
+          0,
+          0,
+          3
+        ],
+        "points": [
+          [
+            1,
+            -2,
+            0,
+            2
+          ],
+          [
+            0,
+            0,
+            0,
+            1
+          ]
+        ],
+        "interval": [
+          0.1,
+          0.8
+        ],
+        "swap": true,
+        "analytics": false
+      }
+    },
+    {
+      "name": "ellipse_5_1_1",
+      "inputs": {
+        "op": 5,
+        "kind": 5,
+        "sweep": [
+          0,
+          0,
+          3
+        ],
+        "points": [
+          [
+            1,
+            -2,
+            0,
+            2
+          ],
+          [
+            0,
+            0,
+            0,
+            1
+          ]
+        ],
+        "interval": [
+          0.1,
+          0.8
+        ],
+        "swap": true,
+        "analytics": true
+      }
+    },
+    {
+      "name": "ellipse_6_0_0",
+      "inputs": {
+        "op": 6,
+        "kind": 5,
+        "sweep": [
+          0,
+          0,
+          3
+        ],
+        "points": [
+          [
+            1,
+            -2,
+            0,
+            2
+          ],
+          [
+            0,
+            0,
+            0,
+            1
+          ]
+        ],
+        "interval": [
+          0.1,
+          0.8
+        ],
+        "swap": false,
+        "analytics": false
+      }
+    },
+    {
+      "name": "ellipse_6_0_1",
+      "inputs": {
+        "op": 6,
+        "kind": 5,
+        "sweep": [
+          0,
+          0,
+          3
+        ],
+        "points": [
+          [
+            1,
+            -2,
+            0,
+            2
+          ],
+          [
+            0,
+            0,
+            0,
+            1
+          ]
+        ],
+        "interval": [
+          0.1,
+          0.8
+        ],
+        "swap": false,
+        "analytics": true
+      }
+    },
+    {
+      "name": "ellipse_6_1_0",
+      "inputs": {
+        "op": 6,
+        "kind": 5,
+        "sweep": [
+          0,
+          0,
+          3
+        ],
+        "points": [
+          [
+            1,
+            -2,
+            0,
+            2
+          ],
+          [
+            0,
+            0,
+            0,
+            1
+          ]
+        ],
+        "interval": [
+          0.1,
+          0.8
+        ],
+        "swap": true,
+        "analytics": false
+      }
+    },
+    {
+      "name": "ellipse_6_1_1",
+      "inputs": {
+        "op": 6,
+        "kind": 5,
+        "sweep": [
+          0,
+          0,
+          3
+        ],
+        "points": [
+          [
+            1,
+            -2,
+            0,
+            2
+          ],
+          [
+            0,
+            0,
+            0,
+            1
+          ]
+        ],
+        "interval": [
+          0.1,
+          0.8
+        ],
+        "swap": true,
+        "analytics": true
+      }
+    },
+    {
+      "name": "ellipse_7_0_0",
+      "inputs": {
+        "op": 7,
+        "kind": 5,
+        "sweep": [
+          0,
+          0,
+          3
+        ],
+        "points": [
+          [
+            1,
+            -2,
+            0,
+            2
+          ],
+          [
+            0,
+            0,
+            0,
+            1
+          ]
+        ],
+        "interval": [
+          0.1,
+          0.8
+        ],
+        "swap": false,
+        "analytics": false
+      }
+    },
+    {
+      "name": "ellipse_7_0_1",
+      "inputs": {
+        "op": 7,
+        "kind": 5,
+        "sweep": [
+          0,
+          0,
+          3
+        ],
+        "points": [
+          [
+            1,
+            -2,
+            0,
+            2
+          ],
+          [
+            0,
+            0,
+            0,
+            1
+          ]
+        ],
+        "interval": [
+          0.1,
+          0.8
+        ],
+        "swap": false,
+        "analytics": true
+      }
+    },
+    {
+      "name": "ellipse_7_1_0",
+      "inputs": {
+        "op": 7,
+        "kind": 5,
+        "sweep": [
+          0,
+          0,
+          3
+        ],
+        "points": [
+          [
+            1,
+            -2,
+            0,
+            2
+          ],
+          [
+            0,
+            0,
+            0,
+            1
+          ]
+        ],
+        "interval": [
+          0.1,
+          0.8
+        ],
+        "swap": true,
+        "analytics": false
+      }
+    },
+    {
+      "name": "ellipse_7_1_1",
+      "inputs": {
+        "op": 7,
+        "kind": 5,
+        "sweep": [
+          0,
+          0,
+          3
+        ],
+        "points": [
+          [
+            1,
+            -2,
+            0,
+            2
+          ],
+          [
+            0,
+            0,
+            0,
+            1
+          ]
+        ],
+        "interval": [
+          0.1,
+          0.8
+        ],
+        "swap": true,
+        "analytics": true
+      }
+    },
+    {
+      "name": "rejected_constructor_0_5",
+      "inputs": {
+        "op": 5,
+        "kind": 0,
+        "sweep": [
+          0,
+          0,
+          1
+        ],
+        "face_kind": 0,
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            1e-15,
+            0,
+            0,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "rejected_constructor_0_6",
+      "inputs": {
+        "op": 6,
+        "kind": 0,
+        "sweep": [
+          0,
+          0,
+          1
+        ],
+        "face_kind": 0,
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            1e-15,
+            0,
+            0,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "rejected_constructor_0_7",
+      "inputs": {
+        "op": 7,
+        "kind": 0,
+        "sweep": [
+          0,
+          0,
+          1
+        ],
+        "face_kind": 0,
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            1e-15,
+            0,
+            0,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "rejected_constructor_0_8",
+      "inputs": {
+        "op": 8,
+        "kind": 0,
+        "sweep": [
+          0,
+          0,
+          1
+        ],
+        "face_kind": 1,
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            1e-15,
+            0,
+            0,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "rejected_constructor_2_5",
+      "inputs": {
+        "op": 5,
+        "kind": 2,
+        "sweep": [
+          0,
+          0,
+          1
+        ],
+        "face_kind": 0,
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1e-15
+          ],
+          [
+            1e-15,
+            0,
+            0,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "rejected_constructor_2_6",
+      "inputs": {
+        "op": 6,
+        "kind": 2,
+        "sweep": [
+          0,
+          0,
+          1
+        ],
+        "face_kind": 0,
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1e-15
+          ],
+          [
+            1e-15,
+            0,
+            0,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "rejected_constructor_2_7",
+      "inputs": {
+        "op": 7,
+        "kind": 2,
+        "sweep": [
+          0,
+          0,
+          1
+        ],
+        "face_kind": 0,
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1e-15
+          ],
+          [
+            1e-15,
+            0,
+            0,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "rejected_constructor_2_8",
+      "inputs": {
+        "op": 8,
+        "kind": 2,
+        "sweep": [
+          0,
+          0,
+          1
+        ],
+        "face_kind": 1,
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1e-15
+          ],
+          [
+            1e-15,
+            0,
+            0,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "nanoscale_fixture_0_5",
+      "inputs": {
+        "op": 5,
+        "kind": 0,
+        "sweep": [
+          0,
+          0,
+          1e-09
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            1e-09,
+            0,
+            0,
+            1
+          ]
+        ],
+        "face_kind": 0,
+        "tolerances": [
+          1e-15,
+          1e-15,
+          1e-15,
+          1e-15
+        ],
+        "epsilon": 1e-14
+      }
+    },
+    {
+      "name": "nanoscale_fixture_0_6",
+      "inputs": {
+        "op": 6,
+        "kind": 0,
+        "sweep": [
+          0,
+          0,
+          1e-09
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            1e-09,
+            0,
+            0,
+            1
+          ]
+        ],
+        "face_kind": 0,
+        "tolerances": [
+          1e-15,
+          1e-15,
+          1e-15,
+          1e-15
+        ],
+        "epsilon": 1e-14
+      }
+    },
+    {
+      "name": "nanoscale_fixture_0_7",
+      "inputs": {
+        "op": 7,
+        "kind": 0,
+        "sweep": [
+          0,
+          0,
+          1e-09
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            1e-09,
+            0,
+            0,
+            1
+          ]
+        ],
+        "face_kind": 0,
+        "tolerances": [
+          1e-15,
+          1e-15,
+          1e-15,
+          1e-15
+        ],
+        "epsilon": 1e-14
+      }
+    },
+    {
+      "name": "nanoscale_fixture_0_8",
+      "inputs": {
+        "op": 8,
+        "kind": 0,
+        "sweep": [
+          0,
+          0,
+          1e-09
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            1e-09,
+            0,
+            0,
+            1
+          ]
+        ],
+        "face_kind": 1,
+        "tolerances": [
+          1e-15,
+          1e-15,
+          1e-15,
+          1e-15
+        ],
+        "epsilon": 1e-14
+      }
+    },
+    {
+      "name": "nanoscale_fixture_1_5",
+      "inputs": {
+        "op": 5,
+        "kind": 1,
+        "sweep": [
+          0,
+          0,
+          1e-09
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            1e-09,
+            0,
+            0,
+            1
+          ]
+        ],
+        "face_kind": 0,
+        "tolerances": [
+          1e-15,
+          1e-15,
+          1e-15,
+          1e-15
+        ],
+        "epsilon": 1e-14
+      }
+    },
+    {
+      "name": "nanoscale_fixture_1_6",
+      "inputs": {
+        "op": 6,
+        "kind": 1,
+        "sweep": [
+          0,
+          0,
+          1e-09
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            1e-09,
+            0,
+            0,
+            1
+          ]
+        ],
+        "face_kind": 0,
+        "tolerances": [
+          1e-15,
+          1e-15,
+          1e-15,
+          1e-15
+        ],
+        "epsilon": 1e-14
+      }
+    },
+    {
+      "name": "nanoscale_fixture_1_7",
+      "inputs": {
+        "op": 7,
+        "kind": 1,
+        "sweep": [
+          0,
+          0,
+          1e-09
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            1e-09,
+            0,
+            0,
+            1
+          ]
+        ],
+        "face_kind": 0,
+        "tolerances": [
+          1e-15,
+          1e-15,
+          1e-15,
+          1e-15
+        ],
+        "epsilon": 1e-14
+      }
+    },
+    {
+      "name": "nanoscale_fixture_1_8",
+      "inputs": {
+        "op": 8,
+        "kind": 1,
+        "sweep": [
+          0,
+          0,
+          1e-09
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            1e-09,
+            0,
+            0,
+            1
+          ]
+        ],
+        "face_kind": 1,
+        "tolerances": [
+          1e-15,
+          1e-15,
+          1e-15,
+          1e-15
+        ],
+        "epsilon": 1e-14
+      }
+    },
+    {
+      "name": "nanoscale_fixture_2_5",
+      "inputs": {
+        "op": 5,
+        "kind": 2,
+        "sweep": [
+          0,
+          0,
+          1e-09
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1e-09
+          ],
+          [
+            1e-09,
+            0,
+            0,
+            1
+          ]
+        ],
+        "face_kind": 0,
+        "tolerances": [
+          1e-15,
+          1e-15,
+          1e-15,
+          1e-15
+        ],
+        "epsilon": 1e-14
+      }
+    },
+    {
+      "name": "nanoscale_fixture_2_6",
+      "inputs": {
+        "op": 6,
+        "kind": 2,
+        "sweep": [
+          0,
+          0,
+          1e-09
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1e-09
+          ],
+          [
+            1e-09,
+            0,
+            0,
+            1
+          ]
+        ],
+        "face_kind": 0,
+        "tolerances": [
+          1e-15,
+          1e-15,
+          1e-15,
+          1e-15
+        ],
+        "epsilon": 1e-14
+      }
+    },
+    {
+      "name": "nanoscale_fixture_2_7",
+      "inputs": {
+        "op": 7,
+        "kind": 2,
+        "sweep": [
+          0,
+          0,
+          1e-09
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1e-09
+          ],
+          [
+            1e-09,
+            0,
+            0,
+            1
+          ]
+        ],
+        "face_kind": 0,
+        "tolerances": [
+          1e-15,
+          1e-15,
+          1e-15,
+          1e-15
+        ],
+        "epsilon": 1e-14
+      }
+    },
+    {
+      "name": "nanoscale_fixture_2_8",
+      "inputs": {
+        "op": 8,
+        "kind": 2,
+        "sweep": [
+          0,
+          0,
+          1e-09
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1e-09
+          ],
+          [
+            1e-09,
+            0,
+            0,
+            1
+          ]
+        ],
+        "face_kind": 1,
+        "tolerances": [
+          1e-15,
+          1e-15,
+          1e-15,
+          1e-15
+        ],
+        "epsilon": 1e-14
+      }
+    },
+    {
+      "name": "nanoscale_fixture_3_5",
+      "inputs": {
+        "op": 5,
+        "kind": 3,
+        "sweep": [
+          0,
+          0,
+          1e-09
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            1e-09,
+            0,
+            0,
+            1
+          ]
+        ],
+        "face_kind": 0,
+        "tolerances": [
+          1e-15,
+          1e-15,
+          1e-15,
+          1e-15
+        ],
+        "epsilon": 1e-14
+      }
+    },
+    {
+      "name": "nanoscale_fixture_3_6",
+      "inputs": {
+        "op": 6,
+        "kind": 3,
+        "sweep": [
+          0,
+          0,
+          1e-09
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            1e-09,
+            0,
+            0,
+            1
+          ]
+        ],
+        "face_kind": 0,
+        "tolerances": [
+          1e-15,
+          1e-15,
+          1e-15,
+          1e-15
+        ],
+        "epsilon": 1e-14
+      }
+    },
+    {
+      "name": "nanoscale_fixture_3_7",
+      "inputs": {
+        "op": 7,
+        "kind": 3,
+        "sweep": [
+          0,
+          0,
+          1e-09
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            1e-09,
+            0,
+            0,
+            1
+          ]
+        ],
+        "face_kind": 0,
+        "tolerances": [
+          1e-15,
+          1e-15,
+          1e-15,
+          1e-15
+        ],
+        "epsilon": 1e-14
+      }
+    },
+    {
+      "name": "nanoscale_fixture_3_8",
+      "inputs": {
+        "op": 8,
+        "kind": 3,
+        "sweep": [
+          0,
+          0,
+          1e-09
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            1e-09,
+            0,
+            0,
+            1
+          ]
+        ],
+        "face_kind": 0,
+        "tolerances": [
+          1e-15,
+          1e-15,
+          1e-15,
+          1e-15
+        ],
+        "epsilon": 1e-14
+      }
+    },
+    {
+      "name": "nanoscale_fixture_4_5",
+      "inputs": {
+        "op": 5,
+        "kind": 4,
+        "sweep": [
+          0,
+          0,
+          1e-09
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            1e-09,
+            0,
+            0,
+            1
+          ]
+        ],
+        "face_kind": 0,
+        "tolerances": [
+          1e-15,
+          1e-15,
+          1e-15,
+          1e-15
+        ],
+        "epsilon": 1e-14
+      }
+    },
+    {
+      "name": "nanoscale_fixture_4_6",
+      "inputs": {
+        "op": 6,
+        "kind": 4,
+        "sweep": [
+          0,
+          0,
+          1e-09
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            1e-09,
+            0,
+            0,
+            1
+          ]
+        ],
+        "face_kind": 0,
+        "tolerances": [
+          1e-15,
+          1e-15,
+          1e-15,
+          1e-15
+        ],
+        "epsilon": 1e-14
+      }
+    },
+    {
+      "name": "nanoscale_fixture_4_7",
+      "inputs": {
+        "op": 7,
+        "kind": 4,
+        "sweep": [
+          0,
+          0,
+          1e-09
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            1e-09,
+            0,
+            0,
+            1
+          ]
+        ],
+        "face_kind": 0,
+        "tolerances": [
+          1e-15,
+          1e-15,
+          1e-15,
+          1e-15
+        ],
+        "epsilon": 1e-14
+      }
+    },
+    {
+      "name": "nanoscale_fixture_4_8",
+      "inputs": {
+        "op": 8,
+        "kind": 4,
+        "sweep": [
+          0,
+          0,
+          1e-09
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1
+          ],
+          [
+            1e-09,
+            0,
+            0,
+            1
+          ]
+        ],
+        "face_kind": 1,
+        "tolerances": [
+          1e-15,
+          1e-15,
+          1e-15,
+          1e-15
+        ],
+        "epsilon": 1e-14
+      }
+    },
+    {
+      "name": "nanoscale_fixture_5_5",
+      "inputs": {
+        "op": 5,
+        "kind": 5,
+        "sweep": [
+          0,
+          0,
+          1e-09
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1e-09
+          ],
+          [
+            1e-09,
+            0,
+            0,
+            5e-10
+          ]
+        ],
+        "face_kind": 0,
+        "tolerances": [
+          1e-15,
+          1e-15,
+          1e-15,
+          1e-15
+        ],
+        "epsilon": 1e-14
+      }
+    },
+    {
+      "name": "nanoscale_fixture_5_6",
+      "inputs": {
+        "op": 6,
+        "kind": 5,
+        "sweep": [
+          0,
+          0,
+          1e-09
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1e-09
+          ],
+          [
+            1e-09,
+            0,
+            0,
+            5e-10
+          ]
+        ],
+        "face_kind": 0,
+        "tolerances": [
+          1e-15,
+          1e-15,
+          1e-15,
+          1e-15
+        ],
+        "epsilon": 1e-14
+      }
+    },
+    {
+      "name": "nanoscale_fixture_5_7",
+      "inputs": {
+        "op": 7,
+        "kind": 5,
+        "sweep": [
+          0,
+          0,
+          1e-09
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1e-09
+          ],
+          [
+            1e-09,
+            0,
+            0,
+            5e-10
+          ]
+        ],
+        "face_kind": 0,
+        "tolerances": [
+          1e-15,
+          1e-15,
+          1e-15,
+          1e-15
+        ],
+        "epsilon": 1e-14
+      }
+    },
+    {
+      "name": "nanoscale_fixture_5_8",
+      "inputs": {
+        "op": 8,
+        "kind": 5,
+        "sweep": [
+          0,
+          0,
+          1e-09
+        ],
+        "points": [
+          [
+            0,
+            0,
+            0,
+            1e-09
+          ],
+          [
+            1e-09,
+            0,
+            0,
+            5e-10
+          ]
+        ],
+        "face_kind": 1,
+        "tolerances": [
+          1e-15,
+          1e-15,
+          1e-15,
+          1e-15
+        ],
+        "epsilon": 1e-14
+      }
+    }
+  ]
+}

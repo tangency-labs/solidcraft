@@ -9,7 +9,9 @@ const COMMANDS: &[(&str, &str)] = &[
     ("run", "run"),
     ("eval", "eval"),
     ("inspect", "eval"),
+    ("check", "check"),
     ("script", "script"),
+    ("textconv", "textconv"),
     ("bench-open", "bench-open"),
     ("bench-agent", "bench-agent"),
     ("snapshot", "snapshot"),
@@ -21,6 +23,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("fuzz", "fuzz"),
     ("fuzz-one", "fuzz-one"),
     ("mcp", "mcp"),
+    ("plugin", "plugin"),
     ("crashes", "crashes"),
     ("licences", "licences"),
     ("licenses", "licences"),
@@ -34,7 +37,9 @@ const COMMANDS: &[(&str, &str)] = &[
 const LISTED: &[&str] = &[
     "run",
     "eval",
+    "check",
     "script",
+    "textconv",
     "bench-open",
     "bench-agent",
     "snapshot",
@@ -45,6 +50,7 @@ const LISTED: &[&str] = &[
     "oracle",
     "fuzz",
     "mcp",
+    "plugin",
     "crashes",
     "licences",
     "gpu",
@@ -58,6 +64,11 @@ fn mentioned(text: &str) -> Vec<&str> {
     names.dedup();
     names
 }
+
+/// How long `fuzz` may run before it counts as a fuzz run, which goes on for minutes. Usage or
+/// a refusal takes well under a second alone, but the whole test suite on all cores can hold a
+/// freshly built binary's start for tens of seconds.
+const FUZZ_RUN: Duration = Duration::from_secs(120);
 
 /// Runs the binary and waits at most `limit` for it to finish. `None` means it was still
 /// running and was killed: the fuzz run `fuzz --help` used to start goes on for minutes.
@@ -125,7 +136,7 @@ fn the_top_level_usage_still_lists_every_command() {
 
 #[test]
 fn fuzz_help_does_not_start_a_fuzz_run() {
-    let Some((code, stdout, stderr)) = run_within(Duration::from_secs(20), &["fuzz", "--help"]) else {
+    let Some((code, stdout, stderr)) = run_within(FUZZ_RUN, &["fuzz", "--help"]) else {
         panic!("`fuzz --help` kept running: it started a fuzz run instead of printing the usage");
     };
     assert_eq!(code, Some(0), "{stderr}");
@@ -137,7 +148,7 @@ fn fuzz_help_does_not_start_a_fuzz_run() {
 #[test]
 fn fuzz_refuses_an_argument_it_does_not_take() {
     for arg in ["--not-a-flag", "stray"] {
-        let Some((code, _stdout, stderr)) = run_within(Duration::from_secs(20), &["fuzz", arg]) else {
+        let Some((code, _stdout, stderr)) = run_within(FUZZ_RUN, &["fuzz", arg]) else {
             panic!("`fuzz {arg}` kept running: it started a fuzz run instead of refusing the argument");
         };
         assert_ne!(code, Some(0), "`fuzz {arg}` succeeded");
@@ -152,8 +163,67 @@ fn render_help_keeps_the_registered_gpu_request_controls() {
         assert!(output.status.success(), "{args:?}: {}", String::from_utf8_lossy(&output.stderr));
         assert!(output.stderr.is_empty());
         let stdout = String::from_utf8_lossy(&output.stdout);
-        for flag in ["--progressive", "--samples", "--max-depth", "--seed", "--exposure", "--lighting", "--environment", "--tone-map"] {
+        for flag in [
+            "--progressive",
+            "--samples",
+            "--max-depth",
+            "--seed",
+            "--exposure",
+            "--lighting",
+            "--environment",
+            "--tone-map",
+            "--legacy-memory-admission",
+        ] {
             assert!(stdout.contains(flag), "{args:?} lost {flag}: {stdout}");
         }
+    }
+}
+
+/// `--max-file-size` (#4086), with any command: the usage names it, a bad size stops the run
+/// with the reason, and a design over the default limit opens once the flag raises it.
+#[test]
+fn max_file_size_raises_the_limit_and_refuses_bad_sizes() {
+    let output = Command::new(env!("CARGO_BIN_EXE_solidcraft-cli")).arg("--help").output().unwrap();
+    assert!(String::from_utf8_lossy(&output.stdout).contains("--max-file-size"));
+    for size in ["17GB", "2", "lots"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_solidcraft-cli")).args(["--max-file-size", size, "exec", "file.new"]).output().unwrap();
+        assert!(!output.status.success(), "{size} was accepted");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.starts_with("error: --max-file-size"), "{size}: {stderr}");
+    }
+    let output = Command::new(env!("CARGO_BIN_EXE_solidcraft-cli")).args(["exec", "file.new", "--max-file-size=2GB"]).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+
+    // A sparse design file just over the default 256 MB: refused unread, then read with the flag
+    // (and refused for what it holds, which is no design).
+    let dir = std::env::temp_dir().join(format!("solidcraft-cli-4086-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("big.solidcraft");
+    std::fs::File::create(&path).unwrap().set_len((256 << 20) + 1).unwrap();
+    let path = path.to_string_lossy().to_string();
+    let output = Command::new(env!("CARGO_BIN_EXE_solidcraft-cli")).args(["eval", &path]).output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success() && stderr.contains("too large") && stderr.contains("--max-file-size"), "{stderr}");
+    let output = Command::new(env!("CARGO_BIN_EXE_solidcraft-cli")).args(["--max-file-size", "1GB", "eval", &path]).output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success() && !stderr.contains("too large"), "{stderr}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #10111: a line for a stderr whose reader has gone (the pipe closed before it, as an agent may
+/// leave the MCP server's, and the app that one starts) is dropped, and the command ends as it
+/// would with stderr open: here a script that isn't there fails with 1, where `eprintln!`
+/// panicked with "failed printing to stderr" (101).
+#[test]
+fn a_closed_stderr_does_not_stop_the_cli() {
+    for _ in 0..5 {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_solidcraft-cli"))
+            .args(["run", "no-such-script.json"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        drop(child.stderr.take());
+        assert_eq!(child.wait().unwrap().code(), Some(1));
     }
 }

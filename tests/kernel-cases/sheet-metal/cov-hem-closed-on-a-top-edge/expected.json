@@ -1,0 +1,21 @@
+{
+ "sources": [],
+ "what": "sheet.hem on the top edge of a 100 x 60 x 2 base, 8 long, the rule's hem gap (0.01 mm): a closed hem folded under the sheet",
+ "source": "analytic",
+ "method": "T = 2, hem gap g = 0.01 (the rule's default) is the inner radius of a 180 degree bend that starts at the edge (y = 0) and turns down (a top-edge pick folds toward the bottom face): bend axis at (y 0, z -g), outer radius g + T = 2.01, so the bend reaches y = -2.01; the leg, 8 - (g + T) = 5.99 long, lies under the base at z -2g - T .. -2g = -2.02 .. -0.02. V = 100*60*2 + (pi/2)((g+T)^2 - g^2)*100 + 5.99*100*2 = 13832.601716. Faces: the section's 8 sides (top, end, bottom, inner arc, leg inner, leg end, leg outer, outer arc) and its 2 end caps",
+ "body_count": 1,
+ "volume_mm3": 13832.601716025138,
+ "faces": 10,
+ "bbox": {
+  "min": [
+   0,
+   -2.01,
+   -2.02
+  ],
+  "max": [
+   100,
+   60,
+   2
+  ]
+ }
+}

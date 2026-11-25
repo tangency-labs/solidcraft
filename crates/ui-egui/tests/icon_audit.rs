@@ -1,9 +1,21 @@
 //! Runtime icon discovery: use the same headless UI and requests as control clients.
+// Test helpers outside #[test] functions print what they skip or measure; clippy.toml
+// `allow-print-in-tests` covers only #[test] functions and #[cfg(test)] code.
+#![allow(clippy::print_stderr)]
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde_json::{Value, json};
 use solidcraft_ui_egui::{icon_svg, scenario::Harness, workspace};
+
+/// A harness whose feature windows don't choose their operation (`auto_operation`): this test
+/// opens every window only to look at its icons, and each choice would run a Join on the design.
+fn harness() -> Harness {
+    let mut h = Harness::new();
+    h.app.preferences.auto_operation = false;
+    h.app.preferences.browser_components_open = true;
+    h
+}
 
 fn click(h: &mut Harness, handle: &str) {
     h.step(&json!({"click":{"handle":handle}})).unwrap_or_else(|e| panic!("{handle}: {e}"));
@@ -16,8 +28,32 @@ fn escape(h: &mut Harness) {
     h.app.design_properties = None;
 }
 
+fn planned_drawing_placeholder(id: &str) -> bool {
+    if solidcraft_engine::cmd::drawing_pending_icon(id).is_none() {
+        return false;
+    }
+    solidcraft_engine::find_command(id).is_some_and(|command| command.planned.is_some() && command.icon == icon_svg::PLACEHOLDER)
+}
+
+fn expected_planned_drawing_placeholder(h: &Harness) -> bool {
+    // The renderer records icon names, not command ids. Only these two surfaces may
+    // request the literal provisional glyph; unknown ids remain failures everywhere.
+    if workspace::drawing_tab(&h.app.ui.tab) {
+        return solidcraft_engine::command_specs().iter().any(|command| command.tab == h.app.ui.tab && planned_drawing_placeholder(command.id));
+    }
+    !h.app.sbox.text.is_empty()
+        && solidcraft_ui_egui::shortcut_box::search(&h.app, &h.app.sbox.text).iter().take(56).any(|row| planned_drawing_placeholder(row.0))
+}
+
+fn permitted_request(name: &str, placeholder: bool, planned_drawing: bool) -> bool {
+    !placeholder || (name == icon_svg::PLACEHOLDER && planned_drawing)
+}
+
 fn collect(h: &mut Harness, surface: &str, requested: &mut BTreeMap<String, bool>) {
-    let reply = h.call("ui.icon_audit", json!({}));
+    let planned_drawing = expected_planned_drawing_placeholder(h);
+    // The control wrapper settles after draining. Read the same audit API directly,
+    // so its extra frames cannot leave requests for the next, unrelated surface.
+    let reply = icon_svg::audit::take();
     use std::io::Write as _;
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/icon-audit");
     std::fs::create_dir_all(&dir).unwrap();
@@ -27,17 +63,168 @@ fn collect(h: &mut Harness, surface: &str, requested: &mut BTreeMap<String, bool
         "{surface}\tpanel={:?}\ttool={:?}\t{}",
         h.app.dialog.as_ref().map(|d| &d.kind),
         h.app.tool.as_ref().map(|t| t.cmd),
-        reply["result"]["requested"]
+        serde_json::to_string(&reply).unwrap()
     )
     .unwrap();
-    for item in reply["result"]["requested"].as_array().expect("audit requests") {
-        let name = item["name"].as_str().unwrap();
-        let placeholder = item["placeholder"].as_bool().unwrap();
+    for item in reply {
+        let name = item.name.as_str();
+        let placeholder = item.placeholder;
         if placeholder && !requested.contains_key(name) {
             eprintln!("{surface}: {name} fell back to the placeholder");
         }
+        assert!(permitted_request(name, placeholder, planned_drawing), "{surface}: unexpected placeholder request {name}");
         requested.insert(name.to_owned(), placeholder);
     }
+}
+
+/// Traverse the real opt-in workspace host, including a deliberately crowded
+/// tab group's overflow menu. This deliberately uses no lookalike gallery.
+fn universal_panel_host_menus(requested: &mut BTreeMap<String, bool>) {
+    use solidcraft_engine::panels::{Destination, LayoutAction, Mutation, Point, SectionId, Size};
+    use solidcraft_ui_egui::panel_runtime::{HostControlTarget, HostPointerTarget, enable_host_specimen};
+    fn click_control(h: &mut Harness, target: &HostControlTarget) {
+        let control = h
+            .app
+            .universal_panel_frame()
+            .unwrap()
+            .controls
+            .iter()
+            .find(|control| control.target == *target)
+            .unwrap_or_else(|| panic!("missing actual host control: {target:?}"));
+        let bounds = control.bounds;
+        assert!(control.enabled, "the audit must use an available real chrome control: {target:?}");
+        let x = bounds.origin.x + bounds.size.width / 2.0;
+        let y = bounds.origin.y + bounds.size.height / 2.0;
+        if let HostControlTarget::Pointer(HostPointerTarget::Menu { instance }) = target {
+            assert!(
+                h.app
+                    .universal_panel_frame()
+                    .unwrap()
+                    .layout
+                    .sections
+                    .iter()
+                    .filter(|section| section.instance != *instance)
+                    .all(|section| !section.outer.contains(Point { x, y })),
+                "the real menu source must not be covered by another specimen card"
+            );
+        }
+        assert_eq!(h.call("ui.move", json!({"x":x,"y":y}))["ok"], true);
+        assert_eq!(h.call("ui.click", json!({"x":x,"y":y}))["ok"], true);
+        h.frames(3);
+    }
+    let mut opened_menus = 0;
+    let mut opened_overflow = 0;
+    for preset in ["docks", "tabs", "collapsed", "floating", "overflow", "pinned", "columns", "stack_tabs", "content_fill", "inline"] {
+        let mut h = harness();
+        h.app.home.open = false;
+        let (width, height) = if preset == "floating" { (1400, 1000) } else { (800, 600) };
+        h.call("ui.resize", json!({"width":width,"height":height}));
+        enable_host_specimen(&mut h.app, preset).unwrap();
+        h.frames(3);
+        if preset == "content_fill" {
+            h.app
+                .dispatch_panel_layout(LayoutAction::Apply {
+                    expected_revision: None,
+                    mutations: vec![Mutation::SetSize {
+                        section: SectionId::new("specimen-section-0").unwrap(),
+                        size: Size { width: 280.0, height: 220.0 },
+                    }],
+                })
+                .unwrap();
+        }
+        if preset == "overflow" {
+            let section = SectionId::new("specimen-section-0").unwrap();
+            let members =
+                h.app.panel_runtime().unwrap().layout().layout().instances.iter().skip(1).map(|instance| instance.id.clone()).collect::<Vec<_>>();
+            h.app
+                .dispatch_panel_layout(LayoutAction::Apply {
+                    expected_revision: None,
+                    mutations: members
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, instance)| Mutation::Move {
+                            instance,
+                            destination: Destination::JoinTab { section: section.clone(), index: index + 1 },
+                        })
+                        .collect(),
+                })
+                .unwrap();
+            h.frames(3);
+            assert!(
+                h.app.universal_panel_frame().unwrap().controls.iter().any(|control| {
+                    control.enabled && control.target == HostControlTarget::Pointer(HostPointerTarget::TabOverflow { section: section.clone() })
+                }),
+                "the typed fixture must force a real tab overflow launcher"
+            );
+        }
+        if preset == "floating" {
+            // Audit visible menu widgets, rather than clicking a lower card
+            // whose default clamped header is covered by its floating peers.
+            let sections = h.app.panel_runtime().unwrap().layout().layout().sections.iter().map(|section| section.id.clone()).collect::<Vec<_>>();
+            let origins = [Point { x: 40.0, y: 200.0 }, Point { x: 400.0, y: 200.0 }, Point { x: 40.0, y: 500.0 }, Point { x: 400.0, y: 500.0 }];
+            h.app
+                .dispatch_panel_layout(LayoutAction::Apply {
+                    expected_revision: None,
+                    mutations: sections
+                        .into_iter()
+                        .zip(origins)
+                        .map(|(section, origin)| Mutation::SetFloatingRect { section, origin, size: Size { width: 280.0, height: 240.0 } })
+                        .collect(),
+                })
+                .unwrap();
+        }
+        h.frames(3);
+        collect(&mut h, &format!("universal host {preset}"), requested);
+        let targets = h
+            .app
+            .universal_panel_frame()
+            .unwrap()
+            .controls
+            .iter()
+            .filter_map(|control| match &control.target {
+                HostControlTarget::Pointer(
+                    HostPointerTarget::Menu { .. }
+                    | HostPointerTarget::TabOverflow { .. }
+                    | HostPointerTarget::Overflow { .. }
+                    | HostPointerTarget::OverflowAll,
+                ) => Some(control.target.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(!targets.is_empty(), "specimen must expose actual shared chrome: {preset}");
+        for target in targets {
+            click_control(&mut h, &target);
+            assert!(h.app.universal_panel_frame().unwrap().menu_bounds.is_some(), "actual host menu must open for {preset}: {target:?}");
+            opened_menus += 1;
+            collect(&mut h, &format!("universal host {preset} {target:?}"), requested);
+            if matches!(
+                target,
+                HostControlTarget::Pointer(
+                    HostPointerTarget::Overflow { .. } | HostPointerTarget::OverflowAll | HostPointerTarget::TabOverflow { .. }
+                )
+            ) {
+                opened_overflow += 1;
+                let nested = h
+                    .app
+                    .universal_panel_frame()
+                    .unwrap()
+                    .controls
+                    .iter()
+                    .find_map(|control| match &control.target {
+                        HostControlTarget::PanelMenu { .. } => Some(control.target.clone()),
+                        _ => None,
+                    })
+                    .expect("overflow must expose the same per-instance action menu");
+                click_control(&mut h, &nested);
+                assert!(h.app.universal_panel_frame().unwrap().menu_bounds.is_some());
+                collect(&mut h, &format!("universal host {preset} overflow actions"), requested);
+            }
+            h.step(&json!({"key":"Escape"})).unwrap();
+            h.frames(2);
+        }
+    }
+    assert!(opened_menus >= 6, "must traverse actual menus in every bounded preset");
+    assert!(opened_overflow > 0, "must traverse an actual overflow menu");
 }
 
 fn menu(h: &mut Harness, target: Value, surface: &str, requested: &mut BTreeMap<String, bool>) {
@@ -61,22 +248,29 @@ fn menu(h: &mut Harness, target: Value, surface: &str, requested: &mut BTreeMap<
         // Planned workspace rows deliberately have no artwork until their workspace exists.
         let intentional = id == "-" || id.starts_with('#') || (id == "ui.workspace" && item["shortcut"] == "coming later");
         assert!(!blank || intentional, "{surface}: icon-less menu item {item}");
-        assert_eq!(item["placeholder"], false, "{surface}: {item}");
-        if let Some(children) = item["children"].as_array() {
-            for child in children {
-                let id = child["id"].as_str().unwrap();
-                assert!(!id.is_empty(), "{surface}: child has no identity");
-                if id == "-" || id.starts_with('#') {
-                    continue;
-                }
-                let icon = child["icon"].as_str().unwrap();
-                assert!(!icon.is_empty(), "{surface}: submenu row has no icon: {child}");
-                assert!(!solidcraft_ui_egui::icon_svg::resolve(icon).placeholder, "{surface}: submenu placeholder {icon}");
-            }
-        }
+        assert!(item["placeholder"] == false || (item["icon"] == icon_svg::PLACEHOLDER && planned_drawing_placeholder(id)), "{surface}: {item}");
+        flyout_icons(item, surface);
     }
     collect(h, surface, requested);
     escape(h);
+}
+
+/// The rows of an item's flyout, and of the flyouts inside it, all have real icons.
+fn flyout_icons(item: &Value, surface: &str) {
+    for child in item["children"].as_array().into_iter().flatten() {
+        let id = child["id"].as_str().unwrap();
+        assert!(!id.is_empty(), "{surface}: child has no identity");
+        if id == "-" || id.starts_with('#') {
+            continue;
+        }
+        let icon = child["icon"].as_str().unwrap();
+        assert!(!icon.is_empty(), "{surface}: submenu row has no icon: {child}");
+        assert!(
+            child["placeholder"] == false || (icon == icon_svg::PLACEHOLDER && planned_drawing_placeholder(id)),
+            "{surface}: submenu placeholder {icon}"
+        );
+        flyout_icons(child, surface);
+    }
 }
 
 fn ribbon(h: &mut Harness, requested: &mut BTreeMap<String, bool>) {
@@ -95,6 +289,52 @@ fn ribbon(h: &mut Harness, requested: &mut BTreeMap<String, bool>) {
             escape(h);
         }
     }
+}
+
+/// Discover an inert package and traverse the host's actual plugin menus and ribbon groups.
+fn plugin_slot_menus_and_ribbon(requested: &mut BTreeMap<String, bool>) {
+    let mut h = harness();
+    let root = h.dir.join("plugins");
+    let package = root.join("icon-audit-helper");
+    std::fs::create_dir_all(&package).unwrap();
+    std::fs::write(package.join("entry.wasm"), []).unwrap();
+    std::fs::write(
+        package.join("plugin.json"),
+        json!({
+            "id":"icon-audit-helper","name":"Icon audit helper","version":"1.0","capabilities":["commands@0.1"],
+            "runtime":{"module":"entry.wasm","commands":[],"entries":[{
+                "name":"inspect","effect":"read","slots":[
+                    {"kind":"menu","name":"File"},{"kind":"menu","name":"Help"},
+                    {"kind":"ribbon","name":"Inspect"},{"kind":"ribbon","name":"Audit tools"}
+                ]
+            }]}
+        })
+        .to_string(),
+    )
+    .unwrap();
+    h.app.session.plugin_state.plugins_dir = Some(root);
+    h.app.home.open = false;
+    h.app.preferences.ribbon_tabs_only = false;
+    h.app.ui.tab = "INSPECT".into();
+    h.call("ui.resize", json!({"width":2400,"height":1400}));
+    // Discovery runs on a worker. Use the shared bounded scenario wait for this fixture's
+    // unique group, so an earlier scan of the user's data directory cannot satisfy the wait.
+    h.step(&json!({"until":{"shown_handles":["panel:INSPECT:plugin:icon-audit-helper","tab:INSPECT"]}})).unwrap();
+    let label = "Icon audit helper · inspect";
+    for (handle, surface) in [("appbar:file", "plugin File slot"), ("appbar:help", "plugin Help slot")] {
+        click(&mut h, handle);
+        assert!(h.widget(label).is_some(), "{surface}: the host item must show the plugin's name");
+        collect(&mut h, surface, requested);
+        escape(&mut h);
+    }
+    // Model's Plugins group already lists every command, so a slot is drawn only on the other tabs.
+    let tab = "INSPECT";
+    click(&mut h, &format!("tab:{tab}"));
+    click(&mut h, &format!("panel:{tab}:plugin:icon-audit-helper"));
+    assert!(h.widget(label).is_some(), "{tab}: the host group menu must show the plugin's name");
+    collect(&mut h, &format!("plugin {tab} ribbon slot"), requested);
+    escape(&mut h);
+    assert_eq!(requested.get("prefs_plugins"), Some(&false), "the host plugin badge must resolve to real artwork");
 }
 
 fn assistant(h: &mut Harness, requested: &mut BTreeMap<String, bool>) {
@@ -157,7 +397,7 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     if evidence.exists() {
         std::fs::remove_file(&evidence).unwrap();
     }
-    let mut h = Harness::new();
+    let mut h = harness();
     h.app.home.open = false;
     h.app.services.install_app = Some(solidcraft_ui_egui::install::InstallApp {
         offer: Box::new(|| Some(solidcraft_ui_egui::install::Offer::Prompt)),
@@ -168,11 +408,29 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     h.app.session.run_script(&solidcraft_engine::sample::script()).unwrap();
     h.frames(3);
     let mut requested = BTreeMap::new();
+    for preset in ["kinds", "key"] {
+        h.call("ui.status_fixture", json!({"preset":preset}));
+        h.frames(3);
+        collect(&mut h, "viewport status specimens", &mut requested);
+        if preset == "kinds" {
+            click(&mut h, "viewport_status:summary");
+            h.frames(3);
+            collect(&mut h, "viewport status summary menu", &mut requested);
+            escape(&mut h);
+        }
+    }
+    h.call("ui.status_fixture", json!({"preset":"off"}));
     collect(&mut h, "initial browser and timeline", &mut requested);
+    // The Browser's search field in its header, with its kind filter (#1634).
+    click(&mut h, "browser:magnifier");
+    h.frames(3);
+    collect(&mut h, "browser search field", &mut requested);
+    click(&mut h, "browser:magnifier");
+    h.frames(2);
     assistant(&mut h, &mut requested);
 
     let navigation = h.app.preferences.navigation_bar.clone();
-    h.call("ui.prefs", json!({"navigation_bar":{"slots":["orbit","pan","zoom","spin","fit","look_at","home","visual_style","projection","display","grid","ground_shadow","ambient_occlusion"]}}));
+    h.call("ui.prefs", json!({"navigation_bar":{"slots":["orbit","pan","zoom","spin","fit","look_at","home","selection_mode","visual_style","projection","display","grid","ground_shadow","ambient_occlusion"]}}));
     collect(&mut h, "navigation catalogue", &mut requested);
     let size = h.ctx.content_rect().size();
     h.call("ui.resize", json!({"width":500,"height":800}));
@@ -185,7 +443,11 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     h.call("ui.prefs", json!({"navigation_bar":navigation}));
     h.frames(3);
 
-    for (handle, surface) in [("nav:slot:visual_style", "navigation visual styles"), ("nav:view", "navigation display")] {
+    for (handle, surface) in [
+        ("nav:slot:selection_mode", "navigation selection modes"),
+        ("nav:slot:visual_style", "navigation visual styles"),
+        ("nav:view", "navigation display"),
+    ] {
         click(&mut h, handle);
         h.frames(3);
         collect(&mut h, surface, &mut requested);
@@ -227,9 +489,28 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     ribbon(&mut h, &mut requested);
     solidcraft_ui_egui::render_workspace::enter(&mut h.app, false).unwrap();
     h.frames(3);
+    {
+        // Independent egui context keeps closing Drawing popup animations out of the
+        // following Design menu scenes, where the provisional glyph is forbidden.
+        let mut drawing = Harness::new();
+        drawing.app.home.open = false;
+        // This scene audits the retained legacy management and docking controls.
+        drawing.app.preferences.drawing_sheets_visibility = "legacy".into();
+        workspace::enter(&mut drawing.app, "drawing").unwrap();
+        drawing.frames(3);
+        collect(&mut drawing, "Drawing sheet strip and browser", &mut requested);
+        ribbon(&mut drawing, &mut requested);
+        click(&mut drawing, "drawing:sheets:manage");
+        collect(&mut drawing, "Drawing sheet management and docking", &mut requested);
+        escape(&mut drawing);
+        click(&mut drawing, "drawing:sheets:settings");
+        collect(&mut drawing, "Drawing Sheet Settings", &mut requested);
+        click(&mut drawing, "drawing:settings:close");
+        collect(&mut drawing, "Drawing panel closed", &mut requested);
+    }
 
     let body = h.app.session.model.state().bodies.first().unwrap().name.clone();
-    let sketch = h.app.session.world_state().sketches.first().unwrap().feature;
+    let sketch = h.app.session.world_state().unwrap().sketches.first().unwrap().feature;
     for target in [
         json!({"type":"viewport"}),
         json!({"type":"body","name":body}),
@@ -246,11 +527,26 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
         json!({"type":"folder","component":0,"scope":"c0","folder":"bodies"}),
         json!({"type":"folder","component":0,"scope":"c0","folder":"sketches"}),
         json!({"type":"folder","component":0,"scope":"c0","folder":"construction"}),
-        json!({"type":"section"}),
-        json!({"type":"canvas","id":1}),
     ] {
         menu(&mut h, target.clone(), &target.to_string(), &mut requested);
     }
+    // The Section Analysis and a canvas have a menu only while they are there (#10745).
+    // Escape after each menu ends the section, so each menu gets one of its own.
+    let plane = h.app.run("inspect.section", json!({"plane": "YZ"})).unwrap()["section"]["id"].clone();
+    menu(&mut h, json!({"type":"section","plane":plane}), "section", &mut requested);
+    h.app.run("inspect.section", json!({"plane": "YZ"})).unwrap();
+    menu(&mut h, json!({"type":"analysis"}), "analysis", &mut requested);
+    h.app.run("inspect.section", json!({"clear": true})).unwrap();
+    let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+    png.extend(400u32.to_be_bytes());
+    png.extend(200u32.to_be_bytes());
+    png.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
+    let data = std::env::temp_dir().join(format!("solidcraft-icon-audit-{}.png", std::process::id()));
+    std::fs::write(&data, &png).unwrap();
+    let data = data.to_string_lossy().into_owned();
+    let canvas = h.app.run("canvas.insert", json!({"path": data, "plane": "XY", "width": 80})).unwrap()["canvas"].clone();
+    menu(&mut h, json!({"type":"canvas","id":canvas}), "canvas", &mut requested);
+    h.app.run("selection.delete", json!({"canvases": [canvas]})).unwrap();
     for selection in [
         json!({"type":"face","body":body,"index":0,"point":[0,0,0]}),
         json!({"type":"edge","body":body,"index":0,"point":[0,0,0]}),
@@ -263,21 +559,31 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     h.app.run("select.clear", json!({})).unwrap();
 
     // Keep history traversal in a small fixture, independent of viewport/browser selection.
-    let mut history = Harness::new();
+    let mut history = harness();
     history.app.home.open = false;
     for name in ["History A", "History B"] {
         history.app.run("solid.box", json!({"length":10,"width":10,"height":10,"name":name})).unwrap();
     }
     history.frames(3);
+    history.app.run("timeline.roll_to", json!({"position":0})).unwrap();
+    history.app.ui.tab = "INSPECT".into();
+    history.frames(2);
+    click(&mut history, "toolbar:timeline.play");
+    history.frames(1);
+    collect(&mut history, "history playback stop", &mut requested);
+    history.app.ui.tab = "INSPECT".into();
+    history.frames(2);
+    click(&mut history, "toolbar:timeline.play");
+    history.app.run("timeline.roll_to", json!({})).unwrap();
     // Named feature history has independent menus in both layout preferences.
     for left in [false, true] {
-        history.app.preferences.timeline_left = left;
+        history.app.run("view.history_layout", json!({"dock":if left { "left" } else { "bottom" }})).unwrap();
         history.frames(3);
         context_rows(&mut history, "timeline:", &mut requested);
     }
-    // The seam has its own checked display menu, independent of feature and folder rows.
-    history.step(&json!({"click":{"handle":"history:names"},"button":"right"})).unwrap();
-    collect(&mut history, "history seam", &mut requested);
+    // The transport controls have their own menu, independent of feature and folder rows.
+    history.step(&json!({"click":{"handle":"history:back"},"button":"right"})).unwrap();
+    collect(&mut history, "history transport menu", &mut requested);
     escape(&mut history);
     let features = history.app.session.doc.features.iter().take(2).map(|f| f.id).collect::<Vec<_>>();
     let group = history.app.run("timeline.group", json!({"features":features,"name":"Audit history folder"})).unwrap()["group"].as_u64().unwrap();
@@ -369,7 +675,7 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     // Sheet and assembly contexts expose contextual tabs and browser row kinds that
     // a single solid part cannot offer. Use repository-owned public sample recipes.
     for sample in solidcraft_engine::sample::samples().into_iter().filter(|s| matches!(s.name, "Sheet Metal Bracket" | "Hinge Assembly")) {
-        let mut sample_h = Harness::new();
+        let mut sample_h = harness();
         sample_h.app.home.open = false;
         sample_h.app.session.run_script(&(sample.script)()).unwrap();
         sample_h.frames(3);
@@ -387,7 +693,7 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
         panels(&mut sample_h, &mut requested);
         collect(&mut sample_h, sample.name, &mut requested);
     }
-    let mut geometry = Harness::new();
+    let mut geometry = harness();
     geometry.app.home.open = false;
     geometry.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Audit block"})).unwrap();
     geometry.app.run("solid.split_body", json!({"body":"Audit block","plane":{"origin":[5,0,0],"normal":[1,0,0]}})).unwrap();
@@ -430,7 +736,7 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     collect(&mut geometry, "File recent designs", &mut requested);
     escape(&mut geometry);
     // Populate actual document slots, then click the same overflow launcher as a person.
-    let mut documents = Harness::new();
+    let mut documents = harness();
     for _ in 0..12 {
         solidcraft_ui_egui::documents::open_tab(&mut documents.app, solidcraft_engine::Session::default()).unwrap();
     }
@@ -438,11 +744,11 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     documents.call("ui.resize", json!({"width":640,"height":1000}));
     click(&mut documents, "tab:overflow");
     documents.frames(3);
-    assert!(documents.ctx.data(|d| d.get_temp::<bool>(egui::Id::new("sc_doc_more"))).unwrap_or(false), "the document list must actually be open");
+    assert!(solidcraft_ui_egui::documents::tab_list_open(&documents.ctx), "the document list must actually be open");
     collect(&mut documents, "document overflow list (active icon is a selection marker)", &mut requested);
     // Diagnostic badges and Copy Error/Warning Message only appear on troubled features.
     for failing in [false, true] {
-        let mut diagnostics = Harness::new();
+        let mut diagnostics = harness();
         diagnostics.app.home.open = false;
         if failing {
             diagnostics.app.session.run_script(&solidcraft_engine::sample::script()).unwrap();
@@ -467,13 +773,15 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
         ("sketch Select Other", include_str!("scenarios/select_other_coincident_lines.json")),
         ("canvas calibration", include_str!("scenarios/s19_canvas_calibrate.json")),
     ] {
-        let mut scenario = Harness::new();
+        let mut scenario = harness();
         scenario.run(&serde_json::from_str(source).unwrap()).unwrap_or_else(|e| panic!("{name}: {e}"));
         collect(&mut scenario, name, &mut requested);
     }
+    universal_panel_host_menus(&mut requested);
+    plugin_slot_menus_and_ribbon(&mut requested);
     icon_svg::audit::stop();
     let manifest = requested.iter().map(|(name, placeholder)| format!("{name}\t{placeholder}\n")).collect::<String>();
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/icons/ui/design/requested_icons.txt");
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../look/icons/design/requested_icons.txt");
     if std::env::var("UPDATE_ICON_MANIFEST").as_deref() == Ok("1") {
         std::fs::write(&path, &manifest).unwrap();
     } else {
@@ -484,8 +792,24 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
             "Runtime icon discovery changed. Regenerate with UPDATE_ICON_MANIFEST=1 cargo test -p solidcraft-ui-egui --test icon_audit"
         );
     }
-    let missing = requested.iter().filter(|(_, placeholder)| **placeholder).map(|(name, _)| name).collect::<Vec<_>>();
+    // Each request was checked in its Drawing/search context by `collect` above.
+    let missing = requested
+        .iter()
+        .filter(|(name, placeholder)| **placeholder && name.as_str() != icon_svg::PLACEHOLDER)
+        .map(|(name, _)| name)
+        .collect::<Vec<_>>();
     assert!(missing.is_empty(), "Runtime placeholder requests (see surface diagnostics above): {missing:?}");
+}
+
+#[test]
+fn intentional_drawing_requests_do_not_allow_unknown_or_unplanned_icons() {
+    assert!(!planned_drawing_placeholder("drawing.view.base.planned"));
+    assert!(!planned_drawing_placeholder("drawing.unknown"));
+    assert!(!planned_drawing_placeholder("solid.extrude"));
+    assert!(permitted_request(icon_svg::PLACEHOLDER, true, true));
+    assert!(!permitted_request(icon_svg::PLACEHOLDER, true, false));
+    assert!(!permitted_request("missing_audit_test_icon", true, true));
+    assert!(!permitted_request("drawing_unknown", true, true));
 }
 
 #[test]
@@ -508,8 +832,18 @@ fn audit_is_opt_in_drains_and_records_resolved_aliases() {
 /// Review evidence uses the application's actual SVG renderer, without a window or screenshot.
 #[test]
 fn offset_mode_artwork_review() {
-    use solidcraft_ui_egui::theme::{ColorVision, Tokens};
-    let names = ["offset", "offset_two_sides", "offset_symmetric", "sketch_chamfer", "sketch_chamfer_two_distances", "split_body"];
+    use solidcraft_theme::{ColorVision, Tokens};
+    let names = [
+        "offset",
+        "offset_two_sides",
+        "offset_symmetric",
+        "sketch_chamfer",
+        "sketch_chamfer_two_distances",
+        "split_body",
+        "gusset_side_negative",
+        "gusset_side_center",
+        "gusset_side_positive",
+    ];
     let mut sheet = tiny_skia::Pixmap::new(400, names.len() as u32 * 88).unwrap();
     for (row, name) in names.iter().enumerate() {
         let resolved = icon_svg::resolve(name);
@@ -540,7 +874,7 @@ fn offset_mode_artwork_review() {
 
 #[test]
 fn overflow_icons_with_many_pins_at_200_points() {
-    let mut h = Harness::new();
+    let mut h = harness();
     icon_svg::audit::start();
     let steps = serde_json::from_str(include_str!("scenarios/s48_toolbar_many_pins.json")).unwrap();
     if let Err(error) = h.run(&steps) {
@@ -550,8 +884,7 @@ fn overflow_icons_with_many_pins_at_200_points() {
     }
     let requested = icon_svg::audit::take();
     icon_svg::audit::stop();
-    let manifest =
-        std::fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/icons/ui/design/requested_icons.txt")).unwrap();
+    let manifest = std::fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../look/icons/design/requested_icons.txt")).unwrap();
     for icon in requested {
         assert!(!icon.placeholder, "{}", icon.name);
         assert!(manifest.lines().any(|line| line == format!("{}\tfalse", icon.name)), "{} is absent from runtime discovery", icon.name);

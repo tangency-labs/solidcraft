@@ -1,0 +1,228 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      0.0,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.0,
+      -1.0,
+      0
+     ]
+    },
+    "name": "S0"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 20.0
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      25.881904510252074,
+      3.407417371093169,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.25881904510252074,
+      -0.9659258262890683,
+      0
+     ]
+    },
+    "name": "S1"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 20.0
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      49.99999999999999,
+      13.397459621556129,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.49999999999999994,
+      -0.8660254037844387,
+      0
+     ]
+    },
+    "name": "S2"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 20.0
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      70.71067811865474,
+      29.28932188134524,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.7071067811865475,
+      -0.7071067811865476,
+      0
+     ]
+    },
+    "name": "S3"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 20.0
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      86.60254037844386,
+      49.999999999999986,
+      0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.8660254037844386,
+      -0.5000000000000001,
+      0
+     ]
+    },
+    "name": "S4"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 20.0
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.loft",
+   "params": {
+    "sections": [
+     {
+      "sketch": "S0"
+     },
+     {
+      "sketch": "S1"
+     },
+     {
+      "sketch": "S2"
+     },
+     {
+      "sketch": "S3"
+     },
+     {
+      "sketch": "S4"
+     }
+    ],
+    "operation": "new",
+    "name": "Bent",
+    "body_name": "Tube"
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      0.0,
+      -14.1421,
+      14.1421
+     ]
+    ],
+    "radius": 3.0,
+    "name": "EndRound"
+   }
+  }
+ ]
+}

@@ -3,11 +3,12 @@
 //! when the part changes (also after the design is saved and reopened), and a bad reference is
 //! refused with an error. A cylinder takes the same references for its base (#6380).
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::PI;
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::FeatureKind;
-use solidcraft_geom::Vec3;
 
 use crate::{EngineError, Session};
 
@@ -19,7 +20,7 @@ fn run(s: &mut Session, id: &str, p: Value) -> Value {
 }
 
 fn solid_at(s: &Session, p: Vec3) -> bool {
-    s.model.state().bodies.iter().any(|b| b.body.contains(p))
+    s.model.state().bodies.iter().any(|b| b.body.classify_point(p).unwrap() == solidcraft_kernel::PointClass::Inside)
 }
 
 /// The bore (5 mm across, 4 mm deep, down from the top face at z = `top`) is about (x, y):
@@ -80,6 +81,18 @@ fn a_hole_sits_at_its_distances_from_two_edges() {
 }
 
 #[test]
+fn a_reference_edge_is_found_on_its_own_part_when_another_part_touches_the_hole() {
+    // A pad lies on the plate where the hole is picked, so both surfaces are as near as can be
+    // and the pad comes first: the plate's edges must still be found on the plate.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 4, "corner": [25, 20, 10], "operation": "new", "body_name": "Pad"}));
+    run(&mut s, "solid.box", json!({"length": 50, "width": 40, "height": 10, "corner": [0, 0, 0], "operation": "new", "body_name": "Plate"}));
+    run(&mut s, "solid.hole", referenced(json!([{"edge": [0, 20, 10], "distance": 10}, {"edge": [25, 0, 10], "distance": "12 mm"}])));
+    let (position, _) = hole(&s);
+    assert!(position.dist(Vec3::new(10.0, 12.0, 10.0)) < 1e-6, "the hole is placed at (10, 12), not {position:?}");
+}
+
+#[test]
 fn a_hole_follows_its_edges_when_the_box_grows() {
     let mut s = plate();
     // From the far edges: 10 mm from x = len, 12 mm from y = wid.
@@ -103,6 +116,32 @@ fn a_hole_follows_its_edges_when_the_box_grows() {
     t.refresh();
     bore_at(&t, 20.0, 45.0, 10.0);
     assert_eq!(hole(&t).1, hole(&s).1);
+}
+
+#[test]
+fn a_referenced_hole_can_be_patterned_and_mirrored() {
+    // #8055, #6754: a pattern or mirror places its copies from the hole's own spot, found again
+    // after the hole has been drilled. Through the plate, its centre is then in the opening, with
+    // no face under it.
+    let mut s = plate();
+    let mut through = referenced(json!([{"edge": [0, 20, 10], "distance": 10}, {"edge": [25, 0, 10], "distance": 12}]));
+    through.as_object_mut().unwrap().remove("depth");
+    run(&mut s, "solid.hole", through);
+    run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"features": ["H"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 12, "dir2": [0, 1, 0], "count2": 2, "spacing2": 12, "name": "P"}),
+    );
+    for (x, y) in [(10.0, 12.0), (22.0, 12.0), (10.0, 24.0), (22.0, 24.0)] {
+        bore_at(&s, x, y, 10.0);
+    }
+    run(&mut s, "solid.mirror", json!({"features": ["H"], "plane": {"origin": [25, 0, 0], "normal": [1, 0, 0]}, "name": "M"}));
+    bore_at(&s, 40.0, 12.0, 10.0);
+    // The copies still follow the hole's edges.
+    run(&mut s, "parameters.change", json!({"name": "len", "expression": "60 mm"}));
+    let p = s.doc.find_feature("P").unwrap().id;
+    assert!(s.model.result(p).is_some_and(|r| r.error.is_none()), "{:?}", s.model.result(p).map(|r| &r.error));
+    bore_at(&s, 22.0, 24.0, 10.0);
 }
 
 #[test]

@@ -11,16 +11,23 @@ workspace = true
 [features]
 # Opt-in developer instrumentation; normal builds contain no collection or clocks.
 solver-profiling = []
+# Test hook: holds the font search's answer for chosen characters until released, so a test can watch text wait.
+test-font-gate = []
 
 [[example]]
 name = "solve_profile"
 required-features = ["solver-profiling"]
 
 [dependencies]
+solidcore-record = { workspace = true }
+solidcraft-kernel = { workspace = true }
+harfrust = "0.12"
 solidcraft-geom = { workspace = true }
 serde = { workspace = true }
+sha2 = { workspace = true }
 thiserror = { workspace = true }
 ttf-parser = { workspace = true }
+unicode-bidi = "0.3"
 
 [dev-dependencies]
 serde_json = { workspace = true }

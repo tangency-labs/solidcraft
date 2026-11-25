@@ -1,0 +1,136 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  -3.1114476537208247,
+                  -5.506259483365744,
+                  -6.413231740953963e-17
+                ],
+                [
+                  -3.111447653720826,
+                  5.506259483365741,
+                  1.0746525901198587e-15
+                ]
+              ],
+              "index": 5
+            }
+          ],
+          "points": [
+            [
+              7.832443735993667,
+              6.217248937900877e-15,
+              0.0
+            ]
+          ],
+          "tolerance": 4.514035824974249
+        },
+        "kind": "round",
+        "sizes": [
+          1.5
+        ]
+      }
+    }
+  ],
+  "case": "cov-junction-boss-tilt-40-root-round",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "edges": 21,
+    "faces": 10,
+    "method": "Plate 60 x 60 x 10, top z = 0; boss R 6 on the axis through the origin along a = (sin 40, 0, cos 40), t from -2 to 23; its bottom cap p.a = -2 meets the plate's top at x = -2 / sin 40, so it overhangs on the -x side. Before the round: 36000 plus the boss above z = 0, in closed form (a circular segment and its first moment): 38565.2859606640. The round's material: in tube coordinates about the spine (the ellipse z = 1.5 at distance 7.5 from the axis, torsion 0), the integral of rho (1 - kappa rho cos phi) over the section between the ball's arc, the plate and the wall, cut by p.a >= -2 (the End: the round ends flush with the cap's plane, its wall rail at (-4.176377478, +-4.664695271, 0.893582223) where the ball's centre is on that plane, its plate rail at x = -2 / sin 40, y = +-6.711406785). Each section ray meets the plate and the wall in closed form; phi and the spine by adaptive Gauss-Kronrod, converged to 1.3e-13: 33.432508155933. V = 38598.7184688199. Graded to 1e-9 relative: the cut by the cap's plane alone moves the volume by 0.4719 mm^3 (1.2e-5). Counts: the 9 faces and the round; the root edge gives way to the plate rail, the wall rail (two edges, split by the seam) and two end edges in the cap's plane, and the End absorbs the rim edge up to the seam's vertex: 18 - 2 + 5 = 21 edges; the root's two ends and the seam's vertex go, the rails' four ends and the rail's seam crossing come: 12 - 3 + 5 = 14 vertices.",
+    "source": "analytic",
+    "sources": [],
+    "tolerance": {
+      "rel": 1e-09
+    },
+    "vertices": 14,
+    "volume_mm3": 38598.7184688199,
+    "what": "cylinder R6 tilted 40 degrees joined into a plate, its root edge rounded 1.5"
+  },
+  "expressible": false,
+  "gallery_note": "at each End the wall rail runs on past the seam's vertex to the bottom cap's rim, and the round ends flush with the cap's plane; SMLib refused it (status 1001)",
+  "operation_expressible": true,
+  "records": "cov-junction-boss-tilt-40-root-round.bodies.json.gz",
+  "result": [
+    {
+      "made": "b16"
+    }
+  ],
+  "sources": [
+    "tangency-labs/solidcore#2829"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "cylinder R6 tilted 40 degrees joined into a plate, its root edge rounded 1.5",
+  "why_not": []
+}

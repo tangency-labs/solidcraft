@@ -1,0 +1,35 @@
+{
+  "area": "surfaces",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-boundary-five-curves-refused",
+  "expected": {
+    "method": "the loop patch is a Coons patch of opposite pairs (or a bridge of two); five sides have no pairing",
+    "outcome": "refused",
+    "refusal": "`curves` must list 2 to 4 sketch curves in loop order",
+    "source": "invariants",
+    "sources": [],
+    "what": "a boundary loop of five curves: refused, a loop patch takes 2 to 4"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 4 (surface.boundary): invalid parameters for `surface.boundary`: `curves` must list 2 to 4 sketch curves in loop order (or give a network as `u` and `v`)",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 4 (surface.boundary): invalid parameters for `surface.boundary`: `curves` must list 2 to 4 sketch curves in loop order (or give a network as `u` and `v`)",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [],
+  "ungraded": [],
+  "what": "a boundary loop of five curves: refused, a loop patch takes 2 to 4",
+  "why_not": [
+    "no kernel operation ran before the failure: step 4 (surface.boundary): invalid parameters for `surface.boundary`: `curves` must list 2 to 4 sketch curves in loop order (or give a network as `u` and `v`)"
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "unit": "nlib.basis_basic",
+  "cases": [
+    {"name": "fuzz00278_9223372036854775807_does_not_fit_i32", "origin": "fuzz-out/n2000/nlib.basis_basic/fuzz00278.json (panic: rust: attempt to add with overflow at crates/solidcore/src/nurbs/basis_basic.rs:773)", "cpp": "harness: 9223372036854775807 does not fit i32", "rust": "error: rust: nurbs::basis_basic::make_knots_compatible: invalid input: degree too large", "inputs": {"op": "make_compatible", "p": 3, "q": 9223372036854775807, "r": [2.0], "s": [2.0]}}
+  ]
+}

@@ -1,0 +1,979 @@
+{
+ "cases": [
+  {
+   "name": "silhouettes_cylinder_z",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:1120-1424",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/cylinder.smb"
+    },
+    "view": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "silhouettes"
+   }
+  },
+  {
+   "name": "global_visibility_cylinder_z",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:434-710",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/cylinder.smb"
+    },
+    "view": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "global_visibility"
+   }
+  },
+  {
+   "name": "silhouettes_cylinder_oblique",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:1120-1424",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/cylinder.smb"
+    },
+    "view": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "silhouettes"
+   }
+  },
+  {
+   "name": "global_visibility_cylinder_oblique",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:434-710",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/cylinder.smb"
+    },
+    "view": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "global_visibility"
+   }
+  },
+  {
+   "name": "global_visibility_cylinder_placement",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:434-710",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/cylinder.smb"
+    },
+    "view": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "placement": [
+     [
+      0.3,
+      -0.4,
+      1.0
+     ],
+     [
+      1.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "global_visibility"
+   }
+  },
+  {
+   "name": "point_visible_cylinder_origin",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:1766-1960",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/cylinder.smb"
+    },
+    "view": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "point_visible",
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "point_visible_cylinder_far",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:1766-1960",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/cylinder.smb"
+    },
+    "view": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "point_visible",
+    "p": [
+     0.0,
+     0.0,
+     1000.0
+    ]
+   }
+  },
+  {
+   "name": "point_visible_cylinder_off",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:1766-1960",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/cylinder.smb"
+    },
+    "view": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "point_visible",
+    "p": [
+     0.5,
+     0.25,
+     -0.75
+    ]
+   }
+  },
+  {
+   "name": "silhouettes_sphere_z",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:1120-1424",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/sphere.smb"
+    },
+    "view": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "silhouettes"
+   }
+  },
+  {
+   "name": "global_visibility_sphere_z",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:434-710",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/sphere.smb"
+    },
+    "view": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "global_visibility"
+   }
+  },
+  {
+   "name": "silhouettes_sphere_oblique",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:1120-1424",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/sphere.smb"
+    },
+    "view": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "silhouettes"
+   }
+  },
+  {
+   "name": "global_visibility_sphere_oblique",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:434-710",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/sphere.smb"
+    },
+    "view": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "global_visibility"
+   }
+  },
+  {
+   "name": "global_visibility_sphere_placement",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:434-710",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/sphere.smb"
+    },
+    "view": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "placement": [
+     [
+      0.3,
+      -0.4,
+      1.0
+     ],
+     [
+      1.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "global_visibility"
+   }
+  },
+  {
+   "name": "point_visible_sphere_origin",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:1766-1960",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/sphere.smb"
+    },
+    "view": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "point_visible",
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "point_visible_sphere_far",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:1766-1960",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/sphere.smb"
+    },
+    "view": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "point_visible",
+    "p": [
+     0.0,
+     0.0,
+     1000.0
+    ]
+   }
+  },
+  {
+   "name": "point_visible_sphere_off",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:1766-1960",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/sphere.smb"
+    },
+    "view": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "point_visible",
+    "p": [
+     0.5,
+     0.25,
+     -0.75
+    ]
+   }
+  },
+  {
+   "name": "silhouettes_cone_z",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:1120-1424",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "view": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "silhouettes"
+   }
+  },
+  {
+   "name": "global_visibility_cone_z",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:434-710",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "view": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "global_visibility"
+   }
+  },
+  {
+   "name": "silhouettes_cone_oblique",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:1120-1424",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "view": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "silhouettes"
+   }
+  },
+  {
+   "name": "global_visibility_cone_oblique",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:434-710",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "view": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "global_visibility"
+   }
+  },
+  {
+   "name": "global_visibility_cone_placement",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:434-710",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "view": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "placement": [
+     [
+      0.3,
+      -0.4,
+      1.0
+     ],
+     [
+      1.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "global_visibility"
+   }
+  },
+  {
+   "name": "point_visible_cone_origin",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:1766-1960",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "view": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "point_visible",
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "point_visible_cone_far",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:1766-1960",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "view": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "point_visible",
+    "p": [
+     0.0,
+     0.0,
+     1000.0
+    ]
+   }
+  },
+  {
+   "name": "point_visible_cone_off",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:1766-1960",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "view": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "point_visible",
+    "p": [
+     0.5,
+     0.25,
+     -0.75
+    ]
+   }
+  },
+  {
+   "name": "silhouettes_torus_z",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:1120-1424",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "view": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "silhouettes"
+   }
+  },
+  {
+   "name": "global_visibility_torus_z",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:434-710",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "view": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "global_visibility"
+   }
+  },
+  {
+   "name": "silhouettes_torus_oblique",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:1120-1424",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "view": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "silhouettes"
+   }
+  },
+  {
+   "name": "global_visibility_torus_oblique",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:434-710",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "view": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "global_visibility"
+   }
+  },
+  {
+   "name": "global_visibility_torus_placement",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:434-710",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "view": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "placement": [
+     [
+      0.3,
+      -0.4,
+      1.0
+     ],
+     [
+      1.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "global_visibility"
+   }
+  },
+  {
+   "name": "point_visible_torus_origin",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:1766-1960",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "view": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "point_visible",
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "point_visible_torus_far",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:1766-1960",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "view": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "point_visible",
+    "p": [
+     0.0,
+     0.0,
+     1000.0
+    ]
+   }
+  },
+  {
+   "name": "point_visible_torus_off",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:1766-1960",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "view": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "point_visible",
+    "p": [
+     0.5,
+     0.25,
+     -0.75
+    ]
+   }
+  },
+  {
+   "name": "silhouettes_box_with_large_fillet_z",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:1120-1424",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "view": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "silhouettes"
+   }
+  },
+  {
+   "name": "global_visibility_box_with_large_fillet_z",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:434-710",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "view": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "global_visibility"
+   }
+  },
+  {
+   "name": "silhouettes_box_with_large_fillet_oblique",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:1120-1424",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "view": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "silhouettes"
+   }
+  },
+  {
+   "name": "global_visibility_box_with_large_fillet_oblique",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:434-710",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "view": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "global_visibility"
+   }
+  },
+  {
+   "name": "global_visibility_box_with_large_fillet_placement",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:434-710",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "view": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "placement": [
+     [
+      0.3,
+      -0.4,
+      1.0
+     ],
+     [
+      1.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "global_visibility"
+   }
+  },
+  {
+   "name": "point_visible_box_with_large_fillet_origin",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:1766-1960",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "view": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "point_visible",
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "point_visible_box_with_large_fillet_far",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:1766-1960",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "view": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "point_visible",
+    "p": [
+     0.0,
+     0.0,
+     1000.0
+    ]
+   }
+  },
+  {
+   "name": "point_visible_box_with_large_fillet_off",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:1766-1960",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "view": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": false,
+    "op": "point_visible",
+    "p": [
+     0.5,
+     0.25,
+     -0.75
+    ]
+   }
+  },
+  {
+   "name": "global_visibility_box_with_large_fillet_z_smooth",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:434-710",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "view": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": true,
+    "op": "global_visibility"
+   }
+  },
+  {
+   "name": "global_visibility_box_with_large_fillet_oblique_smooth",
+   "upstream_ref": "source/SMLib/src/SmHCR.cpp:434-710",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "view": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "approx_tol": 1e-05,
+    "ang_tol": 0.17453292519943295,
+    "seams": true,
+    "smooth": true,
+    "op": "global_visibility"
+   }
+  }
+ ]
+}

@@ -1,0 +1,421 @@
+{
+  "cases": [
+    {
+      "name": "box_pointers_no_walk",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers; tests/prog_test/src/smTopoTest.cpp:my_test_topology",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "walk": false
+      }
+    },
+    {
+      "name": "box_pointers_walk",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers; tests/prog_test/src/smTopoTest.cpp:my_test_topology",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "walk": true
+      }
+    },
+    {
+      "name": "network_pointers_no_walk",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers; tests/prog_test/src/smTopoTest.cpp:my_test_topology",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "walk": false
+      }
+    },
+    {
+      "name": "network_pointers_walk",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers; tests/prog_test/src/smTopoTest.cpp:my_test_topology",
+      "inputs": {
+        "brep": {
+          "kind": "network"
+        },
+        "walk": true
+      }
+    },
+    {
+      "name": "vertices_pointers_no_walk",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers; tests/prog_test/src/smTopoTest.cpp:my_test_topology",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ],
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "walk": false
+      }
+    },
+    {
+      "name": "vertices_pointers_walk",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers; tests/prog_test/src/smTopoTest.cpp:my_test_topology",
+      "inputs": {
+        "brep": {
+          "kind": "vertices",
+          "points": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              1,
+              0,
+              0
+            ],
+            [
+              0,
+              0,
+              0
+            ]
+          ]
+        },
+        "walk": true
+      }
+    },
+    {
+      "name": "points_pointers_no_walk",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers; tests/prog_test/src/smTopoTest.cpp:my_test_topology",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "walk": false
+      }
+    },
+    {
+      "name": "points_pointers_walk",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers; tests/prog_test/src/smTopoTest.cpp:my_test_topology",
+      "inputs": {
+        "brep": {
+          "kind": "points",
+          "vertices": [
+            [
+              0.5,
+              0,
+              0,
+              1e-06
+            ]
+          ],
+          "lines": [
+            [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              1e-06
+            ]
+          ]
+        },
+        "walk": true
+      }
+    },
+    {
+      "name": "box_mutation_1",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "mutation": 1,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "box_mutation_2",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "mutation": 2,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "box_mutation_3",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "mutation": 3,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "box_mutation_4",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "mutation": 4,
+        "value": 2
+      }
+    },
+    {
+      "name": "box_mutation_5",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "mutation": 5,
+        "value": 2
+      }
+    },
+    {
+      "name": "box_mutation_6",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "mutation": 6,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "box_mutation_7",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "mutation": 7,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "box_mutation_8",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "mutation": 8,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "box_mutation_9",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "mutation": 9,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "box_mutation_10",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:ValidatePointers",
+      "inputs": {
+        "brep": {
+          "kind": "box",
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "mutation": 10,
+        "value": 0.1
+      }
+    },
+    {
+      "name": "grid_1_pointers",
+      "upstream_ref": "source/SMLib/src/SmBrepData.cpp:SmBrepConstructor; source/SMLib/src/SmBrep.cpp:ValidatePointers",
+      "inputs": {
+        "grid_faces": 1
+      }
+    },
+    {
+      "name": "grid_2_pointers",
+      "upstream_ref": "source/SMLib/src/SmBrepData.cpp:SmBrepConstructor; source/SMLib/src/SmBrep.cpp:ValidatePointers",
+      "inputs": {
+        "grid_faces": 2
+      }
+    },
+    {
+      "name": "grid_8_pointers",
+      "upstream_ref": "source/SMLib/src/SmBrepData.cpp:SmBrepConstructor; source/SMLib/src/SmBrep.cpp:ValidatePointers",
+      "inputs": {
+        "grid_faces": 8
+      }
+    },
+    {
+      "name": "grid_32_pointers",
+      "upstream_ref": "source/SMLib/src/SmBrepData.cpp:SmBrepConstructor; source/SMLib/src/SmBrep.cpp:ValidatePointers",
+      "inputs": {
+        "grid_faces": 32
+      }
+    },
+    {
+      "name": "grid_128_pointers",
+      "upstream_ref": "source/SMLib/src/SmBrepData.cpp:SmBrepConstructor; source/SMLib/src/SmBrep.cpp:ValidatePointers",
+      "inputs": {
+        "grid_faces": 128
+      }
+    }
+  ]
+}

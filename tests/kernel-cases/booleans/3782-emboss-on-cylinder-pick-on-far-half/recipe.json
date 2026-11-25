@@ -1,0 +1,65 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 10,
+    "height": 20,
+    "body_name": "Cyl"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      10,
+      0
+     ],
+     "x_dir": [
+      -1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "Badge"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -2,
+     5
+    ],
+    "p1": [
+     2,
+     10
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.emboss",
+   "params": {
+    "sketch": "Badge",
+    "depth": 1,
+    "mode": "emboss",
+    "face": [
+     0,
+     -10,
+     7.5
+    ]
+   }
+  }
+ ]
+}

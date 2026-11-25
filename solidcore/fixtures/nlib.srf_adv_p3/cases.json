@@ -1,0 +1,5332 @@
+{
+ "cases": [
+  {
+   "name": "Surface.sms_grid_11",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "grid",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "u": [
+     0.0,
+     0.14285714285714285,
+     0.2857142857142857,
+     0.42857142857142855,
+     0.5714285714285714,
+     0.7142857142857143,
+     0.8571428571428571,
+     1.0
+    ],
+    "v": [
+     0.0634210842965636,
+     0.25486358896901634,
+     0.4463060936414691,
+     0.6377485983139218
+    ],
+    "ufl": 1,
+    "vfl": 1
+   }
+  },
+  {
+   "name": "Surface.sms_grid_12",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "grid",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "u": [
+     0.0,
+     0.14285714285714285,
+     0.2857142857142857,
+     0.42857142857142855,
+     0.5714285714285714,
+     0.7142857142857143,
+     0.8571428571428571,
+     1.0
+    ],
+    "v": [
+     0.0634210842965636,
+     0.25486358896901634,
+     0.4463060936414691,
+     0.6377485983139218
+    ],
+    "ufl": 1,
+    "vfl": 2
+   }
+  },
+  {
+   "name": "Surface.sms_grid_21",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "grid",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "u": [
+     0.0,
+     0.14285714285714285,
+     0.2857142857142857,
+     0.42857142857142855,
+     0.5714285714285714,
+     0.7142857142857143,
+     0.8571428571428571,
+     1.0
+    ],
+    "v": [
+     0.0634210842965636,
+     0.25486358896901634,
+     0.4463060936414691,
+     0.6377485983139218
+    ],
+    "ufl": 2,
+    "vfl": 1
+   }
+  },
+  {
+   "name": "Surface.sms_grid_22",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "grid",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "u": [
+     0.0,
+     0.14285714285714285,
+     0.2857142857142857,
+     0.42857142857142855,
+     0.5714285714285714,
+     0.7142857142857143,
+     0.8571428571428571,
+     1.0
+    ],
+    "v": [
+     0.0634210842965636,
+     0.25486358896901634,
+     0.4463060936414691,
+     0.6377485983139218
+    ],
+    "ufl": 2,
+    "vfl": 2
+   }
+  },
+  {
+   "name": "Surface.sms_grid_knots",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "grid",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "u": [
+     0.0,
+     0.0323000000097693,
+     0.1580195729049453,
+     0.2001195729147676,
+     0.5378790260004654,
+     0.5799790260102878,
+     0.7841343359098634,
+     0.8262343359196858,
+     0.8293664333098115,
+     0.8714664333196339,
+     0.990199999999947,
+     1.0
+    ],
+    "v": [
+     0.0634210842965636,
+     0.6377485983139218
+    ],
+    "ufl": 2,
+    "vfl": 1
+   }
+  },
+  {
+   "name": "Surface.sms_grid_out",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "grid",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "u": [
+     -0.001,
+     1.0
+    ],
+    "v": [
+     0.0634210842965636
+    ],
+    "ufl": 1,
+    "vfl": 1
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g1_d1_e1_0.1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": -0.1,
+    "dir": 1,
+    "end": 1,
+    "cont": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g1_d1_e1_0.1_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": -0.1,
+    "dir": 1,
+    "end": 1,
+    "cont": 2,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g1_d1_e1_0.5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": -0.5,
+    "dir": 1,
+    "end": 1,
+    "cont": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g1_d1_e1_1.5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": -1.5,
+    "dir": 1,
+    "end": 1,
+    "cont": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g1_d1_e2_0.1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 1.1,
+    "dir": 1,
+    "end": 2,
+    "cont": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g1_d1_e2_0.1_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 1.1,
+    "dir": 1,
+    "end": 2,
+    "cont": 2,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g1_d1_e2_0.5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 1.5,
+    "dir": 1,
+    "end": 2,
+    "cont": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g1_d1_e2_1.5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 2.5,
+    "dir": 1,
+    "end": 2,
+    "cont": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g1_d2_e1_0.1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 0.005988332894827766,
+    "dir": 2,
+    "end": 1,
+    "cont": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g1_d2_e1_0.1_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 0.005988332894827766,
+    "dir": 2,
+    "end": 1,
+    "cont": 2,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g1_d2_e1_0.5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": -0.22374267271211554,
+    "dir": 2,
+    "end": 1,
+    "cont": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g1_d2_e1_1.5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": -0.7980701867294738,
+    "dir": 2,
+    "end": 1,
+    "cont": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g1_d2_e2_0.1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 0.6951813497156577,
+    "dir": 2,
+    "end": 2,
+    "cont": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g1_d2_e2_0.1_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 0.6951813497156577,
+    "dir": 2,
+    "end": 2,
+    "cont": 2,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g1_d2_e2_0.5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 0.924912355322601,
+    "dir": 2,
+    "end": 2,
+    "cont": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g1_d2_e2_1.5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 1.4992398693399593,
+    "dir": 2,
+    "end": 2,
+    "cont": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g2_d1_e1_0.1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": -0.1,
+    "dir": 1,
+    "end": 1,
+    "cont": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g2_d1_e1_0.1_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": -0.1,
+    "dir": 1,
+    "end": 1,
+    "cont": 3,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g2_d1_e1_0.5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": -0.5,
+    "dir": 1,
+    "end": 1,
+    "cont": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g2_d1_e1_1.5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": -1.5,
+    "dir": 1,
+    "end": 1,
+    "cont": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g2_d1_e2_0.1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 1.1,
+    "dir": 1,
+    "end": 2,
+    "cont": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g2_d1_e2_0.1_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 1.1,
+    "dir": 1,
+    "end": 2,
+    "cont": 3,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g2_d1_e2_0.5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 1.5,
+    "dir": 1,
+    "end": 2,
+    "cont": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g2_d1_e2_1.5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 2.5,
+    "dir": 1,
+    "end": 2,
+    "cont": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g2_d2_e1_0.1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 0.005988332894827766,
+    "dir": 2,
+    "end": 1,
+    "cont": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g2_d2_e1_0.1_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 0.005988332894827766,
+    "dir": 2,
+    "end": 1,
+    "cont": 3,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g2_d2_e1_0.5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": -0.22374267271211554,
+    "dir": 2,
+    "end": 1,
+    "cont": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g2_d2_e1_1.5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": -0.7980701867294738,
+    "dir": 2,
+    "end": 1,
+    "cont": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g2_d2_e2_0.1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 0.6951813497156577,
+    "dir": 2,
+    "end": 2,
+    "cont": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g2_d2_e2_0.1_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 0.6951813497156577,
+    "dir": 2,
+    "end": 2,
+    "cont": 3,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g2_d2_e2_0.5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 0.924912355322601,
+    "dir": 2,
+    "end": 2,
+    "cont": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g2_d2_e2_1.5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 1.4992398693399593,
+    "dir": 2,
+    "end": 2,
+    "cont": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_cmax_d1_e1_0.1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": -0.1,
+    "dir": 1,
+    "end": 1,
+    "cont": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_cmax_d1_e1_0.1_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": -0.1,
+    "dir": 1,
+    "end": 1,
+    "cont": 4,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface.sms_ext_cmax_d1_e1_0.5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": -0.5,
+    "dir": 1,
+    "end": 1,
+    "cont": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_cmax_d1_e1_1.5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": -1.5,
+    "dir": 1,
+    "end": 1,
+    "cont": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_cmax_d1_e2_0.1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 1.1,
+    "dir": 1,
+    "end": 2,
+    "cont": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_cmax_d1_e2_0.1_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 1.1,
+    "dir": 1,
+    "end": 2,
+    "cont": 4,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface.sms_ext_cmax_d1_e2_0.5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 1.5,
+    "dir": 1,
+    "end": 2,
+    "cont": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_cmax_d1_e2_1.5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 2.5,
+    "dir": 1,
+    "end": 2,
+    "cont": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_cmax_d2_e1_0.1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 0.005988332894827766,
+    "dir": 2,
+    "end": 1,
+    "cont": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_cmax_d2_e1_0.1_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 0.005988332894827766,
+    "dir": 2,
+    "end": 1,
+    "cont": 4,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface.sms_ext_cmax_d2_e1_0.5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": -0.22374267271211554,
+    "dir": 2,
+    "end": 1,
+    "cont": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_cmax_d2_e1_1.5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": -0.7980701867294738,
+    "dir": 2,
+    "end": 1,
+    "cont": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_cmax_d2_e2_0.1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 0.6951813497156577,
+    "dir": 2,
+    "end": 2,
+    "cont": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_cmax_d2_e2_0.1_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 0.6951813497156577,
+    "dir": 2,
+    "end": 2,
+    "cont": 4,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface.sms_ext_cmax_d2_e2_0.5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 0.924912355322601,
+    "dir": 2,
+    "end": 2,
+    "cont": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_cmax_d2_e2_1.5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 1.4992398693399593,
+    "dir": 2,
+    "end": 2,
+    "cont": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g1r_d1_e1_0.1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": -0.1,
+    "dir": 1,
+    "end": 1,
+    "cont": 6,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g1r_d1_e1_0.1_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": -0.1,
+    "dir": 1,
+    "end": 1,
+    "cont": 6,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g1r_d1_e1_0.5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": -0.5,
+    "dir": 1,
+    "end": 1,
+    "cont": 6,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g1r_d1_e1_1.5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": -1.5,
+    "dir": 1,
+    "end": 1,
+    "cont": 6,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g1r_d1_e2_0.1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 1.1,
+    "dir": 1,
+    "end": 2,
+    "cont": 6,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g1r_d1_e2_0.1_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 1.1,
+    "dir": 1,
+    "end": 2,
+    "cont": 6,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g1r_d1_e2_0.5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 1.5,
+    "dir": 1,
+    "end": 2,
+    "cont": 6,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g1r_d1_e2_1.5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 2.5,
+    "dir": 1,
+    "end": 2,
+    "cont": 6,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g1r_d2_e1_0.1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 0.005988332894827766,
+    "dir": 2,
+    "end": 1,
+    "cont": 6,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g1r_d2_e1_0.1_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 0.005988332894827766,
+    "dir": 2,
+    "end": 1,
+    "cont": 6,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g1r_d2_e1_0.5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": -0.22374267271211554,
+    "dir": 2,
+    "end": 1,
+    "cont": 6,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g1r_d2_e1_1.5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": -0.7980701867294738,
+    "dir": 2,
+    "end": 1,
+    "cont": 6,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g1r_d2_e2_0.1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 0.6951813497156577,
+    "dir": 2,
+    "end": 2,
+    "cont": 6,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g1r_d2_e2_0.1_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 0.6951813497156577,
+    "dir": 2,
+    "end": 2,
+    "cont": 6,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g1r_d2_e2_0.5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 0.924912355322601,
+    "dir": 2,
+    "end": 2,
+    "cont": 6,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface.sms_ext_g1r_d2_e2_1.5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "par": 1.4992398693399593,
+    "dir": 2,
+    "end": 2,
+    "cont": 6,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_grid_11",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "grid",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "u": [
+     -5.475299932110956,
+     -4.693114227523677,
+     -3.9109285229363975,
+     -3.1287428183491177,
+     -2.3465571137618384,
+     -1.5643714091745586,
+     -0.7821857045872793,
+     0.0
+    ],
+    "v": [
+     0.0,
+     3.3333333333333335,
+     6.666666666666667,
+     10.0
+    ],
+    "ufl": 1,
+    "vfl": 1
+   }
+  },
+  {
+   "name": "offset_nurb.sms_grid_12",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "grid",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "u": [
+     -5.475299932110956,
+     -4.693114227523677,
+     -3.9109285229363975,
+     -3.1287428183491177,
+     -2.3465571137618384,
+     -1.5643714091745586,
+     -0.7821857045872793,
+     0.0
+    ],
+    "v": [
+     0.0,
+     3.3333333333333335,
+     6.666666666666667,
+     10.0
+    ],
+    "ufl": 1,
+    "vfl": 2
+   }
+  },
+  {
+   "name": "offset_nurb.sms_grid_21",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "grid",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "u": [
+     -5.475299932110956,
+     -4.693114227523677,
+     -3.9109285229363975,
+     -3.1287428183491177,
+     -2.3465571137618384,
+     -1.5643714091745586,
+     -0.7821857045872793,
+     0.0
+    ],
+    "v": [
+     0.0,
+     3.3333333333333335,
+     6.666666666666667,
+     10.0
+    ],
+    "ufl": 2,
+    "vfl": 1
+   }
+  },
+  {
+   "name": "offset_nurb.sms_grid_22",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "grid",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "u": [
+     -5.475299932110956,
+     -4.693114227523677,
+     -3.9109285229363975,
+     -3.1287428183491177,
+     -2.3465571137618384,
+     -1.5643714091745586,
+     -0.7821857045872793,
+     0.0
+    ],
+    "v": [
+     0.0,
+     3.3333333333333335,
+     6.666666666666667,
+     10.0
+    ],
+    "ufl": 2,
+    "vfl": 2
+   }
+  },
+  {
+   "name": "offset_nurb.sms_grid_knots",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "grid",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "u": [
+     -5.475299932110956,
+     -4.061086369737861,
+     -2.030543184868931,
+     0.0
+    ],
+    "v": [
+     0.0,
+     10.0
+    ],
+    "ufl": 2,
+    "vfl": 1
+   }
+  },
+  {
+   "name": "offset_nurb.sms_grid_out",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "grid",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "u": [
+     -5.480775232043067,
+     0.0
+    ],
+    "v": [
+     0.0
+    ],
+    "ufl": 1,
+    "vfl": 1
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g1_d1_e1_0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": -6.022829925322052,
+    "dir": 1,
+    "end": 1,
+    "cont": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g1_d1_e1_0.1_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": -6.022829925322052,
+    "dir": 1,
+    "end": 1,
+    "cont": 2,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g1_d1_e1_0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": -8.212949898166434,
+    "dir": 1,
+    "end": 1,
+    "cont": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g1_d1_e1_1.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": -13.688249830277389,
+    "dir": 1,
+    "end": 1,
+    "cont": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g1_d1_e2_0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": 0.5475299932110956,
+    "dir": 1,
+    "end": 2,
+    "cont": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g1_d1_e2_0.1_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": 0.5475299932110956,
+    "dir": 1,
+    "end": 2,
+    "cont": 2,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g1_d1_e2_0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": 2.737649966055478,
+    "dir": 1,
+    "end": 2,
+    "cont": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g1_d1_e2_1.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": 8.212949898166434,
+    "dir": 1,
+    "end": 2,
+    "cont": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g1_d2_e1_0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": -1.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g1_d2_e1_0.1_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": -1.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 2,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g1_d2_e1_0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": -5.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g1_d2_e1_1.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": -15.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g1_d2_e2_0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": 11.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g1_d2_e2_0.1_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": 11.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 2,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g1_d2_e2_0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": 15.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g1_d2_e2_1.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": 25.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g2_d1_e1_0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": -6.022829925322052,
+    "dir": 1,
+    "end": 1,
+    "cont": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g2_d1_e1_0.1_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": -6.022829925322052,
+    "dir": 1,
+    "end": 1,
+    "cont": 3,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g2_d1_e1_0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": -8.212949898166434,
+    "dir": 1,
+    "end": 1,
+    "cont": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g2_d1_e1_1.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": -13.688249830277389,
+    "dir": 1,
+    "end": 1,
+    "cont": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g2_d1_e2_0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": 0.5475299932110956,
+    "dir": 1,
+    "end": 2,
+    "cont": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g2_d1_e2_0.1_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": 0.5475299932110956,
+    "dir": 1,
+    "end": 2,
+    "cont": 3,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g2_d1_e2_0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": 2.737649966055478,
+    "dir": 1,
+    "end": 2,
+    "cont": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g2_d1_e2_1.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": 8.212949898166434,
+    "dir": 1,
+    "end": 2,
+    "cont": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g2_d2_e1_0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": -1.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g2_d2_e1_0.1_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": -1.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 3,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g2_d2_e1_0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": -5.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g2_d2_e1_1.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": -15.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g2_d2_e2_0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": 11.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g2_d2_e2_0.1_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": 11.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 3,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g2_d2_e2_0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": 15.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g2_d2_e2_1.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": 25.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_cmax_d1_e1_0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": -6.022829925322052,
+    "dir": 1,
+    "end": 1,
+    "cont": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_cmax_d1_e1_0.1_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": -6.022829925322052,
+    "dir": 1,
+    "end": 1,
+    "cont": 4,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_cmax_d1_e1_0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": -8.212949898166434,
+    "dir": 1,
+    "end": 1,
+    "cont": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_cmax_d1_e1_1.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": -13.688249830277389,
+    "dir": 1,
+    "end": 1,
+    "cont": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_cmax_d1_e2_0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": 0.5475299932110956,
+    "dir": 1,
+    "end": 2,
+    "cont": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_cmax_d1_e2_0.1_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": 0.5475299932110956,
+    "dir": 1,
+    "end": 2,
+    "cont": 4,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_cmax_d1_e2_0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": 2.737649966055478,
+    "dir": 1,
+    "end": 2,
+    "cont": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_cmax_d1_e2_1.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": 8.212949898166434,
+    "dir": 1,
+    "end": 2,
+    "cont": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_cmax_d2_e1_0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": -1.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_cmax_d2_e1_0.1_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": -1.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 4,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_cmax_d2_e1_0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": -5.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_cmax_d2_e1_1.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": -15.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_cmax_d2_e2_0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": 11.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_cmax_d2_e2_0.1_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": 11.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 4,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_cmax_d2_e2_0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": 15.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_cmax_d2_e2_1.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": 25.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g1r_d1_e1_0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": -6.022829925322052,
+    "dir": 1,
+    "end": 1,
+    "cont": 6,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g1r_d1_e1_0.1_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": -6.022829925322052,
+    "dir": 1,
+    "end": 1,
+    "cont": 6,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g1r_d1_e1_0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": -8.212949898166434,
+    "dir": 1,
+    "end": 1,
+    "cont": 6,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g1r_d1_e1_1.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": -13.688249830277389,
+    "dir": 1,
+    "end": 1,
+    "cont": 6,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g1r_d1_e2_0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": 0.5475299932110956,
+    "dir": 1,
+    "end": 2,
+    "cont": 6,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g1r_d1_e2_0.1_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": 0.5475299932110956,
+    "dir": 1,
+    "end": 2,
+    "cont": 6,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g1r_d1_e2_0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": 2.737649966055478,
+    "dir": 1,
+    "end": 2,
+    "cont": 6,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g1r_d1_e2_1.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": 8.212949898166434,
+    "dir": 1,
+    "end": 2,
+    "cont": 6,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g1r_d2_e1_0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": -1.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 6,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g1r_d2_e1_0.1_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": -1.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 6,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g1r_d2_e1_0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": -5.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 6,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g1r_d2_e1_1.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": -15.0,
+    "dir": 2,
+    "end": 1,
+    "cont": 6,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g1r_d2_e2_0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": 11.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 6,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g1r_d2_e2_0.1_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": 11.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 6,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g1r_d2_e2_0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": 15.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 6,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb.sms_ext_g1r_d2_e2_1.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (offset surface fixture)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "par": 25.0,
+    "dir": 2,
+    "end": 2,
+    "cont": 6,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_grid_11",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "grid",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "u": [
+     0.0,
+     0.14285714285714285,
+     0.2857142857142857,
+     0.42857142857142855,
+     0.5714285714285714,
+     0.7142857142857143,
+     0.8571428571428571,
+     1.0
+    ],
+    "v": [
+     0.0,
+     0.3333333333333333,
+     0.6666666666666666,
+     1.0
+    ],
+    "ufl": 1,
+    "vfl": 1
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_grid_12",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "grid",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "u": [
+     0.0,
+     0.14285714285714285,
+     0.2857142857142857,
+     0.42857142857142855,
+     0.5714285714285714,
+     0.7142857142857143,
+     0.8571428571428571,
+     1.0
+    ],
+    "v": [
+     0.0,
+     0.3333333333333333,
+     0.6666666666666666,
+     1.0
+    ],
+    "ufl": 1,
+    "vfl": 2
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_grid_21",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "grid",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "u": [
+     0.0,
+     0.14285714285714285,
+     0.2857142857142857,
+     0.42857142857142855,
+     0.5714285714285714,
+     0.7142857142857143,
+     0.8571428571428571,
+     1.0
+    ],
+    "v": [
+     0.0,
+     0.3333333333333333,
+     0.6666666666666666,
+     1.0
+    ],
+    "ufl": 2,
+    "vfl": 1
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_grid_22",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "grid",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "u": [
+     0.0,
+     0.14285714285714285,
+     0.2857142857142857,
+     0.42857142857142855,
+     0.5714285714285714,
+     0.7142857142857143,
+     0.8571428571428571,
+     1.0
+    ],
+    "v": [
+     0.0,
+     0.3333333333333333,
+     0.6666666666666666,
+     1.0
+    ],
+    "ufl": 2,
+    "vfl": 2
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_grid_knots",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "grid",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "u": [
+     0.0,
+     1.0
+    ],
+    "v": [
+     0.0,
+     1.0
+    ],
+    "ufl": 2,
+    "vfl": 1
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_grid_out",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "grid",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "u": [
+     -0.001,
+     1.0
+    ],
+    "v": [
+     0.0
+    ],
+    "ufl": 1,
+    "vfl": 1
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g1_d1_e1_0.1",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": -0.1,
+    "dir": 1,
+    "end": 1,
+    "cont": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g1_d1_e1_0.1_inplace",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": -0.1,
+    "dir": 1,
+    "end": 1,
+    "cont": 2,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g1_d1_e1_0.5",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": -0.5,
+    "dir": 1,
+    "end": 1,
+    "cont": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g1_d1_e1_1.5",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": -1.5,
+    "dir": 1,
+    "end": 1,
+    "cont": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g1_d1_e2_0.1",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": 1.1,
+    "dir": 1,
+    "end": 2,
+    "cont": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g1_d1_e2_0.1_inplace",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": 1.1,
+    "dir": 1,
+    "end": 2,
+    "cont": 2,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g1_d1_e2_0.5",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": 1.5,
+    "dir": 1,
+    "end": 2,
+    "cont": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g1_d1_e2_1.5",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": 2.5,
+    "dir": 1,
+    "end": 2,
+    "cont": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g1_d2_e1_0.1",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": -0.1,
+    "dir": 2,
+    "end": 1,
+    "cont": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g1_d2_e1_0.1_inplace",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": -0.1,
+    "dir": 2,
+    "end": 1,
+    "cont": 2,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g1_d2_e1_0.5",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": -0.5,
+    "dir": 2,
+    "end": 1,
+    "cont": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g1_d2_e1_1.5",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": -1.5,
+    "dir": 2,
+    "end": 1,
+    "cont": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g1_d2_e2_0.1",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": 1.1,
+    "dir": 2,
+    "end": 2,
+    "cont": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g1_d2_e2_0.1_inplace",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": 1.1,
+    "dir": 2,
+    "end": 2,
+    "cont": 2,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g1_d2_e2_0.5",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": 1.5,
+    "dir": 2,
+    "end": 2,
+    "cont": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g1_d2_e2_1.5",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": 2.5,
+    "dir": 2,
+    "end": 2,
+    "cont": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g2_d1_e1_0.1",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": -0.1,
+    "dir": 1,
+    "end": 1,
+    "cont": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g2_d1_e1_0.1_inplace",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": -0.1,
+    "dir": 1,
+    "end": 1,
+    "cont": 3,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g2_d1_e1_0.5",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": -0.5,
+    "dir": 1,
+    "end": 1,
+    "cont": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g2_d1_e1_1.5",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": -1.5,
+    "dir": 1,
+    "end": 1,
+    "cont": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g2_d1_e2_0.1",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": 1.1,
+    "dir": 1,
+    "end": 2,
+    "cont": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g2_d1_e2_0.1_inplace",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": 1.1,
+    "dir": 1,
+    "end": 2,
+    "cont": 3,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g2_d1_e2_0.5",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": 1.5,
+    "dir": 1,
+    "end": 2,
+    "cont": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g2_d1_e2_1.5",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": 2.5,
+    "dir": 1,
+    "end": 2,
+    "cont": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g2_d2_e1_0.1",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": -0.1,
+    "dir": 2,
+    "end": 1,
+    "cont": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g2_d2_e1_0.1_inplace",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": -0.1,
+    "dir": 2,
+    "end": 1,
+    "cont": 3,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g2_d2_e1_0.5",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": -0.5,
+    "dir": 2,
+    "end": 1,
+    "cont": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g2_d2_e1_1.5",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": -1.5,
+    "dir": 2,
+    "end": 1,
+    "cont": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g2_d2_e2_0.1",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": 1.1,
+    "dir": 2,
+    "end": 2,
+    "cont": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g2_d2_e2_0.1_inplace",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": 1.1,
+    "dir": 2,
+    "end": 2,
+    "cont": 3,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g2_d2_e2_0.5",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": 1.5,
+    "dir": 2,
+    "end": 2,
+    "cont": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g2_d2_e2_1.5",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": 2.5,
+    "dir": 2,
+    "end": 2,
+    "cont": 3,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_cmax_d1_e1_0.1",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": -0.1,
+    "dir": 1,
+    "end": 1,
+    "cont": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_cmax_d1_e1_0.1_inplace",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": -0.1,
+    "dir": 1,
+    "end": 1,
+    "cont": 4,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_cmax_d1_e1_0.5",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": -0.5,
+    "dir": 1,
+    "end": 1,
+    "cont": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_cmax_d1_e1_1.5",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": -1.5,
+    "dir": 1,
+    "end": 1,
+    "cont": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_cmax_d1_e2_0.1",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": 1.1,
+    "dir": 1,
+    "end": 2,
+    "cont": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_cmax_d1_e2_0.1_inplace",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": 1.1,
+    "dir": 1,
+    "end": 2,
+    "cont": 4,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_cmax_d1_e2_0.5",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": 1.5,
+    "dir": 1,
+    "end": 2,
+    "cont": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_cmax_d1_e2_1.5",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": 2.5,
+    "dir": 1,
+    "end": 2,
+    "cont": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_cmax_d2_e1_0.1",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": -0.1,
+    "dir": 2,
+    "end": 1,
+    "cont": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_cmax_d2_e1_0.1_inplace",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": -0.1,
+    "dir": 2,
+    "end": 1,
+    "cont": 4,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_cmax_d2_e1_0.5",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": -0.5,
+    "dir": 2,
+    "end": 1,
+    "cont": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_cmax_d2_e1_1.5",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": -1.5,
+    "dir": 2,
+    "end": 1,
+    "cont": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_cmax_d2_e2_0.1",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": 1.1,
+    "dir": 2,
+    "end": 2,
+    "cont": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_cmax_d2_e2_0.1_inplace",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": 1.1,
+    "dir": 2,
+    "end": 2,
+    "cont": 4,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_cmax_d2_e2_0.5",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": 1.5,
+    "dir": 2,
+    "end": 2,
+    "cont": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_cmax_d2_e2_1.5",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": 2.5,
+    "dir": 2,
+    "end": 2,
+    "cont": 4,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g1r_d1_e1_0.1",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": -0.1,
+    "dir": 1,
+    "end": 1,
+    "cont": 6,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g1r_d1_e1_0.1_inplace",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": -0.1,
+    "dir": 1,
+    "end": 1,
+    "cont": 6,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g1r_d1_e1_0.5",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": -0.5,
+    "dir": 1,
+    "end": 1,
+    "cont": 6,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g1r_d1_e1_1.5",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": -1.5,
+    "dir": 1,
+    "end": 1,
+    "cont": 6,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g1r_d1_e2_0.1",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": 1.1,
+    "dir": 1,
+    "end": 2,
+    "cont": 6,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g1r_d1_e2_0.1_inplace",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": 1.1,
+    "dir": 1,
+    "end": 2,
+    "cont": 6,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g1r_d1_e2_0.5",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": 1.5,
+    "dir": 1,
+    "end": 2,
+    "cont": 6,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g1r_d1_e2_1.5",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": 2.5,
+    "dir": 1,
+    "end": 2,
+    "cont": 6,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g1r_d2_e1_0.1",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": -0.1,
+    "dir": 2,
+    "end": 1,
+    "cont": 6,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g1r_d2_e1_0.1_inplace",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": -0.1,
+    "dir": 2,
+    "end": 1,
+    "cont": 6,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g1r_d2_e1_0.5",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": -0.5,
+    "dir": 2,
+    "end": 1,
+    "cont": 6,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g1r_d2_e1_1.5",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": -1.5,
+    "dir": 2,
+    "end": 1,
+    "cont": 6,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g1r_d2_e2_0.1",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": 1.1,
+    "dir": 2,
+    "end": 2,
+    "cont": 6,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g1r_d2_e2_0.1_inplace",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": 1.1,
+    "dir": 2,
+    "end": 2,
+    "cont": 6,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g1r_d2_e2_0.5",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": 1.5,
+    "dir": 2,
+    "end": 2,
+    "cont": 6,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface.sms_ext_g1r_d2_e2_1.5",
+   "upstream_ref": "tests/prog_test (my_test_drop_point, DropCurveSurface.sms)",
+   "inputs": {
+    "op": "extend",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "par": 2.5,
+    "dir": 2,
+    "end": 2,
+    "cont": 6,
+    "inplace": false
+   }
+  },
+  {
+   "name": "swung_DropCurveCurve.smc_DropCurveCurve.smc",
+   "upstream_ref": "tests/prog_test (my_test_drop_point / my_test_reversed_line_join curve fixtures)",
+   "inputs": {
+    "op": "swung",
+    "prof": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "traj": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "alf": 0.75
+   }
+  },
+  {
+   "name": "sweep_DropCurveCurve.smc_DropCurveCurve.smc",
+   "upstream_ref": "tests/prog_test (my_test_drop_point / my_test_reversed_line_join curve fixtures)",
+   "inputs": {
+    "op": "sweep",
+    "traj": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "sect": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "swung_DropCurveCurve.smc_closedCurve.smc",
+   "upstream_ref": "tests/prog_test (my_test_drop_point / my_test_reversed_line_join curve fixtures)",
+   "inputs": {
+    "op": "swung",
+    "prof": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "traj": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "alf": 0.75
+   }
+  },
+  {
+   "name": "sweep_DropCurveCurve.smc_closedCurve.smc",
+   "upstream_ref": "tests/prog_test (my_test_drop_point / my_test_reversed_line_join curve fixtures)",
+   "inputs": {
+    "op": "sweep",
+    "traj": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "sect": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "swung_DropCurveCurve.smc_crvTrim1.smc",
+   "upstream_ref": "tests/prog_test (my_test_drop_point / my_test_reversed_line_join curve fixtures)",
+   "inputs": {
+    "op": "swung",
+    "prof": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "alf": 0.75
+   }
+  },
+  {
+   "name": "sweep_DropCurveCurve.smc_crvTrim1.smc",
+   "upstream_ref": "tests/prog_test (my_test_drop_point / my_test_reversed_line_join curve fixtures)",
+   "inputs": {
+    "op": "sweep",
+    "traj": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "sect": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "swung_closedCurve.smc_DropCurveCurve.smc",
+   "upstream_ref": "tests/prog_test (my_test_drop_point / my_test_reversed_line_join curve fixtures)",
+   "inputs": {
+    "op": "swung",
+    "prof": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "traj": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "alf": 0.75
+   }
+  },
+  {
+   "name": "sweep_closedCurve.smc_DropCurveCurve.smc",
+   "upstream_ref": "tests/prog_test (my_test_drop_point / my_test_reversed_line_join curve fixtures)",
+   "inputs": {
+    "op": "sweep",
+    "traj": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "sect": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "swung_closedCurve.smc_closedCurve.smc",
+   "upstream_ref": "tests/prog_test (my_test_drop_point / my_test_reversed_line_join curve fixtures)",
+   "inputs": {
+    "op": "swung",
+    "prof": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "traj": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "alf": 0.75
+   }
+  },
+  {
+   "name": "sweep_closedCurve.smc_closedCurve.smc",
+   "upstream_ref": "tests/prog_test (my_test_drop_point / my_test_reversed_line_join curve fixtures)",
+   "inputs": {
+    "op": "sweep",
+    "traj": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "sect": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "swung_closedCurve.smc_crvTrim1.smc",
+   "upstream_ref": "tests/prog_test (my_test_drop_point / my_test_reversed_line_join curve fixtures)",
+   "inputs": {
+    "op": "swung",
+    "prof": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "alf": 0.75
+   }
+  },
+  {
+   "name": "sweep_closedCurve.smc_crvTrim1.smc",
+   "upstream_ref": "tests/prog_test (my_test_drop_point / my_test_reversed_line_join curve fixtures)",
+   "inputs": {
+    "op": "sweep",
+    "traj": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "sect": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "swung_crvTrim1.smc_DropCurveCurve.smc",
+   "upstream_ref": "tests/prog_test (my_test_drop_point / my_test_reversed_line_join curve fixtures)",
+   "inputs": {
+    "op": "swung",
+    "prof": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "traj": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "alf": 0.75
+   }
+  },
+  {
+   "name": "sweep_crvTrim1.smc_DropCurveCurve.smc",
+   "upstream_ref": "tests/prog_test (my_test_drop_point / my_test_reversed_line_join curve fixtures)",
+   "inputs": {
+    "op": "sweep",
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "sect": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "swung_crvTrim1.smc_closedCurve.smc",
+   "upstream_ref": "tests/prog_test (my_test_drop_point / my_test_reversed_line_join curve fixtures)",
+   "inputs": {
+    "op": "swung",
+    "prof": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "traj": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "alf": 0.75
+   }
+  },
+  {
+   "name": "sweep_crvTrim1.smc_closedCurve.smc",
+   "upstream_ref": "tests/prog_test (my_test_drop_point / my_test_reversed_line_join curve fixtures)",
+   "inputs": {
+    "op": "sweep",
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "sect": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "swung_crvTrim1.smc_crvTrim1.smc",
+   "upstream_ref": "tests/prog_test (my_test_drop_point / my_test_reversed_line_join curve fixtures)",
+   "inputs": {
+    "op": "swung",
+    "prof": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "alf": 0.75
+   }
+  },
+  {
+   "name": "sweep_crvTrim1.smc_crvTrim1.smc",
+   "upstream_ref": "tests/prog_test (my_test_drop_point / my_test_reversed_line_join curve fixtures)",
+   "inputs": {
+    "op": "sweep",
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "sect": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "swung_crvTrim2.smc_DropCurveCurve.smc",
+   "upstream_ref": "tests/prog_test (my_test_drop_point / my_test_reversed_line_join curve fixtures)",
+   "inputs": {
+    "op": "swung",
+    "prof": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "traj": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "alf": 0.75
+   }
+  },
+  {
+   "name": "sweep_crvTrim2.smc_DropCurveCurve.smc",
+   "upstream_ref": "tests/prog_test (my_test_drop_point / my_test_reversed_line_join curve fixtures)",
+   "inputs": {
+    "op": "sweep",
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "sect": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "swung_crvTrim2.smc_closedCurve.smc",
+   "upstream_ref": "tests/prog_test (my_test_drop_point / my_test_reversed_line_join curve fixtures)",
+   "inputs": {
+    "op": "swung",
+    "prof": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "traj": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "alf": 0.75
+   }
+  },
+  {
+   "name": "sweep_crvTrim2.smc_closedCurve.smc",
+   "upstream_ref": "tests/prog_test (my_test_drop_point / my_test_reversed_line_join curve fixtures)",
+   "inputs": {
+    "op": "sweep",
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "sect": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "swung_crvTrim2.smc_crvTrim1.smc",
+   "upstream_ref": "tests/prog_test (my_test_drop_point / my_test_reversed_line_join curve fixtures)",
+   "inputs": {
+    "op": "swung",
+    "prof": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "alf": 0.75
+   }
+  },
+  {
+   "name": "sweep_crvTrim2.smc_crvTrim1.smc",
+   "upstream_ref": "tests/prog_test (my_test_drop_point / my_test_reversed_line_join curve fixtures)",
+   "inputs": {
+    "op": "sweep",
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "sect": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "swung_crvToOffset.smc_DropCurveCurve.smc",
+   "upstream_ref": "tests/prog_test (my_test_drop_point / my_test_reversed_line_join curve fixtures)",
+   "inputs": {
+    "op": "swung",
+    "prof": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "traj": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "alf": 0.75
+   }
+  },
+  {
+   "name": "sweep_crvToOffset.smc_DropCurveCurve.smc",
+   "upstream_ref": "tests/prog_test (my_test_drop_point / my_test_reversed_line_join curve fixtures)",
+   "inputs": {
+    "op": "sweep",
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "sect": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "swung_crvToOffset.smc_closedCurve.smc",
+   "upstream_ref": "tests/prog_test (my_test_drop_point / my_test_reversed_line_join curve fixtures)",
+   "inputs": {
+    "op": "swung",
+    "prof": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "traj": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "alf": 0.75
+   }
+  },
+  {
+   "name": "sweep_crvToOffset.smc_closedCurve.smc",
+   "upstream_ref": "tests/prog_test (my_test_drop_point / my_test_reversed_line_join curve fixtures)",
+   "inputs": {
+    "op": "sweep",
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "sect": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "swung_crvToOffset.smc_crvTrim1.smc",
+   "upstream_ref": "tests/prog_test (my_test_drop_point / my_test_reversed_line_join curve fixtures)",
+   "inputs": {
+    "op": "swung",
+    "prof": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "alf": 0.75
+   }
+  },
+  {
+   "name": "sweep_crvToOffset.smc_crvTrim1.smc",
+   "upstream_ref": "tests/prog_test (my_test_drop_point / my_test_reversed_line_join curve fixtures)",
+   "inputs": {
+    "op": "sweep",
+    "traj": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "sect": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "sweep_curve0_line",
+   "upstream_ref": "tests/prog_test (my_test_drop_point / my_test_reversed_line_join curve fixtures)",
+   "inputs": {
+    "op": "sweep",
+    "traj": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "sect": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "skin_set0_deg1_d1_open",
+   "upstream_ref": "TestFiles/pt_TestFiles cross sections (N_CreateSkinSrf, called by SmBSplineSurface lofts)",
+   "inputs": {
+    "op": "skin",
+    "curves": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    ],
+    "cmp": true,
+    "cld": false,
+    "deg": 1,
+    "dir": 1,
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "skin_set0_deg1_d1_cld",
+   "upstream_ref": "TestFiles/pt_TestFiles cross sections (N_CreateSkinSrf, called by SmBSplineSurface lofts)",
+   "inputs": {
+    "op": "skin",
+    "curves": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    ],
+    "cmp": true,
+    "cld": true,
+    "deg": 1,
+    "dir": 1,
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "skin_set0_deg1_d2_open",
+   "upstream_ref": "TestFiles/pt_TestFiles cross sections (N_CreateSkinSrf, called by SmBSplineSurface lofts)",
+   "inputs": {
+    "op": "skin",
+    "curves": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    ],
+    "cmp": true,
+    "cld": false,
+    "deg": 1,
+    "dir": 2,
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "skin_set0_deg1_d2_cld",
+   "upstream_ref": "TestFiles/pt_TestFiles cross sections (N_CreateSkinSrf, called by SmBSplineSurface lofts)",
+   "inputs": {
+    "op": "skin",
+    "curves": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    ],
+    "cmp": true,
+    "cld": true,
+    "deg": 1,
+    "dir": 2,
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "skin_set0_deg2_d1_open",
+   "upstream_ref": "TestFiles/pt_TestFiles cross sections (N_CreateSkinSrf, called by SmBSplineSurface lofts)",
+   "inputs": {
+    "op": "skin",
+    "curves": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    ],
+    "cmp": true,
+    "cld": false,
+    "deg": 2,
+    "dir": 1,
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "skin_set0_deg2_d1_cld",
+   "upstream_ref": "TestFiles/pt_TestFiles cross sections (N_CreateSkinSrf, called by SmBSplineSurface lofts)",
+   "inputs": {
+    "op": "skin",
+    "curves": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    ],
+    "cmp": true,
+    "cld": true,
+    "deg": 2,
+    "dir": 1,
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "skin_set0_deg2_d2_open",
+   "upstream_ref": "TestFiles/pt_TestFiles cross sections (N_CreateSkinSrf, called by SmBSplineSurface lofts)",
+   "inputs": {
+    "op": "skin",
+    "curves": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    ],
+    "cmp": true,
+    "cld": false,
+    "deg": 2,
+    "dir": 2,
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "skin_set0_deg2_d2_cld",
+   "upstream_ref": "TestFiles/pt_TestFiles cross sections (N_CreateSkinSrf, called by SmBSplineSurface lofts)",
+   "inputs": {
+    "op": "skin",
+    "curves": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    ],
+    "cmp": true,
+    "cld": true,
+    "deg": 2,
+    "dir": 2,
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "skin_set1_deg1_d1_open",
+   "upstream_ref": "TestFiles/pt_TestFiles cross sections (N_CreateSkinSrf, called by SmBSplineSurface lofts)",
+   "inputs": {
+    "op": "skin",
+    "curves": [
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    ],
+    "cmp": true,
+    "cld": false,
+    "deg": 1,
+    "dir": 1,
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "skin_set1_deg1_d1_cld",
+   "upstream_ref": "TestFiles/pt_TestFiles cross sections (N_CreateSkinSrf, called by SmBSplineSurface lofts)",
+   "inputs": {
+    "op": "skin",
+    "curves": [
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    ],
+    "cmp": true,
+    "cld": true,
+    "deg": 1,
+    "dir": 1,
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "skin_set1_deg1_d2_open",
+   "upstream_ref": "TestFiles/pt_TestFiles cross sections (N_CreateSkinSrf, called by SmBSplineSurface lofts)",
+   "inputs": {
+    "op": "skin",
+    "curves": [
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    ],
+    "cmp": true,
+    "cld": false,
+    "deg": 1,
+    "dir": 2,
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "skin_set1_deg1_d2_cld",
+   "upstream_ref": "TestFiles/pt_TestFiles cross sections (N_CreateSkinSrf, called by SmBSplineSurface lofts)",
+   "inputs": {
+    "op": "skin",
+    "curves": [
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    ],
+    "cmp": true,
+    "cld": true,
+    "deg": 1,
+    "dir": 2,
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "skin_set1_deg2_d1_open",
+   "upstream_ref": "TestFiles/pt_TestFiles cross sections (N_CreateSkinSrf, called by SmBSplineSurface lofts)",
+   "inputs": {
+    "op": "skin",
+    "curves": [
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    ],
+    "cmp": true,
+    "cld": false,
+    "deg": 2,
+    "dir": 1,
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "skin_set1_deg2_d1_cld",
+   "upstream_ref": "TestFiles/pt_TestFiles cross sections (N_CreateSkinSrf, called by SmBSplineSurface lofts)",
+   "inputs": {
+    "op": "skin",
+    "curves": [
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    ],
+    "cmp": true,
+    "cld": true,
+    "deg": 2,
+    "dir": 1,
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "skin_set1_deg2_d2_open",
+   "upstream_ref": "TestFiles/pt_TestFiles cross sections (N_CreateSkinSrf, called by SmBSplineSurface lofts)",
+   "inputs": {
+    "op": "skin",
+    "curves": [
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    ],
+    "cmp": true,
+    "cld": false,
+    "deg": 2,
+    "dir": 2,
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "skin_set1_deg2_d2_cld",
+   "upstream_ref": "TestFiles/pt_TestFiles cross sections (N_CreateSkinSrf, called by SmBSplineSurface lofts)",
+   "inputs": {
+    "op": "skin",
+    "curves": [
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    ],
+    "cmp": true,
+    "cld": true,
+    "deg": 2,
+    "dir": 2,
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "skin_set2_deg1_d1_open",
+   "upstream_ref": "TestFiles/pt_TestFiles cross sections (N_CreateSkinSrf, called by SmBSplineSurface lofts)",
+   "inputs": {
+    "op": "skin",
+    "curves": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    ],
+    "cmp": true,
+    "cld": false,
+    "deg": 1,
+    "dir": 1,
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "skin_set2_deg1_d1_cld",
+   "upstream_ref": "TestFiles/pt_TestFiles cross sections (N_CreateSkinSrf, called by SmBSplineSurface lofts)",
+   "inputs": {
+    "op": "skin",
+    "curves": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    ],
+    "cmp": true,
+    "cld": true,
+    "deg": 1,
+    "dir": 1,
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "skin_set2_deg1_d2_open",
+   "upstream_ref": "TestFiles/pt_TestFiles cross sections (N_CreateSkinSrf, called by SmBSplineSurface lofts)",
+   "inputs": {
+    "op": "skin",
+    "curves": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    ],
+    "cmp": true,
+    "cld": false,
+    "deg": 1,
+    "dir": 2,
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "skin_set2_deg1_d2_cld",
+   "upstream_ref": "TestFiles/pt_TestFiles cross sections (N_CreateSkinSrf, called by SmBSplineSurface lofts)",
+   "inputs": {
+    "op": "skin",
+    "curves": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    ],
+    "cmp": true,
+    "cld": true,
+    "deg": 1,
+    "dir": 2,
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "skin_set2_deg2_d1_open",
+   "upstream_ref": "TestFiles/pt_TestFiles cross sections (N_CreateSkinSrf, called by SmBSplineSurface lofts)",
+   "inputs": {
+    "op": "skin",
+    "curves": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    ],
+    "cmp": true,
+    "cld": false,
+    "deg": 2,
+    "dir": 1,
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "skin_set2_deg2_d1_cld",
+   "upstream_ref": "TestFiles/pt_TestFiles cross sections (N_CreateSkinSrf, called by SmBSplineSurface lofts)",
+   "inputs": {
+    "op": "skin",
+    "curves": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    ],
+    "cmp": true,
+    "cld": true,
+    "deg": 2,
+    "dir": 1,
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "skin_set2_deg2_d2_open",
+   "upstream_ref": "TestFiles/pt_TestFiles cross sections (N_CreateSkinSrf, called by SmBSplineSurface lofts)",
+   "inputs": {
+    "op": "skin",
+    "curves": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    ],
+    "cmp": true,
+    "cld": false,
+    "deg": 2,
+    "dir": 2,
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "skin_set2_deg2_d2_cld",
+   "upstream_ref": "TestFiles/pt_TestFiles cross sections (N_CreateSkinSrf, called by SmBSplineSurface lofts)",
+   "inputs": {
+    "op": "skin",
+    "curves": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    ],
+    "cmp": true,
+    "cld": true,
+    "deg": 2,
+    "dir": 2,
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "skin_set2_deg3_d1_open",
+   "upstream_ref": "TestFiles/pt_TestFiles cross sections (N_CreateSkinSrf, called by SmBSplineSurface lofts)",
+   "inputs": {
+    "op": "skin",
+    "curves": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    ],
+    "cmp": true,
+    "cld": false,
+    "deg": 3,
+    "dir": 1,
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "skin_set2_deg3_d1_cld",
+   "upstream_ref": "TestFiles/pt_TestFiles cross sections (N_CreateSkinSrf, called by SmBSplineSurface lofts)",
+   "inputs": {
+    "op": "skin",
+    "curves": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    ],
+    "cmp": true,
+    "cld": true,
+    "deg": 3,
+    "dir": 1,
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "skin_set2_deg3_d2_open",
+   "upstream_ref": "TestFiles/pt_TestFiles cross sections (N_CreateSkinSrf, called by SmBSplineSurface lofts)",
+   "inputs": {
+    "op": "skin",
+    "curves": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    ],
+    "cmp": true,
+    "cld": false,
+    "deg": 3,
+    "dir": 2,
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "skin_set2_deg3_d2_cld",
+   "upstream_ref": "TestFiles/pt_TestFiles cross sections (N_CreateSkinSrf, called by SmBSplineSurface lofts)",
+   "inputs": {
+    "op": "skin",
+    "curves": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    ],
+    "cmp": true,
+    "cld": true,
+    "deg": 3,
+    "dir": 2,
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "skin_set3_deg1_d1_open",
+   "upstream_ref": "TestFiles/pt_TestFiles cross sections (N_CreateSkinSrf, called by SmBSplineSurface lofts)",
+   "inputs": {
+    "op": "skin",
+    "curves": [
+     {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    ],
+    "cmp": true,
+    "cld": false,
+    "deg": 1,
+    "dir": 1,
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "skin_set3_deg1_d1_cld",
+   "upstream_ref": "TestFiles/pt_TestFiles cross sections (N_CreateSkinSrf, called by SmBSplineSurface lofts)",
+   "inputs": {
+    "op": "skin",
+    "curves": [
+     {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    ],
+    "cmp": true,
+    "cld": true,
+    "deg": 1,
+    "dir": 1,
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "skin_set3_deg1_d2_open",
+   "upstream_ref": "TestFiles/pt_TestFiles cross sections (N_CreateSkinSrf, called by SmBSplineSurface lofts)",
+   "inputs": {
+    "op": "skin",
+    "curves": [
+     {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    ],
+    "cmp": true,
+    "cld": false,
+    "deg": 1,
+    "dir": 2,
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "skin_set3_deg1_d2_cld",
+   "upstream_ref": "TestFiles/pt_TestFiles cross sections (N_CreateSkinSrf, called by SmBSplineSurface lofts)",
+   "inputs": {
+    "op": "skin",
+    "curves": [
+     {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    ],
+    "cmp": true,
+    "cld": true,
+    "deg": 1,
+    "dir": 2,
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "skin_uv_dir",
+   "upstream_ref": "N_CreateSkinSrf NL_CAL_ERR branch",
+   "inputs": {
+    "op": "skin",
+    "curves": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    ],
+    "cmp": true,
+    "cld": false,
+    "deg": 1,
+    "dir": 3,
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "skin_same_curve_closed",
+   "upstream_ref": "N_CreateSkinSrf closed branch (cur[0] == cur[k])",
+   "inputs": {
+    "op": "skin",
+    "curves": [
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     }
+    ],
+    "cmp": false,
+    "cld": true,
+    "deg": 2,
+    "dir": 1,
+    "knot_tol": 0.0
+   }
+  }
+ ]
+}

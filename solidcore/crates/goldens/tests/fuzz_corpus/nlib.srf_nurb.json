@@ -1,0 +1,6 @@
+{
+  "unit": "nlib.srf_nurb",
+  "cases": [
+    {"name": "fuzz01067_ffi_rejected_bad_index_flag_9223372036854776000", "origin": "fuzz-out/n2000/nlib.srf_nurb/fuzz01067.json (panic: rust: attempt to add with overflow at crates/solidcore/src/nurbs/srf_nurb.rs:1107)", "cpp": "harness: ffi rejected: bad index/flag 9223372036854776000", "rust": "ok", "inputs": {"dflg": 3, "n": 1, "op": "closed_smooth", "sur": {"net": [[[1.78, 5.04, 1.77, 0.707], [3.59, 4.4, 2.9, 0.707]], [[0.271, 4.93, 4.84, 1.0], [2.82, 4.02, 6.44, 1.0]]], "p": 9223372036854775807, "q": 9223372036854775807, "u": [1.0], "v": [1.0]}, "tols": [1e-06, 5.0]}}
+  ]
+}

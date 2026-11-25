@@ -1,0 +1,5 @@
+{"commands": [
+  {"command": "solid.cylinder", "params": {"radius": 50, "height": 10, "body_name": "Cup"}},
+  {"command": "solid.cylinder", "params": {"radius": 48, "height": 8, "base": [0, 0, 2], "body_name": "Pocket"}},
+  {"command": "solid.combine", "params": {"target": "Cup", "tools": ["Pocket"], "operation": "cut"}}
+]}

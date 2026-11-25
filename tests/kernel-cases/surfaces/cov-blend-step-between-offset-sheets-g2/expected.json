@@ -1,0 +1,24 @@
+{
+ "sources": [],
+ "what": "a G2 blend bridging a 10 mm step between two parallel sheets (z = 0 and z = 10), stitched to both: it meets each at G2",
+ "source": "invariants",
+ "method": "sheets x 0..10 at z = 0 and x 20..30 at z = 10, 20 wide; the blend leaves each edge in its sheet's tangent plane (and curvature, rate) as asked. Graded: the order at both seams as Continuity Analysis measures it, one body of 3 faces (each a different surface, so none merge)",
+ "valid": false,
+ "body_count": 1,
+ "faces": 3,
+ "continuity": {
+  "order": "g2",
+  "edges": [
+   [
+    10,
+    10,
+    0
+   ],
+   [
+    20,
+    10,
+    10
+   ]
+  ]
+ }
+}

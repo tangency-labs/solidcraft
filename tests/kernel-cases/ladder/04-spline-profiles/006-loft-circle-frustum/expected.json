@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "a loft between circles r20 at z=0 and r10 at z=30",
+ "source": "analytic",
+ "method": "a ruled loft between coaxial circles is a cone frustum: V = pi h/3 (R^2 + R r + r^2)",
+ "body_count": 1,
+ "volume_mm3": 21991.148575129,
+ "faces": 3
+}

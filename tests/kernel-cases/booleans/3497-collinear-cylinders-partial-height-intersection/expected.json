@@ -1,0 +1,12 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#3497",
+    "tangency-labs/solidcraft#3456"
+  ],
+  "what": "intersection of two collinear R2 H12 cylinders offset by 0.75 along the axis (curved walls coincide over part of the height)",
+  "source": "analytic",
+  "method": "common part is the cylinder r=2 from z=0.75 to 12, height 11.25: V = pi*4*11.25 = 45 pi. Faces: 2 caps + 1 side = 3",
+  "body_count": 1,
+  "volume_mm3": 141.3717,
+  "faces": 3
+}

@@ -1,0 +1,10 @@
+{
+ "what": "after the round of a bar's top edge running into a cylinder, an r2 round of the edge where that round meets the cylinder's wall (tangent at its lower end only, a crease elsewhere) with its tangent chain (the concave arc of the top): it was refused as a smooth edge; reported from the app (2026-10-30, test-peg part)",
+ "source": "analytic",
+ "method": "a bar 40 x 16 x 10 whose far end is a half disc R8 about (40, 8), a disc R8 about the same centre sketched on its top (the top's outline projected) and extruded 10 up, joined: the bar's sides run tangent into the cylinder, V0 = 6400 + 960 pi; then the front round (the r2 round of the front top edge (y = 0, z = 10) runs into the cylinder's wall: removed = integral over y in [0, 2] of (2 - sqrt(4 - (2 - y)^2)) (40 - sqrt(64 - (8 - y)^2)) dy = 32.3064821881 (Simpson)): V1 = 9383.622465. The second round is on concave edges (the round and the top meet the cylinder's wall from outside it), so it adds material, and its chain stops where the back top edge, convex, runs on tangent at (40, 16, 10). Lower end: about the cylinder's axis at angles a (from +x) in 126.87..216.87 deg the top runs on flat for 2 or more past the wall (8 + 10 sin a stays in 2..16), so there the round is the rolling ball's torus and adds its whole section, the corner r 8..10, z 10..12 less the quarter disc about (10, 12): Pappus, Int r dA = 8 (4 - pi) + (4 - 2 pi + 8/3) = 7.250740 a radian, over pi/2: 11.389. Upper end: what it adds lies outside V1, within 2 of the chain (on r = 8, angles 90..270 deg, z 8..10): r 8..10, angles within asin(1/4) = 14.48 deg of the chain's, z 6..12; that is z 10..12 over 75.52..284.48 deg (36 a radian: 131.29), and below z = 10 only in front of the bar or over the front round (214.11..284.48 deg, z 6..10, 72 a radian: 88.42) or behind its back face (75.52..104.48 deg, z 8..10: 18.19): 237.9. V in V1 + [11.389, 237.9]; one valid body",
+ "body_count": 1,
+ "volume_mm3": [
+  9395.0,
+  9622.0
+ ]
+}

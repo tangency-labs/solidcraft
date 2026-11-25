@@ -1,0 +1,14 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#334",
+  "tangency-labs/solidcraft#335"
+ ],
+ "what": "an R2 round on the whole top outline of two merged cylinders after their two concave vertical edges were rounded R5",
+ "source": "analytic",
+ "method": "two discs R25 with centres 25 apart, extruded 10 and merged: union area 2*pi*25^2 - lens (lens = 2R^2 acos(d/2R) - d/2 sqrt(4R^2-d^2)) = 3159.260. R5 on the two concave vertical cusps adds, per cusp, the area between the two circles and the R5 circle tangent to both (centre at distance R+r = 30 from both centres, i.e. (-12.5, +-27.272)) = 0.8803 (polygon area of the region bounded by the three arcs, 120000 points). Outline after that: perimeter 208.653 (union 2*(240/360)*2*pi*25, less the arcs replaced, plus the two R5 arcs). The R2 round of the whole top outline (one closed smooth loop, total turning 2 pi) removes (1-pi/4) r^2 (P - 2 pi x r) with x r = r (5/6-pi/4)/(1-pi/4) the spandrel centroid offset (Pappus along the curved loop, ds scaled by 1 - kappa x). V = 10*(union + 2*add) - that = 31433.505.",
+ "body_count": 1,
+ "volume_mm3": 31433.50481953096,
+ "continuity": {
+  "order": "g1"
+ }
+}

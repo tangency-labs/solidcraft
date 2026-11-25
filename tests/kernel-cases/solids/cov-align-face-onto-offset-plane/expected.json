@@ -1,0 +1,20 @@
+{
+ "sources": [],
+ "what": "a post's bottom face aligned onto a plane z=50 away from the picked point in X and Y: it moves along the plane's normal only",
+ "source": "analytic",
+ "method": "onto a plane the point moves along its normal: (0,0,50); the bottom faces -Z, the plane +Z: no turn. The post goes to z 50..70, x and y unchanged",
+ "body_count": 1,
+ "volume_mm3": 2000.0,
+ "bbox": {
+  "min": [
+   100,
+   0,
+   50
+  ],
+  "max": [
+   110,
+   10,
+   70
+  ]
+ }
+}

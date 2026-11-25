@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "plastic.manage_rules asked to start a new rule from a rule that does not exist",
+ "source": "invariants",
+ "method": "a new rule copies the values of `from`; with no such rule there is nothing to copy, a clean refusal naming it",
+ "outcome": "refused",
+ "refusal": "no plastic rule `No Such Rule` to start from"
+}

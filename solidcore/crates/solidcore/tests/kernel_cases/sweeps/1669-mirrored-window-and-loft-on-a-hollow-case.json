@@ -1,0 +1,199 @@
+{
+  "area": "sweeps",
+  "bodies": {
+    "b60": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b63": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b60"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b61"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b61"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b62"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b63"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b64"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b64"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b65"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b62"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b66"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b65"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b67"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b66",
+        "b67"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b68"
+      ],
+      "params": {
+        "op": "union"
+      }
+    }
+  ],
+  "case": "1669-mirrored-window-and-loft-on-a-hollow-case",
+  "expected": {
+    "body_count": 1,
+    "method": "as for one wall: each window is filled by its loft (the loft section is larger than the window), and what is added to the plain hollow case (60 x 60 x 40 minus the 55 x 55 x 35 cavity = 38125) is the overhanging strip of the loft outside the wall (x in [-0.5, 0]) and the strip inside the cavity (x in [2.5, 3]), 938.966 each; the mirror gives the far wall the same: V = 38125 + 2 * 938.966. The windows are filled again, so the cavity is sealed (an internal void: shell count 2, which the rig cannot grade, so valid is false).",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#1669"
+    ],
+    "valid": false,
+    "volume_mm3": 40002.93197278911,
+    "what": "a closed hollow box (60 x 60 x 40, 2.5 mm walls) with a window cut in one end wall and a loft joined into it, both mirrored about the middle plane x = 30 onto the far wall (\"Union: no result\" on the mirror only)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 72,
+      "faces": 32,
+      "vertices": 48
+    }
+  },
+  "records": "1669-mirrored-window-and-loft-on-a-hollow-case.bodies.json.gz",
+  "result": [
+    {
+      "body": "Case",
+      "made": "b68"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 30843.47100920502,
+      "body_count": 1,
+      "edges": 72,
+      "faces": 32,
+      "vertices": 48,
+      "volume_mm3": 40002.931972789156
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#1669"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "loft",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "transform",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "loft",
+    "copy",
+    "copy",
+    "tagged",
+    "transform",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a closed hollow box (60 x 60 x 40, 2.5 mm walls) with a window cut in one end wall and a loft joined into it, both mirrored about the middle plane x = 30 onto the far wall (\"Union: no result\" on the mirror only)",
+  "why_not": []
+}

@@ -1,0 +1,157 @@
+{
+  "cases": [
+    {
+      "name": "attributed-box-cylinder-arc-round-seam-mid-r2",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiFilletEdgesPerEdge)",
+      "note": "A box 40 long, 10 wide and 15 high joined with SmApiCreateCylinder r 10, h 35 at (0, 0, -5) (below the box's base, so no face is coplanar); the box along +X: the cylinder's seam (+X) crosses the arc's middle, so the arc is two edges. The concave arc where the box's top (z 15) meets the cylinder is rounded r 2 (SmApiFilletEdgesPerEdge, circular).",
+      "inputs": {
+        "attributed": {
+          "api": "per_edge",
+          "body": {
+            "box_cylinder_union": {
+              "a": [
+                [
+                  0,
+                  -5,
+                  0
+                ],
+                [
+                  40,
+                  10,
+                  15
+                ]
+              ],
+              "origin": [
+                0,
+                0,
+                -5
+              ],
+              "radius": 10,
+              "height": 35
+            }
+          },
+          "radius": 2.0,
+          "xsect": 2,
+          "edges": [
+            10,
+            11
+          ]
+        }
+      }
+    },
+    {
+      "name": "attributed-box-cylinder-arc-round-seam-opposite-r2",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiFilletEdgesPerEdge)",
+      "note": "A box 40 long, 10 wide and 15 high joined with SmApiCreateCylinder r 10, h 35 at (0, 0, -5) (below the box's base, so no face is coplanar); the box along -X: the arc is centred opposite the seam (180 degrees). The concave arc where the box's top (z 15) meets the cylinder is rounded r 2 (SmApiFilletEdgesPerEdge, circular).",
+      "inputs": {
+        "attributed": {
+          "api": "per_edge",
+          "body": {
+            "box_cylinder_union": {
+              "a": [
+                [
+                  -40,
+                  -5,
+                  0
+                ],
+                [
+                  40,
+                  10,
+                  15
+                ]
+              ],
+              "origin": [
+                0,
+                0,
+                -5
+              ],
+              "radius": 10,
+              "height": 35
+            }
+          },
+          "radius": 2.0,
+          "xsect": 2,
+          "edges": [
+            9
+          ]
+        }
+      }
+    },
+    {
+      "name": "attributed-box-cylinder-arc-round-seam-quarter-r2",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiFilletEdgesPerEdge)",
+      "note": "A box 40 long, 10 wide and 15 high joined with SmApiCreateCylinder r 10, h 35 at (0, 0, -5) (below the box's base, so no face is coplanar); the box along +Y: the arc is centred 90 degrees from the seam. The concave arc where the box's top (z 15) meets the cylinder is rounded r 2 (SmApiFilletEdgesPerEdge, circular).",
+      "inputs": {
+        "attributed": {
+          "api": "per_edge",
+          "body": {
+            "box_cylinder_union": {
+              "a": [
+                [
+                  -5,
+                  0,
+                  0
+                ],
+                [
+                  10,
+                  40,
+                  15
+                ]
+              ],
+              "origin": [
+                0,
+                0,
+                -5
+              ],
+              "radius": 10,
+              "height": 35
+            }
+          },
+          "radius": 2.0,
+          "xsect": 2,
+          "edges": [
+            9
+          ]
+        }
+      }
+    },
+    {
+      "name": "attributed-box-cylinder-arc-round-seam-three-quarter-r2",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiFilletEdgesPerEdge)",
+      "note": "A box 40 long, 10 wide and 15 high joined with SmApiCreateCylinder r 10, h 35 at (0, 0, -5) (below the box's base, so no face is coplanar); the box along -Y: the arc is centred 270 degrees from the seam. The concave arc where the box's top (z 15) meets the cylinder is rounded r 2 (SmApiFilletEdgesPerEdge, circular).",
+      "inputs": {
+        "attributed": {
+          "api": "per_edge",
+          "body": {
+            "box_cylinder_union": {
+              "a": [
+                [
+                  -5,
+                  -40,
+                  0
+                ],
+                [
+                  10,
+                  40,
+                  15
+                ]
+              ],
+              "origin": [
+                0,
+                0,
+                -5
+              ],
+              "radius": 10,
+              "height": 35
+            }
+          },
+          "radius": 2.0,
+          "xsect": 2,
+          "edges": [
+            9
+          ]
+        }
+      }
+    }
+  ]
+}

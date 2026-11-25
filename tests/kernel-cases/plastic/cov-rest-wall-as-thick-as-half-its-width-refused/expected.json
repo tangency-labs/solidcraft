@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "plastic.rest, round, 12 across with a 6 mm wall: the wall would fill it",
+ "source": "invariants",
+ "method": "a hollow rest's wall must be thinner than half its width (6 here): a 6 mm wall leaves no bore, a clean refusal",
+ "outcome": "refused",
+ "refusal": "the rest's wall must be thinner than half its width"
+}

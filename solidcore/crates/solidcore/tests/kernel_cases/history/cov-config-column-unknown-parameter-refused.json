@@ -1,0 +1,45 @@
+{
+  "area": "history",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-config-column-unknown-parameter-refused",
+  "expected": {
+    "method": "no parameter Depth: refused naming it",
+    "outcome": "refused",
+    "refusal": "no parameter `Depth`",
+    "source": "invariants",
+    "sources": [],
+    "what": "config.column of a parameter the design does not have"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 6 (config.column): invalid parameters for `config.column`: no parameter `Depth`",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 6 (config.column): invalid parameters for `config.column`: no parameter `Depth`",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "config.column of a parameter the design does not have",
+  "why_not": [
+    "the failure is SolidCraft's, not a kernel operation's: step 6 (config.column): invalid parameters for `config.column`: no parameter `Depth`"
+  ]
+}

@@ -1,0 +1,148 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/4095",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+ "test": "none: open on SolidCraft's truck kernel (kernel work paused under tangency-labs/solidcraft#3992); geometry is the issue's",
+ "summary": "On SolidCraft's truck kernel a slab cut whose planar face stands 8.8e-5 mm from a bore (closer than the 1e-4 tolerance) came out 0.708 mm^3 short (#4095). A 90 x 60 x 20 block with an r 15 bore through it; the 6 x 16 x 14 slab's face x = -15.000088 stands just outside the bore. The slab removes exactly its 6 x 16 x 8 inside the block. A control puts the face at -15.00022, outside the tolerance.",
+ "cases": [
+  {
+   "name": "face_inside_tolerance",
+   "note": "Slab from x = -21.000088: its face at x = -15.000088, 8.8e-5 from the bore.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      -45,
+      -30,
+      0
+     ],
+     "size": [
+      90,
+      60,
+      20
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "bore",
+     "origin": [
+      0,
+      0,
+      -5
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 15,
+     "height": 30
+    },
+    {
+     "op": "difference",
+     "id": "bored",
+     "a": "block",
+     "b": "bore"
+    },
+    {
+     "op": "box",
+     "id": "slab",
+     "origin": [
+      -21.000088,
+      -8,
+      12
+     ],
+     "size": [
+      6,
+      16,
+      14
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "bored",
+     "b": "slab"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 93094.83305884594,
+     "tol": 0.01,
+     "formula": "90*60*20 - pi*15^2*20 - 6*16*8 (the slab stays clear of the bore and removes its whole 6 x 16 x 8 inside the block)"
+    }
+   }
+  },
+  {
+   "name": "face_outside_tolerance_control",
+   "note": "Control: slab from x = -21.00022, its face 2.2e-4 from the bore.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      -45,
+      -30,
+      0
+     ],
+     "size": [
+      90,
+      60,
+      20
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "bore",
+     "origin": [
+      0,
+      0,
+      -5
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 15,
+     "height": 30
+    },
+    {
+     "op": "difference",
+     "id": "bored",
+     "a": "block",
+     "b": "bore"
+    },
+    {
+     "op": "box",
+     "id": "slab",
+     "origin": [
+      -21.00022,
+      -8,
+      12
+     ],
+     "size": [
+      6,
+      16,
+      14
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "bored",
+     "b": "slab"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 93094.83305884594,
+     "tol": 0.01,
+     "formula": "90*60*20 - pi*15^2*20 - 6*16*8 (the slab stays clear of the bore and removes its whole 6 x 16 x 8 inside the block)"
+    }
+   }
+  }
+ ]
+}

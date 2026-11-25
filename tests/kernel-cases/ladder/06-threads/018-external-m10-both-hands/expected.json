@@ -1,0 +1,11 @@
+{
+ "sources": [],
+ "what": "001's modelled M10 thread cut both ways: a right- and a left-handed groove crossing on a d10 x 30 cylinder",
+ "source": "analytic",
+ "method": "each groove alone leaves 001's material fraction m(r) (ISO 68-1 basic profile; 016 is the left hand alone). Along a line parallel to the axis at radius r each groove takes the fraction g = 1 - m of every pitch, the two phases drifting apart by two pitches a turn; over a turn the overlap of the two takes g^2 (exact here: in the two grooves' phases the (theta, z) domain is spanned by (L, L) and (-P, P), both periods, L = 20 P), so the material left is 1 - 2g + g^2 = m^2: V = 2 pi L int_0^5 r m(r)^2 dr (= stock - 2 x groove + crossing). Both grooves run out past the free ends. No bbox: the crest survives only in diamonds, two windows of 45 deg a turn where the two crests meet, so how far the part reaches along x and y depends on where the grooves' phases line up round the axis. Tolerance 0.01%: SMLib's exact screw sweeps",
+ "body_count": 1,
+ "volume_mm3": 1804.920030661,
+ "tolerance": {
+  "rel": 0.0001
+ }
+}

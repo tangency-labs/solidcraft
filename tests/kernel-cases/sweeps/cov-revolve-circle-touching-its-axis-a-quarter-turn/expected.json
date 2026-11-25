@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "a circle r5 that touches the revolve axis, revolved 90 deg: a quarter of a horn torus, its tube pinched to a point on the axis",
+ "source": "analytic",
+ "method": "the disc r5 about (5, 0) on XZ touches the Z axis at the origin; Pappus, its centroid 5 from the axis: V = pi 25 x 2 pi 5 / 4 = 616.850275",
+ "body_count": 1,
+ "volume_mm3": 616.8502750680849
+}

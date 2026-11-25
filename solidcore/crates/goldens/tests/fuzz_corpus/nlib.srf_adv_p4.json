@@ -1,0 +1,6 @@
+{
+  "unit": "nlib.srf_adv_p4",
+  "cases": [
+    {"name": "fuzz01582_ffi_rejected_bad_index_count_flag", "origin": "fuzz-out/n2000/nlib.srf_adv_p4/fuzz01582.json (crash: rust: killed by signal 6 (memory allocation of 51539607576 bytes failed))", "cpp": "harness: ffi rejected: bad index/count/flag 2147483648", "rust": "ok", "inputs": {"cur": {"cpts": [[-5.91, -9.64, 1.7976931348623157e+308, -1.7976931348623157e+308], [2.32, -5.44, 1.7976931348623157e+308, -1.7976931348623157e+308]], "p": 2147483648, "u": [5.48]}, "drma": [[0.635, 0.332, 0.697], [-0.505, -0.436, 0.745], [-0.463, 0.523, -0.716]], "dscale": [-0.709, 0.974, -0.349], "dtraj": [8.05, -3.84, -5.33], "op": "sweep_tangent", "rma": [[-0.352, -0.158, 0.923], [-0.416, -0.192, 0.889], [-0.46, 0.716, -0.525]], "scale": [1.68, 1.22, 1.71]}}
+  ]
+}

@@ -15,6 +15,7 @@
 //! The browser build keeps neither: it has no shared folders, and no clock in `std`.
 
 use serde::{Deserialize, Serialize};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 /// How often an open design's lock is written again.
@@ -90,6 +91,20 @@ impl Lock {
         now.saturating_sub(self.refreshed) > STALE_SECS || self.refreshed.saturating_sub(now) > STALE_SECS
     }
 
+    /// Written on this computer by a process that is no longer running (a crash, `kill -9`), so
+    /// waiting for it to go stale would only block the design. Our own process is running, so it
+    /// is never gone. If the process can't be looked up (the browser, an unsupported system), this
+    /// is `false`, which keeps the lock held until it goes stale.
+    ///
+    /// A different live process may have taken over a dead one's pid; that lock is still treated
+    /// as held, the safe side: the wait ends when the lock goes stale.
+    ///
+    /// Only a lock of this user counts: a system may hide other users' processes (Linux with
+    /// `hidepid`), so another user's process that can't be seen may still be running.
+    pub fn owner_is_gone(&self) -> bool {
+        self.host == host_name() && self.user == user_name() && self.pid != std::process::id() && process_running(self.pid) == Some(false)
+    }
+
     /// Written by this process.
     pub fn is_mine(&self) -> bool {
         self.pid == std::process::id() && self.host == host_name()
@@ -105,31 +120,67 @@ pub fn host_name() -> String {
     if name.is_empty() { "this computer".into() } else { name }
 }
 
+/// Whether a process with this id is running: `None` when that can't be told (the browser, a
+/// system the lookup doesn't support, a pid of 0).
+#[cfg(not(target_arch = "wasm32"))]
+fn process_running(pid: u32) -> Option<bool> {
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessStatus, ProcessesToUpdate, System};
+    if pid == 0 {
+        return None;
+    }
+    let pid = Pid::from_u32(pid);
+    let mut system = System::new().ok()?;
+    system.refresh_processes_specifics(ProcessesToUpdate::Some(&[pid]), true, ProcessRefreshKind::nothing());
+    // A zombie has exited and only waits to be collected.
+    Some(system.process(pid).is_some_and(|p| p.status() != ProcessStatus::Zombie))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn process_running(_pid: u32) -> Option<bool> {
+    None
+}
+
 fn user_name() -> String {
     ["USER", "USERNAME", "LOGNAME"].iter().find_map(|k| std::env::var(k).ok().filter(|v| !v.trim().is_empty())).unwrap_or_default()
 }
 
-/// The lock next to the design at `path`, if there is a readable one.
+/// The lock next to the design at `path`, if there is a readable one. Anything at the lock's path
+/// but a regular file (a symbolic link, a device, a FIFO) is no lock and is not opened, and no
+/// more than a lock's size is ever read.
 pub fn read(path: &Path) -> Option<Lock> {
     if cfg!(target_arch = "wasm32") {
         return None;
     }
     let file = lock_path(path);
-    if std::fs::metadata(&file).ok()?.len() > MAX_LOCK_BYTES {
+    let meta = std::fs::symlink_metadata(&file).ok().filter(std::fs::Metadata::is_file)?;
+    if meta.len() > MAX_LOCK_BYTES {
         return None;
     }
-    serde_json::from_slice(&std::fs::read(&file).ok()?).ok()
+    let opened = std::fs::File::open(&file).ok()?;
+    // The path may have been swapped between the two calls; the handle decides.
+    if !opened.metadata().ok()?.is_file() {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    opened.take(MAX_LOCK_BYTES + 1).read_to_end(&mut bytes).ok()?;
+    if bytes.len() as u64 > MAX_LOCK_BYTES {
+        return None;
+    }
+    serde_json::from_slice(&bytes).ok()
 }
 
-/// Another app's fresh lock on the design at `path` at `now`: it is open elsewhere.
+/// Another app's fresh lock on the design at `path` at `now`: it is open elsewhere. A lock this
+/// computer wrote for a process that has since ended counts as stale at once.
 pub fn held_elsewhere(path: &Path, now: u64) -> Option<Lock> {
-    read(path).filter(|l| !l.is_mine() && !l.is_stale(now))
+    read(path).filter(|l| !l.is_mine() && !l.is_stale(now) && !l.owner_is_gone())
 }
 
-/// Write `lock` next to the design at `path` (replacing whatever lock is there).
+/// Write `lock` next to the design at `path`, replacing whatever lock is there. A symbolic link
+/// at the lock's path is refused and never followed, unlike a save, which follows a link to where
+/// the design really lives: the file a link there points to is not this app's to replace.
 pub fn write(path: &Path, lock: &Lock) -> std::io::Result<()> {
     let bytes = serde_json::to_vec_pretty(lock).map_err(std::io::Error::other)?;
-    crate::safe_write::write_atomic(&lock_path(path), &bytes, false)
+    crate::safe_write::write_atomic_no_follow(&lock_path(path), &bytes)
 }
 
 /// Remove this process's lock on the design at `path`; another app's lock is left alone.

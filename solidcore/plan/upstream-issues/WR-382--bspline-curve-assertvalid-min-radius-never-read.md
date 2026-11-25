@@ -1,0 +1,11 @@
+#### WR-382. `SmBSplineCurve::AssertValid` tests 13/14 compare the minimum radius of curvature before reading it
+- **Severity:** Missed check (a curve with an extremely small radius of curvature passes), plus wasted time
+- **Area:** Curves / checking
+- **Location:** `source/SMLib/src/SmBSplineCurve.cpp` (`:7753`, `:8008`-`8011`), `SmBSplineCurve::AssertValid`: `GlobalPropertyAnalysis(SM_CP_MINIMIZE_RADIUS_OF_CURVATURE, ...)`, then `if (dMinRadius < dTol)`, with `dMinRadius` still `SM_BIG_DOUBLE`: it is assigned from the solutions only inside that branch.
+- **What happens:** the test never fires, while the analysis costs about half of `AssertValid` for a B-spline curve.
+- **Trigger:** any B-spline curve with a kink-like bend, e.g. the quadratic (-1,0,0), (0,1000,0), (1,0,0): radius 1e-3 at its middle against a tolerance of about 0.05.
+- **How found:** tangency-labs/solidcore#475 (SolidCraft regression rig on SMLib).
+- **Confirmed:** source; the port reproduces upstream with the default.
+- **Fix:** read the first solution's value into `dMinRadius` before the comparison.
+- **Caveat:** with the fix, WR-383 (tangency-labs/solidcore#481: `SolveOscillating` reads a failed evaluation as a sign change) makes a straight line report a minimum radius of 0. Turn the two opt-ins on together.
+- **Rust port:** opt-in `Kernel::fixes.bspline_check_min_radius` (default `false`, upstream's never-firing test) in `BSplineCurve::assert_valid_with`, `crates/solidcore/src/nurbs/b_spline_curve/p3.rs`. Test `issue_475_min_radius_of_curvature_test`. With the default, `nurbs.b_spline_curve_p3` and every unit reaching `AssertValid` compare as before. Fixes tangency-labs/solidcore#475.

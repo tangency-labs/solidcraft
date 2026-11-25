@@ -1,0 +1,13 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#2904"
+  ],
+  "what": "a countersunk hole in a small plate, near a rounded corner, while an unrelated body sits 120 mm away: only the plate may change, and the countersink must be complete",
+  "source": "analytic",
+  "method": "lid: rounded rectangle 80.4x22.9 (r2) x 2 thick = 2*(80.4*22.9 - (4-pi)*2^2) = 3675.4527. Hole at (-38.7,-8.35), d2.4 through, countersink d4.2 at 90 deg (a cone of half angle 45: radius 2.1 at the top face z=9.1 shrinking to 1.2 at depth 0.9). Removed = Int over the plate around the hole of the tool's depth: 2 for r<=1.2, 2.1-r for 1.2<r<2.1, with the plate bounded by the corner arc (centre (-38.2,-7.85), r2) which clips the countersink; integrated numerically in polar coordinates = 11.8482. The distant box stays 1000. Total = lid - removed + 1000 (tolerance 1e-4: the countersink's missing part is 4.5 mm^3)",
+  "body_count": 2,
+  "volume_mm3": 4663.6045492287185,
+  "tolerance": {
+    "rel": 0.0001
+  }
+}

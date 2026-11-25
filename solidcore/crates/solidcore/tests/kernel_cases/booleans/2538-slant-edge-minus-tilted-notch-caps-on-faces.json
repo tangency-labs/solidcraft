@@ -1,0 +1,79 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b1": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b1"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b3"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b4"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b3",
+        "b4"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "2538-slant-edge-minus-tilted-notch-caps-on-faces",
+  "expected": {
+    "body_count": 1,
+    "method": "The notch's axis is the line through the issue's sketch origin (-12.07395, -6.5, 0.84551) along the unit of its sketch y_dir [0.069857, 0, 0.997557], so sin(t) = 0.06985700109333193, cos(t) = 0.9975570156127649 and k = tan(t) = 0.07002807859601005 at t = 4.005773878 degrees. That line lies in the plane y = -6.5, the box's own y_min face, and the half space's plane holds it, so the slanted face and that face meet along it at a right angle and the tool takes a quarter of its own volume out of the wedge. The clipped box (b1) is a prism: at height z its cross section in x runs from -99 to -12.07395 + k (z - 0.84551), so V_prism = 105.5 * integral(99 - 12.07395 + k (z - 0.84551) dz, -55 .. 16.5) = 105.5 * (6215.2125750000005 - 100.61837169004377) = 645089.6884492004; midpoint quadrature over 4e6 steps gives 645089.6884492140, 2.1e-14 off. For the notch put (p, q, s) on the axis: p along the slanted face's outward normal [cos(t), 0, -sin(t)], q along world +y from the face y = -6.5, s along the axis from the sketch origin. The frame is orthonormal and the material is p <= 0, q >= 0, so the tool contributes the quarter disc p^2 + q^2 <= 64 of that quadrant. The box's top face z = 16.5 bounds s <= 15.692827332164052 + k p and its bottom face z = -55 bounds s >= -55.982273820906393 + k p, an interval of the fixed length L = 71.5/cos(t) = 71.67510115307044 that slides down with p. The tool runs from s = -55.982273820906393 to s = 15.692827332164052 (its cap centres on the two face planes), so for p <= 0 its top cap plane is above the box's top face and does not cut, while its bottom cap plane is above the box's bottom face and does: the length cut is L + k p, and V_notch = integral(sqrt(64 - p^2) (L + k p) dp, -8 .. 0) = 16 pi L + k * integral(p sqrt(64 - p^2) dp, -8 .. 0) = 16 pi L - (512/3) k = 3602.7835396446626 - 11.951458747052381 = 3590.83208089761: a quarter of a slanted cylinder through the slab, less the ungula the tilted bottom cap spares. Midpoint quadrature of the same integral over 4e6 steps gives 3590.8320809468, 1.4e-11 off. The result is the prism less that: 645089.6884492004 - 3590.83208089761 = 641498.8563683027. body_count 1",
+    "outcome": "solid",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcore#2538"
+    ],
+    "volume_mm3": 641498.8563683027,
+    "what": "a box clipped by a half space, less a quarter-round notch along the tilted edge that clipping leaves: the notch's tool is the cylinder of radius 8 about that very edge, tilted 4.006 degrees from z, its seam on the line where the cylinder meets the slanted face on the material side, and both its cap centres exactly on the box's z = 16.5 and z = -55 face planes. The cut must give one closed solid; the mirror image about x = 0, whose seam is on the line on the empty side, passes. This entry's slanted plane holds the axis exactly, which is what the issue's design means; built from the issue's own rounded rotation the plane misses the axis by 1.5e-06 mm and 4.5e-07 rad, and the same cut then fails face test 36 (tests/issue_2538_tilted_notch_on_a_slant_edge.rs holds that as known failing)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "records": "2538-slant-edge-minus-tilted-notch-caps-on-faces.bodies.json.gz",
+  "result": [
+    {
+      "body": "t27",
+      "made": "b5"
+    }
+  ],
+  "sources": [
+    "tangency-labs/solidcore#2538"
+  ],
+  "ungraded": [],
+  "what": "a box clipped by a half space, less a quarter-round notch along the tilted edge that clipping leaves: the notch's tool is the cylinder of radius 8 about that very edge, tilted 4.006 degrees from z, its seam on the line where the cylinder meets the slanted face on the material side, and both its cap centres exactly on the box's z = 16.5 and z = -55 face planes. The cut must give one closed solid; the mirror image about x = 0, whose seam is on the line on the empty side, passes. This entry's slanted plane holds the axis exactly, which is what the issue's design means; built from the issue's own rounded rotation the plane misses the axis by 1.5e-06 mm and 4.5e-07 rad, and the same cut then fails face test 36 (tests/issue_2538_tilted_notch_on_a_slant_edge.rs holds that as known failing)",
+  "why_not": []
+}

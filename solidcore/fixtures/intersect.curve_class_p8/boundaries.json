@@ -1,0 +1,1384 @@
+{
+  "cases": [
+    {
+      "name": "op0_2d_s0_inside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 2, 0, 0, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op0_2d_s0_outside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 2, 0, 0, 2, 2, 2, 2, 0, 3, 0, 0, 1, 1, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op0_2d_s0_cross",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 2, 0, 0, 2, 2, -1, 0.5, 0, 2, 0, 0, 1, 1, 1, 1, 0.5, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op0_2d_s0_parallel",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 2, 0, 0, 2, 2, 0.2, -1, 0, 0.7, 0, 0, 1, 1, 1, 1, -1, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op0_2d_s0_preclassified",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 2, 0, 0, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 4, 0.0, 0.25, 107, 0.25, 0.5, 100, 0.5, 0.75, 110, 0.75, 1, 100] }
+    },
+    {
+      "name": "op0_2d_s1_inside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 2, 0, 1, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op0_2d_s1_outside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 2, 0, 1, 2, 2, 2, 2, 0, 3, 0, 0, 1, 1, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op0_2d_s1_cross",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 2, 0, 1, 2, 2, -1, 0.5, 0, 2, 0, 0, 1, 1, 1, 1, 0.5, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op0_2d_s1_parallel",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 2, 0, 1, 2, 2, 0.2, -1, 0, 0.7, 0, 0, 1, 1, 1, 1, -1, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op0_2d_s1_preclassified",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 2, 0, 1, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 4, 0.0, 0.25, 107, 0.25, 0.5, 100, 0.5, 0.75, 110, 0.75, 1, 100] }
+    },
+    {
+      "name": "op0_2d_s2_inside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 2, 0, 2, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op0_2d_s2_outside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 2, 0, 2, 2, 2, 2, 2, 0, 3, 0, 0, 1, 1, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op0_2d_s2_cross",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 2, 0, 2, 2, 2, -1, 0.5, 0, 2, 0, 0, 1, 1, 1, 1, 0.5, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op0_2d_s2_parallel",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 2, 0, 2, 2, 2, 0.2, -1, 0, 0.7, 0, 0, 1, 1, 1, 1, -1, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op0_2d_s2_preclassified",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 2, 0, 2, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 4, 0.0, 0.25, 107, 0.25, 0.5, 100, 0.5, 0.75, 110, 0.75, 1, 100] }
+    },
+    {
+      "name": "op0_3d_s0_inside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 3, 0, 0, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op0_3d_s0_outside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 3, 0, 0, 2, 2, 2, 2, 0, 3, 0, 0, 1, 1, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op0_3d_s0_cross",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 3, 0, 0, 2, 2, -1, 0.5, 0, 2, 0, 0, 1, 1, 1, 1, 0.5, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op0_3d_s0_parallel",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 3, 0, 0, 2, 2, 0.2, -1, 0, 0.7, 0, 0, 1, 1, 1, 1, -1, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op0_3d_s0_pierce",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 3, 0, 0, 2, 2, 0.5, 0.5, -1, 0.5, 0, 0, 1, 1, 1, 1, 0.5, 1, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op0_3d_s0_preclassified",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 3, 0, 0, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 4, 0.0, 0.25, 107, 0.25, 0.5, 100, 0.5, 0.75, 110, 0.75, 1, 100] }
+    },
+    {
+      "name": "op0_3d_s1_inside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 3, 0, 1, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op0_3d_s1_outside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 3, 0, 1, 2, 2, 2, 2, 0, 3, 0, 0, 1, 1, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op0_3d_s1_cross",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 3, 0, 1, 2, 2, -1, 0.5, 0, 2, 0, 0, 1, 1, 1, 1, 0.5, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op0_3d_s1_parallel",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 3, 0, 1, 2, 2, 0.2, -1, 0, 0.7, 0, 0, 1, 1, 1, 1, -1, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op0_3d_s1_pierce",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 3, 0, 1, 2, 2, 0.5, 0.5, -1, 0.5, 0, 0, 1, 1, 1, 1, 0.5, 1, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op0_3d_s1_preclassified",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 3, 0, 1, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 4, 0.0, 0.25, 107, 0.25, 0.5, 100, 0.5, 0.75, 110, 0.75, 1, 100] }
+    },
+    {
+      "name": "op0_3d_s2_inside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 3, 0, 2, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op0_3d_s2_outside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 3, 0, 2, 2, 2, 2, 2, 0, 3, 0, 0, 1, 1, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op0_3d_s2_cross",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 3, 0, 2, 2, 2, -1, 0.5, 0, 2, 0, 0, 1, 1, 1, 1, 0.5, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op0_3d_s2_parallel",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 3, 0, 2, 2, 2, 0.2, -1, 0, 0.7, 0, 0, 1, 1, 1, 1, -1, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op0_3d_s2_pierce",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 3, 0, 2, 2, 2, 0.5, 0.5, -1, 0.5, 0, 0, 1, 1, 1, 1, 0.5, 1, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op0_3d_s2_preclassified",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 3, 0, 2, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 4, 0.0, 0.25, 107, 0.25, 0.5, 100, 0.5, 0.75, 110, 0.75, 1, 100] }
+    },
+    {
+      "name": "op0_unequal_knots_3_2",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 2, 0, 1, 3, 2, 0.12, 0.13, 0, 0.22, 0, 0, 1, 1, 1, 1, 0.23, 0, 0, 1, 1e-07, 0, 3, 0.0, 0.3333333333333333, 100, 0.3333333333333333, 0.6666666666666666, 110, 0.6666666666666666, 1, 100] }
+    },
+    {
+      "name": "op0_unequal_knots_2_3",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 2, 0, 1, 2, 3, 0.12, 0.13, 0, 0.22, 0, 0, 1, 1, 1, 1, 0.23, 0, 0, 1, 1e-07, 0, 3, 0.0, 0.3333333333333333, 100, 0.3333333333333333, 0.6666666666666666, 110, 0.6666666666666666, 1, 100] }
+    },
+    {
+      "name": "op0_unequal_knots_4_2",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 2, 0, 1, 4, 2, 0.12, 0.13, 0, 0.22, 0, 0, 1, 1, 1, 1, 0.23, 0, 0, 1, 1e-07, 0, 3, 0.0, 0.3333333333333333, 100, 0.3333333333333333, 0.6666666666666666, 110, 0.6666666666666666, 1, 100] }
+    },
+    {
+      "name": "op0_unequal_knots_2_4",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 2, 0, 1, 2, 4, 0.12, 0.13, 0, 0.22, 0, 0, 1, 1, 1, 1, 0.23, 0, 0, 1, 1e-07, 0, 3, 0.0, 0.3333333333333333, 100, 0.3333333333333333, 0.6666666666666666, 110, 0.6666666666666666, 1, 100] }
+    },
+    {
+      "name": "op0_unequal_knots_3_3",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 2, 0, 1, 3, 3, 0.12, 0.13, 0, 0.22, 0, 0, 1, 1, 1, 1, 0.23, 0, 0, 1, 1e-07, 0, 3, 0.0, 0.3333333333333333, 100, 0.3333333333333333, 0.6666666666666666, 110, 0.6666666666666666, 1, 100] }
+    },
+    {
+      "name": "op0_unequal_knots_4_4",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 2, 0, 1, 4, 4, 0.12, 0.13, 0, 0.22, 0, 0, 1, 1, 1, 1, 0.23, 0, 0, 1, 1e-07, 0, 3, 0.0, 0.3333333333333333, 100, 0.3333333333333333, 0.6666666666666666, 110, 0.6666666666666666, 1, 100] }
+    },
+    {
+      "name": "op0_circle_or_stationary_1",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 2, 1, 1, 2, 2, 0.5, 0.5, 0, 0.2, 0, 0, 1, 1, 1, 1, 0, 0, 0, 360, 1e-07, 0, 1, 0.0, 360, 100] }
+    },
+    {
+      "name": "op0_circle_or_stationary_2",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 2, 2, 1, 2, 2, 0.5, 0.5, 0, 0.2, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op0_nonunit_domain_41",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 2, 0, 1, 2, 2, -2.8, -1.8, 0, -2.6, -3, -2, 4, 5, 1, 1, -1.6, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op0_nonunit_domain_42",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 2, 0, 1, 2, 2, 2.2, 4.2, 0, 2.4, 2, 4, 3, 8, 1, 1, 4.4, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op0_tolerance_0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 3, 0, 1, 2, 2, 0.25, 0.5, 0, 0.75, 0, 0, 1, 1, 1, 1, 0.5, 0, 0.2, 0.8, 0, 0, 1, 0.2, 0.8, 100] }
+    },
+    {
+      "name": "op0_tolerance_1e-12",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 3, 0, 1, 2, 2, 0.25, 0.5, 0, 0.75, 0, 0, 1, 1, 1, 1, 0.5, 0, 0.2, 0.8, 1e-12, 0, 1, 0.2, 0.8, 100] }
+    },
+    {
+      "name": "op0_tolerance_0.0001",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [0, 3, 0, 1, 2, 2, 0.25, 0.5, 0, 0.75, 0, 0, 1, 1, 1, 1, 0.5, 0, 0.2, 0.8, 0.0001, 0, 1, 0.2, 0.8, 100] }
+    },
+    {
+      "name": "op1_2d_s0_inside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 2, 0, 0, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op1_2d_s0_outside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 2, 0, 0, 2, 2, 2, 2, 0, 3, 0, 0, 1, 1, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op1_2d_s0_cross",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 2, 0, 0, 2, 2, -1, 0.5, 0, 2, 0, 0, 1, 1, 1, 1, 0.5, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op1_2d_s0_parallel",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 2, 0, 0, 2, 2, 0.2, -1, 0, 0.7, 0, 0, 1, 1, 1, 1, -1, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op1_2d_s0_preclassified",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 2, 0, 0, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 4, 0.0, 0.25, 107, 0.25, 0.5, 100, 0.5, 0.75, 110, 0.75, 1, 100] }
+    },
+    {
+      "name": "op1_2d_s1_inside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 2, 0, 1, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op1_2d_s1_outside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 2, 0, 1, 2, 2, 2, 2, 0, 3, 0, 0, 1, 1, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op1_2d_s1_cross",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 2, 0, 1, 2, 2, -1, 0.5, 0, 2, 0, 0, 1, 1, 1, 1, 0.5, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op1_2d_s1_parallel",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 2, 0, 1, 2, 2, 0.2, -1, 0, 0.7, 0, 0, 1, 1, 1, 1, -1, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op1_2d_s1_preclassified",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 2, 0, 1, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 4, 0.0, 0.25, 107, 0.25, 0.5, 100, 0.5, 0.75, 110, 0.75, 1, 100] }
+    },
+    {
+      "name": "op1_2d_s2_inside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 2, 0, 2, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op1_2d_s2_outside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 2, 0, 2, 2, 2, 2, 2, 0, 3, 0, 0, 1, 1, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op1_2d_s2_cross",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 2, 0, 2, 2, 2, -1, 0.5, 0, 2, 0, 0, 1, 1, 1, 1, 0.5, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op1_2d_s2_parallel",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 2, 0, 2, 2, 2, 0.2, -1, 0, 0.7, 0, 0, 1, 1, 1, 1, -1, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op1_2d_s2_preclassified",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 2, 0, 2, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 4, 0.0, 0.25, 107, 0.25, 0.5, 100, 0.5, 0.75, 110, 0.75, 1, 100] }
+    },
+    {
+      "name": "op1_3d_s0_inside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 3, 0, 0, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op1_3d_s0_outside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 3, 0, 0, 2, 2, 2, 2, 0, 3, 0, 0, 1, 1, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op1_3d_s0_cross",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 3, 0, 0, 2, 2, -1, 0.5, 0, 2, 0, 0, 1, 1, 1, 1, 0.5, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op1_3d_s0_parallel",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 3, 0, 0, 2, 2, 0.2, -1, 0, 0.7, 0, 0, 1, 1, 1, 1, -1, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op1_3d_s0_pierce",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 3, 0, 0, 2, 2, 0.5, 0.5, -1, 0.5, 0, 0, 1, 1, 1, 1, 0.5, 1, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op1_3d_s0_preclassified",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 3, 0, 0, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 4, 0.0, 0.25, 107, 0.25, 0.5, 100, 0.5, 0.75, 110, 0.75, 1, 100] }
+    },
+    {
+      "name": "op1_3d_s1_inside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 3, 0, 1, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op1_3d_s1_outside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 3, 0, 1, 2, 2, 2, 2, 0, 3, 0, 0, 1, 1, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op1_3d_s1_cross",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 3, 0, 1, 2, 2, -1, 0.5, 0, 2, 0, 0, 1, 1, 1, 1, 0.5, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op1_3d_s1_parallel",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 3, 0, 1, 2, 2, 0.2, -1, 0, 0.7, 0, 0, 1, 1, 1, 1, -1, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op1_3d_s1_pierce",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 3, 0, 1, 2, 2, 0.5, 0.5, -1, 0.5, 0, 0, 1, 1, 1, 1, 0.5, 1, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op1_3d_s1_preclassified",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 3, 0, 1, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 4, 0.0, 0.25, 107, 0.25, 0.5, 100, 0.5, 0.75, 110, 0.75, 1, 100] }
+    },
+    {
+      "name": "op1_3d_s2_inside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 3, 0, 2, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op1_3d_s2_outside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 3, 0, 2, 2, 2, 2, 2, 0, 3, 0, 0, 1, 1, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op1_3d_s2_cross",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 3, 0, 2, 2, 2, -1, 0.5, 0, 2, 0, 0, 1, 1, 1, 1, 0.5, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op1_3d_s2_parallel",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 3, 0, 2, 2, 2, 0.2, -1, 0, 0.7, 0, 0, 1, 1, 1, 1, -1, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op1_3d_s2_pierce",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 3, 0, 2, 2, 2, 0.5, 0.5, -1, 0.5, 0, 0, 1, 1, 1, 1, 0.5, 1, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op1_3d_s2_preclassified",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 3, 0, 2, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 4, 0.0, 0.25, 107, 0.25, 0.5, 100, 0.5, 0.75, 110, 0.75, 1, 100] }
+    },
+    {
+      "name": "op1_unequal_knots_3_2",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 2, 0, 1, 3, 2, 0.12, 0.13, 0, 0.22, 0, 0, 1, 1, 1, 1, 0.23, 0, 0, 1, 1e-07, 0, 3, 0.0, 0.3333333333333333, 100, 0.3333333333333333, 0.6666666666666666, 110, 0.6666666666666666, 1, 100] }
+    },
+    {
+      "name": "op1_unequal_knots_2_3",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 2, 0, 1, 2, 3, 0.12, 0.13, 0, 0.22, 0, 0, 1, 1, 1, 1, 0.23, 0, 0, 1, 1e-07, 0, 3, 0.0, 0.3333333333333333, 100, 0.3333333333333333, 0.6666666666666666, 110, 0.6666666666666666, 1, 100] }
+    },
+    {
+      "name": "op1_unequal_knots_4_2",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 2, 0, 1, 4, 2, 0.12, 0.13, 0, 0.22, 0, 0, 1, 1, 1, 1, 0.23, 0, 0, 1, 1e-07, 0, 3, 0.0, 0.3333333333333333, 100, 0.3333333333333333, 0.6666666666666666, 110, 0.6666666666666666, 1, 100] }
+    },
+    {
+      "name": "op1_unequal_knots_2_4",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 2, 0, 1, 2, 4, 0.12, 0.13, 0, 0.22, 0, 0, 1, 1, 1, 1, 0.23, 0, 0, 1, 1e-07, 0, 3, 0.0, 0.3333333333333333, 100, 0.3333333333333333, 0.6666666666666666, 110, 0.6666666666666666, 1, 100] }
+    },
+    {
+      "name": "op1_unequal_knots_3_3",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 2, 0, 1, 3, 3, 0.12, 0.13, 0, 0.22, 0, 0, 1, 1, 1, 1, 0.23, 0, 0, 1, 1e-07, 0, 3, 0.0, 0.3333333333333333, 100, 0.3333333333333333, 0.6666666666666666, 110, 0.6666666666666666, 1, 100] }
+    },
+    {
+      "name": "op1_unequal_knots_4_4",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 2, 0, 1, 4, 4, 0.12, 0.13, 0, 0.22, 0, 0, 1, 1, 1, 1, 0.23, 0, 0, 1, 1e-07, 0, 3, 0.0, 0.3333333333333333, 100, 0.3333333333333333, 0.6666666666666666, 110, 0.6666666666666666, 1, 100] }
+    },
+    {
+      "name": "op1_circle_or_stationary_1",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 2, 1, 1, 2, 2, 0.5, 0.5, 0, 0.2, 0, 0, 1, 1, 1, 1, 0, 0, 0, 360, 1e-07, 0, 1, 0.0, 360, 100] }
+    },
+    {
+      "name": "op1_circle_or_stationary_2",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 2, 2, 1, 2, 2, 0.5, 0.5, 0, 0.2, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op1_nonunit_domain_87",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 2, 0, 1, 2, 2, -2.8, -1.8, 0, -2.6, -3, -2, 4, 5, 1, 1, -1.6, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op1_nonunit_domain_88",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 2, 0, 1, 2, 2, 2.2, 4.2, 0, 2.4, 2, 4, 3, 8, 1, 1, 4.4, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op1_tolerance_0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 3, 0, 1, 2, 2, 0.25, 0.5, 0, 0.75, 0, 0, 1, 1, 1, 1, 0.5, 0, 0.2, 0.8, 0, 0, 1, 0.2, 0.8, 100] }
+    },
+    {
+      "name": "op1_tolerance_1e-12",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 3, 0, 1, 2, 2, 0.25, 0.5, 0, 0.75, 0, 0, 1, 1, 1, 1, 0.5, 0, 0.2, 0.8, 1e-12, 0, 1, 0.2, 0.8, 100] }
+    },
+    {
+      "name": "op1_tolerance_0.0001",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [1, 3, 0, 1, 2, 2, 0.25, 0.5, 0, 0.75, 0, 0, 1, 1, 1, 1, 0.5, 0, 0.2, 0.8, 0.0001, 0, 1, 0.2, 0.8, 100] }
+    },
+    {
+      "name": "op2_2d_s0_inside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 2, 0, 0, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op2_2d_s0_outside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 2, 0, 0, 2, 2, 2, 2, 0, 3, 0, 0, 1, 1, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op2_2d_s0_cross",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 2, 0, 0, 2, 2, -1, 0.5, 0, 2, 0, 0, 1, 1, 1, 1, 0.5, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op2_2d_s0_parallel",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 2, 0, 0, 2, 2, 0.2, -1, 0, 0.7, 0, 0, 1, 1, 1, 1, -1, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op2_2d_s0_preclassified",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 2, 0, 0, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 4, 0.0, 0.25, 107, 0.25, 0.5, 100, 0.5, 0.75, 110, 0.75, 1, 100] }
+    },
+    {
+      "name": "op2_2d_s1_inside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 2, 0, 1, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op2_2d_s1_outside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 2, 0, 1, 2, 2, 2, 2, 0, 3, 0, 0, 1, 1, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op2_2d_s1_cross",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 2, 0, 1, 2, 2, -1, 0.5, 0, 2, 0, 0, 1, 1, 1, 1, 0.5, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op2_2d_s1_parallel",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 2, 0, 1, 2, 2, 0.2, -1, 0, 0.7, 0, 0, 1, 1, 1, 1, -1, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op2_2d_s1_preclassified",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 2, 0, 1, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 4, 0.0, 0.25, 107, 0.25, 0.5, 100, 0.5, 0.75, 110, 0.75, 1, 100] }
+    },
+    {
+      "name": "op2_2d_s2_inside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 2, 0, 2, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op2_2d_s2_outside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 2, 0, 2, 2, 2, 2, 2, 0, 3, 0, 0, 1, 1, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op2_2d_s2_cross",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 2, 0, 2, 2, 2, -1, 0.5, 0, 2, 0, 0, 1, 1, 1, 1, 0.5, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op2_2d_s2_parallel",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 2, 0, 2, 2, 2, 0.2, -1, 0, 0.7, 0, 0, 1, 1, 1, 1, -1, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op2_2d_s2_preclassified",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 2, 0, 2, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 4, 0.0, 0.25, 107, 0.25, 0.5, 100, 0.5, 0.75, 110, 0.75, 1, 100] }
+    },
+    {
+      "name": "op2_3d_s0_inside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 3, 0, 0, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op2_3d_s0_outside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 3, 0, 0, 2, 2, 2, 2, 0, 3, 0, 0, 1, 1, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op2_3d_s0_cross",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 3, 0, 0, 2, 2, -1, 0.5, 0, 2, 0, 0, 1, 1, 1, 1, 0.5, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op2_3d_s0_parallel",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 3, 0, 0, 2, 2, 0.2, -1, 0, 0.7, 0, 0, 1, 1, 1, 1, -1, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op2_3d_s0_pierce",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 3, 0, 0, 2, 2, 0.5, 0.5, -1, 0.5, 0, 0, 1, 1, 1, 1, 0.5, 1, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op2_3d_s0_preclassified",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 3, 0, 0, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 4, 0.0, 0.25, 107, 0.25, 0.5, 100, 0.5, 0.75, 110, 0.75, 1, 100] }
+    },
+    {
+      "name": "op2_3d_s1_inside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 3, 0, 1, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op2_3d_s1_outside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 3, 0, 1, 2, 2, 2, 2, 0, 3, 0, 0, 1, 1, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op2_3d_s1_cross",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 3, 0, 1, 2, 2, -1, 0.5, 0, 2, 0, 0, 1, 1, 1, 1, 0.5, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op2_3d_s1_parallel",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 3, 0, 1, 2, 2, 0.2, -1, 0, 0.7, 0, 0, 1, 1, 1, 1, -1, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op2_3d_s1_pierce",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 3, 0, 1, 2, 2, 0.5, 0.5, -1, 0.5, 0, 0, 1, 1, 1, 1, 0.5, 1, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op2_3d_s1_preclassified",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 3, 0, 1, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 4, 0.0, 0.25, 107, 0.25, 0.5, 100, 0.5, 0.75, 110, 0.75, 1, 100] }
+    },
+    {
+      "name": "op2_3d_s2_inside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 3, 0, 2, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op2_3d_s2_outside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 3, 0, 2, 2, 2, 2, 2, 0, 3, 0, 0, 1, 1, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op2_3d_s2_cross",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 3, 0, 2, 2, 2, -1, 0.5, 0, 2, 0, 0, 1, 1, 1, 1, 0.5, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op2_3d_s2_parallel",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 3, 0, 2, 2, 2, 0.2, -1, 0, 0.7, 0, 0, 1, 1, 1, 1, -1, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op2_3d_s2_pierce",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 3, 0, 2, 2, 2, 0.5, 0.5, -1, 0.5, 0, 0, 1, 1, 1, 1, 0.5, 1, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op2_3d_s2_preclassified",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 3, 0, 2, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 4, 0.0, 0.25, 107, 0.25, 0.5, 100, 0.5, 0.75, 110, 0.75, 1, 100] }
+    },
+    {
+      "name": "op2_unequal_knots_3_2",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 2, 0, 1, 3, 2, 0.12, 0.13, 0, 0.22, 0, 0, 1, 1, 1, 1, 0.23, 0, 0, 1, 1e-07, 0, 3, 0.0, 0.3333333333333333, 100, 0.3333333333333333, 0.6666666666666666, 110, 0.6666666666666666, 1, 100] }
+    },
+    {
+      "name": "op2_unequal_knots_2_3",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 2, 0, 1, 2, 3, 0.12, 0.13, 0, 0.22, 0, 0, 1, 1, 1, 1, 0.23, 0, 0, 1, 1e-07, 0, 3, 0.0, 0.3333333333333333, 100, 0.3333333333333333, 0.6666666666666666, 110, 0.6666666666666666, 1, 100] }
+    },
+    {
+      "name": "op2_unequal_knots_4_2",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 2, 0, 1, 4, 2, 0.12, 0.13, 0, 0.22, 0, 0, 1, 1, 1, 1, 0.23, 0, 0, 1, 1e-07, 0, 3, 0.0, 0.3333333333333333, 100, 0.3333333333333333, 0.6666666666666666, 110, 0.6666666666666666, 1, 100] }
+    },
+    {
+      "name": "op2_unequal_knots_2_4",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 2, 0, 1, 2, 4, 0.12, 0.13, 0, 0.22, 0, 0, 1, 1, 1, 1, 0.23, 0, 0, 1, 1e-07, 0, 3, 0.0, 0.3333333333333333, 100, 0.3333333333333333, 0.6666666666666666, 110, 0.6666666666666666, 1, 100] }
+    },
+    {
+      "name": "op2_unequal_knots_3_3",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 2, 0, 1, 3, 3, 0.12, 0.13, 0, 0.22, 0, 0, 1, 1, 1, 1, 0.23, 0, 0, 1, 1e-07, 0, 3, 0.0, 0.3333333333333333, 100, 0.3333333333333333, 0.6666666666666666, 110, 0.6666666666666666, 1, 100] }
+    },
+    {
+      "name": "op2_unequal_knots_4_4",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 2, 0, 1, 4, 4, 0.12, 0.13, 0, 0.22, 0, 0, 1, 1, 1, 1, 0.23, 0, 0, 1, 1e-07, 0, 3, 0.0, 0.3333333333333333, 100, 0.3333333333333333, 0.6666666666666666, 110, 0.6666666666666666, 1, 100] }
+    },
+    {
+      "name": "op2_circle_or_stationary_1",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 2, 1, 1, 2, 2, 0.5, 0.5, 0, 0.2, 0, 0, 1, 1, 1, 1, 0, 0, 0, 360, 1e-07, 0, 1, 0.0, 360, 100] }
+    },
+    {
+      "name": "op2_circle_or_stationary_2",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 2, 2, 1, 2, 2, 0.5, 0.5, 0, 0.2, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op2_nonunit_domain_133",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 2, 0, 1, 2, 2, -2.8, -1.8, 0, -2.6, -3, -2, 4, 5, 1, 1, -1.6, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op2_nonunit_domain_134",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 2, 0, 1, 2, 2, 2.2, 4.2, 0, 2.4, 2, 4, 3, 8, 1, 1, 4.4, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op2_tolerance_0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 3, 0, 1, 2, 2, 0.25, 0.5, 0, 0.75, 0, 0, 1, 1, 1, 1, 0.5, 0, 0.2, 0.8, 0, 0, 1, 0.2, 0.8, 100] }
+    },
+    {
+      "name": "op2_tolerance_1e-12",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 3, 0, 1, 2, 2, 0.25, 0.5, 0, 0.75, 0, 0, 1, 1, 1, 1, 0.5, 0, 0.2, 0.8, 1e-12, 0, 1, 0.2, 0.8, 100] }
+    },
+    {
+      "name": "op2_tolerance_0.0001",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [2, 3, 0, 1, 2, 2, 0.25, 0.5, 0, 0.75, 0, 0, 1, 1, 1, 1, 0.5, 0, 0.2, 0.8, 0.0001, 0, 1, 0.2, 0.8, 100] }
+    },
+    {
+      "name": "op3_2d_s0_inside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 2, 0, 0, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op3_2d_s0_outside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 2, 0, 0, 2, 2, 2, 2, 0, 3, 0, 0, 1, 1, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op3_2d_s0_cross",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 2, 0, 0, 2, 2, -1, 0.5, 0, 2, 0, 0, 1, 1, 1, 1, 0.5, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op3_2d_s0_parallel",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 2, 0, 0, 2, 2, 0.2, -1, 0, 0.7, 0, 0, 1, 1, 1, 1, -1, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op3_2d_s0_preclassified",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 2, 0, 0, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 4, 0.0, 0.25, 107, 0.25, 0.5, 100, 0.5, 0.75, 110, 0.75, 1, 100] }
+    },
+    {
+      "name": "op3_2d_s1_inside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 2, 0, 1, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op3_2d_s1_outside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 2, 0, 1, 2, 2, 2, 2, 0, 3, 0, 0, 1, 1, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op3_2d_s1_cross",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 2, 0, 1, 2, 2, -1, 0.5, 0, 2, 0, 0, 1, 1, 1, 1, 0.5, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op3_2d_s1_parallel",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 2, 0, 1, 2, 2, 0.2, -1, 0, 0.7, 0, 0, 1, 1, 1, 1, -1, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op3_2d_s1_preclassified",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 2, 0, 1, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 4, 0.0, 0.25, 107, 0.25, 0.5, 100, 0.5, 0.75, 110, 0.75, 1, 100] }
+    },
+    {
+      "name": "op3_2d_s2_inside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 2, 0, 2, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op3_2d_s2_outside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 2, 0, 2, 2, 2, 2, 2, 0, 3, 0, 0, 1, 1, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op3_2d_s2_cross",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 2, 0, 2, 2, 2, -1, 0.5, 0, 2, 0, 0, 1, 1, 1, 1, 0.5, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op3_2d_s2_parallel",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 2, 0, 2, 2, 2, 0.2, -1, 0, 0.7, 0, 0, 1, 1, 1, 1, -1, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op3_2d_s2_preclassified",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 2, 0, 2, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 4, 0.0, 0.25, 107, 0.25, 0.5, 100, 0.5, 0.75, 110, 0.75, 1, 100] }
+    },
+    {
+      "name": "op3_3d_s0_inside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 3, 0, 0, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op3_3d_s0_outside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 3, 0, 0, 2, 2, 2, 2, 0, 3, 0, 0, 1, 1, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op3_3d_s0_cross",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 3, 0, 0, 2, 2, -1, 0.5, 0, 2, 0, 0, 1, 1, 1, 1, 0.5, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op3_3d_s0_parallel",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 3, 0, 0, 2, 2, 0.2, -1, 0, 0.7, 0, 0, 1, 1, 1, 1, -1, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op3_3d_s0_pierce",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 3, 0, 0, 2, 2, 0.5, 0.5, -1, 0.5, 0, 0, 1, 1, 1, 1, 0.5, 1, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op3_3d_s0_preclassified",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 3, 0, 0, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 4, 0.0, 0.25, 107, 0.25, 0.5, 100, 0.5, 0.75, 110, 0.75, 1, 100] }
+    },
+    {
+      "name": "op3_3d_s1_inside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 3, 0, 1, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op3_3d_s1_outside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 3, 0, 1, 2, 2, 2, 2, 0, 3, 0, 0, 1, 1, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op3_3d_s1_cross",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 3, 0, 1, 2, 2, -1, 0.5, 0, 2, 0, 0, 1, 1, 1, 1, 0.5, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op3_3d_s1_parallel",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 3, 0, 1, 2, 2, 0.2, -1, 0, 0.7, 0, 0, 1, 1, 1, 1, -1, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op3_3d_s1_pierce",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 3, 0, 1, 2, 2, 0.5, 0.5, -1, 0.5, 0, 0, 1, 1, 1, 1, 0.5, 1, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op3_3d_s1_preclassified",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 3, 0, 1, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 4, 0.0, 0.25, 107, 0.25, 0.5, 100, 0.5, 0.75, 110, 0.75, 1, 100] }
+    },
+    {
+      "name": "op3_3d_s2_inside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 3, 0, 2, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op3_3d_s2_outside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 3, 0, 2, 2, 2, 2, 2, 0, 3, 0, 0, 1, 1, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op3_3d_s2_cross",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 3, 0, 2, 2, 2, -1, 0.5, 0, 2, 0, 0, 1, 1, 1, 1, 0.5, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op3_3d_s2_parallel",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 3, 0, 2, 2, 2, 0.2, -1, 0, 0.7, 0, 0, 1, 1, 1, 1, -1, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op3_3d_s2_pierce",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 3, 0, 2, 2, 2, 0.5, 0.5, -1, 0.5, 0, 0, 1, 1, 1, 1, 0.5, 1, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op3_3d_s2_preclassified",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 3, 0, 2, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 4, 0.0, 0.25, 107, 0.25, 0.5, 100, 0.5, 0.75, 110, 0.75, 1, 100] }
+    },
+    {
+      "name": "op3_unequal_knots_3_2",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 2, 0, 1, 3, 2, 0.12, 0.13, 0, 0.22, 0, 0, 1, 1, 1, 1, 0.23, 0, 0, 1, 1e-07, 0, 3, 0.0, 0.3333333333333333, 100, 0.3333333333333333, 0.6666666666666666, 110, 0.6666666666666666, 1, 100] }
+    },
+    {
+      "name": "op3_unequal_knots_2_3",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 2, 0, 1, 2, 3, 0.12, 0.13, 0, 0.22, 0, 0, 1, 1, 1, 1, 0.23, 0, 0, 1, 1e-07, 0, 3, 0.0, 0.3333333333333333, 100, 0.3333333333333333, 0.6666666666666666, 110, 0.6666666666666666, 1, 100] }
+    },
+    {
+      "name": "op3_unequal_knots_4_2",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 2, 0, 1, 4, 2, 0.12, 0.13, 0, 0.22, 0, 0, 1, 1, 1, 1, 0.23, 0, 0, 1, 1e-07, 0, 3, 0.0, 0.3333333333333333, 100, 0.3333333333333333, 0.6666666666666666, 110, 0.6666666666666666, 1, 100] }
+    },
+    {
+      "name": "op3_unequal_knots_2_4",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 2, 0, 1, 2, 4, 0.12, 0.13, 0, 0.22, 0, 0, 1, 1, 1, 1, 0.23, 0, 0, 1, 1e-07, 0, 3, 0.0, 0.3333333333333333, 100, 0.3333333333333333, 0.6666666666666666, 110, 0.6666666666666666, 1, 100] }
+    },
+    {
+      "name": "op3_unequal_knots_3_3",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 2, 0, 1, 3, 3, 0.12, 0.13, 0, 0.22, 0, 0, 1, 1, 1, 1, 0.23, 0, 0, 1, 1e-07, 0, 3, 0.0, 0.3333333333333333, 100, 0.3333333333333333, 0.6666666666666666, 110, 0.6666666666666666, 1, 100] }
+    },
+    {
+      "name": "op3_unequal_knots_4_4",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 2, 0, 1, 4, 4, 0.12, 0.13, 0, 0.22, 0, 0, 1, 1, 1, 1, 0.23, 0, 0, 1, 1e-07, 0, 3, 0.0, 0.3333333333333333, 100, 0.3333333333333333, 0.6666666666666666, 110, 0.6666666666666666, 1, 100] }
+    },
+    {
+      "name": "op3_circle_or_stationary_1",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 2, 1, 1, 2, 2, 0.5, 0.5, 0, 0.2, 0, 0, 1, 1, 1, 1, 0, 0, 0, 360, 1e-07, 0, 1, 0.0, 360, 100] }
+    },
+    {
+      "name": "op3_circle_or_stationary_2",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 2, 2, 1, 2, 2, 0.5, 0.5, 0, 0.2, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op3_nonunit_domain_179",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 2, 0, 1, 2, 2, -2.8, -1.8, 0, -2.6, -3, -2, 4, 5, 1, 1, -1.6, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op3_nonunit_domain_180",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 2, 0, 1, 2, 2, 2.2, 4.2, 0, 2.4, 2, 4, 3, 8, 1, 1, 4.4, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op3_tolerance_0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 3, 0, 1, 2, 2, 0.25, 0.5, 0, 0.75, 0, 0, 1, 1, 1, 1, 0.5, 0, 0.2, 0.8, 0, 0, 1, 0.2, 0.8, 100] }
+    },
+    {
+      "name": "op3_tolerance_1e-12",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 3, 0, 1, 2, 2, 0.25, 0.5, 0, 0.75, 0, 0, 1, 1, 1, 1, 0.5, 0, 0.2, 0.8, 1e-12, 0, 1, 0.2, 0.8, 100] }
+    },
+    {
+      "name": "op3_tolerance_0.0001",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [3, 3, 0, 1, 2, 2, 0.25, 0.5, 0, 0.75, 0, 0, 1, 1, 1, 1, 0.5, 0, 0.2, 0.8, 0.0001, 0, 1, 0.2, 0.8, 100] }
+    },
+    {
+      "name": "op4_2d_s0_inside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 2, 0, 0, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op4_2d_s0_outside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 2, 0, 0, 2, 2, 2, 2, 0, 3, 0, 0, 1, 1, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op4_2d_s0_cross",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 2, 0, 0, 2, 2, -1, 0.5, 0, 2, 0, 0, 1, 1, 1, 1, 0.5, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op4_2d_s0_parallel",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 2, 0, 0, 2, 2, 0.2, -1, 0, 0.7, 0, 0, 1, 1, 1, 1, -1, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op4_2d_s0_preclassified",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 2, 0, 0, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 4, 0.0, 0.25, 107, 0.25, 0.5, 100, 0.5, 0.75, 110, 0.75, 1, 100] }
+    },
+    {
+      "name": "op4_2d_s1_inside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 2, 0, 1, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op4_2d_s1_outside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 2, 0, 1, 2, 2, 2, 2, 0, 3, 0, 0, 1, 1, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op4_2d_s1_cross",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 2, 0, 1, 2, 2, -1, 0.5, 0, 2, 0, 0, 1, 1, 1, 1, 0.5, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op4_2d_s1_parallel",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 2, 0, 1, 2, 2, 0.2, -1, 0, 0.7, 0, 0, 1, 1, 1, 1, -1, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op4_2d_s1_preclassified",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 2, 0, 1, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 4, 0.0, 0.25, 107, 0.25, 0.5, 100, 0.5, 0.75, 110, 0.75, 1, 100] }
+    },
+    {
+      "name": "op4_2d_s2_inside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 2, 0, 2, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op4_2d_s2_outside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 2, 0, 2, 2, 2, 2, 2, 0, 3, 0, 0, 1, 1, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op4_2d_s2_cross",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 2, 0, 2, 2, 2, -1, 0.5, 0, 2, 0, 0, 1, 1, 1, 1, 0.5, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op4_2d_s2_parallel",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 2, 0, 2, 2, 2, 0.2, -1, 0, 0.7, 0, 0, 1, 1, 1, 1, -1, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op4_2d_s2_preclassified",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 2, 0, 2, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 4, 0.0, 0.25, 107, 0.25, 0.5, 100, 0.5, 0.75, 110, 0.75, 1, 100] }
+    },
+    {
+      "name": "op4_3d_s0_inside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 3, 0, 0, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op4_3d_s0_outside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 3, 0, 0, 2, 2, 2, 2, 0, 3, 0, 0, 1, 1, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op4_3d_s0_cross",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 3, 0, 0, 2, 2, -1, 0.5, 0, 2, 0, 0, 1, 1, 1, 1, 0.5, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op4_3d_s0_parallel",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 3, 0, 0, 2, 2, 0.2, -1, 0, 0.7, 0, 0, 1, 1, 1, 1, -1, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op4_3d_s0_pierce",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 3, 0, 0, 2, 2, 0.5, 0.5, -1, 0.5, 0, 0, 1, 1, 1, 1, 0.5, 1, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op4_3d_s0_preclassified",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 3, 0, 0, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 4, 0.0, 0.25, 107, 0.25, 0.5, 100, 0.5, 0.75, 110, 0.75, 1, 100] }
+    },
+    {
+      "name": "op4_3d_s1_inside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 3, 0, 1, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op4_3d_s1_outside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 3, 0, 1, 2, 2, 2, 2, 0, 3, 0, 0, 1, 1, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op4_3d_s1_cross",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 3, 0, 1, 2, 2, -1, 0.5, 0, 2, 0, 0, 1, 1, 1, 1, 0.5, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op4_3d_s1_parallel",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 3, 0, 1, 2, 2, 0.2, -1, 0, 0.7, 0, 0, 1, 1, 1, 1, -1, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op4_3d_s1_pierce",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 3, 0, 1, 2, 2, 0.5, 0.5, -1, 0.5, 0, 0, 1, 1, 1, 1, 0.5, 1, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op4_3d_s1_preclassified",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 3, 0, 1, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 4, 0.0, 0.25, 107, 0.25, 0.5, 100, 0.5, 0.75, 110, 0.75, 1, 100] }
+    },
+    {
+      "name": "op4_3d_s2_inside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 3, 0, 2, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op4_3d_s2_outside",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 3, 0, 2, 2, 2, 2, 2, 0, 3, 0, 0, 1, 1, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op4_3d_s2_cross",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 3, 0, 2, 2, 2, -1, 0.5, 0, 2, 0, 0, 1, 1, 1, 1, 0.5, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op4_3d_s2_parallel",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 3, 0, 2, 2, 2, 0.2, -1, 0, 0.7, 0, 0, 1, 1, 1, 1, -1, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op4_3d_s2_pierce",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 3, 0, 2, 2, 2, 0.5, 0.5, -1, 0.5, 0, 0, 1, 1, 1, 1, 0.5, 1, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op4_3d_s2_preclassified",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 3, 0, 2, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 4, 0.0, 0.25, 107, 0.25, 0.5, 100, 0.5, 0.75, 110, 0.75, 1, 100] }
+    },
+    {
+      "name": "op4_unequal_knots_3_2",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 2, 0, 1, 3, 2, 0.12, 0.13, 0, 0.22, 0, 0, 1, 1, 1, 1, 0.23, 0, 0, 1, 1e-07, 0, 3, 0.0, 0.3333333333333333, 100, 0.3333333333333333, 0.6666666666666666, 110, 0.6666666666666666, 1, 100] }
+    },
+    {
+      "name": "op4_unequal_knots_2_3",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 2, 0, 1, 2, 3, 0.12, 0.13, 0, 0.22, 0, 0, 1, 1, 1, 1, 0.23, 0, 0, 1, 1e-07, 0, 3, 0.0, 0.3333333333333333, 100, 0.3333333333333333, 0.6666666666666666, 110, 0.6666666666666666, 1, 100] }
+    },
+    {
+      "name": "op4_unequal_knots_4_2",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 2, 0, 1, 4, 2, 0.12, 0.13, 0, 0.22, 0, 0, 1, 1, 1, 1, 0.23, 0, 0, 1, 1e-07, 0, 3, 0.0, 0.3333333333333333, 100, 0.3333333333333333, 0.6666666666666666, 110, 0.6666666666666666, 1, 100] }
+    },
+    {
+      "name": "op4_unequal_knots_2_4",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 2, 0, 1, 2, 4, 0.12, 0.13, 0, 0.22, 0, 0, 1, 1, 1, 1, 0.23, 0, 0, 1, 1e-07, 0, 3, 0.0, 0.3333333333333333, 100, 0.3333333333333333, 0.6666666666666666, 110, 0.6666666666666666, 1, 100] }
+    },
+    {
+      "name": "op4_unequal_knots_3_3",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 2, 0, 1, 3, 3, 0.12, 0.13, 0, 0.22, 0, 0, 1, 1, 1, 1, 0.23, 0, 0, 1, 1e-07, 0, 3, 0.0, 0.3333333333333333, 100, 0.3333333333333333, 0.6666666666666666, 110, 0.6666666666666666, 1, 100] }
+    },
+    {
+      "name": "op4_unequal_knots_4_4",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 2, 0, 1, 4, 4, 0.12, 0.13, 0, 0.22, 0, 0, 1, 1, 1, 1, 0.23, 0, 0, 1, 1e-07, 0, 3, 0.0, 0.3333333333333333, 100, 0.3333333333333333, 0.6666666666666666, 110, 0.6666666666666666, 1, 100] }
+    },
+    {
+      "name": "op4_circle_or_stationary_1",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 2, 1, 1, 2, 2, 0.5, 0.5, 0, 0.2, 0, 0, 1, 1, 1, 1, 0, 0, 0, 360, 1e-07, 0, 1, 0.0, 360, 100] }
+    },
+    {
+      "name": "op4_circle_or_stationary_2",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 2, 2, 1, 2, 2, 0.5, 0.5, 0, 0.2, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op4_nonunit_domain_225",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 2, 0, 1, 2, 2, -2.8, -1.8, 0, -2.6, -3, -2, 4, 5, 1, 1, -1.6, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op4_nonunit_domain_226",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 2, 0, 1, 2, 2, 2.2, 4.2, 0, 2.4, 2, 4, 3, 8, 1, 1, 4.4, 0, 0, 1, 1e-07, 0, 1, 0.0, 1, 100] }
+    },
+    {
+      "name": "op4_tolerance_0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 3, 0, 1, 2, 2, 0.25, 0.5, 0, 0.75, 0, 0, 1, 1, 1, 1, 0.5, 0, 0.2, 0.8, 0, 0, 1, 0.2, 0.8, 100] }
+    },
+    {
+      "name": "op4_tolerance_1e-12",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 3, 0, 1, 2, 2, 0.25, 0.5, 0, 0.75, 0, 0, 1, 1, 1, 1, 0.5, 0, 0.2, 0.8, 1e-12, 0, 1, 0.2, 0.8, 100] }
+    },
+    {
+      "name": "op4_tolerance_0.0001",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (branch-derived; listed upstream tests reach these calls indirectly)",
+      "inputs": { "record": [4, 3, 0, 1, 2, 2, 0.25, 0.5, 0, 0.75, 0, 0, 1, 1, 1, 1, 0.5, 0, 0.2, 0.8, 0.0001, 0, 1, 0.2, 0.8, 100] }
+    },
+    {
+      "name": "upstream_rectangle_side_0_op0",
+      "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424-430 (10 by 6 rectangle geometry, re-expressed as side segments for p8 boundary classification)",
+      "inputs": { "record": [0, 2, 0, 1, 2, 2, -5, -3, 0, 5, -5, -3, 5, 3, 1, 1, -3, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "upstream_rectangle_side_1_op0",
+      "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424-430 (10 by 6 rectangle geometry, re-expressed as side segments for p8 boundary classification)",
+      "inputs": { "record": [0, 2, 0, 1, 2, 2, 5, -3, 0, 5, -5, -3, 5, 3, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "upstream_rectangle_side_2_op0",
+      "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424-430 (10 by 6 rectangle geometry, re-expressed as side segments for p8 boundary classification)",
+      "inputs": { "record": [0, 2, 0, 1, 2, 2, 5, 3, 0, -5, -5, -3, 5, 3, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "upstream_rectangle_side_3_op0",
+      "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424-430 (10 by 6 rectangle geometry, re-expressed as side segments for p8 boundary classification)",
+      "inputs": { "record": [0, 2, 0, 1, 2, 2, -5, 3, 0, -5, -5, -3, 5, 3, 1, 1, -3, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "upstream_rectangle_side_0_op1",
+      "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424-430 (10 by 6 rectangle geometry, re-expressed as side segments for p8 boundary classification)",
+      "inputs": { "record": [1, 2, 0, 1, 2, 2, -5, -3, 0, 5, -5, -3, 5, 3, 1, 1, -3, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "upstream_rectangle_side_1_op1",
+      "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424-430 (10 by 6 rectangle geometry, re-expressed as side segments for p8 boundary classification)",
+      "inputs": { "record": [1, 2, 0, 1, 2, 2, 5, -3, 0, 5, -5, -3, 5, 3, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "upstream_rectangle_side_2_op1",
+      "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424-430 (10 by 6 rectangle geometry, re-expressed as side segments for p8 boundary classification)",
+      "inputs": { "record": [1, 2, 0, 1, 2, 2, 5, 3, 0, -5, -5, -3, 5, 3, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "upstream_rectangle_side_3_op1",
+      "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424-430 (10 by 6 rectangle geometry, re-expressed as side segments for p8 boundary classification)",
+      "inputs": { "record": [1, 2, 0, 1, 2, 2, -5, 3, 0, -5, -5, -3, 5, 3, 1, 1, -3, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "upstream_rectangle_side_0_op2",
+      "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424-430 (10 by 6 rectangle geometry, re-expressed as side segments for p8 boundary classification)",
+      "inputs": { "record": [2, 2, 0, 1, 2, 2, -5, -3, 0, 5, -5, -3, 5, 3, 1, 1, -3, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "upstream_rectangle_side_1_op2",
+      "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424-430 (10 by 6 rectangle geometry, re-expressed as side segments for p8 boundary classification)",
+      "inputs": { "record": [2, 2, 0, 1, 2, 2, 5, -3, 0, 5, -5, -3, 5, 3, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "upstream_rectangle_side_2_op2",
+      "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424-430 (10 by 6 rectangle geometry, re-expressed as side segments for p8 boundary classification)",
+      "inputs": { "record": [2, 2, 0, 1, 2, 2, 5, 3, 0, -5, -5, -3, 5, 3, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "upstream_rectangle_side_3_op2",
+      "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424-430 (10 by 6 rectangle geometry, re-expressed as side segments for p8 boundary classification)",
+      "inputs": { "record": [2, 2, 0, 1, 2, 2, -5, 3, 0, -5, -5, -3, 5, 3, 1, 1, -3, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "upstream_rectangle_side_0_op3",
+      "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424-430 (10 by 6 rectangle geometry, re-expressed as side segments for p8 boundary classification)",
+      "inputs": { "record": [3, 2, 0, 1, 2, 2, -5, -3, 0, 5, -5, -3, 5, 3, 1, 1, -3, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "upstream_rectangle_side_1_op3",
+      "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424-430 (10 by 6 rectangle geometry, re-expressed as side segments for p8 boundary classification)",
+      "inputs": { "record": [3, 2, 0, 1, 2, 2, 5, -3, 0, 5, -5, -3, 5, 3, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "upstream_rectangle_side_2_op3",
+      "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424-430 (10 by 6 rectangle geometry, re-expressed as side segments for p8 boundary classification)",
+      "inputs": { "record": [3, 2, 0, 1, 2, 2, 5, 3, 0, -5, -5, -3, 5, 3, 1, 1, 3, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "upstream_rectangle_side_3_op3",
+      "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424-430 (10 by 6 rectangle geometry, re-expressed as side segments for p8 boundary classification)",
+      "inputs": { "record": [3, 2, 0, 1, 2, 2, -5, 3, 0, -5, -5, -3, 5, 3, 1, 1, -3, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "op0_source_tol_-1.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420; SmZoneTol3d scalar-constructor default/negative normalization",
+      "inputs": { "record": [0, 2, 0, 1, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, -1.0, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "op0_source_tol_-1e-07",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420; SmZoneTol3d scalar-constructor default/negative normalization",
+      "inputs": { "record": [0, 2, 0, 1, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, -1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "op0_geometry_scale_1e-09",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (tiny/huge-scale branch probe)",
+      "inputs": { "record": [0, 3, 0, 1, 2, 2, 2.0000000000000003e-10, 3e-10, 0, 7e-10, 0, 0, 1, 1, 1e-09, 1e-09, 6e-10, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "op0_geometry_scale_1000000000.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (tiny/huge-scale branch probe)",
+      "inputs": { "record": [0, 3, 0, 1, 2, 2, 200000000.0, 300000000.0, 0, 700000000.0, 0, 0, 1, 1, 1000000000.0, 1000000000.0, 600000000.0, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "op0_circle_radius_1e-10",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (full-circle tiny-radius/tangent branch probe)",
+      "inputs": { "record": [0, 2, 1, 1, 2, 2, 0.5, 0.5, 0, 1e-10, 0, 0, 1, 1, 1, 1, 0, 0, 0, 360, 1e-07, 0, 1, 0, 360, 100] }
+    },
+    {
+      "name": "op0_circle_radius_0.5",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (full-circle tiny-radius/tangent branch probe)",
+      "inputs": { "record": [0, 2, 1, 1, 2, 2, 0.5, 0.5, 0, 0.5, 0, 0, 1, 1, 1, 1, 0, 0, 0, 360, 1e-07, 0, 1, 0, 360, 100] }
+    },
+    {
+      "name": "op1_source_tol_-1.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420; SmZoneTol3d scalar-constructor default/negative normalization",
+      "inputs": { "record": [1, 2, 0, 1, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, -1.0, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "op1_source_tol_-1e-07",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420; SmZoneTol3d scalar-constructor default/negative normalization",
+      "inputs": { "record": [1, 2, 0, 1, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, -1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "op1_geometry_scale_1e-09",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (tiny/huge-scale branch probe)",
+      "inputs": { "record": [1, 3, 0, 1, 2, 2, 2.0000000000000003e-10, 3e-10, 0, 7e-10, 0, 0, 1, 1, 1e-09, 1e-09, 6e-10, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "op1_geometry_scale_1000000000.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (tiny/huge-scale branch probe)",
+      "inputs": { "record": [1, 3, 0, 1, 2, 2, 200000000.0, 300000000.0, 0, 700000000.0, 0, 0, 1, 1, 1000000000.0, 1000000000.0, 600000000.0, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "op1_circle_radius_1e-10",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (full-circle tiny-radius/tangent branch probe)",
+      "inputs": { "record": [1, 2, 1, 1, 2, 2, 0.5, 0.5, 0, 1e-10, 0, 0, 1, 1, 1, 1, 0, 0, 0, 360, 1e-07, 0, 1, 0, 360, 100] }
+    },
+    {
+      "name": "op1_circle_radius_0.5",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (full-circle tiny-radius/tangent branch probe)",
+      "inputs": { "record": [1, 2, 1, 1, 2, 2, 0.5, 0.5, 0, 0.5, 0, 0, 1, 1, 1, 1, 0, 0, 0, 360, 1e-07, 0, 1, 0, 360, 100] }
+    },
+    {
+      "name": "op2_source_tol_-1.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420; SmZoneTol3d scalar-constructor default/negative normalization",
+      "inputs": { "record": [2, 2, 0, 1, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, -1.0, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "op2_source_tol_-1e-07",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420; SmZoneTol3d scalar-constructor default/negative normalization",
+      "inputs": { "record": [2, 2, 0, 1, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, -1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "op2_geometry_scale_1e-09",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (tiny/huge-scale branch probe)",
+      "inputs": { "record": [2, 3, 0, 1, 2, 2, 2.0000000000000003e-10, 3e-10, 0, 7e-10, 0, 0, 1, 1, 1e-09, 1e-09, 6e-10, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "op2_geometry_scale_1000000000.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (tiny/huge-scale branch probe)",
+      "inputs": { "record": [2, 3, 0, 1, 2, 2, 200000000.0, 300000000.0, 0, 700000000.0, 0, 0, 1, 1, 1000000000.0, 1000000000.0, 600000000.0, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "op2_circle_radius_1e-10",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (full-circle tiny-radius/tangent branch probe)",
+      "inputs": { "record": [2, 2, 1, 1, 2, 2, 0.5, 0.5, 0, 1e-10, 0, 0, 1, 1, 1, 1, 0, 0, 0, 360, 1e-07, 0, 1, 0, 360, 100] }
+    },
+    {
+      "name": "op2_circle_radius_0.5",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (full-circle tiny-radius/tangent branch probe)",
+      "inputs": { "record": [2, 2, 1, 1, 2, 2, 0.5, 0.5, 0, 0.5, 0, 0, 1, 1, 1, 1, 0, 0, 0, 360, 1e-07, 0, 1, 0, 360, 100] }
+    },
+    {
+      "name": "op3_source_tol_-1.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420; SmZoneTol3d scalar-constructor default/negative normalization",
+      "inputs": { "record": [3, 2, 0, 1, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, -1.0, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "op3_source_tol_-1e-07",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420; SmZoneTol3d scalar-constructor default/negative normalization",
+      "inputs": { "record": [3, 2, 0, 1, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, -1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "op3_geometry_scale_1e-09",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (tiny/huge-scale branch probe)",
+      "inputs": { "record": [3, 3, 0, 1, 2, 2, 2.0000000000000003e-10, 3e-10, 0, 7e-10, 0, 0, 1, 1, 1e-09, 1e-09, 6e-10, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "op3_geometry_scale_1000000000.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (tiny/huge-scale branch probe)",
+      "inputs": { "record": [3, 3, 0, 1, 2, 2, 200000000.0, 300000000.0, 0, 700000000.0, 0, 0, 1, 1, 1000000000.0, 1000000000.0, 600000000.0, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "op3_circle_radius_1e-10",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (full-circle tiny-radius/tangent branch probe)",
+      "inputs": { "record": [3, 2, 1, 1, 2, 2, 0.5, 0.5, 0, 1e-10, 0, 0, 1, 1, 1, 1, 0, 0, 0, 360, 1e-07, 0, 1, 0, 360, 100] }
+    },
+    {
+      "name": "op3_circle_radius_0.5",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (full-circle tiny-radius/tangent branch probe)",
+      "inputs": { "record": [3, 2, 1, 1, 2, 2, 0.5, 0.5, 0, 0.5, 0, 0, 1, 1, 1, 1, 0, 0, 0, 360, 1e-07, 0, 1, 0, 360, 100] }
+    },
+    {
+      "name": "op4_source_tol_-1.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420; SmZoneTol3d scalar-constructor default/negative normalization",
+      "inputs": { "record": [4, 2, 0, 1, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, -1.0, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "op4_source_tol_-1e-07",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420; SmZoneTol3d scalar-constructor default/negative normalization",
+      "inputs": { "record": [4, 2, 0, 1, 2, 2, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, -1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "op4_geometry_scale_1e-09",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (tiny/huge-scale branch probe)",
+      "inputs": { "record": [4, 3, 0, 1, 2, 2, 2.0000000000000003e-10, 3e-10, 0, 7e-10, 0, 0, 1, 1, 1e-09, 1e-09, 6e-10, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "op4_geometry_scale_1000000000.0",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (tiny/huge-scale branch probe)",
+      "inputs": { "record": [4, 3, 0, 1, 2, 2, 200000000.0, 300000000.0, 0, 700000000.0, 0, 0, 1, 1, 1000000000.0, 1000000000.0, 600000000.0, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "op4_circle_radius_1e-10",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (full-circle tiny-radius/tangent branch probe)",
+      "inputs": { "record": [4, 2, 1, 1, 2, 2, 0.5, 0.5, 0, 1e-10, 0, 0, 1, 1, 1, 1, 0, 0, 0, 360, 1e-07, 0, 1, 0, 360, 100] }
+    },
+    {
+      "name": "op4_circle_radius_0.5",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (full-circle tiny-radius/tangent branch probe)",
+      "inputs": { "record": [4, 2, 1, 1, 2, 2, 0.5, 0.5, 0, 0.5, 0, 0, 1, 1, 1, 1, 0, 0, 0, 360, 1e-07, 0, 1, 0, 360, 100] }
+    }
+  ]
+}

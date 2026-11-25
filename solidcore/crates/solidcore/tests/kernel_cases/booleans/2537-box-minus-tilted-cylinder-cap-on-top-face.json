@@ -1,0 +1,79 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b1": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b1"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b3"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b4"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b3",
+        "b4"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "2537-box-minus-tilted-cylinder-cap-on-top-face",
+  "expected": {
+    "body_count": 1,
+    "method": "The tool's axis lies in the plane y = -6.5, which is the box's own y_min face, so exactly half the tool is inside the box; nothing else about the box binds (the tool spans x -24.105..-2.997 inside -99..99, and y -14.5..1.5 inside -6.5..99). Coordinates on the axis: u along it from the top cap centre, a along the seam (world +y), b = axis x a, so a point is at z = 16.5 + u cos(t) + b sin(t) and at y = -6.5 + a, with t = 4.005773878 degrees the tilt of the unit of the issue's sketch y_dir [0.069857, 0, 0.997557]. Write L = 71.5/cos(t) = 71.67510115307044, the box's 71.5 mm height measured along the axis, and k = tan(t) = 0.07002807859601005. The box's bottom face z = -55 bounds u >= -L - k b and its top face z = 16.5 bounds u <= -k b; the tool's own top cap plane bounds u <= 0, and of those two upper bounds the cap plane is the lower one exactly where b < 0. The tool's bottom cap centre sits 1.995 mm below z = -55 and its whole disc (half-span 8 sin(t) = 0.559) with it, so that cap never cuts. The height of the cut region is therefore L for b >= 0 and L + k b for b < 0. The region in y is the half disc a in [0, sqrt(64 - b^2)], and (u, a, b) is orthonormal, so V_cut = L * integral(sqrt(64-b^2) db, -8..8) + k * integral(b sqrt(64-b^2) db, -8..0) = 32 pi L - (512/3) k = 7205.567079289325 - 11.951458747052382 = 7193.615620542273: half a slanted cylinder through the slab, less the ungula the tilted cap cuts off it. Midpoint quadrature of the same integral over 4e6 steps gives 7193.6156208, 3.9e-11 off. The result is the box less that: 198 * 105.5 * 71.5 - V_cut = 1493563.5 - 7193.615620542273 = 1486369.8843794577. body_count 1",
+    "outcome": "solid",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcore#2537"
+    ],
+    "volume_mm3": 1486369.8843794577,
+    "what": "a box minus a cylinder of radius 8 tilted 4.006 degrees from z, whose top end cap is centred on the box's top face plane z = 16.5 so the cap is bisected by that face, and whose seam ends on one of the two points where the cap circle crosses it: a vertex where the cylinder, its cap plane and the box's face all meet. The cut must give one closed solid; the same cut with the cap centre 1 um clear of the face passes"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "records": "2537-box-minus-tilted-cylinder-cap-on-top-face.bodies.json.gz",
+  "result": [
+    {
+      "body": "t27",
+      "made": "b5"
+    }
+  ],
+  "sources": [
+    "tangency-labs/solidcore#2537"
+  ],
+  "ungraded": [],
+  "what": "a box minus a cylinder of radius 8 tilted 4.006 degrees from z, whose top end cap is centred on the box's top face plane z = 16.5 so the cap is bisected by that face, and whose seam ends on one of the two points where the cap circle crosses it: a vertex where the cylinder, its cap plane and the box's face all meet. The cut must give one closed solid; the same cut with the cap centre 1 um clear of the face passes",
+  "why_not": []
+}

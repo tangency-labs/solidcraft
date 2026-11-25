@@ -1,0 +1,32 @@
+{
+ "base": "../../09-shells-and-offsets/011-part-shell",
+ "commands": [
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     30,
+     24,
+     20
+    ],
+    "diameter": 3,
+    "name": "Vent"
+   }
+  },
+  {
+   "command": "solid.pattern.rectangular",
+   "params": {
+    "features": [
+     "Vent"
+    ],
+    "dir1": [
+     1,
+     0,
+     0
+    ],
+    "count1": 4,
+    "spacing1": 5
+   }
+  }
+ ]
+}

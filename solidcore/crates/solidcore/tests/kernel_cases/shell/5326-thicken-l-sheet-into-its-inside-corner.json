@@ -1,0 +1,112 @@
+{
+  "area": "shell",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "thicken",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "symmetric": false,
+        "thickness": -2.0
+      }
+    }
+  ],
+  "case": "5326-thicken-l-sheet-into-its-inside-corner",
+  "expected": {
+    "body_count": 1,
+    "faces": 8,
+    "method": "-2 is the inside of the corner (the side truck refused; +2, the outside, worked). Each wall offset 2 mm toward the other; the two slabs overlap in a 2x2 square: V = (30*2 + 20*2 - 2*2)*20 = 1920; faces 8 (an L-shaped prism). The sheet itself is removed afterwards, so only the new solid is graded",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#5326"
+    ],
+    "volume_mm3": 1920.0,
+    "what": "an open sheet of two planar walls at a right angle (30 and 20 mm, 20 deep) thickened 2 mm toward the inside of its corner: truck refused it ('thickening into an inside corner across a sharp edge'); the outside worked"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 18,
+      "faces": 8,
+      "vertices": 12
+    }
+  },
+  "records": "5326-thicken-l-sheet-into-its-inside-corner.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body2",
+      "made": "b6"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 2191.9999999999995,
+      "body_count": 1,
+      "edges": 18,
+      "faces": 8,
+      "vertices": 12,
+      "volume_mm3": 1919.9999999999927
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#5326"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "thicken"
+  ],
+  "ungraded": [],
+  "what": "an open sheet of two planar walls at a right angle (30 and 20 mm, 20 deep) thickened 2 mm toward the inside of its corner: truck refused it ('thickening into an inside corner across a sharp edge'); the outside worked",
+  "why_not": []
+}

@@ -1,0 +1,20 @@
+{
+ "sources": [],
+ "what": "a sphere's silhouette projected onto a plane below it and extruded: the outline is its equator circle, exactly",
+ "source": "analytic",
+ "method": "the silhouette of a sphere r8 seen along Z is the circle r8: extruded 5 down from z=-10, 320 pi beside the sphere 4/3 pi 512",
+ "body_count": 2,
+ "volume_mm3": 3149.9702339993655,
+ "bbox": {
+  "min": [
+   -8,
+   -8,
+   -15
+  ],
+  "max": [
+   8,
+   8,
+   8
+  ]
+ }
+}

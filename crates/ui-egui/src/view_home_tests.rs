@@ -1,8 +1,10 @@
 // Home and Fit frame what is shown now, and a middle-button double-click goes Home.
 use crate::scenario::Harness;
 use serde_json::json;
-use solidcraft_engine::geom::{Aabb3, Vec3};
-use solidcraft_engine::render::StandardView;
+use solidcore_record::Vec3;
+use solidcraft_engine::geom::Aabb3;
+use solidcraft_engine::geom::prelude::*;
+use solidcraft_viewport::StandardView;
 
 /// A block drawn at the origin and extruded, then moved 500 mm along X: its sketch stays at the
 /// origin, used by the extrude (so not drawn).
@@ -11,7 +13,7 @@ fn moved_block(h: &mut Harness) {
     h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]})).unwrap();
     h.app.run("sketch.finish", json!({})).unwrap();
     h.app.run("solid.extrude", json!({"distance": 5})).unwrap();
-    let body = h.app.session.world_state().bodies[0].name.clone();
+    let body = h.app.session.world_state().unwrap().bodies[0].name.clone();
     h.app.run("solid.move", json!({"bodies": [body], "translate": [500, 0, 0]})).unwrap();
     h.app.preferences.look_at_anim = false;
     h.settle();
@@ -23,7 +25,7 @@ fn near_box(a: Aabb3, lo: [f64; 3], hi: [f64; 3]) {
 }
 
 /// The camera Home gives: the iso view framing what is shown.
-fn home(h: &Harness) -> solidcraft_engine::render::Camera {
+fn home(h: &Harness) -> solidcraft_viewport::Camera {
     let mut cam = h.app.cam;
     cam.set_view(StandardView::Iso);
     h.app.fitted(cam)
@@ -35,7 +37,7 @@ fn spot(h: &Harness) -> egui::Pos2 {
     d.left_top() + egui::vec2(d.width() * 0.3, d.height() * 0.7)
 }
 
-fn same_cam(a: &solidcraft_engine::render::Camera, b: &solidcraft_engine::render::Camera) -> bool {
+fn same_cam(a: &solidcraft_viewport::Camera, b: &solidcraft_viewport::Camera) -> bool {
     a.target.dist(b.target) < 1e-6 && (a.distance - b.distance).abs() < 1e-6 && (a.yaw - b.yaw).abs() < 1e-9 && (a.pitch - b.pitch).abs() < 1e-9
 }
 
@@ -124,7 +126,7 @@ fn middle_double_click_preference_fit_or_off() {
     assert_eq!((h.app.cam.yaw, h.app.cam.pitch), (yaw, pitch), "Fit keeps the orientation");
     assert!(h.app.cam.target.dist(Vec3::new(505.0, 5.0, 2.5)) < 5.0, "{:?}", h.app.cam.target);
     // Fit frames everything shown, not the selection.
-    let body = h.app.session.world_state().bodies[0].name.clone();
+    let body = h.app.session.world_state().unwrap().bodies[0].name.clone();
     h.app.run("select.set", json!({"items": [{"type": "body", "name": body}]})).unwrap();
     let fitted = h.app.cam;
     h.app.cam.pan(60.0, 0.0, 500.0);
@@ -161,9 +163,10 @@ fn view_bar_json_commands_apply_ui_state_without_dialogs_or_undo() {
         assert_eq!(r["ok"], true, "{r}");
         assert_eq!(usize::from(h.app.ui.visual_style), index);
     }
-    for id in ["view.spin", "view.grid", "view.ground_shadow", "view.navigation_bar"] {
+    for id in ["view.tool.zoom", "view.spin", "view.grid", "view.ground_shadow", "view.navigation_bar"] {
         let key = if id == "view.navigation_bar" { "visible" } else { "on" };
         let state = |app: &crate::SolveApp| match id {
+            "view.tool.zoom" => app.viewport.nav == Some(NavMode::Zoom),
             "view.spin" => app.viewport.spin,
             "view.grid" => app.ui.show_grid,
             "view.ground_shadow" => app.ui.ground_shadow,
@@ -196,6 +199,66 @@ fn view_bar_json_commands_apply_ui_state_without_dialogs_or_undo() {
 }
 
 #[test]
+fn drag_to_zoom_shortcut_stops_on_key_release_without_editing_the_sketch() {
+    use egui::{Event, Key, Modifiers, PointerButton, vec2};
+
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[20,0]]})).unwrap();
+    h.app.start("sketch.line");
+    h.settle();
+    let cmd = crate::keymap::DRAG_ZOOM;
+    assert!(crate::keymap::keys(&h.app, cmd).is_empty());
+    let bind = h.call("ui.shortcut", json!({"command":cmd,"key":"Shift+F6"}));
+    assert_eq!(bind["ok"], true, "{bind}");
+    // Shift+F6 is assignable, but the built-in F6 Fit handler also sees it.
+    h.app.cam.distance *= 1.5;
+    let before = h.app.cam;
+    let before_doc = h.app.session.doc.to_json();
+    let before_undo = h.app.session.undo.len();
+    let at = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap()).to_screen(Vec3::ZERO).unwrap();
+    let shifted = Modifiers::SHIFT;
+    let plain = Modifiers::NONE;
+    let key = |pressed, modifiers| Event::Key { key: Key::F6, physical_key: None, pressed, repeat: false, modifiers };
+    let mouse = |pos, pressed, modifiers| Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers };
+    let frame = |h: &mut Harness, modifiers, events: Vec<Event>| {
+        h.frame_with(std::iter::once(Event::ModifiersChanged(modifiers)).chain(events).collect());
+    };
+
+    frame(&mut h, shifted, vec![Event::PointerMoved(at), key(true, shifted)]);
+    assert_eq!(h.app.cam, before, "the assigned chord does not trigger Fit");
+    assert!(h.app.viewport.nav.is_none(), "the key press does not latch Zoom");
+    frame(&mut h, shifted, vec![mouse(at, true, shifted)]);
+    let zoomed_at = at - vec2(0.0, 48.0);
+    frame(&mut h, shifted, vec![Event::PointerMoved(zoomed_at)]);
+    let zoomed = h.app.cam;
+    assert!(zoomed.distance < before.distance, "an upward drag zooms in");
+    assert_eq!(zoomed.back(), before.back());
+
+    let after_release = zoomed_at - vec2(0.0, 48.0);
+    frame(&mut h, plain, vec![Event::PointerMoved(after_release)]);
+    assert_eq!(h.app.cam, zoomed, "releasing Shift breaks the chord and stops zoom");
+    frame(&mut h, plain, vec![key(false, plain), mouse(after_release, false, plain)]);
+    assert!(h.app.tool.as_ref().unwrap().pts.is_empty());
+    assert_eq!(h.app.session.doc.to_json(), before_doc);
+    assert_eq!(h.app.session.undo.len(), before_undo);
+
+    // A stationary zoom press remains owned by navigation when the shortcut is released first.
+    frame(&mut h, shifted, vec![Event::PointerMoved(at), key(true, shifted)]);
+    frame(&mut h, shifted, vec![mouse(at, true, shifted)]);
+    frame(&mut h, plain, vec![key(false, plain)]);
+    frame(&mut h, plain, vec![mouse(at, false, plain)]);
+    assert!(h.app.tool.as_ref().unwrap().pts.is_empty(), "the release does not place a line point");
+    assert_eq!(h.app.cam, zoomed);
+
+    h.frame();
+    frame(&mut h, plain, vec![mouse(at, true, plain)]);
+    frame(&mut h, plain, vec![mouse(at, false, plain)]);
+    assert_eq!(h.app.tool.as_ref().unwrap().pts.len(), 1, "the next ordinary click starts the line");
+}
+
+#[test]
 fn navigation_bar_visibility_defaults_and_round_trips() {
     let mut h = Harness::new();
     moved_block(&mut h);
@@ -223,12 +286,14 @@ fn navigation_bar_buttons_run_registered_commands() {
     moved_block(&mut h);
     let undo = h.app.session.undo.len();
     let mut orbit_on = false;
+    let mut zoom_on = false;
     h.call("ui.prefs", json!({"navigation_bar":{"slots":["orbit","pan","zoom","fit","home","visual_style","spin"]}}));
     for (slot, id) in [
         ("orbit", "view.tool"),
         ("orbit", "view.tool"),
         ("pan", "view.tool"),
-        ("zoom", "view.tool"),
+        ("zoom", "view.tool.zoom"),
+        ("zoom", "view.tool.zoom"),
         ("fit", "view.fit"),
         ("home", "view.home"),
         ("spin", "view.spin"),
@@ -237,18 +302,21 @@ fn navigation_bar_buttons_run_registered_commands() {
         let log = h.app.session.log.len();
         h.call("ui.click", json!({"x":at.x,"y":at.y}));
         let label = solidcraft_engine::find_command(id).unwrap().label;
-        let echo = crate::i18n::Locale::for_language(&h.app.preferences.language).format("ui.command_done", &[("command", label)]);
+        let echo = solidcraft_ui_text::Locale::for_language(&h.app.preferences.language).format("ui.command_done", &[("command", label)]);
         assert!(h.app.session.log.iter().skip(log).any(|line| line == &echo), "{id} was not run");
         if slot == "orbit" {
             orbit_on = !orbit_on;
             assert_eq!(h.app.viewport.nav, if orbit_on { Some(crate::viewport::NavMode::Orbit) } else { None });
+        } else if slot == "zoom" {
+            zoom_on = !zoom_on;
+            assert_eq!(h.app.viewport.nav, if zoom_on { Some(crate::viewport::NavMode::Zoom) } else { None });
         }
     }
     let log = h.app.session.log.len();
     h.step(&json!({"click":{"handle":"nav:slot:visual_style"}})).unwrap();
     h.step(&json!({"click":{"handle":"nav:style:shaded"}})).unwrap();
     let label = solidcraft_engine::find_command("view.visual_style").unwrap().label;
-    let echo = crate::i18n::Locale::for_language(&h.app.preferences.language).format("ui.command_done", &[("command", label)]);
+    let echo = solidcraft_ui_text::Locale::for_language(&h.app.preferences.language).format("ui.command_done", &[("command", label)]);
     assert!(h.app.session.log.iter().skip(log).any(|line| line == &echo));
     assert_eq!(h.app.ui.visual_style, 1);
     assert_eq!(h.app.session.undo.len(), undo);
@@ -278,6 +346,36 @@ fn fit_and_home_json_commands_preserve_design_framing() {
     assert_eq!(h.app.session.undo.len(), undo);
 }
 
+/// #10091: Preferences › Navigation "Home and Fit size" is how much of the view the model fills
+/// when Home and Fit (and an opened design or a navigator view change) frame it; 100 %, the
+/// default, fills the room between the panels and the controls as before.
+#[test]
+fn home_fit_size_scales_the_framed_model() {
+    let mut h = Harness::new();
+    h.app.preferences.look_at_anim = false;
+    moved_block(&mut h);
+    assert_eq!(h.app.preferences.home_fit_size, 1.0, "fills the room by default");
+    h.call("engine.execute", json!({"command":"view.home","params":{}}));
+    h.frames(2);
+    let tight = h.app.cam;
+    h.call("ui.prefs", json!({"home_fit_size":0.8}));
+    for command in ["view.home", "view.fit"] {
+        h.call("engine.execute", json!({"command":command,"params":{}}));
+        h.frames(2);
+        assert!((h.app.cam.distance / tight.distance - 1.25).abs() < 0.02, "{command}: {} vs {}", h.app.cam.distance, tight.distance);
+        assert_eq!((h.app.cam.yaw, h.app.cam.pitch), (tight.yaw, tight.pitch), "{command}: the size only zooms");
+    }
+    for bad in [1.5, 0.05, 0.0, -1.0] {
+        let r = h.call("ui.prefs", json!({"home_fit_size":bad}));
+        assert_eq!(r["ok"], false, "{bad} is outside 10 %…100 %: {r}");
+    }
+    assert!((h.app.preferences.home_fit_size - 0.8).abs() < 1e-6);
+    h.call("ui.prefs", json!({"open":"Navigation"}));
+    h.call("ui.prefs", json!({"button":"defaults"}));
+    assert_eq!(h.app.preferences.home_fit_size, 1.0, "Navigation defaults restore 100 %");
+    h.call("ui.prefs", json!({"button":"cancel"}));
+}
+
 #[test]
 fn fit_json_frames_selection_while_home_frames_everything() {
     let mut h = Harness::new();
@@ -300,6 +398,70 @@ fn fit_json_frames_selection_while_home_frames_everything() {
     assert_eq!(h.app.session.undo.len(), undo);
 }
 
+/// #18507: End frames the selection as Fit (and F6) does, and Home goes to the home view. A focused
+/// text field keeps both keys for its caret. They are ordinary shortcuts, so they can be cleared.
+#[test]
+fn end_fits_the_selection_and_home_goes_home_except_in_a_text_field() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.look_at_anim = false;
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Near"})).unwrap();
+    h.app.run("solid.box", json!({"corner":[500,0,0],"length":10,"width":10,"height":10,"body_name":"Far"})).unwrap();
+    h.settle();
+    assert_eq!(crate::keymap::keys(&h.app, "view.fit"), ["End"]);
+    assert_eq!(crate::keymap::keys(&h.app, "view.home"), ["Home"]);
+    h.app.run("select.set", json!({"items":[{"type":"body","name":"Near"}]})).unwrap();
+    h.app.cam.set_view(StandardView::Front);
+    h.app.cam.pan(300.0, 200.0, 500.0);
+    let direction = (h.app.cam.yaw, h.app.cam.pitch);
+    h.step(&json!({"key":"End"})).unwrap();
+    h.settle();
+    assert!(h.app.cam.target.dist(Vec3::new(5.0, 5.0, 5.0)) < 5.0, "End frames the selected box: {:?}", h.app.cam.target);
+    assert_eq!((h.app.cam.yaw, h.app.cam.pitch), direction, "End keeps the orientation, as Fit does");
+    let fitted = h.app.cam;
+    h.app.cam.pan(60.0, 0.0, 500.0);
+    h.step(&json!({"key":"F6"})).unwrap();
+    h.settle();
+    assert!(same_cam(&h.app.cam, &fitted), "F6 still fits");
+    h.step(&json!({"key":"Home"})).unwrap();
+    h.settle();
+    assert!(same_cam(&h.app.cam, &home(&h)), "Home goes to the home view");
+
+    // The command search's field has the keyboard: Home and End move its caret, not the view.
+    h.call("ui.palette", json!({"text":"fit"}));
+    h.frames(3);
+    let field = egui::Id::unique("sc_sbox_text");
+    let caret = |h: &Harness| egui::TextEdit::load_state(&h.ctx, field).and_then(|s| s.cursor.char_range()).map(|r| r.primary);
+    h.app.cam.pan(60.0, 0.0, 500.0);
+    let moved = h.app.cam;
+    h.step(&json!({"key":"Home"})).unwrap();
+    h.frames(2);
+    assert_eq!(caret(&h), Some(egui::text::CCursor::new(0)), "Home moves the caret to the start");
+    h.step(&json!({"key":"End"})).unwrap();
+    h.frames(2);
+    assert_eq!(caret(&h), Some(egui::text::CCursor::new(3)), "End moves the caret to the end");
+    assert!(same_cam(&h.app.cam, &moved), "the view stays put while the field has the keys");
+    h.call("ui.palette", json!({"open":false}));
+    h.frames(2);
+    // Any other focused field too: the Preferences search.
+    h.call("ui.prefs", json!({"open":"General"}));
+    h.frames(3);
+    h.step(&json!({"text":"grid"})).unwrap();
+    for key in ["Home", "End"] {
+        h.step(&json!({"key":key})).unwrap();
+        h.frames(2);
+        assert!(same_cam(&h.app.cam, &moved), "{key} in the Preferences search leaves the view");
+    }
+    assert_eq!(h.app.prefs_window.shell.filter, "grid");
+    h.call("ui.prefs", json!({"button":"cancel"}));
+    h.frames(2);
+
+    crate::keymap::bind(&mut h.app, "view.home", "", false).unwrap();
+    h.step(&json!({"key":"Home"})).unwrap();
+    h.settle();
+    assert!(same_cam(&h.app.cam, &moved), "a cleared Home does nothing");
+}
+
 #[test]
 fn navigation_bar_display_menu_runs_grid_and_shadow_commands() {
     let mut h = Harness::new();
@@ -311,9 +473,115 @@ fn navigation_bar_display_menu_runs_grid_and_shadow_commands() {
         h.step(&json!({"widget":label})).unwrap();
         let after = if id == "view.grid" { h.app.ui.show_grid } else { h.app.ui.ground_shadow };
         assert_eq!(after, !before);
-        let echo = crate::i18n::Locale::for_language(&h.app.preferences.language).format("ui.command_done", &[("command", label)]);
+        let language = solidcraft_ui_text::Locale::for_language(&h.app.preferences.language);
+        let echo = language.format("ui.command_done", &[("command", language.label(crate::command_label(id)))]);
         assert!(h.app.session.log.iter().skip(log).any(|line| line == &echo), "{id} was not run");
     }
+}
+
+/// The Browser tree panel closes from its own host menu, which left no way back; the View menu
+/// and the Layout setting bring it back (#16058).
+#[test]
+fn the_view_menu_brings_the_browser_tree_back() {
+    let mut h = Harness::new();
+    moved_block(&mut h);
+    // The tree is closed, as its own host menu closes it.
+    h.app.ui.show_browser = false;
+    h.settle();
+    assert!(!crate::browser::panel_open(&h.app), "the tree starts closed");
+    let language = solidcraft_ui_text::Locale::for_language(&h.app.preferences.language);
+    let echo = language.format("ui.command_done", &[("command", language.label(crate::command_label("view.browser")))]);
+    h.step(&json!({"click":{"handle":"nav:view"}})).unwrap();
+    assert!(crate::scenario::rect_of("view:browser_tree").is_some(), "the View menu has the Browser tree row");
+    for open in [true, false] {
+        let log = h.app.session.log.len();
+        h.step(&json!({"click":{"handle":"view:browser_tree"}})).unwrap();
+        h.settle();
+        assert_eq!(crate::browser::panel_open(&h.app), open, "the row turns the tree {open}");
+        assert!(h.app.session.log.iter().skip(log).any(|line| line == &echo), "the row runs the command: {echo}");
+    }
+    // The Layout setting brings the tree back as well.
+    h.step(&json!({"click":{"handle":"nav:view"}})).unwrap();
+    h.call("ui.prefs", json!({"open":"Layout"}));
+    h.frames(4);
+    crate::prefs::reveal_preference(&mut h, "prefs:browser_tree");
+    let log = h.app.session.log.len();
+    h.step(&json!({"click":{"handle":"prefs:browser_tree"}})).unwrap();
+    h.settle();
+    assert!(crate::browser::panel_open(&h.app), "the Layout setting brings the tree back");
+    assert!(h.app.session.log.iter().skip(log).any(|line| line == &echo), "the setting runs the command: {echo}");
+}
+
+/// Whether the panel layout holds the Browser tree open, and how it is asked to be.
+fn browser_layout_open(app: &crate::SolveApp) -> Option<bool> {
+    app.panel_runtime()
+        .and_then(|runtime| runtime.layout().layout().instances.iter().find(|panel| panel.id.0 == "browser").map(|panel| panel.requested_open))
+}
+
+/// The View menu row runs `view.browser` without parameters, which toggles the tree: two quick
+/// toggles leave it open again, not closed (#16058).
+#[test]
+fn a_double_toggle_of_the_browser_tree_leaves_it_open() {
+    let mut h = Harness::new();
+    moved_block(&mut h);
+    assert_eq!(browser_layout_open(&h.app), Some(true), "the tree starts open in the layout");
+    // The tree closes.
+    h.app.run("view.browser", json!({})).unwrap();
+    assert!(!h.app.ui.show_browser, "the first toggle closes the tree");
+    // The tree opens again: the second toggle reads the closed state, before the panels sync.
+    h.app.run("view.browser", json!({})).unwrap();
+    assert!(h.app.ui.show_browser, "the second toggle leaves the tree open");
+    assert_eq!(browser_layout_open(&h.app), Some(true), "the layout holds it open again");
+    assert!(crate::browser::panel_open(&h.app), "the tree is open again");
+}
+
+#[test]
+fn origin_axes_display_menu_and_preferences_share_an_opt_in_setting() {
+    let mut h = Harness::new();
+    moved_block(&mut h);
+    assert!(!h.app.preferences.origin_axes_across_view);
+    let design = h.app.session.doc.to_json();
+    let undo = h.app.session.undo.len();
+    let camera = h.app.cam;
+    h.step(&json!({"click":{"handle":"nav:view"}})).unwrap();
+    for enabled in [true, false] {
+        let log = h.app.session.log.len();
+        h.step(&json!({"click":{"handle":"view:origin_axes_across_view"}})).unwrap();
+        assert_eq!(h.app.preferences.origin_axes_across_view, enabled);
+        let language = solidcraft_ui_text::Locale::for_language(&h.app.preferences.language);
+        let echo = language.format("ui.command_done", &[("command", language.label(crate::command_label("view.origin_axes_across_view")))]);
+        assert!(h.app.session.log.iter().skip(log).any(|line| line == &echo), "the Display menu runs the command");
+    }
+    h.step(&json!({"click":{"handle":"nav:view"}})).unwrap();
+    let result = h.call("engine.execute", json!({"command":"view.origin_axes_across_view","params":{"enabled":true}}));
+    assert_eq!(result["ok"], true, "{result}");
+    assert!(h.app.preferences.origin_axes_across_view);
+    h.step(&json!({"click":{"handle":"nav:view"}})).unwrap();
+    h.step(&json!({"click":{"handle":"view:origin_axes_across_view"}})).unwrap();
+    assert!(!h.app.preferences.origin_axes_across_view, "the menu uses the value set by the control command");
+
+    h.step(&json!({"click":{"handle":"nav:view"}})).unwrap();
+    h.call("ui.prefs", json!({"open":"Design"}));
+    h.app.prefs_window.shell.filter = "Origin axes".into();
+    h.frames(5);
+    crate::prefs::reveal_preference(&mut h, "prefs:origin_axes_across_view");
+    h.step(&json!({"click":{"handle":"prefs:origin_axes_across_view"}})).unwrap();
+    assert!(h.app.preferences.origin_axes_across_view);
+    h.call("ui.prefs", json!({"button":"ok"}));
+    let mut restored = crate::SolveApp::new(Default::default(), Default::default());
+    restored.load_prefs(&h.app.prefs());
+    assert!(restored.preferences.origin_axes_across_view, "opting in survives a settings reload");
+
+    h.call("ui.prefs", json!({"open":"Design"}));
+    h.call("ui.prefs", json!({"button":"defaults"}));
+    assert!(!h.app.preferences.origin_axes_across_view, "Design reset restores short axes");
+    h.call("ui.prefs", json!({"button":"ok"}));
+    restored.load_prefs(&h.app.prefs());
+    assert!(!restored.preferences.origin_axes_across_view);
+    assert_eq!(h.app.cam, camera);
+    assert_eq!(h.app.session.doc.to_json(), design);
+    assert_eq!(h.app.session.undo.len(), undo);
+    assert!(h.app.dialog.is_none() && h.app.tool.is_none());
 }
 
 #[test]
@@ -336,7 +604,7 @@ fn navigation_bar_toggle_slots_apply_commands_and_projection_compatibility() {
         assert_eq!(value(&h.app), !before, "{slot}");
         if slot != "projection" {
             let command = solidcraft_engine::find_command(&format!("view.{slot}")).unwrap();
-            let echo = crate::i18n::Locale::for_language(&h.app.preferences.language).format("ui.command_done", &[("command", command.label)]);
+            let echo = solidcraft_ui_text::Locale::for_language(&h.app.preferences.language).format("ui.command_done", &[("command", command.label)]);
             assert!(h.app.session.log.iter().skip(log).any(|line| line == &echo), "{slot}");
         }
     }
@@ -362,8 +630,8 @@ fn navigation_bar_tool_radio_group_and_overflow_execute_in_list_order() {
     h.settle();
     let bar = crate::scenario::rect_of("nav:outer").unwrap();
     assert_eq!(bar, h.app.viewport.layout.as_ref().unwrap().navigation);
-    let metrics = crate::ui_kit::NavigationMetrics::for_size(crate::navigation_bar::Size::Regular);
-    assert_eq!(h.app.preferences.navigation_bar.size, crate::navigation_bar::Size::Regular);
+    let metrics = crate::ui_kit::NavigationMetrics::for_size(crate::ui_kit::NavigationSize::Regular);
+    assert_eq!(h.app.preferences.navigation_bar.size, crate::ui_kit::NavigationSize::Regular);
     assert_eq!(bar.height(), metrics.height());
     let more = crate::scenario::rect_of("nav:more").unwrap();
     assert_eq!(more.size(), egui::vec2(metrics.button, metrics.button));
@@ -400,4 +668,193 @@ fn navigation_bar_look_at_keeps_the_active_sketch_fallback() {
     assert_eq!(h.app.session.active_sketch, sketch);
     assert_eq!(h.app.session.doc.to_json(), design);
     assert_eq!(h.app.session.undo.len(), undo);
+}
+
+/// In the default orbit mode, orbit turns about the middle of the part of the view the panels
+/// leave free, the middle Home moves the model to (#14651): straight after Home, an orbit keeps
+/// that point still and turns the model about it, with the Browser shown and with it hidden.
+/// Turning about the window's centre instead swung the model off to the side.
+#[test]
+fn orbit_after_home_turns_the_model_in_place_beside_the_browser() {
+    for browser in [true, false] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        moved_block(&mut h);
+        h.app.ui.show_browser = browser;
+        h.settle();
+        assert_eq!(h.app.preferences.orbit_around, crate::prefs::OrbitAround::ViewCentre);
+        assert_eq!(h.app.shell.browser.is_some(), browser, "exercise both Browser visibility states");
+        h.app.animate_view("home");
+        h.settle();
+        let rect = h.app.viewport.rect.unwrap();
+        // The pivot is the point Home centres the model on (the free view's middle, kept clear of the
+        // navigation bar), so that is where the orbit must hold still; it is no longer `layout.middle` itself.
+        let middle =
+            crate::viewport_layout::framing_centre(h.app.cam, &crate::viewport::view_bounds(&h.app), h.app.viewport.layout.as_ref().unwrap())
+                .unwrap();
+        assert!(!crate::shell::covered(&h.app, middle), "the framing point is in free canvas");
+        let proj = |h: &Harness| crate::viewport::projection(&h.app, rect);
+        // The model's middle, and the point at the camera target's depth under the free view's middle.
+        let centre = crate::viewport::view_bounds(&h.app).center();
+        let (origin, dir) = proj(&h).ray(middle);
+        let back = h.app.cam.back();
+        let pivot = origin + dir * ((h.app.cam.target - origin).dot(back) / dir.dot(back));
+        let before = proj(&h).to_screen(centre).unwrap();
+        // Home moves the model to the free view's middle, as far as the compass and the
+        // navigation bar leave room.
+        let reach = before.distance(middle);
+        assert!((before.x - middle.x).abs() < 1.0 && reach < 40.0, "browser {browser}: Home puts the model at {before:?}, the middle is {middle:?}");
+        let (yaw, pitch) = (h.app.cam.yaw, h.app.cam.pitch);
+        // Fusion's orbit (the default preset): Shift and the middle button.
+        let p = spot(&h);
+        h.call("ui.drag", json!({"x0": p.x, "y0": p.y, "x1": p.x + 60.0, "y1": p.y + 30.0, "button": "middle", "shift": true, "steps": 6}));
+        h.settle();
+        assert!((h.app.cam.yaw - yaw).abs() > 0.1 && (h.app.cam.pitch - pitch).abs() > 0.05, "browser {browser}: the drag orbits");
+        let held = proj(&h).to_screen(pivot).unwrap();
+        assert!(held.distance(middle) < 1.0, "browser {browser}: the free view's middle moved from {middle:?} to {held:?}");
+        let after = proj(&h).to_screen(centre).unwrap();
+        assert!(after.distance(middle) < reach + 1.0, "browser {browser}: the model's middle went from {before:?} to {after:?}");
+    }
+}
+
+/// The default orbit pivot is exactly the screen point Home centres the model on, not the free view's middle,
+/// which lies a few points off it because Home leaves room for the navigation bar (#14651): no drift after
+/// Home, with the Browser shown and hidden.
+#[test]
+fn the_orbit_pivot_is_the_point_home_centres_on() {
+    for browser in [true, false] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        moved_block(&mut h);
+        h.app.ui.show_browser = browser;
+        h.settle();
+        h.app.animate_view("home");
+        h.settle();
+        let rect = h.app.viewport.rect.unwrap();
+        let proj = crate::viewport::projection(&h.app, rect);
+        let centre = proj.to_screen(crate::viewport::view_bounds(&h.app).center()).unwrap();
+        let layout = h.app.viewport.layout.as_ref().unwrap();
+        let home = crate::viewport_layout::framing_centre(h.app.cam, &crate::viewport::view_bounds(&h.app), layout).unwrap();
+        let pivot = crate::navigation::view_middle(&h.app, rect).unwrap_or(h.app.cam.target);
+        let at = proj.to_screen(pivot).unwrap();
+        assert!(at.distance(home) < 0.5, "browser {browser}: the pivot is at {at:?}, Home centres on {home:?}");
+        assert!(at.distance(centre) < 1.5, "browser {browser}: Home left the model at {centre:?}, the pivot is at {at:?}");
+    }
+}
+
+/// With the navigators' Fit on, an orbit drag straight after Home or Fit and continuous orbit
+/// straight after Home keep the model's middle at its framed position, with the Browser shown
+/// and hidden, in parallel and perspective views (#14651).
+#[test]
+fn orbit_after_the_navigators_home_turns_the_model_in_place() {
+    for (browser, perspective) in [(true, false), (false, false), (true, true)] {
+        let case = format!("browser {browser}, perspective {perspective}");
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        moved_block(&mut h);
+        h.app.ui.show_browser = browser;
+        h.app.ui.perspective = perspective;
+        h.app.preferences.navigator_fit = true;
+        h.settle();
+        assert_eq!(h.app.preferences.orbit_around, crate::prefs::OrbitAround::ViewCentre);
+        let rect = h.app.viewport.rect.unwrap();
+        let proj = |h: &Harness| crate::viewport::projection(&h.app, rect);
+        let centre = crate::viewport::view_bounds(&h.app).center();
+        let frame = |h: &mut Harness, view: &str| {
+            h.app.animate_view(view);
+            h.settle();
+            proj(h).to_screen(centre).unwrap()
+        };
+        let drag = |h: &mut Harness, view: &str| {
+            let before = frame(h, view);
+            let (yaw, pitch) = (h.app.cam.yaw, h.app.cam.pitch);
+            // Fusion's orbit (the default preset): Shift and the middle button.
+            let p = spot(h);
+            h.call("ui.drag", json!({"x0": p.x, "y0": p.y, "x1": p.x + 60.0, "y1": p.y + 30.0, "button": "middle", "shift": true, "steps": 6}));
+            h.settle();
+            assert!((h.app.cam.yaw - yaw).abs() > 0.1 && (h.app.cam.pitch - pitch).abs() > 0.05, "{case}, {view}: the drag orbits");
+            let after = proj(h).to_screen(centre).unwrap();
+            assert!(after.distance(before) < 0.5, "{case}, {view}: the model's middle went from {before:?} to {after:?}");
+        };
+        drag(&mut h, "home");
+        drag(&mut h, "fit");
+        let before = frame(&mut h, "home");
+        let yaw = h.app.cam.yaw;
+        h.app.viewport.spin = true;
+        h.frames(60);
+        assert!(h.app.viewport.spin && (h.app.cam.yaw - yaw).abs() > 0.05, "{case}: the view spins");
+        let after = proj(&h).to_screen(centre).unwrap();
+        assert!(after.distance(before) < 0.5, "{case}: spinning, the model's middle went from {before:?} to {after:?}");
+    }
+}
+
+/// Continuous orbit turns about the same point an orbit drag does: after a pan, the point the drag orbit
+/// holds still (the view's middle) holds still through a spin too.
+#[test]
+fn spin_after_a_pan_holds_the_drag_orbit_pivot_still() {
+    for (browser, perspective) in [(true, false), (false, false), (true, true)] {
+        let case = format!("browser {browser}, perspective {perspective}");
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        moved_block(&mut h);
+        h.app.ui.show_browser = browser;
+        h.app.ui.perspective = perspective;
+        h.settle();
+        h.app.animate_view("home");
+        h.settle();
+        let p = spot(&h);
+        // Middle button drag: pan in the default preset.
+        h.call("ui.drag", json!({"x0": p.x, "y0": p.y, "x1": p.x + 90.0, "y1": p.y - 40.0, "button": "middle", "steps": 6}));
+        h.settle();
+        let rect = h.app.viewport.rect.unwrap();
+        let proj = |h: &Harness| crate::viewport::projection(&h.app, rect);
+        let pivot = crate::navigation::view_middle(&h.app, rect).unwrap_or(h.app.cam.target);
+        let before = proj(&h).to_screen(pivot).unwrap();
+        let yaw = h.app.cam.yaw;
+        h.app.viewport.spin = true;
+        h.frames(60);
+        assert!(h.app.viewport.spin && (h.app.cam.yaw - yaw).abs() > 0.05, "{case}: the view spins");
+        let after = proj(&h).to_screen(pivot).unwrap();
+        assert!(after.distance(before) < 0.5, "{case}: spinning, the orbit pivot went from {before:?} to {after:?}");
+    }
+}
+
+/// An orbit about the view's centre keeps the point it began with for the whole drag, also while
+/// the view tilts up to the top view and then turns sideways there (#16091). Home's framing point
+/// moves as the model's outline turns, and choosing the pivot again whenever it moved swung a wide,
+/// flat model sideways out of the view. The pivot holds still on screen, with the Browser shown and
+/// hidden, zoomed in and not.
+#[test]
+fn orbit_up_to_the_top_view_and_around_keeps_one_pivot() {
+    for (browser, zoom) in [(true, 1.0), (true, 0.6), (false, 1.0), (false, 0.6)] {
+        let case = format!("browser {browser}, zoom {zoom}");
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [-60, -20], "p1": [60, 20]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("solid.extrude", json!({"distance": 3})).unwrap();
+        h.app.preferences.look_at_anim = false;
+        h.app.ui.show_browser = browser;
+        h.settle();
+        assert_eq!(h.app.preferences.orbit_around, crate::prefs::OrbitAround::ViewCentre);
+        h.app.animate_view("home");
+        h.settle();
+        h.app.cam.zoom_at(zoom, None);
+        h.settle();
+        let rect = h.app.viewport.rect.unwrap();
+        let proj = |h: &Harness| crate::viewport::projection(&h.app, rect);
+        crate::navigation::orbit(&mut h.app, rect, 0.0, 0.0, None);
+        let pivot = h.app.viewport.orbit_pivot.unwrap_or(h.app.cam.target);
+        let held = proj(&h).to_screen(pivot).unwrap();
+        for i in 0..400 {
+            // Up to the top view's limit first, then sideways there.
+            let (dx, dy) = if i < 100 { (0.0, 3.0) } else { (4.0, 0.0) };
+            crate::navigation::orbit(&mut h.app, rect, dx, dy, None);
+            assert_eq!(h.app.viewport.orbit_pivot.unwrap_or(h.app.cam.target), pivot, "{case}, step {i}: the pivot is chosen once");
+            let at = proj(&h).to_screen(pivot).unwrap();
+            assert!(at.distance(held) < 0.5, "{case}, step {i}: the pivot moved from {held:?} to {at:?}");
+        }
+        assert!(std::f64::consts::FRAC_PI_2 - h.app.cam.pitch < 1e-3, "{case}: the drag reached the top view");
+    }
 }

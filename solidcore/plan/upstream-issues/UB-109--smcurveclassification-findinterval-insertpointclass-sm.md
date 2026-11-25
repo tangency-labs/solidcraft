@@ -1,0 +1,11 @@
+#### UB-109. `SmCurveClassification::FindInterval` / `InsertPointClass` / `sm_FixProblemsBySqueezing` read the first interval of an empty classification
+- **Severity:** Crash / undefined behaviour
+- **Area:** Topology
+- **Location:** `source/SMLib/src/SmCurveClass.cpp:5839` (`FindInterval`: `(*this)[0]` is read before any size check; the next test at `:5899` does check `GetSize() > 0`). Reached from `IsCoincident` (`:6995`, `:7007`), `InsertPointClass` (`:7304`) and, for the other classification, `sm_FixProblemsBySqueezing` (`:3593`, `:3602`).
+- **What happens:** with `GetSize() == 0` the first test reads `m_pData[0]` of an array without intervals (null or past the allocation).
+- **Trigger:** a classification whose intervals were all removed or never set, searched for a parameter (a curve with no classified interval, or the empty `rCurveClassOther` of a squeeze).
+- **How found:** read during porting (unit `intersect.curve_class_p3`).
+- **Confirmed:** no (the difftest shim rejects these scripts).
+- **Severity:** crash/UB.
+- **Rust port:** `SolidError::InvalidInput`.
+- **Fuzz sweep trigger (2026-10-20):** `SmCurveClassification::IntersectVertices` -> `InsertPointClass` -> `FindInterval` with an empty classification and a vertex (`intersect.curve_class_p5` op 6, `n == 0`, `flag1` set; `fuzz-out/n2000/intersect.curve_class_p5/fuzz00653.json`, `fuzz01268.json`, `/bounds truncated to 1`). SIGSEGV in the C++ run: Confirmed becomes yes. Guard: `crates/solidcore-ffi/src/units/intersect_curve_class_p5.rs:90`.

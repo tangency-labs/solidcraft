@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2992",
+  "tangency-labs/solidcraft#1856"
+ ],
+ "what": "a disk joined to 36 patterned twisted lofted blades (each a loft of 9 rectangle sections turning 7.5 degrees apart, rooted 2 mm inside the disk): hang of minutes",
+ "source": "analytic",
+ "method": "each blade section is a 6 x 3 rectangle (area 18) turning about its own centre, which stays on the vertical line at radius 50: the section area and centre do not change, so a blade above the disk top z = 5 is 18 * (43 - 5) = 684 and its root part is inside the disk. The 36 blades (centres 8.7 apart, reach 3.4 each) do not touch each other, so V = pi 60^2 5 + 36 * 684 = 81172.7.",
+ "body_count": 1,
+ "volume_mm3": 81172.66776461627
+}

@@ -1,0 +1,8 @@
+# General: a polygon Boolean whose FixGaps fails (#732, UB-275) has no Rust or difftest counterpart (2026-10-31)
+
+- **Issue:** tangency-labs/solidcore#732, upstream record `plan/upstream-issues/UB-275--polygon-boolean-continues-with-deleted-polyedges-after-failed-fixgaps.md`.
+- **Unit:** none. `SmPolyMerge::ManifoldBoolean` and `SmPolyIntersector::FixGaps` belong to no unit in `harness/callgraph/units.json`; both files are in `plan/closure.md`'s Provably unused table. `query.poly` ports only the PolyBrep queries.
+- **Rust behaviour on the trigger:** the operation does not exist in the port, so there is no Rust result to compare and no deleted record to read. The closest ported path, the B-rep `SmMerge::ManifoldBoolean` -> `SmTopologyIntersector::FixGaps`, stops on the error (upstream `SER` at `SmMerge.cpp:3029`, Rust `?` in `crates/solidcore/src/boolean/merge/p4.rs`), and the B-rep `FixGaps` has no connect-the-dots step that can fail after a combine.
+- **C++ behaviour on the trigger:** crash (`SmTopology::GetMark(this=0x0)` from `SmPolyMerge.cpp:1399`) in the fork's prog_test with refined tessellations; stock 1.0.1 tessellations do not reach the failing `FixGaps`.
+- **Difftest classification:** no case. There is no shim, FFI binding or Rust function for the polygon Boolean, so no case can run either side; no `cpp_defect` marker is needed because nothing is parked. No unit status changes.
+- **If the polygon Boolean is ported:** take the fork diff from the issue as an unconditional fix (crash class under the #1018 interim policy): re-gather the common lists whenever `bModifiedTopology` is set, and unmate each PolyBrep's deleted records right after its combine.

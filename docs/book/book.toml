@@ -13,6 +13,7 @@ create-missing = false
 git-repository-url = "https://github.com/tangency-labs/solidcraft"
 edit-url-template = "https://github.com/tangency-labs/solidcraft/edit/main/docs/book/{path}"
 site-url = "/"
+additional-css = ["theme/media.css"]
 no-section-label = false
 
 [output.html.search]

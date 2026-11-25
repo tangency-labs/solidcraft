@@ -1,0 +1,816 @@
+{
+  "cases": [
+    {
+      "name": "surface-surface-linear-xsect",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              5,
+              0,
+              -5
+            ],
+            [
+              5,
+              0,
+              5
+            ],
+            [
+              5,
+              10,
+              -5
+            ],
+            [
+              5,
+              10,
+              5
+            ]
+          ],
+          "radius1": 2,
+          "radius2": 2,
+          "tolerance": 0.01,
+          "xsect": 0,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    },
+    {
+      "name": "surface-surface-approx-circular-xsect",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              5,
+              0,
+              -5
+            ],
+            [
+              5,
+              0,
+              5
+            ],
+            [
+              5,
+              10,
+              -5
+            ],
+            [
+              5,
+              10,
+              5
+            ]
+          ],
+          "radius1": 2,
+          "radius2": 2,
+          "tolerance": 0.01,
+          "xsect": 1,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    },
+    {
+      "name": "surface-surface-mirror",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              5,
+              0,
+              -5
+            ],
+            [
+              5,
+              0,
+              5
+            ],
+            [
+              5,
+              10,
+              -5
+            ],
+            [
+              5,
+              10,
+              5
+            ]
+          ],
+          "radius1": 2,
+          "radius2": 2,
+          "tolerance": 0.01,
+          "xsect": 2,
+          "mirror": true,
+          "complement": false
+        }
+      }
+    },
+    {
+      "name": "surface-surface-complement",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              5,
+              0,
+              -5
+            ],
+            [
+              5,
+              0,
+              5
+            ],
+            [
+              5,
+              10,
+              -5
+            ],
+            [
+              5,
+              10,
+              5
+            ]
+          ],
+          "radius1": 2,
+          "radius2": 2,
+          "tolerance": 0.01,
+          "xsect": 2,
+          "mirror": false,
+          "complement": true
+        }
+      }
+    },
+    {
+      "name": "surface-surface-mirror-complement-approx",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              5,
+              0,
+              -5
+            ],
+            [
+              5,
+              0,
+              5
+            ],
+            [
+              5,
+              10,
+              -5
+            ],
+            [
+              5,
+              10,
+              5
+            ]
+          ],
+          "radius1": 2,
+          "radius2": 2,
+          "tolerance": 0.01,
+          "xsect": 1,
+          "mirror": true,
+          "complement": true
+        }
+      }
+    },
+    {
+      "name": "surface-surface-negative-second-radius",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              5,
+              0,
+              -5
+            ],
+            [
+              5,
+              0,
+              5
+            ],
+            [
+              5,
+              10,
+              -5
+            ],
+            [
+              5,
+              10,
+              5
+            ]
+          ],
+          "radius1": 2,
+          "radius2": -2,
+          "tolerance": 0.01,
+          "xsect": 2,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    },
+    {
+      "name": "surface-surface-negative-both-radii",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              5,
+              0,
+              -5
+            ],
+            [
+              5,
+              0,
+              5
+            ],
+            [
+              5,
+              10,
+              -5
+            ],
+            [
+              5,
+              10,
+              5
+            ]
+          ],
+          "radius1": -2,
+          "radius2": -2,
+          "tolerance": 0.01,
+          "xsect": 2,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    },
+    {
+      "name": "surface-surface-unequal-radii",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              5,
+              0,
+              -5
+            ],
+            [
+              5,
+              0,
+              5
+            ],
+            [
+              5,
+              10,
+              -5
+            ],
+            [
+              5,
+              10,
+              5
+            ]
+          ],
+          "radius1": 1,
+          "radius2": 3,
+          "tolerance": 0.01,
+          "xsect": 2,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    },
+    {
+      "name": "surface-surface-tilted-second",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              4,
+              0,
+              -5
+            ],
+            [
+              6,
+              0,
+              5
+            ],
+            [
+              4,
+              10,
+              -5
+            ],
+            [
+              6,
+              10,
+              5
+            ]
+          ],
+          "radius1": 2,
+          "radius2": 2,
+          "tolerance": 0.01,
+          "xsect": 2,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    },
+    {
+      "name": "surface-surface-partial-overlap-in-v",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              5,
+              2,
+              -5
+            ],
+            [
+              5,
+              2,
+              5
+            ],
+            [
+              5,
+              8,
+              -5
+            ],
+            [
+              5,
+              8,
+              5
+            ]
+          ],
+          "radius1": 2,
+          "radius2": 2,
+          "tolerance": 0.01,
+          "xsect": 2,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    },
+    {
+      "name": "surface-surface-offsets-do-not-meet",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              5,
+              0,
+              -5
+            ],
+            [
+              5,
+              0,
+              5
+            ],
+            [
+              5,
+              10,
+              -5
+            ],
+            [
+              5,
+              10,
+              5
+            ]
+          ],
+          "radius1": 20,
+          "radius2": 2,
+          "tolerance": 0.01,
+          "xsect": 2,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    },
+    {
+      "name": "surface-surface-small-radius-tight-tolerance",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10,
+              0,
+              0
+            ],
+            [
+              0,
+              10,
+              0
+            ],
+            [
+              10,
+              10,
+              0
+            ]
+          ],
+          "second": [
+            [
+              5,
+              0,
+              -5
+            ],
+            [
+              5,
+              0,
+              5
+            ],
+            [
+              5,
+              10,
+              -5
+            ],
+            [
+              5,
+              10,
+              5
+            ]
+          ],
+          "radius1": 0.25,
+          "radius2": 0.25,
+          "tolerance": 0.0001,
+          "xsect": 2,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    },
+    {
+      "name": "surface-surface-huge-scale",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface": {
+          "first": [
+            [
+              0,
+              0,
+              0
+            ],
+            [
+              10000,
+              0,
+              0
+            ],
+            [
+              0,
+              10000,
+              0
+            ],
+            [
+              10000,
+              10000,
+              0
+            ]
+          ],
+          "second": [
+            [
+              5000,
+              0,
+              -5000
+            ],
+            [
+              5000,
+              0,
+              5000
+            ],
+            [
+              5000,
+              10000,
+              -5000
+            ],
+            [
+              5000,
+              10000,
+              5000
+            ]
+          ],
+          "radius1": 2000,
+          "radius2": 2000,
+          "tolerance": 10,
+          "xsect": 2,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    },
+    {
+      "name": "surface-surface-tiny-scale",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2189",
+      "inputs": {
+        "surface_surface": {
+          "first": [
+            [
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.01,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.01,
+              0.0
+            ],
+            [
+              0.01,
+              0.01,
+              0.0
+            ]
+          ],
+          "second": [
+            [
+              0.005,
+              0.0,
+              -0.005
+            ],
+            [
+              0.005,
+              0.0,
+              0.005
+            ],
+            [
+              0.005,
+              0.01,
+              -0.005
+            ],
+            [
+              0.005,
+              0.01,
+              0.005
+            ]
+          ],
+          "radius1": 0.002,
+          "radius2": 0.002,
+          "tolerance": 1e-05,
+          "xsect": 2,
+          "mirror": false,
+          "complement": false
+        }
+      }
+    }
+  ]
+}

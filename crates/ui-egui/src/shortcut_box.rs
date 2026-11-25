@@ -6,8 +6,8 @@ use egui::{Pos2, Rect, pos2, vec2};
 use serde_json::{Value, json};
 use solidcraft_engine::command_specs;
 
-use crate::theme::Tokens;
 use crate::{SolveApp, ui_kit};
+use solidcraft_theme::Tokens;
 
 /// How many recent commands are kept.
 const RECENT: usize = 12;
@@ -32,6 +32,68 @@ pub struct ShortcutBox {
     design: Option<(u64, Vec<DesignRow>)>,
     /// Retained paint content while closing; the public query still clears immediately.
     closing_text: String,
+    /// The pointer moved while the box was open: only then does a hovered result reveal its
+    /// place, not when the results appear under a resting pointer.
+    moved: bool,
+    /// The command whose place the ribbon shows (#7287).
+    pub reveal: Option<Reveal>,
+}
+
+/// A command the ribbon points out: its button pulses, or its section's drop-down opens on its
+/// row with its tooltip, or (once started) its section label pulses.
+#[derive(Clone, Debug)]
+pub struct Reveal {
+    pub id: &'static str,
+    /// When it started (egui input time, seconds).
+    pub since: f64,
+    /// Shown while a search result is hovered; then the drop-down and tooltip stay open, and
+    /// the ribbon goes back to `back` when the pointer leaves the results.
+    pub preview: bool,
+    /// The tab to return to after a preview.
+    pub back: String,
+}
+
+/// How long a reveal pulses, in seconds: two blinks.
+pub const REVEAL_PULSE: f64 = 1.2;
+
+impl Reveal {
+    /// The pulse's strength at `now`: 0 to 1 and back twice over `REVEAL_PULSE`, then 1 for a
+    /// preview (it stays marked while hovered) and 0 for a started command. Without animations
+    /// a preview is marked steadily and a start isn't pulsed.
+    pub fn strength(&self, now: f64, animate: bool) -> f32 {
+        let t = now - self.since;
+        if !animate || !(0.0..REVEAL_PULSE).contains(&t) {
+            return if self.preview { 1.0 } else { 0.0 };
+        }
+        (0.5 - 0.5 * (t / REVEAL_PULSE * 4.0 * std::f64::consts::PI).cos()) as f32
+    }
+}
+
+/// Shows the hovered result's place in the ribbon (#7287): its tab, then its button or its
+/// section drop-down row. `None` ends a preview and goes back to the tab the user was on.
+fn preview(app: &mut SolveApp, now: f64, id: Option<&'static str>) {
+    let Some(id) = id else {
+        end_preview(app);
+        return;
+    };
+    if app.sbox.reveal.as_ref().is_some_and(|r| r.preview && r.id == id) {
+        return;
+    }
+    let back = match app.sbox.reveal.take() {
+        Some(r) if r.preview => r.back,
+        _ => app.ui.tab.clone(),
+    };
+    app.ui.tab = back.clone();
+    if let Some(tab) = crate::workspace::command_tab(app, id) {
+        app.ui.tab = tab.into();
+    }
+    app.sbox.reveal = Some(Reveal { id, since: now, preview: true, back });
+}
+
+fn end_preview(app: &mut SolveApp) {
+    if let Some(r) = app.sbox.reveal.take_if(|r| r.preview) {
+        app.ui.tab = r.back;
+    }
 }
 
 impl ShortcutBox {
@@ -110,7 +172,16 @@ pub fn score(q: &str, s: &str) -> u32 {
 fn keywords(id: &str) -> &'static str {
     match id {
         "file.save_mesh" => "export stl 3mf mesh 3d print printing slicer",
-        "file.export" => "export stl 3mf obj step urdf mesh 3d print",
+        "file.export" => "export stl 3mf obj step urdf sdf gazebo mesh 3d print",
+        "file.export_step" => "stp cad",
+        "file.export_stl" | "file.export_3mf" => "mesh 3d print printing",
+        "file.export_obj" => "mesh",
+        "file.export_urdf" | "file.export_urdf_options" => "robot ros simulation",
+        "file.export_sdf" => "gazebo model simulation world texture",
+        "sketch.constraint.tangent" => "g1 tangency continuity smooth",
+        "sketch.constraint.curvature" => "g2 curvature continuity smooth",
+        "sketch.blend_curve" => "g1 g2 g3 g4 continuity tangent curvature bridge",
+        "solid.fillet" => "g1 g2 continuity curvature blend round",
         _ => "",
     }
 }
@@ -128,6 +199,19 @@ fn keyword_score(q: &str, keywords: &str) -> u32 {
 /// (tab, panel; `None` off the toolbar), in the current language.
 pub type Row = (&'static str, &'static str, &'static str, Option<(&'static str, &'static str)>);
 
+fn available_in_workspace(app: &SolveApp, id: &str) -> bool {
+    if crate::drawing_workspace::active(app) {
+        id.starts_with("drawing.") || matches!(id, "assembly.bom" | "sheet.flat_pattern" | "document.metadata")
+    } else {
+        !id.starts_with("drawing.")
+    }
+}
+
+fn can_start(app: &SolveApp, id: &str) -> bool {
+    solidcraft_engine::find_command(id).is_some_and(|c| crate::render_workspace::interactive_command_info(app, c).enabled)
+        || (crate::drawing_workspace::active(app) && crate::drawing_workspace::can_open_options(id))
+}
+
 /// Commands matching `q`, best first. With an empty query, recent commands come first, then
 /// everything by name.
 ///
@@ -138,21 +222,27 @@ pub fn search(app: &SolveApp, q: &str) -> Vec<Row> {
     let mut v: Vec<(u32, Row)> = command_specs()
         .into_iter()
         .filter(|c| !crate::workspace::AGENT_ONLY.contains(&c.id))
+        .filter(|c| available_in_workspace(app, c.id))
         .filter_map(|c| {
             let (home_tab, home_panel) = crate::workspace::destination(c).unwrap_or(("", ""));
-            let (label, tab, panel) =
-                (crate::i18n::tr_label(c.label), crate::i18n::tr_label(crate::workspace::tab_label(home_tab)), crate::i18n::tr_label(home_panel));
+            let info = crate::render_workspace::interactive_command_info(app, c);
+            let (label, tab, panel) = (
+                solidcraft_ui_text::tr_command(c.id, info.label),
+                solidcraft_ui_text::tr_label(crate::workspace::tab_label(home_tab)),
+                solidcraft_ui_text::tr_label(home_panel),
+            );
             let place = (!home_tab.is_empty()).then_some((tab, panel));
             let s = score(&q, label)
                 .max(score(&q, c.label))
+                .max(score(&q, info.label))
                 .max(score(&q, c.id) * 9 / 10)
                 .max(keyword_score(&q, keywords(c.id)))
                 .max(score(&q, tab).max(score(&q, home_tab)) / 3)
                 .max(score(&q, panel).max(score(&q, home_panel)) / 3);
             let recent = app.sbox.recent.iter().position(|r| r == c.id).map_or(0, |i| 2000u32.saturating_sub(i.min(2000) as u32));
             // Commands that can run now come before those that can't.
-            let usable = if crate::render_workspace::interactive_command_info(app, c).enabled { 150 } else { 0 };
-            (s > 0).then_some((s + usable + if q.is_empty() { recent } else { recent / 20 }, (c.id, label, c.icon, place)))
+            let usable = if info.enabled { 150 } else { 0 };
+            (s > 0).then_some((s + usable + if q.is_empty() { recent } else { recent / 20 }, (c.id, label, info.icon, place)))
         })
         .collect();
     v.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.1.cmp(b.1.1)));
@@ -189,21 +279,21 @@ fn design_rows(app: &mut SolveApp, query: &str) -> Vec<DesignRow> {
                 .iter()
                 .take(64)
                 .find_map(|name| values.get(name.as_str()))
-                .map(|p| p.value.filter(|v| v.is_finite()).map_or_else(|| bounded(&p.expression), |v| format!("{v} {}", p.unit)))
+                .map(|p| p.display_value.or(p.value).filter(|v| v.is_finite()).map_or_else(|| bounded(&p.expression), |v| format!("{v} {}", p.unit)))
                 .unwrap_or_default();
             rows.push(DesignRow {
                 label: bounded(&feature.name),
-                detail: format!("{} · {value}", crate::i18n::tr("search.feature")),
+                detail: format!("{} · {value}", solidcraft_ui_text::tr("search.feature")),
                 icon: crate::timeline::icon_of(&feature.kind),
                 target: DesignTarget::Feature(feature.id),
             });
         }
         let icon = solidcraft_engine::find_command("parameters.change").map_or("", |c| c.icon);
         for p in params.iter().filter(|p| p.source == "user").take(10_000) {
-            let value = p.value.filter(|v| v.is_finite()).map_or_else(|| bounded(&p.expression), |v| format!("{v} {}", p.unit));
+            let value = p.display_value.or(p.value).filter(|v| v.is_finite()).map_or_else(|| bounded(&p.expression), |v| format!("{v} {}", p.unit));
             rows.push(DesignRow {
                 label: bounded(&p.name),
-                detail: format!("{} · {value}", crate::i18n::tr("search.parameter")),
+                detail: format!("{} · {value}", solidcraft_ui_text::tr("search.parameter")),
                 icon,
                 target: DesignTarget::Parameter(p.name.clone()),
             });
@@ -236,9 +326,9 @@ fn typed(line: &str) -> Option<(&str, Result<Value, String>)> {
     let id = line.get(..split).unwrap_or_default();
     let rest = line.get(split..).unwrap_or_default().trim();
     let result = if solidcraft_engine::find_command(id).is_none() {
-        Err(crate::i18n::format("shortcut.no_command", &[("id", id)]))
+        Err(solidcraft_ui_text::format("shortcut.no_command", &[("id", id)]))
     } else {
-        serde_json::from_str::<Value>(rest).map_err(|e| crate::i18n::format("shortcut.json_error", &[("error", &e.to_string())]))
+        serde_json::from_str::<Value>(rest).map_err(|e| solidcraft_ui_text::format("shortcut.json_error", &[("error", &e.to_string())]))
     };
     Some((id, result))
 }
@@ -249,7 +339,7 @@ fn closest(query: &str) -> Option<&'static str> {
     command_specs()
         .into_iter()
         .map(|c| {
-            let label = crate::i18n::tr_label(c.label);
+            let label = solidcraft_ui_text::tr_command(c.id, c.label);
             let mut prev: Vec<_> = (0..=q.len()).collect();
             for (j, ch) in label.to_lowercase().chars().take(128).enumerate() {
                 let mut next = vec![j + 1];
@@ -276,6 +366,7 @@ pub fn open(app: &mut SolveApp, at: Option<Pos2>) {
     app.sbox.text.clear();
     app.sbox.focus = true;
     app.sbox.design = None;
+    app.sbox.moved = false;
 }
 
 /// A line typed as `command.id {"param": value}`: the command runs at once with those parameters
@@ -294,6 +385,7 @@ fn run_typed(app: &mut SolveApp, line: &str) {
 }
 
 fn close(app: &mut SolveApp) {
+    end_preview(app);
     app.ui.palette_open = false;
     app.sbox.at = None;
     app.sbox.text.clear();
@@ -305,15 +397,15 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let open = app.ui.palette_open;
     // Respect egui's instant/reduced animation policy, with a 120 ms upper bound.
     let progress = ctx.animate_bool_with_time_and_easing(
-        egui::Id::new("sc_search_expansion"),
+        egui::Id::unique("sc_search_expansion"),
         open,
         ctx.global_style().animation_time.clamp(0.0, 0.12),
         egui::emath::easing::cubic_out,
     );
-    let ribbon = ctx.data(|d| d.get_temp::<Rect>(egui::Id::new("sc_ribbon_search")));
+    let ribbon = ctx.data(|d| d.get_temp::<Rect>(egui::Id::unique("sc_ribbon_search")));
     if !open {
         app.sbox.focus = false;
-        ctx.memory_mut(|m| m.surrender_focus(egui::Id::new("sc_sbox_text")));
+        ctx.memory_mut(|m| m.surrender_focus(egui::Id::unique("sc_sbox_text")));
         if progress == 0.0 {
             app.sbox.at = None;
         }
@@ -322,8 +414,15 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         }
     }
     let fallback = app.sbox.at.filter(|p| p.x.is_finite() && p.y.is_finite()).unwrap_or(screen.center());
-    let width = ui_kit::CommandSearch::width().min((screen.width() - t.space_8).max(t.space_24));
-    let closed = ribbon.unwrap_or_else(|| {
+    // Open centred over the view (#18309): the field sits at full width in the view's middle,
+    // a third of the way down so the results have room under it; the ribbon slot stays empty.
+    let view = app.viewport.rect.filter(|r| r.is_finite() && r.is_positive()).unwrap_or(screen);
+    let centred = app.preferences.command_search_centred && (open || progress > 0.0);
+    let room = if centred { view.width() } else { screen.width() };
+    let width = ui_kit::CommandSearch::width().min((room - t.space_8).max(t.space_24));
+    let centre =
+        centred.then(|| Rect::from_min_size(pos2(view.center().x - width / 2.0, view.top() + view.height() / 3.0), vec2(width, t.control_height)));
+    let closed = centre.or(ribbon).unwrap_or_else(|| {
         Rect::from_min_size(
             pos2(
                 fallback.x.clamp(screen.left() + t.space_4, (screen.right() - width - t.space_4).max(screen.left() + t.space_4)),
@@ -354,14 +453,21 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     });
     let mut picked = None;
     let mut menu = None;
+    // The command result under the pointer, when it has a place on the ribbon to show.
+    let mut hovered = None;
+    let now = ctx.input(|i| i.time);
+    if open && ctx.input(|i| i.pointer.delta() != egui::Vec2::ZERO) {
+        app.sbox.moved = true;
+    }
     let mut rows = Vec::new();
     let mut design = Vec::new();
     let mut mode = None;
     // Closed, the field is part of the ribbon and belongs under the system windows the rest of
-    // the ribbon goes under (Preferences, say); open, its sheet floats over everything.
-    let floating = open || progress > 0.0;
+    // the ribbon goes under (Preferences, say); open, its sheet floats over everything. The
+    // folded ribbon's panels, open over the view (#10112), keep it on top of them too.
+    let floating = open || progress > 0.0 || app.ui.ribbon_open;
     let response = Container::new(ctx, Surface::Popup)
-        .area(egui::Id::new("sc_sbox"))
+        .area(egui::Id::unique("sc_sbox"))
         .fixed_pos(pos)
         .order(if floating { egui::Order::Foreground } else { egui::Order::Background })
         .fade_in(false)
@@ -375,6 +481,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 ui_kit::scope(ui, |ui| {
                     ui.spacing_mut().item_spacing.y = 0.0;
                     let invalid = typed(&query).is_some_and(|(_, result)| result.is_err());
+                    let key = crate::keymap::display_for(app, "ui.palette");
                     let field = ui_kit::CommandSearch::field(
                         ui,
                         &mut query,
@@ -386,11 +493,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                             progress,
                             radius: ui_kit::CommandSearch::field_radius(progress, ui_kit::Container::new(ctx, ui_kit::Surface::Chrome).floating()),
                         },
+                        key.as_deref(),
                         MAX_QUERY,
                     );
                     if !open && progress == 0.0 {
                         if field.clicked()
-                            || ui.interact(Rect::from_min_size(pos, field_size), ui.id().with("search_open"), egui::Sense::click()).clicked()
+                            || ui.interact(Rect::from_min_size(pos, field_size), ui.scope_id().with("search_open"), egui::Sense::click()).clicked()
                         {
                             app.start("ui.palette");
                             ctx.request_repaint();
@@ -415,16 +523,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                 56
                             })
                             .collect();
-                        design = if query.trim().is_empty() { Vec::new() } else { design_rows(app, &query) };
+                        design = if query.trim().is_empty() || crate::drawing_workspace::active(app) { Vec::new() } else { design_rows(app, &query) };
                     }
-                    let enabled: Vec<_> = rows
-                        .iter()
-                        .map(|r| {
-                            solidcraft_engine::find_command(r.0).is_some_and(|c| crate::render_workspace::interactive_command_info(app, c).enabled)
-                        })
-                        .chain(design.iter().map(|_| true))
-                        .take(MAX_RESULTS)
-                        .collect();
+                    let enabled: Vec<_> = rows.iter().map(|r| can_start(app, r.0)).chain(design.iter().map(|_| true)).take(MAX_RESULTS).collect();
                     if down || up {
                         let step = if down { 1 } else { enabled.len().saturating_sub(1) };
                         for _ in 0..enabled.len() {
@@ -445,12 +546,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                 if let Some((id, result)) = &mode {
                                     let mut row = ui_kit::MenuItem::new(
                                         "search:run",
-                                        crate::i18n::tr("search.run"),
+                                        solidcraft_ui_text::tr("search.run"),
                                         solidcraft_engine::find_command(id).map_or("", |c| c.icon),
                                     );
                                     row.enabled = result.is_ok();
                                     row.highlighted = true;
-                                    let badge = crate::i18n::tr(if result.is_ok() { "search.valid" } else { "search.invalid" });
+                                    let badge = solidcraft_ui_text::tr(if result.is_ok() { "search.valid" } else { "search.invalid" });
                                     row.shortcut = badge;
                                     if row
                                         .search_row(
@@ -483,18 +584,31 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                             ui_kit::CommandSearch::heading(ui, if recent { "search.recent" } else { "search.commands" }, count);
                                             last_recent = Some(recent);
                                         }
-                                        let mut item = ui_kit::MenuItem::new(id, label, icon);
+                                        let mut item = ui_kit::MenuItem::new(id, label, *icon);
                                         item.enabled = enabled.get(index).copied().unwrap_or(false);
                                         item.highlighted = index == app.sbox.index;
                                         let shortcut = crate::keymap::display_for(app, id).unwrap_or_default();
                                         item.shortcut = &shortcut;
                                         let path = place.map_or_else(|| id.to_string(), |(tab, panel)| format!("{tab} › {panel}"));
-                                        let response = item.search_row(ui, &query, &path, None);
+                                        let response = ui
+                                            .scope(|ui| {
+                                                if solidcraft_engine::find_command(id)
+                                                    .is_some_and(|c| !crate::render_workspace::interactive_command_info(app, c).enabled)
+                                                {
+                                                    ui.set_opacity(0.35);
+                                                }
+                                                item.search_row(ui, &query, &path, None)
+                                            })
+                                            .inner;
+                                        crate::scenario::publish_target(&format!("search:command:{id}"), response.rect);
                                         if item.highlighted && (up || down) {
                                             ui.scroll_to_rect(response.rect, None);
                                         }
                                         if response.clicked() {
                                             picked = Some(index);
+                                        }
+                                        if response.hovered() && place.is_some() {
+                                            hovered = Some(*id);
                                         }
                                         if response.secondary_clicked() {
                                             menu = Some((response.rect.left_bottom(), (*id).to_owned()));
@@ -507,7 +621,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                         let handle = format!("search:design:{index}");
                                         let mut item = ui_kit::MenuItem::new(&handle, &row.label, row.icon);
                                         item.highlighted = app.sbox.index == rows.len() + index;
-                                        let badge = crate::i18n::tr(match row.target {
+                                        let badge = solidcraft_ui_text::tr(match row.target {
                                             DesignTarget::Feature(_) => "search.feature",
                                             DesignTarget::Parameter(_) => "search.parameter",
                                         });
@@ -525,13 +639,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                         ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
                                             ui_kit::text(
                                                 ui,
-                                                &crate::i18n::format("search.no_match", &[("query", &query)]),
+                                                &solidcraft_ui_text::format("search.no_match", &[("query", &query)]),
                                                 ui_kit::Text::Heading("search_no_match"),
                                             );
                                             if let Some(label) = closest(&query) {
                                                 ui_kit::text(
                                                     ui,
-                                                    &crate::i18n::format("search.suggest", &[("label", label)]),
+                                                    &solidcraft_ui_text::format("search.suggest", &[("label", label)]),
                                                     ui_kit::Text::Report("search_suggest", false),
                                                 );
                                             }
@@ -541,7 +655,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                     if empty {
                                         ui_kit::text(
                                             ui,
-                                            &crate::i18n::format("search.try", &[("example", r#"solid.extrude {"distance": 20}"#)]),
+                                            &solidcraft_ui_text::format("search.try", &[("example", r#"solid.extrude {"distance": 20}"#)]),
                                             ui_kit::Text::Note("search_try"),
                                         );
                                     }
@@ -554,6 +668,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         });
     if !open {
         return;
+    }
+    preview(app, now, hovered.filter(|_| app.preferences.ribbon_reveal && app.sbox.moved && menu.is_none()));
+    if app.sbox.reveal.is_some() {
+        ctx.request_repaint();
     }
     app.sbox.text = query;
     app.sbox.closing_text = app.sbox.text.clone();
@@ -586,13 +704,14 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
         } else {
             let index = picked.unwrap_or(app.sbox.index);
-            if let Some((id, ..)) = rows
-                .get(index)
-                .filter(|r| solidcraft_engine::find_command(r.0).is_some_and(|c| crate::render_workspace::interactive_command_info(app, c).enabled))
-            {
+            if let Some((id, ..)) = rows.get(index).filter(|r| can_start(app, r.0)) {
                 app.sbox.used(id);
                 close(app);
                 app.start(id);
+                // The ribbon shows where it was started from: its button or section label pulses.
+                if app.preferences.ribbon_reveal {
+                    app.sbox.reveal = Some(Reveal { id, since: now, preview: false, back: String::new() });
+                }
             } else if let Some(row) = design.get(index.saturating_sub(rows.len())).filter(|_| index >= rows.len()) {
                 let target = row.target.clone();
                 close(app);
@@ -641,7 +760,7 @@ mod tests {
     fn the_search_field_asks_for_focus_once_per_opening() {
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         let ctx = crate::fonts::test_context();
-        let field = egui::Id::new("sc_sbox_text");
+        let field = egui::Id::unique("sc_sbox_text");
         open(&mut app, None);
         frame(&mut app, &ctx);
         frame(&mut app, &ctx);
@@ -659,11 +778,136 @@ mod tests {
     }
 
     #[test]
+    fn a_reveal_pulses_twice_then_stays_for_a_preview_and_ends_for_a_start() {
+        let preview = Reveal { id: "surface.stitch", since: 10.0, preview: true, back: "MODEL".into() };
+        let start = Reveal { preview: false, ..preview.clone() };
+        for r in [&preview, &start] {
+            assert_eq!(r.strength(10.0, true), 0.0);
+            assert!((r.strength(10.0 + REVEAL_PULSE / 4.0, true) - 1.0).abs() < 1e-6, "the first blink");
+            assert!(r.strength(10.0 + REVEAL_PULSE / 2.0, true) < 1e-6, "dark between the blinks");
+        }
+        assert_eq!(preview.strength(12.0, true), 1.0, "a hovered result stays marked");
+        assert_eq!(start.strength(12.0, true), 0.0, "a started command's pulse ends");
+        // Without animations: marked steadily while hovered, no pulse after a start.
+        assert_eq!(preview.strength(10.2, false), 1.0);
+        assert_eq!(start.strength(10.2, false), 0.0);
+    }
+
+    /// Hovering a result shows where its command lives (#7287): the ribbon switches to its tab
+    /// and marks its button with its tooltip, or opens the section drop-down that holds it on
+    /// its row; leaving the results goes back to the tab the user was on. Starting a command
+    /// that lives only in a drop-down marks that section's label while it runs.
+    #[test]
+    fn hovering_a_result_reveals_its_place_in_the_ribbon() {
+        use crate::scenario::rect_of;
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.ribbon_reveal = true;
+        h.frames(3);
+        assert_eq!(h.app.ui.tab, "MODEL");
+        let away = rect_of("toolbar").unwrap().center_bottom() + vec2(0.0, 300.0);
+        h.call("ui.move", json!({"x": away.x, "y": away.y}));
+        h.call("ui.palette", json!({}));
+        h.frames(10);
+        let hover = |h: &mut crate::scenario::Harness, id: &str| {
+            let row = rect_of(&format!("search:command:{id}")).unwrap_or_else(|| panic!("no result row for {id}"));
+            h.call("ui.move", json!({"x": row.center().x, "y": row.center().y + 1.0}));
+            h.call("ui.move", json!({"x": row.center().x, "y": row.center().y}));
+            h.frames(3);
+        };
+
+        // Results appearing under a resting pointer reveal nothing: the box opens again with
+        // the pointer already where the row will be.
+        h.app.sbox.text = "stitch".into();
+        h.frames(2);
+        let row = rect_of("search:command:surface.stitch").unwrap();
+        h.call("ui.key", json!({"key": "Escape"}));
+        h.frames(10);
+        h.call("ui.move", json!({"x": row.center().x, "y": row.center().y}));
+        h.frames(2);
+        h.call("ui.palette", json!({}));
+        h.app.sbox.text = "stitch".into();
+        h.frames(10);
+        assert!(h.app.sbox.reveal.is_none() && h.app.ui.tab == "MODEL", "{:?}", h.app.sbox.reveal);
+
+        // A visible button: its tab, the button marked, its tooltip open.
+        hover(&mut h, "surface.stitch");
+        assert_eq!(h.app.ui.tab, "SURFACE");
+        assert_eq!(rect_of("ribbon:reveal"), rect_of("button:surface.stitch"));
+        assert!(rect_of("ribbon:reveal_tooltip").is_some());
+        h.call("ui.move", json!({"x": away.x, "y": away.y}));
+        h.frames(2);
+        assert_eq!(h.app.ui.tab, "MODEL", "leaving the results goes back");
+        assert!(rect_of("ribbon:reveal").is_none());
+
+        // Only in its section's drop-down: the drop-down opens on its row.
+        h.app.sbox.text = "circular".into();
+        h.frames(2);
+        hover(&mut h, "solid.pattern.circular");
+        assert_eq!(h.app.ui.tab, "MODEL");
+        assert!(rect_of("button:solid.pattern.circular").is_none(), "the command has no button on the default ribbon");
+        let row = rect_of("ribbon:reveal").expect("the revealed row");
+        assert!(rect_of("toolbar_dropdown").unwrap().contains_rect(row), "{row:?}");
+        assert!(rect_of("ribbon:reveal_tooltip").is_some_and(|tip| tip.left() >= row.right()), "the row's tooltip beside it");
+        assert_eq!(h.ctx.data(|d| d.get_temp::<egui::Id>(egui::Id::unique("sc_panel_open"))), None, "the preview doesn't open it for good");
+
+        // Starting it from the box: the section label pulses, then stays marked while it runs.
+        h.call("ui.key", json!({"key": "Enter"}));
+        h.frames(2);
+        assert!(!h.app.ui.palette_open);
+        assert!(rect_of("toolbar_dropdown").is_none(), "the preview's drop-down closes");
+        let label = rect_of("ribbon:section:MODEL:ARRANGE").unwrap();
+        assert_eq!(rect_of("ribbon:reveal"), Some(label));
+        assert_eq!(rect_of("ribbon:running_section:MODEL:ARRANGE"), Some(label));
+        h.frames((REVEAL_PULSE * 60.0) as usize + 2);
+        assert!(rect_of("ribbon:reveal").is_none(), "the pulse ends");
+        assert_eq!(rect_of("ribbon:running_section:MODEL:ARRANGE"), Some(label), "marked while it runs");
+    }
+
+    /// Without the preference (the default) the ribbon stays as it was: hovering a result
+    /// neither switches the tab nor opens a drop-down, and a command started from a drop-down
+    /// doesn't mark its section label.
+    #[test]
+    fn without_the_preference_hovering_a_result_leaves_the_ribbon_alone() {
+        use crate::scenario::rect_of;
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.frames(3);
+        assert!(!h.app.preferences.ribbon_reveal, "off by default");
+        let away = rect_of("toolbar").unwrap().center_bottom() + vec2(0.0, 300.0);
+        h.call("ui.move", json!({"x": away.x, "y": away.y}));
+        h.call("ui.palette", json!({}));
+        h.frames(10);
+        for (query, id) in [("stitch", "surface.stitch"), ("circular", "solid.pattern.circular")] {
+            h.app.sbox.text = query.into();
+            h.frames(2);
+            let row = rect_of(&format!("search:command:{id}")).unwrap_or_else(|| panic!("no result row for {id}"));
+            h.call("ui.move", json!({"x": row.center().x, "y": row.center().y + 1.0}));
+            h.call("ui.move", json!({"x": row.center().x, "y": row.center().y}));
+            h.frames(3);
+            assert_eq!(h.app.ui.tab, "MODEL", "{id}");
+            assert!(h.app.sbox.reveal.is_none(), "{id}");
+            assert!(rect_of("ribbon:reveal").is_none() && rect_of("toolbar_dropdown").is_none(), "{id}");
+        }
+        h.call("ui.key", json!({"key": "Enter"}));
+        h.frames(2);
+        assert!(!h.app.ui.palette_open);
+        assert!(h.app.sbox.reveal.is_none());
+        assert!(rect_of("ribbon:reveal").is_none());
+        assert!(rect_of("ribbon:running_section:MODEL:ARRANGE").is_none());
+    }
+
+    #[test]
     fn search_finds_by_name_id_and_panel_and_puts_recent_first() {
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         assert_eq!(search(&app, "extr").first().map(|x| x.0), Some("solid.extrude"));
         assert_eq!(search(&app, "solid.fil").first().map(|x| x.0), Some("solid.fillet"));
         assert!(search(&app, "constrain").iter().any(|x| x.0 == "sketch.constraint.parallel"), "by panel");
+        for (query, id) in
+            [("g1", "sketch.constraint.tangent"), ("g2", "sketch.constraint.curvature"), ("g2", "sketch.blend_curve"), ("g2", "solid.fillet")]
+        {
+            assert!(search(&app, query).iter().any(|x| x.0 == id), "{query:?} finds {id}");
+        }
         app.sbox.used("solid.shell");
         app.sbox.used("solid.revolve");
         let all = search(&app, "");
@@ -672,6 +916,20 @@ mod tests {
         let mut other = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         other.sbox.load(&app.sbox.prefs());
         assert_eq!((other.sbox.pinned.clone(), other.sbox.recent.len()), (vec!["solid.extrude".to_string()], 2));
+    }
+
+    #[test]
+    fn drawing_search_exposes_only_drawing_and_explicit_source_actions() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        assert!(!search(&app, "").iter().any(|row| row.0.starts_with("drawing.")));
+        crate::workspace::enter(&mut app, "drawing").unwrap();
+        let rows = search(&app, "");
+        assert!(rows.iter().any(|row| row.0 == "drawing.view.base.planned"));
+        assert!(rows.iter().any(|row| row.0 == "assembly.bom"));
+        assert!(!rows.iter().any(|row| row.0 == "solid.extrude"));
+        assert!(can_start(&app, "drawing.view.base.planned"), "known options are inspectable");
+        assert!(!can_start(&app, "drawing.view.section.planned"), "uncertain tools cannot start");
+        assert!(!solidcraft_engine::find_command("drawing.view.base.planned").unwrap().info(&app.session).enabled);
     }
 
     #[test]
@@ -688,8 +946,8 @@ mod tests {
     #[test]
     fn search_shows_and_matches_the_current_language() {
         let app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
-        let _ja = crate::i18n::scope("ja");
-        let ja = crate::i18n::Locale::for_language("ja");
+        let _ja = solidcraft_ui_text::scope("ja");
+        let ja = solidcraft_ui_text::Locale::for_language("ja");
         let name = ja.text("cmd.sketch_rectangle_center");
         assert_ne!(name, "Center Rectangle");
         let place = Some((ja.label("SKETCH"), ja.label("CREATE")));
@@ -752,6 +1010,7 @@ mod tests {
     }
     #[test]
     fn command_mode_preserves_parser_and_keeps_invalid_input_editable() {
+        crate::i18n::install();
         assert!(typed("solid.box").is_none());
         assert_eq!(typed(r#"solid.box {"length":10}"#).unwrap().1.unwrap(), json!({"length":10}));
         assert!(typed("solid.box {}").unwrap().1.is_ok());
@@ -759,7 +1018,7 @@ mod tests {
         let expected = serde_json::from_str::<Value>(r#"{"length": }"#).unwrap_err();
         assert_eq!(
             typed(r#"solid.box {"length": }"#).unwrap().1.unwrap_err(),
-            crate::i18n::format("shortcut.json_error", &[("error", &expected.to_string())])
+            solidcraft_ui_text::format("shortcut.json_error", &[("error", &expected.to_string())])
         );
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
@@ -784,7 +1043,7 @@ mod tests {
         assert_eq!(h.app.session.doc.features.len(), 1, "{:?}", h.app.status);
         assert!(h.app.ui.palette_open);
         assert_eq!(h.app.sbox.text, query);
-        assert!(h.ctx.memory(|m| m.has_focus(egui::Id::new("sc_sbox_text"))));
+        assert!(h.ctx.memory(|m| m.has_focus(egui::Id::unique("sc_sbox_text"))));
         h.step(&json!({"key":"Enter"})).unwrap();
         h.frames(2);
         assert_eq!(h.app.session.doc.features.len(), 2);
@@ -854,23 +1113,68 @@ mod tests {
         h.app.home.open = false;
         h.frames(3);
         let order = |h: &crate::scenario::Harness| {
-            h.ctx.memory(|m| m.areas().visible_layer_ids().into_iter().find(|l| l.id == egui::Id::new("sc_sbox")).map(|l| l.order))
+            h.ctx.memory(|m| m.areas().visible_layer_ids().into_iter().find(|l| l.id == egui::Id::unique("sc_sbox")).map(|l| l.order))
         };
         // Closed, the field is ribbon chrome: Preferences and the other system windows cover it.
         assert_eq!(order(&h), Some(egui::Order::Background), "the closed field belongs to the ribbon");
         h.call("ui.prefs", json!({"open": "General"}));
         h.frames(3);
-        let window = h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_prefs"))).unwrap();
+        let window = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_prefs"))).unwrap();
         let field = crate::scenario::rect_of("ribbon:search").unwrap();
         assert!(order(&h) < Some(egui::Order::Middle), "a system window draws over the closed field");
         assert!(
-            !window.contains(field.center()) || h.ctx.memory(|m| m.layer_id_at(field.center())).is_some_and(|l| l.id == egui::Id::new("sc_prefs"))
+            !window.contains(field.center()) || h.ctx.memory(|m| m.layer_id_at(field.center())).is_some_and(|l| l.id == egui::Id::unique("sc_prefs"))
         );
         h.call("ui.prefs", json!({"button": "cancel"}));
         // Open, the sheet is a popup again and floats over every window.
         h.call("ui.palette", json!({}));
         h.frames(3);
         assert_eq!(order(&h), Some(egui::Order::Foreground), "the open sheet floats over windows");
+    }
+
+    /// With `command_search_centred` (#18309) the shortcut opens the same search centred over
+    /// the view, not in the ribbon's corner; Esc or a started command closes it, and the
+    /// closed field stays in the ribbon. Off (the default) it opens in place.
+    #[test]
+    fn the_preference_opens_the_search_centred_over_the_view() {
+        use crate::scenario::rect_of;
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        assert!(!h.app.preferences.command_search_centred, "off by default");
+        h.frames(3);
+        let closed = rect_of("ribbon:search").unwrap();
+        h.call("ui.palette", json!({}));
+        h.frames(10);
+        assert_eq!(rect_of("ribbon:search").unwrap().right(), closed.right(), "off: it opens in the ribbon");
+        h.call("ui.key", json!({"key": "Escape"}));
+        h.frames(10);
+
+        h.app.preferences.command_search_centred = true;
+        h.frames(2);
+        assert_eq!(rect_of("ribbon:search"), Some(closed), "closed, the field stays in the ribbon");
+        h.call("ui.key", json!({"key": "S"}));
+        h.frames(10);
+        assert!(h.app.ui.palette_open);
+        let view = h.app.viewport.rect.unwrap();
+        let field = rect_of("ribbon:search").unwrap();
+        assert!(view.contains_rect(field), "{field:?} in {view:?}");
+        assert!((field.center().x - view.center().x).abs() < 1.0, "{field:?} centred in {view:?}");
+        assert!(field.top() > closed.bottom() + 100.0, "{field:?} below the ribbon");
+        assert!(view.contains_rect(rect_of("ribbon:search_popup").unwrap()), "the results under it");
+        h.call("ui.key", json!({"key": "Escape"}));
+        h.frames(10);
+        assert!(!h.app.ui.palette_open);
+        assert_eq!(rect_of("ribbon:search"), Some(closed), "Esc closes it back into the ribbon");
+
+        // The same results and keys: a command run from it closes it.
+        h.call("ui.palette", json!({}));
+        h.app.sbox.text = "extrude".into();
+        h.frames(3);
+        h.call("ui.key", json!({"key": "Enter"}));
+        h.frames(10);
+        assert!(!h.app.ui.palette_open);
+        assert_eq!(h.app.sbox.recent.first().map(String::as_str), Some("solid.extrude"));
+        assert_eq!(rect_of("ribbon:search"), Some(closed));
     }
 
     #[test]
@@ -883,7 +1187,7 @@ mod tests {
         let toolbar = crate::scenario::rect_of("toolbar").unwrap();
         assert_eq!(crate::toolbar::TAB_ROW_HEIGHT, 30.0);
         assert_eq!(crate::toolbar::RIBBON_HEIGHT, 117.0);
-        assert_eq!(closed.size(), vec2(ui_kit::CommandSearch::closed_width(&h.ctx), 22.0));
+        assert_eq!(closed.size(), vec2(ui_kit::CommandSearch::closed_width(&h.ctx, Some("S")), 22.0));
         assert_eq!(closed.right(), toolbar.right() - 4.0);
         assert_eq!(closed.top(), toolbar.top() + 4.0);
         assert_eq!(closed.center().y, toolbar.top() + 15.0);
@@ -912,11 +1216,18 @@ mod tests {
         assert_eq!(footer, Rect::from_min_max(pos2(sheet.left(), footer.top()), sheet.right_bottom()));
         // Inspect native accessibility widgets, not just aliases or painted labels.
         let nodes = &h.output.accesskit_update.as_ref().unwrap().nodes;
-        let search_edit = h.ctx.read_response(egui::Id::new("sc_sbox_text")).unwrap().rect;
+        let search_edit = h.ctx.read_response(egui::Id::unique("sc_sbox_text")).unwrap().rect;
         let fields: Vec<_> = nodes
             .iter()
             .filter(|(_, n)| n.role() == egui::accesskit::Role::TextInput)
-            .filter(|(_, n)| n.bounds().is_some_and(|b| b.y0 >= f64::from(field.top()) && b.y1 <= f64::from(sheet.bottom())))
+            .filter(|(_, n)| {
+                n.bounds().is_some_and(|b| {
+                    b.y0 >= f64::from(field.top())
+                        && b.y1 <= f64::from(sheet.bottom())
+                        && b.x0 >= f64::from(field.left())
+                        && b.x1 <= f64::from(field.right())
+                })
+            })
             .collect();
         assert_eq!(fields.len(), 1, "one editor in the field and sheet: {fields:?}");
         assert!(field.contains_rect(search_edit));

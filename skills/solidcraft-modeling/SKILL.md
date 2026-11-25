@@ -13,7 +13,8 @@ Work the part out as numbers first. Then build it in a few large `batch` calls, 
 2. Run `inspect_design {"measure":false,"sketches":false}`, even when you think the session is empty.
    - The SolidCraft server's instructions end with `Backend: connected to the SolidCraft app` when it drives the user's open app, and with `Backend: headless` otherwise.
    - If the design has timeline features, ask before calling `new_design` or `open`, because both discard unsaved work. You can also build into the open design.
-3. Write a plan:
+3. The user's current selection comes with every reply; when they say 'this', 'these' or 'the selected', use it. It is a text block at the end of a reply (`[Selected in SolidCraft right now: ...]`), left out when nothing is selected; faces and edges come with the names and indices the tools take.
+4. Write a plan:
    - the parameters
    - the placement: centre the part on the origin so patterns and mirrors can work from the planes
    - every feature, with the world point you will use for each edge or face pick
@@ -47,13 +48,17 @@ Work the part out as numbers first. Then build it in a few large `batch` calls, 
   - A fillet between two curved faces, such as a sphere joined to a cylinder: the shell then fails with `offset: only bodies with planes, cylinders, cones, spheres and tori`. Shell first. The inside corner then stays sharp, so the wall there is thinner than `thickness`.
 
 ## Verify
-- **Each stage:** run `measure {}` (about 0.9 KB per body) and compare the volume, bbox and face count with your numbers. A cut or hole that leaves the volume unchanged has missed, even though it reported success.
+- **Each stage:** run `measure {}` (about 0.9 KB per body; `{"summary":true}` keeps only name, volume, bbox, face count and `closed` per body) and compare the volume, bbox and face count with your numbers. A cut or hole that leaves the volume unchanged has missed, even though it reported success.
 - **Timeline health:** `inspect_design {"measure":false,"sketches":false}` shows each feature's `error` and `warning`.
-- **Parameter test:** run `set_parameter`. Expect `errors: []`, then `measure` again; the COM and bbox should move by the amounts you computed.
+- **Parameter test:** run `set_parameter`. Expect `errors: []`, then `measure` again; the COM and bbox should move by the amounts you computed. To try values without keeping them, `check_parameters {"set": {"L": "140 mm"}}` reports the volume, errors and cylinder axes and puts the design back.
+- **Compare proposals:** call `inspect.parameter_variants` through `execute` with named sets of values when several parameters change together. Compare the baseline and each result's volume, mass and regressions before applying a choice. Every variant starts from the open design and leaves it unchanged.
 - **Positions:** `measure` does not say where a feature sits.
   - On an asymmetric part, check the COM shift you computed.
   - On a symmetric part (a mirrored or patterned layout) the COM does not move, so take a top-view screenshot and compare distances in pixels against a known size.
-  - `body_topology` is a last resort: it costs 25-45 KB and splits cylinders into half faces.
+  - For round holes and bosses, `body_topology {"body":"Body1","faces":"cylinders"}`: one entry per cylinder (`radius`, `origin`, `axis`, `extent` along the axis, the merged faces' `names`), a few lines.
+    - Holes of one radius on one axis line, such as blind holes from both sides, merge into one entry whose `extent` spans the material between them. Check their depths with the `measure` volume.
+    - Features that are not round, such as a square hole or a rectangular boss, have no cylinder entry. Check them with the top-view screenshot.
+  - The full `body_topology` is a last resort: it costs 25-45 KB and splits cylinders into half faces.
 - **Final look:** one `screenshot {"source":"model","view":"iso","width":480,"height":320}`. Use `"view":"top"` for features inside walls, which the iso view hides.
   - `width` and `height` apply only to model renders.
   - When the server is bridged, `source` defaults to the whole app window and `view` also turns the user's camera, so pass `"source":"model"` and leave out `view` unless the user wants the camera moved.
@@ -66,7 +71,6 @@ Work the part out as numbers first. Then build it in a few large `batch` calls, 
 | Thought | Do instead |
 |---|---|
 | "List all commands first" | `reference.md`, or `list_commands {"filter":"<distinctive word>"}`. The unfiltered list is over 100 KB. |
-| "Check positions with body_topology" | `measure` COM and bbox against your numbers. |
 | "Inspect the sketch" | `sketch.solve` returns dof and the profile count in under 100 bytes. Run `sketch.inspect` on its own, never inside a big batch. |
 | "new_design for a clean start" | When the server is bridged, ask first. |
 | "It reported ok, so it worked" | Only a `measure` that matches the computed values counts. |

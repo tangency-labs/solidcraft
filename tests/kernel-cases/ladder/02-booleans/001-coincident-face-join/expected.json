@@ -1,0 +1,23 @@
+{
+ "sources": [],
+ "what": "a 60x40x10 box joined exactly on the stock's top face: one 60x40x30 box",
+ "source": "analytic",
+ "method": "the boxes share the whole face z=20 and every side is coplanar: the union is the box 60x40x30, V = 72000, its coplanar sides merged into 6 faces",
+ "body_count": 1,
+ "volume_mm3": 72000.0,
+ "faces": 6,
+ "edges": 12,
+ "vertices": 8,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   40,
+   30
+  ]
+ }
+}

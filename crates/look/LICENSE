@@ -1,0 +1,62 @@
+SolidCraft Brand and Interface Licence
+
+Copyright (c) 2026 the SolidCraft maintainers.
+
+SolidCraft's code that models, imports, exports and computes geometry is open source under the MIT
+License or the Apache License 2.0 (LICENSE-MIT, LICENSE-APACHE). This licence covers something
+different: how SolidCraft looks and feels. That is its brand. A CAD program can be built from
+SolidCraft's open code; it should not look like SolidCraft unless the maintainers have agreed.
+
+1. What this licence covers ("the Brand Material")
+
+   a. The UI kit, `crates/ui-kit` (solidcraft-ui-kit): the code and the design of SolidCraft's
+      controls, panels, menus, ribbon, app bar, history bar, navigation bar, view compass,
+      Preferences window, start page and window chrome.
+   b. The look, `crates/look` (solidcraft-look): the interface icon masters and their artwork,
+      the code-drawn glyphs, and the built-in themes.
+   c. The theme, `crates/theme` (solidcraft-theme): the design tokens, colour palettes, accent
+      ramps, sizes and spacing that give SolidCraft its appearance.
+   d. The SolidCraft name, logo, app icon and brand kit (`assets/branding`, `assets/icons/app`).
+
+   Third-party material inside these folders keeps its own licence, listed in ATTRIBUTION.md.
+   In particular the IBM Plex fonts are under the SIL Open Font License 1.1, and nothing here
+   limits what that licence allows.
+
+2. What you may do without asking
+
+   a. Read, build, run and modify the Brand Material as part of SolidCraft itself, including
+      your own builds and forks of SolidCraft used for development, testing, learning or
+      contributing back.
+   b. Contribute changes to the Brand Material through the SolidCraft repository.
+   c. Show SolidCraft, with its look, in reviews, tutorials, articles, videos and teaching.
+
+3. What needs the maintainers' written permission first
+
+   a. Using any Brand Material in another program, product, service or library, including
+      linking to the UI kit, the look or the theme from software that is not SolidCraft.
+   b. Distributing the Brand Material, or a modified version of it, other than as part of
+      SolidCraft.
+   c. Distributing a fork or modified build of SolidCraft to others under the SolidCraft name,
+      logo or app icon, or with a look that could be taken for SolidCraft's.
+   d. Using the SolidCraft name, logo or app icon to name, promote or endorse anything else.
+
+   To ask, open an issue at https://github.com/tangency-labs/solidcraft or contact the
+   maintainers there. Permission is given in writing and may come with conditions.
+
+4. Contributions
+
+   By contributing to the Brand Material you agree that the maintainers may license your
+   contribution under this licence, and under the MIT License or the Apache License 2.0, at
+   their choice.
+
+5. Earlier versions
+
+   Versions of SolidCraft published before this licence took effect stay under the licences
+   they were published with.
+
+6. No warranty
+
+   The Brand Material is provided "as is", without warranty of any kind, express or implied,
+   including the warranties of merchantability, fitness for a particular purpose and
+   non-infringement. In no event shall the maintainers or contributors be liable for any
+   claim, damages or other liability arising from the Brand Material or its use.

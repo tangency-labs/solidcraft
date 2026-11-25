@@ -1,0 +1,35 @@
+{
+  "area": "surfaces",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-untrim-face-without-holes-refused",
+  "expected": {
+    "method": "the face has no inner loop and outer is not asked: the command says so",
+    "outcome": "refused",
+    "refusal": "the face has no holes to remove",
+    "source": "invariants",
+    "sources": [],
+    "what": "untrim on a face with no holes and its outer boundary kept: nothing to do, refused"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 5 (surface.untrim): invalid input: the face has no holes to remove (restore its outer boundary instead)",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 5 (surface.untrim): invalid input: the face has no holes to remove (restore its outer boundary instead)",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [],
+  "ungraded": [],
+  "what": "untrim on a face with no holes and its outer boundary kept: nothing to do, refused",
+  "why_not": [
+    "no kernel operation ran before the failure: step 5 (surface.untrim): invalid input: the face has no holes to remove (restore its outer boundary instead)"
+  ]
+}

@@ -37,7 +37,7 @@ impl ConfigTable {
     pub fn clone_targets(&mut self, maps: &ConfigCloneMaps) -> Result<()> {
         if maps.features.values().chain(maps.components.values()).any(|id| *id == 0)
             || maps.parameters.values().any(|name| crate::Document::param_name_problem(name).is_some())
-            || maps.bodies.values().any(|name| name.is_empty() || name.len() > 128)
+            || maps.bodies.values().any(|name| name.is_empty() || name.chars().count() > 128)
         {
             return Err(DocError::Invalid("invalid configuration clone identity mapping".into()));
         }
@@ -142,11 +142,12 @@ mod tests {
                     body: "Old".into(),
                     origin_feature: 3,
                     name: "F3:+z".into(),
-                    point: solidcraft_geom::Vec3::new(1., 1., 2.),
+                    point: solidcore_record::Vec3::new(1., 1., 2.),
                     certificate: None,
                 }),
             ],
             rows: vec![ConfigRow {
+                id: 1,
                 name: "Default".into(),
                 cells: vec!["d1 * 2 + d2".into(), "4 mm".into(), "d1".into(), String::new(), String::new()],
             }],
@@ -159,6 +160,7 @@ mod tests {
                 condition: RuleCondition::Suppression { feature: 3, value: false },
                 effect: RuleEffect::DriveParameter { parameter: "d1".into(), expression: "d2 * 2 + d1".into() },
             }],
+            ..Default::default()
         };
         let original = table.clone();
         let maps = ConfigCloneMaps {
@@ -199,11 +201,11 @@ mod tests {
                     body: "Foreign".into(),
                     origin_feature: 3,
                     name: "F3:+z".into(),
-                    point: solidcraft_geom::Vec3::ZERO,
+                    point: solidcore_record::Vec3::ZERO,
                     certificate: None,
                 }),
             ],
-            rows: vec![ConfigRow { name: "Default".into(), cells: vec!["2 mm".into(), String::new()] }],
+            rows: vec![ConfigRow { id: 2, name: "Default".into(), cells: vec!["2 mm".into(), String::new()] }],
             ..Default::default()
         };
         let original = table.clone();

@@ -1,0 +1,39 @@
+{
+ "base": "../../04-spline-profiles/010-part-bezier-window",
+ "commands": [
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     52,
+     22,
+     20
+    ],
+    "thread": "M6"
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     15,
+     15,
+     30
+    ],
+    "thread": "M5",
+    "depth": 8
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     5,
+     35,
+     35
+    ],
+    "diameter": 3.3
+   }
+  }
+ ]
+}

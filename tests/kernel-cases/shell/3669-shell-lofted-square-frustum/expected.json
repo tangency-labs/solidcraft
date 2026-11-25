@@ -1,0 +1,12 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3669",
+  "tangency-labs/solidcraft#2990"
+ ],
+ "what": "a loft between a 40 mm and a 20 mm square 80 mm apart, shelled 2 mm open at the small end",
+ "source": "analytic",
+ "method": "a ruled loft of two squares is a square pyramid frustum (4 planar walls). Outer V=80/3*(1600+800+400). Walls offset 2 normal to the faces: tan(a)=10/80, half-width w(z)=20-z/8-2/cos(a), floor at z=2, cavity a frustum of height 78 with areas (2w(2))^2 and (2w(80))^2: V=outer-78/3*(A1+sqrt(A1*A2)+A2); faces 4 outer walls + base + top ring + 4 inner walls + floor = 11",
+ "body_count": 1,
+ "volume_mm3": 20601.135771593457,
+ "faces": 11
+}

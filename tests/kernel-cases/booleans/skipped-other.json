@@ -1,0 +1,294 @@
+[
+ {
+  "source": "tangency-labs/solidcraft#25",
+  "why": "test infrastructure (spatial reference comparison), no geometry failure"
+ },
+ {
+  "source": "tangency-labs/solidcraft#195",
+  "why": "sketch.create refusal on a user's face; needs the user's design, no geometry spec"
+ },
+ {
+  "source": "tangency-labs/solidcraft#255",
+  "why": "performance only, no wrong result"
+ },
+ {
+  "source": "tangency-labs/solidcraft#287",
+  "why": "performance only, no wrong result"
+ },
+ {
+  "source": "tangency-labs/solidcraft#291",
+  "why": "feature request (integer arithmetic), no geometry case"
+ },
+ {
+  "source": "tangency-labs/solidcraft#331",
+  "why": "kernel evaluation or tracking, not a geometry failure"
+ },
+ {
+  "source": "tangency-labs/solidcraft#344",
+  "why": "sketch.create refusal on a user's face; needs the user's design, no geometry spec"
+ },
+ {
+  "source": "tangency-labs/solidcraft#415",
+  "why": "sketch.create refusal on two intersecting cylinders plus a feature request; no dimensions to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#424",
+  "why": "other area: threads"
+ },
+ {
+  "source": "tangency-labs/solidcraft#446",
+  "why": "surface-modelling feature or proposal, not a failing solid operation"
+ },
+ {
+  "source": "tangency-labs/solidcraft#466",
+  "why": "other area: tessellation (revolved cone tip shows indentations; the profile coordinates are not given)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#467",
+  "why": "no reproduction data (screenshot or video only)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#611",
+  "why": "performance only, no wrong result"
+ },
+ {
+  "source": "tangency-labs/solidcraft#669",
+  "why": "surface-modelling feature or proposal, not a failing solid operation"
+ },
+ {
+  "source": "tangency-labs/solidcraft#759",
+  "why": "surface-modelling feature or proposal, not a failing solid operation"
+ },
+ {
+  "source": "tangency-labs/solidcraft#763",
+  "why": "surface-modelling feature or proposal, not a failing solid operation"
+ },
+ {
+  "source": "tangency-labs/solidcraft#767",
+  "why": "surface-modelling feature or proposal, not a failing solid operation"
+ },
+ {
+  "source": "tangency-labs/solidcraft#770",
+  "why": "surface-modelling feature or proposal, not a failing solid operation"
+ },
+ {
+  "source": "tangency-labs/solidcraft#772",
+  "why": "surface-modelling feature or proposal, not a failing solid operation"
+ },
+ {
+  "source": "tangency-labs/solidcraft#987",
+  "why": "other area: threads"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1008",
+  "why": "other area: fillets"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1191",
+  "why": "other area: fillets"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1202",
+  "why": "no reproduction data (screenshot or video only)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1308",
+  "why": "property-test PR, tests not a failing case"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1317",
+  "why": "UI or customization PR, not geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1328",
+  "why": "no reproduction data (screenshot or video only)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1431",
+  "why": "surface-modelling feature or proposal, not a failing solid operation"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1437",
+  "why": "extrude join result beyond the sketch; needs the user's design (earlier features not given)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1466",
+  "why": "surface-modelling feature or proposal, not a failing solid operation"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1508",
+  "why": "sketch projection of solid edges (sketch area), not a kernel failure"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1531",
+  "why": "feature request (partial taper where the sides would cross); the refusal is intended; needs the user's plate"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1603",
+  "why": "other area: sheet-metal"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1737",
+  "why": "extrude join leaves a gap after a fillet; the base solid is only in a screenshot"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1788",
+  "why": "extra seam edge from a mirrored sketch, marked possibly intentional; no dimensions"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1891",
+  "why": "profiling or tracing tooling, not geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1967",
+  "why": "other area: sweeps (loft reported as not working, no details)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1995",
+  "why": "other area: threads"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2064",
+  "why": "performance only, no wrong result"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2074",
+  "why": "part library or fastener fill feature, not a failing operation"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2274",
+  "why": "part library or fastener fill feature, not a failing operation"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2343",
+  "why": "refactor or rollup PR with no behaviour change to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2428",
+  "why": "refactor or rollup PR with no behaviour change to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2509",
+  "why": "refactor or rollup PR with no behaviour change to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2545",
+  "why": "refactor or rollup PR with no behaviour change to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2572",
+  "why": "refactor or rollup PR with no behaviour change to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2768",
+  "why": "documentation"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2876",
+  "why": "refactor or rollup PR with no behaviour change to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2968",
+  "why": "UI or customization PR, not geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3013",
+  "why": "performance only, no wrong result"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3104",
+  "why": "performance only, no wrong result"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3126",
+  "why": "sphere placement UI (centre taken from the picked point); the cut itself is not wrong"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3134",
+  "why": "performance only, no wrong result"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3226",
+  "why": "test layout housekeeping"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3268",
+  "why": "profiling or tracing tooling, not geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3272",
+  "why": "fix for #2970 (bore guard in a two-profile join): geometry only in the user's design, no dimensions"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3450",
+  "why": "solid.move pivot/point-to-point selection UI, no geometry failure"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3486",
+  "why": "solid.move pivot/point-to-point selection UI, no geometry failure"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3517",
+  "why": "refactor or rollup PR with no behaviour change to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3525",
+  "why": "refactor or rollup PR with no behaviour change to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3551",
+  "why": "refactor or rollup PR with no behaviour change to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3569",
+  "why": "UI or customization PR, not geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3592",
+  "why": "refactor or rollup PR with no behaviour change to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3594",
+  "why": "feature (wrap sketches onto cylinders), not a failing operation"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3756",
+  "why": "refactor or rollup PR with no behaviour change to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3900",
+  "why": "transform input validation (refuses non-affine matrices); not a geometry failure"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3907",
+  "why": "performance only, no wrong result"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3976",
+  "why": "refactor or rollup PR with no behaviour change to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3992",
+  "why": "kernel evaluation or tracking, not a geometry failure"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3997",
+  "why": "kernel evaluation or tracking, not a geometry failure"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4002",
+  "why": "construct.plane.three_points selection UI"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4012",
+  "why": "kernel evaluation or tracking, not a geometry failure"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4024",
+  "why": "fill tolerance check in geom, no geometry case"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4148",
+  "why": "revolve join 'no result' on a sketch not given in the report; needs the user's design"
+ }
+]

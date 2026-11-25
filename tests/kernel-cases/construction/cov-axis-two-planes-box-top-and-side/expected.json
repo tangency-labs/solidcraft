@@ -1,0 +1,22 @@
+{
+ "sources": [],
+ "what": "the axis where a box's top and right side meet",
+ "source": "analytic",
+ "method": "box 40 x 30 x 20 with a corner at the origin (x 0..40, y 0..30, z 0..20): z = 20 and x = 40 meet on the line through (40,0,20) along Y",
+ "construction": {
+  "A": {
+   "axis": {
+    "through": [
+     40,
+     0,
+     20
+    ],
+    "dir": [
+     0,
+     1,
+     0
+    ]
+   }
+  }
+ }
+}

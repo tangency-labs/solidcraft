@@ -1,0 +1,67 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 18.5
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 11.5
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 33,
+    "body_name": "Ring",
+    "profiles": [
+     {
+      "point": [
+       15,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      0,
+      18.5,
+      33
+     ],
+     [
+      0,
+      11.5,
+      33
+     ]
+    ],
+    "radius": 2
+   }
+  }
+ ]
+}

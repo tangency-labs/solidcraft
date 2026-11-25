@@ -12,10 +12,12 @@
 //! oscillating one from its arm pointing away from the cam's axis) and stops where it first
 //! touches the profile: the follower stays in contact, as a spring would hold it.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::TAU;
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Aabb2, Aabb3, Ring, Vec2, Vec3};
+use solidcore_record::{Vec2, Vec3};
+use solidcraft_geom::{Aabb2, Aabb3, Ring};
 
 use super::{JointKind, JointOrigin, MotionLink, Size, component_bodies, component_of, flip_of, occurrence_world, size_of};
 use crate::{DocError, Document, IDENTITY, Mat, ModelState, Result, apply_point, apply_vector, mat_inverse, mat_mul};
@@ -252,6 +254,7 @@ fn dist_to_segment(x: Vec2, p: Vec2, q: Vec2) -> f64 {
 }
 
 /// Everything a cam's table is worked out from, in the cam's fixed frame C.
+#[derive(Debug)]
 struct Setup {
     /// The profile at cam value 0.
     poly: Ring<Vec2>,
@@ -284,10 +287,140 @@ fn world(doc: &Document, occ: u64) -> Mat {
     if occ == 0 { IDENTITY } else { occurrence_world(doc, occ) }
 }
 
+/// The component or occurrence name for display in cam error messages.
+fn part_name(doc: &Document, occ: u64, comp: Option<u64>) -> String {
+    let comp_id = comp.or_else(|| component_of(doc, occ).ok());
+    if occ == 0 && comp_id.unwrap_or(0) == 0 {
+        return "the root design".to_string();
+    }
+    if let Some(c) = comp_id.filter(|&c| c != 0).and_then(|cid| doc.components.iter().find(|c| c.id == cid)) {
+        return c.name.clone();
+    }
+    if let Some(o) = doc.occurrences.iter().find(|o| o.id == occ) {
+        return o.name.clone();
+    }
+    if let Some(cid) = comp_id { format!("Component{cid}") } else { format!("occurrence {occ}") }
+}
+
+/// The occurrence turned by a revolute cam joint (the moving side of the joint).
+fn cam_turned_occurrence(doc: &Document, cam: &super::Joint) -> u64 {
+    let a_grounded = cam.a.occurrence == 0 || doc.occurrences.iter().any(|o| o.id == cam.a.occurrence && o.grounded);
+    let b_grounded = cam.b.occurrence == 0 || doc.occurrences.iter().any(|o| o.id == cam.b.occurrence && o.grounded);
+    if a_grounded && !b_grounded {
+        return cam.b.occurrence;
+    }
+    if b_grounded && !a_grounded {
+        return cam.a.occurrence;
+    }
+    let from_root = hops(doc, 0, [cam.id, 0]);
+    let dist_a = from_root.get(&cam.a.occurrence).copied();
+    let dist_b = from_root.get(&cam.b.occurrence).copied();
+    match (dist_a, dist_b) {
+        (Some(da), Some(db)) if da < db => cam.b.occurrence,
+        (Some(da), Some(db)) if db < da => cam.a.occurrence,
+        (Some(_), None) => cam.b.occurrence,
+        (None, Some(_)) => cam.a.occurrence,
+        _ => cam.b.occurrence,
+    }
+}
+
+/// The occurrence that moves on joint `j` (slides along a slider, turns on a hinge): the side
+/// that is not grounded (the design itself is), else the side farther from the design through
+/// the other joints, else B.
+pub fn moving_occurrence(doc: &Document, j: &super::Joint) -> u64 {
+    let a_grounded = j.a.occurrence == 0 || doc.occurrences.iter().any(|o| o.id == j.a.occurrence && o.grounded);
+    let b_grounded = j.b.occurrence == 0 || doc.occurrences.iter().any(|o| o.id == j.b.occurrence && o.grounded);
+    if a_grounded && !b_grounded {
+        return j.b.occurrence;
+    }
+    if b_grounded && !a_grounded {
+        return j.a.occurrence;
+    }
+    let from_root = hops(doc, 0, [j.id, 0]);
+    let dist_a = from_root.get(&j.a.occurrence).copied();
+    let dist_b = from_root.get(&j.b.occurrence).copied();
+    match (dist_a, dist_b) {
+        (Some(da), Some(db)) if da < db => j.b.occurrence,
+        (Some(da), Some(db)) if db < da => j.a.occurrence,
+        (Some(_), None) => j.b.occurrence,
+        (None, Some(_)) => j.a.occurrence,
+        _ => j.b.occurrence,
+    }
+}
+
+/// Whether the given occurrence or component moves along a slider joint.
+fn part_slides(doc: &Document, occ: Option<u64>, comp: Option<u64>) -> bool {
+    let comp = comp.or_else(|| occ.and_then(|o| component_of(doc, o).ok()));
+    if occ.is_some_and(|o| o == 0 || doc.occurrences.iter().any(|item| item.id == o && item.grounded)) {
+        return false;
+    }
+    let direct = doc.assembly.joints.iter().any(|j| {
+        if j.suppressed || j.kind != JointKind::Slider {
+            return false;
+        }
+        let moving = moving_occurrence(doc, j);
+        if occ.is_some_and(|o| moving == o) {
+            return true;
+        }
+        if comp.is_some_and(|c| component_of(doc, moving).is_ok_and(|jc| jc == c)) {
+            return true;
+        }
+        false
+    });
+    if direct {
+        return true;
+    }
+    if let Some(o) = occ {
+        let nearby = hops(doc, o, [0, 0]);
+        for (other_occ, cost) in nearby {
+            if cost == 0
+                && other_occ != o
+                && other_occ != u64::MAX
+                && doc.assembly.joints.iter().any(|j| !j.suppressed && j.kind == JointKind::Slider && moving_occurrence(doc, j) == other_occ)
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// The refusal when a cam's profile is picked on a part other than the part the cam joint turns.
+/// When the profile is on a part moved by a slider joint, it explains that cams on sliding parts
+/// are not supported yet (#17878).
+fn profile_not_on_cam_error(doc: &Document, cam: &super::Joint, profile_occ: Option<u64>, profile_comp: Option<u64>) -> DocError {
+    let turned_occ = cam_turned_occurrence(doc, cam);
+    let mut turned_name = part_name(doc, turned_occ, None);
+    let mut profile_name = part_name(doc, profile_occ.unwrap_or(0), profile_comp);
+    if turned_name == profile_name {
+        if let Some(to) = doc.occurrences.iter().find(|o| o.id == turned_occ) {
+            turned_name = to.name.clone();
+        }
+        if let Some(po) = profile_occ.and_then(|id| doc.occurrences.iter().find(|o| o.id == id)) {
+            profile_name = po.name.clone();
+        }
+        if let (true, Some(po)) = (turned_name == profile_name, profile_occ) {
+            profile_name = format!("{profile_name} (occurrence {po})");
+        }
+    }
+    let slides = part_slides(doc, profile_occ, profile_comp);
+    let slide_note = if slides { ", which slides. Cams on sliding parts are not supported yet." } else { "." };
+    DocError::Invalid(format!(
+        "cam: the Cam joint must turn the part the profile is on; {} turns {turned_name}, while the profile is on {profile_name}{slide_note}",
+        cam.name
+    ))
+}
+
 /// The profile's points in its component's coordinates, the occurrence placing them, and the
 /// profile's size. `fa`, `fb`: the cam joint's frames (picked edges continue along the edges in
 /// the plane square to the cam's axis).
-fn profile_points(doc: &Document, st: &ModelState, p: &CamProfile, cam: &super::Joint, (fa, fb): (&Mat, &Mat)) -> Result<(Vec<Vec3>, u64, f64)> {
+pub(crate) fn profile_points(
+    doc: &Document,
+    st: &ModelState,
+    p: &CamProfile,
+    cam: &super::Joint,
+    (fa, fb): (&Mat, &Mat),
+) -> Result<(Vec<Vec3>, u64, f64)> {
     let bad = |m: &str| DocError::Invalid(format!("cam: {m}"));
     match p {
         CamProfile::Sketch { sketch, curves } => {
@@ -297,19 +430,22 @@ fn profile_points(doc: &Document, st: &ModelState, p: &CamProfile, cam: &super::
                 [cam.b.occurrence, cam.a.occurrence].into_iter().filter(|o| component_of(doc, *o).is_ok_and(|c| c == comp)).collect();
             let occ = match sides.as_slice() {
                 [o] => *o,
-                [] => return Err(bad("the profile's sketch must be in the component the cam joint turns")),
+                [] => {
+                    let occ = doc.occurrences.iter().find(|o| o.component == comp).map(|o| o.id);
+                    return Err(profile_not_on_cam_error(doc, cam, occ, Some(comp)));
+                }
                 _ => return Err(bad("both sides of the cam joint are that sketch's component: pick the cam's edges instead")),
             };
             let lp = &sketch_profile(sk, curves).ok_or_else(|| bad("the sketch has no closed profile (or the cam's profile is gone)"))?.region.outer;
             let too_many = || bad(&format!("the profile is too detailed (more than {MAX_PROFILE_POINTS} points)"));
             let size = bounds_2d(&sampled(lp, 0.1).ok_or_else(too_many)?);
-            let pts = sampled(lp, tolerance(size)).ok_or_else(too_many)?;
+            let pts = sampled(lp, profile_tolerance(size)).ok_or_else(too_many)?;
             let pl = &sk.plane;
             Ok((pts.iter().map(|q| pl.origin + pl.x * q.x + pl.y * q.y).collect(), occ, size))
         }
         CamProfile::Edges { occurrence, picks, names } => {
             if *occurrence != cam.a.occurrence && *occurrence != cam.b.occurrence {
-                return Err(bad("the profile's edges must be on the part the cam joint turns"));
+                return Err(profile_not_on_cam_error(doc, cam, Some(*occurrence), None));
             }
             if picks.is_empty() || picks.len() > MAX_PROFILE_EDGES || !picks.iter().all(|p| p.is_finite()) {
                 return Err(bad(&format!("pick 1 to {MAX_PROFILE_EDGES} edges")));
@@ -321,9 +457,12 @@ fn profile_points(doc: &Document, st: &ModelState, p: &CamProfile, cam: &super::
                 return Err(bad("the cam has no body"));
             }
             // Each body sampled to its own size (a large part beside the cam leaves the cam fine).
-            // Each body's edges with the faces beside them.
-            let meshes: Vec<solidcraft_geom::Mesh> =
-                bodies.iter().map(|b| b.body.tessellate(tolerance(b.body.size()))).collect::<std::result::Result<_, _>>()?;
+            // Each body's edges with the faces beside them. The mesh of a body is made once and
+            // kept with it, so a solve that reads the profile again does not mesh it again.
+            let meshes: Vec<std::sync::Arc<solidcraft_geom::Mesh>> = bodies
+                .iter()
+                .map(|b| b.cam_mesh(|| b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(profile_tolerance(b.body.size())))))
+                .collect::<crate::Result<_>>()?;
             let edges: Vec<(usize, &Vec<Vec3>, &[u32])> = meshes
                 .iter()
                 .enumerate()
@@ -339,7 +478,7 @@ fn profile_points(doc: &Document, st: &ModelState, p: &CamProfile, cam: &super::
                     let (body, p) = bodies
                         .iter()
                         .enumerate()
-                        .find_map(|(i, b)| crate::naming::find_edge(b, name, *pick).ok().map(|(p, _)| (i, p)))
+                        .find_map(|(i, b)| crate::naming::find_edge(b, name, *pick).ok().map(|p| (i, p)))
                         .ok_or_else(|| bad(&format!("the edge `{name}` no longer exists (edit the cam to pick again)")))?;
                     (on, at) = (Some(body), p);
                 }
@@ -484,7 +623,7 @@ pub fn sketch_profile<'a>(sk: &'a crate::SolvedSketch, curves: &[String]) -> Opt
 }
 
 /// A loop's polyline within `tol`, segment by segment: `None` past `MAX_PROFILE_POINTS` points.
-fn sampled(lp: &solidcraft_geom::Loop2, tol: f64) -> Option<Vec<Vec2>> {
+fn sampled(lp: &solidcore_record::Loop2, tol: f64) -> Option<Vec<Vec2>> {
     let mut out = Vec::new();
     for seg in &lp.segs {
         let p = seg.polyline(tol);
@@ -506,7 +645,8 @@ fn bounds_2d(pts: &[Vec2]) -> f64 {
 }
 
 /// The chord error a profile is sampled to: 0.1 µm per 100 mm of its size, at least 0.1 µm.
-fn tolerance(size: f64) -> f64 {
+/// The mesh a cam's profile is read from is made at that error.
+pub(crate) fn profile_tolerance(size: f64) -> f64 {
     1e-4 * (size / 100.0).max(1.0)
 }
 
@@ -514,6 +654,9 @@ fn tolerance(size: f64) -> f64 {
 fn setup(doc: &Document, st: &ModelState, l: &MotionLink, c: &Cam) -> Result<Setup> {
     let bad = |m: &str| DocError::Invalid(format!("cam: {m}"));
     let (cam, fol) = (joint(doc, l.a)?, joint(doc, l.b)?);
+    if cam.kind == JointKind::Slider {
+        return Err(bad("cams on sliding parts are not supported yet (the cam turns on a revolute joint)"));
+    }
     if cam.kind != JointKind::Revolute {
         return Err(bad("the cam turns on a revolute joint"));
     }
@@ -523,7 +666,7 @@ fn setup(doc: &Document, st: &ModelState, l: &MotionLink, c: &Cam) -> Result<Set
     if cam.a.occurrence == cam.b.occurrence {
         return Err(bad("the cam joint joins two parts"));
     }
-    let (fa, fb) = (super::resolve_origin(doc, st, &cam.a)?, super::resolve_origin(doc, st, &cam.b)?);
+    let (fa, fb) = (cam.offset_frame_a(super::resolve_origin(doc, st, &cam.a)?), super::resolve_origin(doc, st, &cam.b)?);
     let (pts, occ, size) = profile_points(doc, st, &c.profile, cam, (&fa, &fb))?;
     if pts.len() < 3 || pts.len() > MAX_PROFILE_POINTS || !size.is_finite() || size <= 0.0 {
         return Err(bad(&format!("the profile must have 3 to {MAX_PROFILE_POINTS} points")));
@@ -551,7 +694,7 @@ fn setup(doc: &Document, st: &ModelState, l: &MotionLink, c: &Cam) -> Result<Set
     // The moving side travels (or turns) by +value along its z when it is b, −value when it is a.
     let c_inv = inv(&frame)?;
     let moves_b = follower_is_b(doc, cam, fol, (fixed, occ))?;
-    let (ga, gb) = (super::resolve_origin(doc, st, &fol.a)?, super::resolve_origin(doc, st, &fol.b)?);
+    let (ga, gb) = (fol.offset_frame_a(super::resolve_origin(doc, st, &fol.a)?), super::resolve_origin(doc, st, &fol.b)?);
     let guide = if moves_b {
         mat_mul(&world(doc, fol.a.occurrence), &ga)
     } else {
@@ -926,7 +1069,7 @@ mod tests {
     /// a guide only on the cam's own side is refused.
     #[test]
     fn the_guide_is_the_side_fewer_moving_joints_from_the_frame() {
-        let origin = JointOrigin { occurrence: 0, snap: super::super::Snap::Point { point: Vec3::ZERO, z: None, x: None } };
+        let origin = JointOrigin::new(0, super::super::Snap::Point { point: Vec3::ZERO, z: None, x: None });
         let joint = |id: u64, kind: JointKind, a: u64, b: u64| super::super::Joint {
             id,
             name: format!("J{id}"),
@@ -940,8 +1083,21 @@ mod tests {
             angle: 0.0,
             suppressed: false,
             exprs: Default::default(),
+            offset_xy: [0.0; 2],
+            captured: None,
+            constraint: None,
+            dynamics: Vec::new(),
         };
-        let occ = |id: u64, grounded: bool| crate::Occurrence { id, component: id, parent: 0, name: format!("O{id}"), transform: IDENTITY, grounded };
+        let occ = |id: u64, grounded: bool| crate::Occurrence {
+            id,
+            component: id,
+            parent: 0,
+            name: format!("O{id}"),
+            transform: IDENTITY,
+            grounded,
+            bom_type: None,
+            expressed_moves: Vec::new(),
+        };
         // 1 frame (grounded), 2 cam, 3-6 a rigid chain to the guide 7, 8 the piston, 9 crank, 10 rod.
         let mut doc = Document { occurrences: (1..=10).map(|id| occ(id, id == 1)).collect(), ..Document::default() };
         let (r, v, s) = (JointKind::Rigid, JointKind::Revolute, JointKind::Slider);
@@ -993,5 +1149,93 @@ mod tests {
         let big = ring(100_000);
         let rest: Vec<&Vec<Vec3>> = big.iter().skip(1).collect();
         assert_eq!(chain(&[&big[0]], &rest, 1e-7), None);
+    }
+
+    /// When a cam's profile is picked on a part that slides (like a ramp or wedge cam, #17878),
+    /// the refusal explains that the cam joint must turn the profile's part, names the joints
+    /// and components involved, and notes that cams on sliding parts are not supported yet.
+    #[test]
+    fn profile_not_on_cam_refusal_explains_cams_on_sliding_parts_not_supported() {
+        let origin = JointOrigin::new(0, super::super::Snap::Point { point: Vec3::ZERO, z: None, x: None });
+        let joint = |id: u64, name: &str, kind: JointKind, a: u64, b: u64| super::super::Joint {
+            id,
+            name: name.to_string(),
+            kind,
+            a: JointOrigin { occurrence: a, ..origin.clone() },
+            b: JointOrigin { occurrence: b, ..origin.clone() },
+            values: Vec::new(),
+            limits: Vec::new(),
+            dynamics: Vec::new(),
+            flip: false,
+            offset: 0.0,
+            angle: 0.0,
+            suppressed: false,
+            exprs: Default::default(),
+            offset_xy: [0.0; 2],
+            captured: None,
+            constraint: None,
+        };
+        let occ = |id: u64, grounded: bool| crate::Occurrence {
+            id,
+            component: id,
+            parent: 0,
+            name: format!("Occurrence{id}"),
+            transform: IDENTITY,
+            grounded,
+            expressed_moves: Vec::new(),
+            bom_type: None,
+        };
+        let comp = |id: u64, name: &str| crate::Component { id, name: name.to_string(), ..crate::Component::default() };
+
+        // 1: Base (grounded)
+        // 4: Linkage arm (revolute from base)
+        // 5: Roller (Body4, spins on Revolute Joint4 at end of linkage arm)
+        // 6: Ramp (Body5, slides along Slider Joint1)
+        // 7: Rigid bracket on base
+        let mut doc = Document {
+            occurrences: vec![occ(1, true), occ(4, false), occ(5, false), occ(6, false), occ(7, false)],
+            components: vec![comp(1, "Base"), comp(4, "Link4"), comp(5, "Component5"), comp(6, "Component6"), comp(7, "Component7")],
+            ..Document::default()
+        };
+        let (r, v, s) = (JointKind::Rigid, JointKind::Revolute, JointKind::Slider);
+        doc.assembly.joints = vec![
+            joint(1, "Slider Joint1", s, 1, 6),
+            joint(2, "Revolute Joint1", v, 1, 4),
+            joint(4, "Revolute Joint4", v, 4, 5),
+            joint(7, "Rigid Joint7", r, 1, 7),
+        ];
+
+        let cam = &doc.assembly.joints[2]; // Revolute Joint4
+        let profile_ramp = CamProfile::Edges { occurrence: 6, picks: vec![Vec3::ZERO], names: Vec::new() };
+        let st = ModelState::default();
+        let err = profile_points(&doc, &st, &profile_ramp, cam, (&IDENTITY, &IDENTITY)).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "cam: the Cam joint must turn the part the profile is on; Revolute Joint4 turns Component5, while the profile is on Component6, which slides. Cams on sliding parts are not supported yet."
+        );
+
+        // When the profile is on a part that does not slide, the refusal still identifies the turned
+        // and profile components clearly without claiming that it slides.
+        let profile_fixed = CamProfile::Edges { occurrence: 7, picks: vec![Vec3::ZERO], names: Vec::new() };
+        let err_fixed = profile_points(&doc, &st, &profile_fixed, cam, (&IDENTITY, &IDENTITY)).unwrap_err();
+        assert_eq!(
+            err_fixed.to_string(),
+            "cam: the Cam joint must turn the part the profile is on; Revolute Joint4 turns Component5, while the profile is on Component7."
+        );
+
+        // Setting a slider joint as the cam joint refuses cleanly with the sliding note.
+        let slider_cam_link = MotionLink {
+            a: 1, // Slider Joint1
+            ia: 0,
+            b: 4, // Revolute Joint4
+            ib: 0,
+            coupling: None,
+            ratio: 1.0,
+            offset: 0.0,
+            lift: Vec::new(),
+        };
+        let cam_def = Cam { profile: profile_ramp, follower: Follower::Knife, tip: None, reverse: false };
+        let err_slider = setup(&doc, &st, &slider_cam_link, &cam_def).unwrap_err();
+        assert_eq!(err_slider.to_string(), "cam: cams on sliding parts are not supported yet (the cam turns on a revolute joint)");
     }
 }

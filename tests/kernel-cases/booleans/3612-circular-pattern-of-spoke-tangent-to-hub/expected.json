@@ -1,0 +1,10 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#3612",
+    "tangency-labs/solidcraft#3379"
+  ],
+  "what": "a spoke whose inner face x=12 is exactly tangent to the hub cylinder r=12 (line contact), joined to the rim, patterned 5 times around the hub's axis",
+  "source": "analytic",
+  "method": "rim r63..66 h3: pi(66^2-63^2)*3; hub r12 h3: pi*144*3; each spoke (x 12..64, y 0.5..2.5, z +-1.25) adds the part outside hub and rim: 2*(integral over z=-1.25..1.25 of sqrt(63^2-z^2) - 12) = 254.979 (the spoke's foot lies inside the rim; at z=+-1.25 the hub reaches x=11.93 so it never overlaps the spoke). Spokes are 72 deg apart and do not overlap: V = 5004.557 + 5*254.979 = 6279.454",
+  "volume_mm3": 6279.4538
+}

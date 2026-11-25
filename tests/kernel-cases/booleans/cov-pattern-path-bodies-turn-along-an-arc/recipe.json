@@ -1,0 +1,61 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 4,
+    "width": 2,
+    "height": 2,
+    "center": [
+     20,
+     0,
+     1
+    ],
+    "body_name": "Key"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Path"
+   }
+  },
+  {
+   "command": "sketch.arc.center_point",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "start": [
+     20,
+     0
+    ],
+    "sweep": 180,
+    "id": "arc"
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {
+    "sketch": "Path"
+   }
+  },
+  {
+   "command": "solid.pattern.path",
+   "params": {
+    "bodies": [
+     "Key"
+    ],
+    "path_sketch": "Path",
+    "path": [
+     "arc"
+    ],
+    "count": 3,
+    "distance": 62.83185307179586,
+    "orientation": "path"
+   }
+  }
+ ]
+}

@@ -1,0 +1,552 @@
+{
+ "cases": [
+  {
+   "name": "tess_ids_split_in_brep",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:297",
+   "inputs": {
+    "kind": "script",
+    "objects": [
+     2,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "user_cb": true,
+    "sys_cb": false,
+    "ops": [
+     [
+      "new_long",
+      116,
+      0,
+      0
+     ],
+     [
+      "add",
+      1,
+      0
+     ],
+     [
+      "new_long",
+      118,
+      1,
+      0
+     ],
+     [
+      "add",
+      2,
+      1
+     ],
+     [
+      "new_long",
+      120,
+      2,
+      0
+     ],
+     [
+      "add",
+      3,
+      2
+     ],
+     [
+      "notify",
+      1,
+      0,
+      1,
+      1,
+      4
+     ],
+     [
+      "notify",
+      1,
+      0,
+      2,
+      2,
+      5
+     ],
+     [
+      "notify",
+      12,
+      3,
+      3,
+      5,
+      0
+     ],
+     [
+      "find",
+      4,
+      116
+     ],
+     [
+      "find",
+      5,
+      118
+     ],
+     [
+      "find",
+      5,
+      120
+     ]
+    ]
+   }
+  },
+  {
+   "name": "tess_ids_merge_in_brep",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:307",
+   "inputs": {
+    "kind": "script",
+    "objects": [
+     2,
+     0,
+     0,
+     0
+    ],
+    "user_cb": true,
+    "sys_cb": false,
+    "ops": [
+     [
+      "new_long",
+      118,
+      7,
+      0
+     ],
+     [
+      "add",
+      1,
+      0
+     ],
+     [
+      "new_long",
+      118,
+      9,
+      0
+     ],
+     [
+      "add",
+      2,
+      1
+     ],
+     [
+      "new_long",
+      120,
+      3,
+      0
+     ],
+     [
+      "add",
+      2,
+      2
+     ],
+     [
+      "notify",
+      2,
+      0,
+      1,
+      2,
+      0
+     ],
+     [
+      "notify",
+      13,
+      3,
+      1,
+      2,
+      0
+     ],
+     [
+      "clear",
+      2
+     ]
+    ]
+   }
+  },
+  {
+   "name": "merge_test_colour_on_brep",
+   "upstream_ref": "tests/prog_test/src/smMergeTest.cpp:219",
+   "inputs": {
+    "kind": "script",
+    "objects": [
+     2,
+     2,
+     0,
+     0
+    ],
+    "user_cb": true,
+    "sys_cb": true,
+    "ops": [
+     [
+      "new_vector3d",
+      100,
+      0,
+      [
+       0,
+       0,
+       1
+      ]
+     ],
+     [
+      "add",
+      1,
+      0
+     ],
+     [
+      "notify",
+      4,
+      0,
+      2,
+      1,
+      1
+     ],
+     [
+      "notify",
+      9,
+      1,
+      3,
+      0,
+      -1
+     ],
+     [
+      "notify",
+      8,
+      3,
+      3,
+      1,
+      -1
+     ],
+     [
+      "find",
+      2,
+      100
+     ],
+     [
+      "find",
+      3,
+      100
+     ]
+    ]
+   }
+  },
+  {
+   "name": "fillet_test_colour_on_result",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:5316",
+   "inputs": {
+    "kind": "script",
+    "objects": [
+     2,
+     1
+    ],
+    "user_cb": true,
+    "sys_cb": false,
+    "ops": [
+     [
+      "new_vector3d",
+      100,
+      0,
+      [
+       0,
+       0,
+       1
+      ]
+     ],
+     [
+      "add",
+      0,
+      0
+     ],
+     [
+      "copy_construct",
+      0
+     ],
+     [
+      "copy_construct",
+      2
+     ],
+     [
+      "notify",
+      10,
+      0,
+      0,
+      -1,
+      -1
+     ],
+     [
+      "notify",
+      11,
+      0,
+      0,
+      -1,
+      -1
+     ],
+     [
+      "notify",
+      15,
+      0,
+      0,
+      -1,
+      -1
+     ],
+     [
+      "assert_valid",
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "brep_mass_properties_attribute",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:642",
+   "inputs": {
+    "kind": "script",
+    "objects": [
+     0,
+     0,
+     1
+    ],
+    "user_cb": true,
+    "sys_cb": false,
+    "ops": [
+     [
+      "new_vector3d",
+      201,
+      0,
+      [
+       5,
+       0,
+       0
+      ]
+     ],
+     [
+      "add",
+      0,
+      0
+     ],
+     [
+      "notify",
+      6,
+      1,
+      2,
+      -1,
+      0
+     ],
+     [
+      "notify",
+      6,
+      1,
+      -1,
+      -1,
+      0
+     ],
+     [
+      "find",
+      2,
+      201
+     ],
+     [
+      "remove",
+      0,
+      -1,
+      0
+     ],
+     [
+      "find",
+      0,
+      201
+     ]
+    ]
+   }
+  },
+  {
+   "name": "cache_check_out_in_guard",
+   "upstream_ref": "source/SMLib/inc/SmCacheMgr.h:497",
+   "inputs": {
+    "kind": "script",
+    "objects": [
+     2,
+     0
+    ],
+    "user_cb": true,
+    "sys_cb": false,
+    "ops": [
+     [
+      "new_cache"
+     ],
+     [
+      "set_cache",
+      0,
+      0
+     ],
+     [
+      "get_or_create",
+      0,
+      3
+     ],
+     [
+      "guard_open",
+      0
+     ],
+     [
+      "guard_open",
+      0
+     ],
+     [
+      "delete_objects_cache",
+      0,
+      0,
+      3
+     ],
+     [
+      "get_cache",
+      0,
+      3
+     ],
+     [
+      "guard_close"
+     ],
+     [
+      "guard_close"
+     ],
+     [
+      "get_cache",
+      0,
+      3
+     ]
+    ]
+   }
+  },
+  {
+   "name": "region_propagation_union_no_colour",
+   "upstream_ref": "source/SMLib/src/SmAObject.cpp:254",
+   "inputs": {
+    "kind": "script",
+    "objects": [
+     0,
+     0,
+     0
+    ],
+    "user_cb": true,
+    "sys_cb": false,
+    "ops": [
+     [
+      "new_merge_region",
+      0,
+      1,
+      1,
+      1
+     ],
+     [
+      "mr_set_operation",
+      0,
+      1
+     ],
+     [
+      "add",
+      0,
+      0
+     ],
+     [
+      "new_long",
+      5,
+      1,
+      0
+     ],
+     [
+      "add",
+      0,
+      1
+     ],
+     [
+      "new_long",
+      6,
+      2,
+      0
+     ],
+     [
+      "add",
+      1,
+      2
+     ],
+     [
+      "notify",
+      14,
+      0,
+      -1,
+      -1,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "region_propagation_union_colour",
+   "upstream_ref": "source/SMLib/src/SmAObject.cpp:387",
+   "inputs": {
+    "kind": "script",
+    "objects": [
+     0,
+     0
+    ],
+    "user_cb": true,
+    "sys_cb": false,
+    "ops": [
+     [
+      "new_merge_region",
+      0,
+      1,
+      1,
+      1
+     ],
+     [
+      "mr_set_operation",
+      0,
+      1
+     ],
+     [
+      "add",
+      0,
+      0
+     ],
+     [
+      "new_color",
+      100,
+      0,
+      [
+       1,
+       0,
+       0
+      ]
+     ],
+     [
+      "add",
+      0,
+      1
+     ],
+     [
+      "new_color",
+      100,
+      0,
+      [
+       0,
+       0,
+       1
+      ]
+     ],
+     [
+      "add",
+      1,
+      2
+     ],
+     [
+      "notify",
+      14,
+      0,
+      -1,
+      -1,
+      -1
+     ]
+    ]
+   }
+  }
+ ]
+}

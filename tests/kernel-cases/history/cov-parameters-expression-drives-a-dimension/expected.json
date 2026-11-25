@@ -1,0 +1,10 @@
+{
+ "sources": [],
+ "what": "sketch dimensions 2 W and W / 2: changing W rebuilds the plate",
+ "method": "W = 30: a 60x15 rectangle extruded 10: V = 9000, A = 2 (900 + 600 + 150) = 3300; 6 faces",
+ "body_count": 1,
+ "volume_mm3": 9000.0,
+ "area_mm2": 3300.0,
+ "faces": 6,
+ "source": "analytic"
+}

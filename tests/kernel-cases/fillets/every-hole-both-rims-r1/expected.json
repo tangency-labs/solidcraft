@@ -1,0 +1,24 @@
+{
+ "sources": [],
+ "what": "both rims of a hole through a plate rounded r1 in one fillet",
+ "source": "analytic",
+ "method": "plate 40x40x10 with a through hole R5 at (20, 20): V0 = 16000 - 250 pi = 15214.6018. Each rim's r1 round removes 2 pi (5 A + M) = 7.0431 (every-hole-top-rim-r1), the two far apart (1 + 1 < 10): V = 15200.5156. Faces 9.",
+ "body_count": 1,
+ "volume_mm3": 15200.515634425325,
+ "faces": 9,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   40,
+   10
+  ]
+ },
+ "continuity": {
+  "order": "g1"
+ }
+}

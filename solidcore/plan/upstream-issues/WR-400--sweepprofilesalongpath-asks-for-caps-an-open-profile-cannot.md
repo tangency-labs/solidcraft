@@ -1,0 +1,11 @@
+#### WR-400. `SweepProfilesAlongPath` asks `CreateCurveSweep` for caps an open profile cannot have, and ignores the failure
+- **Severity:** Wrong status (latent: hidden by an ignored status)
+- **Area:** Primitive creation / sweeps
+- **Location:** `source/SMLib/src/SmPrimitiveCreation.cpp`, `SweepProfilesAlongPath` (the static helper of `CreateSweepAlongPlanarPath`, used by `SmApiCreateSweepAlongPlanarPath`): `sOptions.bCapEndsArg = TRUE` unconditionally.
+- **What happens:** An open profile wire bounds no planar region, so its start cap fails: `SmTrimmingTools::OrderCurvesIntoLoops` finds no loop, `CreatePlanarFacesWith3DCurves` returns `SM_ERR`, and `CreateCurveSweep` returns before it runs `StitchAndOrient` on the swept walls. The helper is `void` and drops that `SM_ERR`; the planar sweep's final `StitchFaces` then stitches the walls, so stock upstream works by accident. Passing the status on (as the SolidCraft fork does) makes the documented open-profile sheet sweep fail with `SM_ERR` (1001).
+- **Trigger:** `SmApiCreateSweepAlongPlanarPath` with a profile that does not close (NVIDIA's `test_planar_path_sweep_open_profile_stays_sheet_with_both_caps`).
+- **How found:** reported by jyviko (tangency-labs/solidcore#837), traced with gdb from `OrderCurvesIntoLoops` up to the API.
+- **Confirmed:** in the fork's 1.0.1 replay (Linux GCC); not compared on the C++ reference here.
+- **Fix:** ask for caps only when the profile closes, meaning every curve end meets another curve end (a closed curve's own other end) within the sweep tolerance. Closed profiles behave as before.
+- **Rust port:** `crates/solidcore/src/primitive/primitive_creation/p2/planar_path.rs` (`profile_closes`, `cap_profile_ends`), opt-in `Kernel::fixes.planar_path_uncapped_open_profiles` (off by default: upstream's always-capped request, so `primitive.primitive_creation_p2` and `sweep.api_brep` keep matching the C++). The port ignores the sweep's status as upstream does, so the default path also returns the stitched sheet. Test: `issue_837_open_profile_sweeps_without_caps` in the same file.
+- Fixes tangency-labs/solidcore#837.

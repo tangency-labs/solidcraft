@@ -1,0 +1,195 @@
+{
+ "cases": [
+  {
+   "name": "fuzz_regression_fuzz00022",
+   "upstream_ref": "fuzz sweep ['/ops/0/set_last_add = false', '/ops/9/add/other_ts = 14'] (was: rust: type string index 14)",
+   "inputs": {
+    "op": "sequence",
+    "ops": [
+     {
+      "set_last_add": false
+     },
+     {
+      "add": {
+       "list_index": 0,
+       "message": "custom message 82",
+       "other": 2,
+       "other_ts": null,
+       "other_type": 16427,
+       "owner": 1,
+       "owner_ts": null,
+       "owner_type": 0,
+       "reporter": 1,
+       "test_class": 18007,
+       "test_index": 6,
+       "tol": 9876543.21,
+       "value": -0.0
+      }
+     },
+     {
+      "add": {
+       "list_index": 4,
+       "message": null,
+       "other": 0,
+       "other_ts": 3,
+       "other_type": 18540,
+       "owner": 2,
+       "owner_ts": 4,
+       "owner_type": 12084,
+       "reporter": 0,
+       "test_class": 12084,
+       "test_index": 0,
+       "tol": 0.0,
+       "value": 0.0
+      }
+     },
+     {
+      "contains": {
+       "list_index": 0,
+       "message": "custom message 82",
+       "other": 2,
+       "other_ts": null,
+       "other_type": 16427,
+       "owner": 1,
+       "owner_ts": null,
+       "owner_type": 0,
+       "reporter": 1,
+       "test_class": 16016,
+       "test_index": 8,
+       "tol": 0.0,
+       "value": -0.0
+      }
+     },
+     {
+      "contains": {
+       "list_index": 4,
+       "message": null,
+       "other": 0,
+       "other_ts": 3,
+       "other_type": 18540,
+       "owner": 0,
+       "owner_ts": 4,
+       "owner_type": 12084,
+       "reporter": 0,
+       "test_class": 12084,
+       "test_index": 0,
+       "tol": 0.0,
+       "value": -0.0
+      }
+     },
+     {
+      "set_last_add": false
+     },
+     {
+      "add": {
+       "list_index": 0,
+       "message": "custom message 82",
+       "other": 2,
+       "other_ts": null,
+       "other_type": 16427,
+       "owner": 2,
+       "owner_ts": null,
+       "owner_type": 0,
+       "reporter": 1,
+       "test_class": 18007,
+       "test_index": 6,
+       "tol": 0.0,
+       "value": -0.0
+      }
+     },
+     {
+      "contains": {
+       "list_index": 4,
+       "message": null,
+       "other": 2,
+       "other_ts": 3,
+       "other_type": 18540,
+       "owner": 0,
+       "owner_ts": 4,
+       "owner_type": 12084,
+       "reporter": 0,
+       "test_class": 12084,
+       "test_index": 0,
+       "tol": 0.0,
+       "value": 0.0
+      }
+     },
+     {
+      "add": {
+       "list_index": 4,
+       "message": null,
+       "other": 0,
+       "other_ts": 3,
+       "other_type": 18540,
+       "owner": 0,
+       "owner_ts": 4,
+       "owner_type": 11380,
+       "reporter": 0,
+       "test_class": 12084,
+       "test_index": 0,
+       "tol": 0.0,
+       "value": 0.0
+      }
+     },
+     {
+      "add": {
+       "list_index": 4,
+       "message": null,
+       "other": 0,
+       "other_ts": 14,
+       "other_type": 18540,
+       "owner": 0,
+       "owner_ts": 4,
+       "owner_type": 12084,
+       "reporter": 0,
+       "test_class": 12084,
+       "test_index": 0,
+       "tol": 0.0,
+       "value": 40.27903211001396
+      }
+     },
+     {
+      "set_last_add": true
+     },
+     {
+      "add": {
+       "list_index": 4,
+       "message": null,
+       "other": 0,
+       "other_ts": 3,
+       "other_type": 18540,
+       "owner": 0,
+       "owner_ts": 4,
+       "owner_type": 3119,
+       "reporter": 0,
+       "test_class": 12084,
+       "test_index": 0,
+       "tol": 0.0,
+       "value": 0.0
+      }
+     },
+     {
+      "add": {
+       "list_index": 4,
+       "message": null,
+       "other": 0,
+       "other_ts": 3,
+       "other_type": 18540,
+       "owner": 0,
+       "owner_ts": 4,
+       "owner_type": 12084,
+       "reporter": 0,
+       "test_class": 12084,
+       "test_index": 0,
+       "tol": 6.94202362694773,
+       "value": 0.0
+      }
+     },
+     {
+      "set_last_add": true
+     }
+    ]
+   }
+  }
+ ]
+}

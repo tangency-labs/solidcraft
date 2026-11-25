@@ -1,0 +1,6886 @@
+{
+ "cases": [
+  {
+   "name": "read_Boolean_BoltMBox1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb"
+   }
+  },
+  {
+   "name": "noheal_Boolean_BoltMBox1",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Boolean_BoltMBox1",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Boolean/BoltMBox1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Boolean_BoltMBox2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Boolean/BoltMBox2.smb"
+   }
+  },
+  {
+   "name": "noheal_Boolean_BoltMBox2",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Boolean/BoltMBox2.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Boolean_BoltMBox2",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Boolean/BoltMBox2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Boolean_extrudeHoles1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Boolean/extrudeHoles1.smb"
+   }
+  },
+  {
+   "name": "noheal_Boolean_extrudeHoles1",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Boolean/extrudeHoles1.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Boolean_extrudeHoles1",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Boolean/extrudeHoles1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Boolean_extrudeHoles2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Boolean/extrudeHoles2.smb"
+   }
+  },
+  {
+   "name": "noheal_Boolean_extrudeHoles2",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Boolean/extrudeHoles2.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Boolean_extrudeHoles2",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Boolean/extrudeHoles2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Defeature_LShape_I",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Defeature/LShape_I.smb"
+   }
+  },
+  {
+   "name": "noheal_Defeature_LShape_I",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Defeature/LShape_I.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Defeature_LShape_I",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Defeature/LShape_I.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Defeature_LShape_II",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Defeature/LShape_II.smb"
+   }
+  },
+  {
+   "name": "noheal_Defeature_LShape_II",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Defeature/LShape_II.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Defeature_LShape_II",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Defeature/LShape_II.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Defeature_Platte",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Defeature/Platte.smb"
+   }
+  },
+  {
+   "name": "noheal_Defeature_Platte",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Defeature/Platte.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Defeature_Platte",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Defeature/Platte.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Defeature_brep1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Defeature/brep1.smb"
+   }
+  },
+  {
+   "name": "noheal_Defeature_brep1",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Defeature_brep1",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Defeature/brep1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Defeature_defillet",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Defeature/defillet.smb"
+   }
+  },
+  {
+   "name": "noheal_Defeature_defillet",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Defeature/defillet.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Defeature_defillet",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Defeature/defillet.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Defeature_extrusion",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Defeature/extrusion.smb"
+   }
+  },
+  {
+   "name": "noheal_Defeature_extrusion",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Defeature/extrusion.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Defeature_extrusion",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Defeature/extrusion.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Defeature_flathead_screw_top",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Defeature/flathead_screw_top.smb"
+   }
+  },
+  {
+   "name": "noheal_Defeature_flathead_screw_top",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Defeature/flathead_screw_top.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Defeature_flathead_screw_top",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Defeature/flathead_screw_top.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Defeature_inset_cube",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Defeature/inset_cube.smb"
+   }
+  },
+  {
+   "name": "noheal_Defeature_inset_cube",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Defeature/inset_cube.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Defeature_inset_cube",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Defeature/inset_cube.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Defeature_inset_cube_1x1fillet",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Defeature/inset_cube_1x1fillet.smb"
+   }
+  },
+  {
+   "name": "noheal_Defeature_inset_cube_1x1fillet",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Defeature/inset_cube_1x1fillet.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Defeature_inset_cube_1x1fillet",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Defeature/inset_cube_1x1fillet.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Defeature_inset_cube_1x2fillet",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Defeature/inset_cube_1x2fillet.smb"
+   }
+  },
+  {
+   "name": "noheal_Defeature_inset_cube_1x2fillet",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Defeature/inset_cube_1x2fillet.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Defeature_inset_cube_1x2fillet",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Defeature/inset_cube_1x2fillet.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Defeature_inset_cube_1x3fillet",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Defeature/inset_cube_1x3fillet.smb"
+   }
+  },
+  {
+   "name": "noheal_Defeature_inset_cube_1x3fillet",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Defeature/inset_cube_1x3fillet.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Defeature_inset_cube_1x3fillet",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Defeature/inset_cube_1x3fillet.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Defeature_inset_cube_3x1fillet",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Defeature/inset_cube_3x1fillet.smb"
+   }
+  },
+  {
+   "name": "noheal_Defeature_inset_cube_3x1fillet",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Defeature/inset_cube_3x1fillet.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Defeature_inset_cube_3x1fillet",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Defeature/inset_cube_3x1fillet.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Endcap",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Endcap.smb"
+   }
+  },
+  {
+   "name": "noheal_Endcap",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Endcap.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Endcap",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Endcap.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_0311",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/0311.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_0311",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/0311.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_0311",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/0311.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_2cyls_on_box",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/2cyls_on_box.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_2cyls_on_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/2cyls_on_box.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_2cyls_on_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/2cyls_on_box.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_6_sided_corner",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/6_sided_corner.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_6_sided_corner",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/6_sided_corner.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_6_sided_corner",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/6_sided_corner.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_Heart",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/Heart.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_Heart",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/Heart.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_Heart",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/Heart.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_bague",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/bague.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_bague",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/bague.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_bague",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/bague.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_blade_fillet_fails",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/blade_fillet_fails.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_blade_fillet_fails",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/blade_fillet_fails.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_blade_fillet_fails",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/blade_fillet_fails.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_blade_hub",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/blade_hub.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_blade_hub",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/blade_hub.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_blade_hub",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/blade_hub.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_blade_hub_1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/blade_hub_1.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_blade_hub_1",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/blade_hub_1.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_blade_hub_1",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/blade_hub_1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_blade_hub_2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/blade_hub_2.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_blade_hub_2",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/blade_hub_2.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_blade_hub_2",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/blade_hub_2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_blade_hub_3",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/blade_hub_3.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_blade_hub_3",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/blade_hub_3.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_blade_hub_3",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/blade_hub_3.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_bolt",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/bolt.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_bolt",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/bolt.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_bolt",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/bolt.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_bottle",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/bottle.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_bottle",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/bottle.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_bottle",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/bottle.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_box1x1x2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/box1x1x2.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_box1x1x2",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/box1x1x2.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_box1x1x2",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/box1x1x2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_box_diff_3cyls",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/box_diff_3cyls.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_box_diff_3cyls",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/box_diff_3cyls.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_box_diff_3cyls",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/box_diff_3cyls.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_box_diff_cyl",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/box_diff_cyl.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_box_diff_cyl",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/box_diff_cyl.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_box_diff_cyl",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/box_diff_cyl.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_box_diff_cyl_big_rad",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/box_diff_cyl_big_rad.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_box_diff_cyl_big_rad",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/box_diff_cyl_big_rad.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_box_diff_cyl_big_rad",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/box_diff_cyl_big_rad.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_box_extrusion1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/box_extrusion1.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_box_extrusion1",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/box_extrusion1.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_box_extrusion1",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/box_extrusion1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_box_extrusion2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/box_extrusion2.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_box_extrusion2",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/box_extrusion2.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_box_extrusion2",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/box_extrusion2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_box_on_box",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/box_on_box.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_box_on_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/box_on_box.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_box_on_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/box_on_box.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_box_w_slot",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/box_w_slot.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_box_w_slot",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/box_w_slot.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_box_w_slot",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/box_w_slot.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_brepForFillet1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/brepForFillet1.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_brepForFillet1",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/brepForFillet1.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_brepForFillet1",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/brepForFillet1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_brepForFillet2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/brepForFillet2.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_brepForFillet2",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/brepForFillet2.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_brepForFillet2",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/brepForFillet2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_brick",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/brick.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_brick",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/brick.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_brick",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/brick.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_cap1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/cap1.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_cap1",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/cap1.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_cap1",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/cap1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_caps_coons",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/caps_coons.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_caps_coons",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/caps_coons.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_caps_coons",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/caps_coons.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_caps_nside",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/caps_nside.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_caps_nside",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/caps_nside.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_caps_nside",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/caps_nside.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_case_ext",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/case_ext.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_case_ext",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/case_ext.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_case_ext",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/case_ext.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_case_int",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/case_int.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_case_int",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/case_int.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_case_int",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/case_int.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_cliff_1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/cliff_1.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_cliff_1",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/cliff_1.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_cliff_1",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/cliff_1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_cliff_2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/cliff_2.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_cliff_2",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/cliff_2.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_cliff_2",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/cliff_2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_cliff_3",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/cliff_3.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_cliff_3",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/cliff_3.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_cliff_3",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/cliff_3.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_cliff_4",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/cliff_4.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_cliff_4",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/cliff_4.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_cliff_4",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/cliff_4.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_cone_34",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/cone_34.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_cone_34",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/cone_34.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_cone_34",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/cone_34.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_coons_01_03_29",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/coons_01_03_29.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_coons_01_03_29",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/coons_01_03_29.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_coons_01_03_29",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/coons_01_03_29.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_corner_box",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/corner_box.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_corner_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/corner_box.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_corner_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/corner_box.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_crown",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/crown.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_crown",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/crown.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_crown",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/crown.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_cube_sphere2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/cube_sphere2.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_cube_sphere2",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/cube_sphere2.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_cube_sphere2",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/cube_sphere2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_cyl_cyl_219",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/cyl_cyl_219.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_cyl_cyl_219",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/cyl_cyl_219.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_cyl_cyl_219",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/cyl_cyl_219.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_cyl_cyl_2191",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/cyl_cyl_2191.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_cyl_cyl_2191",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/cyl_cyl_2191.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_cyl_cyl_2191",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/cyl_cyl_2191.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_cyl_cyl_shell",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/cyl_cyl_shell.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_cyl_cyl_shell",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/cyl_cyl_shell.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_cyl_cyl_shell",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/cyl_cyl_shell.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_cyl_on_box",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/cyl_on_box.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_cyl_on_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/cyl_on_box.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_cyl_on_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/cyl_on_box.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_cyl_on_box1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/cyl_on_box1.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_cyl_on_box1",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/cyl_on_box1.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_cyl_on_box1",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/cyl_on_box1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_cyl_on_box_w_fillet",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/cyl_on_box_w_fillet.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_cyl_on_box_w_fillet",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/cyl_on_box_w_fillet.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_cyl_on_box_w_fillet",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/cyl_on_box_w_fillet.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_cyl_on_box_w_fillet1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/cyl_on_box_w_fillet1.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_cyl_on_box_w_fillet1",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/cyl_on_box_w_fillet1.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_cyl_on_box_w_fillet1",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/cyl_on_box_w_fillet1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_cyl_on_box_w_fillet2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/cyl_on_box_w_fillet2.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_cyl_on_box_w_fillet2",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/cyl_on_box_w_fillet2.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_cyl_on_box_w_fillet2",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/cyl_on_box_w_fillet2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_cyl_on_box_w_hole",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/cyl_on_box_w_hole.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_cyl_on_box_w_hole",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/cyl_on_box_w_hole.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_cyl_on_box_w_hole",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/cyl_on_box_w_hole.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_cyl_on_box_w_tan_hole",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/cyl_on_box_w_tan_hole.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_cyl_on_box_w_tan_hole",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/cyl_on_box_w_tan_hole.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_cyl_on_box_w_tan_hole",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/cyl_on_box_w_tan_hole.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_cyl_on_box_w_tan_hole2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/cyl_on_box_w_tan_hole2.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_cyl_on_box_w_tan_hole2",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/cyl_on_box_w_tan_hole2.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_cyl_on_box_w_tan_hole2",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/cyl_on_box_w_tan_hole2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_cyl_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/cyl_sphere.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_cyl_sphere",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/cyl_sphere.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_cyl_sphere",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/cyl_sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_eg1_srf1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/eg1_srf1.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_eg1_srf1",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/eg1_srf1.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_eg1_srf1",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/eg1_srf1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_eg1_srf2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/eg1_srf2.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_eg1_srf2",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/eg1_srf2.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_eg1_srf2",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/eg1_srf2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_ext_w_hole",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/ext_w_hole.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_ext_w_hole",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/ext_w_hole.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_ext_w_hole",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/ext_w_hole.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_extrusion0206",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/extrusion0206.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_extrusion0206",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/extrusion0206.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_extrusion0206",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/extrusion0206.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_extrusion0210",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/extrusion0210.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_extrusion0210",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/extrusion0210.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_extrusion0210",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/extrusion0210.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_extrusion1002",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/extrusion1002.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_extrusion1002",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/extrusion1002.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_extrusion1002",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/extrusion1002.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_fillet0114",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/fillet0114.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_fillet0114",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/fillet0114.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_fillet0114",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/fillet0114.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_fillet0227",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/fillet0227.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_fillet0227",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/fillet0227.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_fillet0227",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/fillet0227.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_fillet1010",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/fillet1010.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_fillet1010",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/fillet1010.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_fillet1010",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/fillet1010.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_fillet1017",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/fillet1017.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_fillet1017",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/fillet1017.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_fillet1017",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/fillet1017.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_fillet1018",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/fillet1018.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_fillet1018",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/fillet1018.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_fillet1018",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/fillet1018.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_fillet1019",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/fillet1019.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_fillet1019",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/fillet1019.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_fillet1019",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/fillet1019.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_filleted_box",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/filleted_box.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_filleted_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/filleted_box.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_filleted_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/filleted_box.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_knife",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/knife.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_knife",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/knife.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_knife",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/knife.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_l_shaped_box",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/l_shaped_box.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_l_shaped_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/l_shaped_box.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_l_shaped_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/l_shaped_box.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_letter_g",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/letter_g.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_letter_g",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/letter_g.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_letter_g",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/letter_g.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_loft_brick",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/loft_brick.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_loft_brick",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/loft_brick.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_loft_brick",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/loft_brick.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_nurb_box",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/nurb_box.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_nurb_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/nurb_box.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_nurb_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/nurb_box.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_nurb_box1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/nurb_box1.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_nurb_box1",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/nurb_box1.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_nurb_box1",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/nurb_box1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_nurb_cone",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/nurb_cone.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_nurb_cone",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/nurb_cone.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_nurb_cone",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/nurb_cone.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_nurb_nurb_1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/nurb_nurb_1.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_nurb_nurb_1",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/nurb_nurb_1.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_nurb_nurb_1",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/nurb_nurb_1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_nurb_nurb_2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/nurb_nurb_2.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_nurb_nurb_2",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/nurb_nurb_2.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_nurb_nurb_2",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/nurb_nurb_2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_nurb_plane_w_notch1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/nurb_plane_w_notch1.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_nurb_plane_w_notch1",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/nurb_plane_w_notch1.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_nurb_plane_w_notch1",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/nurb_plane_w_notch1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_nurb_plane_w_notch2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/nurb_plane_w_notch2.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_nurb_plane_w_notch2",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/nurb_plane_w_notch2.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_nurb_plane_w_notch2",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/nurb_plane_w_notch2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_nurb_sph_1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/nurb_sph_1.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_nurb_sph_1",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/nurb_sph_1.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_nurb_sph_1",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/nurb_sph_1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_nurb_sph_2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/nurb_sph_2.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_nurb_sph_2",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/nurb_sph_2.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_nurb_sph_2",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/nurb_sph_2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_open_shell",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/open_shell.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_open_shell",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/open_shell.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_open_shell",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/open_shell.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_rollover_corner",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/rollover_corner.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_rollover_corner",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/rollover_corner.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_rollover_corner",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/rollover_corner.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_shell_fillet",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/shell_fillet.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_shell_fillet",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/shell_fillet.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_shell_fillet",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/shell_fillet.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_shell_fillet2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/shell_fillet2.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_shell_fillet2",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/shell_fillet2.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_shell_fillet2",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/shell_fillet2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_sphere_dif_box",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/sphere_dif_box.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_sphere_dif_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/sphere_dif_box.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_sphere_dif_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/sphere_dif_box.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_sphere_diff_3cylinders",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/sphere_diff_3cylinders.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_sphere_diff_3cylinders",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/sphere_diff_3cylinders.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_sphere_diff_3cylinders",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/sphere_diff_3cylinders.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_sphere_plane",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/sphere_plane.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_sphere_plane",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/sphere_plane.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_sphere_plane",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/sphere_plane.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_test1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/test1.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_test1",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/test1.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_test1",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/test1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_test4",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/test4.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_test4",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/test4.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_test4",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/test4.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_test5",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/test5.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_test5",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/test5.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_test5",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/test5.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_test6",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/test6.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_test6",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/test6.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_test6",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/test6.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_test7",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/test7.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_test7",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/test7.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_test7",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/test7.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_test8",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/test8.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_test8",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/test8.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_test8",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/test8.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_test9",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/test9.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_test9",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/test9.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_test9",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/test9.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_tilt_cyl_on_box",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/tilt_cyl_on_box.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_tilt_cyl_on_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/tilt_cyl_on_box.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_tilt_cyl_on_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/tilt_cyl_on_box.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_torii_fillet",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/torii_fillet.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_torii_fillet",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/torii_fillet.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_torii_fillet",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/torii_fillet.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_torii_unioned",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/torii_unioned.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_torii_unioned",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/torii_unioned.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_torii_unioned",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/torii_unioned.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_vase",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/vase.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_vase",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/vase.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_vase",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/vase.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_vase1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/vase1.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_vase1",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/vase1.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_vase1",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/vase1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_vase2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/vase2.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_vase2",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/vase2.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_vase2",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/vase2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Fillet_vase3",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Fillet/vase3.smb"
+   }
+  },
+  {
+   "name": "noheal_Fillet_vase3",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Fillet/vase3.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Fillet_vase3",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Fillet/vase3.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Mouse",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Mouse.smb"
+   }
+  },
+  {
+   "name": "noheal_Mouse",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Mouse.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Mouse",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Mouse.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Shell_ShellBrep_983",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Shell/ShellBrep_983.smb"
+   }
+  },
+  {
+   "name": "noheal_Shell_ShellBrep_983",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Shell/ShellBrep_983.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Shell_ShellBrep_983",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Shell/ShellBrep_983.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Shell_problemShell",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Shell/problemShell.smb"
+   }
+  },
+  {
+   "name": "noheal_Shell_problemShell",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Shell/problemShell.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Shell_problemShell",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Shell/problemShell.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Shell_problemShell1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Shell/problemShell1.smb"
+   }
+  },
+  {
+   "name": "noheal_Shell_problemShell1",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Shell/problemShell1.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Shell_problemShell1",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Shell/problemShell1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Shell_problemShell10",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Shell/problemShell10.smb"
+   }
+  },
+  {
+   "name": "noheal_Shell_problemShell10",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Shell/problemShell10.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Shell_problemShell10",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Shell/problemShell10.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Shell_problemShell11",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Shell/problemShell11.smb"
+   }
+  },
+  {
+   "name": "noheal_Shell_problemShell11",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Shell/problemShell11.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Shell_problemShell11",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Shell/problemShell11.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Shell_problemShell12",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Shell/problemShell12.smb"
+   }
+  },
+  {
+   "name": "noheal_Shell_problemShell12",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Shell/problemShell12.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Shell_problemShell12",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Shell/problemShell12.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Shell_problemShell13",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Shell/problemShell13.smb"
+   }
+  },
+  {
+   "name": "noheal_Shell_problemShell13",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Shell/problemShell13.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Shell_problemShell13",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Shell/problemShell13.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Shell_problemShell14",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Shell/problemShell14.smb"
+   }
+  },
+  {
+   "name": "noheal_Shell_problemShell14",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Shell/problemShell14.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Shell_problemShell14",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Shell/problemShell14.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Shell_problemShell15",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Shell/problemShell15.smb"
+   }
+  },
+  {
+   "name": "noheal_Shell_problemShell15",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Shell/problemShell15.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Shell_problemShell15",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Shell/problemShell15.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Shell_problemShell16",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Shell/problemShell16.smb"
+   }
+  },
+  {
+   "name": "noheal_Shell_problemShell16",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Shell/problemShell16.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Shell_problemShell16",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Shell/problemShell16.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Shell_problemShell17",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Shell/problemShell17.smb"
+   }
+  },
+  {
+   "name": "noheal_Shell_problemShell17",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Shell/problemShell17.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Shell_problemShell17",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Shell/problemShell17.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Shell_problemShell18",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Shell/problemShell18.smb"
+   }
+  },
+  {
+   "name": "noheal_Shell_problemShell18",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Shell/problemShell18.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Shell_problemShell18",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Shell/problemShell18.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Shell_problemShell19",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Shell/problemShell19.smb"
+   }
+  },
+  {
+   "name": "noheal_Shell_problemShell19",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Shell/problemShell19.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Shell_problemShell19",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Shell/problemShell19.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Shell_problemShell2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Shell/problemShell2.smb"
+   }
+  },
+  {
+   "name": "noheal_Shell_problemShell2",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Shell/problemShell2.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Shell_problemShell2",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Shell/problemShell2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Shell_problemShell20",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Shell/problemShell20.smb"
+   }
+  },
+  {
+   "name": "noheal_Shell_problemShell20",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Shell/problemShell20.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Shell_problemShell20",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Shell/problemShell20.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Shell_problemShell21",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Shell/problemShell21.smb"
+   }
+  },
+  {
+   "name": "noheal_Shell_problemShell21",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Shell/problemShell21.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Shell_problemShell21",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Shell/problemShell21.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Shell_problemShell22",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Shell/problemShell22.smb"
+   }
+  },
+  {
+   "name": "noheal_Shell_problemShell22",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Shell/problemShell22.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Shell_problemShell22",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Shell/problemShell22.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Shell_problemShell23",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Shell/problemShell23.smb"
+   }
+  },
+  {
+   "name": "noheal_Shell_problemShell23",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Shell/problemShell23.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Shell_problemShell23",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Shell/problemShell23.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Shell_problemShell3",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Shell/problemShell3.smb"
+   }
+  },
+  {
+   "name": "noheal_Shell_problemShell3",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Shell/problemShell3.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Shell_problemShell3",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Shell/problemShell3.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Shell_problemShell4",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Shell/problemShell4.smb"
+   }
+  },
+  {
+   "name": "noheal_Shell_problemShell4",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Shell/problemShell4.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Shell_problemShell4",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Shell/problemShell4.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Shell_problemShell5",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Shell/problemShell5.smb"
+   }
+  },
+  {
+   "name": "noheal_Shell_problemShell5",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Shell/problemShell5.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Shell_problemShell5",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Shell/problemShell5.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Shell_problemShell6",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Shell/problemShell6.smb"
+   }
+  },
+  {
+   "name": "noheal_Shell_problemShell6",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Shell/problemShell6.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Shell_problemShell6",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Shell/problemShell6.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Shell_problemShell7",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Shell/problemShell7.smb"
+   }
+  },
+  {
+   "name": "noheal_Shell_problemShell7",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Shell/problemShell7.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Shell_problemShell7",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Shell/problemShell7.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Shell_problemShell8",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Shell/problemShell8.smb"
+   }
+  },
+  {
+   "name": "noheal_Shell_problemShell8",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Shell/problemShell8.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Shell_problemShell8",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Shell/problemShell8.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Shell_problemShell9",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Shell/problemShell9.smb"
+   }
+  },
+  {
+   "name": "noheal_Shell_problemShell9",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Shell/problemShell9.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Shell_problemShell9",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Shell/problemShell9.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Solids_InsetCone",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Solids/InsetCone.smb"
+   }
+  },
+  {
+   "name": "noheal_Solids_InsetCone",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Solids/InsetCone.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Solids_InsetCone",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Solids/InsetCone.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Solids_InsetTaperedExtrude",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Solids/InsetTaperedExtrude.smb"
+   }
+  },
+  {
+   "name": "noheal_Solids_InsetTaperedExtrude",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Solids/InsetTaperedExtrude.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Solids_InsetTaperedExtrude",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Solids/InsetTaperedExtrude.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Solids_OffsetBoxCylOnCorner",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Solids/OffsetBoxCylOnCorner.smb"
+   }
+  },
+  {
+   "name": "noheal_Solids_OffsetBoxCylOnCorner",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Solids/OffsetBoxCylOnCorner.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Solids_OffsetBoxCylOnCorner",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Solids/OffsetBoxCylOnCorner.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Solids_OffsetBoxCylOnCorner_edited",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Solids/OffsetBoxCylOnCorner_edited.smb"
+   }
+  },
+  {
+   "name": "noheal_Solids_OffsetBoxCylOnCorner_edited",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Solids/OffsetBoxCylOnCorner_edited.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Solids_OffsetBoxCylOnCorner_edited",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Solids/OffsetBoxCylOnCorner_edited.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Solids_OffsetBoxCylOnCorner_healed",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Solids/OffsetBoxCylOnCorner_healed.smb"
+   }
+  },
+  {
+   "name": "noheal_Solids_OffsetBoxCylOnCorner_healed",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Solids/OffsetBoxCylOnCorner_healed.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Solids_OffsetBoxCylOnCorner_healed",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Solids/OffsetBoxCylOnCorner_healed.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Solids_OffsetBoxSphOnCorner",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Solids/OffsetBoxSphOnCorner.smb"
+   }
+  },
+  {
+   "name": "noheal_Solids_OffsetBoxSphOnCorner",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Solids/OffsetBoxSphOnCorner.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Solids_OffsetBoxSphOnCorner",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Solids/OffsetBoxSphOnCorner.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Solids_OffsetBoxWithBoss",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Solids/OffsetBoxWithBoss.smb"
+   }
+  },
+  {
+   "name": "noheal_Solids_OffsetBoxWithBoss",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Solids/OffsetBoxWithBoss.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Solids_OffsetBoxWithBoss",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Solids/OffsetBoxWithBoss.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Solids_boolean_trees_result",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Solids/boolean_trees_result.smb"
+   }
+  },
+  {
+   "name": "noheal_Solids_boolean_trees_result",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Solids/boolean_trees_result.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Solids_boolean_trees_result",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Solids/boolean_trees_result.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Solids_box",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Solids/box.smb"
+   }
+  },
+  {
+   "name": "noheal_Solids_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Solids/box.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Solids_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Solids/box.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Solids_cylinder",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Solids/cylinder.smb"
+   }
+  },
+  {
+   "name": "noheal_Solids_cylinder",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Solids/cylinder.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Solids_cylinder",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Solids/cylinder.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Solids_extrusion",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Solids/extrusion.smb"
+   }
+  },
+  {
+   "name": "noheal_Solids_extrusion",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Solids/extrusion.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Solids_extrusion",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Solids/extrusion.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Solids_extrusion2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Solids/extrusion2.smb"
+   }
+  },
+  {
+   "name": "noheal_Solids_extrusion2",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Solids/extrusion2.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Solids_extrusion2",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Solids/extrusion2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Solids_extrusion_old",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Solids/extrusion_old.smb"
+   }
+  },
+  {
+   "name": "noheal_Solids_extrusion_old",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Solids/extrusion_old.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Solids_extrusion_old",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Solids/extrusion_old.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Solids_fillet_cut",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Solids/fillet_cut.smb"
+   }
+  },
+  {
+   "name": "noheal_Solids_fillet_cut",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Solids/fillet_cut.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Solids_fillet_cut",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Solids/fillet_cut.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Solids_fillet_ts",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Solids/fillet_ts.smb"
+   }
+  },
+  {
+   "name": "noheal_Solids_fillet_ts",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Solids/fillet_ts.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Solids_fillet_ts",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Solids/fillet_ts.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Solids_l_shape_with_boss",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Solids/l_shape_with_boss.smb"
+   }
+  },
+  {
+   "name": "noheal_Solids_l_shape_with_boss",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Solids/l_shape_with_boss.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Solids_l_shape_with_boss",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Solids/l_shape_with_boss.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Solids_mouse_1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Solids/mouse_1.smb"
+   }
+  },
+  {
+   "name": "noheal_Solids_mouse_1",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Solids/mouse_1.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Solids_mouse_1",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Solids/mouse_1.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Solids_mouse_2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Solids/mouse_2.smb"
+   }
+  },
+  {
+   "name": "noheal_Solids_mouse_2",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Solids/mouse_2.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Solids_mouse_2",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Solids/mouse_2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Solids_mouse_3",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Solids/mouse_3.smb"
+   }
+  },
+  {
+   "name": "noheal_Solids_mouse_3",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Solids/mouse_3.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Solids_mouse_3",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Solids/mouse_3.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Solids_mouse_4",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Solids/mouse_4.smb"
+   }
+  },
+  {
+   "name": "noheal_Solids_mouse_4",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Solids/mouse_4.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Solids_mouse_4",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Solids/mouse_4.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Solids_mouse_5",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Solids/mouse_5.smb"
+   }
+  },
+  {
+   "name": "noheal_Solids_mouse_5",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Solids/mouse_5.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Solids_mouse_5",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Solids/mouse_5.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Solids_nurb_fillet",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Solids/nurb_fillet.smb"
+   }
+  },
+  {
+   "name": "noheal_Solids_nurb_fillet",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Solids/nurb_fillet.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Solids_nurb_fillet",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Solids/nurb_fillet.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Solids_off_extrusion",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Solids/off_extrusion.smb"
+   }
+  },
+  {
+   "name": "noheal_Solids_off_extrusion",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Solids/off_extrusion.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Solids_off_extrusion",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Solids/off_extrusion.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Solids_offset_bracket2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Solids/offset_bracket2.smb"
+   }
+  },
+  {
+   "name": "noheal_Solids_offset_bracket2",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Solids/offset_bracket2.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Solids_offset_bracket2",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Solids/offset_bracket2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Solids_offset_bracket_box",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Solids/offset_bracket_box.smb"
+   }
+  },
+  {
+   "name": "noheal_Solids_offset_bracket_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Solids/offset_bracket_box.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Solids_offset_bracket_box",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Solids/offset_bracket_box.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Solids_plane",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Solids/plane.smb"
+   }
+  },
+  {
+   "name": "noheal_Solids_plane",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Solids/plane.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Solids_plane",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Solids/plane.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Solids_pyramid",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Solids/pyramid.smb"
+   }
+  },
+  {
+   "name": "noheal_Solids_pyramid",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Solids/pyramid.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Solids_pyramid",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Solids/pyramid.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Solids_revolution",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Solids/revolution.smb"
+   }
+  },
+  {
+   "name": "noheal_Solids_revolution",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Solids/revolution.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Solids_revolution",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Solids/revolution.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Solids_revolution2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Solids/revolution2.smb"
+   }
+  },
+  {
+   "name": "noheal_Solids_revolution2",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Solids/revolution2.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Solids_revolution2",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Solids/revolution2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Solids_revolution_360",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Solids/revolution_360.smb"
+   }
+  },
+  {
+   "name": "noheal_Solids_revolution_360",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Solids/revolution_360.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Solids_revolution_360",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Solids/revolution_360.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Solids_revolution_mold",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Solids/revolution_mold.smb"
+   }
+  },
+  {
+   "name": "noheal_Solids_revolution_mold",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Solids/revolution_mold.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Solids_revolution_mold",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Solids/revolution_mold.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Solids_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Solids/sphere.smb"
+   }
+  },
+  {
+   "name": "noheal_Solids_sphere",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Solids/sphere.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Solids_sphere",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Solids/sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Tess_nurby_box_cyl_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Tess/nurby_box_cyl_sphere.smb"
+   }
+  },
+  {
+   "name": "noheal_Tess_nurby_box_cyl_sphere",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Tess/nurby_box_cyl_sphere.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Tess_nurby_box_cyl_sphere",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Tess/nurby_box_cyl_sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_Tess_tess_20_2_80_0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "Tess/tess_20_2_80_0.smb"
+   }
+  },
+  {
+   "name": "noheal_Tess_tess_20_2_80_0",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "Tess/tess_20_2_80_0.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_Tess_tess_20_2_80_0",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "Tess/tess_20_2_80_0.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_box_with_large_fillet",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "box_with_large_fillet.smb"
+   }
+  },
+  {
+   "name": "noheal_box_with_large_fillet",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "box_with_large_fillet.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_box_with_large_fillet",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "box_with_large_fillet.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_cone",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "cone.smb"
+   }
+  },
+  {
+   "name": "noheal_cone",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "cone.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_cone",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "cone.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_disk",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "disk.smb"
+   }
+  },
+  {
+   "name": "noheal_disk",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "disk.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_disk",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "disk.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_ellips_ts2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "ellips_ts2.smb"
+   }
+  },
+  {
+   "name": "noheal_ellips_ts2",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "ellips_ts2.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_ellips_ts2",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "ellips_ts2.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_plane_circ",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "plane_circ.smb"
+   }
+  },
+  {
+   "name": "noheal_plane_circ",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "plane_circ.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_plane_circ",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "plane_circ.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_plane_square",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "plane_square.smb"
+   }
+  },
+  {
+   "name": "noheal_plane_square",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "plane_square.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_plane_square",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "plane_square.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_sphere",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "sphere.smb"
+   }
+  },
+  {
+   "name": "noheal_sphere",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_sphere",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "sphere.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_surf_extrude",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "surf_extrude.smb"
+   }
+  },
+  {
+   "name": "noheal_surf_extrude",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "surf_extrude.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_surf_extrude",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "surf_extrude.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_surf_rev",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "surf_rev.smb"
+   }
+  },
+  {
+   "name": "noheal_surf_rev",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "surf_rev.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_surf_rev",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "surf_rev.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_surf_sphere150",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "surf_sphere150.smb"
+   }
+  },
+  {
+   "name": "noheal_surf_sphere150",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "surf_sphere150.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_surf_sphere150",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "surf_sphere150.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_torus",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "torus.smb"
+   }
+  },
+  {
+   "name": "noheal_torus",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "torus.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_torus",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "torus.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_toruswvy",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "toruswvy.smb"
+   }
+  },
+  {
+   "name": "noheal_toruswvy",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "toruswvy.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_toruswvy",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "toruswvy.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "read_vase_rev",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::ReadFromFile -> MakeTopologyFromData(data, attrs, FALSE, TRUE, TRUE)",
+   "inputs": {
+    "file": "vase_rev.smb"
+   }
+  },
+  {
+   "name": "noheal_vase_rev",
+   "upstream_ref": "TestFiles/pt_TestFiles (healer disabled: the whole build is compared)",
+   "inputs": {
+    "file": "vase_rev.smb",
+    "options": [
+     false,
+     true,
+     true,
+     false,
+     false,
+     false
+    ]
+   }
+  },
+  {
+   "name": "plain_vase_rev",
+   "upstream_ref": "TestFiles/pt_TestFiles (no analytics, data tolerance clamped, healer disabled)",
+   "inputs": {
+    "file": "vase_rev.smb",
+    "options": [
+     true,
+     false,
+     false,
+     false,
+     false,
+     false
+    ]
+   }
+  }
+ ]
+}

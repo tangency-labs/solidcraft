@@ -1,0 +1,139 @@
+{
+  "area": "shell",
+  "bodies": {
+    "b7": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b9"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b9"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b10"
+      ],
+      "op": "offset_faces",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "distance": 2.0,
+        "faces": {
+          "kind": "face",
+          "picked": [
+            {
+              "at": [],
+              "index": 0
+            }
+          ],
+          "points": [
+            [
+              13.63007792514882,
+              -14.60377833298627,
+              8.333333333333332
+            ]
+          ],
+          "tolerance": 0.05744662646538029
+        }
+      }
+    }
+  ],
+  "case": "3283-offset-face-cylinder-wall",
+  "expected": {
+    "body_count": 1,
+    "center_of_mass": [
+      0,
+      0,
+      5
+    ],
+    "faces": 4,
+    "method": "tube R20/r10 x 10 tall; the outer wall moves out 2 mm to R22: V=pi*(22^2-10^2)*10; faces 4 (outer, inner, top, bottom); centroid (0,0,5)",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#3283",
+      "tangency-labs/solidcraft#3650"
+    ],
+    "volume_mm3": 12063.715789784805,
+    "what": "Offset Face on the outer cylindrical wall of a tube (the picker only accepted planar faces)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 6,
+      "faces": 4,
+      "vertices": 4
+    }
+  },
+  "records": "3283-offset-face-cylinder-wall.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 4423.362456248126,
+      "body_count": 1,
+      "edges": 6,
+      "faces": 4,
+      "vertices": 4,
+      "volume_mm3": 12063.715789722144
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#3283",
+    "tangency-labs/solidcraft#3650"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "merge_faces",
+    "copy",
+    "copy",
+    "tagged",
+    "offset_faces"
+  ],
+  "ungraded": [],
+  "what": "Offset Face on the outer cylindrical wall of a tube (the picker only accepted planar faces)",
+  "why_not": []
+}

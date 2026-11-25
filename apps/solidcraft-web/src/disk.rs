@@ -155,6 +155,17 @@ pub fn input_accept(extensions: &[&str], apple_touch: bool) -> String {
     if apple_touch { String::new() } else { accept_list(extensions) }
 }
 
+/// The extensions the disk picker offers (`showOpenFilePicker`), dotted: everything the browser
+/// build opens, from the format registry, designs first (its first row). The picker
+/// refuses its whole call for one extension outside the File System Access rule ("validate a
+/// suffix": a leading dot, no dot at the end, at most 16 long, only ASCII letters, digits, `+` and
+/// `.`), so such an extension (`.kicad_pcb`) is left out; the picker's "All files" still reaches it.
+pub fn picker_extensions() -> Vec<String> {
+    let suffix_ok =
+        |s: &str| s.starts_with('.') && !s.ends_with('.') && s.len() <= 16 && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'.');
+    solidcraft_engine::io::formats::open_extensions(true).into_iter().map(|e| format!(".{e}")).filter(|e| suffix_ok(e)).collect()
+}
+
 /// The browser runs on an iPhone or iPad (every browser there is WebKit), from its
 /// `navigator.userAgent` and `navigator.maxTouchPoints`. iPadOS presents itself as a Mac; only its
 /// touch screen tells them apart.
@@ -190,8 +201,8 @@ pub use web::*;
 
 #[cfg(target_arch = "wasm32")]
 mod web {
-    use std::cell::{Cell, RefCell};
-    use std::collections::{HashMap, VecDeque};
+    use std::cell::RefCell;
+    use std::collections::HashMap;
     use std::rc::Rc;
 
     use js_sys::{Array, Function, Object, Promise, Reflect};
@@ -200,7 +211,7 @@ mod web {
     use wasm_bindgen_futures::{JsFuture, spawn_local};
     use web_sys::{FileSystemFileHandle, IdbDatabase, IdbObjectStore, IdbOpenDbRequest, IdbRequest, IdbTransactionMode};
 
-    use super::{HANDLE_MAX_AGE_MS, is_abort, make_id, parse, path, plan_prune, save_type};
+    use super::{HANDLE_MAX_AGE_MS, is_abort, make_id, parse, path, picker_extensions, plan_prune, save_type};
     use crate::files::{Files, err, read_handle};
 
     const DB: &str = "solidcraft-disk-handles";
@@ -209,9 +220,6 @@ mod web {
     thread_local! {
         /// Handles picked or looked up in this session, by id.
         static HANDLES: RefCell<HashMap<String, FileSystemFileHandle>> = RefCell::new(HashMap::new());
-        /// Writes waiting for their turn (a file takes one writer at a time), latest per id.
-        static QUEUE: RefCell<VecDeque<(String, Vec<u8>)>> = const { RefCell::new(VecDeque::new()) };
-        static BUSY: Cell<bool> = const { Cell::new(false) };
     }
 
     /// Why a dialog gave no file.
@@ -354,9 +362,7 @@ mod web {
         let options = Object::new();
         let _ = Reflect::set(&options, &"multiple".into(), &JsValue::FALSE);
         let extensions = Array::new();
-        let designs = solidcraft_engine::io::DESIGN_EXTS.iter().map(|e| format!(".{e}"));
-        let others = [".json", ".step", ".stp", ".3mf", ".stl", ".obj", ".glb", ".gltf", ".fcstd", ".3dm", ".dxf", ".svg"].map(String::from);
-        for e in designs.chain(others) {
+        for e in picker_extensions() {
             extensions.push(&e.into());
         }
         let accept = Object::new();
@@ -379,29 +385,7 @@ mod web {
 
     // ---- writing ------------------------------------------------------------------------
 
-    /// Queue what a command wrote to a disk path. Writes go one at a time; a newer write of the
-    /// same file replaces one still waiting.
-    pub fn enqueue(files: &Rc<Files>, path: &str, bytes: Vec<u8>) {
-        QUEUE.with(|q| {
-            let mut q = q.borrow_mut();
-            q.retain(|(p, _)| p != path);
-            q.push_back((path.to_string(), bytes));
-        });
-        if BUSY.with(|b| b.replace(true)) {
-            return;
-        }
-        let files = files.clone();
-        spawn_local(async move {
-            while let Some((path, bytes)) = QUEUE.with(|q| q.borrow_mut().pop_front()) {
-                if let Err(e) = write(&path, &bytes).await {
-                    files.failed_disk(&path, &e);
-                }
-            }
-            BUSY.with(|b| b.set(false));
-        });
-    }
-
-    async fn write(path: &str, bytes: &[u8]) -> Result<(), String> {
+    pub async fn write(path: &str, bytes: &[u8]) -> Result<(), String> {
         let (id, name) = parse(path).ok_or("not a file on the computer")?;
         let handle = handle_for(id).await.map_err(|e| format!("{name}: {e}"))?;
         write_handle(&handle, bytes).await.map_err(|e| format!("{name}: {e}"))
@@ -467,7 +451,7 @@ mod web {
 
     async fn open_db() -> Result<IdbDatabase, String> {
         let factory = web_sys::window().ok_or("no window")?.indexed_db().map_err(err)?.ok_or("this browser has no IndexedDB")?;
-        let request: IdbOpenDbRequest = factory.open_with_u32(DB, 1).map_err(err)?;
+        let request: IdbOpenDbRequest = factory.open_with_u32(&crate::channel::key(DB), 1).map_err(err)?;
         let target = request.clone();
         let upgrade = Closure::once_into_js(move || {
             if let Ok(db) = target.result().and_then(|r| r.dyn_into::<IdbDatabase>()) {
@@ -553,7 +537,7 @@ mod web {
     /// Open a design remembered from an earlier session (a recent one, after a reload): ask once
     /// for access to the file (call in the click), read it into the engine's files and queue it
     /// to open. A file that is gone is forgotten and dropped from the recent designs.
-    pub fn restore(files: &Rc<Files>, path: &str) {
+    pub fn restore(files: &Rc<Files>, path: &str, on_opened: Option<Box<dyn FnOnce()>>) {
         let Some((id, name)) = parse(path) else { return };
         let (files, path, id, name) = (files.clone(), path.to_string(), id.to_string(), name.to_string());
         spawn_local(async move {
@@ -568,6 +552,9 @@ mod web {
                     files.opened.borrow_mut().push(path);
                     files.wake();
                     touch(&id).await;
+                    if let Some(done) = on_opened {
+                        done();
+                    }
                 }
                 Err(e) => {
                     let gone = e.contains("NotFoundError") || e.contains("could not be found") || e.contains("no longer remembers");
@@ -623,9 +610,7 @@ mod tests {
     /// names, whether or not the browser can write to the disk.
     #[test]
     fn writes_to_opfs_paths_still_go_to_opfs() {
-        for p in
-            ["/opfs/Bracket.solidcraft", "/opfs/Bracket (2).solidcraft", "/opfs/recovery.solidcraft", "/opfs/recovery.json", "/opfs/old.solvecraft"]
-        {
+        for p in ["/opfs/Bracket.solidcraft", "/opfs/Bracket (2).solidcraft", "/opfs/recovery.solidcraft", "/opfs/recovery.json", "/opfs/old.sc"] {
             assert_eq!(route(p), WriteTo::Opfs, "{p}");
         }
         // A design opened from OPFS saves to its own path; only a Save As can pick the disk.
@@ -676,7 +661,6 @@ mod tests {
         assert!(opens_design(&[]));
         assert!(opens_design(&["sc"]));
         assert!(opens_design(&["solidcraft"]));
-        assert!(opens_design(&["solvecraft"]));
         assert!(!opens_design(&["step", "stp"]));
         assert!(!opens_design(&["json"]));
     }
@@ -694,6 +678,25 @@ mod tests {
         assert_eq!(accept_list(&[]), "");
         assert!(upload_limit(&["png", "jpg", "jpeg"]).is_some());
         assert_eq!(upload_limit(&["dxf"]), None);
+    }
+
+    /// #7328: the disk picker offers what the browser build opens, from the registry: IGES and
+    /// point clouds too, designs first, and only extensions the picker accepts.
+    #[test]
+    fn the_disk_picker_offers_what_the_browser_build_opens() {
+        let offered = picker_extensions();
+        let designs: Vec<String> = solidcraft_engine::io::DESIGN_EXTS.iter().map(|e| format!(".{e}")).collect();
+        assert_eq!(offered.get(..designs.len()), Some(designs.as_slice()), "designs first: {offered:?}");
+        for e in [".json", ".step", ".igs", ".iges", ".fcstd", ".3dm", ".ply", ".e57", ".usdz", ".dxf", ".svg"] {
+            assert!(offered.iter().any(|x| x == e), "{e} missing from {offered:?}");
+        }
+        assert!(!offered.iter().any(|x| x.starts_with(".kicad")), "the picker refuses `_`: {offered:?}");
+        for e in &offered {
+            assert!(e.len() <= 16 && !e.ends_with('.'), "{e}");
+            assert!(e.bytes().skip(1).all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'.'), "{e}");
+        }
+        let once: std::collections::BTreeSet<_> = offered.iter().collect();
+        assert_eq!(once.len(), offered.len(), "no duplicates in {offered:?}");
     }
 
     /// An iPhone or iPad greys out a `.solidcraft` design the `accept` list names, as it knows no

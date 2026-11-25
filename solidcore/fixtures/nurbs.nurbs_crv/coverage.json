@@ -1,0 +1,340 @@
+{
+ "cases": [
+  {
+   "name": "DropCurveCurve_global_max_1_tol0",
+   "upstream_ref": "source/SMLib/src/SmNurbsCrv.cpp:2873 (sm_BasisFindGlobalMax: no convergence after itl refinements) (coverage: nurbs/nurbs_crv.rs:1976)",
+   "inputs": {
+    "op": "global_max",
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "i": 1,
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "DropCurveCurve_span_maxima_1_tol0",
+   "upstream_ref": "source/SMLib/src/SmNurbsCrv.cpp:2033 (sm_BasisFindAllSpanMaxima: the global maximum does not converge) (coverage: nurbs/nurbs_crv.rs:1976)",
+   "inputs": {
+    "op": "span_maxima",
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "i": 1,
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "DropCurveCurve_global_max_1_tol-1",
+   "upstream_ref": "source/SMLib/src/SmNurbsCrv.cpp:2873 (sm_BasisFindGlobalMax: no convergence after itl refinements) (coverage: nurbs/nurbs_crv.rs:1976)",
+   "inputs": {
+    "op": "global_max",
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "i": 1,
+    "tol": -1.0
+   }
+  },
+  {
+   "name": "DropCurveCurve_span_maxima_1_tol-1",
+   "upstream_ref": "source/SMLib/src/SmNurbsCrv.cpp:2033 (sm_BasisFindAllSpanMaxima: the global maximum does not converge) (coverage: nurbs/nurbs_crv.rs:1976)",
+   "inputs": {
+    "op": "span_maxima",
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "i": 1,
+    "tol": -1.0
+   }
+  },
+  {
+   "name": "DropCurveCurve_global_max_3_tol0",
+   "upstream_ref": "source/SMLib/src/SmNurbsCrv.cpp:2873 (sm_BasisFindGlobalMax: no convergence after itl refinements) (coverage: nurbs/nurbs_crv.rs:1976)",
+   "inputs": {
+    "op": "global_max",
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "i": 3,
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "DropCurveCurve_span_maxima_3_tol0",
+   "upstream_ref": "source/SMLib/src/SmNurbsCrv.cpp:2033 (sm_BasisFindAllSpanMaxima: the global maximum does not converge) (coverage: nurbs/nurbs_crv.rs:1976)",
+   "inputs": {
+    "op": "span_maxima",
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "i": 3,
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "DropCurveCurve_global_max_3_tol-1",
+   "upstream_ref": "source/SMLib/src/SmNurbsCrv.cpp:2873 (sm_BasisFindGlobalMax: no convergence after itl refinements) (coverage: nurbs/nurbs_crv.rs:1976)",
+   "inputs": {
+    "op": "global_max",
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "i": 3,
+    "tol": -1.0
+   }
+  },
+  {
+   "name": "DropCurveCurve_span_maxima_3_tol-1",
+   "upstream_ref": "source/SMLib/src/SmNurbsCrv.cpp:2033 (sm_BasisFindAllSpanMaxima: the global maximum does not converge) (coverage: nurbs/nurbs_crv.rs:1976)",
+   "inputs": {
+    "op": "span_maxima",
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "i": 3,
+    "tol": -1.0
+   }
+  },
+  {
+   "name": "closedCurve_global_max_1_tol0",
+   "upstream_ref": "source/SMLib/src/SmNurbsCrv.cpp:2873 (sm_BasisFindGlobalMax: no convergence after itl refinements) (coverage: nurbs/nurbs_crv.rs:1976)",
+   "inputs": {
+    "op": "global_max",
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "i": 1,
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "closedCurve_span_maxima_1_tol0",
+   "upstream_ref": "source/SMLib/src/SmNurbsCrv.cpp:2033 (sm_BasisFindAllSpanMaxima: the global maximum does not converge) (coverage: nurbs/nurbs_crv.rs:1976)",
+   "inputs": {
+    "op": "span_maxima",
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "i": 1,
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "closedCurve_global_max_1_tol-1",
+   "upstream_ref": "source/SMLib/src/SmNurbsCrv.cpp:2873 (sm_BasisFindGlobalMax: no convergence after itl refinements) (coverage: nurbs/nurbs_crv.rs:1976)",
+   "inputs": {
+    "op": "global_max",
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "i": 1,
+    "tol": -1.0
+   }
+  },
+  {
+   "name": "closedCurve_span_maxima_1_tol-1",
+   "upstream_ref": "source/SMLib/src/SmNurbsCrv.cpp:2033 (sm_BasisFindAllSpanMaxima: the global maximum does not converge) (coverage: nurbs/nurbs_crv.rs:1976)",
+   "inputs": {
+    "op": "span_maxima",
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "i": 1,
+    "tol": -1.0
+   }
+  },
+  {
+   "name": "closedCurve_global_max_3_tol0",
+   "upstream_ref": "source/SMLib/src/SmNurbsCrv.cpp:2873 (sm_BasisFindGlobalMax: no convergence after itl refinements) (coverage: nurbs/nurbs_crv.rs:1976)",
+   "inputs": {
+    "op": "global_max",
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "i": 3,
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "closedCurve_span_maxima_3_tol0",
+   "upstream_ref": "source/SMLib/src/SmNurbsCrv.cpp:2033 (sm_BasisFindAllSpanMaxima: the global maximum does not converge) (coverage: nurbs/nurbs_crv.rs:1976)",
+   "inputs": {
+    "op": "span_maxima",
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "i": 3,
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "closedCurve_global_max_3_tol-1",
+   "upstream_ref": "source/SMLib/src/SmNurbsCrv.cpp:2873 (sm_BasisFindGlobalMax: no convergence after itl refinements) (coverage: nurbs/nurbs_crv.rs:1976)",
+   "inputs": {
+    "op": "global_max",
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "i": 3,
+    "tol": -1.0
+   }
+  },
+  {
+   "name": "closedCurve_span_maxima_3_tol-1",
+   "upstream_ref": "source/SMLib/src/SmNurbsCrv.cpp:2033 (sm_BasisFindAllSpanMaxima: the global maximum does not converge) (coverage: nurbs/nurbs_crv.rs:1976)",
+   "inputs": {
+    "op": "span_maxima",
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "i": 3,
+    "tol": -1.0
+   }
+  },
+  {
+   "name": "crvToOffset_global_max_1_tol0",
+   "upstream_ref": "source/SMLib/src/SmNurbsCrv.cpp:2873 (sm_BasisFindGlobalMax: no convergence after itl refinements) (coverage: nurbs/nurbs_crv.rs:1976)",
+   "inputs": {
+    "op": "global_max",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "i": 1,
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "crvToOffset_span_maxima_1_tol0",
+   "upstream_ref": "source/SMLib/src/SmNurbsCrv.cpp:2033 (sm_BasisFindAllSpanMaxima: the global maximum does not converge) (coverage: nurbs/nurbs_crv.rs:1976)",
+   "inputs": {
+    "op": "span_maxima",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "i": 1,
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "crvToOffset_global_max_1_tol-1",
+   "upstream_ref": "source/SMLib/src/SmNurbsCrv.cpp:2873 (sm_BasisFindGlobalMax: no convergence after itl refinements) (coverage: nurbs/nurbs_crv.rs:1976)",
+   "inputs": {
+    "op": "global_max",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "i": 1,
+    "tol": -1.0
+   }
+  },
+  {
+   "name": "crvToOffset_span_maxima_1_tol-1",
+   "upstream_ref": "source/SMLib/src/SmNurbsCrv.cpp:2033 (sm_BasisFindAllSpanMaxima: the global maximum does not converge) (coverage: nurbs/nurbs_crv.rs:1976)",
+   "inputs": {
+    "op": "span_maxima",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "i": 1,
+    "tol": -1.0
+   }
+  },
+  {
+   "name": "crvToOffset_global_max_3_tol0",
+   "upstream_ref": "source/SMLib/src/SmNurbsCrv.cpp:2873 (sm_BasisFindGlobalMax: no convergence after itl refinements) (coverage: nurbs/nurbs_crv.rs:1976)",
+   "inputs": {
+    "op": "global_max",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "i": 3,
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "crvToOffset_span_maxima_3_tol0",
+   "upstream_ref": "source/SMLib/src/SmNurbsCrv.cpp:2033 (sm_BasisFindAllSpanMaxima: the global maximum does not converge) (coverage: nurbs/nurbs_crv.rs:1976)",
+   "inputs": {
+    "op": "span_maxima",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "i": 3,
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "crvToOffset_global_max_3_tol-1",
+   "upstream_ref": "source/SMLib/src/SmNurbsCrv.cpp:2873 (sm_BasisFindGlobalMax: no convergence after itl refinements) (coverage: nurbs/nurbs_crv.rs:1976)",
+   "inputs": {
+    "op": "global_max",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "i": 3,
+    "tol": -1.0
+   }
+  },
+  {
+   "name": "crvToOffset_span_maxima_3_tol-1",
+   "upstream_ref": "source/SMLib/src/SmNurbsCrv.cpp:2033 (sm_BasisFindAllSpanMaxima: the global maximum does not converge) (coverage: nurbs/nurbs_crv.rs:1976)",
+   "inputs": {
+    "op": "span_maxima",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "i": 3,
+    "tol": -1.0
+   }
+  }
+ ]
+}

@@ -1,0 +1,22 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3326",
+  "tangency-labs/solidcraft#3402"
+ ],
+ "what": "a loft from a 20 mm square to a circle of radius 10 offset 20 mm (the loft tool symbol): the loft geometry looked wrong",
+ "source": "invariants",
+ "method": "the square and the circle are inscribed in each other (circle r 10 touches the square sides), and the pairing of corners to circle points is not canonical, so only invariants are graded: one closed valid solid inside the hull of both sections, bbox x, y +-10, z 0..20.",
+ "body_count": 1,
+ "bbox": {
+  "min": [
+   -10,
+   -10,
+   0
+  ],
+  "max": [
+   10,
+   10,
+   20
+  ]
+ }
+}

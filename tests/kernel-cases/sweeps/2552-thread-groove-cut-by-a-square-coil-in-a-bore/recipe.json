@@ -1,0 +1,56 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 30,
+    "width": 30,
+    "height": 12,
+    "corner": [
+     -7,
+     -7,
+     -1
+    ],
+    "body_name": "Block"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 4.1,
+    "height": 12,
+    "base": [
+     8,
+     8,
+     -1
+    ],
+    "operation": "cut",
+    "targets": [
+     "Block"
+    ]
+   }
+  },
+  {
+   "command": "solid.coil",
+   "params": {
+    "axis": "Z",
+    "base": [
+     8,
+     8,
+     0
+    ],
+    "diameter": 10,
+    "height": 10,
+    "pitch": 1.5,
+    "section": "square",
+    "section_position": "inside",
+    "section_size": 0.9,
+    "name": "Helical thread groove",
+    "operation": "cut",
+    "targets": [
+     "Block"
+    ]
+   }
+  }
+ ]
+}

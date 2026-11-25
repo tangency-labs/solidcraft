@@ -1,0 +1,326 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b223": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b226": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b223"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b224"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b224"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b225"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b226"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b227"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b227"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b228"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b225"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b229"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b228"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b230"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b229",
+        "b230"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b231"
+      ],
+      "params": {
+        "op": "union"
+      }
+    }
+  ],
+  "case": "1140-hollow-lofted-tube-cut-in-half-and-joined",
+  "expected": {
+    "body_count": 1,
+    "method": "the script is the report's own generator (stdlib only, defaults 8 bands x 7 sections, inspect.measure dropped). Every band is a hollow tube cut at z=0 and the bands abut end to end, so the join is one connected solid. No exact volume (the loft of 7 sections only approximates the spiral's ~8.15 L half wall), so only the outcome, validity and body_count are graded",
+    "source": "invariants",
+    "sources": [
+      "tangency-labs/solidcraft#1140"
+    ],
+    "what": "a spiral round tube (radius growing 76 to 210 mm over one turn, 12 mm wall) built as 8 lofted bands, each minus a lofted bore, cut in half through the axis plane z=0 and the halves joined: must give one body"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 88,
+      "faces": 36,
+      "vertices": 54
+    }
+  },
+  "records": "1140-hollow-lofted-tube-cut-in-half-and-joined.bodies.json.gz",
+  "result": [
+    {
+      "body": "Band1",
+      "made": "b231"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 1411871.2150910338,
+      "body_count": 1,
+      "edges": 54,
+      "faces": 20,
+      "vertices": 36,
+      "volume_mm3": 8157562.325952535
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#1140"
+  ],
+  "traced_ops": [
+    "loft",
+    "loft",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "loft",
+    "loft",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "loft",
+    "loft",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "loft",
+    "loft",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "loft",
+    "loft",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "loft",
+    "loft",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "loft",
+    "loft",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "loft",
+    "loft",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a spiral round tube (radius growing 76 to 210 mm over one turn, 12 mm wall) built as 8 lofted bands, each minus a lofted bore, cut in half through the axis plane z=0 and the halves joined: must give one body",
+  "why_not": []
+}

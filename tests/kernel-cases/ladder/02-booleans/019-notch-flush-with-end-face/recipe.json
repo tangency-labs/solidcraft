@@ -1,0 +1,22 @@
+{
+ "base": "../../01-primitives/001-box",
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     20,
+     10,
+     -1
+    ],
+    "length": 40,
+    "width": 20,
+    "height": 22,
+    "operation": "cut",
+    "targets": [
+     "Part"
+    ]
+   }
+  }
+ ]
+}

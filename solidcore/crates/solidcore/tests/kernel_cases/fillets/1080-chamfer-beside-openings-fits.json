@@ -1,0 +1,172 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b32": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b32"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b33"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b33"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b34"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b34"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b35"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b35"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b36"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  0.0,
+                  0.0,
+                  20.0
+                ],
+                [
+                  20.0,
+                  0.0,
+                  20.0
+                ]
+              ],
+              "index": 1
+            }
+          ],
+          "points": [
+            [
+              10.0,
+              0.0,
+              20.0
+            ]
+          ],
+          "tolerance": 1.7330508075688775
+        },
+        "kind": "chamfer",
+        "sizes": [
+          4.0
+        ]
+      }
+    }
+  ],
+  "case": "1080-chamfer-beside-openings-fits",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g0"
+    },
+    "method": "cube 20 with three orthogonal 10x10 through openings (cross): union of the three bars 3*2000 - 3*1000 + 1000 = 4000, so V0 = 8000 - 4000 = 4000. The top front edge (y=0,z=20, length 20) is intact (the openings span 5..15 in the other axes), and a 4 mm setback stays inside the 5 mm between the edge and the openings: it removes 4^2/2 x 20 = 160, V = 3840.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#1080",
+      "tangency-labs/solidcraft#1124"
+    ],
+    "volume_mm3": 3840.0,
+    "what": "a 4 mm chamfer on the top front edge of a cube with three square openings stays clear of the openings (they start 5 mm in)"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 75,
+      "faces": 31,
+      "vertices": 42
+    }
+  },
+  "records": "1080-chamfer-beside-openings-fits.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b36"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 2937.1370849898476,
+      "body_count": 1,
+      "edges": 75,
+      "faces": 31,
+      "vertices": 42,
+      "volume_mm3": 3840.0000000000014
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#1080",
+    "tangency-labs/solidcraft#1124"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "a 4 mm chamfer on the top front edge of a cube with three square openings stays clear of the openings (they start 5 mm in)",
+  "why_not": []
+}

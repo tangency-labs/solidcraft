@@ -4,7 +4,7 @@ import sys
 import tempfile
 import unittest
 
-TOOLS = Path(__file__).resolve().parents[2] / 'assets/icons/ui/design/tools'
+TOOLS = Path(__file__).resolve().parents[2] / 'crates/look/icons/design/tools'
 sys.path.insert(0, str(TOOLS))
 import icon_palette  # noqa: E402
 import review_state  # noqa: E402

@@ -1,0 +1,11 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#4058",
+    "tangency-labs/solidcraft#4059"
+  ],
+  "what": "a 10 mm ring (rounded corners) extruded 40 mm as a Join round a floor's outline: it touches the floor back to back on its flat sides and rounded corners",
+  "source": "analytic",
+  "method": "floor 60x50 with r4 corners, 3.25 thick: (3000-(4-pi)*16)*3.25; minus the pocket 40x30 (r3 corners), 2.25 deep, walls leaning in 15 deg (integral of (40-2d)(30-2d)-(4-pi)(3-d)^2 with d=t*tan15, t=0..2.25); plus the socket 36x26x4.75: 11559.35 (the PR measures 11559.34). Ring area (80*70-(4-pi)*14^2)-(60*50-(4-pi)*4^2) = 2445.487, times 40 = 97819.467. The ring only touches the floor, so V = floor + ring. One solid",
+  "body_count": 1,
+  "volume_mm3": 109378.817
+}

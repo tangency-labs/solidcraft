@@ -1,0 +1,52 @@
+{
+  "area": "sheet-metal",
+  "bodies": {},
+  "calls": [],
+  "case": "4328-convert-l-section-with-modelled-bend",
+  "expected": {
+    "body_count": 1,
+    "method": "the section is a plate of even thickness 2 with a cylindrical bend between its legs, so it converts unchanged: V = (36*2 + 2*26 + (pi/4)(4^2-2^2))*20 = 2668.4956",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#4328"
+    ],
+    "volume_mm3": 2668.4956,
+    "what": "an L section 2 mm thick with its bend modelled round (inner r2, outer r4), converted to sheet metal with the bend picked: refused ('the face across the bend can't be a face of the sheet: curved faces in a converted sheet')"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 28,
+      "faces": 14,
+      "vertices": 16
+    }
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 3015.3451151389268,
+      "body_count": 1,
+      "edges": 24,
+      "faces": 10,
+      "vertices": 16,
+      "volume_mm3": 2668.4955592513265
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#4328"
+  ],
+  "traced_ops": [
+    "extrude"
+  ],
+  "ungraded": [],
+  "what": "an L section 2 mm thick with its bend modelled round (inner r2, outer r4), converted to sheet metal with the bend picked: refused ('the face across the bend can't be a face of the sheet: curved faces in a converted sheet')",
+  "why_not": [
+    "body \"Angle\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+  ]
+}

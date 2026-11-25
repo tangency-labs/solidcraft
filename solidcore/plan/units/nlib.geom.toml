@@ -1,0 +1,12 @@
+id = "nlib.geom"
+upstream = ["source/SMLib/src/NL_FrameBasic.cpp", "source/SMLib/src/NL_Geom.cpp"]
+rust_module = "nurbs::geom"
+depends_on = ["nlib.math"]
+soft_depends_on = []
+est_lines = 1244
+layer = 1
+tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
+status = "green"
+claimed_by = "swarm-nlib.geom-a1"
+claimed_at = "2026-10-12T19:47:08Z"
+notes = "green: 3173 difftest cases (173 fixture + 3000 generated), 0 deferred, max_rel_err 0 (bit-identical). No UNPORTED(nlib.geom) stubs existed to wire. 64 fns; largest: N_CreateTransformMatrixFromAxes, N_IsectLineLine, N_IsectLinePlane, N_CreateRotationMatrixAboutAxis; unit-SCC #2 (3 units); 317 upstream test entry points reach this unit"

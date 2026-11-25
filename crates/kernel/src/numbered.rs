@@ -1,12 +1,14 @@
 //! Profile loops whose segments carry the profile segments they come from, through every way the
-//! builders reshape a loop before building (turning it round, re-seaming a circle, re-splitting
-//! it to match another section). [`FaceOrigin::Profile`](crate::history::FaceOrigin::Profile)
+//! builders reshape a loop before building (turning it round, re-seaming a circle, matching it to
+//! another section, or re-splitting it to match another section when the matching would make
+//! too many segments). [`FaceOrigin::Profile`](crate::history::FaceOrigin::Profile)
 //! numbers are defined here: the segments of the caller's regions in order, each region its outer
 //! loop and then its holes ([`profile_loops`]).
 
+use solidcraft_geom::prelude::*;
 use std::collections::BTreeSet;
 
-use solidcraft_geom::{Loop2, Region2, Seg2};
+use solidcore_record::{Loop2, Region2, Seg2};
 
 /// The loops of `regions` in profile order: each region's outer loop, then its holes.
 pub(crate) fn profile_loops(regions: &[Region2]) -> impl Iterator<Item = &Loop2> {
@@ -122,6 +124,16 @@ impl NumberedLoop {
         out
     }
 
+    /// The loop as matched for a loft (`solidcore_ops::sweep::match_loft_sections`): `segs`, each
+    /// over the numbers of the segments of this loop `from` names.
+    pub(crate) fn matched(&self, segs: Vec<Seg2>, from: &[Vec<usize>]) -> NumberedLoop {
+        let from = from
+            .iter()
+            .map(|ix| if let [i] = ix.as_slice() { self.numbers(*i).to_vec() } else { union(ix.iter().map(|i| self.numbers(*i))) })
+            .collect();
+        NumberedLoop { lp: Loop2 { segs }, from }
+    }
+
     /// Each run of lines that `joins` says continue one another as a single line, over what
     /// they all ran over. (Adjacent profiles merged into one region keep a vertex where each
     /// shared edge met the outline.)
@@ -147,6 +159,19 @@ impl NumberedLoop {
             }
             out.lp.segs.push(s);
             out.from.push(from.to_vec());
+        }
+        out
+    }
+
+    /// The same loop started at a segment `joins` does not join to the one before it, so no run of
+    /// joined segments wraps round the loop's end (as it is when every segment joins the next).
+    pub(crate) fn starting_a_run(&self, joins: impl Fn(&Seg2, &Seg2) -> bool) -> NumberedLoop {
+        let segs = &self.lp.segs;
+        let n = segs.len();
+        let joined = |i: usize| matches!((segs.get((i + n - 1) % n), segs.get(i)), (Some(s), Some(t)) if joins(s, t));
+        let mut out = self.clone();
+        if let Some(k) = (0..n).find(|&i| !joined(i)) {
+            out.rotate_left(k);
         }
         out
     }

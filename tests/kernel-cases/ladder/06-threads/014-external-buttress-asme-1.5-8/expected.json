@@ -1,0 +1,11 @@
+{
+ "sources": [],
+ "what": "a modelled 1.5-8 buttress thread (ASME B1.9 basic profile, 7/45 deg) on a 1.5 in shaft, six turns",
+ "source": "analytic",
+ "method": "groove volume per turn 2 pi int r w(r) dr over the material it cuts (Pappus on the axial section; a screw motion), w(r) = P - flat - depth (tan a + tan b); six whole turns between free ends, so V = stock - 6 x that. Tolerance 0.01%: SMLib's exact screw sweep. ASME B1.9 basic profile: 7 deg load flank, 45 deg clearance flank, h = 0.6 P, flats (P - 0.6 P (tan7 + tan45))/2 = 0.16316 P; the root radius and allowances are not modelled",
+ "body_count": 1,
+ "volume_mm3": 19631.082660727,
+ "tolerance": {
+  "rel": 0.0001
+ }
+}

@@ -1,0 +1,35 @@
+{
+  "area": "sheet-metal",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-perforate-pitch-no-larger-than-the-hole-refused",
+  "expected": {
+    "method": "holes 2 mm across at a 2 mm pitch leave no web between them; the documented rule is pitch > diameter, so the field is refused",
+    "outcome": "refused",
+    "refusal": "pitch > diameter",
+    "source": "invariants",
+    "sources": [],
+    "what": "sheet.perforate with a pitch equal to the hole's diameter: the holes would touch"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 6 (sheet.perforate): perforation needs diameter > 0, pitch > diameter and margin >= 0 (diameter 2, pitch 2, margin 1)",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 6 (sheet.perforate): perforation needs diameter > 0, pitch > diameter and margin >= 0 (diameter 2, pitch 2, margin 1)",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [],
+  "ungraded": [],
+  "what": "sheet.perforate with a pitch equal to the hole's diameter: the holes would touch",
+  "why_not": [
+    "no kernel operation ran before the failure: step 6 (sheet.perforate): perforation needs diameter > 0, pitch > diameter and margin >= 0 (diameter 2, pitch 2, margin 1)"
+  ]
+}

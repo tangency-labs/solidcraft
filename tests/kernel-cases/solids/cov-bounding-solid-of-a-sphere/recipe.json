@@ -1,0 +1,25 @@
+{
+ "commands": [
+  {
+   "command": "solid.sphere",
+   "params": {
+    "radius": 10,
+    "center": [
+     5,
+     5,
+     5
+    ],
+    "body_name": "Ball"
+   }
+  },
+  {
+   "command": "solid.bounding_solid",
+   "params": {
+    "bodies": [
+     "Ball"
+    ],
+    "body_name": "Bound"
+   }
+  }
+ ]
+}

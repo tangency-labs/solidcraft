@@ -1,0 +1,37 @@
+{
+  "area": "construction",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-point-two-edges-refuses-parallel-edges",
+  "expected": {
+    "method": "box 40 x 30 x 20 with a corner at the origin (x 0..40, y 0..30, z 0..20): the edges y 0, z 0 and y 30, z 0 both run along X: they never meet nor have one closest point: refused",
+    "outcome": "refused",
+    "refusal": "the edges are parallel",
+    "source": "analytic",
+    "sources": [],
+    "what": "two parallel box edges"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 2 (construct.point.two_edges): the edges are parallel",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 2 (construct.point.two_edges): the edges are parallel",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude"
+  ],
+  "ungraded": [],
+  "what": "two parallel box edges",
+  "why_not": [
+    "the failure is SolidCraft's, not a kernel operation's: step 2 (construct.point.two_edges): the edges are parallel"
+  ]
+}

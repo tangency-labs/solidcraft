@@ -1,0 +1,25 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4567",
+  "tangency-labs/solidcraft#5076",
+  "tangency-labs/solidcraft#5050",
+  "tangency-labs/solidcraft#4743"
+ ],
+ "what": "a vase revolved from a fit-point spline wall, shelled 2 mm from its flat top: truck refused any free-form wall ('offset: only bodies with planes, cylinders, cones, spheres and tori')",
+ "source": "analytic",
+ "method": "the wall is the sketch's fit-point spline: the natural cubic through the seven points with chord-length parameters, six cubic spans. Its curvature towards the material stays below 0.0765 / mm (radius 13) and away from it below 0.34 / mm, so its 2 mm inward offset, c - 2 n, is a clean curve; the revolved shell's cavity is that offset revolved (the offset of a surface of revolution is its meridian's offset revolved), open at the flat top y = 46 (removed): it leaves the axis at y = 2.00335 (the bottom is a flat cone point, the two halves' offsets meet there) and reaches y = 46 at x = 3.96953, before its end (4.030, 46.346), so it is trimmed, never extended. Volumes by revolving (V = pi int x^2 dy): body 46402.29333 (exact, polynomial per span), cavity 34793.17040 (pi int x_o^2 dy_o along the offset, with o' = c' (1 - 2 k), Gauss quadrature converged to 1e-9). V = 11609.12293. Faces: the outer wall, the inner wall and the rim; the wall reaches x = 22.8722 at most Faces are not graded: whether a spline of several spans is one wall or one face per span is an open decision.",
+ "body_count": 1,
+ "volume_mm3": 11609.12292605581,
+ "bbox": {
+  "min": [
+   -22.8722,
+   0,
+   -22.8722
+  ],
+  "max": [
+   22.8722,
+   46,
+   22.8722
+  ]
+ }
+}

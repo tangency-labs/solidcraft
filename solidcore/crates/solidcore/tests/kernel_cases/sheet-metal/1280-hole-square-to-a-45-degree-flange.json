@@ -1,0 +1,103 @@
+{
+  "area": "sheet-metal",
+  "bodies": {},
+  "calls": [],
+  "case": "1280-hole-square-to-a-45-degree-flange",
+  "expected": {
+    "body_count": 1,
+    "method": "T = 2.5, R = 2.5, K = 0.44, 100 x 60 base and a 15 mm flange at 45 degrees, setback s = 5*tan(22.5 deg) = 2.0711: V45 = 100*(60 - s)*2.5 + 100*(15 - s)*2.5 + (pi/4)(25 - 6.25)*100/2 = 18450.78; the hole removes pi*2.5^2*2.5 = 49.087 of the flange: V = V45 - 15.625*pi",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#1280"
+    ],
+    "volume_mm3": 18401.68948704003,
+    "what": "a 5 mm hole drilled square to the face of a 45 degree flange: the drill cap's certificate refused it by 1e-11 mm"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 34,
+      "faces": 16,
+      "vertices": 20
+    }
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 15629.637035214082,
+      "body_count": 1,
+      "edges": 26,
+      "faces": 11,
+      "vertices": 18,
+      "volume_mm3": 18401.68948699043
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#1280"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "boolean2d",
+    "planar_faces",
+    "planar_faces",
+    "boolean2d"
+  ],
+  "ungraded": [],
+  "what": "a 5 mm hole drilled square to the face of a 45 degree flange: the drill cap's certificate refused it by 1e-11 mm",
+  "why_not": [
+    "body \"Body1\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+  ]
+}

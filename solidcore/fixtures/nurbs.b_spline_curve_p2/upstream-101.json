@@ -1,0 +1,55 @@
+{
+ "cases": [
+  {
+   "name": "reverse_unclamped_rational_quadratic",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:714 TestSmReverseUnclampedCurve (v1.0.1)",
+   "inputs": {
+    "this": {
+     "dim": 3,
+     "oob": false,
+     "crv": {
+      "cpts": [
+       [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+       ],
+       [
+        1.25,
+        1.25,
+        0.0,
+        1.25
+       ],
+       [
+        3.0,
+        0.0,
+        0.0,
+        1.5
+       ],
+       [
+        5.25,
+        1.75,
+        0.0,
+        1.75
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0.0,
+       0.0,
+       0.0,
+       1.2,
+       2.0,
+       3.0,
+       4.0
+      ]
+     }
+    },
+    "op": "reverse",
+    "a": 0.0,
+    "b": 2.0
+   }
+  }
+ ]
+}

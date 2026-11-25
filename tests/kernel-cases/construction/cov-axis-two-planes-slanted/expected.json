@@ -1,0 +1,22 @@
+{
+ "sources": [],
+ "what": "the axis where two slanted planes meet",
+ "source": "analytic",
+ "method": "x + y = 10 (normal (1,1,0) through (10,0,0)) and y + z = 6 (normal (0,1,1) through (0,0,6)): direction (1,1,0) x (0,1,1) = (1,-1,1); (10,0,6) is on both",
+ "construction": {
+  "A": {
+   "axis": {
+    "through": [
+     10,
+     0,
+     6
+    ],
+    "dir": [
+     1,
+     -1,
+     1
+    ]
+   }
+  }
+ }
+}

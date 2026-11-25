@@ -7,12 +7,16 @@
 # An AppImage installs nothing, so every AppImage run would otherwise show the
 # generic "Wayland" icon. Best-effort desktop integration: on first run
 # (and whenever the AppImage's path changes) install the .desktop entry and the
-# hicolor icons into $XDG_DATA_HOME, then launch. Every failure here must leave
-# the launch untouched. Opt out with SOLIDCRAFT_NO_DESKTOP_INTEGRATION=1 (the pre-rename
-# SOLVECRAFT_NO_DESKTOP_INTEGRATION still works: compatibility shim, docs/compatibility.md),
-# or for good with an empty file $XDG_DATA_HOME/solidcraft/no-desktop-integration. Nothing is
-# installed either when appimaged (go-appimage) already made an entry for this AppImage, or when
-# a launcher that manages AppImages (Gear Lever, AppImageLauncher) started it: it sets
+# hicolor icons into $XDG_DATA_HOME, refresh the icon cache, point Icon= at the
+# installed PNG (panels that skip the theme cache still show the mark; #10673),
+# then launch. Only an entry this script generated (marked X-SolidCraft-Generated)
+# is ever replaced: rewriting the entry during a launch makes GNOME Shell lose the
+# window it is about to map (#9679), so a user-edited entry survives and never
+# triggers a rewrite. Every failure here must leave the launch untouched. Opt out with
+# SOLIDCRAFT_NO_DESKTOP_INTEGRATION=1, or for good with an empty
+# file $XDG_DATA_HOME/solidcraft/no-desktop-integration. Nothing is installed either
+# when appimaged (go-appimage) already made an entry for this AppImage, or when a
+# launcher that manages AppImages (Gear Lever, AppImageLauncher) started it: it sets
 # DESKTOPINTEGRATION and owns the menu entry.
 #
 # The same step puts `solidcraft-cli` on PATH: a small wrapper script in ~/.local/bin that starts this
@@ -25,9 +29,12 @@ set -u
 APPDIR="$(dirname "$(readlink -f "$0")")"
 DESK_ID=io.tangencylabs.solidcraft
 CLI_MARKER="# solidcraft-cli wrapper written by the SolidCraft AppImage"
-# Compatibility shim (docs/compatibility.md): the desktop ids of earlier releases (0.8 until the
-# move to Tangency Labs, and before 0.8).
-OLD_DESK_IDS="ai.storyteller.solidcraft ai.storyteller.solvecraft"
+# Marks a .desktop entry this script wrote. An entry without it is the user's
+# (hand-edited, or written by an older release) and is never overwritten (#9679).
+DESK_MARKER="X-SolidCraft-Generated=true"
+# Compatibility shim (docs/compatibility.md): the desktop id of earlier releases (0.8 until the
+# move to Tangency Labs).
+OLD_DESK_IDS="ai.storyteller.solidcraft"
 
 # The wrapper in ~/.local/bin: $1 is the AppImage's path, $2 the home folder.
 install_cli() {
@@ -49,7 +56,7 @@ install_cli() {
 }
 
 integrate() {
-  case "${SOLIDCRAFT_NO_DESKTOP_INTEGRATION:-${SOLVECRAFT_NO_DESKTOP_INTEGRATION:-}}" in
+  case "${SOLIDCRAFT_NO_DESKTOP_INTEGRATION:-}" in
     1 | true | yes) return 0 ;;
   esac
   # The AppImage runtime exports $APPIMAGE; without it (an extracted AppDir) there
@@ -98,24 +105,57 @@ integrate() {
     return 0
   done
 
-  # Rewrite Exec to this AppImage (the binary is not on the host PATH) and drop
-  # TryExec, which would hide the entry; everything else is shipped as packaged.
-  mkdir -p "$apps" 2>/dev/null || return 0
-  tmp="$apps/.$DESK_ID.tmp.$$"
-  esc="$(printf '%s' "$appimage" | sed 's/[\\&|]/\\&/g')"
-  if sed -e "s|^Exec=.*|Exec=\"$esc\" %F|" -e '/^TryExec=/d' "$src_desktop" 2>/dev/null >"$tmp"; then
-    if cmp -s "$tmp" "$apps/$DESK_ID.desktop"; then
-      rm -f "$tmp"
-    else
-      if mv -f "$tmp" "$apps/$DESK_ID.desktop" 2>/dev/null; then
-        command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$apps" >/dev/null 2>&1
-      else
-        rm -f "$tmp"
+  # Icons first: the desktop entry's Icon= points at the installed 256×256 PNG so panels
+  # that skip the theme cache still show the mark (#10673: Mint Cinnamon AppImage taskbar).
+  src_icons="$APPDIR/usr/share/icons/hicolor"
+  icons="$data/icons/hicolor"
+  if [ -d "$src_icons" ]; then
+    (cd "$src_icons" && find . -type f) | while IFS= read -r rel; do
+      mkdir -p "$icons/$(dirname "$rel")" 2>/dev/null || continue
+      if ! cmp -s "$src_icons/$rel" "$icons/$rel"; then
+        cp "$src_icons/$rel" "$icons/$rel" 2>/dev/null || true
       fi
+    done
+    if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+      gtk-update-icon-cache -q -t -f "$icons" 2>/dev/null || true
+    elif command -v update-icon-caches >/dev/null 2>&1; then
+      update-icon-caches "$icons" 2>/dev/null || true
     fi
-  else
-    rm -f "$tmp"
-    return 0
+  fi
+
+  # Rewrite Exec to this AppImage (the binary is not on the host PATH), drop TryExec
+  # (which would hide the entry), and point Icon at the installed PNG when we have one.
+  # Only an entry carrying DESK_MARKER is replaced: replacing the entry while a
+  # launch is in flight makes GNOME Shell never register the window (no dock icon,
+  # and the next launch starts a second instance, #9679). An entry without the
+  # marker is the user's (hand-edited, or written by an older release) and is
+  # left alone for good, so it can never trigger such a rewrite.
+  mkdir -p "$apps" 2>/dev/null || return 0
+  target="$apps/$DESK_ID.desktop"
+  if [ ! -f "$target" ] || grep -q "^$DESK_MARKER\$" "$target" 2>/dev/null; then
+    tmp="$apps/.$DESK_ID.tmp.$$"
+    esc="$(printf '%s' "$appimage" | sed 's/[\\&|]/\\&/g')"
+    icon_png="$icons/256x256/apps/$DESK_ID.png"
+    if [ -f "$icon_png" ]; then
+      icon_esc="$(printf '%s' "$icon_png" | sed 's/[\\&|]/\\&/g')"
+      icon_sed="s|^Icon=.*|Icon=$icon_esc|"
+    else
+      icon_sed='s|^Icon=.*|Icon='"$DESK_ID"'|'
+    fi
+    if { sed -e "s|^Exec=.*|Exec=\"$esc\" %F|" -e '/^TryExec=/d' -e "$icon_sed" "$src_desktop" 2>/dev/null; printf '%s\n' "$DESK_MARKER"; } >"$tmp"; then
+      if cmp -s "$tmp" "$target"; then
+        rm -f "$tmp"
+      else
+        if mv -f "$tmp" "$target" 2>/dev/null; then
+          command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$apps" >/dev/null 2>&1
+        else
+          rm -f "$tmp"
+        fi
+      fi
+    else
+      rm -f "$tmp"
+      return 0
+    fi
   fi
 
   # An entry and icons that an earlier AppImage installed under an old id would show a second
@@ -125,17 +165,6 @@ integrate() {
     if [ -f "$old" ] && grep -q "^Icon=$old_id\$" "$old" && grep -q '^Exec="' "$old"; then
       rm -f "$old" "$data"/icons/hicolor/*/apps/"$old_id".png 2>/dev/null
       command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$apps" >/dev/null 2>&1
-    fi
-  done
-
-  # Icons: per-file compare so an unchanged install costs a handful of cmp calls.
-  src_icons="$APPDIR/usr/share/icons/hicolor"
-  [ -d "$src_icons" ] || return 0
-  icons="$data/icons/hicolor"
-  (cd "$src_icons" && find . -type f) | while IFS= read -r rel; do
-    mkdir -p "$icons/$(dirname "$rel")" 2>/dev/null || continue
-    if ! cmp -s "$src_icons/$rel" "$icons/$rel"; then
-      cp "$src_icons/$rel" "$icons/$rel" 2>/dev/null || true
     fi
   done
 }

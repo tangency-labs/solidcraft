@@ -1,0 +1,14 @@
+#### UB-48. Copying a curve that owns a Hermite base
+- **Severity:** Crash / undefined behaviour
+- **Area:** Curves
+- **Location:** `SmProjectedCurve.cpp:76`, `SmOffsetCurve.cpp:53`, `SmCompositeCurve.cpp:1111`, `SmCrvInVolume.cpp:102` (copy constructors).
+- **What happens:** `SmHermiteCurve` has no `Copy` (base `SmCurve::Copy` returns `SM_ERR`), and the copy constructors ignore the status. The results:
+  - a projected curve with a NULL base;
+  - an offset curve sharing the base pointer, then a double free;
+  - a composite curve with a NULL segment;
+  - an in-volume curve with both objects owning one curve, then a double delete.
+- **Trigger:** Copy an `SmOffsetCurve` that owns an `SmHermiteCurve` base.
+- **How found:** read during porting.
+- **Confirmed:** no.
+- **Severity:** crash/UB (double free, NULL dereference).
+- **Rust port:** Returns the `SM_ERR`, or owns the base by value.

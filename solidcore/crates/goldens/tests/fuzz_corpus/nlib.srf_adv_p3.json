@@ -1,0 +1,6 @@
+{
+  "unit": "nlib.srf_adv_p3",
+  "cases": [
+    {"name": "fuzz01374_alloc_alloc", "origin": "fuzz-out/n2000/nlib.srf_adv_p3/fuzz01374.json (enomem: rust: fit_arrays::alloc sized from a 2^31/2^32 argument, outcome depended on the machine memory)", "issue": "#505", "cpp": "harness: ffi rejected: bad index/count/flag 4294967296", "rust": "ok", "inputs": {"cld": false, "cmp": true, "curves": [{"smc": {"$upstream_file": "DropCurveCurve.smc"}}, {"smc": {"$upstream_file": "crvTrim1.smc"}}], "deg": 4294967296, "dir": 2, "knot_tol": 0.0, "op": "skin"}}
+  ]
+}

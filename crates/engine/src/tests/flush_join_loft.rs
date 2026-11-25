@@ -93,7 +93,7 @@ fn a_flange_flush_with_the_end_of_a_bent_tapered_tube_joins() {
     assert!(body.validity().is_empty(), "{:?}", body.validity());
     assert_eq!(body.lumps().unwrap().len(), 1);
     let (origin, normal) = (Vec3::new(BEND * TURN.sin(), BEND * (1.0 - TURN.cos()), 0.0), Vec3::new(TURN.cos(), TURN.sin(), 0.0));
-    let mesh = body.tessellate(0.05).unwrap();
+    let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.05)).unwrap();
     let beyond = mesh.positions.iter().map(|p| (*p - origin).dot(normal)).fold(f64::MIN, f64::max);
     assert!(beyond < 1e-3, "the join reaches {beyond} mm past the end plane");
 }

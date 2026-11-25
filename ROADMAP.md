@@ -21,7 +21,7 @@ scripts and AI agents can drive the same commands you use.
 - Sheet metal with flat patterns and DXF export, and a plastic-enclosure subset.
 - A Render workspace with GPU rendering, studio lighting, materials and image export
   (first release in 0.22.0).
-- Import and export of STEP, IGES, 3MF, STL, OBJ and DXF, and FreeCAD and Rhino files.
+- Import and export of STEP, IGES, 3MF, STL, OBJ and DXF, GLB export for viewers and renderers, and FreeCAD and Rhino files.
 - Autosave and crash recovery, and the browser build of the same app.
 
 The full list of commands is in [docs/features.md](docs/features.md). Release notes for each
@@ -35,7 +35,7 @@ feature or request. Work merged on a feature branch (`drawings`, `render`) count
 reaches the app only when that branch merges. They are rough, not a promise.
 
 - **[Rendering & materials](https://github.com/tangency-labs/solidcraft/milestone/17)**: in progress, 9 of 34 pieces done, 3 of them built only on the `render` branch and in the app when it merges. The basic Render workspace is already in releases (0.22.0); the interface rework (#6281) and the material and light libraries are what is left.
-- **[Drawings](https://github.com/tangency-labs/solidcraft/milestone/8)**: in progress, 3 of 21 pieces built (2 in releases, 1 on the `drawings` branch), and 3 more partly built there (sheets and borders, bill-of-materials types, the paper scene). Not in the app yet: it lands when the `drawings` branch merges. Today you can export the current view as a DXF.
+- **[Drawings](https://github.com/tangency-labs/solidcraft/milestone/8)**: in progress, 3 of 21 pieces built (2 in releases, 1 on the `drawings` branch), and 3 more partly built there (sheets and borders, bill-of-materials types, the paper scene). Not in the app yet: it lands when the `drawings` branch merges. Today you can export the current view as a DXF. A test runs the first checkpoint of the drawings plan (its milestone M2, [#4894](https://github.com/tangency-labs/solidcraft/issues/4894)) by commands. One part's drawing is made and exported, follows edits to the part when it is updated, keeps a lost dimension until it is repaired, and is saved, opened again and undone. What the program reads, what the sheet shows and the SVG and PNG files agree at each step ([what it checks](docs/drawing-delivery.md#m2-checkpoint-w23)). The browser half of the checkpoint is its own test ([#17648](https://github.com/tangency-labs/solidcraft/pull/17648)).
 - **[Sheet metal](https://github.com/tangency-labs/solidcraft/milestone/15)**: in progress, 1 of 30 requests done. Flanges, hems, unfold and flat patterns already work; the 30 are extensions, mostly the per-edge flange options (segments, miters, partial flanges, reliefs) and bend allowance.
 - **[Sketching](https://github.com/tangency-labs/solidcraft/milestone/14)**: in progress, 12 of 50 pieces done. Dimension types, selection and snapping options.
 - **[Solid modeling](https://github.com/tangency-labs/solidcraft/milestone/2)**: in progress, 9 of 50 pieces done. Blends, holes, threads and patterns.
@@ -43,7 +43,6 @@ reaches the app only when that branch merges. They are rough, not a promise.
 - **[Import & export](https://github.com/tangency-labs/solidcraft/milestone/5)**: in progress, 7 of 39 pieces done. FreeCAD, SolidWorks and point-cloud import, and mesh export options.
 - **[AI agents & MCP](https://github.com/tangency-labs/solidcraft/milestone/18)**: in progress, 2 of 8 pieces done. Agent chat and the MCP server.
 - **[Interface, web app & plugins](https://github.com/tangency-labs/solidcraft/milestone/4)**: in progress, 31 of 96 pieces done. Ribbon redesign, navigation, themes, the web app and plugins.
-- **[SMLib kernel migration](https://github.com/tangency-labs/solidcraft/milestone/1)**: in progress, 1 tracking issue open. The kernel is moving from truck to NVIDIA's SMLib (usd-brep, Apache-2.0) on the `kernel-smlib` branch; it is not in releases yet. Tracked in [#4012](https://github.com/tangency-labs/solidcraft/issues/4012).
 
 ## Next
 

@@ -1,0 +1,254 @@
+{
+  "area": "ladder/06-threads",
+  "bodies": {
+    "b73": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b99": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b73"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b100"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b100"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b101"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b99"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b102"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b102"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b103"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b101"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b104"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b103"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b105"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b104",
+        "b105"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b106"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "010-part-threaded-boss",
+  "expected": {
+    "bbox": {
+      "max": [
+        60,
+        40,
+        35
+      ],
+      "min": [
+        0,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "method": "the boss (r8, z 20..30) stands on the base's top face, a shoulder: the groove stops with its centre w = 0.932735 above it (004's rule, M16 P = 2) and runs out past the free top end; its root r = 8 - 5H/8 = 6.917 stays clear of the M5 tap drill (r 2.1) in the boss. V = the tier-05 part - (pi 8^2 (30 - 20 - w) - 2 pi int_{20+w}^30 int r m(r) dr dz), m as in 001; the bbox is the part's. Later tiers build on the part before this step and 11-cumulative-parts adds the thread last",
+    "source": "analytic",
+    "sources": [],
+    "tolerance": {
+      "rel": 0.0001
+    },
+    "volume_mm3": 53208.190964337,
+    "what": "the running part with a modelled M16 thread on its d16 boss"
+  },
+  "expressible": true,
+  "golden": {
+    "measured": {
+      "area_mm2": 13318.766397751697,
+      "body_count": 1,
+      "edges": 111,
+      "faces": 41,
+      "vertices": 74,
+      "volume_mm3": 53208.190621080044
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 133,
+      "faces": 54,
+      "vertices": 83
+    }
+  },
+  "records": "010-part-threaded-boss.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b106"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 13318.766397751697,
+      "body_count": 1,
+      "edges": 111,
+      "faces": 41,
+      "vertices": 74,
+      "volume_mm3": 53208.190621080044
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "revolve",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "screw_sweep",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "the running part with a modelled M16 thread on its d16 boss",
+  "why_not": []
+}

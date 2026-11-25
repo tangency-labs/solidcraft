@@ -1,0 +1,113 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "YZ",
+    "name": "Stadium"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      -9.5
+     ],
+     [
+      25,
+      -9.5
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.center_point",
+   "params": {
+    "center": [
+     25,
+     0
+    ],
+    "start": [
+     25,
+     -9.5
+    ],
+    "end": [
+     25,
+     9.5
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      25,
+      9.5
+     ],
+     [
+      0,
+      9.5
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.center_point",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "start": [
+     0,
+     9.5
+    ],
+    "end": [
+     0,
+     -9.5
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Stadium",
+    "distance": 14
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     3.5,
+     -12,
+     -10
+    ],
+    "length": 6,
+    "width": 12,
+    "height": 20,
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      6.5,
+      0,
+      9.5
+     ]
+    ],
+    "radius": 2
+   }
+  }
+ ]
+}

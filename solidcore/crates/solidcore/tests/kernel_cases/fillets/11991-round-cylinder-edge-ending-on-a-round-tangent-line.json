@@ -1,0 +1,87 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b1": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b1"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  5.0,
+                  0.0,
+                  13.0
+                ],
+                [
+                  11.0,
+                  0.0,
+                  13.0
+                ]
+              ],
+              "index": 18
+            }
+          ],
+          "points": [
+            [
+              8.0,
+              0.0,
+              13.0
+            ]
+          ],
+          "tolerance": 0.01
+        },
+        "kind": "round",
+        "sizes": [
+          0.5
+        ]
+      }
+    }
+  ],
+  "case": "11991-round-cylinder-edge-ending-on-a-round-tangent-line",
+  "expected": {
+    "body_count": 1,
+    "method": "Before: 30*20*20 - (1 - pi/4)*5^2*20 + (pi*2^2/2)*6 = 12000 - 500 (1 - pi/4) + 12 pi = 11930.398193541801. The round runs the full 6 mm between the cylinder's two plane end faces, square to the edge, so it adds 6 times its cross-section A. In the section x = const, (y, z): the disc of radius 2 about (0, 15) with y <= 0, the face y = 0, the edge at E = (0, 13). The ball of radius 0.5 touches y = 0 and the circle from outside: centre B = (-0.5, 15 - sqrt 6) (0.25 + (15 - z)^2 = 2.5^2), feet P1 = (0, 15 - sqrt 6) on the face and T2 = (-0.4, 15 - 0.8 sqrt 6) on the circle. A is the quadrilateral B P1 E T2 (0.21237243569579478) less the circle's segment between E and T2 (2 (asin 0.2 - 0.2) = 0.002715841580661571) less the ball's sector between P1 and T2 (acos(0.2)/8 = 0.17117980075057074): A = 0.03847679336456247; a 4000 x 1000 grid count gives 0.038474. Volume 11930.398193541801 + 6 A = 11930.62905430199. body_count 1",
+    "outcome": "solid",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#11991",
+      "tangency-labs/solidcore#2843"
+    ],
+    "tolerance": {
+      "rel": 1e-09
+    },
+    "volume_mm3": 11930.62905430199,
+    "what": "a box 30 x 20 x 20 with its vertical edge at x = y = 0 rounded R5, joined with a half cylinder r2 along x (axis y = 0, z = 15, x 5..11) standing out of the front face y = 0; the cylinder's end x = 5 lies exactly on the line where the front face runs tangent into the R5 round. The concave edge where the cylinder meets the front face (z = 13) rounded 0.5 must give one closed solid, as it does at x = 5.001 or 6"
+  },
+  "expressible": true,
+  "gallery_note": "the half cylinder's end sits on the line where the front face runs into the R5 round; the round of its foot runs the full 6 and ends on the end disc's plane, whose patch closes it against the R5 round",
+  "operation_expressible": true,
+  "records": "11991-round-cylinder-edge-ending-on-a-round-tangent-line.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b2"
+    }
+  ],
+  "sources": [
+    "tangency-labs/solidcraft#11991",
+    "tangency-labs/solidcore#2843"
+  ],
+  "ungraded": [],
+  "what": "a box 30 x 20 x 20 with its vertical edge at x = y = 0 rounded R5, joined with a half cylinder r2 along x (axis y = 0, z = 15, x 5..11) standing out of the front face y = 0; the cylinder's end x = 5 lies exactly on the line where the front face runs tangent into the R5 round. The concave edge where the cylinder meets the front face (z = 13) rounded 0.5 must give one closed solid, as it does at x = 5.001 or 6",
+  "why_not": []
+}

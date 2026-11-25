@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 
 use super::check::schema_keys;
 use super::features::{BoxParams, ExtrudeParams};
+use super::types::{RevolveAxis, RevolveConventionParam, RevolveDirection, RevolveToPoint};
 use super::*;
 use crate::Session;
 
@@ -20,6 +21,27 @@ fn box_contract() -> TypedContract<BoxParams> {
 
 fn messages(issues: &[Issue]) -> Vec<String> {
     issues.iter().map(|i| i.message.clone()).collect()
+}
+
+#[test]
+fn plugin_remove_defaults_to_keeping_user_data_in_the_schema_and_parser() {
+    let schema = input_schema_for::<plugin::RemoveParams>();
+    let root = schema.as_value();
+    assert_eq!(root["required"], json!(["id"]));
+    assert_eq!(root["properties"]["remove_user_data"]["default"], false);
+    for (params, expected) in [
+        (json!({"id":"gears"}), false),
+        (json!({"id":"gears", "remove_user_data":false}), false),
+        (json!({"id":"gears", "remove_user_data":true}), true),
+    ] {
+        assert!(conforms(root, root, &params));
+        assert_eq!(parse::<plugin::RemoveParams>(params).unwrap().remove_user_data, expected);
+    }
+    for value in [json!(null), json!("false"), json!(0)] {
+        let params = json!({"id":"gears", "remove_user_data":value});
+        assert!(!conforms(root, root, &params));
+        assert!(parse::<plugin::RemoveParams>(params).is_none());
+    }
 }
 
 #[test]
@@ -76,6 +98,33 @@ fn axes_and_scale_factors_match_their_readers() {
         assert!(parse::<ScaleFactors>(v.clone()).is_none(), "{v}");
         assert!(!conforms(root, root, &v), "{v}");
     }
+}
+
+/// A cylinder's `AxisDirExpr` (#18822) takes what `AxisDir` takes, and `[x, y, z]` or
+/// `{x, y, z}` with expressions among the numbers; its schema agrees with its reader, except
+/// for the zero vector, which a schema can't refuse.
+#[test]
+fn an_expression_axis_matches_its_reader() {
+    let root = schemars::schema_for!(AxisDirExpr);
+    let root = root.as_value();
+    let given = [json!("X"), json!(" y "), json!([0, 0, 1]), json!([0, "-sin(t)", "-cos(t)"]), json!({"x": "a", "y": 0, "z": 1})];
+    for v in given {
+        assert!(crate::cmd::axis_expr_form(&v).is_ok(), "{v}");
+        assert!(parse::<AxisDirExpr>(v.clone()).is_some(), "{v}");
+        assert!(conforms(root, root, &v), "{v}");
+    }
+    for v in [json!("W"), json!([1, 2]), json!([0, "", 1]), json!([0, true, "a"]), json!({"x": "a"}), json!(null), json!([0, 0, 0])] {
+        assert!(crate::cmd::axis_expr_form(&v).is_err(), "{v}");
+        assert!(parse::<AxisDirExpr>(v.clone()).is_none(), "{v}");
+        if !v.is_string() {
+            assert_eq!(conforms(root, root, &v), v == json!([0, 0, 0]), "{v}");
+        }
+    }
+    // Plain numbers are normalized, as `AxisDir` reads them; expressions are kept as given.
+    let d = crate::cmd::axis_expr_form(&json!([0, 0, 2])).unwrap();
+    assert_eq!(d.map(|e| e.to_string()), ["0", "0", "1"]);
+    let d = crate::cmd::axis_expr_form(&json!([0, "-sin(t)", 2])).unwrap();
+    assert_eq!(d.map(|e| e.to_string()), ["0", "-sin(t)", "2"]);
 }
 
 #[test]
@@ -274,17 +323,30 @@ fn present_null_is_refused_but_absent_is_fine() {
     assert!(c.check(&json!({"distance": 5})).is_empty());
     // `body` picks the placed instance `face` is read in (frames::to_local), so it is a key.
     assert!(c.check(&json!({"distance": 5, "face": [0, 0, 0], "body": "Part"})).is_empty());
-    for key in ["sketch", "profiles", "faces", "convention", "to", "from", "thin"] {
+    for key in ["sketch", "profiles", "faces", "face", "convention", "to", "from", "thin"] {
         let mut p = json!({"distance": 5});
         p[key] = Value::Null;
         assert_eq!(c.check(&p).len(), 1, "{key}: null");
     }
     // Keys today's reader treats `null` like absence stay optional.
-    for key in ["taper", "direction", "face", "operation", "name"] {
+    for key in ["taper", "direction", "operation", "name"] {
         let mut p = json!({"distance": 5});
         p[key] = Value::Null;
         assert!(c.check(&p).is_empty(), "{key}: null");
     }
+}
+
+/// A box design's drawing, open, checking parameters at `level`, and its source's id: where the
+/// drawing commands' schemas are tested.
+pub(super) fn drawing_session(level: ParamCheck) -> (Session, Value) {
+    let mut s = Session::default();
+    let design = json!({"length": 40, "width": 30, "height": 10, "body_name": "Plate"});
+    for (id, p) in [("solid.box", design), ("drawing.create", json!({}))] {
+        s.execute(id, &p).unwrap_or_else(|e| panic!("{id}: {e}"));
+    }
+    s.param_check = level;
+    let id = s.execute("drawing.inspect", &json!({})).unwrap_or_else(|e| panic!("{e}"))["sources"][0]["id"].clone();
+    (s, id)
 }
 
 pub(super) fn sketch_rectangle(s: &mut Session) {
@@ -361,17 +423,151 @@ fn the_level_survives_a_new_design() {
     assert_eq!(s.scratch().param_check, ParamCheck::Strict);
 }
 
+#[test]
+fn issues_are_read_from_the_commands_own_contract() {
+    let issues = super::issues("solid.box", &json!({"length": 1, "width": 1, "height": 1, "operaton": "cut"}));
+    assert_eq!(messages(&issues), ["unknown key `operaton`; did you mean `operation`?"]);
+    assert_eq!(issues, box_contract().check(&json!({"length": 1, "width": 1, "height": 1, "operaton": "cut"})));
+    // No contract, or no such command: nothing to say. The first command without a contract
+    // stands for them all, so converting a command doesn't break this.
+    if let Some(c) = crate::cmd::command_specs().into_iter().find(|c| c.contract.is_none()) {
+        assert!(super::issues(c.id, &json!({"nonsense": 1})).is_empty(), "{}", c.id);
+    }
+    assert!(super::issues("no.such", &json!({"nonsense": 1})).is_empty());
+}
+
+#[test]
+fn a_level_is_read_back_from_its_name() {
+    for level in ParamCheck::ALL {
+        assert_eq!(ParamCheck::parse(level.name()), Some(level));
+    }
+}
+
+#[test]
+fn ui_prefs_browser_scroll_wheel_schema_lists_supported_modes() {
+    use super::ui_prefs::{BrowserScrollWheel, PrefsParams};
+    let schema = input_schema_for::<PrefsParams>();
+    let schema = schema.as_value();
+    assert!(schema["properties"]["browser_scroll_wheel"].is_object());
+    for (id, expected) in
+        [("automatic", BrowserScrollWheel::Automatic), ("always_zoom", BrowserScrollWheel::AlwaysZoom), ("always_pan", BrowserScrollWheel::AlwaysPan)]
+    {
+        let value = json!({"browser_scroll_wheel":id});
+        let parsed = serde_json::from_value::<PrefsParams>(value.clone()).unwrap();
+        assert_eq!(parsed.browser_scroll_wheel, Some(expected));
+        assert!(conforms(schema, schema, &value), "{value}");
+    }
+    assert_eq!(serde_json::from_value::<PrefsParams>(json!({})).unwrap().browser_scroll_wheel, None);
+    for invalid in [json!("future"), json!(42), json!(true), json!(null)] {
+        let value = json!({"browser_scroll_wheel":invalid});
+        assert!(serde_json::from_value::<PrefsParams>(value.clone()).is_err());
+        assert!(!conforms(schema, schema, &value), "{value}");
+    }
+}
+
+#[test]
+fn ui_prefs_theme_options_input_schema_covers_updates_and_resets() {
+    use super::ui_prefs::PrefsParams;
+    let schema = input_schema_for::<PrefsParams>();
+    let schema = schema.as_value();
+    assert!(schema["properties"]["theme_options"].is_object());
+    for value in [
+        json!({}),
+        json!({"theme_options":{}}),
+        json!({"theme_options":{"a":{}}}),
+        json!({"theme_options":{"a":{"enabled":true,"amount":3.5,"style":"cool","reset":null}},"theme":"a"}),
+    ] {
+        assert!(serde_json::from_value::<PrefsParams>(value.clone()).is_ok(), "{value}");
+        assert!(conforms(schema, schema, &value), "{value}");
+    }
+    for value in [
+        json!({"theme_options":null}),
+        json!({"theme_options":[]}),
+        json!({"theme_options":{"a":true}}),
+        json!({"theme_options":{"a":{"enabled":{}}}}),
+        json!({"theme_options":{"a":{"amount":[]}}}),
+    ] {
+        assert!(serde_json::from_value::<PrefsParams>(value.clone()).is_err(), "{value}");
+    }
+}
+
+#[test]
+fn ui_prefs_theme_options_output_schema_matches_serialized_reply() {
+    use super::ui_prefs::*;
+    let options = ThemeOptionsReply {
+        theme_option_defs: vec![
+            ThemeOptionDef {
+                id: "enabled".into(),
+                kind: ThemeOptionKind::Bool { default: false },
+                label: "Enabled".into(),
+                help: String::new(),
+                parent: None,
+                advanced: false,
+                section: None,
+                standard: false,
+                available: true,
+                reason: None,
+            },
+            ThemeOptionDef {
+                id: "blur".into(),
+                kind: ThemeOptionKind::Range { default: 0.0, min: 0.0, max: 100.0, step: 1.0, unit: Some("px".into()) },
+                label: "blur".into(),
+                help: String::new(),
+                parent: None,
+                advanced: false,
+                section: None,
+                standard: true,
+                available: false,
+                reason: Some("not implemented".into()),
+            },
+            ThemeOptionDef {
+                id: "style".into(),
+                kind: ThemeOptionKind::Choice { default: "warm".into(), values: vec![ThemeChoice { id: "warm".into(), label: "Warm".into() }] },
+                label: "Style".into(),
+                help: String::new(),
+                parent: Some("enabled".into()),
+                advanced: true,
+                section: Some("Details".into()),
+                standard: false,
+                available: true,
+                reason: None,
+            },
+        ],
+        theme_option_values: [
+            ("enabled".into(), ThemeOptionValue::Bool(true)),
+            ("blur".into(), ThemeOptionValue::Num(0.0)),
+            ("style".into(), ThemeOptionValue::Choice("warm".into())),
+        ]
+        .into(),
+        theme_option_notices: vec![ThemeOptionNotice { id: "removed".into(), kind: ThemeOptionNoticeKind::UnknownOption }],
+    };
+    let reply = PrefsReply { options, settings: [("theme".into(), json!("a")), ("theme_options".into(), json!({"a":{"enabled":true}}))].into() };
+    let value = serde_json::to_value(&reply).unwrap();
+    let schema = output_schema_for::<PrefsReply>();
+    let schema = schema.as_value();
+    for field in ["theme_option_defs", "theme_option_values", "theme_option_notices"] {
+        assert!(schema["properties"][field].is_object(), "{schema}");
+    }
+    assert!(conforms(schema, schema, &value), "{schema}\n{value}");
+    assert_eq!(serde_json::to_value(serde_json::from_value::<PrefsReply>(value.clone()).unwrap()).unwrap(), value);
+}
+
 /// Whether `v` conforms to `node` of the schema `root`, for the keywords these schemas use
 /// apart from `pattern`: `type`, `properties`, `required`, `additionalProperties: false`,
 /// `items`, `minItems`, `maxItems`, `uniqueItems`, `enum`, `minLength`, `maxLength`, `minimum`,
 /// `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `anyOf`, `not` and `$ref`. (`integer`
 /// here is what serde reads as one, so `1.0` is not.)
-pub(super) fn conforms(root: &Value, node: &Value, v: &Value) -> bool {
+pub(crate) fn conforms(root: &Value, node: &Value, v: &Value) -> bool {
     if let Some(name) = node.get("$ref").and_then(Value::as_str).and_then(|r| r.strip_prefix("#/$defs/")) {
         return root.get("$defs").and_then(|d| d.get(name)).is_some_and(|t| conforms(root, t, v));
     }
     if let Some(branches) = node.get("anyOf").and_then(Value::as_array)
         && !branches.iter().any(|b| conforms(root, b, v))
+    {
+        return false;
+    }
+    if let Some(branches) = node.get("allOf").and_then(Value::as_array)
+        && !branches.iter().all(|b| conforms(root, b, v))
     {
         return false;
     }
@@ -396,8 +592,15 @@ pub(super) fn conforms(root: &Value, node: &Value, v: &Value) -> bool {
     if !typed {
         return false;
     }
+    // `prefixItems` checks the leading elements; `items` then covers the rest.
+    let prefix = node.get("prefixItems").and_then(Value::as_array);
+    if let (Some(prefix), Some(a)) = (prefix, v.as_array())
+        && !prefix.iter().zip(a).all(|(p, x)| conforms(root, p, x))
+    {
+        return false;
+    }
     if let (Some(items), Some(a)) = (node.get("items"), v.as_array())
-        && !a.iter().all(|x| conforms(root, items, x))
+        && !a.iter().skip(prefix.map_or(0, Vec::len)).all(|x| conforms(root, items, x))
     {
         return false;
     }
@@ -556,6 +759,33 @@ pub(super) fn assert_keys(schema: Schema, fields: &[&str]) {
     assert_eq!(v.get("$schema").and_then(Value::as_str), Some("https://json-schema.org/draft/2020-12/schema"));
 }
 
+/// Every string the schema's `$defs` entry `def` allows by `enum` or `const`, however it nests
+/// them, sorted: a reply's closed list, which each module's test holds to the list's `ALL`.
+pub(super) fn closed_list(schema: &Schema, def: &str) -> Vec<String> {
+    fn walk(node: &Value, out: &mut Vec<String>) {
+        match node {
+            Value::Object(o) => o.iter().for_each(|(key, v)| match (key.as_str(), v) {
+                ("enum", Value::Array(list)) => out.extend(list.iter().filter_map(Value::as_str).map(str::to_string)),
+                ("const", Value::String(name)) => out.push(name.clone()),
+                _ => walk(v, out),
+            }),
+            Value::Array(list) => list.iter().for_each(|v| walk(v, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    walk(&schema.as_value()["$defs"][def], &mut out);
+    out.sort();
+    out
+}
+
+/// The names `values` serialize to, sorted: a closed list's `ALL`, for [`closed_list`].
+pub(super) fn names_of<T: serde::Serialize>(values: &[T]) -> Vec<String> {
+    let mut out: Vec<String> = values.iter().filter_map(|v| serde_json::to_value(v).ok()?.as_str().map(str::to_string)).collect();
+    out.sort();
+    out
+}
+
 /// A call with one problem that already fails gets the same error in strict as with the check
 /// off, apart from messages that differ on purpose. Chiefly: a missing key; a value the handler
 /// reads as missing where its message for a missing key says something else (a wrong type, a
@@ -568,7 +798,8 @@ pub(super) fn assert_keys(schema: Schema, fields: &[&str]) {
 /// (strict's comes from `TypedContract::check` and serde), and the handler may stop first at
 /// one the contract can't see (against the design: a pick that finds nothing, a missing sketch,
 /// an expression that doesn't evaluate; one of two keys, such as `radius` or `diameter`; an
-/// empty list).
+/// empty list). A value a helper reads as another command's (the pick-up's `appearance.chain`
+/// target) names that command with the check off and the one that was called in strict.
 /// Each module's `strict_keeps_todays_errors` calls this with its commands' cases; each runs
 /// after `sketch_rectangle`.
 pub(super) fn assert_strict_keeps_todays_errors(cases: &[(&str, Value)]) {
@@ -670,7 +901,7 @@ fn face_and_edge_refs_match_the_pick_readers() {
     assert!(parse::<EdgeRef>(json!({"body": "A", "index": 1.0})).is_none());
     assert_eq!(edge_schema["anyOf"][2]["properties"]["index"]["type"], "integer");
     assert_eq!(parse::<EdgeRef>(json!({"body": "A", "index": 4})), Some(EdgeRef::Index { body: "A".into(), index: 4 }));
-    assert_eq!(parse::<FaceRef>(json!({"point": [1, 2, 3]})), Some(FaceRef::Point(solidcraft_geom::Vec3::new(1.0, 2.0, 3.0))));
+    assert_eq!(parse::<FaceRef>(json!({"point": [1, 2, 3]})), Some(FaceRef::Point(solidcore_record::Vec3::new(1.0, 2.0, 3.0))));
 }
 
 /// The pick lists take 1 to 1000 picks, as `face_points` and `edge_points` do, and so do their
@@ -803,7 +1034,8 @@ fn shared_types_keep_the_handlers_messages() {
     for (id, p, probe) in [
         ("solid.shell", json!({"thickness": 1, "faces": 5}), json!({"faces": 5})),
         ("solid.shell", json!({"thickness": 1, "faces": null}), json!({"faces": null})),
-        ("solid.shell", json!({"thickness": 1, "faces": []}), json!({"faces": []})),
+        // `solid.shell` takes no faces (a closed hollow body); the draft refuses them.
+        ("solid.draft", json!({"angle": 1, "faces": []}), json!({"faces": []})),
         ("solid.shell", json!({"thickness": 1, "faces": [true]}), json!({"faces": [true]})),
         ("solid.shell", json!({"thickness": 1, "faces": [""]}), json!({"faces": [""]})),
         ("solid.fillet", json!({"radius": 1, "edges": {}}), json!({"edges": {}})),
@@ -851,4 +1083,357 @@ fn picks_are_still_looked_up_one_at_a_time() {
     assert_eq!(error(&mut s, "solid.extrude", json!({"distance": 5, "sketch": "Nope"})), "invalid parameters for `solid.extrude`: no sketch `Nope`");
     let r = s.execute("solid.fillet", &fillet(json!([{"body": "Body1", "index": 0}]))).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(r["changed_bodies"], json!(["Body1"]), "{r}");
+}
+
+/// A reference is accepted as `construct::geo` reads it before it looks anything up, and its
+/// schema says the same, the first form that fits deciding, apart from what a schema can't say
+/// (below).
+#[test]
+fn references_match_the_reference_reader() {
+    let schema = input_schema_for::<GeoRefParam>();
+    let schema = schema.as_value();
+    for (v, accepted) in [
+        (json!({"face": [1, 2, 3]}), true),
+        (json!({"edge": {"x": 1, "y": 2, "z": 3}}), true),
+        (json!({"vertex": [1, 2, 3], "body": "Body1"}), true),
+        (json!({"face": "F1", "edge": [1, 2, 3]}), true),
+        (json!({"face": [1e9, 0, 0]}), false),
+        (json!({"type": "point", "p": [1, 2, 3]}), true),
+        (json!({"type": "origin"}), true),
+        (json!({"type": "bogus"}), false),
+        (json!({"type": null, "face": [1, 2, 3]}), false),
+        (json!({"sketch": 3, "point": "p1"}), true),
+        (json!({"sketch": "Guide", "curve": "l1"}), true),
+        (json!({"sketch": 2.5, "point": [1, 2], "curve": "l1"}), true),
+        (json!({"sketch": true, "point": "p1"}), false),
+        (json!({"sketch": 3}), false),
+        (json!({"sketch": null, "point": [1, 2, 3]}), false),
+        (json!({"point": [1, 2, 3]}), true),
+        (json!({"point": "p1"}), false),
+        (json!({"plane": "XY"}), true),
+        (json!({"plane": 4}), true),
+        (json!({"plane": -4}), false),
+        (json!({"plane": {"normal": [0, 0, 1]}}), true),
+        (json!({"plane": {"origin": ["w", 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}), true),
+        (json!({"plane": {"x_dir": [1, 0, 0]}}), false),
+        (json!({"plane": {"origin": [0, 0], "normal": [0, 0, 1]}}), false),
+        (json!({"plane": 2.5, "axis": "X"}), false),
+        (json!({"point": [1, 2, 3], "plane": 2.5}), true),
+        (json!({"axis": "X"}), true),
+        (json!({"axis": "o:2/3/origin/X"}), true),
+        (json!({"axis": 1, "construct_point": "P"}), true),
+        (json!({"construct_point": "P"}), true),
+        (json!({"construct_point": "o:2/3/origin/O"}), true),
+        (json!({"construct_point": 1}), false),
+        (json!("Shelf"), true),
+        (json!(""), true),
+        (json!(5), false),
+        (json!(null), false),
+        (json!([1, 2, 3]), false),
+        (json!({}), false),
+    ] {
+        let form = match crate::cmd::geo_form(&v) {
+            Ok(crate::cmd::GeoForm::Sketch { sketch, part }) => crate::cmd::sketch_key(Some(sketch)).is_some() && part.is_some(),
+            Ok(crate::cmd::GeoForm::Plane(plane)) => parse::<PlaneParam>(plane.clone()).is_some(),
+            form => form.is_ok(),
+        };
+        assert_eq!(form, accepted, "reader {v}");
+        assert_eq!(parse::<GeoRefParam>(v.clone()).is_some(), accepted, "{v}");
+        assert_eq!(conforms(schema, schema, &v), accepted, "schema {v}");
+    }
+    // Where the schema can't follow the reader: a saved reference is read whole by serde, and an
+    // explicit plane's directions must make a plane.
+    for v in [json!({"type": "face", "at": "x"}), json!({"plane": {"normal": [0, 0, 0]}})] {
+        assert!(parse::<GeoRefParam>(v.clone()).is_none() && conforms(schema, schema, &v), "{v}");
+    }
+}
+
+/// A plane is accepted as `features::plane_param` reads it before it looks anything up, and
+/// so is a plane or face `base` (a face as `sketch::face::capture` reads it); their schemas say
+/// the same, apart from directions that don't make a plane.
+#[test]
+fn planes_match_the_plane_readers() {
+    let plane = input_schema_for::<PlaneParam>();
+    let plane = plane.as_value();
+    let base = input_schema_for::<PlaneOrFace>();
+    let base = base.as_value();
+    let face = |extra: Value| {
+        let mut v = json!({"face": [1, 2, 3]});
+        if let (Some(v), Some(extra)) = (v.as_object_mut(), extra.as_object()) {
+            v.extend(extra.clone());
+        }
+        v
+    };
+    for (v, as_plane, as_base) in [
+        (json!("XY"), true, true),
+        (json!("anything"), true, true),
+        (json!(7), true, true),
+        (json!(u64::MAX), true, true),
+        (json!(-7), false, false),
+        (json!(7.5), false, false),
+        (json!(true), false, false),
+        (json!(null), false, false),
+        (json!([0, 0, 1]), false, false),
+        (json!({}), false, false),
+        (json!({"origin": [0, 0, "h"], "normal": [0, 0, 1]}), true, true),
+        (json!({"origin": {"x": 0, "y": 0, "z": 1}, "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}), true, true),
+        (json!({"x_dir": [1, 0, 0], "y_dir": "y", "normal": [0, 0, 1]}), true, true),
+        (json!({"x_dir": [1, 0, 0]}), false, false),
+        (json!({"origin": {"x": 0, "y": 0}, "normal": [0, 0, 1]}), false, false),
+        (json!({"origin": null, "normal": [0, 0, 1]}), false, false),
+        (face(json!({})), false, true),
+        (face(json!({"normal": [0, 0, 1]})), true, true),
+        (face(json!({"body": "Body1", "index": 0, "path": [1, 2], "fixed": true})), false, true),
+        (face(json!({"body": "Body1"})), false, false),
+        (face(json!({"index": 0})), false, false),
+        (face(json!({"body": "", "index": 0})), false, false),
+        (face(json!({"body": "Body1", "index": -1})), false, false),
+        (face(json!({"body": "Body1", "index": 1.0})), false, false),
+        (face(json!({"path": [0]})), false, false),
+        (face(json!({"path": vec![1; 64]})), false, true),
+        (face(json!({"path": vec![1; 65]})), false, false),
+        (face(json!({"fixed": "yes"})), false, false),
+        (json!({"face": "x", "normal": [0, 0, 1]}), true, false),
+        (json!({"face": null}), false, false),
+    ] {
+        assert_eq!(parse::<PlaneParam>(v.clone()).is_some(), as_plane, "{v}");
+        assert_eq!(conforms(plane, plane, &v), as_plane, "plane schema {v}");
+        let reader = match v.get("face") {
+            Some(_) => crate::cmd::face_pick_form(&v).is_ok(),
+            None => as_plane,
+        };
+        assert_eq!(reader, as_base, "reader {v}");
+        assert_eq!(parse::<PlaneOrFace>(v.clone()).is_some(), as_base, "{v}");
+        assert_eq!(conforms(base, base, &v), as_base, "base schema {v}");
+    }
+    for v in [json!({"normal": [0, 0, 0]}), json!({"x_dir": [1, 0, 0], "y_dir": [2, 0, 0], "normal": [0, 0, 1]})] {
+        assert!(parse::<PlaneParam>(v.clone()).is_none() && conforms(plane, plane, &v), "{v}");
+    }
+    // An id, an index or a path id written with a fraction (`7.0`) is refused by the readers but
+    // is an integer to JSON Schema (`conforms` reads integers as serde does, so it agrees with
+    // the readers above; a standard validator would not).
+    assert!(parse::<PlaneParam>(json!(7.0)).is_none() && parse::<PlaneOrFace>(face(json!({"path": [1.0]}))).is_none());
+}
+
+/// A plane at an angle's `axis` is accepted as `features::axis_line` reads it before it looks
+/// anything up, and its schema says the same, apart from what a schema can't say (below).
+#[test]
+fn axis_lines_match_the_axis_reader() {
+    let schema = input_schema_for::<AxisLine>();
+    let schema = schema.as_value();
+    for (v, accepted) in [
+        (json!("X"), true),
+        (json!("Bore"), true),
+        (json!({"dir": [0, 0, 1]}), true),
+        (json!({"origin": [1, 2, 3], "dir": {"x": 0, "y": 1, "z": 0}}), true),
+        (json!({"origin": ["1 mm", "r - 2 mm", 0], "dir": [0, 0, 1]}), true),
+        (json!({"origin": [true, 0, 0], "dir": [0, 0, 1]}), false),
+        (json!({"origin": [0, 0], "dir": [0, 0, 1]}), false),
+        (json!({"dir": [0, 0, 1], "type": "world", "axis": "X"}), true),
+        (json!({"edge": [1, 2, 3]}), true),
+        (json!({"face": [1, 2, 3], "dir": [0, 0, 1]}), true),
+        (json!({"face": "x", "dir": [0, 0, 1]}), false),
+        (json!({"type": "edge", "at": [1, 2, 3]}), true),
+        (json!({"type": "vertex", "at": [1, 2, 3]}), false),
+        (json!({"face": "x", "vertex": [1, 2, 3]}), false),
+        (json!({"edge": "x", "sketch": 1, "curve": "l1"}), false),
+        (json!({}), false),
+        (json!(5), false),
+        (json!(null), false),
+        (json!([0, 0, 1]), false),
+    ] {
+        assert_eq!(parse::<AxisLine>(v.clone()).is_some(), accepted, "{v}");
+        assert_eq!(conforms(schema, schema, &v), accepted, "schema {v}");
+    }
+    // Where the schema can't follow the reader: a saved edge is read whole by serde, and `dir`
+    // must not be zero.
+    for v in [json!({"type": "edge", "at": "x"}), json!({"dir": [0, 0, 0]})] {
+        assert!(parse::<AxisLine>(v.clone()).is_none() && conforms(schema, schema, &v), "{v}");
+    }
+}
+
+/// A revolve's `axis` is accepted as `features::axis_param` reads it before it looks anything up,
+/// and its schema says the same, apart from what a schema can't say (below).
+#[test]
+fn revolve_axes_match_the_axis_reader() {
+    let schema = input_schema_for::<RevolveAxis>();
+    let schema = schema.as_value();
+    for (v, accepted) in [
+        (json!("y"), true),
+        (json!("Z"), true),
+        (json!("z"), true),
+        (json!("l1"), true),
+        (json!("Spindle"), true),
+        (json!(""), true),
+        (json!({"dir": [0, 0, 1]}), true),
+        (json!({"dir": [0, 0, 0]}), true),
+        (json!({"origin": [1, 2, 3], "dir": {"x": 0, "y": 1, "z": 0}}), true),
+        (json!({"origin": ["1 mm", 0, {"x": 1}], "dir": [0, 0, 1]}), false),
+        (json!({"origin": ["1 mm", "w / 2", 0], "dir": [0, 0, 1]}), true),
+        (json!({"origin": {"x": 1, "y": 2, "z": "3 mm"}, "dir": [0, 0, 1]}), true),
+        (json!({"origin": "o", "dir": [0, 0, 1]}), false),
+        (json!({"origin": null, "dir": [0, 0, 1]}), false),
+        (json!({"origin": [1, 2], "dir": [0, 0, 1]}), false),
+        (json!({"origin": [0, 0, 0]}), false),
+        (json!({"dir": [0, 1]}), false),
+        (json!({"dir": "y"}), false),
+        (json!({"dir": [0, 0, 1], "type": "sketch_line", "extra": 1}), true),
+        // A line of another sketch, named by its owner (#6548), also as saved with its type.
+        (json!({"sketch": 12, "curve": "l1"}), true),
+        (json!({"sketch": "Axis", "curve": "l1"}), true),
+        (json!({"curve": "l1"}), true),
+        (json!({"type": "sketch_line", "sketch": 12, "curve": "l1"}), true),
+        (json!({"sketch": 12}), false),
+        (json!({"sketch": 12, "curve": 5}), false),
+        (json!({"type": "sketch_axis", "axis": "x"}), true),
+        (json!({"type": "sketch_axis", "axis": "y"}), true),
+        (json!({"type": "sketch_axis", "axis": "z"}), false),
+        (json!({"type": "sketch_axis", "dir": [0, 0, 1]}), false),
+        (json!({"type": "world", "axis": "X"}), true),
+        (json!({"type": "world", "axis": "X", "origin": 5, "dir": "q"}), true),
+        (json!({"type": "world", "axis": "x"}), false),
+        (json!({"type": "world", "axis": 5}), false),
+        (json!({"type": "world"}), false),
+        (json!({"type": "world", "dir": [0, 0, 1]}), false),
+        (json!({"edge": [1, 2, 3]}), true),
+        (json!({"face": [1, 2, 3], "dir": [0, 0, 1]}), true),
+        (json!({"face": "x", "dir": [0, 0, 1]}), false),
+        (json!({"type": "face", "at": [1, 2, 3]}), true),
+        (json!({"type": "vertex", "at": [1, 2, 3]}), false),
+        (json!({"face": "x", "vertex": [1, 2, 3]}), false),
+        (json!({}), false),
+        (json!(5), false),
+        (json!(true), false),
+        (json!(null), false),
+        (json!([0, 0, 1]), false),
+    ] {
+        assert_eq!(parse::<RevolveAxis>(v.clone()).is_some(), accepted, "{v}");
+        assert_eq!(conforms(schema, schema, &v), accepted, "schema {v}");
+    }
+    // Where the schema can't follow the reader: a saved edge is read whole by serde.
+    let v = json!({"type": "edge", "at": "x"});
+    assert!(parse::<RevolveAxis>(v.clone()).is_none() && conforms(schema, schema, &v), "{v}");
+}
+
+/// Revolve's `direction` and `convention` take what the handler reads, and its `to` is a point.
+#[test]
+fn revolve_keywords_match_the_handler() {
+    for (v, accepted) in
+        [(json!("symmetric"), true), (json!("SYMMETRIC"), true), (json!(" symmetric"), false), (json!("negative"), false), (json!(true), false)]
+    {
+        assert_eq!(parse::<RevolveDirection>(v.clone()).is_some(), accepted, "{v}");
+        let schema = input_schema_for::<RevolveDirection>();
+        assert_eq!(conforms(schema.as_value(), schema.as_value(), &v), accepted && v == json!("symmetric"), "schema {v}");
+    }
+    for (v, accepted) in [
+        (json!("sketch_normal"), true),
+        (json!("legacy_axis_start"), true),
+        (json!("Sketch_Normal"), false),
+        (json!("legacy_per_side"), false),
+        (json!(null), false),
+    ] {
+        assert_eq!(parse::<RevolveConventionParam>(v.clone()).is_some(), accepted, "{v}");
+    }
+    assert!(parse::<RevolveToPoint>(json!([1, 2, 3])).is_some() && parse::<RevolveToPoint>(json!([1, 2])).is_none());
+}
+
+/// A construction plane's name is refused when `features::check_plane_name` refuses it. (The
+/// schema can't say which names: see `PlaneName`.)
+#[test]
+fn plane_names_match_check_plane_name() {
+    for name in ["Shelf", "XY", " top ", "Front\u{a0}", "RIGHT", "XYZ", "", "前"] {
+        let refused = crate::cmd::plane_name_problem(name);
+        assert_eq!(parse::<PlaneName>(json!(name)).is_none(), refused.is_some(), "{name:?}");
+    }
+    assert!(parse::<PlaneName>(json!(5)).is_none());
+}
+
+#[test]
+fn sketch_edit_contracts_validate_markers_before_changing_the_session() {
+    use crate::schema::sketch::{CancelResult, EditParams, EditResult, ExitParams, FinishResult};
+    use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
+    assert_keys(input_schema_for::<EditParams>(), &["restore_marker", "sketch", "view"]);
+    assert_keys(input_schema_for::<ExitParams>(), &["restore_marker"]);
+    let mut s = crate::Session::default();
+    let run = |s: &mut crate::Session, id: &str, p: serde_json::Value| s.execute(id, &p).unwrap();
+    let id = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 5}));
+    s.param_check = ParamCheck::Strict;
+    let before = s.doc.to_json();
+    for marker in [json!(-1), json!(3), json!(1.5), json!(true), json!([])] {
+        assert!(s.execute("sketch.edit", &json!({"sketch": id, "restore_marker": marker})).is_err());
+        assert_eq!(s.doc.to_json(), before);
+        assert_eq!(s.active_sketch, None);
+    }
+    for exit in ["sketch.finish", "sketch.cancel"] {
+        let r = run(&mut s, "sketch.edit", json!({"sketch": id, "restore_marker": null}));
+        let schema = output_schema_for::<EditResult>();
+        assert!(conforms(schema.as_value(), schema.as_value(), &r));
+        for params in [json!({"restore_marker": "yes"}), json!({"unknown": true})] {
+            assert!(s.execute(exit, &params).is_err());
+            assert_eq!(s.active_sketch, Some(id));
+            assert_eq!(s.doc.marker, Some(1));
+        }
+        let r = run(&mut s, exit, json!({}));
+        let schema = if exit == "sketch.finish" { output_schema_for::<FinishResult>() } else { output_schema_for::<CancelResult>() };
+        assert!(conforms(schema.as_value(), schema.as_value(), &r));
+        assert_eq!(s.doc.to_json(), before);
+    }
+}
+
+#[test]
+fn step_and_component_link_schema_keys_and_replies() {
+    use super::{component_link::*, insert_step::InsertStepParams};
+    assert_keys(
+        input_schema_for::<InsertStepParams>(),
+        &["envelope", "flatten", "folder", "history", "link", "matrix", "name", "names", "path", "reader", "tolerance", "up"],
+    );
+    assert_keys(input_schema_for::<UpdateLinksParams>(), &["component", "components", "linked_bodies"]);
+    assert_keys(input_schema_for::<BreakLinkParams>(), &["component"]);
+    assert_keys(input_schema_for::<LinksParams>(), &[]);
+    let examples = [
+        (
+            "component.links",
+            json!({"links": [{"component": 1, "name": "Part", "path": "part.step", "file": "/parts/part.step", "found": true, "changed": false}]}),
+        ),
+        (
+            "component.links",
+            json!({"links": [{"component": 1, "name": "Part", "path": "part.step", "file": "/parts/part.step", "found": false, "changed": null}]}),
+        ),
+        (
+            "component.links",
+            json!({"links": [{"component": 1, "name": "Part", "path": "part.step", "file": "/parts/part.step", "found": null, "host": "nas", "state": "not_allowed", "reason": "not allowed"}]}),
+        ),
+        (
+            "component.update_links",
+            json!({"updated": ["Part"], "unchanged": [], "failed": [{"component": 2, "name": "Missing", "error": "file missing"}], "warnings": ["Missing keeps its bodies"]}),
+        ),
+        ("component.break_link", json!({"component": 1, "path": "part.step"})),
+        ("component.links", json!({"links": [], "param_warnings": ["unknown parameter"]})),
+        (
+            "file.insert_step",
+            json!({"path": "part.step", "feature": 1, "name": "Import", "component": 1, "component_name": "Part", "occurrence": 1, "bodies": ["Box"], "created_bodies": ["Box"], "warnings": [], "system": "SolidCraft", "content_sha256": "0000000000000000000000000000000000000000000000000000000000000000"}),
+        ),
+    ];
+    for (id, reply) in examples {
+        let spec = crate::find_command(id).unwrap();
+        let schema = spec.output.unwrap()();
+        assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{id}: {reply}");
+    }
+    let mut s = crate::Session { param_check: ParamCheck::Strict, ..Default::default() };
+    for (id, params) in [
+        ("file.insert_step", json!({"path": "part.step", "link": "yes"})),
+        ("file.insert_step", json!({"path": "part.step", "unknown": true})),
+        ("component.update_links", json!({"components": "all"})),
+        ("component.update_links", json!({"component": null})),
+        ("component.update_links", json!({"components": null})),
+        ("component.break_link", json!({"component": []})),
+        ("component.links", json!({"unknown": true})),
+    ] {
+        let before = s.doc.to_json();
+        assert!(s.execute(id, &params).is_err(), "{id} {params}");
+        assert_eq!(s.doc.to_json(), before);
+    }
 }

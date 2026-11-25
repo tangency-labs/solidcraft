@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Select the workspace packages a pull request affects.
 
-Usage: affected.py --paths FILE [--metadata FILE] [--github-output FILE]
+Usage: affected.py --paths FILE [--metadata FILE] [--github-output FILE] [--owners]
 
 FILE holds the changed paths relative to the repository root, separated by NUL (git diff -z);
 "-" reads standard input. --metadata is the output of `cargo metadata --no-deps
@@ -9,13 +9,18 @@ FILE holds the changed paths relative to the repository root, separated by NUL (
 
 Prints and optionally appends to $GITHUB_OUTPUT:
   full=true|false   test the whole workspace
-  packages=a b c    the affected packages (empty when full, or when nothing needs building)
+  packages=a b c    the affected packages (empty when full, or when nothing needs building);
+                    with --owners only the packages the paths themselves change, without the
+                    packages that depend on them, listed even when full (what `cargo xtask
+                    fast` tests)
 
 A changed file maps to the package whose directory holds it. The packages that depend on those
 (directly or not, dev-dependencies included) are added. Test data under tests/ maps to the
-packages that read it, a vendored crate (vendor/, a [patch] of a crates.io dependency) to the
-packages that use it, and a root file or folder a crate embeds to that crate. Anything that can
-change every package, or that no package owns, selects the full workspace. Documentation,
+packages that read it, a vendored crates.io patch (vendor/, see VENDOR_USES) to the packages
+that use it, and a root file or folder a crate embeds to that crate. Anything that can change
+every package (the vendored kernel in `solidcore/`, a vendored tree no mapping names), or that no
+package owns,
+selects the full workspace. Documentation,
 packaging, the other workflows and the GitHub bots' scripts are ignored: when only those change,
 nothing is selected and full is false, which CI reads as "no code changed" (on pull requests and
 on pushes to main alike).
@@ -42,30 +47,30 @@ EMBEDDED = {
     "THIRD-PARTY-LICENSES.txt": "solidcraft-engine",
 }
 # Folders that only some packages read: the UI embeds the catalogs and xtask checks them; the MCP
-# server's tests read the agent skills.
-EMBEDDED_PREFIXES = {"assets/locales/": ("solidcraft-ui-egui", "xtask"), "skills/": ("solidcraft-mcp",)}
+# server's tests read the in-app agent skills; xtask checks the dev skills and their link.
+EMBEDDED_PREFIXES = {
+    "assets/locales/": ("solidcraft-ui-egui", "xtask"),
+    "skills/": ("solidcraft-mcp",),
+    ".agents/skills/": ("xtask",),
+    ".claude/skills": ("xtask",),
+}
 # Test data and the package directories whose tests (or xtask) read it. Any other folder under
 # tests/ selects the full workspace.
 TEST_DATA = {
-    "tests/robustness/": ("crates/engine/",),
     "tests/hole_matrix/": ("crates/engine/",),
     "tests/projection/": ("crates/engine/",),
     "tests/taper/": ("crates/engine/",),
     "tests/oracle/": ("apps/solidcraft-cli/", "xtask/"),
     "tests/action_matrix/": ("apps/solidcraft-cli/", "crates/engine/", "xtask/"),
 }
-# Vendored crates (vendor/<crate>/, a [patch] of a crates.io dependency) and the dependency names
-# through which workspace packages reach them: the truck crates and their maths crate only through
-# truck itself (crates/kernel), egui-wgpu directly or through eframe. Another vendored crate
-# selects the full workspace.
-TRUCK = lambda dep: dep.startswith("truck-")  # noqa: E731
+# Vendored crates.io patches (vendor/<tree>/) and the dependency names through which workspace
+# packages reach them: egui's tree (vendor/egui/, git subtree) through any of its crates. A vendored tree no entry names, such
+# as the kernel in `solidcore/`, selects the full workspace: a kernel change reaches every
+# package, so a change to it is not narrowed to the packages that depend on one crate.
+EGUI_CRATES = ("ecolor", "eframe", "egui", "egui-wgpu", "egui-winit", "egui_glow", "emath", "epaint",
+               "epaint_default_fonts")
 VENDOR_USES = {
-    "truck-geometry": TRUCK,
-    "truck-shapeops": TRUCK,
-    "truck-stepio": TRUCK,
-    "truck-meshalgo": TRUCK,
-    "matext4cgmath": TRUCK,
-    "egui-wgpu": lambda dep: dep in ("egui-wgpu", "eframe"),
+    "egui": lambda dep: dep in EGUI_CRATES,
 }
 
 
@@ -85,14 +90,73 @@ def read_paths(src):
     return [p.decode() for p in data.split(b"\0") if p]
 
 
-def select(meta, paths):
-    """Return (full, sorted package names)."""
+def package_dirs(meta):
+    """Return (workspace root with a trailing slash, {package name: its directory})."""
     root = meta["workspace_root"].replace("\\", "/").rstrip("/") + "/"
     pkgs = {}
     for p in meta["packages"]:
         manifest = p["manifest_path"].replace("\\", "/")
         assert manifest.startswith(root), manifest
         pkgs[p["name"]] = manifest[len(root):].rsplit("/", 1)[0] + "/"
+    return root, pkgs
+
+
+def owners(meta, paths):
+    """Return (full, set of the package names the paths themselves change), without the
+    packages that depend on those. The set holds the owners of the other paths when full too:
+    `cargo xtask fast` tests those. select() adds the dependents."""
+    _, pkgs = package_dirs(meta)
+    by_dir = {d: n for n, d in pkgs.items()}
+
+    def users_of(vendored):
+        """The workspace packages that depend on a vendored crate (by dependency name)."""
+        uses = VENDOR_USES.get(vendored)
+        if uses is None:
+            return set()
+        return {p["name"] for p in meta["packages"] if any(uses(d["name"]) for d in p["dependencies"])}
+
+    full, hit = False, set()
+    for path in paths:
+        if path in FULL_FILES or path.startswith("rust-toolchain"):
+            full = True
+            continue
+        if path in IGNORED_FILES or path.startswith(IGNORED_PREFIXES):
+            continue
+        if path.startswith(FULL_PREFIXES):
+            full = True
+            continue
+        dirs = [d for d in by_dir if path.startswith(d)]
+        if path.startswith("vendor/"):
+            users = users_of(path.split("/")[1])
+            if not users:
+                full = True
+            hit.update(users)
+        elif path.startswith("tests/"):
+            data = next((v for k, v in TEST_DATA.items() if path.startswith(k)), None)
+            readers = [by_dir[d] for d in data or () if d in by_dir]
+            if not readers:
+                full = True
+            hit.update(readers)
+        elif dirs:
+            hit.add(by_dir[max(dirs, key=len)])
+        elif path in EMBEDDED:
+            hit.add(EMBEDDED[path])
+        elif any(path.startswith(p) for p in EMBEDDED_PREFIXES):
+            hit.update(next(v for p, v in EMBEDDED_PREFIXES.items() if path.startswith(p)))
+        elif "/" not in path and path.endswith(".md"):
+            continue
+        else:
+            full = True  # not owned by any package
+
+    return full, hit
+
+
+def select(meta, paths):
+    """Return (full, sorted package names): the owners and every package that depends on one."""
+    full, hit = owners(meta, paths)
+    if full:
+        return True, []
+    root, pkgs = package_dirs(meta)
     by_dir = {d: n for n, d in pkgs.items()}
     # Reverse dependencies inside the workspace, matched by the dependency's path.
     dependents = {n: set() for n in pkgs}
@@ -105,45 +169,6 @@ def select(meta, paths):
             target = by_dir.get(rel[len(root):]) if rel.startswith(root) else None
             if target:
                 dependents[target].add(p["name"])
-
-    def users_of(vendored):
-        """The workspace packages that depend on a vendored crate (by dependency name)."""
-        uses = VENDOR_USES.get(vendored)
-        if uses is None:
-            return set()
-        return {p["name"] for p in meta["packages"] if any(uses(d["name"]) for d in p["dependencies"])}
-
-    hit = set()
-    for path in paths:
-        if path in FULL_FILES or path.startswith("rust-toolchain"):
-            return True, []
-        if path in IGNORED_FILES or path.startswith(IGNORED_PREFIXES):
-            continue
-        if path.startswith(FULL_PREFIXES):
-            return True, []
-        owners = [d for d in by_dir if path.startswith(d)]
-        if path.startswith("vendor/"):
-            users = users_of(path.split("/")[1])
-            if not users:
-                return True, []
-            hit.update(users)
-        elif path.startswith("tests/"):
-            data = next((v for k, v in TEST_DATA.items() if path.startswith(k)), None)
-            readers = [by_dir[d] for d in data or () if d in by_dir]
-            if not readers:
-                return True, []
-            hit.update(readers)
-        elif owners:
-            hit.add(by_dir[max(owners, key=len)])
-        elif path in EMBEDDED:
-            hit.add(EMBEDDED[path])
-        elif any(path.startswith(p) for p in EMBEDDED_PREFIXES):
-            hit.update(next(v for p, v in EMBEDDED_PREFIXES.items() if path.startswith(p)))
-        elif "/" not in path and path.endswith(".md"):
-            continue
-        else:
-            return True, []  # not owned by any package
-
     todo, seen = list(hit), set(hit)
     while todo:
         for dep in dependents[todo.pop()]:
@@ -158,8 +183,14 @@ def main():
     ap.add_argument("--paths", required=True)
     ap.add_argument("--metadata")
     ap.add_argument("--github-output")
+    ap.add_argument("--owners", action="store_true", help="only the packages the paths change, not their dependents")
     a = ap.parse_args()
-    full, packages = select(load_metadata(a.metadata), read_paths(a.paths))
+    meta, paths = load_metadata(a.metadata), read_paths(a.paths)
+    if a.owners:
+        full, hit = owners(meta, paths)
+        packages = sorted(hit)
+    else:
+        full, packages = select(meta, paths)
     lines = [f"full={'true' if full else 'false'}", f"packages={' '.join(packages)}"]
     print("\n".join(lines))
     if a.github_output:

@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "an L bracket: concave r5 round, 5 mm outer chamfer, a hole in each leg",
+ "source": "analytic",
+ "method": "L section 60*8 + 8*42 = 816 times 40; + (1-pi/4) 25 40 (concave round) - 12.5*40 (chamfer) - 2 pi 4^2 8 (holes, 8 thick legs); features apart from each other",
+ "body_count": 1,
+ "volume_mm3": 31550.354117284,
+ "faces": 12
+}

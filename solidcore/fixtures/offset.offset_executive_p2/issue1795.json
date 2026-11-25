@@ -1,0 +1,291 @@
+{
+ "coverage": "tangency-labs/solidcore#1795: SmApiShellBrepFull 2 inward (extended convex edges, merged results) on the #1528 drilled plate (data/issue1528_plate.smb; see issue1528.json for how it is built), open at its top face z = 27.5 (GetFaces index 5 of 8) or at its face y = 20 (the plane the arc meets tangentially at (0, 20), which the issue's tangent-gap bridge at x = 0, y 18..20 points to; index 2 of 8), each with create_offset_solid false and true (smlib_shell passes TRUE); the indices as crates/solidcore/tests/issue_1795_shell_hole_through_arc.rs, ignored test issue1528_plate_file_top_face_index, prints). The hole r 5 opens through the arc side r 10; inset by 2 the hole's tube (r 7) passes out through the arc's offset (r 8). Pinned SMLib 1.0.1 shells the top-open cases (closed solids) and fails the y = 20 cases with SM_ERR (1001; WR-617); the port agrees on both; SolidCraft's smlib_shell (the fork, its own plate) reports 1001. The static_shell cases run SmOffsetExecutive::ShellBrep on the read body without the API's SmBrep copy, with the same outcomes (plan/findings/offset.offset_executive_p2--1795-y20-shell-fails-in-both.md). The _unmerged cases shell with merge_results false: issue1795_plate_api_shell_2_y20_unmerged (no offset solid) returns the raw offset B-rep, compared before any merge; the _offset_solid_unmerged ones still merge the offset (y = 20 fails there with 1001, WR-617).",
+ "cases": [
+  {
+   "name": "issue1795_plate_api_shell_2_top",
+   "upstream_ref": "tangency-labs/solidcore#1795 (operand: issue_1528_write_operand.rs)",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$repo_file": "fixtures/offset.offset_executive_p2/data/issue1528_plate.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 5
+     }
+    ],
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -2.0,
+     "extend_convex": true,
+     "merge_results": true,
+     "create_offset_solid": false
+    }
+   }
+  },
+  {
+   "name": "issue1795_plate_api_shell_2_top_offset_solid",
+   "upstream_ref": "tangency-labs/solidcore#1795 (operand: issue_1528_write_operand.rs)",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$repo_file": "fixtures/offset.offset_executive_p2/data/issue1528_plate.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 5
+     }
+    ],
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -2.0,
+     "extend_convex": true,
+     "merge_results": true,
+     "create_offset_solid": true
+    }
+   }
+  },
+  {
+   "name": "issue1795_plate_api_shell_2_y20",
+   "upstream_ref": "tangency-labs/solidcore#1795 (operand: issue_1528_write_operand.rs)",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$repo_file": "fixtures/offset.offset_executive_p2/data/issue1528_plate.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -2.0,
+     "extend_convex": true,
+     "merge_results": true,
+     "create_offset_solid": false
+    }
+   }
+  },
+  {
+   "name": "issue1795_plate_api_shell_2_y20_offset_solid",
+   "upstream_ref": "tangency-labs/solidcore#1795 (operand: issue_1528_write_operand.rs)",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$repo_file": "fixtures/offset.offset_executive_p2/data/issue1528_plate.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -2.0,
+     "extend_convex": true,
+     "merge_results": true,
+     "create_offset_solid": true
+    }
+   }
+  },
+  {
+   "name": "issue1795_plate_static_shell_2_top",
+   "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp SmOffsetExecutive::ShellBrep on the read body itself (no SmApiShellBrepFull copy); tangency-labs/solidcore#1795",
+   "inputs": {
+    "operation": "static_shell",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$repo_file": "fixtures/offset.offset_executive_p2/data/issue1528_plate.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 5
+     }
+    ],
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -2.0,
+     "extend_convex": true,
+     "merge_results": true,
+     "create_offset_solid": false
+    }
+   }
+  },
+  {
+   "name": "issue1795_plate_static_shell_2_top_offset_solid",
+   "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp SmOffsetExecutive::ShellBrep on the read body itself (no SmApiShellBrepFull copy); tangency-labs/solidcore#1795",
+   "inputs": {
+    "operation": "static_shell",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$repo_file": "fixtures/offset.offset_executive_p2/data/issue1528_plate.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 5
+     }
+    ],
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -2.0,
+     "extend_convex": true,
+     "merge_results": true,
+     "create_offset_solid": true
+    }
+   }
+  },
+  {
+   "name": "issue1795_plate_static_shell_2_y20",
+   "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp SmOffsetExecutive::ShellBrep on the read body itself (no SmApiShellBrepFull copy); tangency-labs/solidcore#1795",
+   "inputs": {
+    "operation": "static_shell",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$repo_file": "fixtures/offset.offset_executive_p2/data/issue1528_plate.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -2.0,
+     "extend_convex": true,
+     "merge_results": true,
+     "create_offset_solid": false
+    }
+   }
+  },
+  {
+   "name": "issue1795_plate_static_shell_2_y20_offset_solid",
+   "upstream_ref": "source/SMLib/src/SmOffsetExecutive.cpp SmOffsetExecutive::ShellBrep on the read body itself (no SmApiShellBrepFull copy); tangency-labs/solidcore#1795",
+   "inputs": {
+    "operation": "static_shell",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$repo_file": "fixtures/offset.offset_executive_p2/data/issue1528_plate.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -2.0,
+     "extend_convex": true,
+     "merge_results": true,
+     "create_offset_solid": true
+    }
+   }
+  },
+  {
+   "name": "issue1795_plate_api_shell_2_y20_offset_solid_unmerged",
+   "upstream_ref": "tangency-labs/solidcore#1795 (operand: issue_1528_write_operand.rs); WR-617: the offset before PiecewiseMerge (bMergeResults FALSE)",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$repo_file": "fixtures/offset.offset_executive_p2/data/issue1528_plate.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -2.0,
+     "extend_convex": true,
+     "merge_results": false,
+     "create_offset_solid": true
+    }
+   }
+  },
+  {
+   "name": "issue1795_plate_api_shell_2_top_offset_solid_unmerged",
+   "upstream_ref": "tangency-labs/solidcore#1795 (operand: issue_1528_write_operand.rs); WR-617: the offset before PiecewiseMerge (bMergeResults FALSE)",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$repo_file": "fixtures/offset.offset_executive_p2/data/issue1528_plate.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 5
+     }
+    ],
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -2.0,
+     "extend_convex": true,
+     "merge_results": false,
+     "create_offset_solid": true
+    }
+   }
+  },
+  {
+   "name": "issue1795_plate_api_shell_2_y20_unmerged",
+   "upstream_ref": "tangency-labs/solidcore#1795 (operand: issue_1528_write_operand.rs); WR-617: the y = 20 offset before PiecewiseMerge (bMergeResults FALSE, no offset solid: the raw offset B-rep is returned)",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$repo_file": "fixtures/offset.offset_executive_p2/data/issue1528_plate.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 2
+     }
+    ],
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -2.0,
+     "extend_convex": true,
+     "merge_results": false,
+     "create_offset_solid": false
+    }
+   }
+  }
+ ]
+}

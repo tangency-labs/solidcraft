@@ -1,0 +1,131 @@
+{
+  "area": "surfaces",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": false,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "distance": 20.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "nurbs": {
+              "degree": 3,
+              "knots": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "points": [
+                [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ],
+                [
+                  13.0,
+                  0.0,
+                  8.0,
+                  1.0
+                ],
+                [
+                  27.0,
+                  0.0,
+                  -8.0,
+                  1.0
+                ],
+                [
+                  40.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "case": "cov-fair-single-span-face-has-nothing-free-to-move",
+  "expected": {
+    "area_mm2": 827.9663653036151,
+    "body_count": 1,
+    "boundary_edges": 4,
+    "faces": 1,
+    "method": "the face: the Bezier (0,0), (13,8), (27,-8), (40,0) on XZ extruded 20 along -y or +y, B-spline degree (3, 1), one span each way. keep_edges holds the two boundary rows each side and the rows next to them: across the cubic that is all 4 rows, so the surface is unchanged: area = curve length 41.3983 (Gauss-Legendre 64) x 20 = 827.966",
+    "source": "analytic",
+    "sources": [],
+    "splines": [
+      {
+        "degree": [
+          3,
+          1
+        ],
+        "spans": [
+          1,
+          1
+        ]
+      }
+    ],
+    "surface_types": [
+      "bspline"
+    ],
+    "valid": false,
+    "what": "fair on a single-span cubic extrusion holding its edges: every control row is a boundary row or the one next to it, so nothing moves"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 4,
+      "faces": 1,
+      "vertices": 4
+    }
+  },
+  "result": [
+    {
+      "body": "Wave",
+      "made": "b1"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 827.9663653052374,
+      "body_count": 1,
+      "edges": 1,
+      "faces": 1,
+      "vertices": 1,
+      "volume_mm3": 0.0
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude"
+  ],
+  "ungraded": [],
+  "what": "fair on a single-span cubic extrusion holding its edges: every control row is a boundary row or the one next to it, so nothing moves",
+  "why_not": []
+}

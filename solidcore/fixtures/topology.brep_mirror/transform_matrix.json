@@ -1,0 +1,1622 @@
+{
+ "cases": [
+  {
+   "name": "Solids_box_smb_identity",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "Solids/box.smb",
+    "matrix": [
+     [
+      1,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Solids_box_smb_translate",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "Solids/box.smb",
+    "matrix": [
+     [
+      1,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1,
+      0
+     ],
+     [
+      2,
+      3,
+      4,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Solids_box_smb_rotate_z30",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "Solids/box.smb",
+    "matrix": [
+     [
+      0.8660254037844387,
+      0.49999999999999994,
+      0,
+      0
+     ],
+     [
+      -0.49999999999999994,
+      0.8660254037844387,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1,
+      0
+     ],
+     [
+      1,
+      -1,
+      2,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Solids_box_smb_uniform_scale_2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "Solids/box.smb",
+    "matrix": [
+     [
+      2,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      2,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Solids_box_smb_non_uniform_2_1_1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "Solids/box.smb",
+    "matrix": [
+     [
+      2,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1,
+      0
+     ],
+     [
+      1,
+      -2,
+      0.5,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Solids_box_smb_issue_1570_shear",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "Solids/box.smb",
+    "matrix": [
+     [
+      1,
+      0.5,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1,
+      0
+     ],
+     [
+      2,
+      3,
+      4,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Solids_box_smb_mirror_x",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "Solids/box.smb",
+    "matrix": [
+     [
+      -1,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Solids_box_smb_mirror_rotated_scaled",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "Solids/box.smb",
+    "matrix": [
+     [
+      -1.7320508075688774,
+      -0.9999999999999999,
+      0,
+      0
+     ],
+     [
+      -0.49999999999999994,
+      0.8660254037844387,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      3,
+      0
+     ],
+     [
+      5,
+      0,
+      -1,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Solids_box_smb_near_singular",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "Solids/box.smb",
+    "matrix": [
+     [
+      1,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1e-09,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Solids_box_smb_singular_z",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "Solids/box.smb",
+    "matrix": [
+     [
+      1,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Solids_box_smb_huge_uniform",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "Solids/box.smb",
+    "matrix": [
+     [
+      1000000.0,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      1000000.0,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1000000.0,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Solids_box_smb_tiny_uniform",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "Solids/box.smb",
+    "matrix": [
+     [
+      1e-06,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      1e-06,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1e-06,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Solids_cylinder_smb_identity",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "Solids/cylinder.smb",
+    "matrix": [
+     [
+      1,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Solids_cylinder_smb_translate",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "Solids/cylinder.smb",
+    "matrix": [
+     [
+      1,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1,
+      0
+     ],
+     [
+      2,
+      3,
+      4,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Solids_cylinder_smb_rotate_z30",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "Solids/cylinder.smb",
+    "matrix": [
+     [
+      0.8660254037844387,
+      0.49999999999999994,
+      0,
+      0
+     ],
+     [
+      -0.49999999999999994,
+      0.8660254037844387,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1,
+      0
+     ],
+     [
+      1,
+      -1,
+      2,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Solids_cylinder_smb_uniform_scale_2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "Solids/cylinder.smb",
+    "matrix": [
+     [
+      2,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      2,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Solids_cylinder_smb_non_uniform_2_1_1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "Solids/cylinder.smb",
+    "matrix": [
+     [
+      2,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1,
+      0
+     ],
+     [
+      1,
+      -2,
+      0.5,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Solids_cylinder_smb_issue_1570_shear",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "Solids/cylinder.smb",
+    "matrix": [
+     [
+      1,
+      0.5,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1,
+      0
+     ],
+     [
+      2,
+      3,
+      4,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Solids_cylinder_smb_mirror_x",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "Solids/cylinder.smb",
+    "matrix": [
+     [
+      -1,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Solids_cylinder_smb_mirror_rotated_scaled",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "Solids/cylinder.smb",
+    "matrix": [
+     [
+      -1.7320508075688774,
+      -0.9999999999999999,
+      0,
+      0
+     ],
+     [
+      -0.49999999999999994,
+      0.8660254037844387,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      3,
+      0
+     ],
+     [
+      5,
+      0,
+      -1,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Solids_cylinder_smb_near_singular",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "Solids/cylinder.smb",
+    "matrix": [
+     [
+      1,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1e-09,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Solids_cylinder_smb_singular_z",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "Solids/cylinder.smb",
+    "matrix": [
+     [
+      1,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Solids_cylinder_smb_huge_uniform",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "Solids/cylinder.smb",
+    "matrix": [
+     [
+      1000000.0,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      1000000.0,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1000000.0,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Solids_cylinder_smb_tiny_uniform",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "Solids/cylinder.smb",
+    "matrix": [
+     [
+      1e-06,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      1e-06,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1e-06,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Solids_sphere_smb_identity",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "Solids/sphere.smb",
+    "matrix": [
+     [
+      1,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Solids_sphere_smb_translate",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "Solids/sphere.smb",
+    "matrix": [
+     [
+      1,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1,
+      0
+     ],
+     [
+      2,
+      3,
+      4,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Solids_sphere_smb_rotate_z30",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "Solids/sphere.smb",
+    "matrix": [
+     [
+      0.8660254037844387,
+      0.49999999999999994,
+      0,
+      0
+     ],
+     [
+      -0.49999999999999994,
+      0.8660254037844387,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1,
+      0
+     ],
+     [
+      1,
+      -1,
+      2,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Solids_sphere_smb_uniform_scale_2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "Solids/sphere.smb",
+    "matrix": [
+     [
+      2,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      2,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Solids_sphere_smb_non_uniform_2_1_1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "Solids/sphere.smb",
+    "matrix": [
+     [
+      2,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1,
+      0
+     ],
+     [
+      1,
+      -2,
+      0.5,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Solids_sphere_smb_issue_1570_shear",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "Solids/sphere.smb",
+    "matrix": [
+     [
+      1,
+      0.5,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1,
+      0
+     ],
+     [
+      2,
+      3,
+      4,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Solids_sphere_smb_mirror_x",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "Solids/sphere.smb",
+    "matrix": [
+     [
+      -1,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Solids_sphere_smb_mirror_rotated_scaled",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "Solids/sphere.smb",
+    "matrix": [
+     [
+      -1.7320508075688774,
+      -0.9999999999999999,
+      0,
+      0
+     ],
+     [
+      -0.49999999999999994,
+      0.8660254037844387,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      3,
+      0
+     ],
+     [
+      5,
+      0,
+      -1,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Solids_sphere_smb_near_singular",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "Solids/sphere.smb",
+    "matrix": [
+     [
+      1,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1e-09,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Solids_sphere_smb_singular_z",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "Solids/sphere.smb",
+    "matrix": [
+     [
+      1,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Solids_sphere_smb_huge_uniform",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "Solids/sphere.smb",
+    "matrix": [
+     [
+      1000000.0,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      1000000.0,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1000000.0,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Solids_sphere_smb_tiny_uniform",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "Solids/sphere.smb",
+    "matrix": [
+     [
+      1e-06,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      1e-06,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1e-06,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "cone_smb_identity",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "cone.smb",
+    "matrix": [
+     [
+      1,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "cone_smb_translate",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "cone.smb",
+    "matrix": [
+     [
+      1,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1,
+      0
+     ],
+     [
+      2,
+      3,
+      4,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "cone_smb_rotate_z30",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "cone.smb",
+    "matrix": [
+     [
+      0.8660254037844387,
+      0.49999999999999994,
+      0,
+      0
+     ],
+     [
+      -0.49999999999999994,
+      0.8660254037844387,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1,
+      0
+     ],
+     [
+      1,
+      -1,
+      2,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "cone_smb_uniform_scale_2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "cone.smb",
+    "matrix": [
+     [
+      2,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      2,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "cone_smb_non_uniform_2_1_1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "cone.smb",
+    "matrix": [
+     [
+      2,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1,
+      0
+     ],
+     [
+      1,
+      -2,
+      0.5,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "cone_smb_issue_1570_shear",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "cone.smb",
+    "matrix": [
+     [
+      1,
+      0.5,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1,
+      0
+     ],
+     [
+      2,
+      3,
+      4,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "cone_smb_mirror_x",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "cone.smb",
+    "matrix": [
+     [
+      -1,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "cone_smb_mirror_rotated_scaled",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "cone.smb",
+    "matrix": [
+     [
+      -1.7320508075688774,
+      -0.9999999999999999,
+      0,
+      0
+     ],
+     [
+      -0.49999999999999994,
+      0.8660254037844387,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      3,
+      0
+     ],
+     [
+      5,
+      0,
+      -1,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "cone_smb_near_singular",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "cone.smb",
+    "matrix": [
+     [
+      1,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1e-09,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "cone_smb_singular_z",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "cone.smb",
+    "matrix": [
+     [
+      1,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "cone_smb_huge_uniform",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "cone.smb",
+    "matrix": [
+     [
+      1000000.0,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      1000000.0,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1000000.0,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "cone_smb_tiny_uniform",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "cone.smb",
+    "matrix": [
+     [
+      1e-06,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      1e-06,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1e-06,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "Solids_box_smb_shear_no_scale_tol",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp SmBrep::Transform(const double[4][4], SmBoolean)",
+   "inputs": {
+    "file": "Solids/box.smb",
+    "matrix": [
+     [
+      1,
+      0.5,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1,
+      0
+     ],
+     [
+      2,
+      3,
+      4,
+      1
+     ]
+    ],
+    "scale_tol": false
+   }
+  }
+ ]
+}

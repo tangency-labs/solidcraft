@@ -3,6 +3,7 @@
 //! those values in the design atomically, which then rebuilds as usual.
 
 use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{DEFAULT_MATERIAL, DocError, Document, Result};
 
@@ -38,6 +39,9 @@ pub enum Column {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ConfigRow {
+    /// Fixed for the row's life, from the design's id counter ([`Document::allocate_id`]): a rename
+    /// keeps it. Undo can rewind the counter; external links also check [`ConfigTable::row_identity`].
+    pub id: u64,
     pub name: String,
     /// One cell per column: expression, suppression, material name or appearance look.
     pub cells: Vec<String>,
@@ -47,6 +51,10 @@ pub struct ConfigRow {
 pub struct ConfigTable {
     pub columns: Vec<Column>,
     pub rows: Vec<ConfigRow>,
+    /// Creation identities for rows made by this version. Unlike the numeric row id, a new
+    /// identity is not reused after undo. Legacy rows have no entry and keep that absence.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub row_identities: BTreeMap<u64, u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -64,9 +72,63 @@ pub fn suppression_cell(value: &str) -> Result<bool> {
     }
 }
 
+/// A row of the table, by its id or by its name.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum RowKey<'a> {
+    Id(u64),
+    Name(&'a str),
+}
+
+impl<'a> RowKey<'a> {
+    /// A row as a command or a file names it: a whole number is its id, text its name, so a row
+    /// named `"17"` is not row 17. Anything else names no row.
+    pub fn read(v: &'a serde_json::Value) -> Option<Self> {
+        v.as_u64().map(RowKey::Id).or_else(|| v.as_str().map(RowKey::Name))
+    }
+}
+
+impl<'a> From<&'a str> for RowKey<'a> {
+    fn from(name: &'a str) -> Self {
+        RowKey::Name(name)
+    }
+}
+
+impl From<u64> for RowKey<'_> {
+    fn from(id: u64) -> Self {
+        RowKey::Id(id)
+    }
+}
+
+impl std::fmt::Display for RowKey<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RowKey::Id(id) => write!(f, "{id}"),
+            RowKey::Name(name) => f.write_str(name),
+        }
+    }
+}
+
 impl ConfigTable {
     pub fn is_empty(&self) -> bool {
         self.columns.is_empty() && self.rows.is_empty() && self.rules.is_empty()
+    }
+
+    /// The row `key` names: the one with that id, or with that name.
+    pub fn row(&self, key: RowKey<'_>) -> Option<&ConfigRow> {
+        self.rows.iter().find(|r| match key {
+            RowKey::Id(id) => r.id == id,
+            RowKey::Name(name) => r.name == name,
+        })
+    }
+
+    /// A row's persistent creation identity, absent for a legacy row.
+    pub fn row_identity(&self, id: u64) -> Option<u64> {
+        self.row_identities.get(&id).copied()
+    }
+
+    /// The active row, when the table still has it.
+    pub fn active_row(&self) -> Option<&ConfigRow> {
+        self.row(RowKey::Name(self.active.as_deref()?))
     }
 }
 
@@ -164,13 +226,28 @@ impl Document {
         }
     }
 
+    /// Add a row to the configuration table, with an id of its own; at most [`MAX_ROWS`] rows.
+    pub fn add_configuration_row(&mut self, name: String, cells: Vec<String>) -> Result<u64> {
+        if self.configs.rows.len() >= MAX_ROWS {
+            return Err(DocError::Invalid("too many rows".into()));
+        }
+        let in_use: BTreeSet<_> = self.configs.row_identities.values().copied().collect();
+        let identity = crate::ids::IdSource::from_entropy().next(&in_use)?;
+        let id = self.allocate_id()?;
+        self.configs.rows.push(ConfigRow { id, name, cells });
+        self.configs.row_identities.insert(id, identity);
+        Ok(id)
+    }
+
     /// Set the design to a row's values (all or nothing).
-    pub fn apply_configuration(&mut self, row: &str) -> Result<()> {
+    pub fn apply_configuration<'a>(&mut self, row: impl Into<RowKey<'a>>) -> Result<()> {
         self.apply_configuration_with_trace(row).map(|_| ())
     }
 
-    pub fn apply_configuration_with_trace(&mut self, row: &str) -> Result<Vec<RuleTrace>> {
-        let r = self.configs.rows.iter().find(|r| r.name == row).cloned().ok_or_else(|| DocError::Unknown(format!("configuration `{row}`")))?;
+    pub fn apply_configuration_with_trace<'a>(&mut self, row: impl Into<RowKey<'a>>) -> Result<Vec<RuleTrace>> {
+        let key = row.into();
+        let r = self.configs.row(key).cloned().ok_or_else(|| DocError::Unknown(format!("configuration `{key}`")))?;
+        let row = r.name.as_str();
         if self.configs.columns.len() > MAX_COLUMNS || self.configs.rows.len() > MAX_ROWS || r.cells.len() != self.configs.columns.len() {
             return Err(DocError::Invalid("configuration table exceeds limits or has incomplete rows".into()));
         }
@@ -250,13 +327,13 @@ impl Document {
 
     /// The active row's values all hold in the design.
     pub fn configuration_matches(&self) -> bool {
-        let Some(r) = self.configs.active.as_ref().and_then(|a| self.configs.rows.iter().find(|r| r.name == *a)) else { return false };
+        let Some(r) = self.configs.active_row() else { return false };
         if r.cells.len() != self.configs.columns.len() {
             return false;
         }
         if !self.configs.rules.is_empty() {
             let mut expected = self.clone();
-            if expected.apply_configuration(&r.name).is_err() {
+            if expected.apply_configuration(r.id).is_err() {
                 return false;
             }
             return self.configs.columns.iter().all(|column| self.config_current(column) == expected.config_current(column));
@@ -291,11 +368,11 @@ mod tests {
         d.set_param("a", "1 mm", None, None).unwrap();
         d.set_param("b", "a", None, None).unwrap();
         d.configs.columns = vec![Column::Param("a".into()), Column::Param("b".into())];
-        d.configs.rows.push(ConfigRow { name: "Reordered".into(), cells: vec!["b".into(), "2 mm".into()] });
+        d.configs.rows.push(ConfigRow { id: 1, name: "Reordered".into(), cells: vec!["b".into(), "2 mm".into()] });
         d.apply_configuration("Reordered").unwrap();
         assert!(d.configuration_matches());
         assert_eq!(d.param_values().0["a"].v, 2.0);
-        d.configs.rows.push(ConfigRow { name: "Cycle".into(), cells: vec!["b".into(), "a".into()] });
+        d.configs.rows.push(ConfigRow { id: 2, name: "Cycle".into(), cells: vec!["b".into(), "a".into()] });
         let before = d.clone();
         assert!(d.apply_configuration("Cycle").is_err());
         assert_eq!(d, before);
@@ -323,13 +400,57 @@ mod tests {
         d.set_param("width", "10 mm", None, None).unwrap();
         d.params[0].expr = "1/".into();
         d.configs.columns = vec![Column::Param("width".into())];
-        d.configs.rows.push(ConfigRow { name: "Default".into(), cells: vec!["1/".into()] });
+        d.configs.rows.push(ConfigRow { id: 3, name: "Default".into(), cells: vec!["1/".into()] });
         d.apply_configuration("Default").unwrap();
         assert!(d.configuration_matches());
-        d.configs.rows.push(ConfigRow { name: "Different error".into(), cells: vec!["missing + 1".into()] });
+        d.configs.rows.push(ConfigRow { id: 4, name: "Different error".into(), cells: vec!["missing + 1".into()] });
         let before = d.clone();
         assert!(d.apply_configuration("Different error").is_err());
         assert_eq!(d, before);
+    }
+
+    /// A row is found by its id or its name, and activating it by id names it active. A deleted
+    /// row's id is never given out again (#14750).
+    #[test]
+    fn a_row_is_found_by_its_id_or_its_name() {
+        let mut d = Document::new("A");
+        d.set_param("w", "10 mm", None, None).unwrap();
+        d.configs.columns.push(Column::Param("w".into()));
+        let (small, large) = (d.allocate_id().unwrap(), d.allocate_id().unwrap());
+        d.configs.rows.push(ConfigRow { id: small, name: "Small".into(), cells: vec!["10 mm".into()] });
+        d.configs.rows.push(ConfigRow { id: large, name: "Large".into(), cells: vec!["40 mm".into()] });
+        assert_eq!(d.configs.row(RowKey::Id(large)).map(|r| r.name.as_str()), Some("Large"));
+        assert_eq!(d.configs.row("Small".into()).map(|r| r.id), Some(small));
+        d.apply_configuration(large).unwrap();
+        assert_eq!((d.configs.active.as_deref(), d.configs.active_row().map(|r| r.id)), (Some("Large"), Some(large)));
+        assert!(d.configuration_matches());
+        d.configs.rows.retain(|r| r.id != large);
+        assert!(d.configs.active_row().is_none() && !d.configuration_matches());
+        assert!(d.allocate_id().unwrap() > large, "a deleted row's id is never given again");
+        let gone = d.apply_configuration(large).unwrap_err().to_string();
+        assert!(gone.contains(&format!("configuration `{large}`")), "{gone}");
+    }
+
+    #[test]
+    fn configuration_row_identities_survive_reopen_and_distinguish_reused_numeric_ids() {
+        let mut before = Document::new("Family");
+        before.set_param("L", "25 mm", None, None).unwrap();
+        before.configs.columns.push(Column::Param("L".into()));
+        let mut first = before.clone();
+        let id = first.add_configuration_row("First".into(), vec!["30 mm".into()]).unwrap();
+        let identity = first.configs.row_identity(id).unwrap();
+        assert_ne!(identity, 0);
+        let reopened = Document::from_json(&first.to_json()).unwrap();
+        assert_eq!(reopened.configs.row_identity(id), Some(identity));
+        // An old snapshot can reuse the numeric id, but cannot supply this creation identity.
+        let replacement = before.add_configuration_row("Replacement".into(), vec!["80 mm".into()]).unwrap();
+        assert_eq!(replacement, id);
+        assert_ne!(before.configs.row_identity(replacement), Some(identity));
+        let mut legacy = serde_json::to_value(&first.configs).unwrap();
+        legacy.as_object_mut().unwrap().remove("row_identities");
+        let legacy: ConfigTable = serde_json::from_value(legacy).unwrap();
+        assert_eq!(legacy.row_identity(id), None);
+        assert_eq!(legacy.rows, first.configs.rows);
     }
 
     #[test]
@@ -337,14 +458,14 @@ mod tests {
         let mut d = Document::new("A");
         d.set_param("w", "10 mm", None, None).unwrap();
         d.configs.columns.push(Column::Param("w".into()));
-        d.configs.rows.push(ConfigRow { name: "Small".into(), cells: vec!["10 mm".into()] });
-        d.configs.rows.push(ConfigRow { name: "Large".into(), cells: vec!["40 mm".into()] });
+        d.configs.rows.push(ConfigRow { id: 5, name: "Small".into(), cells: vec!["10 mm".into()] });
+        d.configs.rows.push(ConfigRow { id: 6, name: "Large".into(), cells: vec!["40 mm".into()] });
         d.apply_configuration("Large").unwrap();
         assert_eq!(d.config_current(&Column::Param("w".into())).as_deref(), Some("40 mm"));
         assert!(d.configuration_matches());
         d.set_param("w", "12 mm", None, None).unwrap();
         assert!(!d.configuration_matches());
-        d.configs.rows.push(ConfigRow { name: "Bad".into(), cells: vec!["1/".into()] });
+        d.configs.rows.push(ConfigRow { id: 7, name: "Bad".into(), cells: vec!["1/".into()] });
         let before = d.clone();
         assert!(d.apply_configuration("Bad").is_err());
         assert_eq!(d, before, "all or nothing");
@@ -356,6 +477,7 @@ mod tests {
         d.set_param("width", "10 mm", None, None).unwrap();
         d.configs.columns = vec![Column::Param("width".into()), Column::Material("Body".into()), Column::Appearance("Body".into())];
         d.configs.rows.push(ConfigRow {
+            id: 8,
             name: "Broken".into(),
             cells: vec!["20 mm".into(), "Steel".into(), r#"{"name":"Invalid","color":[1,2,3],"opacity":2}"#.into()],
         });

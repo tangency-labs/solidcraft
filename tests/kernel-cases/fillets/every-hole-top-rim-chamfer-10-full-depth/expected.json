@@ -1,0 +1,24 @@
+{
+ "sources": [],
+ "what": "the top rim of a hole through a 10 mm plate chamfered 10: its leg uses the hole's whole wall, ending on the bottom rim, and it builds (a cone from the top to the bottom rim)",
+ "source": "analytic",
+ "method": "plate 40x40x10 with a through hole R5 at (20, 20): V0 = 16000 - 250 pi = 15214.6018. The chamfer's legs are 10 along the top face (to rho = 15, inside the plate's 20 to its sides) and 10 down the wall, its whole height (the owner's ruling of 2026-10-30 (d7): a chamfer that reaches or runs past a rim builds): the triangle 10^2/2 at centroid rho = 5 + 10/3, revolved once (Pappus): 2500 pi / 3 = 2617.9939. V = 16000 - 3250 pi / 3 = 12596.6080. The wall is used up: the faces are the plate's 6 and the cone: 7.",
+ "body_count": 1,
+ "volume_mm3": 12596.607958611057,
+ "faces": 7,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   40,
+   10
+  ]
+ },
+ "continuity": {
+  "order": "g0"
+ }
+}

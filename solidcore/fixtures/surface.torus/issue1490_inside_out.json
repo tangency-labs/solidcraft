@@ -1,0 +1,1340 @@
+{
+ "cases": [
+  {
+   "name": "issue1490_r20_4_s1_i1_sw0_copy",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1490; SmTorus constructor and copy constructor (m_bInsideOut)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      1.0,
+      -2.0,
+      0.5
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 20.0,
+     "minor": 4.0,
+     "swap": false,
+     "inside_out": true,
+     "dom": [
+      0.0,
+      -90.0,
+      270.0,
+      90.0
+     ]
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "issue1490_r20_4_s1_i1_sw0_is_nurb",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1490; SmTorus constructor and copy constructor (m_bInsideOut)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      1.0,
+      -2.0,
+      0.5
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 20.0,
+     "minor": 4.0,
+     "swap": false,
+     "inside_out": true,
+     "dom": [
+      0.0,
+      -90.0,
+      270.0,
+      90.0
+     ]
+    },
+    "op": "is_nurb",
+    "scale": 1.0,
+    "net_scale": [
+     1,
+     1,
+     1
+    ],
+    "perturb": []
+   }
+  },
+  {
+   "name": "issue1490_r20_4_s1_i1_sw1_copy",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1490; SmTorus constructor and copy constructor (m_bInsideOut)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      1.0,
+      -2.0,
+      0.5
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 20.0,
+     "minor": 4.0,
+     "swap": true,
+     "inside_out": true,
+     "dom": [
+      0.0,
+      -90.0,
+      270.0,
+      90.0
+     ]
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "issue1490_r20_4_s1_i1_sw1_is_nurb",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1490; SmTorus constructor and copy constructor (m_bInsideOut)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      1.0,
+      -2.0,
+      0.5
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 20.0,
+     "minor": 4.0,
+     "swap": true,
+     "inside_out": true,
+     "dom": [
+      0.0,
+      -90.0,
+      270.0,
+      90.0
+     ]
+    },
+    "op": "is_nurb",
+    "scale": 1.0,
+    "net_scale": [
+     1,
+     1,
+     1
+    ],
+    "perturb": []
+   }
+  },
+  {
+   "name": "issue1490_r20_4_s1_i0_sw0_copy",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1490; SmTorus constructor and copy constructor (m_bInsideOut)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      1.0,
+      -2.0,
+      0.5
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 20.0,
+     "minor": 4.0,
+     "swap": false,
+     "inside_out": false,
+     "dom": [
+      0.0,
+      -90.0,
+      270.0,
+      90.0
+     ]
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "issue1490_r20_4_s1_i0_sw0_is_nurb",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1490; SmTorus constructor and copy constructor (m_bInsideOut)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      1.0,
+      -2.0,
+      0.5
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 20.0,
+     "minor": 4.0,
+     "swap": false,
+     "inside_out": false,
+     "dom": [
+      0.0,
+      -90.0,
+      270.0,
+      90.0
+     ]
+    },
+    "op": "is_nurb",
+    "scale": 1.0,
+    "net_scale": [
+     1,
+     1,
+     1
+    ],
+    "perturb": []
+   }
+  },
+  {
+   "name": "issue1490_r20_4_s1_i0_sw1_copy",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1490; SmTorus constructor and copy constructor (m_bInsideOut)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      1.0,
+      -2.0,
+      0.5
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 20.0,
+     "minor": 4.0,
+     "swap": true,
+     "inside_out": false,
+     "dom": [
+      0.0,
+      -90.0,
+      270.0,
+      90.0
+     ]
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "issue1490_r20_4_s1_i0_sw1_is_nurb",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1490; SmTorus constructor and copy constructor (m_bInsideOut)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      1.0,
+      -2.0,
+      0.5
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 20.0,
+     "minor": 4.0,
+     "swap": true,
+     "inside_out": false,
+     "dom": [
+      0.0,
+      -90.0,
+      270.0,
+      90.0
+     ]
+    },
+    "op": "is_nurb",
+    "scale": 1.0,
+    "net_scale": [
+     1,
+     1,
+     1
+    ],
+    "perturb": []
+   }
+  },
+  {
+   "name": "issue1490_r20_4_s1em3_i1_sw0_copy",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1490; SmTorus constructor and copy constructor (m_bInsideOut)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0.001,
+      -0.002,
+      0.0005
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 0.02,
+     "minor": 0.004,
+     "swap": false,
+     "inside_out": true,
+     "dom": [
+      0.0,
+      -90.0,
+      270.0,
+      90.0
+     ]
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "issue1490_r20_4_s1em3_i1_sw0_is_nurb",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1490; SmTorus constructor and copy constructor (m_bInsideOut)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0.001,
+      -0.002,
+      0.0005
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 0.02,
+     "minor": 0.004,
+     "swap": false,
+     "inside_out": true,
+     "dom": [
+      0.0,
+      -90.0,
+      270.0,
+      90.0
+     ]
+    },
+    "op": "is_nurb",
+    "scale": 1.0,
+    "net_scale": [
+     1,
+     1,
+     1
+    ],
+    "perturb": []
+   }
+  },
+  {
+   "name": "issue1490_r20_4_s1em3_i1_sw1_copy",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1490; SmTorus constructor and copy constructor (m_bInsideOut)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0.001,
+      -0.002,
+      0.0005
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 0.02,
+     "minor": 0.004,
+     "swap": true,
+     "inside_out": true,
+     "dom": [
+      0.0,
+      -90.0,
+      270.0,
+      90.0
+     ]
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "issue1490_r20_4_s1em3_i1_sw1_is_nurb",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1490; SmTorus constructor and copy constructor (m_bInsideOut)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0.001,
+      -0.002,
+      0.0005
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 0.02,
+     "minor": 0.004,
+     "swap": true,
+     "inside_out": true,
+     "dom": [
+      0.0,
+      -90.0,
+      270.0,
+      90.0
+     ]
+    },
+    "op": "is_nurb",
+    "scale": 1.0,
+    "net_scale": [
+     1,
+     1,
+     1
+    ],
+    "perturb": []
+   }
+  },
+  {
+   "name": "issue1490_r20_4_s1em3_i0_sw0_copy",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1490; SmTorus constructor and copy constructor (m_bInsideOut)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0.001,
+      -0.002,
+      0.0005
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 0.02,
+     "minor": 0.004,
+     "swap": false,
+     "inside_out": false,
+     "dom": [
+      0.0,
+      -90.0,
+      270.0,
+      90.0
+     ]
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "issue1490_r20_4_s1em3_i0_sw0_is_nurb",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1490; SmTorus constructor and copy constructor (m_bInsideOut)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0.001,
+      -0.002,
+      0.0005
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 0.02,
+     "minor": 0.004,
+     "swap": false,
+     "inside_out": false,
+     "dom": [
+      0.0,
+      -90.0,
+      270.0,
+      90.0
+     ]
+    },
+    "op": "is_nurb",
+    "scale": 1.0,
+    "net_scale": [
+     1,
+     1,
+     1
+    ],
+    "perturb": []
+   }
+  },
+  {
+   "name": "issue1490_r20_4_s1em3_i0_sw1_copy",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1490; SmTorus constructor and copy constructor (m_bInsideOut)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0.001,
+      -0.002,
+      0.0005
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 0.02,
+     "minor": 0.004,
+     "swap": true,
+     "inside_out": false,
+     "dom": [
+      0.0,
+      -90.0,
+      270.0,
+      90.0
+     ]
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "issue1490_r20_4_s1em3_i0_sw1_is_nurb",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1490; SmTorus constructor and copy constructor (m_bInsideOut)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0.001,
+      -0.002,
+      0.0005
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 0.02,
+     "minor": 0.004,
+     "swap": true,
+     "inside_out": false,
+     "dom": [
+      0.0,
+      -90.0,
+      270.0,
+      90.0
+     ]
+    },
+    "op": "is_nurb",
+    "scale": 1.0,
+    "net_scale": [
+     1,
+     1,
+     1
+    ],
+    "perturb": []
+   }
+  },
+  {
+   "name": "issue1490_r20_4_s1e3_i1_sw0_copy",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1490; SmTorus constructor and copy constructor (m_bInsideOut)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      1000.0,
+      -2000.0,
+      500.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 20000.0,
+     "minor": 4000.0,
+     "swap": false,
+     "inside_out": true,
+     "dom": [
+      0.0,
+      -90.0,
+      270.0,
+      90.0
+     ]
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "issue1490_r20_4_s1e3_i1_sw0_is_nurb",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1490; SmTorus constructor and copy constructor (m_bInsideOut)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      1000.0,
+      -2000.0,
+      500.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 20000.0,
+     "minor": 4000.0,
+     "swap": false,
+     "inside_out": true,
+     "dom": [
+      0.0,
+      -90.0,
+      270.0,
+      90.0
+     ]
+    },
+    "op": "is_nurb",
+    "scale": 1.0,
+    "net_scale": [
+     1,
+     1,
+     1
+    ],
+    "perturb": []
+   }
+  },
+  {
+   "name": "issue1490_r20_4_s1e3_i1_sw1_copy",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1490; SmTorus constructor and copy constructor (m_bInsideOut)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      1000.0,
+      -2000.0,
+      500.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 20000.0,
+     "minor": 4000.0,
+     "swap": true,
+     "inside_out": true,
+     "dom": [
+      0.0,
+      -90.0,
+      270.0,
+      90.0
+     ]
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "issue1490_r20_4_s1e3_i1_sw1_is_nurb",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1490; SmTorus constructor and copy constructor (m_bInsideOut)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      1000.0,
+      -2000.0,
+      500.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 20000.0,
+     "minor": 4000.0,
+     "swap": true,
+     "inside_out": true,
+     "dom": [
+      0.0,
+      -90.0,
+      270.0,
+      90.0
+     ]
+    },
+    "op": "is_nurb",
+    "scale": 1.0,
+    "net_scale": [
+     1,
+     1,
+     1
+    ],
+    "perturb": []
+   }
+  },
+  {
+   "name": "issue1490_r20_4_s1e3_i0_sw0_copy",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1490; SmTorus constructor and copy constructor (m_bInsideOut)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      1000.0,
+      -2000.0,
+      500.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 20000.0,
+     "minor": 4000.0,
+     "swap": false,
+     "inside_out": false,
+     "dom": [
+      0.0,
+      -90.0,
+      270.0,
+      90.0
+     ]
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "issue1490_r20_4_s1e3_i0_sw0_is_nurb",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1490; SmTorus constructor and copy constructor (m_bInsideOut)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      1000.0,
+      -2000.0,
+      500.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 20000.0,
+     "minor": 4000.0,
+     "swap": false,
+     "inside_out": false,
+     "dom": [
+      0.0,
+      -90.0,
+      270.0,
+      90.0
+     ]
+    },
+    "op": "is_nurb",
+    "scale": 1.0,
+    "net_scale": [
+     1,
+     1,
+     1
+    ],
+    "perturb": []
+   }
+  },
+  {
+   "name": "issue1490_r20_4_s1e3_i0_sw1_copy",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1490; SmTorus constructor and copy constructor (m_bInsideOut)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      1000.0,
+      -2000.0,
+      500.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 20000.0,
+     "minor": 4000.0,
+     "swap": true,
+     "inside_out": false,
+     "dom": [
+      0.0,
+      -90.0,
+      270.0,
+      90.0
+     ]
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "issue1490_r20_4_s1e3_i0_sw1_is_nurb",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1490; SmTorus constructor and copy constructor (m_bInsideOut)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      1000.0,
+      -2000.0,
+      500.0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 20000.0,
+     "minor": 4000.0,
+     "swap": true,
+     "inside_out": false,
+     "dom": [
+      0.0,
+      -90.0,
+      270.0,
+      90.0
+     ]
+    },
+    "op": "is_nurb",
+    "scale": 1.0,
+    "net_scale": [
+     1,
+     1,
+     1
+    ],
+    "perturb": []
+   }
+  },
+  {
+   "name": "issue1490_horn14_s1_i1_sw0_copy",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1490; SmTorus constructor and copy constructor (m_bInsideOut)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      1.0,
+      -2.0,
+      0.5
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 14.0,
+     "minor": 14.0,
+     "swap": false,
+     "inside_out": true,
+     "dom": [
+      0.0,
+      -90.0,
+      270.0,
+      90.0
+     ]
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "issue1490_horn14_s1_i1_sw1_copy",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1490; SmTorus constructor and copy constructor (m_bInsideOut)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      1.0,
+      -2.0,
+      0.5
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 14.0,
+     "minor": 14.0,
+     "swap": true,
+     "inside_out": true,
+     "dom": [
+      0.0,
+      -90.0,
+      270.0,
+      90.0
+     ]
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "issue1490_horn14_s1_i0_sw0_copy",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1490; SmTorus constructor and copy constructor (m_bInsideOut)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      1.0,
+      -2.0,
+      0.5
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 14.0,
+     "minor": 14.0,
+     "swap": false,
+     "inside_out": false,
+     "dom": [
+      0.0,
+      -90.0,
+      270.0,
+      90.0
+     ]
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "issue1490_horn14_s1_i0_sw1_copy",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1490; SmTorus constructor and copy constructor (m_bInsideOut)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      1.0,
+      -2.0,
+      0.5
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 14.0,
+     "minor": 14.0,
+     "swap": true,
+     "inside_out": false,
+     "dom": [
+      0.0,
+      -90.0,
+      270.0,
+      90.0
+     ]
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "issue1490_r5_1_full_s1_i1_sw0_copy",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1490; SmTorus constructor and copy constructor (m_bInsideOut)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      1.0,
+      -2.0,
+      0.5
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 5.0,
+     "minor": 1.0,
+     "swap": false,
+     "inside_out": true,
+     "dom": [
+      0.0,
+      0.0,
+      360.0,
+      360.0
+     ]
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "issue1490_r5_1_full_s1_i1_sw0_is_nurb",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1490; SmTorus constructor and copy constructor (m_bInsideOut)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      1.0,
+      -2.0,
+      0.5
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 5.0,
+     "minor": 1.0,
+     "swap": false,
+     "inside_out": true,
+     "dom": [
+      0.0,
+      0.0,
+      360.0,
+      360.0
+     ]
+    },
+    "op": "is_nurb",
+    "scale": 1.0,
+    "net_scale": [
+     1,
+     1,
+     1
+    ],
+    "perturb": []
+   }
+  },
+  {
+   "name": "issue1490_r5_1_full_s1_i1_sw1_copy",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1490; SmTorus constructor and copy constructor (m_bInsideOut)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      1.0,
+      -2.0,
+      0.5
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 5.0,
+     "minor": 1.0,
+     "swap": true,
+     "inside_out": true,
+     "dom": [
+      0.0,
+      0.0,
+      360.0,
+      360.0
+     ]
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "issue1490_r5_1_full_s1_i1_sw1_is_nurb",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1490; SmTorus constructor and copy constructor (m_bInsideOut)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      1.0,
+      -2.0,
+      0.5
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 5.0,
+     "minor": 1.0,
+     "swap": true,
+     "inside_out": true,
+     "dom": [
+      0.0,
+      0.0,
+      360.0,
+      360.0
+     ]
+    },
+    "op": "is_nurb",
+    "scale": 1.0,
+    "net_scale": [
+     1,
+     1,
+     1
+    ],
+    "perturb": []
+   }
+  },
+  {
+   "name": "issue1490_r5_1_full_s1_i0_sw0_copy",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1490; SmTorus constructor and copy constructor (m_bInsideOut)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      1.0,
+      -2.0,
+      0.5
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 5.0,
+     "minor": 1.0,
+     "swap": false,
+     "inside_out": false,
+     "dom": [
+      0.0,
+      0.0,
+      360.0,
+      360.0
+     ]
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "issue1490_r5_1_full_s1_i0_sw0_is_nurb",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1490; SmTorus constructor and copy constructor (m_bInsideOut)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      1.0,
+      -2.0,
+      0.5
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 5.0,
+     "minor": 1.0,
+     "swap": false,
+     "inside_out": false,
+     "dom": [
+      0.0,
+      0.0,
+      360.0,
+      360.0
+     ]
+    },
+    "op": "is_nurb",
+    "scale": 1.0,
+    "net_scale": [
+     1,
+     1,
+     1
+    ],
+    "perturb": []
+   }
+  },
+  {
+   "name": "issue1490_r5_1_full_s1_i0_sw1_copy",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1490; SmTorus constructor and copy constructor (m_bInsideOut)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      1.0,
+      -2.0,
+      0.5
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 5.0,
+     "minor": 1.0,
+     "swap": true,
+     "inside_out": false,
+     "dom": [
+      0.0,
+      0.0,
+      360.0,
+      360.0
+     ]
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "issue1490_r5_1_full_s1_i0_sw1_is_nurb",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1490; SmTorus constructor and copy constructor (m_bInsideOut)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      1.0,
+      -2.0,
+      0.5
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "major": 5.0,
+     "minor": 1.0,
+     "swap": true,
+     "inside_out": false,
+     "dom": [
+      0.0,
+      0.0,
+      360.0,
+      360.0
+     ]
+    },
+    "op": "is_nurb",
+    "scale": 1.0,
+    "net_scale": [
+     1,
+     1,
+     1
+    ],
+    "perturb": []
+   }
+  }
+ ]
+}

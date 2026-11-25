@@ -1,0 +1,183 @@
+{
+  "area": "sweeps",
+  "bodies": {
+    "b43": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b46": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b43"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b44"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b44"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b45"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b46"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b47"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b47"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b48"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b45"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b49"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b48"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b50"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b49",
+        "b50"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b51"
+      ],
+      "params": {
+        "op": "union"
+      }
+    }
+  ],
+  "case": "1140-loft-hollow-tube-bands-halved-and-joined",
+  "expected": {
+    "body_count": 1,
+    "method": "the two bands meet on a shared section plane and together are the 90 degree wall: pi (30^2 - 18^2) * 100 * (pi/2), cut in half by the plane through the axis (the arc lies in z = 0, so the halves are equal): V = 1/2 * pi * 576 * 100 * pi/2 = 142122.3.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#1140"
+    ],
+    "volume_mm3": 142122.30337568675,
+    "what": "two hollow lofted tube bands (outer r 30, bore r 18 on R100, 5 sections each, 45 degrees each), each cut in half through its axis plane z = 0 and the halves joined into one body (\"no result\" after ten minutes of fallbacks)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 28,
+      "faces": 12,
+      "vertices": 18
+    }
+  },
+  "records": "1140-loft-hollow-tube-bands-halved-and-joined.bodies.json.gz",
+  "result": [
+    {
+      "body": "Out0",
+      "made": "b51"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 29266.851725283475,
+      "body_count": 1,
+      "edges": 18,
+      "faces": 8,
+      "vertices": 12,
+      "volume_mm3": 142126.53895584817
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#1140"
+  ],
+  "traced_ops": [
+    "loft",
+    "loft",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "loft",
+    "loft",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "two hollow lofted tube bands (outer r 30, bore r 18 on R100, 5 sections each, 45 degrees each), each cut in half through its axis plane z = 0 and the halves joined into one body (\"no result\" after ten minutes of fallbacks)",
+  "why_not": []
+}

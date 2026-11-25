@@ -1,0 +1,983 @@
+{
+ "cases": [
+  {
+   "name": "extrude_wave_z",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:246",
+   "inputs": {
+    "op": "extrude",
+    "curve": {
+     "kind": "curve",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       4,
+       2,
+       0
+      ],
+      [
+       6,
+       -2,
+       0
+      ],
+      [
+       8,
+       2,
+       0
+      ],
+      [
+       10,
+       4,
+       0
+      ],
+      [
+       12,
+       0,
+       0
+      ]
+     ]
+    },
+    "vector": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "extrude_zero_vector",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:280",
+   "inputs": {
+    "op": "extrude",
+    "curve": {
+     "kind": "curve",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       4,
+       2,
+       0
+      ],
+      [
+       6,
+       -2,
+       0
+      ],
+      [
+       8,
+       2,
+       0
+      ],
+      [
+       10,
+       4,
+       0
+      ],
+      [
+       12,
+       0,
+       0
+      ]
+     ]
+    },
+    "vector": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "sweep_zero_length_path",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:289",
+   "inputs": {
+    "op": "sweep",
+    "curve": {
+     "kind": "curve",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       4,
+       2,
+       0
+      ],
+      [
+       6,
+       -2,
+       0
+      ],
+      [
+       8,
+       2,
+       0
+      ],
+      [
+       10,
+       4,
+       0
+      ],
+      [
+       12,
+       0,
+       0
+      ]
+     ]
+    },
+    "path": {
+     "kind": "curve",
+     "points": [
+      [
+       5,
+       5,
+       5
+      ],
+      [
+       5,
+       5,
+       5
+      ],
+      [
+       5,
+       5,
+       5
+      ],
+      [
+       5,
+       5,
+       5
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "sweep_wave_along_rising_path",
+   "upstream_ref": "source/SM_API/src/SmApiSurfaces.cpp:308",
+   "inputs": {
+    "op": "sweep",
+    "curve": {
+     "kind": "curve",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       4,
+       2,
+       0
+      ],
+      [
+       6,
+       -2,
+       0
+      ],
+      [
+       8,
+       2,
+       0
+      ],
+      [
+       10,
+       4,
+       0
+      ],
+      [
+       12,
+       0,
+       0
+      ]
+     ]
+    },
+    "path": {
+     "kind": "curve",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       1,
+       0,
+       3
+      ],
+      [
+       0,
+       1,
+       6
+      ],
+      [
+       1,
+       1,
+       9
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "ruled_wave_pair",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:344",
+   "inputs": {
+    "op": "ruled",
+    "curve1": {
+     "kind": "curve",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       4,
+       2,
+       0
+      ],
+      [
+       6,
+       -2,
+       0
+      ],
+      [
+       8,
+       2,
+       0
+      ],
+      [
+       10,
+       4,
+       0
+      ],
+      [
+       12,
+       0,
+       0
+      ]
+     ]
+    },
+    "curve2": {
+     "kind": "curve",
+     "points": [
+      [
+       0,
+       0,
+       10
+      ],
+      [
+       4,
+       2,
+       10
+      ],
+      [
+       6,
+       -2,
+       10
+      ],
+      [
+       8,
+       2,
+       10
+      ],
+      [
+       10,
+       4,
+       10
+      ],
+      [
+       12,
+       0,
+       10
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "revolution_wave_x_axis",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:355",
+   "inputs": {
+    "op": "revolution",
+    "curve": {
+     "kind": "curve",
+     "points": [
+      [
+       0,
+       3,
+       0
+      ],
+      [
+       4,
+       5,
+       0
+      ],
+      [
+       6,
+       1,
+       0
+      ],
+      [
+       8,
+       5,
+       0
+      ],
+      [
+       10,
+       7,
+       0
+      ],
+      [
+       12,
+       3,
+       0
+      ]
+     ]
+    },
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     1,
+     0,
+     0
+    ],
+    "angle_deg": 180.0
+   }
+  },
+  {
+   "name": "revolution_degenerate_curve",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:397",
+   "inputs": {
+    "op": "revolution",
+    "curve": {
+     "kind": "curve",
+     "points": [
+      [
+       0,
+       5,
+       0
+      ],
+      [
+       0,
+       5,
+       0
+      ],
+      [
+       0,
+       5,
+       0
+      ],
+      [
+       0,
+       5,
+       0
+      ]
+     ]
+    },
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     1,
+     0,
+     0
+    ],
+    "angle_deg": 180.0
+   }
+  },
+  {
+   "name": "revolution_null_curve",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:403",
+   "inputs": {
+    "op": "revolution",
+    "curve": {
+     "kind": "null"
+    },
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     1,
+     0,
+     0
+    ],
+    "angle_deg": 180.0
+   }
+  },
+  {
+   "name": "skin_three_circles",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:641",
+   "inputs": {
+    "op": "skin",
+    "profiles": [
+     {
+      "kind": "circle",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 5.0
+     },
+     {
+      "kind": "circle",
+      "center": [
+       0,
+       0,
+       5
+      ],
+      "radius": 3.0
+     },
+     {
+      "kind": "circle",
+      "center": [
+       0,
+       0,
+       10
+      ],
+      "radius": 5.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "skin_one_profile",
+   "upstream_ref": "source/SM_API/src/SmApiSurfaces.cpp:465",
+   "inputs": {
+    "op": "skin",
+    "profiles": [
+     {
+      "kind": "circle",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 5.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "skin_no_profiles",
+   "upstream_ref": "source/SM_API/src/SmApiSurfaces.cpp:465",
+   "inputs": {
+    "op": "skin",
+    "profiles": []
+   }
+  },
+  {
+   "name": "skin_primitive_cubic_capped",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:533",
+   "inputs": {
+    "op": "skin_primitive",
+    "counts": [
+     1,
+     1,
+     1
+    ],
+    "curves": [
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 5.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     },
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       5
+      ],
+      "radius": 8.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     },
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       10
+      ],
+      "radius": 3.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     }
+    ],
+    "degree": 3,
+    "cap_ends": true
+   }
+  },
+  {
+   "name": "skin_primitive_linear_capped",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:548",
+   "inputs": {
+    "op": "skin_primitive",
+    "counts": [
+     1,
+     1,
+     1
+    ],
+    "curves": [
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 5.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     },
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       5
+      ],
+      "radius": 8.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     },
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       10
+      ],
+      "radius": 3.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     }
+    ],
+    "degree": 1,
+    "cap_ends": true
+   }
+  },
+  {
+   "name": "skin_primitive_circle_to_line",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:563",
+   "inputs": {
+    "op": "skin_primitive",
+    "counts": [
+     1,
+     1
+    ],
+    "curves": [
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 3.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     },
+     {
+      "kind": "line",
+      "start": [
+       0,
+       0,
+       10
+      ],
+      "end": [
+       2,
+       0,
+       10
+      ]
+     }
+    ],
+    "degree": 1,
+    "cap_ends": true
+   }
+  },
+  {
+   "name": "skin_primitive_annular",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:596",
+   "inputs": {
+    "op": "skin_primitive",
+    "counts": [
+     2,
+     2,
+     2
+    ],
+    "curves": [
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 5.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     },
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 2.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     },
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       5
+      ],
+      "radius": 8.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     },
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       5
+      ],
+      "radius": 4.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     },
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       10
+      ],
+      "radius": 3.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     },
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       10
+      ],
+      "radius": 1.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     }
+    ],
+    "degree": 1,
+    "cap_ends": true
+   }
+  },
+  {
+   "name": "skin_primitive_one_profile",
+   "upstream_ref": "source/SM_API/src/SmApiPrimitives.cpp:78",
+   "inputs": {
+    "op": "skin_primitive",
+    "counts": [
+     1
+    ],
+    "curves": [
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 5.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     }
+    ],
+    "degree": 1,
+    "cap_ends": true
+   }
+  },
+  {
+   "name": "skin_primitive_degree_zero",
+   "upstream_ref": "source/SM_API/src/SmApiPrimitives.cpp:78",
+   "inputs": {
+    "op": "skin_primitive",
+    "counts": [
+     1,
+     1
+    ],
+    "curves": [
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 5.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     },
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       5
+      ],
+      "radius": 3.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     }
+    ],
+    "degree": 0,
+    "cap_ends": true
+   }
+  },
+  {
+   "name": "skin_primitive_degree_four",
+   "upstream_ref": "source/SM_API/src/SmApiPrimitives.cpp:78",
+   "inputs": {
+    "op": "skin_primitive",
+    "counts": [
+     1,
+     1
+    ],
+    "curves": [
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 5.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     },
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       5
+      ],
+      "radius": 3.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     }
+    ],
+    "degree": 4,
+    "cap_ends": true
+   }
+  },
+  {
+   "name": "skin_primitive_empty_profile",
+   "upstream_ref": "source/SM_API/src/SmApiPrimitives.cpp:85",
+   "inputs": {
+    "op": "skin_primitive",
+    "counts": [
+     0,
+     2
+    ],
+    "curves": [
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 5.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     },
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       5
+      ],
+      "radius": 3.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     }
+    ],
+    "degree": 1,
+    "cap_ends": true
+   }
+  },
+  {
+   "name": "skin_primitive_counts_overrun",
+   "upstream_ref": "source/SM_API/src/SmApiPrimitives.cpp:85",
+   "inputs": {
+    "op": "skin_primitive",
+    "counts": [
+     1,
+     2
+    ],
+    "curves": [
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 5.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     },
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       5
+      ],
+      "radius": 3.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     }
+    ],
+    "degree": 1,
+    "cap_ends": true
+   }
+  },
+  {
+   "name": "skin_primitive_extra_curve",
+   "upstream_ref": "source/SM_API/src/SmApiPrimitives.cpp:90",
+   "inputs": {
+    "op": "skin_primitive",
+    "counts": [
+     1,
+     1
+    ],
+    "curves": [
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 5.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     },
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       5
+      ],
+      "radius": 3.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     },
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       9
+      ],
+      "radius": 3.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     }
+    ],
+    "degree": 1,
+    "cap_ends": true
+   }
+  },
+  {
+   "name": "skin_primitive_null_curve",
+   "upstream_ref": "source/SM_API/src/SmApiPrimitives.cpp:93",
+   "inputs": {
+    "op": "skin_primitive",
+    "counts": [
+     1,
+     1
+    ],
+    "curves": [
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 5.0,
+      "start_deg": 0.0,
+      "end_deg": 360.0
+     },
+     {
+      "kind": "null"
+     }
+    ],
+    "degree": 1,
+    "cap_ends": false
+   }
+  },
+  {
+   "name": "skin_from_faces_two_discs",
+   "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:665",
+   "inputs": {
+    "op": "skin_from_faces",
+    "circles": [
+     [
+      [
+       0,
+       0,
+       0
+      ],
+      5.0
+     ],
+     [
+      [
+       0,
+       0,
+       10
+      ],
+      8.0
+     ]
+    ],
+    "degree": 3
+   }
+  }
+ ]
+}

@@ -1,0 +1,10 @@
+#### UB-281. The level-2 sm_AssertTest* checks dereference a null face surface or edge curve without the checks ValidatePointers makes
+- **Severity:** Crash / undefined behaviour
+- **Area:** Topology
+- **Location:**
+  - `SmEdgeuse::CalcMaxEdgeFaceGap` (`source/SMLib/src/SmEdgeuse.cpp:5206`). It reads `pEdge->GetCurve()` and `pFace->GetSurface()` at `:5239-5240` and passes them to `SmCrvSrfGapFunction` at `:5256`, whose `Evaluate` dereferences them while `SmGapFunction::BuildSampleSet` samples. The only check is `SM_ASSERT_MSG` at `:5230`, which a release build compiles out.
+  - Reached from `sm_AssertTestEdge13` (`source/SMLib/src/SmEdge.cpp:7046`) through `SmEdge::IsOnFaceEdgeForm` (`:5460`, gap read at `:5488`) and `SmEdgeuse::GetMaxEdgeFaceGap` (`SmEdgeuse.cpp:4904`, calculation at `:4916`).
+- **What happens:** `SmBrep::AssertValid` runs `ValidatePointers` first, so there the level-2 tests only see a B-rep whose links are all set. Called directly, `sm_AssertTestEdge13` computes the edge/face gap through whatever links the B-rep holds. A face with no surface, or an edge with no curve, is dereferenced as a null pointer.
+- **Trigger:** a B-rep with one face's surface pointer, or one edge's curve pointer, cleared; then the level-2 tests called directly, without `ValidatePointers`.
+- **How found:** `topology.assert_valid` harness. Its bare-test entry (shim op 2) refused the null-link mutations 8-10 (`l2_box_tests_m8/m9/m10_rejected`, `fixtures/topology.assert_valid/level2_tests.json`).
+- **Confirmed:** yes, in an isolated run (one process per input, frame names only). An `SmApiCreateCylinder` body (radius 1, height 2) with the first face's surface cleared (mutation 8), or the first edge's curve cleared (mutation 9), faults with SIGSEGV in `SmCrvSrfGapFunction::Evaluate`. The stack is `SmGapFunction::BuildSampleSet`, then `SmEdgeuse::CalcMaxEdgeFaceGap`, `SmEdgeuse::GetMaxEdgeFaceGap`, `SmEdge::IsOnFaceEdgeForm`. Clearing the first edge use's CCW link (mutation 10) did not fault, so it is not part of this record.

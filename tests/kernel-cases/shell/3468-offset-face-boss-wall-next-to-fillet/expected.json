@@ -1,0 +1,12 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3468",
+  "tangency-labs/solidcraft#3898"
+ ],
+ "what": "Offset Face on a boss wall whose base has a 2 mm fillet: the boss grows to r 11 and the fillet follows",
+ "source": "analytic",
+ "method": "box 60x40x10 + boss r11 x10 + concave base fillet r2 around the boss. V=24000+pi*11^2*10+2*pi*(R+d)*A with R=11, A=r^2(1-pi/4), d=r^3(5/6-pi/4)/A (Pappus, centroid of the corner region at distance d from the wall); faces: box bottom + 4 sides + top (annulus) + fillet + boss wall + boss cap = 9",
+ "body_count": 1,
+ "volume_mm3": 27863.06545197909,
+ "faces": 9
+}

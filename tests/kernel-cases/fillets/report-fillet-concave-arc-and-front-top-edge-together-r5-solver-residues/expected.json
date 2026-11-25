@@ -1,0 +1,21 @@
+{
+ "what": "as report-fillet-concave-arc-and-front-top-edge-together-solver-residues, at r5: the corner patch stands out of the bar's front face (known limit past r4); reported from the app (2026-10-30, test-peg part)",
+ "source": "invariants",
+ "method": "the plane of the bar's front face, y = 0.0579254505, bounds the whole body (the cylinder's wall runs tangent into it), as do the planes of its back face, bottom, left end and the cylinder's top and far side: every blend lies within them, so the body's exact box (SMLib's tight box) is the unblended body's, x 0.4892940775 .. 41.6497118311 + 8, y 0.0579254505 .. 16.0579254508, z 0 .. 20; graded to 4e-5, the corner patch's own tolerance (the fillet's approximation tolerance)",
+ "body_count": 1,
+ "bbox": {
+  "min": [
+   0.4892940775280783,
+   0.05792545052986289,
+   0
+  ],
+  "max": [
+   49.64971183108453,
+   16.05792545083297,
+   20
+  ]
+ },
+ "tolerance": {
+  "abs_mm": 4e-05
+ }
+}

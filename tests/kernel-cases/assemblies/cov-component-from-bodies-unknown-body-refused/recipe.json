@@ -1,0 +1,22 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 10,
+    "width": 10,
+    "height": 10,
+    "operation": "new",
+    "body_name": "P"
+   }
+  },
+  {
+   "command": "component.from_bodies",
+   "params": {
+    "bodies": [
+     "Nope"
+    ]
+   }
+  }
+ ]
+}

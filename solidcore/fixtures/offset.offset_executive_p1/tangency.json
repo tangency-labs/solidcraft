@@ -1,0 +1,166 @@
+{
+  "cases": [
+    {
+      "name": "config_tangency_positive_zero",
+      "inputs": {
+        "op": "config",
+        "offset_distance": 0.125,
+        "approx_tol": 1e-6,
+        "tangency_tol_radians": 0.0,
+        "operation": 0,
+        "inset": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "create_solid": false,
+        "install_offset_brep": true,
+        "original_edges": 1,
+        "offset_edges": 2,
+        "face_count": 2,
+        "shell_face_sets": [[1, 1], [0, 1, 0], []],
+        "relations": [[0, 0], [0, 0], [1, 2], [1, 3]]
+      }
+    },
+    {
+      "name": "config_tangency_negative_zero",
+      "inputs": {
+        "op": "config",
+        "offset_distance": -0.125,
+        "approx_tol": 1e-6,
+        "tangency_tol_radians": -0.0,
+        "operation": 1,
+        "inset": true,
+        "extend_convex": false,
+        "merge_results": false,
+        "create_solid": true,
+        "install_offset_brep": false,
+        "original_edges": 1,
+        "offset_edges": 2,
+        "face_count": 2,
+        "shell_face_sets": [[1, 1], [0, 1, 0], []],
+        "relations": [[0, 0], [0, 0], [1, 2], [1, 3]]
+      }
+    },
+    {
+      "name": "config_tangency_tiny_positive",
+      "inputs": {
+        "op": "config",
+        "offset_distance": 0.125,
+        "approx_tol": 1e-12,
+        "tangency_tol_radians": 1e-12,
+        "operation": 2,
+        "inset": false,
+        "extend_convex": true,
+        "merge_results": true,
+        "create_solid": true,
+        "install_offset_brep": true,
+        "original_edges": 1,
+        "offset_edges": 2,
+        "face_count": 2,
+        "shell_face_sets": [[1, 1], [0, 1, 0], []],
+        "relations": [[0, 0], [0, 0], [1, 2], [1, 3]]
+      }
+    },
+    {
+      "name": "config_tangency_tiny_negative",
+      "inputs": {
+        "op": "config",
+        "offset_distance": -0.125,
+        "approx_tol": 1e-12,
+        "tangency_tol_radians": -1e-12,
+        "operation": 3,
+        "inset": true,
+        "extend_convex": true,
+        "merge_results": false,
+        "create_solid": false,
+        "install_offset_brep": false,
+        "original_edges": 1,
+        "offset_edges": 2,
+        "face_count": 2,
+        "shell_face_sets": [[1, 1], [0, 1, 0], []],
+        "relations": [[0, 0], [0, 0], [1, 2], [1, 3]]
+      }
+    },
+    {
+      "name": "config_tangency_positive_pi",
+      "inputs": {
+        "op": "config",
+        "offset_distance": 1.0,
+        "approx_tol": 1e-6,
+        "tangency_tol_radians": 3.141592653589793,
+        "operation": 4,
+        "inset": false,
+        "extend_convex": false,
+        "merge_results": true,
+        "create_solid": false,
+        "install_offset_brep": true,
+        "original_edges": 1,
+        "offset_edges": 2,
+        "face_count": 2,
+        "shell_face_sets": [[1, 1], [0, 1, 0], []],
+        "relations": [[0, 0], [0, 0], [1, 2], [1, 3]]
+      }
+    },
+    {
+      "name": "config_tangency_negative_pi",
+      "inputs": {
+        "op": "config",
+        "offset_distance": -1.0,
+        "approx_tol": 1e-6,
+        "tangency_tol_radians": -3.141592653589793,
+        "operation": 0,
+        "inset": true,
+        "extend_convex": false,
+        "merge_results": true,
+        "create_solid": true,
+        "install_offset_brep": false,
+        "original_edges": 1,
+        "offset_edges": 2,
+        "face_count": 2,
+        "shell_face_sets": [[1, 1], [0, 1, 0], []],
+        "relations": [[0, 0], [0, 0], [1, 2], [1, 3]]
+      }
+    },
+    {
+      "name": "config_tangency_nonround_positive_order_sensitive",
+      "note": "Compute radians * 180.0 / PI in that order, not radians * (180.0 / PI).",
+      "inputs": {
+        "op": "config",
+        "offset_distance": 0.125,
+        "approx_tol": 1e-6,
+        "tangency_tol_radians": 0.1234567890123456,
+        "operation": 1,
+        "inset": false,
+        "extend_convex": true,
+        "merge_results": false,
+        "create_solid": true,
+        "install_offset_brep": true,
+        "original_edges": 1,
+        "offset_edges": 2,
+        "face_count": 2,
+        "shell_face_sets": [[1, 1], [0, 1, 0], []],
+        "relations": [[0, 0], [0, 0], [1, 2], [1, 3]]
+      }
+    },
+    {
+      "name": "config_tangency_nonround_negative_order_sensitive",
+      "note": "The custom geometry tolerance remains signed in both constructor and final snapshots.",
+      "inputs": {
+        "op": "config",
+        "offset_distance": -0.125,
+        "approx_tol": 1e-6,
+        "tangency_tol_radians": -0.1234567890123456,
+        "operation": 2,
+        "inset": true,
+        "extend_convex": true,
+        "merge_results": true,
+        "create_solid": true,
+        "install_offset_brep": false,
+        "original_edges": 1,
+        "offset_edges": 2,
+        "face_count": 2,
+        "shell_face_sets": [[1, 1], [0, 1, 0], []],
+        "relations": [[0, 0], [0, 0], [1, 2], [1, 3]]
+      }
+    }
+  ]
+}

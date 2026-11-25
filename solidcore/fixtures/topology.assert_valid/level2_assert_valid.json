@@ -1,0 +1,1687 @@
+{
+ "cases": [
+  {
+   "name": "l2_box_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_box_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_box_far_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      1000.0,
+      -2000.0,
+      500.0
+     ],
+     "size": [
+      0.001,
+      0.002,
+      0.004
+     ]
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_box_far_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      1000.0,
+      -2000.0,
+      500.0
+     ],
+     "size": [
+      0.001,
+      0.002,
+      0.004
+     ]
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_box_big_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      100,
+      200,
+      300
+     ]
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_box_big_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      100,
+      200,
+      300
+     ]
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_sphere_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_sphere_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_cylinder_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_cylinder_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_cone_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "cone",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "radius_base": 2,
+     "radius_top": 0.5,
+     "height": 1
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_cone_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "cone",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "radius_base": 2,
+     "radius_top": 0.5,
+     "height": 1
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_cone_apex_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "cone",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius_base": 1,
+     "radius_top": 0,
+     "height": 2
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_cone_apex_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "cone",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius_base": 1,
+     "radius_top": 0,
+     "height": 2
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_torus_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "torus",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "major": 3,
+     "minor": 1
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_torus_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "torus",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "major": 3,
+     "minor": 1
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_network_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_network_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_thinnest_buildable_face_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1e-12,
+      1
+     ]
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_thinnest_buildable_face_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1e-12,
+      1
+     ]
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_thinnest_buildable_face2_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        1,
+        2,
+        3
+       ],
+       "n": [
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      -0.99999999999,
+      1
+     ]
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_thinnest_buildable_face2_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        1,
+        2,
+        3
+       ],
+       "n": [
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      -0.99999999999,
+      1
+     ]
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_face0_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "ellipse_face",
+     "circle": false,
+     "origin": [
+      0.002,
+      -0.003,
+      0.001
+     ],
+     "axis": 2,
+     "radii": [
+      0.003,
+      0.001
+     ],
+     "angles": [
+      0.0,
+      360.0
+     ],
+     "natural": [
+      -4.0,
+      3.0
+     ],
+     "inside_out": false,
+     "oob": false
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_face0_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "ellipse_face",
+     "circle": false,
+     "origin": [
+      0.002,
+      -0.003,
+      0.001
+     ],
+     "axis": 2,
+     "radii": [
+      0.003,
+      0.001
+     ],
+     "angles": [
+      0.0,
+      360.0
+     ],
+     "natural": [
+      -4.0,
+      3.0
+     ],
+     "inside_out": false,
+     "oob": false
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_face1_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "ellipse_face",
+     "circle": false,
+     "origin": [
+      0.002,
+      -0.003,
+      0.001
+     ],
+     "axis": 2,
+     "radii": [
+      0.003,
+      0.001
+     ],
+     "angles": [
+      30.0,
+      210.0
+     ],
+     "natural": [
+      -4.0,
+      3.0
+     ],
+     "inside_out": false,
+     "oob": false
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_face1_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "ellipse_face",
+     "circle": false,
+     "origin": [
+      0.002,
+      -0.003,
+      0.001
+     ],
+     "axis": 2,
+     "radii": [
+      0.003,
+      0.001
+     ],
+     "angles": [
+      30.0,
+      210.0
+     ],
+     "natural": [
+      -4.0,
+      3.0
+     ],
+     "inside_out": false,
+     "oob": false
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_face2_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "ellipse_face",
+     "circle": false,
+     "origin": [
+      2.0,
+      -3.0,
+      1.0
+     ],
+     "axis": 2,
+     "radii": [
+      3.0,
+      1.0
+     ],
+     "angles": [
+      0.0,
+      360.0
+     ],
+     "natural": [
+      -4.0,
+      3.0
+     ],
+     "inside_out": false,
+     "oob": false
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_face2_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "ellipse_face",
+     "circle": false,
+     "origin": [
+      2.0,
+      -3.0,
+      1.0
+     ],
+     "axis": 2,
+     "radii": [
+      3.0,
+      1.0
+     ],
+     "angles": [
+      0.0,
+      360.0
+     ],
+     "natural": [
+      -4.0,
+      3.0
+     ],
+     "inside_out": false,
+     "oob": false
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_face3_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "ellipse_face",
+     "circle": false,
+     "origin": [
+      2.0,
+      -3.0,
+      1.0
+     ],
+     "axis": 2,
+     "radii": [
+      3.0,
+      1.0
+     ],
+     "angles": [
+      30.0,
+      210.0
+     ],
+     "natural": [
+      -4.0,
+      3.0
+     ],
+     "inside_out": false,
+     "oob": false
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_face3_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "ellipse_face",
+     "circle": false,
+     "origin": [
+      2.0,
+      -3.0,
+      1.0
+     ],
+     "axis": 2,
+     "radii": [
+      3.0,
+      1.0
+     ],
+     "angles": [
+      30.0,
+      210.0
+     ],
+     "natural": [
+      -4.0,
+      3.0
+     ],
+     "inside_out": false,
+     "oob": false
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_face4_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "ellipse_face",
+     "circle": false,
+     "origin": [
+      2000.0,
+      -3000.0,
+      1000.0
+     ],
+     "axis": 2,
+     "radii": [
+      3000.0,
+      1000.0
+     ],
+     "angles": [
+      0.0,
+      360.0
+     ],
+     "natural": [
+      -4.0,
+      3.0
+     ],
+     "inside_out": false,
+     "oob": false
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_face4_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "ellipse_face",
+     "circle": false,
+     "origin": [
+      2000.0,
+      -3000.0,
+      1000.0
+     ],
+     "axis": 2,
+     "radii": [
+      3000.0,
+      1000.0
+     ],
+     "angles": [
+      0.0,
+      360.0
+     ],
+     "natural": [
+      -4.0,
+      3.0
+     ],
+     "inside_out": false,
+     "oob": false
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_face5_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "ellipse_face",
+     "circle": false,
+     "origin": [
+      2000.0,
+      -3000.0,
+      1000.0
+     ],
+     "axis": 2,
+     "radii": [
+      3000.0,
+      1000.0
+     ],
+     "angles": [
+      30.0,
+      210.0
+     ],
+     "natural": [
+      -4.0,
+      3.0
+     ],
+     "inside_out": false,
+     "oob": false
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_face5_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "ellipse_face",
+     "circle": false,
+     "origin": [
+      2000.0,
+      -3000.0,
+      1000.0
+     ],
+     "axis": 2,
+     "radii": [
+      3000.0,
+      1000.0
+     ],
+     "angles": [
+      30.0,
+      210.0
+     ],
+     "natural": [
+      -4.0,
+      3.0
+     ],
+     "inside_out": false,
+     "oob": false
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_face6_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "ellipse_face",
+     "circle": true,
+     "origin": [
+      0.002,
+      -0.003,
+      0.001
+     ],
+     "axis": 2,
+     "radii": [
+      0.003,
+      0.003
+     ],
+     "angles": [
+      0.0,
+      360.0
+     ],
+     "natural": [
+      -4.0,
+      3.0
+     ],
+     "inside_out": false,
+     "oob": false
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_face6_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "ellipse_face",
+     "circle": true,
+     "origin": [
+      0.002,
+      -0.003,
+      0.001
+     ],
+     "axis": 2,
+     "radii": [
+      0.003,
+      0.003
+     ],
+     "angles": [
+      0.0,
+      360.0
+     ],
+     "natural": [
+      -4.0,
+      3.0
+     ],
+     "inside_out": false,
+     "oob": false
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_face7_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "ellipse_face",
+     "circle": true,
+     "origin": [
+      0.002,
+      -0.003,
+      0.001
+     ],
+     "axis": 2,
+     "radii": [
+      0.003,
+      0.003
+     ],
+     "angles": [
+      30.0,
+      210.0
+     ],
+     "natural": [
+      -4.0,
+      3.0
+     ],
+     "inside_out": false,
+     "oob": false
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_face7_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "ellipse_face",
+     "circle": true,
+     "origin": [
+      0.002,
+      -0.003,
+      0.001
+     ],
+     "axis": 2,
+     "radii": [
+      0.003,
+      0.003
+     ],
+     "angles": [
+      30.0,
+      210.0
+     ],
+     "natural": [
+      -4.0,
+      3.0
+     ],
+     "inside_out": false,
+     "oob": false
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_file_Solids_box_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/box.smb"
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_file_Solids_box_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/box.smb"
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_file_Solids_cylinder_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/cylinder.smb"
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_file_Solids_cylinder_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/cylinder.smb"
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_file_Solids_extrusion_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/extrusion.smb"
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_file_Solids_extrusion_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/extrusion.smb"
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_file_Solids_fillet_cut_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/fillet_cut.smb"
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_file_Solids_fillet_cut_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/fillet_cut.smb"
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_file_Solids_l_shape_with_boss_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/l_shape_with_boss.smb"
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_file_Solids_l_shape_with_boss_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/l_shape_with_boss.smb"
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_file_Solids_revolution_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/revolution.smb"
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_file_Solids_revolution_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/revolution.smb"
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_file_Solids_revolution_360_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/revolution_360.smb"
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_file_Solids_revolution_360_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/revolution_360.smb"
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_file_Solids_sphere_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/sphere.smb"
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_file_Solids_sphere_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/sphere.smb"
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_file_Solids_pyramid_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/pyramid.smb"
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_file_Solids_pyramid_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/pyramid.smb"
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_file_Solids_nurb_fillet_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/nurb_fillet.smb"
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_file_Solids_nurb_fillet_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/nurb_fillet.smb"
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_file_Solids_OffsetBoxCylOnCorner_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/OffsetBoxCylOnCorner.smb"
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_file_Solids_OffsetBoxCylOnCorner_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/OffsetBoxCylOnCorner.smb"
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_file_Solids_OffsetBoxWithBoss_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/OffsetBoxWithBoss.smb"
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_file_Solids_OffsetBoxWithBoss_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/OffsetBoxWithBoss.smb"
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_file_Solids_InsetCone_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/InsetCone.smb"
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_file_Solids_InsetCone_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/InsetCone.smb"
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_file_Solids_off_extrusion_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/off_extrusion.smb"
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_file_Solids_off_extrusion_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/off_extrusion.smb"
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_file_Solids_mouse_1_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/mouse_1.smb"
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_file_Solids_mouse_1_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/mouse_1.smb"
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_file_Endcap_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_file_Endcap_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_file_Mouse_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_file_Mouse_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_file_box_with_large_fillet_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_file_box_with_large_fillet_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_file_cone_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_file_cone_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_file_disk_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_file_disk_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_file_ellips_ts2_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_file_ellips_ts2_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_file_plane_circ_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_file_plane_circ_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_file_plane_square_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_file_plane_square_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_file_sphere_level2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "level": 2
+   }
+  },
+  {
+   "name": "l2_file_sphere_capi2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "level": 2,
+    "capi": true
+   }
+  },
+  {
+   "name": "l2_box_level2_m6_v-1_i0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "level": 2,
+    "mutation": 6,
+    "value": -1.0,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_box_level2_m6_v-1_i1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "level": 2,
+    "mutation": 6,
+    "value": -1.0,
+    "index": 1
+   }
+  },
+  {
+   "name": "l2_box_level2_m6_v-1_i2",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "level": 2,
+    "mutation": 6,
+    "value": -1.0,
+    "index": 2
+   }
+  },
+  {
+   "name": "l2_box_level2_m6_v-1_i3",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "level": 2,
+    "mutation": 6,
+    "value": -1.0,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_box_level2_m6_v-1_i4",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "level": 2,
+    "mutation": 6,
+    "value": -1.0,
+    "index": 4
+   }
+  },
+  {
+   "name": "l2_box_level2_m6_v-1_i5",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "level": 2,
+    "mutation": 6,
+    "value": -1.0,
+    "index": 5
+   }
+  },
+  {
+   "name": "l2_box_level2_m6_v-1_i6",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "level": 2,
+    "mutation": 6,
+    "value": -1.0,
+    "index": 6
+   }
+  },
+  {
+   "name": "l2_box_level2_m6_v-1_i7",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:AssertValid",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "level": 2,
+    "mutation": 6,
+    "value": -1.0,
+    "index": 7
+   }
+  }
+ ]
+}

@@ -2,7 +2,8 @@
 //! or given as `point`. Each pair is joined by a construction line the point is the midpoint of.
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{ConstraintKind, Sketch};
 
 use crate::Session;

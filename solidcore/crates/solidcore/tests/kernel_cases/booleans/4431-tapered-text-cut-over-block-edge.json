@@ -1,0 +1,182 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b56": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b57": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b57"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b58"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b58"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b59"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b56"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b60"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b60"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b61"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b59"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b62"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b61"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b63"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b62",
+        "b63"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b64"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "4431-tapered-text-cut-over-block-edge",
+  "expected": {
+    "body_count": 1,
+    "method": "a 1 mm cut of glyphs into a 40 mm block leaves one valid closed body; the glyph areas are not closed-form, so only the outcome is graded, within the run's timeout (truck took 145 s; over the edge with a join it never finished)",
+    "source": "invariants",
+    "sources": [
+      "tangency-labs/solidcraft#4431"
+    ],
+    "what": "a line of text (22 letters, 7.81 mm high) on a block's top face, running over the block's edge, cut 1 mm deep with a -5 deg taper: 145 s in truck (the untapered cut takes 1 s)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 1263,
+      "faces": 459,
+      "vertices": 814
+    }
+  },
+  "records": "4431-tapered-text-cut-over-block-edge.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b64"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 16390.470993913674,
+      "body_count": 1,
+      "edges": 1262,
+      "faces": 459,
+      "vertices": 813,
+      "volume_mm3": 108996.03770435526
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#4431"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "boolean",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "boolean",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "boolean",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "boolean",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "boolean",
+    "extrude",
+    "extrude",
+    "extrude",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a line of text (22 letters, 7.81 mm high) on a block's top face, running over the block's edge, cut 1 mm deep with a -5 deg taper: 145 s in truck (the untapered cut takes 1 s)",
+  "why_not": []
+}

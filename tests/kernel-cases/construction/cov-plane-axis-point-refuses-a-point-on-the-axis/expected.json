@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "a plane through the Z axis and a point on it",
+ "source": "analytic",
+ "method": "(0,0,50) is on the Z axis: every plane through the axis holds it, so no one plane is meant: refused",
+ "outcome": "refused",
+ "refusal": "point is on the axis"
+}

@@ -1,0 +1,12 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3850",
+  "tangency-labs/solidcraft#3741"
+ ],
+ "what": "the O10 through-all hole across the wall of the body from the cross-cut case (the report's failing step: 'lumps: cannot mesh a complete shell boundary')",
+ "source": "analytic",
+ "method": "the hole is a O10 cylinder along y through (x=0,z=25), starting on the y=0 plane and running out through the +y wall (the body is symmetric in y, so either direction gives the same volume). It removes the material beyond the earlier cuts: Int over the disk x^2+w^2<=25 (w=z-25) of (sqrt(625-x^2) - max(sqrt(400-w^2), 12.5 for |x|<=12.5)) = 395.199 (python quadrature). V = 32897.506 - 395.199 = 32502.307. One shell",
+ "body_count": 1,
+ "shells": 1,
+ "volume_mm3": 32502.3067
+}

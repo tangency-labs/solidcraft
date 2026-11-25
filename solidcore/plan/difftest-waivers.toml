@@ -1,0 +1,198 @@
+# Accepted difftest regression-gate violations (crates/difftest/README.md, "Regression gate").
+# Every entry needs a reason a reviewer can check. Remove ratchet waivers once the PR
+# that needed them has merged (the base commit's reports then no longer contain the case).
+#
+# [[waiver]]
+# unit = "nlib.knots"
+# check = "ratchet"          # or "value-share"
+# case = "insert_at_end"     # ratchet only; omit to waive every case of the unit
+# reason = "fixture asserted the pre-#123 clamp; replaced by insert_at_end_clamped"
+
+[[waiver]]
+unit = "intersect.api_intersectors"
+check = "ratchet"
+case = "upstream-surfaces-net-cylinder"
+reason = "renamed, not lost: #1662 replaces the hand-built 5x7 net stand-in with upstream's exact SmApiCreateSurfaceFromOrderedPoints input (TestSmIntersectors.cpp); the case now runs as upstream-surfaces-ordered-cylinder"
+
+[[waiver]]
+unit = "intersect.api_intersectors"
+check = "ratchet"
+case = "upstream-surfaces-net-revolution"
+reason = "renamed, not lost: #1662 replaces the hand-built 5x7 net stand-in with upstream's exact SmApiCreateSurfaceFromOrderedPoints input (TestSmIntersectors.cpp); the case now runs as upstream-surfaces-ordered-revolution"
+
+[[waiver]]
+unit = "topology.brep_local_operation"
+check = "ratchet"
+case = "nurb_fillet_face5_same"
+reason = "ND-493 C++ clock-seeded rand() (srand(time(NULL)) in GetPointsInFace via IsInnerShell in the merge stitch): intermittent on main CI at c47d6d3b5 and 7ca6ce7a9; Rust deterministic; parked"
+
+[[waiver]]
+unit = "blend.fillet_corner_p1"
+check = "ratchet"
+reason = "old corner code deleted, #2400: the blend corner is the default; its corner cases on the deleted 1x1 and 2x2 classes are retired (no Rust class is left to compare) (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md). Remove once #2400 has merged."
+
+[[waiver]]
+unit = "blend.fillet_corner_p2"
+check = "ratchet"
+reason = "old corner code deleted, #2400: the blend corner is the default; its corner cases on the deleted 1x1 and 2x2 classes and its AdjustTopology cases that reach the deleted big-radius conversion are retired; 2 passes are known mismatches (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md). Remove once #2400 has merged."
+
+[[waiver]]
+unit = "blend.fillet_corner_p3"
+check = "ratchet"
+reason = "old corner code deleted, #2400: the blend corner is the default; its cases on the deleted 1x1 and 2x2 classes, AdjustTangentCorner and TestAndConvertBigRadFillet (big_rad_*, and the AdjustTopology cases that reach it) are retired; 95 passes are known mismatches (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md). Remove once #2400 has merged."
+
+[[waiver]]
+unit = "blend.fillet_executive_p3"
+check = "ratchet"
+reason = "old corner code deleted, #2400: the blend corner is the default; 155 passes are known mismatches (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md). Remove once #2400 has merged."
+
+[[waiver]]
+unit = "blend.fillet_geom_p4"
+check = "ratchet"
+reason = "old corner code deleted, #2400: the blend corner is the default; 23 passes are known mismatches (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md). Remove once #2400 has merged."
+
+[[waiver]]
+unit = "intersect.api_intersectors"
+check = "ratchet"
+reason = "old corner code deleted, #2400: the blend corner is the default; 1 passes are known mismatches (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md). Remove once #2400 has merged."
+
+[[waiver]]
+unit = "intersect.surface_intersector_p2"
+check = "ratchet"
+reason = "old corner code deleted, #2400: the blend corner is the default; 40 passes are known mismatches (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md). Remove once #2400 has merged."
+
+[[waiver]]
+unit = "primitive.api_trim_ops"
+check = "ratchet"
+reason = "old corner code deleted, #2400: the blend corner is the default; 9 passes are known mismatches (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md). Remove once #2400 has merged."
+
+[[waiver]]
+unit = "surface.torus"
+check = "ratchet"
+reason = "old corner code deleted, #2400: the blend corner is the default; 12 passes are known mismatches (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md). Remove once #2400 has merged."
+
+[[waiver]]
+unit = "topology.api_files"
+check = "ratchet"
+reason = "old corner code deleted, #2400: the blend corner is the default; 2 passes are known mismatches (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md). Remove once #2400 has merged."
+
+[[waiver]]
+unit = "topology.api_projection"
+check = "ratchet"
+reason = "old corner code deleted, #2400: the blend corner is the default; 5 passes are known mismatches (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md). Remove once #2400 has merged."
+
+[[waiver]]
+unit = "topology.brep_cutting"
+check = "ratchet"
+reason = "old corner code deleted, #2400: the blend corner is the default; 19 passes are known mismatches (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md). Remove once #2400 has merged."
+
+[[waiver]]
+unit = "topology.brep_local_operation"
+check = "ratchet"
+reason = "old corner code deleted, #2400: the blend corner is the default; 6 passes are known mismatches (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md). Remove once #2400 has merged."
+
+[[waiver]]
+unit = "topology.brep_planar_section"
+check = "ratchet"
+reason = "old corner code deleted, #2400: the blend corner is the default; 12 passes are known mismatches (plan/findings/blend.fillet_corner_p3--blend-corner-default-diverges-from-cpp-v1-0-1-2026-11-04.md). Remove once #2400 has merged."
+
+[[waiver]]
+unit = "offset.offset_executive_p2"
+check = "ratchet"
+case = "tiny_tolerance_sheet_exact_boundary"
+reason = "#2393, WR-749 (confirmed): parked as cpp_defect, the C++ shells a sheet of tolerance 1e-15 into a result of tolerance 1e-15, below SM_EFF_ZERO; solidcore refuses it by name (OffsetFailure::ToleranceUnresolved)"
+
+[[waiver]]
+unit = "offset.offset_executive_p2"
+check = "ratchet"
+case = "tiny_tolerance_sheet_above_boundary"
+reason = "#2393, WR-749 (confirmed): as tiny_tolerance_sheet_exact_boundary"
+
+[[waiver]]
+unit = "offset.offset_executive_p2"
+check = "ratchet"
+case = "fuzz00087"
+reason = "HANG-53 (#2737): the offset distance is below the input B-rep tolerance (0, -0, or tolerance 1e300 against 0.5), which the offset now refuses on both sides before building anything; the case was compared before and is rejected now"
+
+[[waiver]]
+unit = "offset.offset_executive_p2"
+check = "ratchet"
+case = "empty_static_offset_negative_zero_not_success"
+reason = "HANG-53 (#2737): the offset distance is below the input B-rep tolerance (0, -0, or tolerance 1e300 against 0.5), which the offset now refuses on both sides before building anything; the case was compared before and is rejected now"
+
+[[waiver]]
+unit = "offset.offset_executive_p2"
+check = "ratchet"
+case = "gen0075"
+reason = "HANG-53 (#2737): the offset distance is below the input B-rep tolerance (0, -0, or tolerance 1e300 against 0.5), which the offset now refuses on both sides before building anything; the case was compared before and is rejected now"
+
+[[waiver]]
+unit = "offset.offset_executive_p2"
+check = "ratchet"
+case = "gen0178"
+reason = "HANG-53 (#2737): the offset distance is below the input B-rep tolerance (0, -0, or tolerance 1e300 against 0.5), which the offset now refuses on both sides before building anything; the case was compared before and is rejected now"
+
+[[waiver]]
+unit = "offset.offset_executive_p2"
+check = "ratchet"
+case = "gen0186"
+reason = "HANG-53 (#2737): the offset distance is below the input B-rep tolerance (0, -0, or tolerance 1e300 against 0.5), which the offset now refuses on both sides before building anything; the case was compared before and is rejected now"
+
+[[waiver]]
+unit = "offset.offset_executive_p2"
+check = "ratchet"
+case = "gen0212"
+reason = "HANG-53 (#2737): the offset distance is below the input B-rep tolerance (0, -0, or tolerance 1e300 against 0.5), which the offset now refuses on both sides before building anything; the case was compared before and is rejected now"
+
+[[waiver]]
+unit = "mass.integrator"
+check = "ratchet"
+reason = "#1556: precise_properties_trim_base_v deleted, the trims' lowest v is the only integration base; 38 bounded-face passes are known mismatches within their accuracy (plan/findings/mass.integrator--trim-base-v-default-moves-cases-2026-11-05.md) and 16 unbounded or half-open v passes are parked as WR-563 (plan/upstream-issues/WR-563--addendum-2026-11-05-trim-base-v-default.md); 89 more passes move with the fifth-order step estimate (plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md). 14 more move with a curve length's span ends from their own knot span and its quadrature step estimate (plan/findings/curve.curve_p5--curve-length-honest-acceptance-moves-cases-2026-11-05.md). 1 more moves when a point curve's length becomes exactly 0, through the step acceptance's rounding floor (same findings). Remove once #1556 has merged."
+
+[[waiver]]
+unit = "boolean.api_brep"
+check = "ratchet"
+reason = "#1556: precise properties start each iso-u integral at the trims' lowest v; 53 passes whose face areas or property attributes move are known mismatches (plan/findings/mass.integrator--trim-base-v-default-moves-cases-2026-11-05.md), and 51 more with the fifth-order step estimate (plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md). Remove once #1556 has merged."
+
+[[waiver]]
+unit = "blend.fillet_executive_p3"
+check = "ratchet"
+reason = "#1556: precise properties start each iso-u integral at the trims' lowest v; 72 passes whose mass properties or property attributes move are known mismatches (plan/findings/mass.integrator--trim-base-v-default-moves-cases-2026-11-05.md), and 71 more with the fifth-order step estimate and the split at the surface's knots (#1435, plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md). Remove once #1556 has merged."
+
+[[waiver]]
+unit = "offset.offset_executive_p2"
+check = "ratchet"
+reason = "#1556: precise properties start each iso-u integral at the trims' lowest v; 2 passes whose volumes move are known mismatches (plan/findings/mass.integrator--trim-base-v-default-moves-cases-2026-11-05.md), and 1 more with the fifth-order step estimate and the split at the surface's knots (#1435, plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md). Remove once #1556 has merged."
+
+[[waiver]]
+unit = "topology.face_p2"
+check = "ratchet"
+reason = "#1556 follow-on: SmODEAreaIFEO's port writes the integrand (zero) where the trim's du/dt is zero, and the iso-curve steps take the fifth-order error estimate too; 47 passes are known mismatches (plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md). Remove once #1556 has merged."
+
+[[waiver]]
+unit = "curve.curve_p5"
+check = "ratchet"
+reason = "a curve's length evaluates each span's end in its own knot span and accepts its steps on the quadrature estimate; 6 pass(es) move within their accuracy, each a known mismatch with both sides' errors against a Gauss-Legendre reference (plan/findings/curve.curve_p5--curve-length-honest-acceptance-moves-cases-2026-11-05.md). Remove once this branch has merged."
+
+[[waiver]]
+unit = "curve.curve_p3"
+check = "ratchet"
+reason = "a curve's length evaluates each span's end in its own knot span and accepts its steps on the quadrature estimate; 1 pass(es) move within their accuracy, each a known mismatch with both sides' errors against a Gauss-Legendre reference (plan/findings/curve.curve_p5--curve-length-honest-acceptance-moves-cases-2026-11-05.md). Remove once this branch has merged."
+
+[[waiver]]
+unit = "sweep.api_brep"
+check = "ratchet"
+case = "box_face1_curve_path_cap"
+reason = "#2890 follow-on: precise properties integrate from the trims' base, split at the surface's knots and step on the fifth-order estimate; 3 passes whose volumes move are known mismatches, each with both sides' errors against an independent reference (plan/findings/sweep.api_brep--precise-properties-2890-moves-cases-2026-11-05.md). Remove once this branch has merged."
+
+[[waiver]]
+unit = "sweep.api_brep"
+check = "ratchet"
+case = "wr471_rot_half_circle_whole_sphere_off_3e-7"
+reason = "#2890 follow-on: precise properties integrate from the trims' base, split at the surface's knots and step on the fifth-order estimate; 3 passes whose volumes move are known mismatches, each with both sides' errors against an independent reference (plan/findings/sweep.api_brep--precise-properties-2890-moves-cases-2026-11-05.md). Remove once this branch has merged."
+
+[[waiver]]
+unit = "sweep.api_brep"
+check = "ratchet"
+case = "wr471_rot_half_circle_whole_sphere_off_0"
+reason = "#2890 follow-on: precise properties integrate from the trims' base, split at the surface's knots and step on the fifth-order estimate; 3 passes whose volumes move are known mismatches, each with both sides' errors against an independent reference (plan/findings/sweep.api_brep--precise-properties-2890-moves-cases-2026-11-05.md). Remove once this branch has merged."

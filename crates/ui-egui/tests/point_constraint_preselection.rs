@@ -1,5 +1,7 @@
 use serde_json::json;
-use solidcraft_engine::{Sel, geom::Vec2, sketch::ConstraintKind};
+use solidcore_record::Vec2;
+use solidcraft_engine::geom::prelude::*;
+use solidcraft_engine::{Sel, sketch::ConstraintKind};
 use solidcraft_ui_egui::scenario::Harness;
 
 fn setup() -> Harness {
@@ -36,7 +38,7 @@ fn clicked_point_constraint_preselection_applies_and_undoes_once() {
         assert!(h.app.tool.is_none());
         assert!(h.app.session.selection.is_empty());
         assert_eq!(h.app.session.undo.len(), undo + 1);
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
         assert!(sk.constraints.iter().any(|c| match command {
             "coincident" => matches!(c.kind, ConstraintKind::Coincident { .. } | ConstraintKind::PointOnCurve { .. }),
@@ -82,10 +84,29 @@ fn rejected_and_ambiguous_preselection_preserve_document_and_selection() {
     for command in ["coincident", "midpoint", "symmetry"] {
         h.app.session.selection = vec![Sel::SketchPoint { id: "a".into() }];
         h.step(&json!({"start":format!("sketch.constraint.{command}")})).unwrap();
-        assert!(h.app.tool.as_ref().unwrap().picks.is_empty());
-        assert_eq!(h.app.session.selection.len(), 1);
+        assert_eq!(h.app.tool.as_ref().unwrap().picks, vec!["a"]);
+        assert!(h.app.session.selection.is_empty());
         assert_eq!(h.app.session.doc.to_json(), before);
+        h.step(&json!({"key":"Escape"})).unwrap();
     }
+    // Seeded single point completes the constraint on one click and unselects the operator.
+    let mut h = setup();
+    h.app.session.selection = vec![Sel::SketchPoint { id: "a".into() }];
+    h.step(&json!({"start": "sketch.constraint.coincident"})).unwrap();
+    assert_eq!(h.app.tool.as_ref().unwrap().picks, vec!["a"]);
+    h.step(&json!({"click": {"sketch": [25, 30]}})).unwrap();
+    assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error), "{:?}", h.app.status);
+    assert!(h.app.tool.is_none(), "preselected coincident should exit tool once applied");
+
+    // Incompatible / over-limit selection is unselected and enters tool-first picking empty.
+    let mut h = setup();
+    let doc_before = h.app.session.doc.to_json();
+    let over = vec![Sel::SketchPoint { id: "a".into() }, Sel::SketchPoint { id: "b".into() }, Sel::Axis { name: "X".into() }];
+    h.app.session.selection = over;
+    h.step(&json!({"start":"sketch.constraint.coincident"})).unwrap();
+    assert!(h.app.tool.as_ref().unwrap().picks.is_empty());
+    assert!(h.app.session.selection.is_empty());
+    assert_eq!(h.app.session.doc.to_json(), doc_before);
 }
 
 // MidPoint centres one line on another when the tool picks two lines.
@@ -99,7 +120,7 @@ fn two_lines() -> Harness {
 }
 
 fn line_ends(h: &Harness, id: &str) -> (Vec2, Vec2) {
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     let p = |end: &str| sk.point(sk.resolve_point(&format!("{id}.{end}")).unwrap()).unwrap();
     (p("start"), p("end"))
@@ -138,13 +159,13 @@ fn midpoint_tool_takes_two_preselected_lines() {
 }
 
 fn midpoint_ids(h: &Harness) -> Vec<String> {
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     sk.constraints.iter().filter(|c| matches!(c.kind, ConstraintKind::Midpoint { .. })).map(|c| c.id.clone()).collect()
 }
 
 fn point_count(h: &Harness) -> usize {
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.points.len()
 }
 

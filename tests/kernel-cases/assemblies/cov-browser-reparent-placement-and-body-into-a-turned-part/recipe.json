@@ -1,0 +1,105 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 10,
+    "height": 10,
+    "corner": [
+     0,
+     -5,
+     0
+    ],
+    "operation": "new",
+    "body_name": "ArmBox"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "Arm",
+    "parent": "root",
+    "activate": false,
+    "grounded": false
+   }
+  },
+  {
+   "command": "component.move_bodies",
+   "params": {
+    "bodies": [
+     "ArmBox"
+    ],
+    "component": "Arm"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "Holder",
+    "parent": "root",
+    "activate": false,
+    "grounded": false
+   }
+  },
+  {
+   "command": "occurrence.move",
+   "params": {
+    "occurrence": "Holder:1",
+    "matrix": [
+     [
+      0,
+      -1,
+      0,
+      100
+     ],
+     [
+      1,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      1,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 10,
+    "width": 10,
+    "height": 10,
+    "corner": [
+     0,
+     20,
+     0
+    ],
+    "operation": "new",
+    "body_name": "Cube"
+   }
+  },
+  {
+   "command": "browser.reparent",
+   "params": {
+    "occurrences": [
+     3
+    ],
+    "bodies": [
+     "Cube"
+    ],
+    "component": "Holder"
+   }
+  },
+  {
+   "command": "occurrence.properties",
+   "params": {
+    "occurrence": "Holder:1"
+   }
+  }
+ ]
+}

@@ -1,0 +1,24 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#723",
+  "tangency-labs/solidcraft#809",
+  "tangency-labs/solidcraft#1797",
+  "tangency-labs/solidcraft#1799"
+ ],
+ "what": "a 120 x 90 tray with four 20 mm 90 degree flanges and corner relief shape tear, unfolded",
+ "source": "analytic",
+ "method": "a flange of angle th, outer leg length Hf (height, from the virtual sharp along the flange) bends with allowance BA = th(R+Kt) and bend deduction BD = 2(R+t)tan(th/2) - BA; unfolded it lies in the base's plane and reaches Hf - BD beyond the base's edge. T = 2, R = 1, K = 0.5. BD(90) = 2*3 - pi = 2.8584, so the flat reaches 20 - BD = 17.1416 past each edge of the base: bbox x from -17.1416 to 137.1416, y from -17.1416 to 107.1416, z 0..2 (the base keeps its place); the corner relief changes the outline only inside the corners",
+ "body_count": 1,
+ "bbox": {
+  "min": [
+   -17.141592653589793,
+   -17.141592653589793,
+   0
+  ],
+  "max": [
+   137.14159265358978,
+   107.1415926535898,
+   2
+  ]
+ }
+}

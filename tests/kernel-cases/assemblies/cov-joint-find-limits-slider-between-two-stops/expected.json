@@ -1,0 +1,26 @@
+{
+ "sources": [],
+ "what": "joint.find_limits of a slider whose block runs into a stop at each end",
+ "source": "analytic",
+ "method": "Frame (grounded): stops 10x10x10 at x -30..-20 and 50..60; Carriage: box 40x10x10 at x 0..40, same y and z; a slider along +x at value 0. Up, its end x = 40 meets the right stop at x = 50: max 10; down, its end x = 0 meets the left stop at x = -20: min -20. Each side stops at the last value clear of contact, bisected to refine 0.01 mm: within 0.02 mm. Every face is flat, so the mesh gap is exact (gap_tolerance_mm 0)",
+ "body_count": 3,
+ "volume_mm3": 6000.0,
+ "results": [
+  {
+   "step": 9,
+   "abs_mm": 0.02,
+   "json": {
+    "values": [
+     {
+      "index": 0,
+      "unit": "mm",
+      "value": 0.0,
+      "min": -20.0,
+      "max": 10.0
+     }
+    ],
+    "gap_tolerance_mm": 0.0
+   }
+  }
+ ]
+}

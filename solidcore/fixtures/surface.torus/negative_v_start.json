@@ -1,0 +1,984 @@
+{
+ "cases": [
+  {
+   "name": "v_neg_plain_build",
+   "upstream_ref": "tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 10.0,
+     "minor": 2.0,
+     "dom": [
+      0,
+      -23.7,
+      360,
+      156.3
+     ]
+    },
+    "op": "build"
+   }
+  },
+  {
+   "name": "v_neg_plain_eval_lo",
+   "upstream_ref": "tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 10.0,
+     "minor": 2.0,
+     "dom": [
+      0,
+      -23.7,
+      360,
+      156.3
+     ]
+    },
+    "op": "eval_step",
+    "u": 90.0,
+    "v": -10.0,
+    "k": 1,
+    "point": true
+   }
+  },
+  {
+   "name": "v_neg_plain_eval_hi",
+   "upstream_ref": "tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 10.0,
+     "minor": 2.0,
+     "dom": [
+      0,
+      -23.7,
+      360,
+      156.3
+     ]
+    },
+    "op": "eval_step",
+    "u": 200.0,
+    "v": 150.0,
+    "k": 1,
+    "point": true
+   }
+  },
+  {
+   "name": "v_neg_plain_to_nurbs",
+   "upstream_ref": "tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 10.0,
+     "minor": 2.0,
+     "dom": [
+      0,
+      -23.7,
+      360,
+      156.3
+     ]
+    },
+    "op": "to_nurbs",
+    "u": 90.0,
+    "v": -10.0
+   }
+  },
+  {
+   "name": "v_neg_plain_to_step",
+   "upstream_ref": "tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 10.0,
+     "minor": 2.0,
+     "dom": [
+      0,
+      -23.7,
+      360,
+      156.3
+     ]
+    },
+    "op": "to_step",
+    "u": 0.25,
+    "v": 0.75
+   }
+  },
+  {
+   "name": "v_neg_plain_iso_v",
+   "upstream_ref": "tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 10.0,
+     "minor": 2.0,
+     "dom": [
+      0,
+      -23.7,
+      360,
+      156.3
+     ]
+    },
+    "op": "iso",
+    "param": 1,
+    "iso": -10.0
+   }
+  },
+  {
+   "name": "v_neg_plain_rebuild",
+   "upstream_ref": "tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 10.0,
+     "minor": 2.0,
+     "dom": [
+      0,
+      -23.7,
+      360,
+      156.3
+     ]
+    },
+    "op": "rebuild"
+   }
+  },
+  {
+   "name": "v_neg_io_swap_build",
+   "upstream_ref": "tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 10.0,
+     "minor": 2.0,
+     "dom": [
+      0,
+      -23.7,
+      360,
+      156.3
+     ],
+     "inside_out": true,
+     "swap": true
+    },
+    "op": "build"
+   }
+  },
+  {
+   "name": "v_neg_io_swap_eval_lo",
+   "upstream_ref": "tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 10.0,
+     "minor": 2.0,
+     "dom": [
+      0,
+      -23.7,
+      360,
+      156.3
+     ],
+     "inside_out": true,
+     "swap": true
+    },
+    "op": "eval_step",
+    "u": 90.0,
+    "v": -10.0,
+    "k": 1,
+    "point": true
+   }
+  },
+  {
+   "name": "v_neg_io_swap_eval_hi",
+   "upstream_ref": "tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 10.0,
+     "minor": 2.0,
+     "dom": [
+      0,
+      -23.7,
+      360,
+      156.3
+     ],
+     "inside_out": true,
+     "swap": true
+    },
+    "op": "eval_step",
+    "u": 200.0,
+    "v": 150.0,
+    "k": 1,
+    "point": true
+   }
+  },
+  {
+   "name": "v_neg_io_swap_to_nurbs",
+   "upstream_ref": "tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 10.0,
+     "minor": 2.0,
+     "dom": [
+      0,
+      -23.7,
+      360,
+      156.3
+     ],
+     "inside_out": true,
+     "swap": true
+    },
+    "op": "to_nurbs",
+    "u": 90.0,
+    "v": -10.0
+   }
+  },
+  {
+   "name": "v_neg_io_swap_to_step",
+   "upstream_ref": "tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 10.0,
+     "minor": 2.0,
+     "dom": [
+      0,
+      -23.7,
+      360,
+      156.3
+     ],
+     "inside_out": true,
+     "swap": true
+    },
+    "op": "to_step",
+    "u": 0.25,
+    "v": 0.75
+   }
+  },
+  {
+   "name": "v_neg_io_swap_iso_v",
+   "upstream_ref": "tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 10.0,
+     "minor": 2.0,
+     "dom": [
+      0,
+      -23.7,
+      360,
+      156.3
+     ],
+     "inside_out": true,
+     "swap": true
+    },
+    "op": "iso",
+    "param": 1,
+    "iso": -10.0
+   }
+  },
+  {
+   "name": "v_neg_io_swap_rebuild",
+   "upstream_ref": "tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 10.0,
+     "minor": 2.0,
+     "dom": [
+      0,
+      -23.7,
+      360,
+      156.3
+     ],
+     "inside_out": true,
+     "swap": true
+    },
+    "op": "rebuild"
+   }
+  },
+  {
+   "name": "v_zero_plain_build",
+   "upstream_ref": "tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 10.0,
+     "minor": 2.0,
+     "dom": [
+      0,
+      0,
+      360,
+      180
+     ]
+    },
+    "op": "build"
+   }
+  },
+  {
+   "name": "v_zero_plain_eval_lo",
+   "upstream_ref": "tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 10.0,
+     "minor": 2.0,
+     "dom": [
+      0,
+      0,
+      360,
+      180
+     ]
+    },
+    "op": "eval_step",
+    "u": 90.0,
+    "v": -10.0,
+    "k": 1,
+    "point": true
+   }
+  },
+  {
+   "name": "v_zero_plain_eval_hi",
+   "upstream_ref": "tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 10.0,
+     "minor": 2.0,
+     "dom": [
+      0,
+      0,
+      360,
+      180
+     ]
+    },
+    "op": "eval_step",
+    "u": 200.0,
+    "v": 150.0,
+    "k": 1,
+    "point": true
+   }
+  },
+  {
+   "name": "v_zero_plain_to_nurbs",
+   "upstream_ref": "tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 10.0,
+     "minor": 2.0,
+     "dom": [
+      0,
+      0,
+      360,
+      180
+     ]
+    },
+    "op": "to_nurbs",
+    "u": 90.0,
+    "v": -10.0
+   }
+  },
+  {
+   "name": "v_zero_plain_to_step",
+   "upstream_ref": "tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 10.0,
+     "minor": 2.0,
+     "dom": [
+      0,
+      0,
+      360,
+      180
+     ]
+    },
+    "op": "to_step",
+    "u": 0.25,
+    "v": 0.75
+   }
+  },
+  {
+   "name": "v_zero_plain_iso_v",
+   "upstream_ref": "tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 10.0,
+     "minor": 2.0,
+     "dom": [
+      0,
+      0,
+      360,
+      180
+     ]
+    },
+    "op": "iso",
+    "param": 1,
+    "iso": -10.0
+   }
+  },
+  {
+   "name": "v_zero_plain_rebuild",
+   "upstream_ref": "tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 10.0,
+     "minor": 2.0,
+     "dom": [
+      0,
+      0,
+      360,
+      180
+     ]
+    },
+    "op": "rebuild"
+   }
+  },
+  {
+   "name": "v_zero_io_swap_build",
+   "upstream_ref": "tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 10.0,
+     "minor": 2.0,
+     "dom": [
+      0,
+      0,
+      360,
+      180
+     ],
+     "inside_out": true,
+     "swap": true
+    },
+    "op": "build"
+   }
+  },
+  {
+   "name": "v_zero_io_swap_eval_lo",
+   "upstream_ref": "tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 10.0,
+     "minor": 2.0,
+     "dom": [
+      0,
+      0,
+      360,
+      180
+     ],
+     "inside_out": true,
+     "swap": true
+    },
+    "op": "eval_step",
+    "u": 90.0,
+    "v": -10.0,
+    "k": 1,
+    "point": true
+   }
+  },
+  {
+   "name": "v_zero_io_swap_eval_hi",
+   "upstream_ref": "tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 10.0,
+     "minor": 2.0,
+     "dom": [
+      0,
+      0,
+      360,
+      180
+     ],
+     "inside_out": true,
+     "swap": true
+    },
+    "op": "eval_step",
+    "u": 200.0,
+    "v": 150.0,
+    "k": 1,
+    "point": true
+   }
+  },
+  {
+   "name": "v_zero_io_swap_to_nurbs",
+   "upstream_ref": "tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 10.0,
+     "minor": 2.0,
+     "dom": [
+      0,
+      0,
+      360,
+      180
+     ],
+     "inside_out": true,
+     "swap": true
+    },
+    "op": "to_nurbs",
+    "u": 90.0,
+    "v": -10.0
+   }
+  },
+  {
+   "name": "v_zero_io_swap_to_step",
+   "upstream_ref": "tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 10.0,
+     "minor": 2.0,
+     "dom": [
+      0,
+      0,
+      360,
+      180
+     ],
+     "inside_out": true,
+     "swap": true
+    },
+    "op": "to_step",
+    "u": 0.25,
+    "v": 0.75
+   }
+  },
+  {
+   "name": "v_zero_io_swap_iso_v",
+   "upstream_ref": "tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 10.0,
+     "minor": 2.0,
+     "dom": [
+      0,
+      0,
+      360,
+      180
+     ],
+     "inside_out": true,
+     "swap": true
+    },
+    "op": "iso",
+    "param": 1,
+    "iso": -10.0
+   }
+  },
+  {
+   "name": "v_zero_io_swap_rebuild",
+   "upstream_ref": "tangency-labs/solidcore#386 (SmTorus::CreateCanonical over a STEP domain whose v range starts below 0)",
+   "inputs": {
+    "torus": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1.0,
+      0
+     ],
+     "major": 10.0,
+     "minor": 2.0,
+     "dom": [
+      0,
+      0,
+      360,
+      180
+     ],
+     "inside_out": true,
+     "swap": true
+    },
+    "op": "rebuild"
+   }
+  }
+ ]
+}

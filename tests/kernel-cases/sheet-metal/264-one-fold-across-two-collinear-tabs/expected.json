@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#264"
+ ],
+ "what": "one fold line spanning both of two collinear tabs folds both",
+ "source": "analytic",
+ "method": "blank area 4210 mm2 at t = 0.8; one fold line over both tabs bends both (width 7 each): a fold keeps the flat length of the blank, so a fold of angle th, inner radius R, thickness t and K-factor K over a width w takes a flat strip of BA = th(R+Kt) and puts a bend of volume th((R+t)^2-R^2)w/2 in its place: V = V_flat + th w t^2 (1/2 - K) (the bend's mid-surface lies at R+t/2, the neutral axis at R+Kt). V = 4210*0.8 + 2*(pi/2)*7*0.64*0.06",
+ "body_count": 1,
+ "volume_mm3": 3368.8444601052847
+}

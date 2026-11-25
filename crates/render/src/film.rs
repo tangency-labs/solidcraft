@@ -21,6 +21,10 @@
 
 use crate::job::{CancelToken, ErrorCode, JobError, Result};
 
+// Standalone adaptive camera-film foundation. No CPU request/producer is installed.
+#[path = "film_adaptive.rs"]
+pub mod adaptive;
+
 #[path = "film_png.rs"]
 pub mod png;
 

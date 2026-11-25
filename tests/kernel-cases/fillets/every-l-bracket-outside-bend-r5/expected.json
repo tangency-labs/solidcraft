@@ -1,0 +1,24 @@
+{
+ "sources": [],
+ "what": "the outside bend of an L-bracket rounded r5",
+ "source": "analytic",
+ "method": "L-bracket: the legs 40x20x5 (x 0..40, z 0..5) and 5x20x40 (x 0..5, z 0..40) joined, 20 deep in y: V0 = 4000 + 4000 - 500 = 7500, 8 faces. The convex edge (x = 0, z = 0) loses the spandrel (1-pi/4) 25 = 5.365046 along its 20: V = 7500 - 107.3009 = 7392.6991. Faces 9.",
+ "body_count": 1,
+ "volume_mm3": 7392.6990816987245,
+ "faces": 9,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   20,
+   40
+  ]
+ },
+ "continuity": {
+  "order": "g1"
+ }
+}

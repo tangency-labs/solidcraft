@@ -2,10 +2,11 @@
 //! Revolve, Circular Pattern and Plane at Angle turn about a circular edge's or a cylinder's
 //! axis, and follow it when a parameter moves the cylinder.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::PI;
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::{Plane, Vec3};
 
 use crate::Session;
 use crate::view::construction_planes;
@@ -82,7 +83,7 @@ fn surface_revolve_about_a_circular_edge() {
     ring_profile(&mut s);
     run(&mut s, "surface.revolve", json!({"sketch": "Profile", "axis": {"edge": [45, 0, 0]}, "angle": "180 deg"}));
     run(&mut s, "parameters.change", json!({"name": "cx", "expression": "41 mm"}));
-    let st = s.world_state();
+    let st = s.world_state().unwrap();
     // A half turn about x = 41: the far side of the profile ends up at x = 41 − 7 ± 1.
     let b = st.bodies.last().map(|b| b.mesh().bounds()).unwrap();
     assert!((b.min.x - (41.0 - 7.0)).abs() < 1e-3, "{b:?}");
@@ -98,15 +99,21 @@ fn circular_pattern_about_a_boss_wall_follows_the_boss() {
     run(&mut s, "solid.hole", json!({"position": [130, 100, 5], "diameter": 2, "name": "Hole"}));
     run(&mut s, "solid.pattern.circular", json!({"features": ["Hole"], "axis": {"face": [110, 100, 10]}, "count": 4, "name": "Ring"}));
     let holes = |s: &Session, cx: f64, r: f64| {
-        let st = s.world_state();
+        let st = s.world_state().unwrap();
         let body = &st.bodies[0].body;
-        [(r, 0.0), (0.0, r), (-r, 0.0), (0.0, -r)].iter().all(|(dx, dy)| !body.contains(Vec3::new(cx + dx, 100.0 + dy, 2.5)))
+        [(r, 0.0), (0.0, r), (-r, 0.0), (0.0, -r)]
+            .iter()
+            .all(|(dx, dy)| body.classify_point(Vec3::new(cx + dx, 100.0 + dy, 2.5)).unwrap() == solidcraft_kernel::PointClass::Outside)
     };
     assert!(holes(&s, 100.0, 30.0), "four holes round the boss");
     run(&mut s, "parameters.change", json!({"name": "cx", "expression": "90 mm"}));
     assert!(holes(&s, 90.0, 40.0), "the copies turn about the boss where it is now");
-    let st = s.world_state();
-    assert!(st.bodies[0].body.contains(Vec3::new(100.0, 130.0, 2.5)), "not where the boss was");
+    let st = s.world_state().unwrap();
+    assert_eq!(
+        st.bodies[0].body.classify_point(Vec3::new(100.0, 130.0, 2.5)).unwrap(),
+        solidcraft_kernel::PointClass::Inside,
+        "not where the boss was"
+    );
 }
 
 #[test]
@@ -150,6 +157,74 @@ fn plane_at_angle_on_a_face_about_an_edge_follows_both() {
     assert!((pl.normal().z.abs() - half).abs() < 1e-9, "{pl:?}");
 }
 
+/// A box `h` high with a construction axis "Rim" on its top front edge (y = 0, along X), and a
+/// plane "Slanted" turned 45 degrees about that axis, given by the axis's name, from the top
+/// face (which contains the axis, so the plane contains it too).
+fn slanted_about_a_named_axis() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "h", "expression": "20 mm"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": "h", "name": "Base"}));
+    run(&mut s, "construct.axis.edge", json!({"edge": {"edge": [20, 0, 20]}, "name": "Rim"}));
+    run(&mut s, "construct.plane.at_angle", json!({"base": {"face": [5, 5, 20]}, "axis": "Rim", "angle": "45 deg", "name": "Slanted"}));
+    s
+}
+
+fn slanted(s: &Session) -> Plane {
+    construction_planes(s).into_iter().find(|p| p.1 == "Slanted").map(|p| p.2).unwrap()
+}
+
+#[test]
+fn plane_at_angle_about_a_named_axis_follows_the_axis() {
+    let mut s = slanted_about_a_named_axis();
+    let feature = s.doc.find_feature("Slanted").unwrap();
+    let solidcraft_doc::FeatureKind::ConstructionPlane { plane: solidcraft_doc::PlaneRef::AtAngle { line, .. } } = &feature.kind else {
+        panic!("at_angle plane: {:?}", feature.kind)
+    };
+    assert!(matches!(line.as_deref(), Some(solidcraft_doc::construct::GeoRef::Axis { name }) if *name == "Rim"), "{line:?}");
+    let half = 0.5_f64.sqrt();
+    let pl = slanted(&s);
+    assert!(pl.height(Vec3::new(0.0, 0.0, 20.0)).abs() < 1e-6, "through the rim: {pl:?}");
+    assert!((pl.normal().z.abs() - half).abs() < 1e-9 && pl.normal().x.abs() < 1e-9, "45 degrees to the top: {pl:?}");
+    // A taller box moves the edge, so the axis and the plane move with it.
+    run(&mut s, "parameters.change", json!({"name": "h", "expression": "50 mm"}));
+    let pl = slanted(&s);
+    assert!(pl.height(Vec3::new(0.0, 0.0, 50.0)).abs() < 1e-6, "follows the axis: {pl:?}");
+    assert!(pl.height(Vec3::new(0.0, 0.0, 20.0)).abs() > 1.0, "not where it was: {pl:?}");
+    assert!((pl.normal().z.abs() - half).abs() < 1e-9 && pl.normal().x.abs() < 1e-9, "{pl:?}");
+    // Saved and opened again it still follows.
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    run(&mut reopened, "parameters.change", json!({"name": "h", "expression": "35 mm"}));
+    assert!(slanted(&reopened).height(Vec3::new(0.0, 0.0, 35.0)).abs() < 1e-6);
+}
+
+#[test]
+fn a_plane_at_angle_saved_with_a_fixed_axis_stays_fixed() {
+    let s = slanted_about_a_named_axis();
+    // As older designs hold it: the axis as numbers only, no reference.
+    let mut json: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    let mut stripped = 0;
+    if let Some(Value::Array(features)) = json.get_mut("features") {
+        for f in features {
+            if f.get("name").and_then(Value::as_str) != Some("Slanted") {
+                continue;
+            }
+            if let Some(Value::Object(plane)) = f.get_mut("plane")
+                && plane.remove("line").is_some()
+            {
+                stripped += 1;
+            }
+        }
+    }
+    assert_eq!(stripped, 1, "the reference is saved in the plane: {json}");
+    let mut old = Session::new(solidcraft_doc::Document::from_json(&json.to_string()).unwrap());
+    run(&mut old, "parameters.change", json!({"name": "h", "expression": "50 mm"}));
+    let pl = slanted(&old);
+    // Followed, the plane would pass through the moved rim (0, 0, 50); with the axis fixed at
+    // z = 20 it turns about that line instead and misses it.
+    assert!(pl.height(Vec3::new(0.0, 0.0, 50.0)).abs() > 1.0, "fixed where it was saved: {pl:?}");
+    assert!((pl.normal().z.abs() - 0.5_f64.sqrt()).abs() < 1e-9, "still turned 45 degrees: {pl:?}");
+}
+
 #[test]
 fn the_axis_keeps_its_turn_whichever_way_the_edge_runs() {
     // The top and bottom rims run opposite ways round the shaft; a quarter turn about either
@@ -158,7 +233,7 @@ fn the_axis_keeps_its_turn_whichever_way_the_edge_runs() {
         let mut s = shaft();
         ring_profile(&mut s);
         run(&mut s, "solid.revolve", json!({"sketch": "Profile", "axis": {"edge": edge}, "angle": "90 deg", "operation": "new"}));
-        let st = s.world_state();
+        let st = s.world_state().unwrap();
         st.bodies.last().map(|b| b.mesh().bounds()).unwrap()
     };
     let (top, bottom) = (quarter([45.0, 0.0, 10.0]), quarter([45.0, 0.0, 0.0]));

@@ -1,0 +1,915 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      100.0,
+      0.0,
+      0.0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      1.0,
+      0.0,
+      0
+     ]
+    },
+    "name": "O0"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 30.0
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      98.4807753012208,
+      17.364817766693033,
+      0.0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.984807753012208,
+      0.17364817766693033,
+      0
+     ]
+    },
+    "name": "O1"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 30.0
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      93.96926207859084,
+      34.20201433256687,
+      0.0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.9396926207859084,
+      0.3420201433256687,
+      0
+     ]
+    },
+    "name": "O2"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 30.0
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      86.60254037844388,
+      49.99999999999999,
+      0.0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.8660254037844387,
+      0.49999999999999994,
+      0
+     ]
+    },
+    "name": "O3"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 30.0
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      76.60444431189781,
+      64.27876096865393,
+      0.0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.766044443118978,
+      0.6427876096865393,
+      0
+     ]
+    },
+    "name": "O4"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 30.0
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      64.27876096865394,
+      76.60444431189781,
+      0.0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.6427876096865394,
+      0.766044443118978,
+      0
+     ]
+    },
+    "name": "O5"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 30.0
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      50.000000000000014,
+      86.60254037844386,
+      0.0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.5000000000000001,
+      0.8660254037844386,
+      0
+     ]
+    },
+    "name": "O6"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 30.0
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      34.20201433256688,
+      93.96926207859083,
+      0.0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.3420201433256688,
+      0.9396926207859083,
+      0
+     ]
+    },
+    "name": "O7"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 30.0
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      17.36481776669304,
+      98.4807753012208,
+      0.0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.17364817766693041,
+      0.984807753012208,
+      0
+     ]
+    },
+    "name": "O8"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 30.0
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      6.123233995736766e-15,
+      100.0,
+      0.0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      6.123233995736766e-17,
+      1.0,
+      0
+     ]
+    },
+    "name": "O9"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 30.0
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.loft",
+   "params": {
+    "sections": [
+     {
+      "sketch": "O0"
+     },
+     {
+      "sketch": "O1"
+     },
+     {
+      "sketch": "O2"
+     },
+     {
+      "sketch": "O3"
+     },
+     {
+      "sketch": "O4"
+     },
+     {
+      "sketch": "O5"
+     },
+     {
+      "sketch": "O6"
+     },
+     {
+      "sketch": "O7"
+     },
+     {
+      "sketch": "O8"
+     },
+     {
+      "sketch": "O9"
+     }
+    ],
+    "operation": "new",
+    "name": "LoftO",
+    "body_name": "TubeO"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      99.87502603949663,
+      -4.997916927067833,
+      0.0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.9987502603949663,
+      -0.04997916927067833,
+      0
+     ]
+    },
+    "name": "I0"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 18.0
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      100.0,
+      0.0,
+      0.0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      1.0,
+      0.0,
+      0
+     ]
+    },
+    "name": "I1"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 18.0
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      98.4807753012208,
+      17.364817766693033,
+      0.0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.984807753012208,
+      0.17364817766693033,
+      0
+     ]
+    },
+    "name": "I2"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 18.0
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      93.96926207859084,
+      34.20201433256687,
+      0.0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.9396926207859084,
+      0.3420201433256687,
+      0
+     ]
+    },
+    "name": "I3"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 18.0
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      86.60254037844388,
+      49.99999999999999,
+      0.0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.8660254037844387,
+      0.49999999999999994,
+      0
+     ]
+    },
+    "name": "I4"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 18.0
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      76.60444431189781,
+      64.27876096865393,
+      0.0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.766044443118978,
+      0.6427876096865393,
+      0
+     ]
+    },
+    "name": "I5"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 18.0
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      64.27876096865394,
+      76.60444431189781,
+      0.0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.6427876096865394,
+      0.766044443118978,
+      0
+     ]
+    },
+    "name": "I6"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 18.0
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      50.000000000000014,
+      86.60254037844386,
+      0.0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.5000000000000001,
+      0.8660254037844386,
+      0
+     ]
+    },
+    "name": "I7"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 18.0
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      34.20201433256688,
+      93.96926207859083,
+      0.0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.3420201433256688,
+      0.9396926207859083,
+      0
+     ]
+    },
+    "name": "I8"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 18.0
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      17.36481776669304,
+      98.4807753012208,
+      0.0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      0.17364817766693041,
+      0.984807753012208,
+      0
+     ]
+    },
+    "name": "I9"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 18.0
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      6.123233995736766e-15,
+      100.0,
+      0.0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      6.123233995736766e-17,
+      1.0,
+      0
+     ]
+    },
+    "name": "I10"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 18.0
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -4.997916927067831,
+      99.87502603949663,
+      0.0
+     ],
+     "x_dir": [
+      0,
+      0,
+      1
+     ],
+     "y_dir": [
+      -0.04997916927067831,
+      0.9987502603949663,
+      0
+     ]
+    },
+    "name": "I11"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 18.0
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.loft",
+   "params": {
+    "sections": [
+     {
+      "sketch": "I0"
+     },
+     {
+      "sketch": "I1"
+     },
+     {
+      "sketch": "I2"
+     },
+     {
+      "sketch": "I3"
+     },
+     {
+      "sketch": "I4"
+     },
+     {
+      "sketch": "I5"
+     },
+     {
+      "sketch": "I6"
+     },
+     {
+      "sketch": "I7"
+     },
+     {
+      "sketch": "I8"
+     },
+     {
+      "sketch": "I9"
+     },
+     {
+      "sketch": "I10"
+     },
+     {
+      "sketch": "I11"
+     }
+    ],
+    "operation": "new",
+    "name": "LoftI",
+    "body_name": "TubeI"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "TubeO",
+    "tools": [
+     "TubeI"
+    ],
+    "operation": "cut",
+    "name": "Hollow"
+   }
+  }
+ ]
+}

@@ -1,0 +1,151 @@
+{
+  "area": "sweeps",
+  "bodies": {
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b4": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b6"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "3528-revolved-dome-cut-by-a-ball-on-its-seam",
+  "expected": {
+    "body_count": 1,
+    "method": "the cap is the revolution of the profile (0,0) (7,0) (7,20) (26,39), arc about (0,32.1) r 26.9 to (0,59), back: V = pi [49*20 + (26^3 - 7^3)/3 + 26.9^2 * 20 - (26.9^3 - 6.9^3)/3] = 46551.0. The ball centre is on the dome sphere (r 26.9), so the cut removes the lens of two spheres, radii 4 and 26.9 at distance 26.9: V = pi (R + r - d)^2 (d^2 + 2 d r - 3 r^2 + 2 d R + 6 r R - 3 R^2) / (12 d) = 126.5. The tool is consumed (keep_tools false): one body.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#3528"
+    ],
+    "volume_mm3": 46424.50587797245,
+    "what": "a ball of radius 4 centred on the dome of a revolved mushroom cap (azimuth 15 degrees, across an internal seam of the revolved faces), cut from it: removed nearly the whole ball"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 9,
+      "faces": 5,
+      "vertices": 7
+    }
+  },
+  "records": "3528-revolved-dome-cut-by-a-ball-on-its-seam.bodies.json.gz",
+  "result": [
+    {
+      "body": "Cap",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 7242.416374148914,
+      "body_count": 1,
+      "edges": 8,
+      "faces": 5,
+      "vertices": 6,
+      "volume_mm3": 46424.50665214949
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#3528"
+  ],
+  "traced_ops": [
+    "revolve",
+    "make_sphere",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a ball of radius 4 centred on the dome of a revolved mushroom cap (azimuth 15 degrees, across an internal seam of the revolved faces), cut from it: removed nearly the whole ball",
+  "why_not": []
+}

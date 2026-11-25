@@ -1,0 +1,22 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1269"
+ ],
+ "what": "a 10 x 10 square swept 40 mm along a straight path while turning 90 degrees about the path",
+ "source": "analytic",
+ "method": "twisting about the section centre does not change the section area, and the centre moves straight along the path: V = A L = 100 * 40 = 4000. Mid-path the square is turned 45 degrees, so the bbox reaches the corners at 5 sqrt(2) = 7.0711 in x and y.",
+ "body_count": 1,
+ "volume_mm3": 4000.0,
+ "bbox": {
+  "min": [
+   -7.0710678,
+   -7.0710678,
+   0
+  ],
+  "max": [
+   7.0710678,
+   7.0710678,
+   40
+  ]
+ }
+}

@@ -2,13 +2,17 @@
 //! circle's centre) goes to that point, as a Multiple pick of the same point does (#657), and
 //! follows it when the sketch changes (#2110); a pick
 //! away from sketch points, or near one off the face under the cursor, stays where it was clicked.
+//! A sketch point with no face under the cursor turns a new Single hole to Multiple and is taken
+//! there, and a Hole opened on selected sketch points (no face) starts in Multiple at them (#3634).
 //! Only points the sketch shows are snapped to (not lettering's outline points), and Select Other
 //! looks the face up once for every point near the cursor.
 
 use serde_json::{Value, json};
+use solidcore_record::{Vec2, Vec3};
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::FeatureKind;
-use solidcraft_engine::geom::{Aabb3, Vec2, Vec3};
+use solidcraft_engine::geom::Aabb3;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::sketch::{CurveKind, LinkKind, SPoint};
 
 use crate::dialogs::Kind;
@@ -327,7 +331,7 @@ fn block_and_circle_on(sketch: Value, at: [f64; 2]) -> (Harness, Vec3) {
     h.app.run("sketch.finish", json!({})).unwrap();
     h.step(&json!({"call": "ui.view", "params": {"view": "top"}})).unwrap();
     h.settle();
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let ss = st.sketches.first().unwrap();
     let centre = ss
         .sketch
@@ -390,7 +394,7 @@ fn face_places(h: &Harness) -> Vec<(String, Vec3)> {
 
 /// Whether the model holds material at `p`.
 fn solid_at(h: &Harness, p: Vec3) -> bool {
-    h.app.session.model.state().bodies.iter().any(|b| b.body.contains(p))
+    h.app.session.model.state().bodies.iter().any(|b| b.body.classify_point(p).unwrap() == solidcraft_engine::kernel::PointClass::Inside)
 }
 
 #[test]
@@ -451,11 +455,12 @@ fn a_single_hole_at_a_circle_centre_follows_the_circle() {
     h.step(&json!({"key": "Enter"})).unwrap();
     assert!(h.app.dialog.is_none(), "OK closed the dialog: {:?}", h.app.dialog.as_ref().map(|d| &d.error));
     let (id, _, _) = hole(&h);
-    let sketch = h.app.session.world_state().sketches.first().unwrap().feature;
+    let sketch = h.app.session.world_state().unwrap().sketches.first().unwrap().feature;
     let circle = h
         .app
         .session
         .world_state()
+        .unwrap()
         .sketches
         .first()
         .unwrap()
@@ -471,7 +476,7 @@ fn a_single_hole_at_a_circle_centre_follows_the_circle() {
     h.app.run("sketch.move_point", json!({"point": format!("{circle}.center"), "to": [20, 9]})).unwrap();
     h.app.run("sketch.finish", json!({})).unwrap();
     h.settle();
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let ss = st.sketches.first().unwrap();
     let moved = ss
         .sketch
@@ -545,6 +550,95 @@ fn a_single_hole_picked_near_a_sketch_point_off_the_face_under_it_stays_where_it
 }
 
 #[test]
+fn a_single_hole_picked_on_a_sketch_point_with_no_face_under_it_goes_to_multiple_placement() {
+    // The circle 20 mm above the block's top face, seen from the iso view: no face is under its
+    // centre on screen, so Single has no face place to take there. The click used to be ignored
+    // without a word (#3634); now the hole switches to Multiple and takes the centre.
+    let (mut h, centre) = block_and_circle_on(json!({"plane": "XY", "offset": 40}), [20.0, 15.0]);
+    assert!(centre.dist(Vec3::new(20.0, 15.0, 40.0)) < 1e-9, "{centre:?}");
+    h.step(&json!({"call": "ui.view", "params": {"view": "iso"}})).unwrap();
+    h.settle();
+    let click = screen(&mut h, centre);
+    let hits = hits_at(&h, click);
+    assert!(matches!(hits.first(), Some(Hit::SketchPoint { .. })), "the click reaches the centre: {hits:?}");
+    assert!(!hits.iter().any(|x| matches!(x, Hit::Face { .. })), "no face is under the centre: {hits:?}");
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    h.step(&json!({"move": click})).unwrap();
+    assert!(
+        matches!(&h.app.viewport.hover, Some(Hit::SketchPoint { .. })),
+        "the centre lights up as what the pick takes: {:?}",
+        h.app.viewport.hover
+    );
+    h.step(&json!({"click": click})).unwrap();
+    let d = h.app.dialog.as_ref().unwrap();
+    assert!(matches!(&d.kind, Kind::Hole { opts, .. } if opts.multiple), "the hole switched to Multiple placement: {:?}", d.kind);
+    assert!(matches!(d.inputs[0].items.as_slice(), [Sel::SketchPoint { .. }]), "the centre is picked: {:?}", d.inputs[0].items);
+    h.step(&json!({"key": "Enter"})).unwrap();
+    assert!(h.app.dialog.is_none(), "OK closed the dialog: {:?}", h.app.dialog.as_ref().map(|d| &d.error));
+    let (id, _, at_points) = hole(&h);
+    assert!(at_points, "the hole is at the sketch point");
+    assert!(h.app.session.model.result(id).is_some_and(|r| r.error.is_none() && r.warning.is_none()));
+    // The bore (5 mm across, 10 mm deep) goes down from the top face (z 20) under the centre.
+    assert!(!solid_at(&h, Vec3::new(20.0, 15.0, 17.0)) && !solid_at(&h, Vec3::new(22.4, 15.0, 17.0)), "the bore is empty");
+    assert!(solid_at(&h, Vec3::new(22.6, 15.0, 17.0)) && solid_at(&h, Vec3::new(20.0, 15.0, 5.0)), "the wall and floor are solid");
+
+    // A Single hole that has its face place already keeps it: the click on the centre changes nothing.
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    let top = screen(&mut h, Vec3::new(30.0, 8.0, 20.0));
+    h.step(&json!({"click": top})).unwrap();
+    assert_eq!(face_places(&h).len(), 1, "the top face is picked");
+    h.step(&json!({"click": click})).unwrap();
+    let d = h.app.dialog.as_ref().unwrap();
+    assert!(matches!(&d.kind, Kind::Hole { opts, .. } if !opts.multiple), "still Single: {:?}", d.kind);
+    assert_eq!(face_places(&h).len(), 1, "the face place stays the only pick");
+}
+
+/// The first sketch's feature id and the id of its circle's centre point.
+fn circle_centre_id(h: &Harness) -> (u64, String) {
+    let st = h.app.session.world_state().unwrap();
+    let ss = st.sketches.first().unwrap();
+    let id = ss
+        .sketch
+        .curves
+        .iter()
+        .find_map(|c| match c.kind {
+            CurveKind::Circle { c, .. } => Some(ss.sketch.points[c].id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    (ss.feature, id)
+}
+
+#[test]
+fn a_hole_opened_on_a_selected_sketch_point_starts_in_multiple_placement_at_it() {
+    let (mut h, centre) = block_with_circle();
+    let (sketch, id) = circle_centre_id(&h);
+    // The centre selected, as a click on it with no command open selects it.
+    h.app.session.selection = vec![Sel::ExternalSketchPoint { sketch, id: id.clone() }];
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    let d = h.app.dialog.as_ref().unwrap();
+    assert!(matches!(&d.kind, Kind::Hole { opts, .. } if opts.multiple), "the hole opens in Multiple placement: {:?}", d.kind);
+    let point = Sel::SketchPoint { id: format!("{sketch}:{id}") };
+    assert_eq!(d.inputs[0].items, vec![point], "the selected centre is the hole's point");
+    h.step(&json!({"key": "Enter"})).unwrap();
+    assert!(h.app.dialog.is_none(), "OK closed the dialog: {:?}", h.app.dialog.as_ref().map(|d| &d.error));
+    let (id, _, at_points) = hole(&h);
+    assert!(at_points, "the hole is at the sketch point");
+    assert!(h.app.session.model.result(id).is_some_and(|r| r.error.is_none() && r.warning.is_none()));
+    let down = Vec3::new(0.0, 0.0, 5.0);
+    assert!(!solid_at(&h, centre - down) && solid_at(&h, centre - down + Vec3::new(2.6, 0.0, 0.0)), "the bore is at the centre {centre:?}");
+
+    // With a face selected too, the hole keeps Single placement on the face, as before.
+    let (mut h, _) = block_with_circle();
+    let (sketch, id) = circle_centre_id(&h);
+    h.app.session.selection =
+        vec![Sel::Face { body: "Body1".into(), index: 0, point: Vec3::new(30.0, 8.0, 20.0) }, Sel::ExternalSketchPoint { sketch, id }];
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    let d = h.app.dialog.as_ref().unwrap();
+    assert!(matches!(&d.kind, Kind::Hole { opts, .. } if !opts.multiple), "a selected face keeps Single placement: {:?}", d.kind);
+}
+
+#[test]
 fn select_other_offers_the_centre_and_the_face_as_picked() {
     let (mut h, centre) = block_with_circle();
     let click = near(&mut h, centre);
@@ -602,7 +696,7 @@ fn block_with_lettering(circle: Option<f64>) -> (Harness, Vec3, Option<Vec3>) {
     h.app.run("sketch.create", json!({"plane": {"face": [20, 15, 20]}})).unwrap();
     h.app.run("sketch.text", json!({"text": "L", "at": [5, 5], "height": 10})).unwrap();
     let outline = |h: &Harness| {
-        let st = h.app.session.world_state();
+        let st = h.app.session.world_state().unwrap();
         let ss = st.sketches.first().unwrap();
         let sk = &ss.sketch;
         let text = |p: &&SPoint| p.link.as_deref().and_then(|l| sk.link(l)).is_some_and(|l| l.kind == LinkKind::Text);
@@ -616,7 +710,7 @@ fn block_with_lettering(circle: Option<f64>) -> (Harness, Vec3, Option<Vec3>) {
     h.app.run("sketch.finish", json!({})).unwrap();
     h.step(&json!({"call": "ui.view", "params": {"view": "top"}})).unwrap();
     h.settle();
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let plane = st.sketches.first().unwrap().plane;
     assert_eq!(outline(&h).len(), 6, "the L's outline has six corners");
     (h, plane.to_world(corner), centre.map(|c| plane.to_world(c)))
@@ -765,7 +859,7 @@ fn cylinder_with_cluster(sketch: Value, at: [f64; 2], view: &str) -> Cluster {
     h.app.run("sketch.finish", json!({})).unwrap();
     h.step(&json!({"call": "ui.view", "params": {"view": view}})).unwrap();
     h.settle();
-    let plane = h.app.session.world_state().sketches.first().unwrap().plane;
+    let plane = h.app.session.world_state().unwrap().sketches.first().unwrap().plane;
     let centre = plane.to_world(Vec2::new(at[0], at[1]));
     let mut points = Aabb3::EMPTY;
     local.iter().for_each(|p| points.add(plane.to_world(*p)));
@@ -773,7 +867,7 @@ fn cylinder_with_cluster(sketch: Value, at: [f64; 2], view: &str) -> Cluster {
     h.step(&json!({"start": "solid.hole"})).unwrap();
     let ray = hits_at(&h, click);
     let Some(Hit::Face { body, index, .. }) = ray.iter().find(|x| matches!(x, Hit::Face { .. })) else { panic!("no face under {centre:?}: {ray:?}") };
-    let m = h.app.session.world_state().body(body).unwrap().mesh();
+    let m = h.app.session.world_state().unwrap().body(body).unwrap().mesh();
     let face: Vec<[Vec3; 3]> = m.triangles.iter().zip(&m.tri_face).filter(|(_, f)| **f as usize == *index).filter_map(|(t, _)| m.tri(t)).collect();
     let near_points = |t: &[Vec3; 3]| {
         let mut b = Aabb3::EMPTY;
@@ -782,7 +876,8 @@ fn cylinder_with_cluster(sketch: Value, at: [f64; 2], view: &str) -> Cluster {
         gap.x.max(gap.y).max(gap.z) <= 1e-3
     };
     let (body_tris, face_tris, near_tris) = (m.triangles.len(), face.len(), face.iter().filter(|t| near_points(t)).count());
-    assert!(body_tris >= 2 * face_tris, "the body has other faces: {body_tris} and {face_tris} triangles");
+    // Other faces exist (the flat caps are two triangles each now, so the curved side can be most of the body).
+    assert!(body_tris > face_tris, "the body has other faces: {body_tris} and {face_tris} triangles");
     Cluster { h, many, click, body_tris, face_tris, near_tris }
 }
 
@@ -790,16 +885,18 @@ fn cylinder_with_cluster(sketch: Value, at: [f64; 2], view: &str) -> Cluster {
 fn select_other_over_a_dense_cluster_looks_the_face_up_once() {
     // The points on the cylinder's top face, a disc of a small part of the body's triangles. Select
     // Other looks the face under the cursor up once for all of them, not once per point (#718
-    // review): one planarity lookup, which tessellates the body, and one pass over the body's
-    // triangles. Each point is then tested against the face's triangles near the points only,
+    // review): one planarity lookup, which meshes nothing (the cap is a plane by its surface), and
+    // one pass over the body's triangles. Each point is then tested against the face's triangles near the points only,
     // not the face's or the body's; every point on the face is still counted.
     let mut c = cylinder_with_cluster(json!({"plane": {"face": [0, 0, 20]}}), [5.0, 4.0], "top");
     let (many, body, face, near) = (c.many, c.body_tris, c.face_tris, c.near_tris);
-    assert!(body >= 4 * face && 4 * near <= face, "{body} triangles in the body, {face} in the face, {near} of them near the points");
+    // The top cap is one of the cylinder's three faces (the planner meshes both caps alike), under
+    // a third of its triangles; the points lie on a small part of it.
+    assert!(body >= 3 * face && 4 * near <= face, "{body} triangles in the body, {face} in the face, {near} of them near the points");
     let (list, (lookups, tested)) = c.select_other();
     assert_eq!((rows_named(&list, "Point"), rows_named(&list, "Face")), (crate::select_other::MAX_PER_KIND, 1), "{list}");
     assert_eq!(list["total"], json!(many + 1), "every point on the face is counted: {list}");
-    assert_eq!(lookups, 1, "the face is looked up once for {many} points");
+    assert_eq!(lookups, 0, "the face is planar by its surface: nothing is meshed for {many} points");
     assert!(tested <= body + many * near, "{tested} triangles looked at for {many} points ({body} in the body, {near} near the points)");
 }
 
@@ -813,7 +910,7 @@ fn select_other_over_a_dense_cluster_off_the_face_tests_no_triangles() {
     let (list, (lookups, tested)) = c.select_other();
     assert_eq!((rows_named(&list, "Point"), rows_named(&list, "Face")), (0, 1), "{list}");
     assert_eq!(list["total"], json!(1), "{list}");
-    assert_eq!(lookups, 1, "the face is looked up once for {many} points");
+    assert_eq!(lookups, 0, "the face is planar by its surface: nothing is meshed for {many} points");
     assert_eq!(tested, body, "one pass over the body's {body} triangles, and no test for the {many} points off the face");
 }
 
@@ -826,7 +923,7 @@ fn select_other_over_a_dense_cluster_by_a_curved_face_looks_it_up_once() {
     let many = c.many;
     let (list, (lookups, tested)) = c.select_other();
     assert_eq!((rows_named(&list, "Point"), rows_named(&list, "Face")), (0, 1), "the curved face alone: {list}");
-    assert_eq!(lookups, 1, "the curved face is looked up once for {many} points");
+    assert_eq!(lookups, 0, "a cylinder is curved by its surface: nothing is meshed for {many} points");
     assert_eq!(tested, 0, "no triangle of a curved face is looked at");
 }
 
@@ -852,7 +949,7 @@ fn a_face_place_snaps_to_the_points_of_shown_geometry_only() {
     // text outline's points (`view::sketch_point_visible`), and no linked point while Show
     // Projected is off. An id names its first link; a point whose link is gone counts as shown.
     let (h, _, _) = block_with_lettering(None);
-    let mut sk = h.app.session.world_state().sketches.first().unwrap().sketch.clone();
+    let mut sk = h.app.session.world_state().unwrap().sketches.first().unwrap().sketch.clone();
     let text = sk.links.iter().find(|l| l.kind == LinkKind::Text).unwrap().clone();
     let edges = sk.links.iter().find(|l| l.kind != LinkKind::Text).unwrap().clone();
     // Later links reusing the ids, with the other kind: the first link of an id is the one.
@@ -879,8 +976,7 @@ fn a_face_place_snaps_to_the_points_of_shown_geometry_only() {
 }
 
 #[test]
-fn combined_recessed_point_presets_keep_left_partial_across_units_and_legacy_defaults() {
-    use solidcraft_engine::doc::ThreadHandedness;
+fn combined_recessed_point_presets_keep_partial_depth_across_units_and_legacy_defaults() {
     for recessed in [1, 2] {
         let mut h = personal_preset_harness();
         if let Kind::Hole { diameter, kind, opts, .. } = &mut h.app.dialog.as_mut().unwrap().kind {
@@ -890,14 +986,12 @@ fn combined_recessed_point_presets_keep_left_partial_across_units_and_legacy_def
             opts.tip_angle = "118 deg".into();
             opts.tapped = true;
             opts.thread = "M8x1.2".into();
-            opts.handedness = ThreadHandedness::Left;
             opts.thread_full_depth = false;
             opts.thread_depth = "5".into();
         }
         save_preset(&mut h, "Combined point");
         let stored = serde_json::to_value(&h.app.preferences.hole_presets).unwrap();
         assert_eq!(stored[0]["angled_bottom"], true);
-        assert_eq!(stored[0]["thread_options"]["handedness"], "left");
         assert_eq!(stored[0]["thread_options"]["depth"], "5 mm");
         h.app.preferences.hole_presets = serde_json::from_value(stored.clone()).unwrap();
         h.app.session.doc_mut().units = "in".into();
@@ -905,18 +999,17 @@ fn combined_recessed_point_presets_keep_left_partial_across_units_and_legacy_def
         if let Kind::Hole { kind, opts, .. } = &mut h.app.dialog.as_mut().unwrap().kind {
             *kind = 0;
             opts.angled = false;
-            opts.handedness = ThreadHandedness::Right;
             opts.thread_full_depth = true;
         }
         let before = h.app.session.doc.to_json();
         choose_preset(&mut h, "Combined point");
         assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Hole {kind,opts,..}
-            if *kind==recessed && opts.angled && opts.tip_angle=="118 deg" && opts.handedness==ThreadHandedness::Left
+            if *kind==recessed && opts.angled && opts.tip_angle=="118 deg"
             && !opts.thread_full_depth && opts.thread_depth=="5 mm" && opts.thread=="M8x1.2"
             && opts.custom_thread.as_ref().is_none_or(|draft| draft.error.is_none())));
         assert_eq!(h.app.session.doc.to_json(), before, "automatic recall only changes the form");
         assert!((h.app.session.doc.eval("5 mm", solidcraft_engine::doc::expr::Kind::Length).unwrap() - 5.0).abs() < 1e-9);
-        // Old recessed presets omit the additive fields: flat, Right and Full remain their defaults.
+        // Old recessed presets omit the additive fields: flat and Full remain their defaults.
         choose_preset(&mut h, "Select a preset");
         let mut legacy = stored.clone();
         legacy[0].as_object_mut().unwrap().remove("angled_bottom");
@@ -924,7 +1017,7 @@ fn combined_recessed_point_presets_keep_left_partial_across_units_and_legacy_def
         h.app.preferences.hole_presets = serde_json::from_value(legacy).unwrap();
         choose_preset(&mut h, "Combined point");
         assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Hole {kind,opts,..}
-            if *kind==recessed && !opts.angled && opts.handedness==ThreadHandedness::Right && opts.thread_full_depth));
+            if *kind==recessed && !opts.angled && opts.thread_full_depth));
         choose_preset(&mut h, "Select a preset");
         let mut future = stored;
         future[0]["thread_options"]["starts"] = json!(2);
@@ -997,7 +1090,6 @@ fn hole_presets_dirty_overwrite_keeps_name_and_all_pointed_left_partial_paramete
         opts.angled = true;
         opts.tapped = true;
         opts.thread = "M8".into();
-        opts.handedness = solidcraft_engine::doc::ThreadHandedness::Left;
         opts.thread_full_depth = false;
         opts.thread_depth = "5 mm".into();
     }
@@ -1010,7 +1102,6 @@ fn hole_presets_dirty_overwrite_keeps_name_and_all_pointed_left_partial_paramete
     assert_eq!(saved[0]["name"], "Workshop");
     assert_eq!(saved[0]["depth"], "13 mm");
     assert_eq!(saved[0]["angled_bottom"], true);
-    assert_eq!(saved[0]["thread_options"]["handedness"], "left");
     assert_eq!(saved[0]["thread_options"]["depth"], "5 mm");
     assert!(!preset_dirty_save_enabled(&h));
     h.step(&json!({"expect":{"hidden_handles":["dialog:hole_presets.name"],"not_shown":"* Workshop"}})).unwrap();

@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3353",
+  "tangency-labs/solidcraft#3354"
+ ],
+ "what": "a sheet metal body mirrored into a new body must still be sheet metal (flat pattern, bend table): it was a plain solid",
+ "source": "analytic",
+ "method": "T = 2, R = 2, K = 0.4, setback 4. One body: base 100 x 52, flanges 20 and 15 high (straights 16 and 11), all 100 wide, 2 thick, two bends of (pi/2)(16 - 4)*100/2 = 942.478 each, a 10 mm hole through the base (pi*25*2). V1 = 2*100*(52 + 16 + 11) + 2*942.478 - 50*pi. The mirror copy is congruent: two bodies, total 2*V1. The flat pattern of the copy must exist",
+ "body_count": 2,
+ "volume_mm3": 35055.75191894878
+}

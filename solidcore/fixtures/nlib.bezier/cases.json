@@ -1,0 +1,5394 @@
+{
+ "cases": [
+  {
+   "name": "rect_edge0_length",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "length",
+    "p": 1,
+    "tol": 1e-09,
+    "pw": [
+     [
+      -5.0,
+      -3.0,
+      0.0
+     ],
+     [
+      5.0,
+      -3.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_edge0_arc_length",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "arc_length",
+    "p": 1,
+    "eps": 1e-06,
+    "len": 0.0,
+    "pw": [
+     [
+      -5.0,
+      -3.0,
+      0.0
+     ],
+     [
+      5.0,
+      -3.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_edge0_split_mid",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "split",
+    "p": 1,
+    "u": 0.5,
+    "pw": [
+     [
+      -5.0,
+      -3.0,
+      0.0
+     ],
+     [
+      5.0,
+      -3.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_edge0_elevate_3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "elevate",
+    "p": 1,
+    "t": 2,
+    "f": 0,
+    "l": 3,
+    "pre": false,
+    "pw": [
+     [
+      -5.0,
+      -3.0,
+      0.0
+     ],
+     [
+      5.0,
+      -3.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_edge0_extend_1_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 1,
+    "rev": false,
+    "pw": [
+     [
+      -5.0,
+      -3.0,
+      0.0
+     ],
+     [
+      5.0,
+      -3.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_edge0_extend_1_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 1,
+    "rev": true,
+    "pw": [
+     [
+      -5.0,
+      -3.0,
+      0.0
+     ],
+     [
+      5.0,
+      -3.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_edge0_extend_2_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 2,
+    "rev": false,
+    "pw": [
+     [
+      -5.0,
+      -3.0,
+      0.0
+     ],
+     [
+      5.0,
+      -3.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_edge0_extend_2_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 2,
+    "rev": true,
+    "pw": [
+     [
+      -5.0,
+      -3.0,
+      0.0
+     ],
+     [
+      5.0,
+      -3.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_edge1_length",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "length",
+    "p": 1,
+    "tol": 1e-09,
+    "pw": [
+     [
+      5.0,
+      -3.0,
+      0.0
+     ],
+     [
+      5.0,
+      3.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_edge1_arc_length",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "arc_length",
+    "p": 1,
+    "eps": 1e-06,
+    "len": 0.0,
+    "pw": [
+     [
+      5.0,
+      -3.0,
+      0.0
+     ],
+     [
+      5.0,
+      3.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_edge1_split_mid",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "split",
+    "p": 1,
+    "u": 0.5,
+    "pw": [
+     [
+      5.0,
+      -3.0,
+      0.0
+     ],
+     [
+      5.0,
+      3.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_edge1_elevate_3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "elevate",
+    "p": 1,
+    "t": 2,
+    "f": 0,
+    "l": 3,
+    "pre": false,
+    "pw": [
+     [
+      5.0,
+      -3.0,
+      0.0
+     ],
+     [
+      5.0,
+      3.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_edge1_extend_1_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 1,
+    "rev": false,
+    "pw": [
+     [
+      5.0,
+      -3.0,
+      0.0
+     ],
+     [
+      5.0,
+      3.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_edge1_extend_1_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 1,
+    "rev": true,
+    "pw": [
+     [
+      5.0,
+      -3.0,
+      0.0
+     ],
+     [
+      5.0,
+      3.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_edge1_extend_2_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 2,
+    "rev": false,
+    "pw": [
+     [
+      5.0,
+      -3.0,
+      0.0
+     ],
+     [
+      5.0,
+      3.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_edge1_extend_2_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 2,
+    "rev": true,
+    "pw": [
+     [
+      5.0,
+      -3.0,
+      0.0
+     ],
+     [
+      5.0,
+      3.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_edge2_length",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "length",
+    "p": 1,
+    "tol": 1e-09,
+    "pw": [
+     [
+      5.0,
+      3.0,
+      0.0
+     ],
+     [
+      -5.0,
+      3.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_edge2_arc_length",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "arc_length",
+    "p": 1,
+    "eps": 1e-06,
+    "len": 0.0,
+    "pw": [
+     [
+      5.0,
+      3.0,
+      0.0
+     ],
+     [
+      -5.0,
+      3.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_edge2_split_mid",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "split",
+    "p": 1,
+    "u": 0.5,
+    "pw": [
+     [
+      5.0,
+      3.0,
+      0.0
+     ],
+     [
+      -5.0,
+      3.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_edge2_elevate_3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "elevate",
+    "p": 1,
+    "t": 2,
+    "f": 0,
+    "l": 3,
+    "pre": false,
+    "pw": [
+     [
+      5.0,
+      3.0,
+      0.0
+     ],
+     [
+      -5.0,
+      3.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_edge2_extend_1_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 1,
+    "rev": false,
+    "pw": [
+     [
+      5.0,
+      3.0,
+      0.0
+     ],
+     [
+      -5.0,
+      3.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_edge2_extend_1_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 1,
+    "rev": true,
+    "pw": [
+     [
+      5.0,
+      3.0,
+      0.0
+     ],
+     [
+      -5.0,
+      3.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_edge2_extend_2_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 2,
+    "rev": false,
+    "pw": [
+     [
+      5.0,
+      3.0,
+      0.0
+     ],
+     [
+      -5.0,
+      3.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_edge2_extend_2_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 2,
+    "rev": true,
+    "pw": [
+     [
+      5.0,
+      3.0,
+      0.0
+     ],
+     [
+      -5.0,
+      3.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_edge3_length",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "length",
+    "p": 1,
+    "tol": 1e-09,
+    "pw": [
+     [
+      -5.0,
+      3.0,
+      0.0
+     ],
+     [
+      -5.0,
+      -3.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_edge3_arc_length",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "arc_length",
+    "p": 1,
+    "eps": 1e-06,
+    "len": 0.0,
+    "pw": [
+     [
+      -5.0,
+      3.0,
+      0.0
+     ],
+     [
+      -5.0,
+      -3.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_edge3_split_mid",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "split",
+    "p": 1,
+    "u": 0.5,
+    "pw": [
+     [
+      -5.0,
+      3.0,
+      0.0
+     ],
+     [
+      -5.0,
+      -3.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_edge3_elevate_3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "elevate",
+    "p": 1,
+    "t": 2,
+    "f": 0,
+    "l": 3,
+    "pre": false,
+    "pw": [
+     [
+      -5.0,
+      3.0,
+      0.0
+     ],
+     [
+      -5.0,
+      -3.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_edge3_extend_1_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 1,
+    "rev": false,
+    "pw": [
+     [
+      -5.0,
+      3.0,
+      0.0
+     ],
+     [
+      -5.0,
+      -3.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_edge3_extend_1_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 1,
+    "rev": true,
+    "pw": [
+     [
+      -5.0,
+      3.0,
+      0.0
+     ],
+     [
+      -5.0,
+      -3.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_edge3_extend_2_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 2,
+    "rev": false,
+    "pw": [
+     [
+      -5.0,
+      3.0,
+      0.0
+     ],
+     [
+      -5.0,
+      -3.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_edge3_extend_2_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 2,
+    "rev": true,
+    "pw": [
+     [
+      -5.0,
+      3.0,
+      0.0
+     ],
+     [
+      -5.0,
+      -3.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_far_width_length",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "length",
+    "p": 1,
+    "tol": 1e-09,
+    "pw": [
+     [
+      5.0,
+      10000000000.0,
+      0.0
+     ],
+     [
+      5.0,
+      10000000000.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_far_width_arc_length",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "arc_length",
+    "p": 1,
+    "eps": 1e-06,
+    "len": 0.0,
+    "pw": [
+     [
+      5.0,
+      10000000000.0,
+      0.0
+     ],
+     [
+      5.0,
+      10000000000.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_far_width_split_mid",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "split",
+    "p": 1,
+    "u": 0.5,
+    "pw": [
+     [
+      5.0,
+      10000000000.0,
+      0.0
+     ],
+     [
+      5.0,
+      10000000000.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_far_width_elevate_3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "elevate",
+    "p": 1,
+    "t": 2,
+    "f": 0,
+    "l": 3,
+    "pre": false,
+    "pw": [
+     [
+      5.0,
+      10000000000.0,
+      0.0
+     ],
+     [
+      5.0,
+      10000000000.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_far_width_extend_1_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 1,
+    "rev": false,
+    "pw": [
+     [
+      5.0,
+      10000000000.0,
+      0.0
+     ],
+     [
+      5.0,
+      10000000000.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_far_width_extend_1_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 1,
+    "rev": true,
+    "pw": [
+     [
+      5.0,
+      10000000000.0,
+      0.0
+     ],
+     [
+      5.0,
+      10000000000.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_far_width_extend_2_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 2,
+    "rev": false,
+    "pw": [
+     [
+      5.0,
+      10000000000.0,
+      0.0
+     ],
+     [
+      5.0,
+      10000000000.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rect_far_width_extend_2_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 2,
+    "rev": true,
+    "pw": [
+     [
+      5.0,
+      10000000000.0,
+      0.0
+     ],
+     [
+      5.0,
+      10000000000.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge0_length",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "length",
+    "p": 1,
+    "tol": 1e-09,
+    "pw": [
+     [
+      5.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.5000000000000004,
+      4.330127018922193,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge0_arc_length",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "arc_length",
+    "p": 1,
+    "eps": 1e-06,
+    "len": 0.0,
+    "pw": [
+     [
+      5.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.5000000000000004,
+      4.330127018922193,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge0_split_mid",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "split",
+    "p": 1,
+    "u": 0.5,
+    "pw": [
+     [
+      5.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.5000000000000004,
+      4.330127018922193,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge0_elevate_3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "elevate",
+    "p": 1,
+    "t": 2,
+    "f": 0,
+    "l": 3,
+    "pre": false,
+    "pw": [
+     [
+      5.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.5000000000000004,
+      4.330127018922193,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge0_extend_1_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 1,
+    "rev": false,
+    "pw": [
+     [
+      5.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.5000000000000004,
+      4.330127018922193,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge0_extend_1_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 1,
+    "rev": true,
+    "pw": [
+     [
+      5.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.5000000000000004,
+      4.330127018922193,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge0_extend_2_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 2,
+    "rev": false,
+    "pw": [
+     [
+      5.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.5000000000000004,
+      4.330127018922193,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge0_extend_2_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 2,
+    "rev": true,
+    "pw": [
+     [
+      5.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.5000000000000004,
+      4.330127018922193,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge1_length",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "length",
+    "p": 1,
+    "tol": 1e-09,
+    "pw": [
+     [
+      2.5000000000000004,
+      4.330127018922193,
+      0.0
+     ],
+     [
+      -2.499999999999999,
+      4.330127018922194,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge1_arc_length",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "arc_length",
+    "p": 1,
+    "eps": 1e-06,
+    "len": 0.0,
+    "pw": [
+     [
+      2.5000000000000004,
+      4.330127018922193,
+      0.0
+     ],
+     [
+      -2.499999999999999,
+      4.330127018922194,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge1_split_mid",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "split",
+    "p": 1,
+    "u": 0.5,
+    "pw": [
+     [
+      2.5000000000000004,
+      4.330127018922193,
+      0.0
+     ],
+     [
+      -2.499999999999999,
+      4.330127018922194,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge1_elevate_3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "elevate",
+    "p": 1,
+    "t": 2,
+    "f": 0,
+    "l": 3,
+    "pre": false,
+    "pw": [
+     [
+      2.5000000000000004,
+      4.330127018922193,
+      0.0
+     ],
+     [
+      -2.499999999999999,
+      4.330127018922194,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge1_extend_1_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 1,
+    "rev": false,
+    "pw": [
+     [
+      2.5000000000000004,
+      4.330127018922193,
+      0.0
+     ],
+     [
+      -2.499999999999999,
+      4.330127018922194,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge1_extend_1_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 1,
+    "rev": true,
+    "pw": [
+     [
+      2.5000000000000004,
+      4.330127018922193,
+      0.0
+     ],
+     [
+      -2.499999999999999,
+      4.330127018922194,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge1_extend_2_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 2,
+    "rev": false,
+    "pw": [
+     [
+      2.5000000000000004,
+      4.330127018922193,
+      0.0
+     ],
+     [
+      -2.499999999999999,
+      4.330127018922194,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge1_extend_2_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 2,
+    "rev": true,
+    "pw": [
+     [
+      2.5000000000000004,
+      4.330127018922193,
+      0.0
+     ],
+     [
+      -2.499999999999999,
+      4.330127018922194,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge2_length",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "length",
+    "p": 1,
+    "tol": 1e-09,
+    "pw": [
+     [
+      -2.499999999999999,
+      4.330127018922194,
+      0.0
+     ],
+     [
+      -5.0,
+      6.123233995736766e-16,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge2_arc_length",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "arc_length",
+    "p": 1,
+    "eps": 1e-06,
+    "len": 0.0,
+    "pw": [
+     [
+      -2.499999999999999,
+      4.330127018922194,
+      0.0
+     ],
+     [
+      -5.0,
+      6.123233995736766e-16,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge2_split_mid",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "split",
+    "p": 1,
+    "u": 0.5,
+    "pw": [
+     [
+      -2.499999999999999,
+      4.330127018922194,
+      0.0
+     ],
+     [
+      -5.0,
+      6.123233995736766e-16,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge2_elevate_3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "elevate",
+    "p": 1,
+    "t": 2,
+    "f": 0,
+    "l": 3,
+    "pre": false,
+    "pw": [
+     [
+      -2.499999999999999,
+      4.330127018922194,
+      0.0
+     ],
+     [
+      -5.0,
+      6.123233995736766e-16,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge2_extend_1_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 1,
+    "rev": false,
+    "pw": [
+     [
+      -2.499999999999999,
+      4.330127018922194,
+      0.0
+     ],
+     [
+      -5.0,
+      6.123233995736766e-16,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge2_extend_1_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 1,
+    "rev": true,
+    "pw": [
+     [
+      -2.499999999999999,
+      4.330127018922194,
+      0.0
+     ],
+     [
+      -5.0,
+      6.123233995736766e-16,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge2_extend_2_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 2,
+    "rev": false,
+    "pw": [
+     [
+      -2.499999999999999,
+      4.330127018922194,
+      0.0
+     ],
+     [
+      -5.0,
+      6.123233995736766e-16,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge2_extend_2_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 2,
+    "rev": true,
+    "pw": [
+     [
+      -2.499999999999999,
+      4.330127018922194,
+      0.0
+     ],
+     [
+      -5.0,
+      6.123233995736766e-16,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge3_length",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "length",
+    "p": 1,
+    "tol": 1e-09,
+    "pw": [
+     [
+      -5.0,
+      6.123233995736766e-16,
+      0.0
+     ],
+     [
+      -2.500000000000002,
+      -4.330127018922192,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge3_arc_length",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "arc_length",
+    "p": 1,
+    "eps": 1e-06,
+    "len": 0.0,
+    "pw": [
+     [
+      -5.0,
+      6.123233995736766e-16,
+      0.0
+     ],
+     [
+      -2.500000000000002,
+      -4.330127018922192,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge3_split_mid",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "split",
+    "p": 1,
+    "u": 0.5,
+    "pw": [
+     [
+      -5.0,
+      6.123233995736766e-16,
+      0.0
+     ],
+     [
+      -2.500000000000002,
+      -4.330127018922192,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge3_elevate_3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "elevate",
+    "p": 1,
+    "t": 2,
+    "f": 0,
+    "l": 3,
+    "pre": false,
+    "pw": [
+     [
+      -5.0,
+      6.123233995736766e-16,
+      0.0
+     ],
+     [
+      -2.500000000000002,
+      -4.330127018922192,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge3_extend_1_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 1,
+    "rev": false,
+    "pw": [
+     [
+      -5.0,
+      6.123233995736766e-16,
+      0.0
+     ],
+     [
+      -2.500000000000002,
+      -4.330127018922192,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge3_extend_1_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 1,
+    "rev": true,
+    "pw": [
+     [
+      -5.0,
+      6.123233995736766e-16,
+      0.0
+     ],
+     [
+      -2.500000000000002,
+      -4.330127018922192,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge3_extend_2_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 2,
+    "rev": false,
+    "pw": [
+     [
+      -5.0,
+      6.123233995736766e-16,
+      0.0
+     ],
+     [
+      -2.500000000000002,
+      -4.330127018922192,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge3_extend_2_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 2,
+    "rev": true,
+    "pw": [
+     [
+      -5.0,
+      6.123233995736766e-16,
+      0.0
+     ],
+     [
+      -2.500000000000002,
+      -4.330127018922192,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge4_length",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "length",
+    "p": 1,
+    "tol": 1e-09,
+    "pw": [
+     [
+      -2.500000000000002,
+      -4.330127018922192,
+      0.0
+     ],
+     [
+      2.5000000000000004,
+      -4.330127018922193,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge4_arc_length",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "arc_length",
+    "p": 1,
+    "eps": 1e-06,
+    "len": 0.0,
+    "pw": [
+     [
+      -2.500000000000002,
+      -4.330127018922192,
+      0.0
+     ],
+     [
+      2.5000000000000004,
+      -4.330127018922193,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge4_split_mid",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "split",
+    "p": 1,
+    "u": 0.5,
+    "pw": [
+     [
+      -2.500000000000002,
+      -4.330127018922192,
+      0.0
+     ],
+     [
+      2.5000000000000004,
+      -4.330127018922193,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge4_elevate_3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "elevate",
+    "p": 1,
+    "t": 2,
+    "f": 0,
+    "l": 3,
+    "pre": false,
+    "pw": [
+     [
+      -2.500000000000002,
+      -4.330127018922192,
+      0.0
+     ],
+     [
+      2.5000000000000004,
+      -4.330127018922193,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge4_extend_1_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 1,
+    "rev": false,
+    "pw": [
+     [
+      -2.500000000000002,
+      -4.330127018922192,
+      0.0
+     ],
+     [
+      2.5000000000000004,
+      -4.330127018922193,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge4_extend_1_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 1,
+    "rev": true,
+    "pw": [
+     [
+      -2.500000000000002,
+      -4.330127018922192,
+      0.0
+     ],
+     [
+      2.5000000000000004,
+      -4.330127018922193,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge4_extend_2_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 2,
+    "rev": false,
+    "pw": [
+     [
+      -2.500000000000002,
+      -4.330127018922192,
+      0.0
+     ],
+     [
+      2.5000000000000004,
+      -4.330127018922193,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge4_extend_2_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 2,
+    "rev": true,
+    "pw": [
+     [
+      -2.500000000000002,
+      -4.330127018922192,
+      0.0
+     ],
+     [
+      2.5000000000000004,
+      -4.330127018922193,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge5_length",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "length",
+    "p": 1,
+    "tol": 1e-09,
+    "pw": [
+     [
+      2.5000000000000004,
+      -4.330127018922193,
+      0.0
+     ],
+     [
+      5.0,
+      -1.2246467991473533e-15,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge5_arc_length",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "arc_length",
+    "p": 1,
+    "eps": 1e-06,
+    "len": 0.0,
+    "pw": [
+     [
+      2.5000000000000004,
+      -4.330127018922193,
+      0.0
+     ],
+     [
+      5.0,
+      -1.2246467991473533e-15,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge5_split_mid",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "split",
+    "p": 1,
+    "u": 0.5,
+    "pw": [
+     [
+      2.5000000000000004,
+      -4.330127018922193,
+      0.0
+     ],
+     [
+      5.0,
+      -1.2246467991473533e-15,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge5_elevate_3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "elevate",
+    "p": 1,
+    "t": 2,
+    "f": 0,
+    "l": 3,
+    "pre": false,
+    "pw": [
+     [
+      2.5000000000000004,
+      -4.330127018922193,
+      0.0
+     ],
+     [
+      5.0,
+      -1.2246467991473533e-15,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge5_extend_1_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 1,
+    "rev": false,
+    "pw": [
+     [
+      2.5000000000000004,
+      -4.330127018922193,
+      0.0
+     ],
+     [
+      5.0,
+      -1.2246467991473533e-15,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge5_extend_1_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 1,
+    "rev": true,
+    "pw": [
+     [
+      2.5000000000000004,
+      -4.330127018922193,
+      0.0
+     ],
+     [
+      5.0,
+      -1.2246467991473533e-15,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge5_extend_2_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 2,
+    "rev": false,
+    "pw": [
+     [
+      2.5000000000000004,
+      -4.330127018922193,
+      0.0
+     ],
+     [
+      5.0,
+      -1.2246467991473533e-15,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_edge5_extend_2_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 2,
+    "rev": true,
+    "pw": [
+     [
+      2.5000000000000004,
+      -4.330127018922193,
+      0.0
+     ],
+     [
+      5.0,
+      -1.2246467991473533e-15,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_bez6_length",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "length",
+    "p": 6,
+    "tol": 0.001,
+    "pw": [
+     [
+      5.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.5000000000000004,
+      4.330127018922193,
+      0.0
+     ],
+     [
+      -2.499999999999999,
+      4.330127018922194,
+      0.0
+     ],
+     [
+      -5.0,
+      6.123233995736766e-16,
+      0.0
+     ],
+     [
+      -2.500000000000002,
+      -4.330127018922192,
+      0.0
+     ],
+     [
+      2.5000000000000004,
+      -4.330127018922193,
+      0.0
+     ],
+     [
+      5.0,
+      -1.2246467991473533e-15,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_bez6_split",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "split",
+    "p": 6,
+    "u": 0.25,
+    "pw": [
+     [
+      5.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.5000000000000004,
+      4.330127018922193,
+      0.0
+     ],
+     [
+      -2.499999999999999,
+      4.330127018922194,
+      0.0
+     ],
+     [
+      -5.0,
+      6.123233995736766e-16,
+      0.0
+     ],
+     [
+      -2.500000000000002,
+      -4.330127018922192,
+      0.0
+     ],
+     [
+      2.5000000000000004,
+      -4.330127018922193,
+      0.0
+     ],
+     [
+      5.0,
+      -1.2246467991473533e-15,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_bez6_reduce",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "reduce",
+    "p": 6,
+    "pw": [
+     [
+      5.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.5000000000000004,
+      4.330127018922193,
+      0.0
+     ],
+     [
+      -2.499999999999999,
+      4.330127018922194,
+      0.0
+     ],
+     [
+      -5.0,
+      6.123233995736766e-16,
+      0.0
+     ],
+     [
+      -2.500000000000002,
+      -4.330127018922192,
+      0.0
+     ],
+     [
+      2.5000000000000004,
+      -4.330127018922193,
+      0.0
+     ],
+     [
+      5.0,
+      -1.2246467991473533e-15,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_bez6_elevate",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "elevate",
+    "p": 6,
+    "t": 11,
+    "f": 0,
+    "l": 17,
+    "pre": true,
+    "pw": [
+     [
+      5.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.5000000000000004,
+      4.330127018922193,
+      0.0
+     ],
+     [
+      -2.499999999999999,
+      4.330127018922194,
+      0.0
+     ],
+     [
+      -5.0,
+      6.123233995736766e-16,
+      0.0
+     ],
+     [
+      -2.500000000000002,
+      -4.330127018922192,
+      0.0
+     ],
+     [
+      2.5000000000000004,
+      -4.330127018922193,
+      0.0
+     ],
+     [
+      5.0,
+      -1.2246467991473533e-15,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "hexagon_bez6_extend",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 6,
+    "whr": 2,
+    "rev": false,
+    "pw": [
+     [
+      5.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.5000000000000004,
+      4.330127018922193,
+      0.0
+     ],
+     [
+      -2.499999999999999,
+      4.330127018922194,
+      0.0
+     ],
+     [
+      -5.0,
+      6.123233995736766e-16,
+      0.0
+     ],
+     [
+      -2.500000000000002,
+      -4.330127018922192,
+      0.0
+     ],
+     [
+      2.5000000000000004,
+      -4.330127018922193,
+      0.0
+     ],
+     [
+      5.0,
+      -1.2246467991473533e-15,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge0_length",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "length",
+    "p": 1,
+    "tol": 1e-09,
+    "pw": [
+     [
+      10000000000.000002,
+      10000000000.0,
+      0.0
+     ],
+     [
+      10000000000.0,
+      10000000000.000002,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge0_arc_length",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "arc_length",
+    "p": 1,
+    "eps": 1e-06,
+    "len": 0.0,
+    "pw": [
+     [
+      10000000000.000002,
+      10000000000.0,
+      0.0
+     ],
+     [
+      10000000000.0,
+      10000000000.000002,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge0_split_mid",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "split",
+    "p": 1,
+    "u": 0.5,
+    "pw": [
+     [
+      10000000000.000002,
+      10000000000.0,
+      0.0
+     ],
+     [
+      10000000000.0,
+      10000000000.000002,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge0_elevate_3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "elevate",
+    "p": 1,
+    "t": 2,
+    "f": 0,
+    "l": 3,
+    "pre": false,
+    "pw": [
+     [
+      10000000000.000002,
+      10000000000.0,
+      0.0
+     ],
+     [
+      10000000000.0,
+      10000000000.000002,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge0_extend_1_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 1,
+    "rev": false,
+    "pw": [
+     [
+      10000000000.000002,
+      10000000000.0,
+      0.0
+     ],
+     [
+      10000000000.0,
+      10000000000.000002,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge0_extend_1_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 1,
+    "rev": true,
+    "pw": [
+     [
+      10000000000.000002,
+      10000000000.0,
+      0.0
+     ],
+     [
+      10000000000.0,
+      10000000000.000002,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge0_extend_2_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 2,
+    "rev": false,
+    "pw": [
+     [
+      10000000000.000002,
+      10000000000.0,
+      0.0
+     ],
+     [
+      10000000000.0,
+      10000000000.000002,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge0_extend_2_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 2,
+    "rev": true,
+    "pw": [
+     [
+      10000000000.000002,
+      10000000000.0,
+      0.0
+     ],
+     [
+      10000000000.0,
+      10000000000.000002,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge1_length",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "length",
+    "p": 1,
+    "tol": 1e-09,
+    "pw": [
+     [
+      10000000000.0,
+      10000000000.000002,
+      0.0
+     ],
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge1_arc_length",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "arc_length",
+    "p": 1,
+    "eps": 1e-06,
+    "len": 0.0,
+    "pw": [
+     [
+      10000000000.0,
+      10000000000.000002,
+      0.0
+     ],
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge1_split_mid",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "split",
+    "p": 1,
+    "u": 0.5,
+    "pw": [
+     [
+      10000000000.0,
+      10000000000.000002,
+      0.0
+     ],
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge1_elevate_3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "elevate",
+    "p": 1,
+    "t": 2,
+    "f": 0,
+    "l": 3,
+    "pre": false,
+    "pw": [
+     [
+      10000000000.0,
+      10000000000.000002,
+      0.0
+     ],
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge1_extend_1_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 1,
+    "rev": false,
+    "pw": [
+     [
+      10000000000.0,
+      10000000000.000002,
+      0.0
+     ],
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge1_extend_1_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 1,
+    "rev": true,
+    "pw": [
+     [
+      10000000000.0,
+      10000000000.000002,
+      0.0
+     ],
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge1_extend_2_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 2,
+    "rev": false,
+    "pw": [
+     [
+      10000000000.0,
+      10000000000.000002,
+      0.0
+     ],
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge1_extend_2_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 2,
+    "rev": true,
+    "pw": [
+     [
+      10000000000.0,
+      10000000000.000002,
+      0.0
+     ],
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge2_length",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "length",
+    "p": 1,
+    "tol": 1e-09,
+    "pw": [
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ],
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge2_arc_length",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "arc_length",
+    "p": 1,
+    "eps": 1e-06,
+    "len": 0.0,
+    "pw": [
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ],
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge2_split_mid",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "split",
+    "p": 1,
+    "u": 0.5,
+    "pw": [
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ],
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge2_elevate_3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "elevate",
+    "p": 1,
+    "t": 2,
+    "f": 0,
+    "l": 3,
+    "pre": false,
+    "pw": [
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ],
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge2_extend_1_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 1,
+    "rev": false,
+    "pw": [
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ],
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge2_extend_1_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 1,
+    "rev": true,
+    "pw": [
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ],
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge2_extend_2_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 2,
+    "rev": false,
+    "pw": [
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ],
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge2_extend_2_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 2,
+    "rev": true,
+    "pw": [
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ],
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge3_length",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "length",
+    "p": 1,
+    "tol": 1e-09,
+    "pw": [
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ],
+     [
+      10000000000.0,
+      9999999999.999998,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge3_arc_length",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "arc_length",
+    "p": 1,
+    "eps": 1e-06,
+    "len": 0.0,
+    "pw": [
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ],
+     [
+      10000000000.0,
+      9999999999.999998,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge3_split_mid",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "split",
+    "p": 1,
+    "u": 0.5,
+    "pw": [
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ],
+     [
+      10000000000.0,
+      9999999999.999998,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge3_elevate_3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "elevate",
+    "p": 1,
+    "t": 2,
+    "f": 0,
+    "l": 3,
+    "pre": false,
+    "pw": [
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ],
+     [
+      10000000000.0,
+      9999999999.999998,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge3_extend_1_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 1,
+    "rev": false,
+    "pw": [
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ],
+     [
+      10000000000.0,
+      9999999999.999998,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge3_extend_1_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 1,
+    "rev": true,
+    "pw": [
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ],
+     [
+      10000000000.0,
+      9999999999.999998,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge3_extend_2_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 2,
+    "rev": false,
+    "pw": [
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ],
+     [
+      10000000000.0,
+      9999999999.999998,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge3_extend_2_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 2,
+    "rev": true,
+    "pw": [
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ],
+     [
+      10000000000.0,
+      9999999999.999998,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge4_length",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "length",
+    "p": 1,
+    "tol": 1e-09,
+    "pw": [
+     [
+      10000000000.0,
+      9999999999.999998,
+      0.0
+     ],
+     [
+      10000000000.000002,
+      10000000000.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge4_arc_length",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "arc_length",
+    "p": 1,
+    "eps": 1e-06,
+    "len": 0.0,
+    "pw": [
+     [
+      10000000000.0,
+      9999999999.999998,
+      0.0
+     ],
+     [
+      10000000000.000002,
+      10000000000.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge4_split_mid",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "split",
+    "p": 1,
+    "u": 0.5,
+    "pw": [
+     [
+      10000000000.0,
+      9999999999.999998,
+      0.0
+     ],
+     [
+      10000000000.000002,
+      10000000000.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge4_elevate_3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "elevate",
+    "p": 1,
+    "t": 2,
+    "f": 0,
+    "l": 3,
+    "pre": false,
+    "pw": [
+     [
+      10000000000.0,
+      9999999999.999998,
+      0.0
+     ],
+     [
+      10000000000.000002,
+      10000000000.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge4_extend_1_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 1,
+    "rev": false,
+    "pw": [
+     [
+      10000000000.0,
+      9999999999.999998,
+      0.0
+     ],
+     [
+      10000000000.000002,
+      10000000000.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge4_extend_1_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 1,
+    "rev": true,
+    "pw": [
+     [
+      10000000000.0,
+      9999999999.999998,
+      0.0
+     ],
+     [
+      10000000000.000002,
+      10000000000.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge4_extend_2_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 2,
+    "rev": false,
+    "pw": [
+     [
+      10000000000.0,
+      9999999999.999998,
+      0.0
+     ],
+     [
+      10000000000.000002,
+      10000000000.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_edge4_extend_2_1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 1,
+    "whr": 2,
+    "rev": true,
+    "pw": [
+     [
+      10000000000.0,
+      9999999999.999998,
+      0.0
+     ],
+     [
+      10000000000.000002,
+      10000000000.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_bez5_length",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "length",
+    "p": 5,
+    "tol": 1e-09,
+    "pw": [
+     [
+      10000000000.000002,
+      10000000000.0,
+      0.0
+     ],
+     [
+      10000000000.0,
+      10000000000.000002,
+      0.0
+     ],
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ],
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ],
+     [
+      10000000000.0,
+      9999999999.999998,
+      0.0
+     ],
+     [
+      10000000000.000002,
+      10000000000.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pentagon_far_bez5_reduce",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "op": "reduce",
+    "p": 5,
+    "pw": [
+     [
+      10000000000.000002,
+      10000000000.0,
+      0.0
+     ],
+     [
+      10000000000.0,
+      10000000000.000002,
+      0.0
+     ],
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ],
+     [
+      9999999999.999998,
+      10000000000.0,
+      0.0
+     ],
+     [
+      10000000000.0,
+      9999999999.999998,
+      0.0
+     ],
+     [
+      10000000000.000002,
+      10000000000.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "fitcrv_elev_matrix_11_6",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "elev_matrix",
+    "p": 11,
+    "t": 6
+   }
+  },
+  {
+   "name": "fitcrv_prod_matrix_11_6",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "prod_matrix",
+    "p": 11,
+    "q": 6
+   }
+  },
+  {
+   "name": "fitcrv_elevate_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "elevate",
+    "p": 11,
+    "t": 1,
+    "f": 0,
+    "l": 12,
+    "pre": false,
+    "pw": {
+     "$pts": "FitCrvPoints.pts"
+    }
+   }
+  },
+  {
+   "name": "fitcrv_elevate_3",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "elevate",
+    "p": 11,
+    "t": 3,
+    "f": 0,
+    "l": 14,
+    "pre": true,
+    "pw": {
+     "$pts": "FitCrvPoints.pts"
+    }
+   }
+  },
+  {
+   "name": "fitcrv_elevate_6",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "elevate",
+    "p": 11,
+    "t": 6,
+    "f": 0,
+    "l": 17,
+    "pre": false,
+    "pw": {
+     "$pts": "FitCrvPoints.pts"
+    }
+   }
+  },
+  {
+   "name": "fitcrv_elevate_part",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "elevate",
+    "p": 11,
+    "t": 4,
+    "f": 3,
+    "l": 9,
+    "pre": false,
+    "pw": {
+     "$pts": "FitCrvPoints.pts"
+    }
+   }
+  },
+  {
+   "name": "fitcrv_split_0.0",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "split",
+    "p": 11,
+    "u": 0.0,
+    "pw": {
+     "$pts": "FitCrvPoints.pts"
+    }
+   }
+  },
+  {
+   "name": "fitcrv_split_0.3",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "split",
+    "p": 11,
+    "u": 0.3,
+    "pw": {
+     "$pts": "FitCrvPoints.pts"
+    }
+   }
+  },
+  {
+   "name": "fitcrv_split_0.5",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "split",
+    "p": 11,
+    "u": 0.5,
+    "pw": {
+     "$pts": "FitCrvPoints.pts"
+    }
+   }
+  },
+  {
+   "name": "fitcrv_split_1.0",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "split",
+    "p": 11,
+    "u": 1.0,
+    "pw": {
+     "$pts": "FitCrvPoints.pts"
+    }
+   }
+  },
+  {
+   "name": "fitcrv_split_outside",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "split",
+    "p": 11,
+    "u": 1.25,
+    "pw": {
+     "$pts": "FitCrvPoints.pts"
+    }
+   }
+  },
+  {
+   "name": "fitcrv_length_0.1",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "length",
+    "p": 11,
+    "tol": 0.1,
+    "pw": {
+     "$pts": "FitCrvPoints.pts"
+    }
+   }
+  },
+  {
+   "name": "fitcrv_length_0.01",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "length",
+    "p": 11,
+    "tol": 0.01,
+    "pw": {
+     "$pts": "FitCrvPoints.pts"
+    }
+   }
+  },
+  {
+   "name": "fitcrv_length_0.001",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "length",
+    "p": 11,
+    "tol": 0.001,
+    "pw": {
+     "$pts": "FitCrvPoints.pts"
+    }
+   }
+  },
+  {
+   "name": "fitcrv_length_too_tight",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "length",
+    "p": 11,
+    "tol": 1e-12,
+    "pw": {
+     "$pts": "FitCrvPoints.pts"
+    }
+   }
+  },
+  {
+   "name": "fitcrv_arc_length_acc",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "arc_length",
+    "p": 11,
+    "eps": 0.01,
+    "len": 7.5,
+    "pw": {
+     "$pts": "FitCrvPoints.pts"
+    }
+   }
+  },
+  {
+   "name": "fitcrv_reduce",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "reduce",
+    "p": 11,
+    "pw": {
+     "$pts": "FitCrvPoints.pts"
+    }
+   }
+  },
+  {
+   "name": "fitcrv_reduce_10",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "reduce",
+    "p": 10,
+    "pw": {
+     "$pts": "FitCrvPoints.pts"
+    }
+   }
+  },
+  {
+   "name": "fitcrv_extend_1_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 11,
+    "whr": 1,
+    "rev": false,
+    "pw": {
+     "$pts": "FitCrvPoints.pts"
+    }
+   }
+  },
+  {
+   "name": "fitcrv_extend_1_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 11,
+    "whr": 1,
+    "rev": true,
+    "pw": {
+     "$pts": "FitCrvPoints.pts"
+    }
+   }
+  },
+  {
+   "name": "fitcrv_extend_2_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 11,
+    "whr": 2,
+    "rev": false,
+    "pw": {
+     "$pts": "FitCrvPoints.pts"
+    }
+   }
+  },
+  {
+   "name": "fitcrv_extend_2_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 11,
+    "whr": 2,
+    "rev": true,
+    "pw": {
+     "$pts": "FitCrvPoints.pts"
+    }
+   }
+  },
+  {
+   "name": "fitcrv_one_basis_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "one_basis",
+    "p": 11,
+    "i": 0,
+    "u": 0.37
+   }
+  },
+  {
+   "name": "fitcrv_one_basis_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "one_basis",
+    "p": 11,
+    "i": 1,
+    "u": 0.37
+   }
+  },
+  {
+   "name": "fitcrv_one_basis_2",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "one_basis",
+    "p": 11,
+    "i": 2,
+    "u": 0.37
+   }
+  },
+  {
+   "name": "fitcrv_one_basis_3",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "one_basis",
+    "p": 11,
+    "i": 3,
+    "u": 0.37
+   }
+  },
+  {
+   "name": "fitcrv_one_basis_4",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "one_basis",
+    "p": 11,
+    "i": 4,
+    "u": 0.37
+   }
+  },
+  {
+   "name": "fitcrv_one_basis_5",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "one_basis",
+    "p": 11,
+    "i": 5,
+    "u": 0.37
+   }
+  },
+  {
+   "name": "fitcrv_one_basis_6",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "one_basis",
+    "p": 11,
+    "i": 6,
+    "u": 0.37
+   }
+  },
+  {
+   "name": "fitcrv_one_basis_7",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "one_basis",
+    "p": 11,
+    "i": 7,
+    "u": 0.37
+   }
+  },
+  {
+   "name": "fitcrv_one_basis_8",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "one_basis",
+    "p": 11,
+    "i": 8,
+    "u": 0.37
+   }
+  },
+  {
+   "name": "fitcrv_one_basis_9",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "one_basis",
+    "p": 11,
+    "i": 9,
+    "u": 0.37
+   }
+  },
+  {
+   "name": "fitcrv_one_basis_10",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "one_basis",
+    "p": 11,
+    "i": 10,
+    "u": 0.37
+   }
+  },
+  {
+   "name": "fitcrv_one_basis_11",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "one_basis",
+    "p": 11,
+    "i": 11,
+    "u": 0.37
+   }
+  },
+  {
+   "name": "fitcrv_func_crv",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "func_crv",
+    "p": 3,
+    "q": 11,
+    "s": 0,
+    "e": 14,
+    "pre": false,
+    "four_d": false,
+    "f": [
+     0.5,
+     1.0,
+     2.0,
+     1.5
+    ],
+    "pw": {
+     "$pts": "FitCrvPoints.pts"
+    }
+   }
+  },
+  {
+   "name": "fitcrv_func_crv_4d",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "func_crv",
+    "p": 3,
+    "q": 11,
+    "s": 2,
+    "e": 12,
+    "pre": true,
+    "four_d": true,
+    "f": [
+     0.5,
+     1.0,
+     2.0,
+     1.5
+    ],
+    "pw": {
+     "$pts": "FitCrvPoints.pts"
+    }
+   }
+  },
+  {
+   "name": "fitcrv_func_crv_bad_range",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "func_crv",
+    "p": 3,
+    "q": 11,
+    "s": 5,
+    "e": 15,
+    "pre": false,
+    "four_d": false,
+    "f": [
+     0.5,
+     1.0,
+     2.0,
+     1.5
+    ],
+    "pw": {
+     "$pts": "FitCrvPoints.pts"
+    }
+   }
+  },
+  {
+   "name": "func_func_cubic_quad",
+   "upstream_ref": "TestFiles/pt_TestFiles/FitCrvPoints.pts (prog_test curve fitting input)",
+   "inputs": {
+    "op": "func_func",
+    "p": 3,
+    "q": 2,
+    "s": 0,
+    "e": 5,
+    "pre": false,
+    "f": [
+     0.5,
+     1.0,
+     2.0,
+     1.5
+    ],
+    "g": [
+     1.0,
+     -2.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "points_extend_deg17_start",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts (prog_test point set)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 17,
+    "whr": 1,
+    "rev": false,
+    "pw": {
+     "$pts": "Points.pts"
+    }
+   }
+  },
+  {
+   "name": "points_extend_deg17_end_rev",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts (prog_test point set)",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 17,
+    "whr": 2,
+    "rev": true,
+    "pw": {
+     "$pts": "Points.pts"
+    }
+   }
+  },
+  {
+   "name": "points_elevate_17",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts (prog_test point set)",
+   "inputs": {
+    "op": "elevate",
+    "p": 17,
+    "t": 0,
+    "f": 0,
+    "l": 17,
+    "pre": false,
+    "pw": {
+     "$pts": "Points.pts"
+    }
+   }
+  },
+  {
+   "name": "points_split_deg29",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts (prog_test point set)",
+   "inputs": {
+    "op": "split",
+    "p": 29,
+    "u": 0.6,
+    "pw": {
+     "$pts": "Points.pts"
+    }
+   }
+  },
+  {
+   "name": "points_reduce_deg29",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts (prog_test point set)",
+   "inputs": {
+    "op": "reduce",
+    "p": 29,
+    "pw": {
+     "$pts": "Points.pts"
+    }
+   }
+  },
+  {
+   "name": "points_reduce_deg28",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts (prog_test point set)",
+   "inputs": {
+    "op": "reduce",
+    "p": 28,
+    "pw": {
+     "$pts": "Points.pts"
+    }
+   }
+  },
+  {
+   "name": "points_length_deg29",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts (prog_test point set)",
+   "inputs": {
+    "op": "length",
+    "p": 29,
+    "tol": 0.01,
+    "pw": {
+     "$pts": "Points.pts"
+    }
+   }
+  },
+  {
+   "name": "points_reduce_coefs_29",
+   "upstream_ref": "TestFiles/pt_TestFiles/Points.pts (prog_test point set)",
+   "inputs": {
+    "op": "reduce_coefs",
+    "p": 29
+   }
+  },
+  {
+   "name": "surface_extend_v_1_0_0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "srf_extend",
+    "dir": 2,
+    "whr": 1,
+    "rev": false,
+    "in_place": false,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "surface_extend_v_1_0_1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "srf_extend",
+    "dir": 2,
+    "whr": 1,
+    "rev": false,
+    "in_place": true,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "surface_extend_v_1_1_0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "srf_extend",
+    "dir": 2,
+    "whr": 1,
+    "rev": true,
+    "in_place": false,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "surface_extend_v_1_1_1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "srf_extend",
+    "dir": 2,
+    "whr": 1,
+    "rev": true,
+    "in_place": true,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "surface_extend_v_2_0_0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "srf_extend",
+    "dir": 2,
+    "whr": 2,
+    "rev": false,
+    "in_place": false,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "surface_extend_v_2_0_1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "srf_extend",
+    "dir": 2,
+    "whr": 2,
+    "rev": false,
+    "in_place": true,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "surface_extend_v_2_1_0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "srf_extend",
+    "dir": 2,
+    "whr": 2,
+    "rev": true,
+    "in_place": false,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "surface_extend_v_2_1_1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "srf_extend",
+    "dir": 2,
+    "whr": 2,
+    "rev": true,
+    "in_place": true,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "surface_extend_u_not_bezier",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "srf_extend",
+    "dir": 1,
+    "whr": 1,
+    "rev": false,
+    "in_place": false,
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    }
+   }
+  },
+  {
+   "name": "surface_elevate_v_row0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "srf_elevate",
+    "r": 1,
+    "t": 3,
+    "dir": 2,
+    "f": 0,
+    "l": 4,
+    "roc": 0,
+    "pre": false,
+    "net": [
+     [
+      [
+       4.404800473510645,
+       21.121034044810564,
+       13.171054214828178,
+       -1.7976931348623157e+308
+      ],
+      [
+       10.143547529497145,
+       17.54027679839803,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       4.129974312307959,
+       21.188377416893946,
+       13.171054214828178,
+       -1.7976931348623157e+308
+      ],
+      [
+       10.263944045816247,
+       17.90691741161508,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       2.0767458138477703,
+       20.352780227487123,
+       13.171054214828178,
+       -1.7976931348623157e+308
+      ],
+      [
+       9.953528998281277,
+       18.852585095795916,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       -3.531782675190398,
+       13.374964998558283,
+       13.17105421482818,
+       -1.7976931348623157e+308
+      ],
+      [
+       3.466273107314373,
+       15.038484422392564,
+       41.887429915696096,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       -8.809843000515015,
+       -6.00881443027442,
+       13.171054214828182,
+       -1.7976931348623157e+308
+      ],
+      [
+       -9.34691511350223,
+       0.1690179795994979,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       1.4559123718321356,
+       -23.15026325567756,
+       13.171054214828184,
+       -1.7976931348623157e+308
+      ],
+      [
+       -5.651648245503523,
+       -19.479310281453923,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       1.5163145483383191,
+       -21.54612307382674,
+       13.171054214828184,
+       -1.7976931348623157e+308
+      ],
+      [
+       -4.942402841455774,
+       -21.7957238180442,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       -1.4492107204096258,
+       -12.662175787436311,
+       13.171054214828182,
+       -1.7976931348623157e+308
+      ],
+      [
+       -5.84790149108631,
+       -14.001552017703752,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       0.3876375693601487,
+       1.276239778804998,
+       13.171054214828182,
+       -1.7976931348623157e+308
+      ],
+      [
+       -1.4191335526760802,
+       -2.263606529040975,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       1.254604278437416,
+       6.0074406382948675,
+       13.171054214828184,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.4916933305123871,
+       1.9222747967411546,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       3.29027076080461,
+       14.52806921955845,
+       13.17105421482818,
+       -1.7976931348623157e+308
+      ],
+      [
+       4.720160982318834,
+       9.851036932020756,
+       41.887429915696096,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       5.406915045357211,
+       20.545092003491384,
+       13.17105421482818,
+       -1.7976931348623157e+308
+      ],
+      [
+       9.40594675276882,
+       15.760752486708878,
+       41.887429915696096,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       4.488184262333751,
+       21.100601690438392,
+       13.171054214828178,
+       -1.7976931348623157e+308
+      ],
+      [
+       10.10701855551644,
+       17.429035993182556,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       4.404800473510645,
+       21.121034044810564,
+       13.171054214828178,
+       -1.7976931348623157e+308
+      ],
+      [
+       10.143547529497145,
+       17.54027679839803,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "name": "surface_elevate_v_row7",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "srf_elevate",
+    "r": 1,
+    "t": 3,
+    "dir": 2,
+    "f": 0,
+    "l": 4,
+    "roc": 7,
+    "pre": true,
+    "net": [
+     [
+      [
+       4.404800473510645,
+       21.121034044810564,
+       13.171054214828178,
+       -1.7976931348623157e+308
+      ],
+      [
+       10.143547529497145,
+       17.54027679839803,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       4.129974312307959,
+       21.188377416893946,
+       13.171054214828178,
+       -1.7976931348623157e+308
+      ],
+      [
+       10.263944045816247,
+       17.90691741161508,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       2.0767458138477703,
+       20.352780227487123,
+       13.171054214828178,
+       -1.7976931348623157e+308
+      ],
+      [
+       9.953528998281277,
+       18.852585095795916,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       -3.531782675190398,
+       13.374964998558283,
+       13.17105421482818,
+       -1.7976931348623157e+308
+      ],
+      [
+       3.466273107314373,
+       15.038484422392564,
+       41.887429915696096,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       -8.809843000515015,
+       -6.00881443027442,
+       13.171054214828182,
+       -1.7976931348623157e+308
+      ],
+      [
+       -9.34691511350223,
+       0.1690179795994979,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       1.4559123718321356,
+       -23.15026325567756,
+       13.171054214828184,
+       -1.7976931348623157e+308
+      ],
+      [
+       -5.651648245503523,
+       -19.479310281453923,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       1.5163145483383191,
+       -21.54612307382674,
+       13.171054214828184,
+       -1.7976931348623157e+308
+      ],
+      [
+       -4.942402841455774,
+       -21.7957238180442,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       -1.4492107204096258,
+       -12.662175787436311,
+       13.171054214828182,
+       -1.7976931348623157e+308
+      ],
+      [
+       -5.84790149108631,
+       -14.001552017703752,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       0.3876375693601487,
+       1.276239778804998,
+       13.171054214828182,
+       -1.7976931348623157e+308
+      ],
+      [
+       -1.4191335526760802,
+       -2.263606529040975,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       1.254604278437416,
+       6.0074406382948675,
+       13.171054214828184,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.4916933305123871,
+       1.9222747967411546,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       3.29027076080461,
+       14.52806921955845,
+       13.17105421482818,
+       -1.7976931348623157e+308
+      ],
+      [
+       4.720160982318834,
+       9.851036932020756,
+       41.887429915696096,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       5.406915045357211,
+       20.545092003491384,
+       13.17105421482818,
+       -1.7976931348623157e+308
+      ],
+      [
+       9.40594675276882,
+       15.760752486708878,
+       41.887429915696096,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       4.488184262333751,
+       21.100601690438392,
+       13.171054214828178,
+       -1.7976931348623157e+308
+      ],
+      [
+       10.10701855551644,
+       17.429035993182556,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       4.404800473510645,
+       21.121034044810564,
+       13.171054214828178,
+       -1.7976931348623157e+308
+      ],
+      [
+       10.143547529497145,
+       17.54027679839803,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "name": "surface_elevate_v_row13",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "srf_elevate",
+    "r": 1,
+    "t": 3,
+    "dir": 2,
+    "f": 0,
+    "l": 4,
+    "roc": 13,
+    "pre": false,
+    "net": [
+     [
+      [
+       4.404800473510645,
+       21.121034044810564,
+       13.171054214828178,
+       -1.7976931348623157e+308
+      ],
+      [
+       10.143547529497145,
+       17.54027679839803,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       4.129974312307959,
+       21.188377416893946,
+       13.171054214828178,
+       -1.7976931348623157e+308
+      ],
+      [
+       10.263944045816247,
+       17.90691741161508,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       2.0767458138477703,
+       20.352780227487123,
+       13.171054214828178,
+       -1.7976931348623157e+308
+      ],
+      [
+       9.953528998281277,
+       18.852585095795916,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       -3.531782675190398,
+       13.374964998558283,
+       13.17105421482818,
+       -1.7976931348623157e+308
+      ],
+      [
+       3.466273107314373,
+       15.038484422392564,
+       41.887429915696096,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       -8.809843000515015,
+       -6.00881443027442,
+       13.171054214828182,
+       -1.7976931348623157e+308
+      ],
+      [
+       -9.34691511350223,
+       0.1690179795994979,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       1.4559123718321356,
+       -23.15026325567756,
+       13.171054214828184,
+       -1.7976931348623157e+308
+      ],
+      [
+       -5.651648245503523,
+       -19.479310281453923,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       1.5163145483383191,
+       -21.54612307382674,
+       13.171054214828184,
+       -1.7976931348623157e+308
+      ],
+      [
+       -4.942402841455774,
+       -21.7957238180442,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       -1.4492107204096258,
+       -12.662175787436311,
+       13.171054214828182,
+       -1.7976931348623157e+308
+      ],
+      [
+       -5.84790149108631,
+       -14.001552017703752,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       0.3876375693601487,
+       1.276239778804998,
+       13.171054214828182,
+       -1.7976931348623157e+308
+      ],
+      [
+       -1.4191335526760802,
+       -2.263606529040975,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       1.254604278437416,
+       6.0074406382948675,
+       13.171054214828184,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.4916933305123871,
+       1.9222747967411546,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       3.29027076080461,
+       14.52806921955845,
+       13.17105421482818,
+       -1.7976931348623157e+308
+      ],
+      [
+       4.720160982318834,
+       9.851036932020756,
+       41.887429915696096,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       5.406915045357211,
+       20.545092003491384,
+       13.17105421482818,
+       -1.7976931348623157e+308
+      ],
+      [
+       9.40594675276882,
+       15.760752486708878,
+       41.887429915696096,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       4.488184262333751,
+       21.100601690438392,
+       13.171054214828178,
+       -1.7976931348623157e+308
+      ],
+      [
+       10.10701855551644,
+       17.429035993182556,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       4.404800473510645,
+       21.121034044810564,
+       13.171054214828178,
+       -1.7976931348623157e+308
+      ],
+      [
+       10.143547529497145,
+       17.54027679839803,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "name": "surface_elevate_u_col0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "srf_elevate",
+    "r": 13,
+    "t": 4,
+    "dir": 1,
+    "f": 0,
+    "l": 17,
+    "roc": 0,
+    "pre": false,
+    "net": [
+     [
+      [
+       4.404800473510645,
+       21.121034044810564,
+       13.171054214828178,
+       -1.7976931348623157e+308
+      ],
+      [
+       10.143547529497145,
+       17.54027679839803,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       4.129974312307959,
+       21.188377416893946,
+       13.171054214828178,
+       -1.7976931348623157e+308
+      ],
+      [
+       10.263944045816247,
+       17.90691741161508,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       2.0767458138477703,
+       20.352780227487123,
+       13.171054214828178,
+       -1.7976931348623157e+308
+      ],
+      [
+       9.953528998281277,
+       18.852585095795916,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       -3.531782675190398,
+       13.374964998558283,
+       13.17105421482818,
+       -1.7976931348623157e+308
+      ],
+      [
+       3.466273107314373,
+       15.038484422392564,
+       41.887429915696096,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       -8.809843000515015,
+       -6.00881443027442,
+       13.171054214828182,
+       -1.7976931348623157e+308
+      ],
+      [
+       -9.34691511350223,
+       0.1690179795994979,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       1.4559123718321356,
+       -23.15026325567756,
+       13.171054214828184,
+       -1.7976931348623157e+308
+      ],
+      [
+       -5.651648245503523,
+       -19.479310281453923,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       1.5163145483383191,
+       -21.54612307382674,
+       13.171054214828184,
+       -1.7976931348623157e+308
+      ],
+      [
+       -4.942402841455774,
+       -21.7957238180442,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       -1.4492107204096258,
+       -12.662175787436311,
+       13.171054214828182,
+       -1.7976931348623157e+308
+      ],
+      [
+       -5.84790149108631,
+       -14.001552017703752,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       0.3876375693601487,
+       1.276239778804998,
+       13.171054214828182,
+       -1.7976931348623157e+308
+      ],
+      [
+       -1.4191335526760802,
+       -2.263606529040975,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       1.254604278437416,
+       6.0074406382948675,
+       13.171054214828184,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.4916933305123871,
+       1.9222747967411546,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       3.29027076080461,
+       14.52806921955845,
+       13.17105421482818,
+       -1.7976931348623157e+308
+      ],
+      [
+       4.720160982318834,
+       9.851036932020756,
+       41.887429915696096,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       5.406915045357211,
+       20.545092003491384,
+       13.17105421482818,
+       -1.7976931348623157e+308
+      ],
+      [
+       9.40594675276882,
+       15.760752486708878,
+       41.887429915696096,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       4.488184262333751,
+       21.100601690438392,
+       13.171054214828178,
+       -1.7976931348623157e+308
+      ],
+      [
+       10.10701855551644,
+       17.429035993182556,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       4.404800473510645,
+       21.121034044810564,
+       13.171054214828178,
+       -1.7976931348623157e+308
+      ],
+      [
+       10.143547529497145,
+       17.54027679839803,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "name": "surface_elevate_uv_call_err",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "srf_elevate",
+    "r": 1,
+    "t": 1,
+    "dir": 3,
+    "f": 0,
+    "l": 2,
+    "roc": 0,
+    "pre": true,
+    "net": [
+     [
+      [
+       4.404800473510645,
+       21.121034044810564,
+       13.171054214828178,
+       -1.7976931348623157e+308
+      ],
+      [
+       10.143547529497145,
+       17.54027679839803,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       4.129974312307959,
+       21.188377416893946,
+       13.171054214828178,
+       -1.7976931348623157e+308
+      ],
+      [
+       10.263944045816247,
+       17.90691741161508,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       2.0767458138477703,
+       20.352780227487123,
+       13.171054214828178,
+       -1.7976931348623157e+308
+      ],
+      [
+       9.953528998281277,
+       18.852585095795916,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       -3.531782675190398,
+       13.374964998558283,
+       13.17105421482818,
+       -1.7976931348623157e+308
+      ],
+      [
+       3.466273107314373,
+       15.038484422392564,
+       41.887429915696096,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       -8.809843000515015,
+       -6.00881443027442,
+       13.171054214828182,
+       -1.7976931348623157e+308
+      ],
+      [
+       -9.34691511350223,
+       0.1690179795994979,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       1.4559123718321356,
+       -23.15026325567756,
+       13.171054214828184,
+       -1.7976931348623157e+308
+      ],
+      [
+       -5.651648245503523,
+       -19.479310281453923,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       1.5163145483383191,
+       -21.54612307382674,
+       13.171054214828184,
+       -1.7976931348623157e+308
+      ],
+      [
+       -4.942402841455774,
+       -21.7957238180442,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       -1.4492107204096258,
+       -12.662175787436311,
+       13.171054214828182,
+       -1.7976931348623157e+308
+      ],
+      [
+       -5.84790149108631,
+       -14.001552017703752,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       0.3876375693601487,
+       1.276239778804998,
+       13.171054214828182,
+       -1.7976931348623157e+308
+      ],
+      [
+       -1.4191335526760802,
+       -2.263606529040975,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       1.254604278437416,
+       6.0074406382948675,
+       13.171054214828184,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.4916933305123871,
+       1.9222747967411546,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       3.29027076080461,
+       14.52806921955845,
+       13.17105421482818,
+       -1.7976931348623157e+308
+      ],
+      [
+       4.720160982318834,
+       9.851036932020756,
+       41.887429915696096,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       5.406915045357211,
+       20.545092003491384,
+       13.17105421482818,
+       -1.7976931348623157e+308
+      ],
+      [
+       9.40594675276882,
+       15.760752486708878,
+       41.887429915696096,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       4.488184262333751,
+       21.100601690438392,
+       13.171054214828178,
+       -1.7976931348623157e+308
+      ],
+      [
+       10.10701855551644,
+       17.429035993182556,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ],
+     [
+      [
+       4.404800473510645,
+       21.121034044810564,
+       13.171054214828178,
+       -1.7976931348623157e+308
+      ],
+      [
+       10.143547529497145,
+       17.54027679839803,
+       41.88742991569609,
+       -1.7976931348623157e+308
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "name": "elev_matrix_0_0",
+   "upstream_ref": "edge",
+   "inputs": {
+    "op": "elev_matrix",
+    "p": 0,
+    "t": 0
+   }
+  },
+  {
+   "name": "elev_matrix_0_17",
+   "upstream_ref": "edge",
+   "inputs": {
+    "op": "elev_matrix",
+    "p": 0,
+    "t": 17
+   }
+  },
+  {
+   "name": "elev_matrix_17_0",
+   "upstream_ref": "edge",
+   "inputs": {
+    "op": "elev_matrix",
+    "p": 17,
+    "t": 0
+   }
+  },
+  {
+   "name": "prod_matrix_0_0",
+   "upstream_ref": "edge",
+   "inputs": {
+    "op": "prod_matrix",
+    "p": 0,
+    "q": 0
+   }
+  },
+  {
+   "name": "prod_matrix_8_9",
+   "upstream_ref": "edge",
+   "inputs": {
+    "op": "prod_matrix",
+    "p": 8,
+    "q": 9
+   }
+  },
+  {
+   "name": "one_basis_end0",
+   "upstream_ref": "edge",
+   "inputs": {
+    "op": "one_basis",
+    "p": 4,
+    "i": 0,
+    "u": 0.0
+   }
+  },
+  {
+   "name": "one_basis_end1",
+   "upstream_ref": "edge",
+   "inputs": {
+    "op": "one_basis",
+    "p": 4,
+    "i": 4,
+    "u": 1.0
+   }
+  },
+  {
+   "name": "one_basis_p0",
+   "upstream_ref": "edge",
+   "inputs": {
+    "op": "one_basis",
+    "p": 0,
+    "i": 0,
+    "u": 0.5
+   }
+  },
+  {
+   "name": "one_basis_bad_index",
+   "upstream_ref": "edge",
+   "inputs": {
+    "op": "one_basis",
+    "p": 4,
+    "i": 5,
+    "u": 0.5
+   }
+  },
+  {
+   "name": "one_basis_bad_param",
+   "upstream_ref": "edge",
+   "inputs": {
+    "op": "one_basis",
+    "p": 4,
+    "i": 2,
+    "u": -1e-300
+   }
+  },
+  {
+   "name": "one_basis_nan",
+   "upstream_ref": "edge",
+   "inputs": {
+    "op": "one_basis",
+    "p": 4,
+    "i": 2,
+    "u": "NaN"
+   }
+  },
+  {
+   "name": "reduce_coefs_0",
+   "upstream_ref": "edge",
+   "inputs": {
+    "op": "reduce_coefs",
+    "p": 0
+   }
+  },
+  {
+   "name": "reduce_coefs_1",
+   "upstream_ref": "edge",
+   "inputs": {
+    "op": "reduce_coefs",
+    "p": 1
+   }
+  },
+  {
+   "name": "reduce_coefs_2",
+   "upstream_ref": "edge",
+   "inputs": {
+    "op": "reduce_coefs",
+    "p": 2
+   }
+  },
+  {
+   "name": "reduce_coefs_3",
+   "upstream_ref": "edge",
+   "inputs": {
+    "op": "reduce_coefs",
+    "p": 3
+   }
+  },
+  {
+   "name": "reduce_coefs_4",
+   "upstream_ref": "edge",
+   "inputs": {
+    "op": "reduce_coefs",
+    "p": 4
+   }
+  },
+  {
+   "name": "reduce_rational_quadratic",
+   "upstream_ref": "edge",
+   "inputs": {
+    "op": "reduce",
+    "p": 2,
+    "pw": [
+     [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0,
+      0.7071067811865476
+     ],
+     [
+      2.0,
+      0.0,
+      0.0,
+      1.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "split_rational_quadratic",
+   "upstream_ref": "edge",
+   "inputs": {
+    "op": "split",
+    "p": 2,
+    "u": 0.5,
+    "pw": [
+     [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0,
+      0.7071067811865476
+     ],
+     [
+      2.0,
+      0.0,
+      0.0,
+      1.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "length_rational_quadratic",
+   "upstream_ref": "edge",
+   "inputs": {
+    "op": "length",
+    "p": 2,
+    "tol": 1e-06,
+    "pw": [
+     [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0,
+      0.7071067811865476
+     ],
+     [
+      2.0,
+      0.0,
+      0.0,
+      1.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "extend_rational_quadratic",
+   "upstream_ref": "edge",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 2,
+    "whr": 2,
+    "rev": true,
+    "pw": [
+     [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0,
+      0.7071067811865476
+     ],
+     [
+      2.0,
+      0.0,
+      0.0,
+      1.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "split_2d",
+   "upstream_ref": "edge",
+   "inputs": {
+    "op": "split",
+    "p": 2,
+    "u": 0.75,
+    "pw": [
+     [
+      0.0,
+      0.0,
+      1.7976931348623157e+308,
+      -1.7976931348623157e+308
+     ],
+     [
+      1.0,
+      2.0,
+      1.7976931348623157e+308,
+      -1.7976931348623157e+308
+     ],
+     [
+      3.0,
+      1.0,
+      1.7976931348623157e+308,
+      -1.7976931348623157e+308
+     ]
+    ]
+   }
+  },
+  {
+   "name": "elevate_2d",
+   "upstream_ref": "edge",
+   "inputs": {
+    "op": "elevate",
+    "p": 2,
+    "t": 2,
+    "f": 0,
+    "l": 4,
+    "pre": false,
+    "pw": [
+     [
+      0.0,
+      0.0,
+      1.7976931348623157e+308,
+      -1.7976931348623157e+308
+     ],
+     [
+      1.0,
+      2.0,
+      1.7976931348623157e+308,
+      -1.7976931348623157e+308
+     ],
+     [
+      3.0,
+      1.0,
+      1.7976931348623157e+308,
+      -1.7976931348623157e+308
+     ]
+    ]
+   }
+  },
+  {
+   "name": "extend_2d_start",
+   "upstream_ref": "edge",
+   "inputs": {
+    "op": "crv_extend",
+    "p": 2,
+    "whr": 1,
+    "rev": true,
+    "pw": [
+     [
+      0.0,
+      0.0,
+      1.7976931348623157e+308,
+      -1.7976931348623157e+308
+     ],
+     [
+      1.0,
+      2.0,
+      1.7976931348623157e+308,
+      -1.7976931348623157e+308
+     ],
+     [
+      3.0,
+      1.0,
+      1.7976931348623157e+308,
+      -1.7976931348623157e+308
+     ]
+    ]
+   }
+  },
+  {
+   "name": "point_curve_length",
+   "upstream_ref": "edge",
+   "inputs": {
+    "op": "length",
+    "p": 3,
+    "tol": 0.0,
+    "pw": [
+     [
+      1.0,
+      2.0,
+      3.0
+     ],
+     [
+      1.0,
+      2.0,
+      3.0
+     ],
+     [
+      1.0,
+      2.0,
+      3.0
+     ],
+     [
+      1.0,
+      2.0,
+      3.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "curve_length_zero_tol",
+   "upstream_ref": "edge",
+   "inputs": {
+    "op": "length",
+    "p": 2,
+    "tol": 0.0,
+    "pw": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "func_func_s_gt_e",
+   "upstream_ref": "edge",
+   "inputs": {
+    "op": "func_func",
+    "p": 1,
+    "q": 1,
+    "s": 2,
+    "e": 1,
+    "pre": false,
+    "f": [
+     1.0,
+     2.0
+    ],
+    "g": [
+     3.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "name": "func_func_p0_q0",
+   "upstream_ref": "edge",
+   "inputs": {
+    "op": "func_func",
+    "p": 0,
+    "q": 0,
+    "s": 0,
+    "e": 0,
+    "pre": true,
+    "f": [
+     3.0
+    ],
+    "g": [
+     -2.0
+    ]
+   }
+  },
+  {
+   "name": "elevate_empty_range",
+   "upstream_ref": "edge",
+   "inputs": {
+    "op": "elevate",
+    "p": 2,
+    "t": 1,
+    "f": 3,
+    "l": 2,
+    "pre": false,
+    "pw": [
+     [
+      0.0,
+      0.0,
+      1.7976931348623157e+308,
+      -1.7976931348623157e+308
+     ],
+     [
+      1.0,
+      2.0,
+      1.7976931348623157e+308,
+      -1.7976931348623157e+308
+     ],
+     [
+      3.0,
+      1.0,
+      1.7976931348623157e+308,
+      -1.7976931348623157e+308
+     ]
+    ]
+   }
+  }
+ ]
+}

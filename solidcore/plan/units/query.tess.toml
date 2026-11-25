@@ -1,0 +1,12 @@
+id = "query.tess"
+upstream = ["source/SMLib/inc/SmTess.h", "source/SMLib/src/SmTess.cpp"]
+rust_module = "query::tess"
+depends_on = ["geom.attribute", "geom.extent2d", "geom.object", "geom.tol", "geom.vector2d", "geom.vector3d", "nurbs.b_spline_surface_p1", "query.poly", "surface.surface_cache_p1", "surface.surface_cache_p2", "surface.surface_cache_p3", "surface.trim_srf_cache"]
+soft_depends_on = ["geom.extent1d", "geom.tree", "surface.surface_p2", "surface.surface_p7", "topology.face_p2"]
+est_lines = 838
+layer = 45
+tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
+status = "green"
+claimed_by = ""
+claimed_at = ""
+notes = "GREEN, PR #563 on main b65597902: 676 native cases, 676 bit-identical passes, 0 failed, 0 deferred; all 665 main passes retained and 11 deferrals now pass. Verified by x86_64 CI 39928207576 and full ARM64 audit. Coverage: 28 upstream-derived fixtures, 48 adversarial fixtures and 600 generated cases (including bounded planes), scales 1e-3..1e3, tolerance/silhouette retests, subdivision, UV segment implantation, face containment, full poly-boundary tree builds and attribute copies. Historical perturbation detected 665/665. BuildTree makes the missing NURB before plane/revolution work. Green covers this corpus, not the previously excluded revolution/face-owned/curve-bounded/STEP face branches or FFI-rejected calls lacking required tree/driver/poly-B-rep state. SurfaceCache::SubdivideNode uses SnapToKnots/SplitAt with subdivision handles; ToleranceTester and find_uv_nodes_built hooks remain. SmPolyToEUVUAttr/SmPolyEdgeToVertexUseAttr are geom::attribute variants. Builds on query.poly (PR #73); 21 fns, largest BuildTree, MarkFaceContainment, ImplantUVSegment, BuildTreeWithSubdivision; unit-SCC #22 (220 units); only 8/838 lines survive original RTA, but 319 upstream test entry points reach this unit."

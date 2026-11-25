@@ -46,6 +46,17 @@ impl FeatureKind {
         found
     }
 
+    /// Bodies the feature works on (by name).
+    pub fn input_bodies(&self) -> Vec<String> {
+        let mut v = Vec::new();
+        self.walk_refs(&mut |r| {
+            if let Ref::Body(name) = r {
+                v.push(name.as_ref().to_string());
+            }
+        });
+        v
+    }
+
     /// Point references to sketches and features (both by id) at their copies, and references
     /// that are still keyed by name at a feature's new name (`timeline.rename`).
     pub fn remap_refs(&mut self, ids: &BTreeMap<u64, u64>, names: &BTreeMap<String, String>) {
@@ -93,6 +104,11 @@ impl crate::Document {
             if let FeatureKind::Sketch { sketch, .. } = &mut f.kind {
                 for link in &mut sketch.links {
                     crate::clipboard::remap_link(&mut link.source, &ids, &names, &bodies, 0);
+                }
+                for constraint in &mut sketch.wire_constraints {
+                    if let Some(solidcraft_sketch::PlaneOf::Model(plane)) = constraint.kind.plane_mut() {
+                        crate::clipboard::remap_link(&mut plane.source, &ids, &names, &bodies, 0);
+                    }
                 }
             }
         }

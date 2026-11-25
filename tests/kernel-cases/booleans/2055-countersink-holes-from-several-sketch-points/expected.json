@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2055"
+ ],
+ "what": "a countersunk hole at two sketch points at once, in a design with several bodies: 'there is no body to cut or intersect' (one point works)",
+ "source": "analytic",
+ "method": "plate 40x20x10 = 8000 and a separate 10x10x10 block (1000). Each hole: O5 cylinder through 10 mm (62.5 pi) plus the 90 deg countersink to O10 (depth 2.5, frustum pi*2.5/3*(25+12.5+6.25) = 36.458 pi, of which 15.625 pi lies in the cylinder): 83.333 pi. Two holes: 166.667 pi = 523.60; total V = 9000 - 523.60 = 8476.40. Two bodies",
+ "body_count": 2,
+ "volume_mm3": 8476.401224401701
+}

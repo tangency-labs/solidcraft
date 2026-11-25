@@ -1,0 +1,13 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3351",
+  "tangency-labs/solidcraft#3352"
+ ],
+ "what": "a 300 mm square surface whose corner vertex sits 0.19 mm off the end of its edge's curve (the file declares 0.01 mm accuracy): the face must be kept, the vertex snapped onto the curve",
+ "source": "analytic",
+ "method": "one planar face 300 x 300: A = 90000 (the 0.19 mm slip changes it by 0.03%, inside the 1e-3 tolerance); a sheet, not a closed solid, so valid is false; 1 face",
+ "valid": false,
+ "body_count": 1,
+ "area_mm2": 90000.0,
+ "faces": 1
+}

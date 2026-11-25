@@ -1,0 +1,9492 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     0,
+     0,
+     0
+    ],
+    "length": 45,
+    "width": 45,
+    "height": 45,
+    "body_name": "S000"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     15.0,
+     15.0
+    ],
+    "length": 47,
+    "width": 15,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S000"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     5.0,
+     5.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S000"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     5.0,
+     20.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S000"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     5.0,
+     35.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S000"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     20.0,
+     5.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S000"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     20.0,
+     35.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S000"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     35.0,
+     5.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S000"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     35.0,
+     20.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S000"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     35.0,
+     35.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S000"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     15.0,
+     -1,
+     15.0
+    ],
+    "length": 15,
+    "width": 47,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S000"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     -1,
+     5.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S000"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     -1,
+     20.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S000"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     -1,
+     35.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S000"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     20.0,
+     -1,
+     5.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S000"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     20.0,
+     -1,
+     35.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S000"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     -1,
+     5.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S000"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     -1,
+     20.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S000"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     -1,
+     35.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S000"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     15.0,
+     15.0,
+     -1
+    ],
+    "length": 15,
+    "width": 15,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S000"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     5.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S000"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     20.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S000"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     35.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S000"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     20.0,
+     5.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S000"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     20.0,
+     35.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S000"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     5.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S000"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     20.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S000"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     35.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S000"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     0,
+     0,
+     45
+    ],
+    "length": 45,
+    "width": 45,
+    "height": 45,
+    "body_name": "S001"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     15.0,
+     60.0
+    ],
+    "length": 47,
+    "width": 15,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S001"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     5.0,
+     50.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S001"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     5.0,
+     65.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S001"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     5.0,
+     80.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S001"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     20.0,
+     50.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S001"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     20.0,
+     80.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S001"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     35.0,
+     50.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S001"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     35.0,
+     65.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S001"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     35.0,
+     80.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S001"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     15.0,
+     -1,
+     60.0
+    ],
+    "length": 15,
+    "width": 47,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S001"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     -1,
+     50.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S001"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     -1,
+     65.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S001"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     -1,
+     80.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S001"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     20.0,
+     -1,
+     50.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S001"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     20.0,
+     -1,
+     80.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S001"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     -1,
+     50.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S001"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     -1,
+     65.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S001"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     -1,
+     80.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S001"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     15.0,
+     15.0,
+     44
+    ],
+    "length": 15,
+    "width": 15,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S001"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     5.0,
+     44
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S001"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     20.0,
+     44
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S001"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     35.0,
+     44
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S001"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     20.0,
+     5.0,
+     44
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S001"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     20.0,
+     35.0,
+     44
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S001"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     5.0,
+     44
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S001"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     20.0,
+     44
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S001"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     35.0,
+     44
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S001"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     0,
+     0,
+     90
+    ],
+    "length": 45,
+    "width": 45,
+    "height": 45,
+    "body_name": "S002"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     15.0,
+     105.0
+    ],
+    "length": 47,
+    "width": 15,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S002"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     5.0,
+     95.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S002"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     5.0,
+     110.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S002"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     5.0,
+     125.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S002"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     20.0,
+     95.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S002"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     20.0,
+     125.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S002"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     35.0,
+     95.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S002"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     35.0,
+     110.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S002"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     35.0,
+     125.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S002"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     15.0,
+     -1,
+     105.0
+    ],
+    "length": 15,
+    "width": 47,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S002"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     -1,
+     95.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S002"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     -1,
+     110.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S002"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     -1,
+     125.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S002"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     20.0,
+     -1,
+     95.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S002"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     20.0,
+     -1,
+     125.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S002"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     -1,
+     95.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S002"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     -1,
+     110.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S002"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     -1,
+     125.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S002"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     15.0,
+     15.0,
+     89
+    ],
+    "length": 15,
+    "width": 15,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S002"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     5.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S002"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     20.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S002"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     35.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S002"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     20.0,
+     5.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S002"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     20.0,
+     35.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S002"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     5.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S002"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     20.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S002"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     35.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S002"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     0,
+     45,
+     0
+    ],
+    "length": 45,
+    "width": 45,
+    "height": 45,
+    "body_name": "S010"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     60.0,
+     15.0
+    ],
+    "length": 47,
+    "width": 15,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S010"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     50.0,
+     5.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S010"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     50.0,
+     20.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S010"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     50.0,
+     35.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S010"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     65.0,
+     5.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S010"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     65.0,
+     35.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S010"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     80.0,
+     5.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S010"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     80.0,
+     20.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S010"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     80.0,
+     35.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S010"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     15.0,
+     44,
+     15.0
+    ],
+    "length": 15,
+    "width": 47,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S010"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     44,
+     5.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S010"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     44,
+     20.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S010"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     44,
+     35.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S010"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     20.0,
+     44,
+     5.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S010"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     20.0,
+     44,
+     35.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S010"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     44,
+     5.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S010"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     44,
+     20.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S010"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     44,
+     35.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S010"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     15.0,
+     60.0,
+     -1
+    ],
+    "length": 15,
+    "width": 15,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S010"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     50.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S010"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     65.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S010"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     80.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S010"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     20.0,
+     50.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S010"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     20.0,
+     80.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S010"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     50.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S010"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     65.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S010"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     80.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S010"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     0,
+     45,
+     90
+    ],
+    "length": 45,
+    "width": 45,
+    "height": 45,
+    "body_name": "S012"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     60.0,
+     105.0
+    ],
+    "length": 47,
+    "width": 15,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S012"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     50.0,
+     95.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S012"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     50.0,
+     110.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S012"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     50.0,
+     125.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S012"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     65.0,
+     95.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S012"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     65.0,
+     125.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S012"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     80.0,
+     95.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S012"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     80.0,
+     110.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S012"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     80.0,
+     125.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S012"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     15.0,
+     44,
+     105.0
+    ],
+    "length": 15,
+    "width": 47,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S012"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     44,
+     95.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S012"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     44,
+     110.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S012"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     44,
+     125.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S012"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     20.0,
+     44,
+     95.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S012"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     20.0,
+     44,
+     125.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S012"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     44,
+     95.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S012"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     44,
+     110.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S012"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     44,
+     125.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S012"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     15.0,
+     60.0,
+     89
+    ],
+    "length": 15,
+    "width": 15,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S012"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     50.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S012"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     65.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S012"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     80.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S012"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     20.0,
+     50.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S012"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     20.0,
+     80.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S012"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     50.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S012"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     65.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S012"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     80.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S012"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     0,
+     90,
+     0
+    ],
+    "length": 45,
+    "width": 45,
+    "height": 45,
+    "body_name": "S020"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     105.0,
+     15.0
+    ],
+    "length": 47,
+    "width": 15,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S020"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     95.0,
+     5.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S020"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     95.0,
+     20.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S020"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     95.0,
+     35.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S020"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     110.0,
+     5.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S020"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     110.0,
+     35.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S020"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     125.0,
+     5.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S020"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     125.0,
+     20.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S020"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     125.0,
+     35.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S020"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     15.0,
+     89,
+     15.0
+    ],
+    "length": 15,
+    "width": 47,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S020"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     89,
+     5.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S020"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     89,
+     20.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S020"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     89,
+     35.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S020"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     20.0,
+     89,
+     5.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S020"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     20.0,
+     89,
+     35.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S020"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     89,
+     5.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S020"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     89,
+     20.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S020"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     89,
+     35.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S020"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     15.0,
+     105.0,
+     -1
+    ],
+    "length": 15,
+    "width": 15,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S020"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     95.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S020"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     110.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S020"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     125.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S020"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     20.0,
+     95.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S020"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     20.0,
+     125.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S020"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     95.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S020"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     110.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S020"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     125.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S020"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     0,
+     90,
+     45
+    ],
+    "length": 45,
+    "width": 45,
+    "height": 45,
+    "body_name": "S021"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     105.0,
+     60.0
+    ],
+    "length": 47,
+    "width": 15,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S021"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     95.0,
+     50.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S021"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     95.0,
+     65.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S021"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     95.0,
+     80.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S021"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     110.0,
+     50.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S021"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     110.0,
+     80.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S021"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     125.0,
+     50.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S021"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     125.0,
+     65.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S021"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     125.0,
+     80.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S021"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     15.0,
+     89,
+     60.0
+    ],
+    "length": 15,
+    "width": 47,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S021"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     89,
+     50.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S021"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     89,
+     65.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S021"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     89,
+     80.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S021"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     20.0,
+     89,
+     50.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S021"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     20.0,
+     89,
+     80.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S021"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     89,
+     50.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S021"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     89,
+     65.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S021"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     89,
+     80.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S021"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     15.0,
+     105.0,
+     44
+    ],
+    "length": 15,
+    "width": 15,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S021"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     95.0,
+     44
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S021"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     110.0,
+     44
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S021"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     125.0,
+     44
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S021"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     20.0,
+     95.0,
+     44
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S021"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     20.0,
+     125.0,
+     44
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S021"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     95.0,
+     44
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S021"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     110.0,
+     44
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S021"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     125.0,
+     44
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S021"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     0,
+     90,
+     90
+    ],
+    "length": 45,
+    "width": 45,
+    "height": 45,
+    "body_name": "S022"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     105.0,
+     105.0
+    ],
+    "length": 47,
+    "width": 15,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S022"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     95.0,
+     95.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S022"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     95.0,
+     110.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S022"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     95.0,
+     125.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S022"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     110.0,
+     95.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S022"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     110.0,
+     125.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S022"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     125.0,
+     95.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S022"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     125.0,
+     110.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S022"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -1,
+     125.0,
+     125.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S022"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     15.0,
+     89,
+     105.0
+    ],
+    "length": 15,
+    "width": 47,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S022"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     89,
+     95.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S022"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     89,
+     110.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S022"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     89,
+     125.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S022"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     20.0,
+     89,
+     95.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S022"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     20.0,
+     89,
+     125.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S022"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     89,
+     95.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S022"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     89,
+     110.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S022"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     89,
+     125.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S022"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     15.0,
+     105.0,
+     89
+    ],
+    "length": 15,
+    "width": 15,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S022"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     95.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S022"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     110.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S022"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     5.0,
+     125.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S022"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     20.0,
+     95.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S022"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     20.0,
+     125.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S022"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     95.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S022"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     110.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S022"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     35.0,
+     125.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S022"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     45,
+     0,
+     0
+    ],
+    "length": 45,
+    "width": 45,
+    "height": 45,
+    "body_name": "S100"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     44,
+     15.0,
+     15.0
+    ],
+    "length": 47,
+    "width": 15,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S100"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     44,
+     5.0,
+     5.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S100"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     44,
+     5.0,
+     20.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S100"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     44,
+     5.0,
+     35.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S100"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     44,
+     20.0,
+     5.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S100"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     44,
+     20.0,
+     35.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S100"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     44,
+     35.0,
+     5.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S100"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     44,
+     35.0,
+     20.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S100"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     44,
+     35.0,
+     35.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S100"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     60.0,
+     -1,
+     15.0
+    ],
+    "length": 15,
+    "width": 47,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S100"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     50.0,
+     -1,
+     5.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S100"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     50.0,
+     -1,
+     20.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S100"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     50.0,
+     -1,
+     35.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S100"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     65.0,
+     -1,
+     5.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S100"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     65.0,
+     -1,
+     35.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S100"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     80.0,
+     -1,
+     5.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S100"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     80.0,
+     -1,
+     20.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S100"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     80.0,
+     -1,
+     35.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S100"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     60.0,
+     15.0,
+     -1
+    ],
+    "length": 15,
+    "width": 15,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S100"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     50.0,
+     5.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S100"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     50.0,
+     20.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S100"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     50.0,
+     35.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S100"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     65.0,
+     5.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S100"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     65.0,
+     35.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S100"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     80.0,
+     5.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S100"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     80.0,
+     20.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S100"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     80.0,
+     35.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S100"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     45,
+     0,
+     90
+    ],
+    "length": 45,
+    "width": 45,
+    "height": 45,
+    "body_name": "S102"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     44,
+     15.0,
+     105.0
+    ],
+    "length": 47,
+    "width": 15,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S102"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     44,
+     5.0,
+     95.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S102"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     44,
+     5.0,
+     110.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S102"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     44,
+     5.0,
+     125.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S102"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     44,
+     20.0,
+     95.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S102"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     44,
+     20.0,
+     125.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S102"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     44,
+     35.0,
+     95.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S102"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     44,
+     35.0,
+     110.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S102"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     44,
+     35.0,
+     125.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S102"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     60.0,
+     -1,
+     105.0
+    ],
+    "length": 15,
+    "width": 47,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S102"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     50.0,
+     -1,
+     95.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S102"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     50.0,
+     -1,
+     110.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S102"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     50.0,
+     -1,
+     125.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S102"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     65.0,
+     -1,
+     95.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S102"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     65.0,
+     -1,
+     125.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S102"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     80.0,
+     -1,
+     95.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S102"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     80.0,
+     -1,
+     110.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S102"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     80.0,
+     -1,
+     125.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S102"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     60.0,
+     15.0,
+     89
+    ],
+    "length": 15,
+    "width": 15,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S102"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     50.0,
+     5.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S102"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     50.0,
+     20.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S102"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     50.0,
+     35.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S102"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     65.0,
+     5.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S102"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     65.0,
+     35.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S102"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     80.0,
+     5.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S102"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     80.0,
+     20.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S102"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     80.0,
+     35.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S102"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     45,
+     90,
+     0
+    ],
+    "length": 45,
+    "width": 45,
+    "height": 45,
+    "body_name": "S120"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     44,
+     105.0,
+     15.0
+    ],
+    "length": 47,
+    "width": 15,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S120"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     44,
+     95.0,
+     5.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S120"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     44,
+     95.0,
+     20.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S120"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     44,
+     95.0,
+     35.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S120"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     44,
+     110.0,
+     5.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S120"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     44,
+     110.0,
+     35.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S120"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     44,
+     125.0,
+     5.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S120"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     44,
+     125.0,
+     20.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S120"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     44,
+     125.0,
+     35.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S120"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     60.0,
+     89,
+     15.0
+    ],
+    "length": 15,
+    "width": 47,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S120"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     50.0,
+     89,
+     5.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S120"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     50.0,
+     89,
+     20.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S120"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     50.0,
+     89,
+     35.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S120"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     65.0,
+     89,
+     5.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S120"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     65.0,
+     89,
+     35.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S120"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     80.0,
+     89,
+     5.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S120"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     80.0,
+     89,
+     20.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S120"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     80.0,
+     89,
+     35.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S120"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     60.0,
+     105.0,
+     -1
+    ],
+    "length": 15,
+    "width": 15,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S120"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     50.0,
+     95.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S120"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     50.0,
+     110.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S120"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     50.0,
+     125.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S120"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     65.0,
+     95.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S120"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     65.0,
+     125.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S120"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     80.0,
+     95.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S120"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     80.0,
+     110.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S120"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     80.0,
+     125.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S120"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     45,
+     90,
+     90
+    ],
+    "length": 45,
+    "width": 45,
+    "height": 45,
+    "body_name": "S122"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     44,
+     105.0,
+     105.0
+    ],
+    "length": 47,
+    "width": 15,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S122"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     44,
+     95.0,
+     95.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S122"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     44,
+     95.0,
+     110.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S122"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     44,
+     95.0,
+     125.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S122"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     44,
+     110.0,
+     95.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S122"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     44,
+     110.0,
+     125.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S122"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     44,
+     125.0,
+     95.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S122"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     44,
+     125.0,
+     110.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S122"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     44,
+     125.0,
+     125.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S122"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     60.0,
+     89,
+     105.0
+    ],
+    "length": 15,
+    "width": 47,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S122"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     50.0,
+     89,
+     95.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S122"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     50.0,
+     89,
+     110.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S122"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     50.0,
+     89,
+     125.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S122"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     65.0,
+     89,
+     95.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S122"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     65.0,
+     89,
+     125.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S122"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     80.0,
+     89,
+     95.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S122"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     80.0,
+     89,
+     110.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S122"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     80.0,
+     89,
+     125.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S122"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     60.0,
+     105.0,
+     89
+    ],
+    "length": 15,
+    "width": 15,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S122"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     50.0,
+     95.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S122"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     50.0,
+     110.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S122"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     50.0,
+     125.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S122"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     65.0,
+     95.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S122"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     65.0,
+     125.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S122"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     80.0,
+     95.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S122"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     80.0,
+     110.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S122"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     80.0,
+     125.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S122"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     90,
+     0,
+     0
+    ],
+    "length": 45,
+    "width": 45,
+    "height": 45,
+    "body_name": "S200"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     15.0,
+     15.0
+    ],
+    "length": 47,
+    "width": 15,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S200"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     5.0,
+     5.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S200"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     5.0,
+     20.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S200"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     5.0,
+     35.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S200"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     20.0,
+     5.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S200"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     20.0,
+     35.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S200"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     35.0,
+     5.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S200"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     35.0,
+     20.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S200"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     35.0,
+     35.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S200"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     105.0,
+     -1,
+     15.0
+    ],
+    "length": 15,
+    "width": 47,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S200"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     -1,
+     5.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S200"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     -1,
+     20.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S200"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     -1,
+     35.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S200"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     110.0,
+     -1,
+     5.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S200"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     110.0,
+     -1,
+     35.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S200"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     -1,
+     5.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S200"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     -1,
+     20.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S200"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     -1,
+     35.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S200"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     105.0,
+     15.0,
+     -1
+    ],
+    "length": 15,
+    "width": 15,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S200"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     5.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S200"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     20.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S200"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     35.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S200"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     110.0,
+     5.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S200"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     110.0,
+     35.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S200"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     5.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S200"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     20.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S200"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     35.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S200"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     90,
+     0,
+     45
+    ],
+    "length": 45,
+    "width": 45,
+    "height": 45,
+    "body_name": "S201"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     15.0,
+     60.0
+    ],
+    "length": 47,
+    "width": 15,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S201"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     5.0,
+     50.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S201"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     5.0,
+     65.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S201"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     5.0,
+     80.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S201"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     20.0,
+     50.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S201"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     20.0,
+     80.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S201"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     35.0,
+     50.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S201"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     35.0,
+     65.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S201"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     35.0,
+     80.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S201"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     105.0,
+     -1,
+     60.0
+    ],
+    "length": 15,
+    "width": 47,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S201"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     -1,
+     50.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S201"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     -1,
+     65.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S201"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     -1,
+     80.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S201"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     110.0,
+     -1,
+     50.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S201"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     110.0,
+     -1,
+     80.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S201"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     -1,
+     50.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S201"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     -1,
+     65.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S201"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     -1,
+     80.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S201"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     105.0,
+     15.0,
+     44
+    ],
+    "length": 15,
+    "width": 15,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S201"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     5.0,
+     44
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S201"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     20.0,
+     44
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S201"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     35.0,
+     44
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S201"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     110.0,
+     5.0,
+     44
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S201"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     110.0,
+     35.0,
+     44
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S201"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     5.0,
+     44
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S201"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     20.0,
+     44
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S201"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     35.0,
+     44
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S201"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     90,
+     0,
+     90
+    ],
+    "length": 45,
+    "width": 45,
+    "height": 45,
+    "body_name": "S202"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     15.0,
+     105.0
+    ],
+    "length": 47,
+    "width": 15,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S202"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     5.0,
+     95.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S202"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     5.0,
+     110.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S202"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     5.0,
+     125.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S202"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     20.0,
+     95.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S202"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     20.0,
+     125.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S202"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     35.0,
+     95.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S202"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     35.0,
+     110.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S202"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     35.0,
+     125.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S202"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     105.0,
+     -1,
+     105.0
+    ],
+    "length": 15,
+    "width": 47,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S202"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     -1,
+     95.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S202"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     -1,
+     110.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S202"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     -1,
+     125.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S202"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     110.0,
+     -1,
+     95.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S202"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     110.0,
+     -1,
+     125.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S202"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     -1,
+     95.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S202"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     -1,
+     110.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S202"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     -1,
+     125.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S202"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     105.0,
+     15.0,
+     89
+    ],
+    "length": 15,
+    "width": 15,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S202"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     5.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S202"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     20.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S202"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     35.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S202"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     110.0,
+     5.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S202"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     110.0,
+     35.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S202"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     5.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S202"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     20.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S202"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     35.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S202"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     90,
+     45,
+     0
+    ],
+    "length": 45,
+    "width": 45,
+    "height": 45,
+    "body_name": "S210"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     60.0,
+     15.0
+    ],
+    "length": 47,
+    "width": 15,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S210"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     50.0,
+     5.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S210"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     50.0,
+     20.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S210"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     50.0,
+     35.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S210"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     65.0,
+     5.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S210"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     65.0,
+     35.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S210"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     80.0,
+     5.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S210"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     80.0,
+     20.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S210"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     80.0,
+     35.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S210"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     105.0,
+     44,
+     15.0
+    ],
+    "length": 15,
+    "width": 47,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S210"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     44,
+     5.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S210"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     44,
+     20.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S210"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     44,
+     35.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S210"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     110.0,
+     44,
+     5.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S210"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     110.0,
+     44,
+     35.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S210"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     44,
+     5.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S210"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     44,
+     20.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S210"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     44,
+     35.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S210"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     105.0,
+     60.0,
+     -1
+    ],
+    "length": 15,
+    "width": 15,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S210"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     50.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S210"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     65.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S210"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     80.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S210"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     110.0,
+     50.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S210"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     110.0,
+     80.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S210"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     50.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S210"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     65.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S210"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     80.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S210"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     90,
+     45,
+     90
+    ],
+    "length": 45,
+    "width": 45,
+    "height": 45,
+    "body_name": "S212"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     60.0,
+     105.0
+    ],
+    "length": 47,
+    "width": 15,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S212"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     50.0,
+     95.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S212"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     50.0,
+     110.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S212"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     50.0,
+     125.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S212"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     65.0,
+     95.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S212"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     65.0,
+     125.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S212"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     80.0,
+     95.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S212"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     80.0,
+     110.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S212"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     80.0,
+     125.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S212"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     105.0,
+     44,
+     105.0
+    ],
+    "length": 15,
+    "width": 47,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S212"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     44,
+     95.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S212"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     44,
+     110.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S212"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     44,
+     125.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S212"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     110.0,
+     44,
+     95.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S212"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     110.0,
+     44,
+     125.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S212"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     44,
+     95.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S212"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     44,
+     110.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S212"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     44,
+     125.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S212"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     105.0,
+     60.0,
+     89
+    ],
+    "length": 15,
+    "width": 15,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S212"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     50.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S212"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     65.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S212"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     80.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S212"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     110.0,
+     50.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S212"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     110.0,
+     80.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S212"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     50.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S212"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     65.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S212"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     80.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S212"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     90,
+     90,
+     0
+    ],
+    "length": 45,
+    "width": 45,
+    "height": 45,
+    "body_name": "S220"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     105.0,
+     15.0
+    ],
+    "length": 47,
+    "width": 15,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S220"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     95.0,
+     5.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S220"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     95.0,
+     20.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S220"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     95.0,
+     35.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S220"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     110.0,
+     5.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S220"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     110.0,
+     35.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S220"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     125.0,
+     5.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S220"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     125.0,
+     20.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S220"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     125.0,
+     35.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S220"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     105.0,
+     89,
+     15.0
+    ],
+    "length": 15,
+    "width": 47,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S220"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     89,
+     5.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S220"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     89,
+     20.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S220"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     89,
+     35.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S220"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     110.0,
+     89,
+     5.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S220"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     110.0,
+     89,
+     35.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S220"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     89,
+     5.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S220"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     89,
+     20.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S220"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     89,
+     35.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S220"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     105.0,
+     105.0,
+     -1
+    ],
+    "length": 15,
+    "width": 15,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S220"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     95.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S220"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     110.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S220"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     125.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S220"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     110.0,
+     95.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S220"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     110.0,
+     125.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S220"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     95.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S220"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     110.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S220"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     125.0,
+     -1
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S220"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     90,
+     90,
+     45
+    ],
+    "length": 45,
+    "width": 45,
+    "height": 45,
+    "body_name": "S221"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     105.0,
+     60.0
+    ],
+    "length": 47,
+    "width": 15,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S221"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     95.0,
+     50.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S221"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     95.0,
+     65.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S221"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     95.0,
+     80.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S221"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     110.0,
+     50.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S221"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     110.0,
+     80.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S221"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     125.0,
+     50.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S221"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     125.0,
+     65.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S221"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     125.0,
+     80.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S221"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     105.0,
+     89,
+     60.0
+    ],
+    "length": 15,
+    "width": 47,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S221"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     89,
+     50.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S221"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     89,
+     65.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S221"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     89,
+     80.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S221"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     110.0,
+     89,
+     50.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S221"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     110.0,
+     89,
+     80.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S221"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     89,
+     50.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S221"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     89,
+     65.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S221"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     89,
+     80.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S221"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     105.0,
+     105.0,
+     44
+    ],
+    "length": 15,
+    "width": 15,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S221"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     95.0,
+     44
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S221"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     110.0,
+     44
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S221"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     125.0,
+     44
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S221"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     110.0,
+     95.0,
+     44
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S221"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     110.0,
+     125.0,
+     44
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S221"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     95.0,
+     44
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S221"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     110.0,
+     44
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S221"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     125.0,
+     44
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S221"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     90,
+     90,
+     90
+    ],
+    "length": 45,
+    "width": 45,
+    "height": 45,
+    "body_name": "S222"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     105.0,
+     105.0
+    ],
+    "length": 47,
+    "width": 15,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S222"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     95.0,
+     95.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S222"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     95.0,
+     110.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S222"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     95.0,
+     125.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S222"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     110.0,
+     95.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S222"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     110.0,
+     125.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S222"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     125.0,
+     95.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S222"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     125.0,
+     110.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S222"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     89,
+     125.0,
+     125.0
+    ],
+    "length": 47,
+    "width": 5,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S222"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     105.0,
+     89,
+     105.0
+    ],
+    "length": 15,
+    "width": 47,
+    "height": 15,
+    "operation": "cut",
+    "targets": [
+     "S222"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     89,
+     95.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S222"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     89,
+     110.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S222"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     89,
+     125.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S222"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     110.0,
+     89,
+     95.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S222"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     110.0,
+     89,
+     125.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S222"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     89,
+     95.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S222"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     89,
+     110.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S222"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     89,
+     125.0
+    ],
+    "length": 5,
+    "width": 47,
+    "height": 5,
+    "operation": "cut",
+    "targets": [
+     "S222"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     105.0,
+     105.0,
+     89
+    ],
+    "length": 15,
+    "width": 15,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S222"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     95.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S222"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     110.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S222"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     95.0,
+     125.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S222"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     110.0,
+     95.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S222"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     110.0,
+     125.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S222"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     95.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S222"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     110.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S222"
+    ]
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     125.0,
+     125.0,
+     89
+    ],
+    "length": 5,
+    "width": 5,
+    "height": 47,
+    "operation": "cut",
+    "targets": [
+     "S222"
+    ]
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "S000",
+    "tools": [
+     "S100",
+     "S200",
+     "S210",
+     "S220",
+     "S120",
+     "S020",
+     "S010",
+     "S001",
+     "S002",
+     "S012",
+     "S021",
+     "S022",
+     "S102",
+     "S122",
+     "S201",
+     "S202",
+     "S212",
+     "S221",
+     "S222"
+    ],
+    "operation": "join"
+   }
+  }
+ ]
+}

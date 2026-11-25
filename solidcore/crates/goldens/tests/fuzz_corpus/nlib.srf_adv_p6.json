@@ -1,0 +1,8 @@
+{
+  "unit": "nlib.srf_adv_p6",
+  "cases": [
+    {"name": "fuzz00422_ffi_rejected_bad_index_count_flag", "origin": "fuzz-out/n2000/nlib.srf_adv_p6/fuzz00422.json (crash: rust: killed by signal 6 (memory allocation of 51539607576 bytes failed))", "cpp": "harness: ffi rejected: bad index/count/flag 2147483648", "rust": "ok", "inputs": {"deg": 1, "dir": 1, "e": 0.263, "op": "sweep", "sect": {"cpts": [[0.0929, 0.0549, -0.17, -1.7976931348623157e+308], [0.0, 0.885, -0.215, -1.7976931348623157e+308]], "p": 2147483648, "u": [1.29]}, "traj": {"cpts": [[0.0, 0.0, 0.0, -1.7976931348623157e+308], [5.28, 2.41, 2.13, -1.7976931348623157e+308]], "p": 1, "u": [-2.09, -2.09, 3.31, 3.31]}, "z0": [0.0, 0.0, 1.0]}},
+    {"name": "fuzz01582_ffi_rejected_sweeping_tolerance_too_small", "origin": "fuzz-out/n2000/nlib.srf_adv_p6/fuzz01582.json (timeout: cpp: no result after 20 s)", "issue": "HANG-5", "cpp": "harness: ffi rejected: sweeping tolerance too small for the trajectory", "rust": "ok", "inputs": {"deg": 3, "dir": 1, "e": 1e-300, "op": "sweep", "sect": {"circle": 1.0, "plane": "yz"}, "traj": {"deg": 3, "pts": [[0, 0, 0], [5, 5, 0], [-9223372036854775808, 0, 0], [15, 5, 0]]}, "z0": [0, 0, 1]}},
+    {"name": "fuzz01966_ffi_rejected_invalid_knot_vector", "origin": "fuzz-out/n2000/nlib.srf_adv_p6/fuzz01966.json (panic: rust: capacity overflow)", "cpp": "harness: ffi rejected: invalid knot vector", "rust": "ok", "inputs": {"deg": 3, "dir": 1, "e": 0.139, "op": "sweep", "sect": {"cpts": [[0.0, 1.15, 0.304, -1.7976931348623157e+308]], "p": 9223372036854775807, "u": [1.0]}, "traj": {"cpts": [[4.63, 0.84, -0.426, 1.0], [5.96, 0.39, 0.797, 1.0], [7.27, -0.787, 0.115, 1.0], [8.77, -0.849, 0.125, 1.0]], "p": 3, "u": [2.87]}, "z0": [0.0, 0.0, 1.0]}}
+  ]
+}

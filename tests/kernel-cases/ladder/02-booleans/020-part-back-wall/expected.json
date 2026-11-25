@@ -1,0 +1,21 @@
+{
+ "sources": [],
+ "what": "the running part: a 60x10x15 back wall joined on the stock's top, flush with its back and ends",
+ "source": "analytic",
+ "method": "an L section (6 sides) extruded along X: 8 faces; the coplanar back and end faces merge",
+ "body_count": 1,
+ "volume_mm3": 57000,
+ "faces": 8,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   40,
+   35
+  ]
+ }
+}

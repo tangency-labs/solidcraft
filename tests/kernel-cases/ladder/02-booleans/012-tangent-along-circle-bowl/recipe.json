@@ -1,0 +1,36 @@
+{
+ "base": "../../01-primitives/001-box",
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     30,
+     20,
+     10
+    ],
+    "radius": 10,
+    "height": 11,
+    "operation": "cut",
+    "targets": [
+     "Part"
+    ]
+   }
+  },
+  {
+   "command": "solid.sphere",
+   "params": {
+    "radius": 10,
+    "center": [
+     30,
+     20,
+     10
+    ],
+    "operation": "cut",
+    "targets": [
+     "Part"
+    ]
+   }
+  }
+ ]
+}

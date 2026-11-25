@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "parameters.change that makes two parameters depend on each other",
+ "source": "invariants",
+ "method": "A = B - 5 with B = A + 5 has no value: refused",
+ "outcome": "refused",
+ "refusal": "circular reference"
+}

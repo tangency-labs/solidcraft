@@ -1,0 +1,952 @@
+{
+ "cases": [
+  {
+   "name": "raw_vote_vertex_gap1.5e-12_trim0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:25110-25283 (ProjectAndTrim whole-face vertex classification after empty projection subset)",
+   "inputs": {
+    "file": "fixture:raw_vote_rectangle.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "projection_curve": {
+     "dim": 3,
+     "p": 1,
+     "cpts": [
+      [
+       -2,
+       0,
+       0,
+       1
+      ],
+      [
+       -1,
+       0,
+       0,
+       1
+      ],
+      [
+       1,
+       1,
+       0,
+       1
+      ],
+      [
+       2,
+       1,
+       0,
+       1
+      ]
+     ],
+     "u": [
+      0,
+      0,
+      1,
+      1.0000000000015,
+      2,
+      2
+     ]
+    },
+    "empty_projection_subset": true,
+    "op": {
+     "project": {
+      "trim": 0,
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       0
+      ],
+      "dir": [
+       0,
+       0,
+       1
+      ],
+      "reference": [
+       -1.5,
+       -1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "raw_vote_vertex_gap1.5e-12_trim1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:25110-25283 (ProjectAndTrim whole-face vertex classification after empty projection subset)",
+   "inputs": {
+    "file": "fixture:raw_vote_rectangle.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "projection_curve": {
+     "dim": 3,
+     "p": 1,
+     "cpts": [
+      [
+       -2,
+       0,
+       0,
+       1
+      ],
+      [
+       -1,
+       0,
+       0,
+       1
+      ],
+      [
+       1,
+       1,
+       0,
+       1
+      ],
+      [
+       2,
+       1,
+       0,
+       1
+      ]
+     ],
+     "u": [
+      0,
+      0,
+      1,
+      1.0000000000015,
+      2,
+      2
+     ]
+    },
+    "empty_projection_subset": true,
+    "op": {
+     "project": {
+      "trim": 1,
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       0
+      ],
+      "dir": [
+       0,
+       0,
+       1
+      ],
+      "reference": [
+       -1.5,
+       -1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "raw_vote_vertex_gap1.9e-12_trim0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:25110-25283 (ProjectAndTrim whole-face vertex classification after empty projection subset)",
+   "inputs": {
+    "file": "fixture:raw_vote_rectangle.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "projection_curve": {
+     "dim": 3,
+     "p": 1,
+     "cpts": [
+      [
+       -2,
+       0,
+       0,
+       1
+      ],
+      [
+       -1,
+       0,
+       0,
+       1
+      ],
+      [
+       1,
+       1,
+       0,
+       1
+      ],
+      [
+       2,
+       1,
+       0,
+       1
+      ]
+     ],
+     "u": [
+      0,
+      0,
+      1,
+      1.0000000000019,
+      2,
+      2
+     ]
+    },
+    "empty_projection_subset": true,
+    "op": {
+     "project": {
+      "trim": 0,
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       0
+      ],
+      "dir": [
+       0,
+       0,
+       1
+      ],
+      "reference": [
+       -1.5,
+       -1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "raw_vote_vertex_gap1.9e-12_trim1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:25110-25283 (ProjectAndTrim whole-face vertex classification after empty projection subset)",
+   "inputs": {
+    "file": "fixture:raw_vote_rectangle.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "projection_curve": {
+     "dim": 3,
+     "p": 1,
+     "cpts": [
+      [
+       -2,
+       0,
+       0,
+       1
+      ],
+      [
+       -1,
+       0,
+       0,
+       1
+      ],
+      [
+       1,
+       1,
+       0,
+       1
+      ],
+      [
+       2,
+       1,
+       0,
+       1
+      ]
+     ],
+     "u": [
+      0,
+      0,
+      1,
+      1.0000000000019,
+      2,
+      2
+     ]
+    },
+    "empty_projection_subset": true,
+    "op": {
+     "project": {
+      "trim": 1,
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       0
+      ],
+      "dir": [
+       0,
+       0,
+       1
+      ],
+      "reference": [
+       -1.5,
+       -1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "raw_vote_vertex_gap1e-08_trim0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:25110-25283 (ProjectAndTrim whole-face vertex classification after empty projection subset)",
+   "inputs": {
+    "file": "fixture:raw_vote_rectangle.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "projection_curve": {
+     "dim": 3,
+     "p": 1,
+     "cpts": [
+      [
+       -2,
+       0,
+       0,
+       1
+      ],
+      [
+       -1,
+       0,
+       0,
+       1
+      ],
+      [
+       1,
+       1,
+       0,
+       1
+      ],
+      [
+       2,
+       1,
+       0,
+       1
+      ]
+     ],
+     "u": [
+      0,
+      0,
+      1,
+      1.00000001,
+      2,
+      2
+     ]
+    },
+    "empty_projection_subset": true,
+    "op": {
+     "project": {
+      "trim": 0,
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       0
+      ],
+      "dir": [
+       0,
+       0,
+       1
+      ],
+      "reference": [
+       -1.5,
+       -1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "raw_vote_vertex_gap1e-08_trim1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:25110-25283 (ProjectAndTrim whole-face vertex classification after empty projection subset)",
+   "inputs": {
+    "file": "fixture:raw_vote_rectangle.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "projection_curve": {
+     "dim": 3,
+     "p": 1,
+     "cpts": [
+      [
+       -2,
+       0,
+       0,
+       1
+      ],
+      [
+       -1,
+       0,
+       0,
+       1
+      ],
+      [
+       1,
+       1,
+       0,
+       1
+      ],
+      [
+       2,
+       1,
+       0,
+       1
+      ]
+     ],
+     "u": [
+      0,
+      0,
+      1,
+      1.00000001,
+      2,
+      2
+     ]
+    },
+    "empty_projection_subset": true,
+    "op": {
+     "project": {
+      "trim": 1,
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       0
+      ],
+      "dir": [
+       0,
+       0,
+       1
+      ],
+      "reference": [
+       -1.5,
+       -1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "raw_vote_midpoint_gap1.5e-12_trim0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:25178-25199 (ProjectAndTrim edge-midpoint fallback; endpoints lie on the projection curve)",
+   "inputs": {
+    "file": "fixture:raw_vote_midpoint_lens.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "projection_curve": {
+     "dim": 3,
+     "p": 1,
+     "cpts": [
+      [
+       -2,
+       0,
+       0,
+       1
+      ],
+      [
+       -1,
+       0,
+       0,
+       1
+      ],
+      [
+       1,
+       1,
+       0,
+       1
+      ],
+      [
+       2,
+       1,
+       0,
+       1
+      ]
+     ],
+     "u": [
+      0,
+      0,
+      1,
+      1.0000000000015,
+      2,
+      2
+     ]
+    },
+    "empty_projection_subset": true,
+    "op": {
+     "project": {
+      "trim": 0,
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       0
+      ],
+      "dir": [
+       0,
+       0,
+       1
+      ],
+      "reference": [
+       -1.5,
+       -1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "raw_vote_midpoint_gap1.5e-12_trim1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:25178-25199 (ProjectAndTrim edge-midpoint fallback; endpoints lie on the projection curve)",
+   "inputs": {
+    "file": "fixture:raw_vote_midpoint_lens.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "projection_curve": {
+     "dim": 3,
+     "p": 1,
+     "cpts": [
+      [
+       -2,
+       0,
+       0,
+       1
+      ],
+      [
+       -1,
+       0,
+       0,
+       1
+      ],
+      [
+       1,
+       1,
+       0,
+       1
+      ],
+      [
+       2,
+       1,
+       0,
+       1
+      ]
+     ],
+     "u": [
+      0,
+      0,
+      1,
+      1.0000000000015,
+      2,
+      2
+     ]
+    },
+    "empty_projection_subset": true,
+    "op": {
+     "project": {
+      "trim": 1,
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       0
+      ],
+      "dir": [
+       0,
+       0,
+       1
+      ],
+      "reference": [
+       -1.5,
+       -1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "raw_vote_midpoint_gap1.9e-12_trim0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:25178-25199 (ProjectAndTrim edge-midpoint fallback; endpoints lie on the projection curve)",
+   "inputs": {
+    "file": "fixture:raw_vote_midpoint_lens.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "projection_curve": {
+     "dim": 3,
+     "p": 1,
+     "cpts": [
+      [
+       -2,
+       0,
+       0,
+       1
+      ],
+      [
+       -1,
+       0,
+       0,
+       1
+      ],
+      [
+       1,
+       1,
+       0,
+       1
+      ],
+      [
+       2,
+       1,
+       0,
+       1
+      ]
+     ],
+     "u": [
+      0,
+      0,
+      1,
+      1.0000000000019,
+      2,
+      2
+     ]
+    },
+    "empty_projection_subset": true,
+    "op": {
+     "project": {
+      "trim": 0,
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       0
+      ],
+      "dir": [
+       0,
+       0,
+       1
+      ],
+      "reference": [
+       -1.5,
+       -1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "raw_vote_midpoint_gap1.9e-12_trim1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:25178-25199 (ProjectAndTrim edge-midpoint fallback; endpoints lie on the projection curve)",
+   "inputs": {
+    "file": "fixture:raw_vote_midpoint_lens.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "projection_curve": {
+     "dim": 3,
+     "p": 1,
+     "cpts": [
+      [
+       -2,
+       0,
+       0,
+       1
+      ],
+      [
+       -1,
+       0,
+       0,
+       1
+      ],
+      [
+       1,
+       1,
+       0,
+       1
+      ],
+      [
+       2,
+       1,
+       0,
+       1
+      ]
+     ],
+     "u": [
+      0,
+      0,
+      1,
+      1.0000000000019,
+      2,
+      2
+     ]
+    },
+    "empty_projection_subset": true,
+    "op": {
+     "project": {
+      "trim": 1,
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       0
+      ],
+      "dir": [
+       0,
+       0,
+       1
+      ],
+      "reference": [
+       -1.5,
+       -1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "raw_vote_midpoint_gap1e-08_trim0",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:25178-25199 (ProjectAndTrim edge-midpoint fallback; endpoints lie on the projection curve)",
+   "inputs": {
+    "file": "fixture:raw_vote_midpoint_lens.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "projection_curve": {
+     "dim": 3,
+     "p": 1,
+     "cpts": [
+      [
+       -2,
+       0,
+       0,
+       1
+      ],
+      [
+       -1,
+       0,
+       0,
+       1
+      ],
+      [
+       1,
+       1,
+       0,
+       1
+      ],
+      [
+       2,
+       1,
+       0,
+       1
+      ]
+     ],
+     "u": [
+      0,
+      0,
+      1,
+      1.00000001,
+      2,
+      2
+     ]
+    },
+    "empty_projection_subset": true,
+    "op": {
+     "project": {
+      "trim": 0,
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       0
+      ],
+      "dir": [
+       0,
+       0,
+       1
+      ],
+      "reference": [
+       -1.5,
+       -1,
+       0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "raw_vote_midpoint_gap1e-08_trim1",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:25178-25199 (ProjectAndTrim edge-midpoint fallback; endpoints lie on the projection curve)",
+   "inputs": {
+    "file": "fixture:raw_vote_midpoint_lens.smb",
+    "options": [
+     false,
+     false,
+     false,
+     false,
+     false,
+     false
+    ],
+    "projection_curve": {
+     "dim": 3,
+     "p": 1,
+     "cpts": [
+      [
+       -2,
+       0,
+       0,
+       1
+      ],
+      [
+       -1,
+       0,
+       0,
+       1
+      ],
+      [
+       1,
+       1,
+       0,
+       1
+      ],
+      [
+       2,
+       1,
+       0,
+       1
+      ]
+     ],
+     "u": [
+      0,
+      0,
+      1,
+      1.00000001,
+      2,
+      2
+     ]
+    },
+    "empty_projection_subset": true,
+    "op": {
+     "project": {
+      "trim": 1,
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       0
+      ],
+      "dir": [
+       0,
+       0,
+       1
+      ],
+      "reference": [
+       -1.5,
+       -1,
+       0
+      ]
+     }
+    }
+   }
+  }
+ ]
+}

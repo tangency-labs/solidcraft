@@ -1,0 +1,116 @@
+{
+  "cases": [
+    {
+      "name": "public_copy_box_identity",
+      "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy;SmApiGeneral.cpp:SmApiTranslate",
+      "inputs": {
+        "script": "transform",
+        "obj": {
+          "copied_box": {
+            "origin": [
+              2,
+              3,
+              5
+            ],
+            "size": [
+              2,
+              3,
+              4
+            ]
+          }
+        },
+        "op": {
+          "translate": {
+            "v": [
+              0,
+              0,
+              0
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "public_copy_box_translate",
+      "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy;SmApiGeneral.cpp:SmApiTranslate",
+      "inputs": {
+        "script": "transform",
+        "obj": {
+          "copied_box": {
+            "origin": [
+              2,
+              3,
+              5
+            ],
+            "size": [
+              2,
+              3,
+              4
+            ]
+          }
+        },
+        "op": {
+          "translate": {
+            "v": [
+              7,
+              11,
+              13
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "public_copy_sphere_identity",
+      "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy;SmApiGeneral.cpp:SmApiTranslate",
+      "inputs": {
+        "script": "transform",
+        "obj": {
+          "copied_sphere": {
+            "origin": [
+              2,
+              3,
+              5
+            ],
+            "radius": 2
+          }
+        },
+        "op": {
+          "translate": {
+            "v": [
+              0,
+              0,
+              0
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "public_copy_sphere_translate",
+      "upstream_ref": "source/SM_API/src/SmApiQueries.cpp:SmApiBrepCopy;SmApiGeneral.cpp:SmApiTranslate",
+      "inputs": {
+        "script": "transform",
+        "obj": {
+          "copied_sphere": {
+            "origin": [
+              2,
+              3,
+              5
+            ],
+            "radius": 2
+          }
+        },
+        "op": {
+          "translate": {
+            "v": [
+              7,
+              11,
+              13
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

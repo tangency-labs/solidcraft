@@ -1,0 +1,38 @@
+{
+ "sources": [],
+ "what": "sheet.perforate, a staggered (60 degree) field of 1 mm holes at 3 mm pitch, 1 mm margin, over a 20 x 10 x 1 plate, exported to DXF",
+ "source": "analytic",
+ "method": "clear = radius + margin = 1.5; rows every 3*sqrt(3)/2 = 2.598 from y 1.5: y 1.5, 4.098, 6.696 (9.294 > 8.5); even rows x 1.5, 4.5, ..., 16.5 (6), the odd row shifted 1.5: x 3, ..., 18 (6): 18 holes. In the DXF, 18 circles on layer PERFORATION, length 18*pi*1; the plate's outline 4 lines, 60 long. The B-rep is not cut: V = 200",
+ "body_count": 1,
+ "volume_mm3": 200.0,
+ "faces": 6,
+ "results": [
+  {
+   "step": 7,
+   "json": {
+    "perforations": [
+     {
+      "count": 18,
+      "pattern": "staggered",
+      "open_area_mm2": 14.137166941154069
+     }
+    ]
+   }
+  }
+ ],
+ "files": [
+  {
+   "path": "flat.dxf",
+   "dxf": {
+    "PERFORATION": {
+     "CIRCLE": 18,
+     "length_mm": 56.548667764616276
+    },
+    "OUTLINE": {
+     "LINE": 4,
+     "length_mm": 60.0
+    }
+   }
+  }
+ ]
+}

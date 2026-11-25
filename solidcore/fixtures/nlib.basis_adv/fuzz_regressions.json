@@ -1,0 +1,74 @@
+{
+  "cases": [
+    {
+      "name": "fuzz_compat_mult_deg0_double_ends",
+      "upstream_ref": "source/SMLib/src/NL_BasisAdv.cpp:151-204 (N_GetCompatibleKnotArrayMult reads R[mr+1], S[ms+1]: degree 0 with ends of multiplicity 2, upstream-issues UB-13); class found by difftest --fuzz 3000 (fuzz00065, /p = 0)",
+      "inputs": {
+        "op": "compat_mult",
+        "p": 0,
+        "r": [0.0, 0.0, 0.5, 1.0, 1.0],
+        "s": [0.0, 0.0, 0.25, 1.0, 1.0]
+      }
+    },
+    {
+      "name": "fuzz_compat_mult_deg0_double_ends_fuzz00065",
+      "upstream_ref": "source/SMLib/src/NL_BasisAdv.cpp:151-204 (UB-13: degree 0 on vectors clamped for degree 6); found by difftest --fuzz 3000 (fuzz00065)",
+      "inputs": {
+        "op": "compat_mult",
+        "p": 0,
+        "r": [848.4517110141433, 848.4517110141433, 848.4517110141433, 848.4517110141433, 848.4517110141433, 848.4517110141433, 848.4517110141433, 1249.2834472330558, 1292.731589710043, 1292.731589710043, 1400.8640807970773, 1585.8909315862234, 1861.0644348171481, 1861.0644348171481, 1861.0644348171481, 1861.0644348171481, 1861.0644348171481, 1861.0644348171481, 1861.0644348171481],
+        "s": [848.4517110141433, 848.4517110141433, 848.4517110141433, 848.4517110141433, 848.4517110141433, 848.4517110141433, 848.4517110141433, 871.9353149796109, 983.2143762737317, 1249.2834472330558, 1258.4812920038669, 1400.8640807970773, 1400.8640807970773, 1501.6025425752428, 1769.080439576735, 1861.0644348171481, 1861.0644348171481, 1861.0644348171481, 1861.0644348171481, 1861.0644348171481, 1861.0644348171481, 1861.0644348171481]
+      }
+    },
+    {
+      "name": "fuzz_compat_mult_deg0_single_ends_in_bounds",
+      "upstream_ref": "source/SMLib/src/NL_BasisAdv.cpp:119 (degree 0 with single end knots stays in bounds: the UB-13 walk check must accept it)",
+      "inputs": {
+        "op": "compat_mult",
+        "p": 0,
+        "r": [0.0, 0.5, 1.0],
+        "s": [0.0, 0.25, 1.0]
+      }
+    },
+    {
+      "name": "fuzz_compat_mult_unsorted_inner",
+      "upstream_ref": "source/SMLib/src/NL_BasisAdv.cpp:151-204 (UB-13: an inner knot of R raised to 0.0, above the end knot, walks i past mr); found by difftest --fuzz 3000 (fuzz00000, /r/13 = 0.0)",
+      "inputs": {
+        "op": "compat_mult",
+        "p": 5,
+        "r": [-0.00350384070985446, -0.00350384070985446, -0.00350384070985446, -0.00350384070985446, -0.00350384070985446, -0.00350384070985446, -0.003041220577936071, -0.0022771345453376952, -0.0020869276073904207, -0.0020869276073904207, -0.0013646145005956115, -0.0013646145005956115, -0.0013136002021560335, 0.0, -0.0008069844024523229, -0.0005699388952395846, -0.000410151840965415, -0.000410151840965415, -0.0004026386949022051, -0.00009364116151989958, -0.00009364116151989958, -0.00009364116151989958, -0.00009364116151989958, -0.00009364116151989958, -0.00009364116151989958],
+        "s": [-0.00350384070985446, -0.00350384070985446, -0.00350384070985446, -0.00350384070985446, -0.00350384070985446, -0.00350384070985446, -0.00320195580087037, -0.0024827227716561805, -0.00188292440524318, -0.0007038405359702437, -0.00009364116151989619, -0.00009364116151989619, -0.00009364116151989619, -0.00009364116151989619, -0.00009364116151989619, -0.00009364116151989619]
+      }
+    },
+    {
+      "name": "fuzz_compat_mult_unclamped_end",
+      "upstream_ref": "source/SMLib/src/NL_BasisAdv.cpp:131-204 (UB-13: R's last knot replaced by -1e-300, so R is rescaled and unclamped at its end); found by difftest --fuzz 3000 (fuzz01857, /r/8 = -1e-300)",
+      "inputs": {
+        "op": "compat_mult",
+        "p": 1,
+        "r": [-49853.72933704766, -49853.72933704766, -47661.337881809595, -9843.707880884831, 45128.154978051, 56146.25865165631, 85990.44530874115, 99008.6403503525, -1e-300],
+        "s": [-49853.72933704766, -49853.72933704766, -33488.50322253788, -30044.404262082586, -17985.087523155988, -13793.425272661436, -9843.707880884831, 80983.97737945395, 99008.6403503525, 99008.6403503525]
+      }
+    },
+    {
+      "name": "fuzz_insert_short_unsorted_r",
+      "upstream_ref": "source/SMLib/src/NL_BasisAdv.cpp:269-305 (N_BasisInsertKnots writes 2p+2+mx+1 knots when R has fewer than 2p+2, upstream-issues UB-196; crashed the reference with a heap overflow before the shim sized its output); found by difftest --fuzz 30000 (fuzz14324)",
+      "inputs": {
+        "op": "insert",
+        "p": 4,
+        "r": [-1e-300, -7.190966391138048, -7.190966391138048, -7.190966391138048, -7.190966391138048],
+        "x": [-6.04491605488316]
+      }
+    },
+    {
+      "name": "fuzz_insert_short_r_four_new_knots",
+      "upstream_ref": "source/SMLib/src/NL_BasisAdv.cpp:269-305 (UB-196: two knots of degree 1 with R[0] > R[1] pass the range check, eight knots written); found by difftest --fuzz 30000 (fuzz20524)",
+      "inputs": {
+        "op": "insert",
+        "p": 1,
+        "r": [4294967296.0, 0.0],
+        "x": [1e300, 1.5, 2.5, 3.5]
+      }
+    }
+  ]
+}

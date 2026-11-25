@@ -1,0 +1,22 @@
+{
+ "sources": [],
+ "what": "the plane through three box corners",
+ "source": "analytic",
+ "method": "(0,0,20), (40,0,20), (40,30,0): (40,0,0) x (40,30,-20) = (0,800,1200): normal (0,2,3) through (0,0,20)",
+ "construction": {
+  "T": {
+   "plane": {
+    "through": [
+     0,
+     30,
+     0
+    ],
+    "normal": [
+     0,
+     2,
+     3
+    ]
+   }
+  }
+ }
+}

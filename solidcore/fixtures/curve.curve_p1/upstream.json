@@ -1,0 +1,2653 @@
+{
+ "cases": [
+  {
+   "name": "line_segment_at_distance_bbox_min",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4583",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 6,
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": 0.1,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "line_segment_drop_point_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 0,
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "line_segment_drop_point_1",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 0,
+    "p": [
+     0.25,
+     0.0,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "line_segment_drop_point_2",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 0,
+    "p": [
+     0.5,
+     0.0,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "line_segment_drop_point_3",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 0,
+    "p": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "circle_at_distance_grid_0_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4616",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "circle": {
+      "center": [
+       0.0,
+       3.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 6,
+    "p": [
+     -1.0,
+     2.0,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": 0.282842712474619,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "circle_at_distance_grid_0_4",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4616",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "circle": {
+      "center": [
+       0.0,
+       3.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 6,
+    "p": [
+     -1.0,
+     2.8888888888790123,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": 0.282842712474619,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "circle_at_distance_grid_0_9",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4616",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "circle": {
+      "center": [
+       0.0,
+       3.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 6,
+    "p": [
+     -1.0,
+     3.9999999999777778,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": 0.282842712474619,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "circle_at_distance_grid_3_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4616",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "circle": {
+      "center": [
+       0.0,
+       3.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 6,
+    "p": [
+     -0.3333333333407408,
+     2.0,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": 0.282842712474619,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "circle_at_distance_grid_3_4",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4616",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "circle": {
+      "center": [
+       0.0,
+       3.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 6,
+    "p": [
+     -0.3333333333407408,
+     2.8888888888790123,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": 0.282842712474619,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "circle_at_distance_grid_3_9",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4616",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "circle": {
+      "center": [
+       0.0,
+       3.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 6,
+    "p": [
+     -0.3333333333407408,
+     3.9999999999777778,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": 0.282842712474619,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "circle_at_distance_grid_6_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4616",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "circle": {
+      "center": [
+       0.0,
+       3.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 6,
+    "p": [
+     0.33333333331851844,
+     2.0,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": 0.282842712474619,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "circle_at_distance_grid_6_4",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4616",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "circle": {
+      "center": [
+       0.0,
+       3.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 6,
+    "p": [
+     0.33333333331851844,
+     2.8888888888790123,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": 0.282842712474619,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "circle_at_distance_grid_6_9",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4616",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "circle": {
+      "center": [
+       0.0,
+       3.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 6,
+    "p": [
+     0.33333333331851844,
+     3.9999999999777778,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": 0.282842712474619,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "circle_at_distance_grid_9_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4616",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "circle": {
+      "center": [
+       0.0,
+       3.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 6,
+    "p": [
+     0.9999999999777778,
+     2.0,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": 0.282842712474619,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "circle_at_distance_grid_9_4",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4616",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "circle": {
+      "center": [
+       0.0,
+       3.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 6,
+    "p": [
+     0.9999999999777778,
+     2.8888888888790123,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": 0.282842712474619,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "circle_at_distance_grid_9_9",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4616",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "circle": {
+      "center": [
+       0.0,
+       3.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 6,
+    "p": [
+     0.9999999999777778,
+     3.9999999999777778,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": 0.282842712474619,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "circle_drop_point_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4617",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "circle": {
+      "center": [
+       0.0,
+       3.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 0,
+    "p": [
+     1.0,
+     3.0,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "circle_drop_point_45",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4617",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "circle": {
+      "center": [
+       0.0,
+       3.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 0,
+    "p": [
+     0.7071067811865476,
+     3.7071067811865475,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "circle_drop_point_90",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4617",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "circle": {
+      "center": [
+       0.0,
+       3.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 0,
+    "p": [
+     6.123233995736766e-17,
+     4.0,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "circle_drop_point_135",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4617",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "circle": {
+      "center": [
+       0.0,
+       3.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 0,
+    "p": [
+     -0.7071067811865475,
+     3.7071067811865475,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "circle_drop_point_180",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4617",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "circle": {
+      "center": [
+       0.0,
+       3.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 0,
+    "p": [
+     -1.0,
+     3.0,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "circle_drop_point_225",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4617",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "circle": {
+      "center": [
+       0.0,
+       3.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 0,
+    "p": [
+     -0.7071067811865477,
+     2.2928932188134525,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "circle_drop_point_270",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4617",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "circle": {
+      "center": [
+       0.0,
+       3.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 0,
+    "p": [
+     -1.8369701987210297e-16,
+     2.0,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "circle_drop_point_315",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4617",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "circle": {
+      "center": [
+       0.0,
+       3.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 0,
+    "p": [
+     0.7071067811865474,
+     2.292893218813452,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "circle_center_sop4_req0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4605",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "circle": {
+      "center": [
+       0.0,
+       3.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 4,
+    "p": [
+     0.0,
+     3.0,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [],
+    "req": 0
+   }
+  },
+  {
+   "name": "circle_center_sop4_req1",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4605",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "circle": {
+      "center": [
+       0.0,
+       3.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 4,
+    "p": [
+     0.0,
+     3.0,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "circle_center_sop5_req0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4605",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "circle": {
+      "center": [
+       0.0,
+       3.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 5,
+    "p": [
+     0.0,
+     3.0,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [],
+    "req": 0
+   }
+  },
+  {
+   "name": "circle_center_sop5_req1",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:4605",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "circle": {
+      "center": [
+       0.0,
+       3.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "a0": 0.0,
+      "a1": 360.0
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 5,
+    "p": [
+     0.0,
+     3.0,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "rectangle_edge0_tessellate",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:430",
+   "inputs": {
+    "op": "tess",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "chord": 0.01,
+    "angle": 10.0,
+    "minseg": 4
+   }
+  },
+  {
+   "name": "rectangle_edge0_bisect",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:430",
+   "inputs": {
+    "op": "bisect",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "chord": 0.01,
+    "angle": 10.0,
+    "max3d": 2.5
+   }
+  },
+  {
+   "name": "rectangle_edge0_closest_to_center",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:430",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 3,
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [],
+    "req": 0
+   }
+  },
+  {
+   "name": "rectangle_edge0_farthest_from_center",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:430",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 4,
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "rectangle_edge0_approximate",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:430",
+   "inputs": {
+    "op": "approx",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "breaks": [
+     0.0,
+     1.0
+    ],
+    "tol": 0.001,
+    "analytics": true,
+    "match_param": false,
+    "copy": false
+   }
+  },
+  {
+   "name": "rectangle_edge1_tessellate",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:430",
+   "inputs": {
+    "op": "tess",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "chord": 0.01,
+    "angle": 10.0,
+    "minseg": 4
+   }
+  },
+  {
+   "name": "rectangle_edge1_bisect",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:430",
+   "inputs": {
+    "op": "bisect",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "chord": 0.01,
+    "angle": 10.0,
+    "max3d": 2.5
+   }
+  },
+  {
+   "name": "rectangle_edge1_closest_to_center",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:430",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 3,
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [],
+    "req": 0
+   }
+  },
+  {
+   "name": "rectangle_edge1_farthest_from_center",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:430",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 4,
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "rectangle_edge1_approximate",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:430",
+   "inputs": {
+    "op": "approx",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "breaks": [
+     0.0,
+     1.0
+    ],
+    "tol": 0.001,
+    "analytics": true,
+    "match_param": false,
+    "copy": false
+   }
+  },
+  {
+   "name": "rectangle_edge2_tessellate",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:430",
+   "inputs": {
+    "op": "tess",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "chord": 0.01,
+    "angle": 10.0,
+    "minseg": 4
+   }
+  },
+  {
+   "name": "rectangle_edge2_bisect",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:430",
+   "inputs": {
+    "op": "bisect",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "chord": 0.01,
+    "angle": 10.0,
+    "max3d": 2.5
+   }
+  },
+  {
+   "name": "rectangle_edge2_closest_to_center",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:430",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 3,
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [],
+    "req": 0
+   }
+  },
+  {
+   "name": "rectangle_edge2_farthest_from_center",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:430",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 4,
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "rectangle_edge2_approximate",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:430",
+   "inputs": {
+    "op": "approx",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "breaks": [
+     0.0,
+     1.0
+    ],
+    "tol": 0.001,
+    "analytics": true,
+    "match_param": false,
+    "copy": false
+   }
+  },
+  {
+   "name": "rectangle_edge3_tessellate",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:430",
+   "inputs": {
+    "op": "tess",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "chord": 0.01,
+    "angle": 10.0,
+    "minseg": 4
+   }
+  },
+  {
+   "name": "rectangle_edge3_bisect",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:430",
+   "inputs": {
+    "op": "bisect",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "chord": 0.01,
+    "angle": 10.0,
+    "max3d": 2.5
+   }
+  },
+  {
+   "name": "rectangle_edge3_closest_to_center",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:430",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 3,
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [],
+    "req": 0
+   }
+  },
+  {
+   "name": "rectangle_edge3_farthest_from_center",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:430",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 4,
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "rectangle_edge3_approximate",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:430",
+   "inputs": {
+    "op": "approx",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5,
+        3,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5,
+        -3,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "breaks": [
+     0.0,
+     1.0
+    ],
+    "tol": 0.001,
+    "analytics": true,
+    "match_param": false,
+    "copy": false
+   }
+  },
+  {
+   "name": "hexagon_edge0_normalize_center",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:468",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.5000000000000004,
+        4.330127018922193,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 5,
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "hexagon_edge0_tessellate",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:468",
+   "inputs": {
+    "op": "tess",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        5.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.5000000000000004,
+        4.330127018922193,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "chord": 0.0,
+    "angle": 15.0,
+    "minseg": 0
+   }
+  },
+  {
+   "name": "hexagon_edge1_normalize_center",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:468",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        2.5000000000000004,
+        4.330127018922193,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -2.499999999999999,
+        4.330127018922194,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 5,
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "hexagon_edge1_tessellate",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:468",
+   "inputs": {
+    "op": "tess",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        2.5000000000000004,
+        4.330127018922193,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -2.499999999999999,
+        4.330127018922194,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "chord": 0.0,
+    "angle": 15.0,
+    "minseg": 0
+   }
+  },
+  {
+   "name": "hexagon_edge2_normalize_center",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:468",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -2.499999999999999,
+        4.330127018922194,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5.0,
+        6.123233995736766e-16,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 5,
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "hexagon_edge2_tessellate",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:468",
+   "inputs": {
+    "op": "tess",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -2.499999999999999,
+        4.330127018922194,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -5.0,
+        6.123233995736766e-16,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "chord": 0.0,
+    "angle": 15.0,
+    "minseg": 0
+   }
+  },
+  {
+   "name": "hexagon_edge3_normalize_center",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:468",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5.0,
+        6.123233995736766e-16,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -2.500000000000002,
+        -4.330127018922192,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 5,
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "hexagon_edge3_tessellate",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:468",
+   "inputs": {
+    "op": "tess",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -5.0,
+        6.123233995736766e-16,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        -2.500000000000002,
+        -4.330127018922192,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "chord": 0.0,
+    "angle": 15.0,
+    "minseg": 0
+   }
+  },
+  {
+   "name": "hexagon_edge4_normalize_center",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:468",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -2.500000000000002,
+        -4.330127018922192,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.5000000000000004,
+        -4.330127018922193,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 5,
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "hexagon_edge4_tessellate",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:468",
+   "inputs": {
+    "op": "tess",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        -2.500000000000002,
+        -4.330127018922192,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.5000000000000004,
+        -4.330127018922193,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "chord": 0.0,
+    "angle": 15.0,
+    "minseg": 0
+   }
+  },
+  {
+   "name": "hexagon_edge5_normalize_center",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:468",
+   "inputs": {
+    "op": "gps",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        2.5000000000000004,
+        -4.330127018922193,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "sop": 5,
+    "p": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "tol": 1e-05,
+    "target": null,
+    "vecs": [],
+    "req": 1
+   }
+  },
+  {
+   "name": "hexagon_edge5_tessellate",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:468",
+   "inputs": {
+    "op": "tess",
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        2.5000000000000004,
+        -4.330127018922193,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        5.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     }
+    },
+    "ivl": [
+     0.0,
+     1.0
+    ],
+    "chord": 0.0,
+    "angle": 15.0,
+    "minseg": 0
+   }
+  }
+ ]
+}

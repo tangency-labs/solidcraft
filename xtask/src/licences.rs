@@ -18,7 +18,20 @@ pub const FILE: &str = "THIRD-PARTY-LICENSES.txt";
 const ROOTS: &[&str] = &["solidcraft", "solidcraft-cli", "solidcraft-web"];
 
 pub fn run(root: &Path, check: bool) -> Result<(), String> {
-    let text = generate(root)?;
+    let (text, crates) = generate(root)?;
+    let copyleft: Vec<&Crate> = crates.iter().filter(|c| !allows_permissive_use(&c.license)).collect();
+    if !copyleft.is_empty() {
+        let mut report = String::new();
+        report
+            .push_str("licences: a dependency with a copyleft licence is in the tree (AGENTS.md: no GPL, LGPL or AGPL code, not even reading it):\n");
+        for c in &copyleft {
+            report.push_str(&format!("  {} {} ({})\n", c.name, c.version, c.license));
+        }
+        if check {
+            return Err(report);
+        }
+        eprint!("{report}");
+    }
     let path = root.join(FILE);
     if check {
         let old = std::fs::read_to_string(&path).unwrap_or_default();
@@ -36,6 +49,126 @@ pub fn run(root: &Path, check: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// Can the project use a crate with this licence expression without taking on a copyleft
+/// obligation?
+///
+/// The licences the project refuses are GPL, LGPL and AGPL (AGENTS.md). A crate that offers a
+/// permissive alternative is not one of them: the project uses it under that alternative. So the
+/// answer is about the expression, not about one identifier inside it:
+///
+/// * `MIT` -> yes.
+/// * `MIT OR Apache-2.0 OR LGPL-2.1-or-later` -> yes (the project takes MIT).
+/// * `Apache-2.0 OR GPL-2.0-only` -> yes (the project takes Apache-2.0).
+/// * `GPL-3.0-only` -> no.
+/// * `MIT AND GPL-3.0` -> no (the project obeys both, and one of them is copyleft).
+///
+/// An expression that cannot be read (an empty licence, or one that is not SPDX) is not a
+/// failure: the check does not know, and a licence nobody can parse is not a copyleft one. The
+/// catalogue still lists the crate and its licence file.
+fn allows_permissive_use(expression: &str) -> bool {
+    let tokens = tokenize(expression);
+    let mut parser = ExprParser { tokens: &tokens, pos: 0 };
+    // `None` is "cannot be read"; that is not a copyleft licence.
+    parser.or_expr().unwrap_or(true)
+}
+
+/// Is this licence identifier one of the copyleft ones?
+fn is_copyleft(identifier: &str) -> bool {
+    let id = identifier.trim().to_ascii_uppercase();
+    ["GPL", "LGPL", "AGPL"].iter().any(|prefix| id == *prefix || id.starts_with(&format!("{prefix}-")))
+}
+
+/// The licence expression, split into words and parentheses.
+fn tokenize(expression: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut word = String::new();
+    for ch in expression.chars() {
+        if ch == '(' || ch == ')' {
+            if !word.is_empty() {
+                tokens.push(std::mem::take(&mut word));
+            }
+            tokens.push(ch.to_string());
+        } else if ch.is_alphanumeric() || ch == '-' || ch == '.' || ch == '+' {
+            word.push(ch);
+        } else if ch.is_whitespace() {
+            if !word.is_empty() {
+                tokens.push(std::mem::take(&mut word));
+            }
+        } else if !word.is_empty() {
+            // A character that is not part of a licence identifier (a slash, for example):
+            // it ends the word it was in.
+            tokens.push(std::mem::take(&mut word));
+        }
+    }
+    if !word.is_empty() {
+        tokens.push(word);
+    }
+    tokens
+}
+
+/// A reader of the SPDX licence expressions: `OR` means the project picks one alternative, `AND`
+/// means it obeys all of them.
+struct ExprParser<'a> {
+    tokens: &'a [String],
+    pos: usize,
+}
+
+impl ExprParser<'_> {
+    fn peek(&self) -> Option<&str> {
+        self.tokens.get(self.pos).map(String::as_str)
+    }
+
+    fn eat_keyword(&mut self, keyword: &str) -> bool {
+        if self.peek().is_some_and(|t| t.eq_ignore_ascii_case(keyword)) {
+            self.pos += 1;
+            return true;
+        }
+        false
+    }
+
+    /// `or := and ('OR' and)*`: permissive when ANY branch is permissive.
+    fn or_expr(&mut self) -> Option<bool> {
+        let mut permissive = self.and_expr()?;
+        while self.eat_keyword("OR") {
+            let branch = self.and_expr()?;
+            permissive = permissive || branch;
+        }
+        Some(permissive)
+    }
+
+    /// `and := primary ('AND' primary)*`: permissive when EVERY part is permissive.
+    fn and_expr(&mut self) -> Option<bool> {
+        let mut permissive = self.primary()?;
+        while self.eat_keyword("AND") {
+            let part = self.primary()?;
+            permissive = permissive && part;
+        }
+        Some(permissive)
+    }
+
+    /// `primary := '(' or ')' | identifier ['WITH' identifier]`.
+    fn primary(&mut self) -> Option<bool> {
+        if self.peek() == Some("(") {
+            self.pos += 1;
+            let inner = self.or_expr()?;
+            if self.peek() != Some(")") {
+                return None;
+            }
+            self.pos += 1;
+            return Some(inner);
+        }
+        let identifier = self.tokens.get(self.pos)?.clone();
+        self.pos += 1;
+        // "GPL-2.0-only WITH Classpath-exception-2.0" is still copyleft: the exception does not
+        // make the licence permissive, so only the base counts.
+        if self.eat_keyword("WITH") {
+            self.tokens.get(self.pos)?;
+            self.pos += 1;
+        }
+        Some(!is_copyleft(&identifier))
+    }
+}
+
 struct Crate {
     name: String,
     version: String,
@@ -45,7 +178,7 @@ struct Crate {
     files: Vec<(String, String)>,
 }
 
-fn generate(root: &Path) -> Result<String, String> {
+fn generate(root: &Path) -> Result<(String, Vec<Crate>), String> {
     let out = cargo().args(["metadata", "--format-version", "1", "--locked"]).output().map_err(|e| format!("cargo metadata: {e}"))?;
     if !out.status.success() {
         return Err(format!("cargo metadata failed:\n{}", String::from_utf8_lossy(&out.stderr)));
@@ -93,7 +226,7 @@ fn generate(root: &Path) -> Result<String, String> {
         });
     }
     crates.sort_by(|a, b| (&a.name, &a.version).cmp(&(&b.name, &b.version)));
-    Ok(render(root, &crates))
+    Ok((render(root, &crates), crates))
 }
 
 /// The licence and notice files at the top of a crate's package (and its `license-file`).
@@ -126,7 +259,9 @@ fn render(root: &Path, crates: &[Crate]) -> String {
     let mut out = format!(
         "Third-party software in SolidCraft\n\nSolidCraft (the desktop app, solidcraft-cli and the web app) is built from the {} crates below.\n\
          Generated by `cargo xtask licences` from Cargo.lock and the crates' own licence files.\n\
-         SolidCraft's own licence is in LICENSE-MIT and LICENSE-APACHE, and NOTICE.\n\n",
+         SolidCraft's own licence is in LICENSE-MIT and LICENSE-APACHE, and NOTICE. Its brand and interface (the UI kit,\n\
+         the look, the theme, the name, logo and app icon) are under LICENSE-BRAND: using them outside SolidCraft needs\n\
+         the maintainers' written permission.\n\n",
         crates.len()
     );
     for c in crates {
@@ -167,21 +302,36 @@ fn render(root: &Path, crates: &[Crate]) -> String {
     let font_rule = "=".repeat(80);
     out += &format!(
         "\n{font_rule}\nBundled fonts (SIL Open Font License, Version 1.1)\n{font_rule}\n\n\
-         - LiberationSans-Regular.ttf (assets/fonts/liberation-sans/LiberationSans-Regular.ttf)\n  \
+         - LiberationSans-Regular.ttf (crates/sketch/assets/fonts/liberation-sans/LiberationSans-Regular.ttf)\n  \
            Copyright 2012 Red Hat, Inc. (Liberation Fonts 2.x; digitized data Google)\n  \
            Source: https://github.com/liberationfonts\n\n\
          - BIZUDPGothic-Regular.ttf (assets/fonts/biz-udp-gothic/BIZUDPGothic-Regular.ttf)\n  \
            Copyright 2022 The BIZ UDGothic Project Authors (https://github.com/googlefonts/morisawa-biz-ud-mincho)\n  \
            Source: https://github.com/googlefonts/morisawa-biz-ud-gothic\n\n\
-         - IBMPlexSans-Variable.ttf (assets/fonts/ibm-plex-sans/IBMPlexSans-Variable.ttf)\n  \
+         - CraftUI-SC.otf (assets/fonts/craft-ui-sc/CraftUI-SC.otf)\n  \
+           Copyright 2014-2021 Adobe / Google Inc. (Noto Sans SC subset for SolidCraft web zh)\n  \
+           Source: https://github.com/notofonts/noto-cjk (Sans SubsetOTF/SC)\n\n\
+         - CraftUI-TC.otf (assets/fonts/craft-ui-tc/CraftUI-TC.otf)\n  \
+           Copyright 2014-2021 Adobe / Google Inc. (Noto Sans TC subset for SolidCraft web zh-TW)\n  \
+           Source: https://github.com/notofonts/noto-cjk (Sans SubsetOTF/TC)\n\n\
+         - CraftUI-KR.otf (assets/fonts/craft-ui-kr/CraftUI-KR.otf)\n  \
+           Copyright 2014-2021 Adobe / Google Inc. (Noto Sans KR subset for SolidCraft web ko)\n  \
+           Source: https://github.com/notofonts/noto-cjk (Sans SubsetOTF/KR)\n\n\
+         - IBMPlexSans-Variable.ttf (crates/look/fonts/ibm-plex-sans/IBMPlexSans-Variable.ttf)\n  \
            Copyright 2017 IBM Corp. with Reserved Font Name \"Plex\"\n  \
            Source: https://github.com/IBM/plex\n\n\
-         - IBMPlexMono-Regular.ttf (assets/fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf)\n  \
+         - IBMPlexMono-Regular.ttf (crates/look/fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf)\n  \
            Copyright 2017 IBM Corp. with Reserved Font Name \"Plex\"\n  \
-           Source: https://github.com/IBM/plex\n\n"
+           Source: https://github.com/IBM/plex\n\n\
+         - NotoSansArabic-Regular.ttf (assets/fonts/noto-sans-arabic/NotoSansArabic-Regular.ttf)\n  \
+           Copyright 2022 The Noto Project Authors (https://github.com/notofonts/arabic)\n  \
+           Source: https://github.com/notofonts/notofonts.github.io\n\n\
+         - NotoSansKR-Regular.otf, NotoSansSC-Regular.otf and NotoSansTC-Regular.otf (assets/fonts/noto-sans-kr, -sc and -tc)\n  \
+           Copyright 2014-2021 Adobe (http://www.adobe.com/)\n  \
+           Source: https://github.com/notofonts/noto-cjk\n\n"
     );
     let ofl_path = root.join("assets/fonts/biz-udp-gothic/OFL.txt");
-    let fallback_path = root.join("assets/fonts/liberation-sans/OFL.txt");
+    let fallback_path = root.join("crates/sketch/assets/fonts/liberation-sans/OFL.txt");
     let ofl_text = std::fs::read_to_string(&ofl_path).or_else(|_| std::fs::read_to_string(&fallback_path)).unwrap_or_default();
     let ofl_clean = ofl_text.replace("\r\n", "\n").trim().to_string();
     if !ofl_clean.is_empty() {
@@ -207,4 +357,61 @@ fn wrap(s: &str) -> String {
         col += w.len();
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_permissive_licence_can_be_used() {
+        assert!(allows_permissive_use("MIT"));
+        assert!(allows_permissive_use("Apache-2.0"));
+        assert!(allows_permissive_use("Apache-2.0 WITH LLVM-exception"));
+    }
+
+    #[test]
+    fn an_or_with_a_permissive_alternative_can_be_used() {
+        // The two the tree really has: the project takes the permissive one.
+        assert!(allows_permissive_use("MIT OR Apache-2.0 OR LGPL-2.1-or-later"));
+        assert!(allows_permissive_use("Apache-2.0 OR GPL-2.0-only"));
+    }
+
+    #[test]
+    fn a_copyleft_licence_alone_cannot_be_used() {
+        assert!(!allows_permissive_use("GPL-3.0-only"));
+        assert!(!allows_permissive_use("LGPL-2.1"));
+        assert!(!allows_permissive_use("AGPL-3.0-or-later"));
+        assert!(!allows_permissive_use("gpl-3.0"));
+    }
+
+    #[test]
+    fn an_and_with_a_copyleft_part_cannot_be_used() {
+        assert!(!allows_permissive_use("MIT AND GPL-3.0"));
+        assert!(!allows_permissive_use("(MIT OR Apache-2.0) AND GPL-3.0"));
+    }
+
+    #[test]
+    fn an_exception_does_not_make_a_copyleft_licence_permissive() {
+        assert!(!allows_permissive_use("GPL-2.0-only WITH Classpath-exception-2.0"));
+    }
+
+    #[test]
+    fn a_licence_that_cannot_be_read_is_not_a_failure() {
+        // The check does not know, and what it does not know is not copyleft.
+        assert!(allows_permissive_use(""));
+        assert!(allows_permissive_use("MIT / Apache-2.0"));
+        assert!(allows_permissive_use("SEE LICENSE IN"));
+    }
+
+    #[test]
+    fn the_copyleft_identifiers_are_the_three_families() {
+        assert!(is_copyleft("GPL-2.0-only"));
+        assert!(is_copyleft("LGPL-2.1-or-later"));
+        assert!(is_copyleft("AGPL-3.0"));
+        assert!(!is_copyleft("MIT"));
+        assert!(!is_copyleft("Apache-2.0"));
+        assert!(!is_copyleft("Unicode-3.0"));
+        assert!(!is_copyleft("BSL-1.0"));
+    }
 }

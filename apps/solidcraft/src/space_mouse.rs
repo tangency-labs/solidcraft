@@ -179,9 +179,11 @@ fn parse_driver_mapping(xml: &[u8]) -> Option<DriverMapping> {
 
 fn load_driver_mapping() -> Option<DriverMapping> {
     let cfg = std::path::PathBuf::from(std::env::var_os("APPDATA")?).join("3Dconnexion").join("3DxWare").join("Cfg");
-    // The driver names the profile after the executable; one made for the pre-rename executable
-    // still applies until the driver writes a new one (compatibility shim).
-    let profile = ["solidcraft-KMJ.xml", "solvecraft-KMJ.xml"].into_iter().map(|n| cfg.join(n)).find(|p| p.is_file())?;
+    // The driver names the profile after the executable.
+    let profile = cfg.join("solidcraft-KMJ.xml");
+    if !profile.is_file() {
+        return None;
+    }
     if std::fs::metadata(&profile).ok()?.len() > MAX_PROFILE_BYTES {
         log::warn!("3D mouse: ignoring oversized 3DxWare profile {}", profile.display());
         return None;
@@ -811,13 +813,20 @@ fn direct_usable(found: bool, since_failed: Option<Duration>, retry: Duration) -
     found && since_failed.is_none_or(|ago| ago >= retry)
 }
 
-/// Whether a read of the daemon should end because the direct device would be the choice now: it was
-/// away and is back, or it failed to open, the wait (`retry`) is over (`failed`, how long since) and
-/// the caller has found that it opens. A read of anything else is left alone: a device that works is
-/// not given up for a daemon that has appeared.
+/// Leave the daemon when the direct device comes back. If an earlier open failed, wait out the
+/// backoff and require a successful probe before leaving.
 #[cfg(target_os = "linux")]
-fn switch_back(wanted: SpaceMouseDriver, pick: Option<Pick>, present: DriversPresent, failed: Option<Duration>, retry: Duration) -> bool {
-    pick == Some(Pick::Spacenavd) && choose(wanted, present.spacenavd, direct_usable(present.direct, failed, retry)) == Some(Pick::Direct)
+fn switch_back(
+    wanted: SpaceMouseDriver,
+    pick: Option<Pick>,
+    present: DriversPresent,
+    failed: Option<Duration>,
+    retry: Duration,
+    probe: impl FnOnce() -> bool,
+) -> bool {
+    pick == Some(Pick::Spacenavd)
+        && choose(wanted, present.spacenavd, direct_usable(present.direct, failed, retry)) == Some(Pick::Direct)
+        && (failed.is_none() || probe())
 }
 
 /// Which reader to use: the one asked for when it is there, else the other, else none. Automatic
@@ -951,17 +960,13 @@ fn reader<S: System>(ctx: Context, shared: Arc<Mutex<Reading>>, drivers: Arc<Dri
                     denied: pick != Some(Pick::Direct) && failed_at.is_some() && now_device.is_some(),
                 };
                 drivers.publish(now_present);
-                // A device that failed to open is tried again once its wait is over, by opening it, so a
-                // daemon that works is only left for a device that now works, and a device that still
-                // cannot be read is not tried again for another wait.
-                if let (Some(at), Some(device), Some(Pick::Spacenavd)) = (failed_at, &now_device, pick)
-                    && at.elapsed() >= times.unreadable_retry
-                    && system.open(&device.path).is_err()
-                {
-                    failed_at = Some(Instant::now());
-                }
-                // The device came back (replugged), or became readable, while the daemon was read.
-                if switch_back(wanted, pick, now_present, failed_at.map(|at| at.elapsed()), times.unreadable_retry) {
+                if switch_back(wanted, pick, now_present, failed_at.map(|at| at.elapsed()), times.unreadable_retry, || {
+                    let opened = now_device.as_ref().is_some_and(|device| system.open(&device.path).is_ok());
+                    if !opened {
+                        failed_at = Some(Instant::now());
+                    }
+                    opened
+                }) {
                     return true;
                 }
             }
@@ -1056,6 +1061,8 @@ fn start_driver_client(ctx: &Context, shared: &Arc<Mutex<Reading>>) {
 }
 
 pub struct SpaceMouse {
+    #[cfg(test)]
+    inactive: bool,
     shared: Arc<Mutex<Reading>>,
     #[cfg(target_os = "linux")]
     drivers: Arc<Drivers>,
@@ -1071,6 +1078,24 @@ pub struct SpaceMouse {
 }
 
 impl SpaceMouse {
+    /// Headless lifecycle tests neither start a reader nor load the user's driver profile.
+    #[cfg(test)]
+    pub fn inactive() -> Self {
+        let now = Instant::now();
+        Self {
+            inactive: true,
+            shared: Arc::new(Mutex::new(Reading::new(now))),
+            #[cfg(target_os = "linux")]
+            drivers: Arc::new(Drivers::default()),
+            last_frame: now,
+            driver_mapping: without_profile(),
+            mapping_checked_at: now,
+            wheel: WheelGuard::default(),
+            started: now,
+            calibration: None,
+        }
+    }
+
     /// Starts the reader. A device that `bridge` says its own app reads is left to that app.
     pub fn start(ctx: &Context, bridge: crate::nav_bridge::Claim) -> Self {
         let now = Instant::now();
@@ -1096,6 +1121,8 @@ impl SpaceMouse {
         #[cfg(target_os = "macos")]
         start_driver_client(ctx, &shared);
         Self {
+            #[cfg(test)]
+            inactive: false,
             shared,
             #[cfg(target_os = "linux")]
             drivers,
@@ -1146,6 +1173,10 @@ impl SpaceMouse {
     }
 
     pub fn tick(&mut self, app: &mut SolveApp, ctx: &Context) {
+        #[cfg(test)]
+        if self.inactive {
+            return;
+        }
         self.tick_at(app, ctx, Instant::now());
     }
 
@@ -1646,14 +1677,14 @@ mod tests {
         // Direct asked for, unplugged: the daemon is read. It comes back: switch.
         let pick = choose(Direct, true, false);
         assert_eq!(pick, Some(Pick::Spacenavd));
-        assert!(switch_back(Direct, pick, both, None, UNREADABLE_RETRY));
-        assert!(!switch_back(Direct, pick, only_daemon, None, UNREADABLE_RETRY), "still away");
+        assert!(switch_back(Direct, pick, both, None, UNREADABLE_RETRY, || panic!("no failed open to retry")));
+        assert!(!switch_back(Direct, pick, only_daemon, None, UNREADABLE_RETRY, || false), "still away");
         // A device that was there at the start (but could not be opened) does not make the read flap.
-        assert!(!switch_back(Direct, pick, both, Some(Duration::ZERO), UNREADABLE_RETRY));
+        assert!(!switch_back(Direct, pick, both, Some(Duration::ZERO), UNREADABLE_RETRY, || true));
         // Within the backoff after a failed open, not yet.
-        assert!(!switch_back(Direct, pick, both, Some(Duration::from_secs(1)), UNREADABLE_RETRY));
+        assert!(!switch_back(Direct, pick, both, Some(Duration::from_secs(1)), UNREADABLE_RETRY, || true));
         // Spacenavd, asked for, keeps the daemon whatever else appears.
-        assert!(!switch_back(Spacenavd, Some(Pick::Spacenavd), both, None, UNREADABLE_RETRY));
+        assert!(!switch_back(Spacenavd, Some(Pick::Spacenavd), both, None, UNREADABLE_RETRY, || true));
         // The key a replugged device gets is its ids, whatever hidraw node it comes up on.
         assert_eq!(Source::Hid(Some((0x046d, 0xc62b))).key(), "hid 046d:c62b");
     }
@@ -1681,32 +1712,34 @@ mod tests {
             (DriversPresent { spacenavd: true, direct: true, denied: false }, DriversPresent { spacenavd: true, direct: false, denied: false });
         let pick = choose(Automatic, true, false);
         assert_eq!(pick, Some(Pick::Spacenavd));
-        assert!(!switch_back(Automatic, pick, only_daemon, None, UNREADABLE_RETRY), "still away");
-        assert!(switch_back(Automatic, pick, both, None, UNREADABLE_RETRY), "back");
-        assert!(!switch_back(Automatic, pick, both, Some(Duration::from_secs(1)), UNREADABLE_RETRY), "backing off after a failed open");
+        assert!(!switch_back(Automatic, pick, only_daemon, None, UNREADABLE_RETRY, || false), "still away");
+        assert!(switch_back(Automatic, pick, both, None, UNREADABLE_RETRY, || false), "back");
+        assert!(!switch_back(Automatic, pick, both, Some(Duration::from_secs(1)), UNREADABLE_RETRY, || true), "backing off after a failed open");
         // Already reading the device: nothing to switch.
-        assert!(!switch_back(Automatic, Some(Pick::Direct), both, None, UNREADABLE_RETRY));
+        assert!(!switch_back(Automatic, Some(Pick::Direct), both, None, UNREADABLE_RETRY, || true));
         // Spacenavd, asked for, is never left for the device.
-        assert!(!switch_back(Spacenavd, Some(Pick::Spacenavd), both, None, UNREADABLE_RETRY));
+        assert!(!switch_back(Spacenavd, Some(Pick::Spacenavd), both, None, UNREADABLE_RETRY, || true));
     }
 
-    /// A device that failed to open and is readable now ends the read of the daemon once the wait is over,
-    /// and not before; a device that works is never given up for a daemon.
+    /// A failed device takes over from the daemon only after its backoff expires and a probe succeeds.
     #[cfg(target_os = "linux")]
     #[test]
-    fn a_device_that_failed_to_open_ends_the_daemon_read_when_its_wait_is_over() {
+    fn a_device_that_failed_to_open_ends_the_daemon_read_only_after_a_successful_probe() {
         use SpaceMouseDriver::{Automatic, Direct, Spacenavd};
         let both = DriversPresent { spacenavd: true, direct: true, denied: false };
         let wait = UNREADABLE_RETRY;
+        let daemon = Some(Pick::Spacenavd);
+        let no_probe = || panic!("the reader must not probe the device");
         for wanted in [Direct, Automatic] {
-            assert!(!switch_back(wanted, Some(Pick::Spacenavd), both, Some(Duration::from_secs(1)), wait), "{wanted:?}: inside the wait");
-            assert!(switch_back(wanted, Some(Pick::Spacenavd), both, Some(wait), wait), "{wanted:?}: the wait is over");
-            assert!(!switch_back(wanted, Some(Pick::Direct), both, Some(wait), wait), "{wanted:?}: already reading the device");
+            assert!(!switch_back(wanted, daemon, both, Some(wait - Duration::from_nanos(1)), wait, no_probe), "{wanted:?}: inside the wait");
+            assert!(!switch_back(wanted, daemon, both, Some(wait), wait, || false), "{wanted:?}: the device still cannot be opened");
+            assert!(switch_back(wanted, daemon, both, Some(wait), wait, || true), "{wanted:?}: the device can be opened");
+            assert!(!switch_back(wanted, Some(Pick::Direct), both, Some(wait), wait, no_probe), "{wanted:?}: already reading the device");
         }
         // Spacenavd, asked for, stays on the daemon whatever the wait.
-        assert!(!switch_back(Spacenavd, Some(Pick::Spacenavd), both, Some(wait), wait));
+        assert!(!switch_back(Spacenavd, daemon, both, Some(wait), wait, no_probe));
         // A device read directly because there was no daemon is not given up when one appears.
-        assert!(!switch_back(Automatic, Some(Pick::Direct), both, None, wait));
+        assert!(!switch_back(Automatic, Some(Pick::Direct), both, None, wait, no_probe));
     }
 
     #[cfg(target_os = "linux")]
@@ -1892,6 +1925,7 @@ mod tests {
         let mut reading = Reading::new(now);
         reading.axes.rotation = [0, 350, 0];
         let mut mouse = SpaceMouse {
+            inactive: false,
             shared: Arc::new(Mutex::new(reading)),
             #[cfg(target_os = "linux")]
             drivers: Arc::default(),
@@ -1914,6 +1948,7 @@ mod tests {
 
     fn wheel() -> egui::Event {
         egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
             unit: egui::MouseWheelUnit::Line,
             delta: egui::vec2(0.0, -1.0),
             modifiers: Default::default(),
@@ -1923,6 +1958,7 @@ mod tests {
 
     fn mouse(reading: Reading, now: Instant) -> SpaceMouse {
         SpaceMouse {
+            inactive: false,
             shared: Arc::new(Mutex::new(reading)),
             #[cfg(target_os = "linux")]
             drivers: Arc::default(),
@@ -2352,6 +2388,7 @@ mod tests {
         reader.reads("spacenavd");
         let now = Instant::now();
         let mouse = SpaceMouse {
+            inactive: false,
             shared: Arc::clone(&reader.shared),
             drivers: Arc::clone(&reader.drivers),
             last_frame: now,
@@ -2405,6 +2442,7 @@ mod tests {
             app.home.open = false;
             let start = Instant::now();
             let mut mouse = SpaceMouse {
+                inactive: false,
                 shared: Arc::clone(&reader.shared),
                 drivers: Arc::clone(&reader.drivers),
                 last_frame: start,
@@ -2489,6 +2527,7 @@ mod tests {
         ctx.run_ui(egui::RawInput { focused: true, ..Default::default() }, |_| {}).textures_delta.clear();
         let shared = Arc::new(Mutex::new(Reading::new(Instant::now())));
         let mouse = SpaceMouse {
+            inactive: false,
             shared: Arc::clone(&shared),
             #[cfg(target_os = "linux")]
             drivers: Arc::default(),
@@ -2591,11 +2630,15 @@ mod tests {
             let reader = Running::start(driver, fake.clone());
             reader.reads("spacenavd");
             // Still not readable, over two waits: the daemon read goes on, one connection, a few probes.
+            let slept = std::time::Instant::now();
             std::thread::sleep(Duration::from_millis(700));
+            let waited = slept.elapsed();
             assert_eq!(reader.key().as_deref(), Some("spacenavd"), "{driver:?}");
             assert_eq!(fake.world().connects, 1, "{driver:?}: the daemon read was not restarted for a device that still cannot be read");
             let opens = fake.world().opens;
-            assert!(opens <= 4, "{driver:?}: {opens} tries in 700 ms with a 300 ms wait");
+            // A loaded machine can sleep far past 700 ms: bound the tries by the time that really passed.
+            let allowed = 4 + (waited.as_millis().saturating_sub(700) / 300) as u32;
+            assert!(opens <= allowed, "{driver:?}: {opens} tries in {waited:?} with a 300 ms wait");
             // The permission is fixed.
             fake.world().openable = true;
             reader.reads(&Source::Hid(Some(IDS)).key());
@@ -2633,6 +2676,7 @@ mod tests {
             }
             let now = Instant::now();
             let mut mouse = SpaceMouse {
+                inactive: false,
                 shared: Arc::clone(&reader.shared),
                 drivers: Arc::clone(&reader.drivers),
                 last_frame: now,

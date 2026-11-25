@@ -1,0 +1,200 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/396",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/577",
+ "test": "crates/kernel/src/tests.rs: loft_joined_onto_a_box_top_is_one_shell",
+ "summary": "A loft standing on a face must fuse into one solid (#396): a loft from a 12 mm circle on a 40 x 30 x 20 box's top (z = 20) to a hexagon of circumradius 4 at z = 35, joined to the box, came back as both shells side by side, touching on the disc. The loft's own volume has no closed form here, but the join's does: the disc lies inside the top face, so the union adds exactly the box, 24000 mm^3, to the loft. The check is the volume removed from the loft, -24000 (negative: the result is larger), and one region. Both operand orders. The test's overhanging variant (no closed form) is not ported.",
+ "cases": [
+  {
+   "name": "loft_on_box_top_box_first",
+   "note": "union(box, loft).",
+   "steps": [
+    {
+     "op": "box",
+     "id": "box",
+     "origin": [
+      -20,
+      -15,
+      0
+     ],
+     "size": [
+      40,
+      30,
+      20
+     ]
+    },
+    {
+     "op": "loft",
+     "id": "loft",
+     "sections": [
+      {
+       "profile": [
+        {
+         "kind": "circle",
+         "center": [
+          0,
+          0
+         ],
+         "radius": 6
+        }
+       ],
+       "origin": [
+        0,
+        0,
+        20
+       ]
+      },
+      {
+       "profile": [
+        {
+         "kind": "polygon",
+         "points": [
+          [
+           4.0,
+           0.0
+          ],
+          [
+           2.0000000000000004,
+           3.4641016151377544
+          ],
+          [
+           -1.9999999999999991,
+           3.464101615137755
+          ],
+          [
+           -4.0,
+           4.898587196589413e-16
+          ],
+          [
+           -2.0000000000000018,
+           -3.464101615137754
+          ],
+          [
+           1.9999999999999973,
+           -3.464101615137756
+          ]
+         ]
+        }
+       ],
+       "origin": [
+        0,
+        0,
+        35
+       ]
+      }
+     ]
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "box",
+     "b": "loft"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "removed": {
+     "from": "loft",
+     "value": -24000.0,
+     "tol": 0.0001,
+     "formula": "vol(loft) - (vol(loft) + 40*30*20): the union adds exactly the box"
+    }
+   }
+  },
+  {
+   "name": "loft_on_box_top_loft_first",
+   "note": "union(loft, box).",
+   "steps": [
+    {
+     "op": "box",
+     "id": "box",
+     "origin": [
+      -20,
+      -15,
+      0
+     ],
+     "size": [
+      40,
+      30,
+      20
+     ]
+    },
+    {
+     "op": "loft",
+     "id": "loft",
+     "sections": [
+      {
+       "profile": [
+        {
+         "kind": "circle",
+         "center": [
+          0,
+          0
+         ],
+         "radius": 6
+        }
+       ],
+       "origin": [
+        0,
+        0,
+        20
+       ]
+      },
+      {
+       "profile": [
+        {
+         "kind": "polygon",
+         "points": [
+          [
+           4.0,
+           0.0
+          ],
+          [
+           2.0000000000000004,
+           3.4641016151377544
+          ],
+          [
+           -1.9999999999999991,
+           3.464101615137755
+          ],
+          [
+           -4.0,
+           4.898587196589413e-16
+          ],
+          [
+           -2.0000000000000018,
+           -3.464101615137754
+          ],
+          [
+           1.9999999999999973,
+           -3.464101615137756
+          ]
+         ]
+        }
+       ],
+       "origin": [
+        0,
+        0,
+        35
+       ]
+      }
+     ]
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "loft",
+     "b": "box"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "removed": {
+     "from": "loft",
+     "value": -24000.0,
+     "tol": 0.0001,
+     "formula": "vol(loft) - (vol(loft) + 40*30*20): the union adds exactly the box"
+    }
+   }
+  }
+ ]
+}

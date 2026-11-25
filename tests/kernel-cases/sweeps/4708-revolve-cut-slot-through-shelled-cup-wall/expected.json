@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4708"
+ ],
+ "what": "a slot revolve-cut through the wall of a shelled cup (r 22.5, 2 mm walls) over 30 deg: the revolve cut (and the same cut as a combine) did nothing (synthetic: the report's cup also had a chamfer and a fillet)",
+ "source": "analytic",
+ "method": "cup pi 22.5^2 10 - pi 20.5^2 8; the slot's section (r 19..24, z 5..8) crosses the wall r 20.5..22.5: it removes (30/360) pi (22.5^2 - 20.5^2) 3",
+ "body_count": 1,
+ "volume_mm3": 5274.7341
+}

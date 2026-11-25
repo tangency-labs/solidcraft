@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1668",
+  "tangency-labs/solidcraft#1080"
+ ],
+ "what": "an R7 round of the outer top edge of a 2 mm wall alone: past the sharp inside corner it would cut through the wall into the hollow, opening a slit along it, so it is refused, naming the largest radius that fits",
+ "source": "analytic",
+ "method": "box 100x60x40 shelled outward 2 mm open at the bottom: the wall runs y 30..32, z 40..42 at the top edge (y, z) = (32, 42). The round's centre is at (32 - r, 42 - r); it removes what lies between the edge and its arc. The hollow's corner (30, 40) lies at sqrt2 (r - 2) from the centre: the arc uncovers it, and the section breaks into the hollow along its 100, where sqrt2 (r - 2) = r, r = 4 + 2 sqrt2 = 6.8284. Past that the wall would open (the owner's ruling of 2026-10-30: refused as too large, naming the largest that fits, 6.828).",
+ "outcome": "refused",
+ "refusal": "the largest radius that fits is 6.828 mm"
+}

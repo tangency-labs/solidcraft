@@ -1,0 +1,740 @@
+{
+ "cases": [
+  {
+   "name": "clone_ctor_raw_projected_gap1.5e-12_owns0",
+   "upstream_ref": "source/SMLib/src/SmProjectedCurve.cpp:76 (copy constructor: it copies m_cpCurve when m_bOwnsCurve is set and shares the pointer otherwise, so a borrowed copy keeps the base's raw knots and compares equal to the original, while an owned copy's Copy fixes its knots up)",
+   "inputs": {
+    "pc": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0.1,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.1,
+         2.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2.05,
+         -1.0,
+         1.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3.1,
+         -1.0,
+         1.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         4.2,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5.0,
+         0.5,
+         1.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         6.1,
+         0.0,
+         2.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         7.2,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.3,
+        0.5,
+        0.5000000000015,
+        0.7,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+       ],
+       "raw_knots": true
+      }
+     },
+     "point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "vec": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "ptype": 0,
+     "owns": 0
+    },
+    "op": "clone_ctor"
+   }
+  },
+  {
+   "name": "clone_ctor_raw_projected_gap1.5e-12_owns1",
+   "upstream_ref": "source/SMLib/src/SmProjectedCurve.cpp:76 (copy constructor: it copies m_cpCurve when m_bOwnsCurve is set and shares the pointer otherwise, so a borrowed copy keeps the base's raw knots and compares equal to the original, while an owned copy's Copy fixes its knots up)",
+   "inputs": {
+    "pc": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0.1,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.1,
+         2.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2.05,
+         -1.0,
+         1.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3.1,
+         -1.0,
+         1.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         4.2,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5.0,
+         0.5,
+         1.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         6.1,
+         0.0,
+         2.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         7.2,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.3,
+        0.5,
+        0.5000000000015,
+        0.7,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+       ],
+       "raw_knots": true
+      }
+     },
+     "point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "vec": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "ptype": 0,
+     "owns": 1
+    },
+    "op": "clone_ctor"
+   }
+  },
+  {
+   "name": "clone_ctor_raw_projected_gap1.5e-12_owns2",
+   "upstream_ref": "source/SMLib/src/SmProjectedCurve.cpp:76 (copy constructor: it copies m_cpCurve when m_bOwnsCurve is set and shares the pointer otherwise, so a borrowed copy keeps the base's raw knots and compares equal to the original, while an owned copy's Copy fixes its knots up)",
+   "inputs": {
+    "pc": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0.1,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.1,
+         2.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2.05,
+         -1.0,
+         1.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3.1,
+         -1.0,
+         1.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         4.2,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5.0,
+         0.5,
+         1.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         6.1,
+         0.0,
+         2.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         7.2,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.3,
+        0.5,
+        0.5000000000015,
+        0.7,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+       ],
+       "raw_knots": true
+      }
+     },
+     "point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "vec": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "ptype": 0,
+     "owns": 2
+    },
+    "op": "clone_ctor"
+   }
+  },
+  {
+   "name": "clone_ctor_raw_projected_gap1.9e-12_owns0",
+   "upstream_ref": "source/SMLib/src/SmProjectedCurve.cpp:76 (copy constructor: it copies m_cpCurve when m_bOwnsCurve is set and shares the pointer otherwise, so a borrowed copy keeps the base's raw knots and compares equal to the original, while an owned copy's Copy fixes its knots up)",
+   "inputs": {
+    "pc": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0.1,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.1,
+         2.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2.05,
+         -1.0,
+         1.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3.1,
+         -1.0,
+         1.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         4.2,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5.0,
+         0.5,
+         1.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         6.1,
+         0.0,
+         2.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         7.2,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.3,
+        0.5,
+        0.5000000000019,
+        0.7,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+       ],
+       "raw_knots": true
+      }
+     },
+     "point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "vec": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "ptype": 0,
+     "owns": 0
+    },
+    "op": "clone_ctor"
+   }
+  },
+  {
+   "name": "clone_ctor_raw_projected_gap1.9e-12_owns1",
+   "upstream_ref": "source/SMLib/src/SmProjectedCurve.cpp:76 (copy constructor: it copies m_cpCurve when m_bOwnsCurve is set and shares the pointer otherwise, so a borrowed copy keeps the base's raw knots and compares equal to the original, while an owned copy's Copy fixes its knots up)",
+   "inputs": {
+    "pc": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0.1,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.1,
+         2.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2.05,
+         -1.0,
+         1.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3.1,
+         -1.0,
+         1.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         4.2,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5.0,
+         0.5,
+         1.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         6.1,
+         0.0,
+         2.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         7.2,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.3,
+        0.5,
+        0.5000000000019,
+        0.7,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+       ],
+       "raw_knots": true
+      }
+     },
+     "point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "vec": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "ptype": 0,
+     "owns": 1
+    },
+    "op": "clone_ctor"
+   }
+  },
+  {
+   "name": "clone_ctor_raw_projected_gap1.9e-12_owns2",
+   "upstream_ref": "source/SMLib/src/SmProjectedCurve.cpp:76 (copy constructor: it copies m_cpCurve when m_bOwnsCurve is set and shares the pointer otherwise, so a borrowed copy keeps the base's raw knots and compares equal to the original, while an owned copy's Copy fixes its knots up)",
+   "inputs": {
+    "pc": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0.1,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.1,
+         2.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2.05,
+         -1.0,
+         1.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3.1,
+         -1.0,
+         1.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         4.2,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5.0,
+         0.5,
+         1.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         6.1,
+         0.0,
+         2.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         7.2,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.3,
+        0.5,
+        0.5000000000019,
+        0.7,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+       ],
+       "raw_knots": true
+      }
+     },
+     "point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "vec": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "ptype": 0,
+     "owns": 2
+    },
+    "op": "clone_ctor"
+   }
+  },
+  {
+   "name": "clone_ctor_raw_projected_ordinary_owns0",
+   "upstream_ref": "source/SMLib/src/SmProjectedCurve.cpp:76 (copy constructor: it copies m_cpCurve when m_bOwnsCurve is set and shares the pointer otherwise, so a borrowed copy keeps the base's raw knots and compares equal to the original, while an owned copy's Copy fixes its knots up)",
+   "inputs": {
+    "pc": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0.1,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.1,
+         2.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2.05,
+         -1.0,
+         1.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         3.1,
+         -1.0,
+         1.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         4.2,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         5.0,
+         0.5,
+         1.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         6.1,
+         0.0,
+         2.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         7.2,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.3,
+        0.5,
+        0.7,
+        0.9,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+       ],
+       "raw_knots": true
+      }
+     },
+     "point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "vec": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "ptype": 0,
+     "owns": 0
+    },
+    "op": "clone_ctor"
+   }
+  },
+  {
+   "name": "clone_ctor_hermite_owns0",
+   "upstream_ref": "source/SMLib/src/SmProjectedCurve.cpp:76 (a borrowed base curve is shared, no Copy call: the copy keeps the original's Hermite base and compares equal)",
+   "inputs": {
+    "pc": {
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "d1": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "p2": [
+        1.0,
+        1.0,
+        0.5
+       ],
+       "d2": [
+        0.0,
+        1.0,
+        0.0
+       ]
+      }
+     },
+     "point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "vec": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "ptype": 0,
+     "owns": 0
+    },
+    "op": "clone_ctor"
+   }
+  },
+  {
+   "name": "clone_ctor_hermite_owns1_rejected",
+   "upstream_ref": "source/SMLib/src/SmProjectedCurve.cpp:86 (the copy constructor calls m_cpCurve->Copy for an owned base and ignores SM_ERR; SmHermiteCurve has no Copy, so the copy keeps a null base curve: rejected, not a Clone result)",
+   "inputs": {
+    "pc": {
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "d1": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "p2": [
+        1.0,
+        1.0,
+        0.5
+       ],
+       "d2": [
+        0.0,
+        1.0,
+        0.0
+       ]
+      }
+     },
+     "point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "vec": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "ptype": 0,
+     "owns": 1
+    },
+    "op": "clone_ctor"
+   }
+  }
+ ]
+}

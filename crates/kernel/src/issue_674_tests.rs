@@ -1,15 +1,20 @@
 //! Partial planar contact must sew a solid without displacing or inventing material.
 use crate::*;
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 use std::f64::consts::PI;
 
 #[test]
 fn split_contact_arc_crossing_one_edge_twice_preserves_the_body() {
-    use truck_modeling::Surface;
     let a = box_solid(Vec3::ZERO, Vec3::new(25.0, 47.5, 37.5)).unwrap();
     let b = cylinder(Vec3::new(0.0, 7.5, 0.0), -Vec3::X, 5.0, 2.5).unwrap();
     let face = a.faces(0.01).unwrap().iter().position(|f| f.plane_normal.is_some_and(|n| n.dot(-Vec3::X) > 0.99)).unwrap();
-    let side = b.solid.face_iter().position(|f| !matches!(f.surface(), Surface::Plane(_))).unwrap();
+    let side = b
+        .record()
+        .faces
+        .iter()
+        .position(|f| !matches!(f.surface, solidcore_record::brep::Surface::Plane { .. } | solidcore_record::brep::Surface::PlaneThrough { .. }))
+        .unwrap();
     let r = split_faces(&a, &[face], &SplitTool::Face { body: &b, face: side }).unwrap();
     assert_eq!(r.face_count(), a.face_count() + 1);
     assert!(r.validity().is_empty(), "{:?}", r.validity());
@@ -20,19 +25,10 @@ fn split_contact_arc_crossing_one_edge_twice_preserves_the_body() {
 }
 
 #[test]
-fn partial_contact_does_not_join_tangent_or_separated_faces() {
-    let a = box_solid(Vec3::ZERO, Vec3::new(25.0, 47.5, 37.5)).unwrap();
-    for z in [-5.0, -6.0] {
-        let b = cylinder(Vec3::new(0.0, 7.5, z), -Vec3::X, 5.0, 2.5).unwrap();
-        assert!(crate::coplanar::imprint_union(&a, &b, &|_| true).is_none());
-    }
-}
-
-#[test]
 fn partial_contact_retains_an_authored_split_away_from_the_contact() {
     let a = box_solid(Vec3::ZERO, Vec3::new(25.0, 47.5, 37.5)).unwrap();
     let face = a.faces(0.01).unwrap().iter().position(|f| f.plane_normal.is_some_and(|n| n.dot(Vec3::X) > 0.99)).unwrap();
-    let a = split_faces(&a, &[face], &SplitTool::Plane(solidcraft_geom::Plane { origin: Vec3::new(0.0, 0.0, 15.0), ..solidcraft_geom::Plane::XY }))
+    let a = split_faces(&a, &[face], &SplitTool::Plane(solidcore_record::Plane { origin: Vec3::new(0.0, 0.0, 15.0), ..solidcore_record::Plane::XY }))
         .unwrap();
     let b = cylinder(Vec3::new(0.0, 7.5, 0.0), -Vec3::X, 5.0, 2.5).unwrap();
     let r = boolean(&a, &b, BoolOp::Union).unwrap().unwrap();

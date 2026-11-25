@@ -1,6 +1,7 @@
+use solidcraft_geom::prelude::*;
 use std::f64::consts::PI;
 
-use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 
 use crate::*;
 
@@ -31,7 +32,9 @@ fn cylinder_measures_match_analytic() {
     let a = 2.0 * PI * 225.0 + 2.0 * PI * 15.0 * 50.0;
     assert!(rel(m.volume, v) < 5e-4, "{} vs {v}", m.volume);
     assert!(rel(m.area, a) < 5e-4, "{} vs {a}", m.area);
-    assert_eq!((m.merged.faces, m.merged.edges, m.merged.vertices), (3, 2, 2), "{:?}", m.merged);
+    // Two closed circles and the side's seam (the ladder's count: each whole curve once, and each
+    // cylinder's seam); a vertex on each circle.
+    assert_eq!((m.merged.faces, m.merged.edges, m.merged.vertices), (3, 3, 2), "{:?}", m.merged);
     assert_eq!(m.merged.face_types.get("cylinder"), Some(&1));
 }
 
@@ -65,7 +68,7 @@ fn through_cut_preserves_a_larger_blind_pocket() {
         let m = measure(&result).unwrap();
         assert!(rel(m.volume, expected) < 5e-4, "reverse={reverse}: {} vs {expected}", m.volume);
         assert_eq!(m.merged.faces, 9);
-        assert!(!result.tessellate(0.01).unwrap().contains(Vec3::new(10.0, 0.0, 3.0)));
+        assert!(!result.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().contains(Vec3::new(10.0, 0.0, 3.0)));
     }
 }
 
@@ -151,6 +154,33 @@ fn revolve_adjacent_profiles_on_the_axis() {
     assert!(rel(measure(&cut).unwrap().volume, want) < 1e-3, "{} vs {want}", measure(&cut).unwrap().volume);
 }
 
+/// #17516: a plate with a spline dome drawn against the axis (a line up the axis, a short line
+/// to the spline's end, the spline down to the rim), as the sketch solver leaves it: the
+/// spline's end and the short line's top 3.8e-9 mm past the axis. That is on the axis, so the
+/// whole turn builds, with the volume pi times the integral of x^2 dy round the profile. The
+/// same profile with the spline's end 1 mm past the axis crosses it and is refused before the
+/// kernel builds anything.
+#[test]
+fn revolve_a_spline_dome_ending_a_hair_past_the_axis() {
+    let profile = |x: f64| Region2 {
+        outer: Loop2 {
+            segs: vec![
+                Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(50.0, 0.0) },
+                Seg2::Line { a: Vec2::new(50.0, 0.0), b: Vec2::new(50.0, 2.4) },
+                Seg2::Cubic { p0: Vec2::new(50.0, 2.4), p1: Vec2::new(35.0, 2.4), p2: Vec2::new(16.0, 8.5), p3: Vec2::new(x, 8.5) },
+                Seg2::Line { a: Vec2::new(x, 8.5), b: Vec2::new(0.0, 2.4) },
+                Seg2::Line { a: Vec2::new(0.0, 2.4), b: Vec2::new(0.0, 0.0) },
+            ],
+        },
+        holes: vec![],
+    };
+    let b = revolve(&Plane::XZ, &[profile(-3.8e-9)], Vec2::ZERO, Vec2::Y, 2.0 * PI).unwrap().pop().unwrap();
+    let volume = measure(&b).unwrap().volume;
+    assert!(rel(volume, 33608.582428514645) < 1e-7, "{volume}");
+    let crossing = revolve(&Plane::XZ, &[profile(-1.0)], Vec2::ZERO, Vec2::Y, 2.0 * PI).unwrap_err().to_string();
+    assert!(crossing.contains("the profile crosses the revolve axis"), "{crossing}");
+}
+
 #[test]
 fn chamfer_and_step() {
     let b = box_solid(Vec3::ZERO, Vec3::new(20.0, 20.0, 20.0)).unwrap();
@@ -159,6 +189,43 @@ fn chamfer_and_step() {
     let s = step_export(&[&c], "SolidCraft").unwrap();
     assert!(s.starts_with("ISO-10303-21;"));
     assert!(s.contains("MANIFOLD_SOLID_BREP") || s.contains("CLOSED_SHELL"));
+}
+
+/// A round of a cylinder's rim is the exact torus it lies on, and STEP says so: a
+/// TOROIDAL_SURFACE, not a rational B-spline net, whose bounding box and volume other readers
+/// get wrong. Pappus: the round takes off 2 pi (R - r (10 - 3 pi) / (3 (4 - pi))) (1 - pi / 4) r^2.
+#[test]
+fn a_cylinder_rim_round_goes_to_step_as_its_torus() {
+    let (big, height, r) = (10.0, 8.0, 2.5);
+    let puck = cylinder(Vec3::ZERO, Vec3::Z, big, height).unwrap();
+    let round = fillet(&puck, &[Vec3::new(0.0, big, height)], r).unwrap();
+    let text = step_export(&[&round], "puck").unwrap();
+    assert_eq!(text.matches("TOROIDAL_SURFACE").count(), 1, "{text}");
+    assert_eq!(text.matches("B_SPLINE_SURFACE").count(), 0, "{text}");
+    let back = step_import(&text).unwrap().bodies.remove(0).body;
+    let (a, b) = (measure(&round).unwrap().volume, measure(&back).unwrap().volume);
+    let pappus = PI * big * big * height - 2.0 * PI * (big - r * (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI))) * (1.0 - PI / 4.0) * r * r;
+    assert!(rel(a, pappus) < 1e-7 && rel(b, pappus) < 1e-7, "{a} {b} {pappus}");
+}
+/// A small round of a cylinder's rim builds whether the cylinder is the primitive (its seam at an
+/// odd angle) or an extruded circle (#16748: the primitive's was refused as larger than its faces
+/// allow, at any radius up to about a twentieth of the cylinder's). Pappus: the round takes off
+/// 2 pi (R - r (10 - 3 pi) / (3 (4 - pi))) (1 - pi / 4) r^2.
+#[test]
+fn a_small_rim_round_builds_on_a_primitive_cylinder_as_on_an_extruded_one() {
+    let (big, height) = (10.0, 20.0);
+    let primitive = cylinder(Vec3::ZERO, Vec3::Z, big, height).unwrap();
+    let circle = Region2 { outer: Loop2::circle(Vec2::ZERO, big), holes: vec![] };
+    let extruded = extrude(&Plane::XY, &[circle], 0.0, height).unwrap().pop().unwrap();
+    let rim = Vec3::new(7.0711, 7.0711, height);
+    // Pappus' closed form, pi R^2 h - 2 pi (R - r (10 - 3 pi) / (3 (4 - pi))) (1 - pi / 4) r^2.
+    for (r, want) in [(0.1, 6283.050770054479), (0.5, 6279.851997607429)] {
+        for (name, body) in [("primitive", &primitive), ("extruded", &extruded)] {
+            let round = fillet(body, &[rim], r).unwrap_or_else(|e| panic!("{name} cylinder, round {r}: {e}"));
+            let volume = measure(&round).unwrap().volume;
+            assert!(rel(volume, want) < 1e-7, "{name} cylinder, round {r}: {volume} vs {want}");
+        }
+    }
 }
 
 #[test]
@@ -286,40 +353,10 @@ fn fillet_ending_across_two_faces() {
 }
 
 #[test]
-fn loop_fillet_as_tall_as_its_wall_consumes_it() {
-    // The removed cross-section (a square of side r less a quarter disc) and its centroid's
-    // distance from the wall: r(10 − 3π) / (3(4 − π)).
-    let spandrel = |r: f64| ((1.0 - PI / 4.0) * r * r, r * (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI)));
-    // #190: a disc 13 in radius and 2 high, its top circle rounded by 2. Pappus for the ring.
-    let disc = cylinder(Vec3::ZERO, Vec3::Z, 13.0, 2.0).unwrap();
-    let f = fillet(&disc, &[Vec3::new(0.0, 13.0, 2.0), Vec3::new(0.0, -13.0, 2.0)], 2.0).unwrap();
-    let (a, c) = spandrel(2.0);
-    let want = PI * 169.0 * 2.0 - a * 2.0 * PI * (13.0 - c);
-    let m = measure(&f).unwrap();
-    assert!(rel(m.volume, want) < 2e-4, "{} vs {want}", m.volume);
-    // Top, round and bottom: the wall is gone.
-    assert_eq!(m.merged.faces, 3, "{:?}", m.merged);
-    assert!(f.validity().is_empty(), "{:?}", f.validity());
-    // A 40 x 30 x 5 plate, its whole top outline rounded by 5 (mitred at the corners).
-    let plate = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 5.0)).unwrap();
-    let top = [Vec3::new(20.0, 0.0, 5.0), Vec3::new(40.0, 15.0, 5.0), Vec3::new(20.0, 30.0, 5.0), Vec3::new(0.0, 15.0, 5.0)];
-    let f = fillet(&plate, &top, 5.0).unwrap();
-    let (a, c) = spandrel(5.0);
-    let want = 6000.0 - a * 2.0 * ((40.0 - 2.0 * c) + (30.0 - 2.0 * c));
-    let m = measure(&f).unwrap();
-    assert!(rel(m.volume, want) < 2e-4, "{} vs {want}", m.volume);
-    assert!(f.validity().is_empty(), "{:?}", f.validity());
-    // Taller than the wall: still refused, the body unchanged.
-    for r in [2.0 + 1e-3, 2.5] {
-        let e = fillet(&disc, &[Vec3::new(0.0, 13.0, 2.0), Vec3::new(0.0, -13.0, 2.0)], r).unwrap_err();
-        assert!(e.to_string().contains("taller than the walls"), "{r}: {e}");
-    }
-}
-
-#[test]
 fn fillet_consuming_a_side_face_makes_a_full_round() {
     // 14 x 6 x 10: r = 3 on the four vertical edges uses up both 6 mm end faces (#199).
     let b = box_solid(Vec3::new(14.0, 0.0, 0.0), Vec3::new(28.0, 6.0, 10.0)).unwrap();
+    let before = measure(&b).unwrap().volume;
     let mids = [Vec3::new(14.0, 0.0, 5.0), Vec3::new(28.0, 0.0, 5.0), Vec3::new(14.0, 6.0, 5.0), Vec3::new(28.0, 6.0, 5.0)];
     let full = 840.0 - (4.0 - PI) * 9.0 * 10.0;
     for order in [mids.to_vec(), mids.iter().rev().copied().collect()] {
@@ -341,12 +378,13 @@ fn fillet_consuming_a_side_face_makes_a_full_round() {
     let c = fillet(&post, &corners, 3.0).unwrap();
     assert!(rel(measure(&c).unwrap().volume, PI * 9.0 * 10.0) < 2e-4, "{}", measure(&c).unwrap().volume);
     assert!(c.validity().is_empty());
-    // Past the limit there is no face left to consume: still refused, the body unchanged.
+    // Past the limit the two rounds on each 6 mm end would cross: still refused as too large
+    // (SMLib's NO_ROOM), the body unchanged.
     for r in [3.0 + 1e-3, 3.5] {
         let e = fillet(&b, &mids, r).unwrap_err();
-        assert!(e.to_string().contains("larger than the neighbouring faces"), "{r}: {e}");
+        assert!(matches!(e, KernelError::TooLarge(_)), "{r}: {e}");
     }
-    assert_eq!(measure(&b).unwrap().volume, 840.0);
+    assert_eq!(measure(&b).unwrap().volume, before);
 }
 
 #[test]
@@ -357,29 +395,14 @@ fn fillet_max_finds_the_largest_radius_that_works() {
     let b = box_solid(Vec3::new(14.0, 0.0, 0.0), Vec3::new(28.0, 6.0, 10.0)).unwrap();
     let mids = [Vec3::new(14.0, 0.0, 5.0), Vec3::new(28.0, 0.0, 5.0), Vec3::new(14.0, 6.0, 5.0), Vec3::new(28.0, 6.0, 5.0)];
     assert!(too_large(&b, &mids, 3.5));
-    let (r, body) = fillet_max(&b, &mids, 3.5).unwrap();
+    let (r, body) = fillet_max(&b, &mids, 3.5, FilletTurn::Mitre).unwrap().unwrap();
     assert_eq!(r, 3.0);
     assert!(rel(measure(&body).unwrap().volume, 840.0 - (4.0 - PI) * 90.0) < 2e-4);
-    // A 2 mm disc's top edge: up to 2 (the wall used up).
-    let disc = cylinder(Vec3::ZERO, Vec3::Z, 13.0, 2.0).unwrap();
-    let top = [Vec3::new(0.0, 13.0, 2.0), Vec3::new(0.0, -13.0, 2.0)];
-    assert!(too_large(&disc, &top, 2.5));
-    assert_eq!(fillet_max(&disc, &top, 2.5).map(|x| x.0), Some(2.0));
-    // Walls of different heights: at the shortest one's height only that wall would be used up,
-    // which is refused, so the largest radius is just below it (to the search's 3 digits).
-    let notched = boolean(
-        &box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 10.0)).unwrap(),
-        &box_solid(Vec3::new(35.0, -1.0, -1.0), Vec3::new(41.0, 5.0, 3.0)).unwrap(),
-        BoolOp::Cut,
-    )
-    .unwrap()
-    .unwrap();
-    let outline = [Vec3::new(20.0, 0.0, 10.0), Vec3::new(40.0, 15.0, 10.0), Vec3::new(20.0, 30.0, 10.0), Vec3::new(0.0, 15.0, 10.0)];
-    assert!(too_large(&notched, &outline, 8.0));
-    let (r, _) = fillet_max(&notched, &outline, 8.0).unwrap();
-    assert!((r - 6.999).abs() < 1e-9, "{r}");
-    // No edge there: no radius.
-    assert!(fillet_max(&b, &[Vec3::new(500.0, 0.0, 5.0)], 1.0).is_none());
+    // No edge there: the fillet's own error, not a smaller radius (only a refusal as too large
+    // narrows the search).
+    let e = fillet(&b, &[Vec3::new(500.0, 0.0, 5.0)], 1.0).unwrap_err();
+    assert!(!matches!(e, KernelError::TooLarge(_)), "{e}");
+    assert_eq!(fillet_max(&b, &[Vec3::new(500.0, 0.0, 5.0)], 1.0, FilletTurn::Mitre).unwrap_err().to_string(), e.to_string());
 }
 
 /// Edges that share no face get their own largest radius: a 2 mm fin's top edge takes at most
@@ -396,43 +419,61 @@ fn fillet_max_each_reduces_only_where_the_radius_does_not_fit() {
     .unwrap()
     .unwrap();
     let edges = [Vec3::new(21.0, 15.0, 30.0), Vec3::new(40.0, 0.0, 10.0)];
-    assert!(matches!(fillet(&body, &edges, 4.0), Err(KernelError::TooLarge(_))));
-    let (one, _) = fillet_max(&body, &edges, 4.0).unwrap();
-    let (radii, b) = fillet_max_each(&body, &edges, 4.0).unwrap();
-    assert_eq!(radii.get(1), Some(&4.0), "{radii:?}");
-    let fin_r = radii.first().copied().unwrap();
-    assert!(fin_r < 4.0 && (fin_r - one).abs() < 1e-9, "{radii:?}, one radius {one}");
+    // R4 on the fin's top edge runs over the fin's 2 mm top, past its far edge (a cliff): it is
+    // cut as if the top went on, so both edges take 4. The fin's section loses the 4 x 4 square
+    // at its edge less the quarter disc about (17, 26), inside the fin (x >= 19): 2 x 4 less the
+    // disc's part, in closed form; the corner's round (1 − π/4)·16 along 20.
+    let both = fillet(&body, &edges, 4.0).unwrap();
+    let (radii, b) = fillet_max_each(&body, &edges, 4.0, FilletTurn::Mitre).unwrap().unwrap();
+    assert_eq!(radii, vec![4.0, 4.0], "{radii:?}");
     assert!(b.validity().is_empty(), "{:?}", b.validity());
-    // Each round takes (1 − π/4)·r² along its edge: the fin's 30 long, the corner's 20.
-    let removed = (1.0 - PI / 4.0) * (fin_r * fin_r * 30.0 + 16.0 * 20.0);
-    assert!(rel(measure(&b).unwrap().volume, block + fin - removed) < 2e-4);
+    let disc = |a: f64| 0.5 * (a * (16.0 - a * a).max(0.0).sqrt() + 16.0 * (a / 4.0).asin());
+    let fin_section = 2.0 * 4.0 - (disc(4.0) - disc(2.0));
+    let removed = fin_section * 30.0 + (1.0 - PI / 4.0) * 16.0 * 20.0;
+    assert!(rel(measure(&both).unwrap().volume, block + fin - removed) < 1e-6, "{}", measure(&both).unwrap().volume);
+    assert!(rel(measure(&b).unwrap().volume, block + fin - removed) < 1e-6);
     // The post's four edges limit each other: one radius, as `fillet_max`.
     let post = box_solid(Vec3::new(14.0, 0.0, 0.0), Vec3::new(28.0, 6.0, 10.0)).unwrap();
     let mids = [Vec3::new(14.0, 0.0, 5.0), Vec3::new(28.0, 0.0, 5.0), Vec3::new(14.0, 6.0, 5.0), Vec3::new(28.0, 6.0, 5.0)];
-    assert_eq!(fillet_max_each(&post, &mids, 3.5).map(|x| x.0), Some(vec![3.0; 4]));
+    assert_eq!(fillet_max_each(&post, &mids, 3.5, FilletTurn::Mitre).unwrap().map(|x| x.0), Some(vec![3.0; 4]));
 }
 
-/// A corner's rounds too large for its faces are refused as too large, so a fit can reduce
-/// them, also where only the corner build finds it (the edge-by-edge blend failing otherwise).
+/// R21 on an edge of a 20 mm cube overflows on its tangent sides, which a round may, taking all
+/// of both faces beside the edge: its circle about (y, z) = (21, 21) meets them only at 21, past
+/// the cube. What is left is the square [0, 20]² inside that circle, with u = 21 − y,
+/// ∫₁^√440 (√(441 − u²) − 1) du, along 20: 6107.529370.
+fn round_wider_than_its_faces() -> f64 {
+    let f = |u: f64| 0.5 * (u * (441.0 - u * u).sqrt() + 441.0 * (u / 21.0).asin());
+    let w = 440f64.sqrt();
+    20.0 * (f(w) - f(1.0) - (w - 1.0))
+}
+
 #[test]
-fn corner_rounds_larger_than_their_faces_are_too_large() {
-    let (l, eps) = (20.0, 1e-9);
-    let b = box_solid(Vec3::ZERO, Vec3::new(l, l, l)).unwrap();
+fn a_round_wider_than_its_faces_overflows_onto_its_tangent_sides() {
+    let want = round_wider_than_its_faces();
+    assert!((want - 6107.529370).abs() < 1e-6, "{want}");
+    let b = box_solid(Vec3::ZERO, Vec3::new(20.0, 20.0, 20.0)).unwrap();
+    let out = fillet(&b, &[Vec3::new(10.0, 0.0, 0.0)], 21.0).unwrap();
+    assert!(out.validity().is_empty(), "{:?}", out.validity());
+    assert!(rel(measure(&out).unwrap().volume, want) < 1e-9, "{} vs {want}", measure(&out).unwrap().volume);
+}
+
+/// A corner's rounds with a radius per edge, one wider than its faces: R21 with R5 on the other
+/// two edges at the corner. The R21 overflows, so it goes first; it takes both faces beside its
+/// edge, and with them the R5 edges, which lie on them and are gone: the body is R21's alone
+/// ([`a_round_wider_than_its_faces_overflows_onto_its_tangent_sides`]). (The same corner at one
+/// radius as wide as the faces, and its fit, are the rig's
+/// fillets/477-fillet-cube-corner-rounds-as-wide-as-faces-* cases; no command takes a radius per
+/// edge.)
+#[test]
+fn a_corner_round_wider_than_its_faces_overflows_and_takes_the_corners_other_edges() {
+    let b = box_solid(Vec3::ZERO, Vec3::new(20.0, 20.0, 20.0)).unwrap();
     let corner = [Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0), Vec3::new(0.0, 0.0, 10.0)];
-    // As wide as the faces: the first edge's round uses up its neighbour, then the edge-by-edge
-    // blend can't find it; the corner build is what says the radius is too large.
-    let e = fillet(&b, &corner, l).unwrap_err();
-    assert!(matches!(e, KernelError::TooLarge(_)), "{e}");
-    let (r, body) = fillet_max(&b, &corner, l).unwrap();
-    assert!((r - 19.99).abs() < eps, "{r}");
-    assert!(body.validity().is_empty(), "{:?}", body.validity());
-    // Three rounds along the edges past the corner cube, and the cube less its sphere octant.
-    let removed = 3.0 * (1.0 - PI / 4.0) * r * r * (l - r) + r * r * r * (1.0 - PI / 6.0);
-    assert!(rel(measure(&body).unwrap().volume, l * l * l - removed) < 2e-4);
-    // Different radii per edge, one wider than its faces.
     let sel: Vec<(Vec3, f64)> = corner.iter().copied().zip([21.0, 5.0, 5.0]).collect();
-    let e = crate::blend_corner::fillet_radii(&b, &sel).unwrap_err();
-    assert!(matches!(e, KernelError::TooLarge(_)), "{e}");
+    let out = crate::blend_corner::fillet_radii(&b, &sel).unwrap();
+    assert!(out.validity().is_empty(), "{:?}", out.validity());
+    let want = round_wider_than_its_faces();
+    assert!(rel(measure(&out).unwrap().volume, want) < 1e-9, "{} vs {want}", measure(&out).unwrap().volume);
 }
 
 #[test]
@@ -442,7 +483,7 @@ fn tapered_extrudes() {
         outer: Loop2::polygon(&[Vec2::new(-20.0, -20.0), Vec2::new(20.0, -20.0), Vec2::new(20.0, 20.0), Vec2::new(-20.0, 20.0)]),
         holes: vec![],
     };
-    let b = extrude_tapered(&Plane::XY, &sq, 30.0, 1.0, 10f64.to_radians()).unwrap();
+    let b = extrude_tapered(&Plane::XY, &sq, 30.0, 1.0, 10f64.to_radians(), crate::DraftCorner::default()).unwrap();
     let top = 40.0 + 2.0 * 30.0 * 10f64.to_radians().tan();
     let v = 30.0 / 3.0 * (1600.0 + top * top + 40.0 * top);
     let m = measure(&b).unwrap();
@@ -450,17 +491,34 @@ fn tapered_extrudes() {
     assert_eq!(m.merged.faces, 6);
     // Inward taper on a circle (a cone frustum), downward.
     let c = Region2 { outer: Loop2::circle(Vec2::ZERO, 10.0), holes: vec![] };
-    let b = extrude_tapered(&Plane::XY, &c, 10.0, -1.0, -20f64.to_radians()).unwrap();
+    let b = extrude_tapered(&Plane::XY, &c, 10.0, -1.0, -20f64.to_radians(), crate::DraftCorner::default()).unwrap();
     let r2 = 10.0 - 10.0 * 20f64.to_radians().tan();
     let v = PI * 10.0 / 3.0 * (100.0 + r2 * r2 + 10.0 * r2);
     let m = measure(&b).unwrap();
     assert!(rel(m.volume, v) < 5e-4, "{} vs {v}", m.volume);
     assert!(m.bbox.max.z < 1e-6 && m.bbox.min.z > -10.0 - 1e-6, "{:?}", m.bbox);
-    assert!(extrude_tapered(&Plane::XY, &c, 10.0, 1.0, -60f64.to_radians()).is_err(), "closes the profile");
+    assert!(extrude_tapered(&Plane::XY, &c, 10.0, 1.0, -60f64.to_radians(), crate::DraftCorner::default()).is_err(), "closes the profile");
+    // The square with a 10 × 10 square hole, 30 up, 5° inward: every wall leans in toward the
+    // material's outside, so the outer frustum narrows and the hole's widens; the solid is the
+    // one frustum less the other, with each wall a face of its own (four out, four in, two caps).
+    let t = 5f64.to_radians().tan();
+    let hole = Loop2::polygon(&[Vec2::new(-5.0, -5.0), Vec2::new(-5.0, 5.0), Vec2::new(5.0, 5.0), Vec2::new(5.0, -5.0)]);
+    let ring = Region2 { outer: sq.outer.clone(), holes: vec![hole] };
+    let b = extrude_tapered(&Plane::XY, &ring, 30.0, 1.0, -5f64.to_radians(), crate::DraftCorner::default()).unwrap();
+    let frustum = |a0: f64, a1: f64| 30.0 / 3.0 * (a0 * a0 + a1 * a1 + a0 * a1);
+    let v = frustum(40.0, 40.0 - 60.0 * t) - frustum(10.0, 10.0 + 60.0 * t);
+    let m = measure(&b).unwrap();
+    assert!(rel(m.volume, v) < 1e-6, "{} vs {v}", m.volume);
+    assert_eq!(m.merged.faces, 10);
+    // At 30° the hole would grow past the outer wall: refused, saying why.
+    let e = extrude_tapered(&Plane::XY, &ring, 30.0, 1.0, -30f64.to_radians(), crate::DraftCorner::default()).unwrap_err();
+    assert!(e.to_string().contains("hole"), "{e}");
 }
 
 /// A slot (two lines and two half-circles, tangent) tapered inward: every edge moves in by
-/// d = z · tan 8°, so A(d) = A₀ − P·d + π·d² (#546). An arc meeting a line at a corner is refused.
+/// d = z · tan 8°, so A(d) = A₀ − P·d + π·d² (#546). A quarter disc, its arc meeting the lines at
+/// corners, tapered outward: each wall continues as itself, so the section at d is the disc of
+/// radius r + d over x ≥ −d, y ≥ −d.
 #[test]
 fn tapered_extrude_of_lines_and_arcs() {
     let (r, l, h, a) = (5.0, 20.0, 12.0, 8f64.to_radians());
@@ -472,7 +530,7 @@ fn tapered_extrude_of_lines_and_arcs() {
             Seg2::Arc { center: Vec2::ZERO, radius: r, start: PI / 2.0, sweep: PI },
         ],
     };
-    let b = extrude_tapered(&Plane::XY, &Region2 { outer: slot, holes: vec![] }, h, 1.0, -a).unwrap();
+    let b = extrude_tapered(&Plane::XY, &Region2 { outer: slot, holes: vec![] }, h, 1.0, -a, crate::DraftCorner::default()).unwrap();
     let (a0, p, t) = (2.0 * r * l + PI * r * r, 2.0 * l + 2.0 * PI * r, a.tan());
     let v = a0 * h - p * t * h * h / 2.0 + PI * t * t * h.powi(3) / 3.0;
     let m = measure(&b).unwrap();
@@ -486,8 +544,34 @@ fn tapered_extrude_of_lines_and_arcs() {
             Seg2::Line { a: Vec2::new(0.0, r), b: Vec2::ZERO },
         ],
     };
-    let e = extrude_tapered(&Plane::XY, &Region2 { outer: quarter, holes: vec![] }, h, 1.0, a).unwrap_err();
-    assert!(e.to_string().contains("arc meets another edge at a corner"), "{e}");
+    let b = extrude_tapered(&Plane::XY, &Region2 { outer: quarter, holes: vec![] }, h, 1.0, a, crate::DraftCorner::default()).unwrap();
+    // The section's area: under the circle of radius R = r + d down to y = −d from x = −d to
+    // x₁, where the circle meets y = −d, then the whole circle's width out to x = R;
+    // F(x) = ∫ √(R² − x²) dx.
+    let section = |d: f64| {
+        let big = r + d;
+        let f = |x: f64| 0.5 * (x * (big * big - x * x).max(0.0).sqrt() + big * big * (x / big).clamp(-1.0, 1.0).asin());
+        let x1 = (big * big - d * d).sqrt();
+        f(x1) - f(-d) + d * (x1 + d) + 2.0 * (f(big) - f(x1))
+    };
+    // Gauss–Legendre on 8 nodes over each of 16 pieces of the height: the area is smooth in d.
+    let (nodes, weights) = (
+        [0.183_434_642_495_649_8, 0.525_532_409_916_329, 0.796_666_477_413_626_7, 0.960_289_856_497_536_3],
+        [0.362_683_783_378_362, 0.313_706_645_877_887_3, 0.222_381_034_453_374_5, 0.101_228_536_290_376_3],
+    );
+    let pieces = 16;
+    let v: f64 = (0..pieces)
+        .map(|k| {
+            let (z0, dz) = (k as f64 * h / pieces as f64, h / pieces as f64);
+            let mid = z0 + 0.5 * dz;
+            nodes.iter().zip(weights).map(|(x, w)| w * (section((mid - 0.5 * dz * x) * t) + section((mid + 0.5 * dz * x) * t))).sum::<f64>()
+                * 0.5
+                * dz
+        })
+        .sum();
+    let m = measure(&b).unwrap();
+    assert!(rel(m.volume, v) < 1e-6, "quarter disc: {} vs {v}", m.volume);
+    assert_eq!(m.merged.faces, 5, "quarter disc: bottom, top, two flat walls and the cone");
 }
 
 /// A circle with a lobe on each side (four arcs of three circles, meeting at corners: the outline of
@@ -511,7 +595,7 @@ fn tapered_extrude_of_arcs_meeting_at_corners() {
             Seg2::Arc { center: Vec2::new(c, 0.0), radius: w0, start: at(c, x, -y), sweep: 2.0 * at(c, x, y) },
         ],
     };
-    let b = extrude_tapered(&Plane::XY, &Region2 { outer: lobed, holes: vec![] }, h, -1.0, -a).unwrap();
+    let b = extrude_tapered(&Plane::XY, &Region2 { outer: lobed, holes: vec![] }, h, -1.0, -a, crate::DraftCorner::default()).unwrap();
     // Union of the circle and two lobes: the circle plus each lobe less its lens with the circle.
     let area = |d: f64| {
         let (r, w) = (r0 - d, w0 - d);
@@ -543,7 +627,7 @@ fn tapered_extrude_of_conics() {
             Seg2::Conic { a: p(0.0, -r), apex: p(r, -r), b: p(r, 0.0), w },
         ],
     };
-    let b = extrude_tapered(&Plane::XY, &Region2 { outer: disc, holes: vec![] }, h, 1.0, -a).unwrap();
+    let b = extrude_tapered(&Plane::XY, &Region2 { outer: disc, holes: vec![] }, h, 1.0, -a, crate::DraftCorner::default()).unwrap();
     let r1 = r - h * a.tan();
     let v = PI * h / 3.0 * (r * r + r1 * r1 + r * r1);
     let m = measure(&b).unwrap();
@@ -569,62 +653,54 @@ fn tapered_extrude_of_cubics_is_close_to_the_true_offset() {
         ],
     };
     let (area, perimeter) = (disc.signed_area().abs(), disc.segs.iter().map(|s| s.length()).sum::<f64>());
-    let b = extrude_tapered(&Plane::XY, &Region2 { outer: disc, holes: vec![] }, h, 1.0, -a).unwrap();
+    let b = extrude_tapered(&Plane::XY, &Region2 { outer: disc, holes: vec![] }, h, 1.0, -a, crate::DraftCorner::default()).unwrap();
     let t = a.tan();
     let v = area * h - perimeter * t * h * h / 2.0 + PI * t * t * h.powi(3) / 3.0;
     let m = measure(&b).unwrap();
     assert!(rel(m.volume, v) < 5e-4, "{} vs {v}", m.volume);
 }
 
-/// An S-shaped cubic (one curve turning both ways) has no moved cubic close to its offset: it is
-/// cut into pieces until each piece's moved curve stays within 2 % of the offset of the true
-/// one (or 10 µm), both ways.
-#[test]
-fn a_tapered_s_curve_is_cut_into_pieces_that_follow_its_offset() {
-    let s_curve = Seg2::Cubic { p0: Vec2::new(0.0, 0.0), p1: Vec2::new(5.0, 10.0), p2: Vec2::new(10.0, -10.0), p3: Vec2::new(15.0, 0.0) };
-    let d = 0.5;
-    assert!(crate::build::offset_error(&s_curve, d).unwrap() > 0.05 * d, "one piece is far off");
-    let lp = Loop2 {
-        segs: vec![
-            s_curve,
-            Seg2::Line { a: Vec2::new(15.0, 0.0), b: Vec2::new(15.0, -20.0) },
-            Seg2::Line { a: Vec2::new(15.0, -20.0), b: Vec2::new(0.0, -20.0) },
-            Seg2::Line { a: Vec2::new(0.0, -20.0), b: Vec2::new(0.0, 0.0) },
-        ],
-    };
-    let (cut, from) = crate::build::offset_splits(&lp, d);
-    let pieces: Vec<&Seg2> = cut.segs.iter().zip(&from).filter(|(_, i)| **i == 0).map(|(s, _)| s).collect();
-    assert!(pieces.len() > 1 && from.iter().filter(|i| **i > 0).count() == 3, "{} pieces", pieces.len());
-    for p in pieces {
-        for d in [d, -d] {
-            let e = crate::build::offset_error(p, d).unwrap();
-            assert!(e <= crate::build::offset_tolerance(d) + 1e-9, "{e}");
-        }
-    }
-}
-
-/// A wedge whose tip is a flat line far shorter than the taper moves its sides in: the tip line
-/// goes, the two long sides meet, and its side is the flat triangle up to there. The solid is a
-/// prismatoid, its volume h/6 · (A₀ + 4·A_mid + A₁).
+/// A wedge whose tip is a flat line far shorter than the taper moves its sides in: every wall,
+/// the tip's too, leans by the taper, so the tip's wall is a triangle that closes where the two
+/// long sides meet across it (z* ≈ 0.126 of h = 2), and above that the long sides meet each
+/// other along a ridge. The section at height z is the profile's lines moved in by z·tan(a): a
+/// quadrilateral below z*, a triangle above, each with an area quadratic in z, so the volume is
+/// exact as Simpson's rule on each of the two pieces.
 #[test]
 fn tapered_extrude_swallows_a_short_tip() {
     let (h, a) = (2.0, 5f64.to_radians());
-    let d = h * a.tan();
     let pts = [Vec2::new(0.0, -2.0), Vec2::new(20.0, -0.01), Vec2::new(20.0, 0.01), Vec2::new(0.0, 2.0)];
-    let b = extrude_tapered(&Plane::XY, &Region2 { outer: Loop2::polygon(&pts), holes: vec![] }, h, 1.0, -a).unwrap();
-    // The top: the three long lines moved in by d (to their left, the loop running
-    // counter-clockwise), meeting each other.
-    let moved = |p: Vec2, q: Vec2| {
-        let t = (q - p).normalized().unwrap();
-        (p + t.perp() * d, t)
+    let b = extrude_tapered(&Plane::XY, &Region2 { outer: Loop2::polygon(&pts), holes: vec![] }, h, 1.0, -a, crate::DraftCorner::default()).unwrap();
+    // Side i (from pts[i] to the next) moved in by t (to its left, the loop running
+    // counter-clockwise), as a point and its direction.
+    let moved = |i: usize, t: f64| {
+        let (p, q) = (pts[i], pts[(i + 1) % pts.len()]);
+        let u = (q - p).normalized().unwrap();
+        (p + u.perp() * t, u)
     };
     let meet = |(p0, t0): (Vec2, Vec2), (p1, t1): (Vec2, Vec2)| p0 + t0 * ((p1 - p0).cross(t1) / t0.cross(t1));
-    let (low, high, left) = (moved(pts[0], pts[1]), moved(pts[2], pts[3]), moved(pts[3], pts[0]));
-    let top = [meet(left, low), meet(low, high), meet(high, left)];
-    let area = |q: &[Vec2]| solidcraft_geom::Ring::from(q.to_vec()).signed_area();
-    // Halfway up, each side edge's midpoint (the two tip corners both run to the top's tip).
-    let mid = [pts[0].lerp(top[0], 0.5), pts[1].lerp(top[1], 0.5), pts[2].lerp(top[1], 0.5), pts[3].lerp(top[2], 0.5)];
-    let v = h / 6.0 * (area(&pts) + 4.0 * area(&mid) + area(&top));
+    // Where the long sides meet, measured off the moved tip line (into the solid positive): it
+    // runs linearly with t, and its root is the offset at which the tip's wall closes.
+    let past_tip = |t: f64| {
+        let (q, u) = moved(1, t);
+        (meet(moved(0, t), moved(2, t)) - q).cross(u)
+    };
+    let d = h * a.tan();
+    let closes = d * past_tip(0.0) / (past_tip(0.0) - past_tip(d));
+    let z_closes = closes / a.tan();
+    assert!(z_closes > 0.0 && z_closes < h, "the tip's wall closes partway up, at {z_closes}");
+    let section = |z: f64| -> Vec<Vec2> {
+        let t = z * a.tan();
+        if t <= closes {
+            (0..4).map(|i| meet(moved((i + 3) % 4, t), moved(i, t))).collect()
+        } else {
+            let (low, high, left) = (moved(0, t), moved(2, t), moved(3, t));
+            vec![meet(left, low), meet(low, high), meet(high, left)]
+        }
+    };
+    let area = |z: f64| solidcraft_geom::Ring::from(section(z)).signed_area();
+    let simpson = |z0: f64, z1: f64| (z1 - z0) / 6.0 * (area(z0) + 4.0 * area(0.5 * (z0 + z1)) + area(z1));
+    let v = simpson(0.0, z_closes) + simpson(z_closes, h);
     let m = measure(&b).unwrap();
     assert!(rel(m.volume, v) < 1e-6, "{} vs {v}", m.volume);
     assert_eq!(m.merged.faces, 6, "bottom, top, three sides and the tip's triangle");
@@ -640,7 +716,7 @@ fn tapered_extrude_between_with_a_foot() {
         holes: vec![],
     };
     let (from, to, foot) = (-2.0, 10.0, 0.5);
-    let b = extrude_tapered_between(&Plane::XY, &sq, from, to, foot, 1.0, a).unwrap();
+    let b = extrude_tapered_between(&Plane::XY, &sq, from, to, foot, 1.0, a, crate::DraftCorner::default()).unwrap();
     let side = |z: f64| 40.0 + 2.0 * z * a.tan();
     let (s0, s1, rise) = (side(from), side(to), to - from - foot);
     let v = foot * s0 * s0 + rise / 3.0 * (s0 * s0 + s1 * s1 + s0 * s1);
@@ -648,13 +724,17 @@ fn tapered_extrude_between_with_a_foot() {
     assert!(rel(m.volume, v) < 1e-6, "{} vs {v}", m.volume);
     assert!((m.bbox.min.z - from).abs() < 1e-6 && (m.bbox.max.z - to).abs() < 1e-6, "{:?}", m.bbox);
     assert_eq!(m.merged.faces, 10);
-    assert!(extrude_tapered_between(&Plane::XY, &sq, from, to, 7.0, 1.0, a).is_err(), "a foot taller than half the solid");
+    assert!(
+        extrude_tapered_between(&Plane::XY, &sq, from, to, 7.0, 1.0, a, crate::DraftCorner::default()).is_err(),
+        "a foot taller than half the solid"
+    );
 }
 
-/// A taper steeper than a profile's details is refused, and says why: a slot narrower than the
-/// taper closes; a ring's hole smaller than it closes.
+/// A taper steeper than a profile's details: a slot narrower than the taper closes partway up
+/// and the solid builds, the slot's walls meeting above where its end wall closes to a point; a
+/// ring's hole smaller than the taper closes the whole hole and is refused, saying why.
 #[test]
-fn tapered_extrude_refuses_a_taper_steeper_than_the_details() {
+fn tapered_extrude_closes_a_narrow_slot_and_refuses_a_closing_hole() {
     let slot = Loop2::polygon(&[
         Vec2::new(0.0, 0.0),
         Vec2::new(10.0, 0.0),
@@ -665,10 +745,20 @@ fn tapered_extrude_refuses_a_taper_steeper_than_the_details() {
         Vec2::new(4.9, 10.0),
         Vec2::new(0.0, 10.0),
     ]);
-    let e = extrude_tapered(&Plane::XY, &Region2 { outer: slot, holes: vec![] }, 2.0, 1.0, 10f64.to_radians()).unwrap_err();
-    assert!(e.to_string().contains("the taper closes the profile"), "{e}");
+    let a = 10f64.to_radians();
+    let b = extrude_tapered(&Plane::XY, &Region2 { outer: slot, holes: vec![] }, 2.0, 1.0, a, crate::DraftCorner::default()).unwrap();
+    assert!(b.validity().is_empty(), "{:?}", b.validity());
+    // Every wall moves out of the material by z·t at height z (t = tan 10°): the 10 mm square
+    // grows to 10 + 2zt, so the solid without the slot is ∫₀² (10 + 2zt)² dz
+    // = ((10 + 4t)³ − 1000) / (6t). The slot narrows to 0.2 − 2zt, its length staying 8 (its end
+    // wall and the square's side both move up by zt), and it closes at z = 0.1/t (0.567, below
+    // the top): it takes ∫ 8 (0.2 − 2zt) dz over 0..0.1/t = 0.08/t.
+    let t = a.tan();
+    let v = ((10.0 + 4.0 * t).powi(3) - 1000.0) / (6.0 * t) - 0.08 / t;
+    let m = measure(&b).unwrap();
+    assert!(rel(m.volume, v) < 1e-6, "{} vs {v}", m.volume);
     let ring = Region2 { outer: Loop2::circle(Vec2::ZERO, 5.0), holes: vec![Loop2::circle(Vec2::ZERO, 0.3).reversed()] };
-    let e = extrude_tapered(&Plane::XY, &ring, 2.0, 1.0, 10f64.to_radians()).unwrap_err();
+    let e = extrude_tapered(&Plane::XY, &ring, 2.0, 1.0, 10f64.to_radians(), crate::DraftCorner::default()).unwrap_err();
     assert!(e.to_string().contains("the taper closes the profile"), "{e}");
 }
 
@@ -696,14 +786,70 @@ fn polyhedra_shell_and_draft() {
     assert!(rel(measure(&cup).unwrap().volume, PI * (25.0 * 5.0 - 16.0 * 4.0)) < 1e-4, "cup");
 }
 
+/// #14346: a loft through three sections whose corners lie on straight lines has flat sides.
+/// Each is a planar face (an extrude can start on it, a sketch can lie on it), its plane through
+/// the face and facing out of the material, also when the face is recorded as a B-spline patch.
+/// A loft turned between its ends has curved sides, which are not planar.
+#[test]
+fn flat_loft_sides_are_planar_faces() {
+    let rectangle = |x: f64, y: f64| Loop2::polygon(&[Vec2::new(-x, -y), Vec2::new(x, -y), Vec2::new(x, y), Vec2::new(-x, y)]);
+    let flat =
+        loft(&[(Plane::XY, rectangle(10.0, 6.0)), (Plane::XY.offset(10.0), rectangle(8.0, 5.0)), (Plane::XY.offset(20.0), rectangle(6.0, 4.0))])
+            .unwrap();
+    // The loft records its flat sides as planes (#13331); to reach the kernel's flatness test
+    // each side is recorded again as the same plane in B-spline form, a bilinear patch through
+    // the plane's points at its domain's corners, so its (u, v) and the trims stay as they were.
+    let mut record = flat.record().clone();
+    let mut splines = 0;
+    for face in &mut record.faces {
+        let solidcore_record::brep::Surface::Plane { origin: o, u_axis: u, v_axis: v } = face.surface else { continue };
+        if u[2].abs() < 1e-9 && v[2].abs() < 1e-9 {
+            continue; // an end
+        }
+        let [[u0, u1], [v0, v1]] = face.domain;
+        let at = |a: f64, b: f64| [o[0] + a * u[0] + b * v[0], o[1] + a * u[1] + b * v[1], o[2] + a * u[2] + b * v[2]];
+        face.surface = solidcore_record::brep::Surface::Spline {
+            u_knots: vec![u0, u0, u1, u1],
+            v_knots: vec![v0, v0, v1, v1],
+            points: vec![vec![at(u0, v0), at(u0, v1)], vec![at(u1, v0), at(u1, v1)]],
+        };
+        splines += 1;
+    }
+    assert_eq!(splines, 4, "the loft's sides are planes");
+    let flat = crate::smlib_sweeps::body_from_record(&record, "flat loft sides as B-splines").unwrap();
+    let splines = flat
+        .record()
+        .faces
+        .iter()
+        .filter(|face| {
+            matches!(face.surface, solidcore_record::brep::Surface::Spline { .. } | solidcore_record::brep::Surface::RationalSpline { .. })
+        })
+        .count();
+    assert_eq!(splines, 4, "the sides read back as B-splines");
+    let faces = flat.faces(0.01).unwrap();
+    assert_eq!(faces.len(), 6);
+    let centre = Vec3::new(0.0, 0.0, 10.0);
+    for face in &faces {
+        let plane = flat.planar_face(face.index).unwrap_or_else(|| panic!("face {} is flat", face.index));
+        assert!(plane.height(face.centroid).abs() < 1e-6, "face {}: its plane runs through it", face.index);
+        assert!((face.centroid - centre).dot(plane.normal()) > 0.0, "face {}: its plane faces out", face.index);
+    }
+    let (sin, cos) = std::f64::consts::FRAC_PI_6.sin_cos();
+    let turned = Loop2::polygon(&[(-6.0, -6.0), (6.0, -6.0), (6.0, 6.0), (-6.0, 6.0)].map(|(x, y)| Vec2::new(cos * x - sin * y, sin * x + cos * y)));
+    let twisted = loft(&[(Plane::XY, rectangle(10.0, 10.0)), (Plane::XY.offset(20.0), turned)]).unwrap();
+    assert_eq!((0..twisted.face_count()).filter(|&i| twisted.planar_face(i).is_some()).count(), 2, "only the ends are flat");
+}
+
 #[test]
 fn loft_and_sweep() {
     let sq = Loop2::polygon(&[Vec2::new(-20.0, -20.0), Vec2::new(20.0, -20.0), Vec2::new(20.0, 20.0), Vec2::new(-20.0, 20.0)]);
     let top = Plane::XY.offset(40.0);
     let l = loft(&[(Plane::XY, sq), (top, Loop2::circle(Vec2::ZERO, 10.0))]).unwrap();
-    let m = measure(&l).unwrap();
-    println!("loft volume {} faces {:?}", m.volume, m.merged);
-    assert!(m.volume > 314.0 * 40.0 && m.volume < 1600.0 * 40.0);
+    // Ruled, each side on the rational quarter of the circle between its corners' directions: the
+    // section at t has area (1 − t)² A_S + t² A_C + t(1 − t) M, M = ½∮(S × C' + C × S'), so
+    // V = h (A_S/3 + A_C/3 + M/6) = 35080.725 (M = 1433.790 by quadrature; tests/oracle/17-loft).
+    let v = measure(&l).unwrap().volume;
+    assert!(rel(v, 35080.725116) < 1e-6, "{v}");
     // A tube: up 30, quarter bend of radius 20, across 30.
     let disc = Region2 { outer: Loop2::circle(Vec2::ZERO, 3.0), holes: vec![] };
     let path = [
@@ -717,9 +863,6 @@ fn loft_and_sweep() {
         PathSeg::Line { a: Vec3::new(20.0, 0.0, 50.0), b: Vec3::new(50.0, 0.0, 50.0) },
     ];
     let t = sweep(&Plane::XY, &disc, &path).unwrap();
-    for tol in [0.1, 0.01, 0.003, 0.001] {
-        println!("tube tess {tol}: {}", t.tessellate(tol).unwrap().measure().volume);
-    }
     let area = PI * 9.0;
     let expect = area * (30.0 + 30.0 + 20.0 * std::f64::consts::FRAC_PI_2);
     assert!(rel(measure(&t).unwrap().volume, expect) < 1e-3, "{} vs {expect}", measure(&t).unwrap().volume);
@@ -750,7 +893,13 @@ fn moving_a_body_with_an_intersection_curve_edge_ends() {
     let block = box_solid(Vec3::new(-20.0, -20.0, 20.0), Vec3::new(20.0, 20.0, 60.0)).unwrap();
     let block = crate::ops::transform(&block, Vec3::ZERO, Vec3::new(0.0, 0.0, 20.0), Vec3::X, 0.4).unwrap();
     let cut = boolean(&cyl, &block, BoolOp::Cut).unwrap().unwrap();
-    assert!(cut.solid.edge_iter().any(|e| matches!(e.curve(), truck_modeling::Curve::IntersectionCurve(_))));
+    // The ellipse where the tilted plane meets the cylinder is an edge of its own.
+    assert!(
+        cut.record()
+            .edges
+            .iter()
+            .any(|e| !matches!(e.curve, solidcore_record::brep::Curve::Line { .. } | solidcore_record::brep::Curve::Circle { .. }))
+    );
     let t = Vec3::new(0.6911, -0.3337, -0.6127) * 2.334;
     let moved = crate::ops::transform(&cut, t, Vec3::ZERO, Vec3::Z, 0.0).unwrap();
     let (v0, v1) = (measure(&cut).unwrap().volume, measure(&moved).unwrap().volume);
@@ -791,10 +940,7 @@ fn drain_pads_flush_under_a_floor_with_a_hole() {
     // The ring's part inside the floor adds nothing: 5 mm of ring below it either way.
     let v_ring = PI * (400.0 - 100.0) * 5.0;
     for (z0, z1) in [(-5.0, 0.0), (-5.0, 2.0)] {
-        let (result, diagnostics) = capture_boolean_diagnostics(|| boolean(&floor, &ring(z0, z1), BoolOp::Union));
-        let u = result.unwrap().unwrap();
-        assert!(diagnostics.events.iter().any(|event| event.strategy == BooleanStrategy::CommonBore), "{diagnostics:?}");
-        assert!(diagnostics.events.iter().all(|event| event.translation_mm.is_finite() && event.face_shift_mm.is_finite()));
+        let u = boolean(&floor, &ring(z0, z1), BoolOp::Union).unwrap().unwrap();
         let v = measure(&u).unwrap().volume;
         assert!(rel(v, v_floor + v_ring) < 2e-5, "ring {z0}..{z1}: {v} vs {}", v_floor + v_ring);
         assert!(u.validity().is_empty(), "{:?}", u.validity());
@@ -878,13 +1024,10 @@ fn planar_booleans_with_coincident_faces() {
     // L-bracket: a wall flush with three sides of its base.
     let base = box_solid(Vec3::ZERO, Vec3::new(80.0, 50.0, 8.0)).unwrap();
     let wall = box_solid(Vec3::new(0.0, 42.0, 8.0), Vec3::new(80.0, 50.0, 50.0)).unwrap();
-    let u = planar_boolean(&base, &wall, BoolOp::Union).unwrap().unwrap();
-    let m = measure(&u).unwrap();
+    let u2 = boolean(&base, &wall, BoolOp::Union).unwrap().unwrap();
+    let m = measure(&u2).unwrap();
     assert!(rel(m.volume, 80.0 * 50.0 * 8.0 + 80.0 * 8.0 * 42.0) < 1e-9, "{}", m.volume);
     assert_eq!(m.merged.faces, 8, "{:?}", m.merged);
-    // Through the public boolean (B-rep first, polygon fallback).
-    let u2 = boolean(&base, &wall, BoolOp::Union).unwrap().unwrap();
-    assert!(rel(measure(&u2).unwrap().volume, m.volume) < 1e-9);
     assert_eq!(u2.face_count(), 8, "coplanar wall and base faces must merge in the B-rep");
     assert!(u2.validity().is_empty());
     // Two boxes sharing a face, and a cut flush with a side.
@@ -898,38 +1041,6 @@ fn planar_booleans_with_coincident_faces() {
     assert!(rel(measure(&c).unwrap().volume, 1000.0 - 250.0) < 1e-9);
     let i = boolean(&a, &notch, BoolOp::Intersect).unwrap().unwrap();
     assert!(rel(measure(&i).unwrap().volume, 250.0) < 1e-9);
-}
-
-/// The planar fallback runs after any failed B-rep boolean, not only on coincident faces; when
-/// it can't run it says which body has which curved faces (it used to blame "coincident faces
-/// on curved bodies" whatever the cause).
-#[test]
-fn planar_fallback_names_the_curved_faces() {
-    let slab = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 10.0)).unwrap();
-    let pad = cylinder(Vec3::new(20.0, 15.0, 5.0), Vec3::Z, 8.0, 10.0).unwrap();
-    let e = planar_boolean(&slab, &pad, BoolOp::Union).unwrap_err().to_string();
-    assert!(e.contains("not supported yet"), "{e}");
-    assert!(e.contains("the tool has 2 curved faces (cylinder)"), "{e}");
-    assert!(!e.contains("target"), "{e}");
-    assert!(!e.contains("coincident faces on curved bodies"), "{e}");
-    let ball = sphere(Vec3::new(20.0, 15.0, 10.0), 5.0).unwrap();
-    let e = planar_boolean(&ball, &pad, BoolOp::Cut).unwrap_err().to_string();
-    assert!(e.contains("the target has 6 curved faces (sphere) and the tool has 2 curved faces (cylinder)"), "{e}");
-    // All-planar bodies, a face of one at a shallow angle (1°): the fallback takes them.
-    let slope = Vec3::new(-1f64.to_radians().tan(), 0.0, 1.0).normalized().unwrap();
-    let wedge = convex_polyhedron(&[
-        HalfSpace { n: Vec3::X, d: 30.0 },
-        HalfSpace { n: -Vec3::X, d: -10.0 },
-        HalfSpace { n: Vec3::Y, d: 20.0 },
-        HalfSpace { n: -Vec3::Y, d: -10.0 },
-        HalfSpace { n: -Vec3::Z, d: -5.0 },
-        HalfSpace { n: slope, d: slope.dot(Vec3::new(10.0, 0.0, 11.0)) },
-    ])
-    .unwrap();
-    let u = planar_boolean(&slab, &wedge, BoolOp::Union).unwrap().unwrap();
-    let above = box_solid(Vec3::new(0.0, 0.0, 10.0), Vec3::new(40.0, 30.0, 20.0)).unwrap();
-    let expect = 40.0 * 30.0 * 10.0 + measure(&boolean(&wedge, &above, BoolOp::Intersect).unwrap().unwrap()).unwrap().volume;
-    assert!(rel(measure(&u).unwrap().volume, expect) < 1e-6, "{} vs {expect}", measure(&u).unwrap().volume);
 }
 
 #[test]
@@ -1007,13 +1118,16 @@ fn sphere_booleans() {
     let s = sphere(Vec3::ZERO, 15.0).unwrap();
     let m = measure(&s).unwrap();
     assert!(rel(m.volume, 4.0 / 3.0 * PI * 3375.0) < 1e-3, "{}", m.volume);
-    assert_eq!((m.merged.faces, m.merged.edges), (1, 0));
+    // One spherical face, closed along its seam from pole to pole.
+    assert_eq!((m.merged.faces, m.merged.edges), (1, 1));
     // A ball cut out of the top face of a slab (oracle 14).
     let b = box_solid(Vec3::new(-25.0, -25.0, -20.0), Vec3::new(25.0, 25.0, 0.0)).unwrap();
     let c = boolean(&b, &s, BoolOp::Cut).unwrap().unwrap();
     let m = measure(&c).unwrap();
     assert!(rel(m.volume, 50.0 * 50.0 * 20.0 - 2.0 / 3.0 * PI * 3375.0) < 1e-3, "{}", m.volume);
-    assert_eq!((m.merged.faces, m.merged.edges, m.merged.vertices), (7, 13, 9));
+    // The box's 6 faces and the sphere's; its 12 edges, the rim circle and the sphere's seam down
+    // to its pole; its 8 corners, the rim's vertex and the pole.
+    assert_eq!((m.merged.faces, m.merged.edges, m.merged.vertices), (7, 14, 10));
 }
 
 #[test]
@@ -1025,102 +1139,6 @@ fn similar_spheres_meet() {
         let b = sphere(Vec3::new(x, 0.0, 0.0), 10.0).unwrap();
         assert_eq!(a.meets(&b).unwrap(), meet, "centres {x} mm apart");
     }
-}
-
-#[test]
-#[ignore]
-fn debug_convergence() {
-    let b = extrude(&Plane::XY, &[Region2 { outer: Loop2::circle(Vec2::ZERO, 15.0), holes: vec![] }], 0.0, 50.0).unwrap().pop().unwrap();
-    for t in [0.1, 0.05, 0.02, 0.01, 0.005, 0.002] {
-        let m = b.tessellate(t).unwrap();
-        let mm = m.measure();
-        println!("tol {t}: tris {} vol {} err {:.3e}", m.triangles.len(), mm.volume, mm.volume / (PI * 225.0 * 50.0) - 1.0);
-    }
-    let m = b.tessellate(0.05).unwrap();
-    for f in 0..4u32 {
-        let ns: Vec<Vec3> =
-            m.triangles.iter().zip(&m.tri_face).filter(|(_, ff)| **ff == f).flat_map(|(t, _)| t.iter().map(|k| m.normals[*k as usize])).collect();
-        println!("face {f}: {} normals, first {:?}, max |n.z| {}", ns.len(), ns.first(), ns.iter().map(|n| n.z.abs()).fold(0.0, f64::max));
-    }
-}
-
-#[test]
-#[ignore]
-fn debug_coplanar() {
-    let b = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap();
-    for (z0, z1) in [(0.0, 20.0), (-5.0, 20.0), (0.0, 25.0), (-5.0, 25.0), (5.0, 20.0), (5.0, 25.0)] {
-        let c = cylinder(Vec3::new(20.0, 15.0, z0), Vec3::Z, 5.0, z1 - z0).unwrap();
-        let r = boolean(&b, &c, BoolOp::Cut);
-        println!("cut z {z0}..{z1}: {:?}", r.map(|o| o.map(|b| measure(&b).unwrap().volume)));
-        let r = boolean(&b, &c, BoolOp::Union);
-        println!("union z {z0}..{z1}: {:?}", r.map(|o| o.map(|b| measure(&b).unwrap().volume)));
-    }
-    let r =
-        Region2 { outer: Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(40.0, 0.0), Vec2::new(40.0, 30.0), Vec2::new(0.0, 30.0)]), holes: vec![] };
-    for ang in [PI / 2.0, PI, 1.5 * PI, 2.0 * PI] {
-        let q = revolve(&Plane::XY, std::slice::from_ref(&r), Vec2::ZERO, Vec2::Y, ang).unwrap().pop().unwrap();
-        let m = measure(&q).unwrap();
-        println!("revolve {ang}: vol {} expect {} faces {}", m.volume, ang / 2.0 * 1600.0 * 30.0, m.faces);
-    }
-}
-
-#[test]
-#[ignore]
-fn debug_blind() {
-    let b = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap();
-    let t = box_solid(Vec3::new(10.0, 10.0, 5.0), Vec3::new(20.0, 20.0, 25.0)).unwrap();
-    println!("box pocket: {:?}", boolean(&b, &t, BoolOp::Cut).map(|o| o.map(|b| measure(&b).unwrap().volume)));
-    let t = box_solid(Vec3::new(10.0, 10.0, 5.0), Vec3::new(20.0, 20.0, 15.0)).unwrap();
-    println!("box void: {:?}", boolean(&b, &t, BoolOp::Cut).map(|o| o.map(|b| measure(&b).unwrap().volume)));
-    for r in [5.0, 4.3] {
-        for z in [5.0, 7.3, 13.1] {
-            let c = cylinder(Vec3::new(20.3, 15.1, z), Vec3::Z, r, 30.0).unwrap();
-            println!("cyl r{r} z{z}: {:?}", boolean(&b, &c, BoolOp::Cut).map(|o| o.map(|b| measure(&b).unwrap().volume)));
-        }
-    }
-    let c = cylinder(Vec3::new(20.0, 15.0, 25.0), -Vec3::Z, 5.0, 20.0).unwrap();
-    println!("cyl down: {:?}", boolean(&b, &c, BoolOp::Cut).map(|o| o.map(|b| measure(&b).unwrap().volume)));
-    let s = sphere(Vec3::new(20.0, 15.0, 20.0), 5.0).unwrap();
-    println!("sphere: {:?}", boolean(&b, &s, BoolOp::Cut).map(|o| o.map(|b| measure(&b).unwrap().volume)));
-}
-
-#[test]
-#[ignore]
-fn debug_revolve_doc_case() {
-    let r =
-        Region2 { outer: Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(40.0, 0.0), Vec2::new(40.0, 30.0), Vec2::new(0.0, 30.0)]), holes: vec![] };
-    for ang in [PI / 2.0, -PI / 2.0] {
-        let q = revolve(&Plane::XY, std::slice::from_ref(&r), Vec2::ZERO, Vec2::Y, ang).unwrap().pop().unwrap();
-        let m = measure(&q).unwrap();
-        println!("ang {ang}: vol {} bbox {:?}", m.volume, m.bbox);
-    }
-    let r2 = Region2 { outer: r.outer.reversed(), holes: vec![] };
-    let q = revolve(&Plane::XY, std::slice::from_ref(&r2), Vec2::ZERO, Vec2::Y, PI / 2.0).unwrap().pop().unwrap();
-    println!("reversed: {}", measure(&q).unwrap().volume);
-}
-
-#[test]
-#[ignore]
-fn debug_coplanar_union_rate() {
-    let a = box_solid(Vec3::ZERO, Vec3::new(40.0, 40.0, 20.0)).unwrap();
-    let b = extrude(&Plane::XY, &[Region2 { outer: Loop2::circle(Vec2::new(40.0, 20.0), 12.0), holes: vec![] }], 0.0, 40.0).unwrap().pop().unwrap();
-    let mut ok = 0;
-    for i in 0..20 {
-        let sh = Vec3::new(0.0137 * i as f64, 0.0291 * i as f64, -0.0173 * i as f64);
-        let (a2, b2) = (transform(&a, sh, Vec3::ZERO, Vec3::Z, 0.0).unwrap(), transform(&b, sh, Vec3::ZERO, Vec3::Z, 0.0).unwrap());
-        for tol in [1e-3, 1e-2, 5e-2] {
-            let r = guard("t", || {
-                let (sa, sb) = (a2.deep_copy(), b2.deep_copy());
-                Ok(truck_shapeops::or(&sa, &sb, tol))
-            });
-            let good = matches!(r, Ok(Some(_)));
-            if good {
-                ok += 1;
-            }
-            println!("shift {i} tol {tol}: {}", if good { "ok" } else { "fail" });
-        }
-    }
-    println!("ok {ok}/60");
 }
 
 #[test]
@@ -1152,263 +1170,166 @@ fn chamfer_sloped_basin_rim() {
     assert_eq!(after.merged.faces, before.merged.faces + 1);
     assert_eq!(result.lumps().unwrap().len(), 1);
     assert!(result.validity().is_empty());
-    let mesh = result.tessellate(0.01).unwrap();
+    let mesh = result.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
     assert!(!mesh.contains(Vec3::new(50.0, 3.5, 29.9)));
     assert!(mesh.contains(Vec3::new(50.0, 3.5, 28.0)));
 }
 
-#[test]
-fn chamfer_wider_than_sloped_basin_rim_is_refused() {
-    for (margin, distance) in [(1.0, 2.0), (1.0, 3.0), (0.5, 4.0), (1.0, 1.0)] {
-        let slab = box_solid(Vec3::ZERO, Vec3::new(100.0, 60.0, 30.0)).unwrap();
-        let rectangle = |x0, y0, x1, y1| Loop2::polygon(&[Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)]);
-        let pocket =
-            loft(&[(Plane::XY.offset(30.0), rectangle(20.0, margin, 80.0, 50.0)), (Plane::XY.offset(10.0), rectangle(30.0, 20.0, 70.0, 40.0))])
-                .unwrap();
-        let basin = boolean(&slab, &pocket, BoolOp::Cut).unwrap().unwrap();
-        let before = measure(&basin).unwrap();
-        let error = chamfer(&basin, &[Vec3::new(50.0, margin, 30.0)], distance).unwrap_err();
-        assert!(error.to_string().contains("larger than the neighbouring faces"), "{margin}, {distance}: {error}");
-        assert_eq!(measure(&basin).unwrap().volume, before.volume);
-        // A smaller chamfer on the same thin rim is still supported.
-        let smaller = chamfer(&basin, &[Vec3::new(50.0, margin, 30.0)], margin * 0.5).unwrap();
-        assert!(smaller.validity().is_empty());
-        assert!(measure(&smaller).unwrap().volume < before.volume);
-    }
+/// `chamfer_sloped_basin_rim`'s basin with its front rim `margin` wide at the top.
+fn sloped_basin(margin: f64) -> Body {
+    let rectangle = |x0, y0, x1, y1| Loop2::polygon(&[Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)]);
+    let slab = box_solid(Vec3::ZERO, Vec3::new(100.0, 60.0, 30.0)).unwrap();
+    let pocket =
+        loft(&[(Plane::XY.offset(30.0), rectangle(20.0, margin, 80.0, 50.0)), (Plane::XY.offset(10.0), rectangle(30.0, 20.0, 70.0, 40.0))]).unwrap();
+    boolean(&slab, &pocket, BoolOp::Cut).unwrap().unwrap()
 }
 
-#[test]
-#[ignore]
-fn debug_chamfer_cut() {
-    let b = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap();
-    // Prism along x: triangle in the YZ plane beyond the top-front edge.
-    let plane = Plane { origin: Vec3::new(-5.0, 0.0, 0.0), x: Vec3::Y, y: Vec3::Z };
-    let tri = Loop2::polygon(&[Vec2::new(2.3, 20.3), Vec2::new(-0.3, 17.7), Vec2::new(10.0, 30.0)]);
-    let tri = if tri.signed_area() < 0.0 { tri.reversed() } else { tri };
-    let tool = extrude(&plane, &[Region2 { outer: tri, holes: vec![] }], 0.0, 50.0).unwrap().pop().unwrap();
-    println!("tool vol {}", measure(&tool).unwrap().volume);
-    let r = boolean(&b, &tool, BoolOp::Cut).unwrap().unwrap();
-    let m = measure(&r).unwrap();
-    println!("cut: {} faces {} {:?}", m.volume, m.faces, m.merged);
-    for f in r.faces(0.01).unwrap() {
-        println!("face {} area {:.3} c {:?} n {:?}", f.index, f.area, f.centroid, f.plane_normal);
-    }
-    for tol in [0.1, 0.01, 0.001] {
-        println!("tess {tol}: {}", r.tessellate(tol).unwrap().measure().volume);
-    }
-}
-
-#[test]
-#[ignore]
-fn debug_revolved_hole_tool() {
-    let b = box_solid(Vec3::ZERO, Vec3::new(60.0, 40.0, 15.0)).unwrap();
-    // Drill point profile in the XZ plane through x = 50: revolve about the vertical line x = 50.
-    let pl = Plane { origin: Vec3::new(50.0, 20.0, 0.0), x: Vec3::X, y: Vec3::Z };
-    let r = 3.0;
-    let tip = r / 59f64.to_radians().tan();
-    let prof =
-        Region2 { outer: Loop2::polygon(&[Vec2::new(0.0, 16.0), Vec2::new(0.0, 5.0 - tip), Vec2::new(r, 5.0), Vec2::new(r, 16.0)]), holes: vec![] };
-    let tool = revolve(&pl, &[prof], Vec2::ZERO, Vec2::Y, std::f64::consts::TAU).unwrap().pop().unwrap();
-    println!("tool vol {}", measure(&tool).unwrap().volume);
-    let res = boolean(&b, &tool, BoolOp::Cut);
-    println!("cut: {:?}", res.map(|o| o.map(|x| measure(&x).unwrap().volume)));
-    let expect = 36000.0 - std::f64::consts::PI * 9.0 * 10.0 - std::f64::consts::PI * 9.0 * tip / 3.0;
-    println!("expect {expect}");
-}
-
-#[test]
-#[ignore]
-fn debug_sphere() {
-    let s = sphere(Vec3::new(1.0, 2.0, 3.0), 10.0).unwrap();
-    let m = measure(&s).unwrap();
-    println!("vol {} area {} faces {} bbox {:?}", m.volume, m.area, m.faces, m.bbox);
-    for f in s.faces(0.05).unwrap() {
-        println!("face {} area {:.3} c {:?}", f.index, f.area, f.centroid);
-    }
-    let b = box_solid(Vec3::new(-25.0, -25.0, -20.0), Vec3::new(25.0, 25.0, 0.0)).unwrap();
-    for (name, c) in [("origin", Vec3::ZERO), ("up", Vec3::new(0.0, 0.0, 3.0)), ("off", Vec3::new(1.3, 2.1, 0.7))] {
-        let sp = sphere(c, 15.0).unwrap();
-        println!("{name} cut {:?}", boolean(&b, &sp, BoolOp::Cut).map(|o| o.map(|x| measure(&x).unwrap().volume)));
-        println!("{name} and {:?}", boolean(&b, &sp, BoolOp::Intersect).map(|o| o.map(|x| measure(&x).unwrap().volume)));
-    }
-}
-
-#[test]
-#[ignore]
-fn debug_countersink() {
-    let b = box_solid(Vec3::ZERO, Vec3::new(60.0, 40.0, 15.0)).unwrap();
-    for (name, pts) in [
-        ("csink", vec![Vec2::new(0.0, 0.6), Vec2::new(6.6, 0.6), Vec2::new(3.0, -3.0), Vec2::new(3.0, -31.0), Vec2::new(0.0, -31.0)]),
-        ("csink-thru-top", vec![Vec2::new(0.0, 0.6), Vec2::new(6.6, 0.6), Vec2::new(3.0, -3.0), Vec2::new(3.0, -16.3), Vec2::new(0.0, -16.3)]),
-        (
-            "cbore",
-            vec![Vec2::new(0.0, 0.6), Vec2::new(7.0, 0.6), Vec2::new(7.0, -5.0), Vec2::new(4.0, -5.0), Vec2::new(4.0, -31.0), Vec2::new(0.0, -31.0)],
-        ),
-    ] {
-        for (pn, pl) in [
-            ("xz@top", Plane::new(Vec3::new(35.0, 20.0, 15.0), Vec3::X, Vec3::Z).unwrap()),
-            ("yz@top", Plane::new(Vec3::new(35.0, 20.0, 15.0), Vec3::Y, Vec3::Z).unwrap()),
-            ("diag", Plane::new(Vec3::new(35.0, 20.0, 15.0), Vec3::new(0.6, 0.8, 0.0), Vec3::Z).unwrap()),
-        ] {
-            let tool = revolve(&pl, &[Region2 { outer: Loop2::polygon(&pts), holes: vec![] }], Vec2::ZERO, Vec2::Y, std::f64::consts::TAU)
-                .unwrap()
-                .pop()
-                .unwrap();
-            println!(
-                "{name} {pn}: tool {} cut {:?}",
-                measure(&tool).unwrap().volume,
-                boolean(&b, &tool, BoolOp::Cut).map(|o| o.map(|x| measure(&x).unwrap().volume))
-            );
-        }
-    }
-}
-
-#[test]
-#[ignore]
-fn debug_cbore_seq() {
-    let b = box_solid(Vec3::ZERO, Vec3::new(60.0, 40.0, 15.0)).unwrap();
-    let pl = Plane::from_normal(Vec3::new(15.0, 20.0, 15.0), Vec3::Z).unwrap();
-    for (s1, s2, r2top) in [(0.0, 0.0, 0.6), (0.613, 1.226, 0.6), (0.3, 0.9, 2.37)] {
-        let t1 = extrude(&pl, &[Region2 { outer: Loop2::circle_from(Vec2::ZERO, 4.0, s1), holes: vec![] }], -31.0, 0.6).unwrap().pop().unwrap();
-        let c1 = boolean(&b, &t1, BoolOp::Cut).unwrap().unwrap();
-        let t2 = extrude(&pl, &[Region2 { outer: Loop2::circle_from(Vec2::ZERO, 7.0, s2), holes: vec![] }], -5.0, r2top).unwrap().pop().unwrap();
-        println!(
-            "seams {s1} {s2}: first {} second {:?}",
-            measure(&c1).unwrap().volume,
-            boolean(&c1, &t2, BoolOp::Cut).map(|o| o.map(|x| measure(&x).unwrap().volume))
-        );
-        let c2 = boolean(&b, &t2, BoolOp::Cut).unwrap().unwrap();
-        println!("  swapped: {:?}", boolean(&c2, &t1, BoolOp::Cut).map(|o| o.map(|x| measure(&x).unwrap().volume)));
-    }
-}
-
-#[test]
-#[ignore]
-fn debug_truck_sphere() {
-    use truck_modeling::{self as mt, builder};
-    let mk = |c: Vec3, r: f64, axis: Vec3| -> Body {
-        let ax = axis.normalized().unwrap();
-        let side = ax.any_perp();
-        let v0 = builder::vertex(crate::body::p3(c + ax * r));
-        let arc = builder::rsweep(&v0, crate::body::p3(c), crate::body::v3(side), mt::Rad(PI));
-        let shell = builder::rsweep(&arc, crate::body::p3(c), crate::body::v3(ax), mt::Rad(2.0 * PI));
-        Body::new(mt::Solid::new(vec![shell])).unwrap()
+/// What an equal-distance chamfer `d` of [`sloped_basin`]'s rim edge at y = `margin` takes, built
+/// as if the top went on past the slab's front face y = 0 and then cut by it (the owner's ruling
+/// of 2026-10-30, d7: a chamfer that reaches or runs past a rim builds). Its section in (y, z) is
+/// the triangle of the edge (margin, 30), the top's contact (margin − d, 30) and the wall's
+/// contact d down the wall towards (20, 10) (run 20 − margin over the drop 20), clipped to
+/// y >= 0. At height z it runs between the sloped end walls x = 20 + (30 − z)/2 and
+/// 80 − (30 − z)/2 (planar, x by z alone), which cut it, so its length there is 30 + z: it takes
+/// ∬ (30 + z) dy dz over the clipped section, area · 30 + ∬ z, both exact by the shoelace sums
+/// over the polygon (the first moment Σ (z₀ + z₁)(y₀ z₁ − y₁ z₀) / 6).
+fn sloped_basin_rim_chamfer_removed(margin: f64, d: f64) -> f64 {
+    let len = ((20.0 - margin).powi(2) + 400.0).sqrt();
+    let (e, t) = ((margin, 30.0), (margin - d, 30.0));
+    let w = (margin + d * (20.0 - margin) / len, 30.0 - d * 20.0 / len);
+    let poly = if t.0 >= 0.0 {
+        vec![e, t, w]
+    } else {
+        let s = -t.0 / (w.0 - t.0);
+        vec![e, (0.0, 30.0), (0.0, t.1 + s * (w.1 - t.1)), w]
     };
-    let b = box_solid(Vec3::new(-25.0, -25.0, -20.0), Vec3::new(25.0, 25.0, 0.0)).unwrap();
-    for (name, axis) in [("z", Vec3::Z), ("x", Vec3::X), ("diag", Vec3::new(0.3, 0.5, 0.8))] {
-        let sp = mk(Vec3::ZERO, 15.0, axis);
-        println!("{name}: faces {} vol {}", sp.face_count(), measure(&sp).unwrap().volume);
-        for op in [BoolOp::Cut, BoolOp::Intersect, BoolOp::Union] {
-            let r = guard("t", || {
-                let (sa, mut sb) = (b.deep_copy(), sp.deep_copy());
-                let res = match op {
-                    BoolOp::Cut => {
-                        sb.not();
-                        truck_shapeops::and(&sa, &sb, 0.01)
-                    }
-                    BoolOp::Intersect => truck_shapeops::and(&sa, &sb, 0.01),
-                    BoolOp::Union => truck_shapeops::or(&sa, &sb, 0.01),
-                };
-                Ok(res.map(|s| s.face_iter().count()))
-            });
-            println!("  {op:?}: {r:?}");
-        }
+    let (mut area, mut moment) = (0.0, 0.0);
+    for i in 0..poly.len() {
+        let ((y0, z0), (y1, z1)) = (poly[i], poly[(i + 1) % poly.len()]);
+        let c = y0 * z1 - y1 * z0;
+        area += c / 2.0;
+        moment += (z0 + z1) * c / 6.0;
+    }
+    area.abs() * 30.0 + moment.abs()
+}
+
+/// A chamfer as wide as a basin's thin rim (`chamfer_sloped_basin_rim`'s basin with the rim
+/// `margin` wide at the top) uses the rim's top up, its leg ending on the slab's front edge:
+/// it builds (the owner's ruling of 2026-10-30, d7), taking the whole triangle
+/// ([`sloped_basin_rim_chamfer_removed`]: unclipped, d · drop / 2 · (60 − drop / 3) with
+/// drop = 20 d / √((20 − margin)² + 400)): 21.662379 at 1 on the 1 mm rim, 5.359321 at 0.5 on
+/// the 0.5 mm one.
+#[test]
+fn chamfer_as_wide_as_sloped_basin_rim_builds() {
+    // The formula reads the fitting chamfer of `chamfer_sloped_basin_rim` as that test does.
+    let drop = 2.0 / (1.0 + 0.8f64.powi(2)).sqrt();
+    assert!(rel(sloped_basin_rim_chamfer_removed(4.0, 2.0), drop * (60.0 - drop / 3.0)) < 1e-12);
+    for margin in [0.5, 1.0] {
+        let b = sloped_basin(margin);
+        let made = chamfer(&b, &[Vec3::new(50.0, margin, 30.0)], margin).unwrap_or_else(|e| panic!("{margin}: {e}"));
+        assert!(made.validity().is_empty(), "{margin}: {:?}", made.validity());
+        let want = measure(&b).unwrap().volume - sloped_basin_rim_chamfer_removed(margin, margin);
+        assert!(rel(measure(&made).unwrap().volume, want) < 1e-8, "{margin}: {} vs {want}", measure(&made).unwrap().volume);
+    }
+}
+
+/// A chamfer wider than a basin's thin rim runs its leg off the rim's top, over the slab's front
+/// edge (a cliff): it builds as if the top went on and is cut by the front face (the owner's
+/// ruling of 2026-10-30, d7), lowering the front face where it crosses it
+/// ([`sloped_basin_rim_chamfer_removed`], clipped to y >= 0): 73.450475 for 2 and 142.112912 for
+/// 3 on the 1 mm rim, 184.526613 for 4 on the 0.5 mm one.
+#[test]
+fn chamfer_wider_than_sloped_basin_rim_builds() {
+    for (margin, distance) in [(1.0, 2.0), (1.0, 3.0), (0.5, 4.0)] {
+        let b = sloped_basin(margin);
+        let made = chamfer(&b, &[Vec3::new(50.0, margin, 30.0)], distance).unwrap_or_else(|e| panic!("{margin}, {distance}: {e}"));
+        assert!(made.validity().is_empty(), "{margin}, {distance}: {:?}", made.validity());
+        let want = measure(&b).unwrap().volume - sloped_basin_rim_chamfer_removed(margin, distance);
+        assert!(rel(measure(&made).unwrap().volume, want) < 1e-8, "{margin}, {distance}: {} vs {want}", measure(&made).unwrap().volume);
     }
 }
 
 #[test]
-#[ignore]
-fn debug_sphere_patches() {
-    let sp = crate::build::sphere_patches(Vec3::ZERO, 15.0).unwrap();
-    let m = measure(&sp).unwrap();
-    println!("vol {} want {} area {} merged {:?}", m.volume, 4.0 / 3.0 * PI * 3375.0, m.area, m.merged);
-    let b = box_solid(Vec3::new(-25.0, -25.0, -20.0), Vec3::new(25.0, 25.0, 0.0)).unwrap();
-    for op in [BoolOp::Cut, BoolOp::Intersect, BoolOp::Union] {
-        let r = boolean(&b, &sp, op).map(|o| {
-            o.map(|x| {
-                let m = measure(&x).unwrap();
-                (m.volume, m.merged)
-            })
-        });
-        println!("{op:?}: {r:?}");
+fn mesh_corner_normals_survive_welding_reflection_and_nonuniform_scale() {
+    let positions = [Vec3::ZERO, Vec3::X, Vec3::Y];
+    let normals = [[Vec3::new(1., 0., 1.), Vec3::new(0., 1., 1.), Vec3::Z]];
+    let body = crate::mesh_body_with_normals(&positions, &[[0, 1, 2]], &normals).unwrap();
+    let matrix = [[-2., 0., 0., 0.], [0., 3., 0., 0.], [0., 0., 0.5, 0.], [7., 11., 13., 1.]];
+    let moved = crate::transform_matrix(&body, matrix).unwrap();
+    let mesh = moved.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
+    let expected = [Vec3::new(-0.5, 0., 2.).normalized().unwrap(), Vec3::Z, Vec3::new(0., 1. / 3., 2.).normalized().unwrap()];
+    for (actual, expected) in mesh.normals.iter().zip(expected) {
+        assert!((*actual - expected).len() < 1e-12);
     }
-    let c = box_solid(Vec3::new(-20.0, -20.0, -20.0), Vec3::new(20.0, 20.0, 20.0)).unwrap();
-    let a = 0.3f64;
-    let (ca, sa) = (a.cos(), a.sin());
-    let b2 = 0.5f64;
-    let (cb, sb) = (b2.cos(), b2.sin());
-    // Rz(a) * Rx(b)
-    let rot = [Vec3::new(ca, sa, 0.0), Vec3::new(-sa * cb, ca * cb, sb), Vec3::new(sa * sb, -ca * sb, cb)];
-    for (name, s2) in [
-        ("plain", crate::build::sphere_patches(Vec3::ZERO, 25.0).unwrap()),
-        ("turned", crate::build::sphere_patches_rotated(Vec3::ZERO, 25.0, rot).unwrap()),
-    ] {
-        println!("{name} vol {}", measure(&s2).unwrap().volume);
-        println!(
-            "{name} cube and sphere: {:?}",
-            boolean(&c, &s2, BoolOp::Intersect).map(|o| o.map(|x| {
-                let m = measure(&x).unwrap();
-                (m.volume, m.merged)
-            }))
-        );
-    }
+    let tiny = crate::transform_matrix(&body, [[1e-6, 0., 0., 0.], [0., 1e-6, 0., 0.], [0., 0., 1e-6, 0.], [0., 0., 0., 1.]]).unwrap();
+    let tiny = tiny.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
+    assert!((tiny.normals[0] - Vec3::new(1., 0., 1.).normalized().unwrap()).len() < 1e-12);
+    assert!((tiny.normals[0].len() - 1.).abs() < 1e-12, "normal magnitude must not depend on a small geometric scale");
+    let [a, b, c] = mesh.triangles[0].map(|i| mesh.positions[i as usize]);
+    assert!((b - a).cross(c - a).z > 0.);
+    assert_eq!(body.triangle_mesh().unwrap().1, &[[0, 1, 2]]);
+    assert!(crate::mesh_body_with_normals(&positions, &[[0, 1, 2]], &[[Vec3::ZERO; 3]]).is_err());
+    assert!(crate::mesh_body_with_normals(&positions, &[[0, 1, 2]], &[[Vec3::Z; 3]; 2]).is_err());
 }
 
 #[test]
-#[ignore]
-fn debug_sphere_cases() {
-    let s = crate::build::sphere_patches(Vec3::ZERO, 25.0).unwrap();
-    let cases = [
-        ("one plane", Vec3::new(-100.0, -100.0, -100.0), Vec3::new(100.0, 100.0, 20.0)),
-        ("two planes", Vec3::new(-100.0, -100.0, -20.0), Vec3::new(100.0, 100.0, 20.0)),
-        ("three", Vec3::new(-100.0, -100.0, -20.0), Vec3::new(20.0, 100.0, 20.0)),
-        ("four", Vec3::new(-100.0, -20.0, -20.0), Vec3::new(20.0, 20.0, 20.0)),
-        ("five", Vec3::new(-20.0, -20.0, -20.0), Vec3::new(20.0, 20.0, 100.0)),
-        ("cube", Vec3::new(-20.0, -20.0, -20.0), Vec3::new(20.0, 20.0, 20.0)),
-        ("cube big sphere-ish", Vec3::new(-24.0, -24.0, -24.0), Vec3::new(24.0, 24.0, 24.0)),
-        ("cube off", Vec3::new(-20.3, -19.7, -20.1), Vec3::new(19.9, 20.2, 19.8)),
+fn packed_mesh_winding_repairs_pairs_and_leaves_non_manifold_edges_alone() {
+    let positions = [
+        [0., 0., 0.],
+        [1., 0., 0.],
+        [0., 1., 0.],
+        [1., 1., 0.],
+        [10., 0., 0.],
+        [11., 0., 0.],
+        [10., 1., 0.],
+        [10., 0., 1.],
+        [10., -1., 0.],
+        [0., 0., 0.],
     ];
-    for (name, lo, hi) in cases {
-        let b = box_solid(lo, hi).unwrap();
-        for op in [BoolOp::Intersect, BoolOp::Cut] {
-            let r = boolean(&b, &s, op).map(|o| o.map(|x| measure(&x).unwrap().volume));
-            println!("{name} {op:?}: {:?}", r.map_err(|e| e.to_string().chars().take(60).collect::<String>()));
+    let triangles = [[0, 9, 1], [0, 1, 2], [1, 2, 3], [4, 5, 6], [4, 5, 7], [4, 5, 8]];
+    let mut normals = [[0., 0., 1., 0., 0., 1., 0., 0., 1.]; 6];
+    normals[2] = [1., 0., 0., 0., 1., 0., 0., 0., 1.];
+
+    let body = crate::Body::from_packed_mesh(&positions, &triangles, &normals).unwrap();
+    let (welded_positions, welded_triangles) = body.triangle_mesh().unwrap();
+    assert_eq!(welded_positions.len(), 9);
+    assert_eq!(welded_triangles, &[[0, 1, 2], [1, 3, 2], [4, 5, 6], [4, 5, 7], [4, 5, 8]]);
+    assert_eq!(body.triangle_corner_normals().unwrap()[1], [Vec3::X, Vec3::Z, Vec3::Y]);
+    assert!(!body.is_closed_mesh());
+}
+
+#[test]
+fn a_flat_scan_keeps_its_welded_source_and_rebuilds_the_same_winding() {
+    // Two triangles of an open square, sharing a side that runs in the same direction.
+    let positions = std::sync::Arc::from([0., 0., 0., 1., 0., 0., 0., 1., 0., 1., 1., 0., 1., 0., 0., 0., 1., 0.]);
+    let facets = std::sync::Arc::from([0, 1, 2, 4, 5, 3]);
+    let (ready, packed, indexed) = crate::Body::from_packed_flat_mesh_indexed(positions, facets).unwrap();
+    assert_eq!(packed.as_chunks::<3>().0, &[[0., 0., 0.], [1., 0., 0.], [0., 1., 0.], [1., 1., 0.]]);
+    assert_eq!(indexed, [0, 1, 2, 1, 2, 3], "source order is kept for shading");
+    let reopened = crate::Body::from_packed_mesh(packed.as_chunks::<3>().0, indexed.as_chunks::<3>().0, &[]).unwrap();
+    assert_eq!(ready.triangle_mesh(), reopened.triangle_mesh());
+    assert_eq!(reopened.triangle_mesh().unwrap().1, &[[0, 1, 2], [1, 3, 2]]);
+}
+
+#[test]
+fn mesh_winding_cannot_close_a_nonorientable_surface() {
+    // Six-vertex projective plane. Each side belongs to two triangles, but their
+    // directions cannot all be made opposite in one consistent winding.
+    let triangles = [[0, 1, 2], [0, 1, 3], [0, 2, 4], [0, 3, 5], [0, 4, 5], [1, 2, 5], [1, 3, 4], [1, 4, 5], [2, 3, 4], [2, 3, 5]];
+    let positions = [Vec3::X, Vec3::Y, Vec3::Z, -Vec3::X, -Vec3::Y, -Vec3::Z];
+    let body = crate::mesh_body(&positions, &triangles).unwrap();
+    let (_, triangles) = body.triangle_mesh().unwrap();
+    let mut edges = std::collections::BTreeMap::new();
+    for &[a, b, c] in triangles {
+        for (from, to) in [(a, b), (b, c), (c, a)] {
+            let (uses, balance) = edges.entry((from.min(to), from.max(to))).or_insert((0, 0));
+            *uses += 1;
+            *balance += if from < to { 1 } else { -1 };
         }
     }
-}
-
-#[test]
-#[ignore]
-fn debug_sphere_rotations() {
-    let b = box_solid(Vec3::new(-20.0, -20.0, -20.0), Vec3::new(20.0, 20.0, 20.0)).unwrap();
-    for k in 0..8 {
-        let (a, c) = (0.37 * k as f64 + 0.1, 0.61 * k as f64 + 0.2);
-        let (ca, sa, cc, sc) = (a.cos(), a.sin(), c.cos(), c.sin());
-        let rot = [Vec3::new(ca, sa, 0.0), Vec3::new(-sa * cc, ca * cc, sc), Vec3::new(sa * sc, -ca * sc, cc)];
-        let s = crate::build::sphere_patches_rotated(Vec3::ZERO, 25.0, rot).unwrap();
-        let r = guard("t", || {
-            let res = truck_shapeops::and(&b.deep_copy(), &s.deep_copy(), 0.01);
-            Ok(res.map(|x| x.face_iter().count()))
-        });
-        println!("rot {k}: {r:?}");
-    }
-}
-
-#[test]
-#[ignore]
-fn debug_cube_sphere_measure() {
-    let b = box_solid(Vec3::new(-20.0, -20.0, -20.0), Vec3::new(20.0, 20.0, 20.0)).unwrap();
-    let s = crate::build::sphere_patches(Vec3::ZERO, 25.0).unwrap();
-    let r = guard("t", || Ok(truck_shapeops::and(&b.deep_copy(), &s.deep_copy(), 0.05))).unwrap().unwrap();
-    let body = Body::new(r).unwrap();
-    for tol in [0.5, 0.1, 0.02] {
-        let m = body.tessellate(tol).unwrap();
-        let mm = m.measure();
-        println!("tol {tol}: vol {} area {} tris {}", mm.volume, mm.area, m.triangles.len());
-    }
-    for f in body.faces(0.05).unwrap() {
-        println!("face {} area {:.2} c {:?} planar {:?}", f.index, f.area, f.centroid, f.plane_normal.is_some());
-    }
+    assert!(edges.values().all(|(uses, _)| *uses == 2));
+    assert!(edges.values().any(|(_, balance)| *balance != 0));
+    assert!(!body.is_closed_mesh());
 }
 
 #[test]
@@ -1431,20 +1352,11 @@ fn mesh_bodies_move_measure_and_refuse_solid_ops() {
     assert!((m.volume - 1000.0).abs() < 1e-9 && (m.area - 600.0).abs() < 1e-9, "{m:?}");
     assert_eq!((m.faces, m.edges, m.vertices), (12, 18, 8));
     let moved = crate::transform(&b, Vec3::new(5.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.7).unwrap();
+    assert!(moved.is_closed_mesh());
     assert!((measure(&moved).unwrap().volume - 1000.0).abs() < 1e-9);
     let mirrored = crate::transform_matrix(&b, [[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]).unwrap();
+    assert!(mirrored.is_closed_mesh());
     assert!((measure(&mirrored).unwrap().volume - 1000.0).abs() < 1e-9);
-    // Their size (the diagonal of the box around them) is measured once, when made: a large
-    // scan's size is asked for every frame.
-    for body in [&b, &moved, &mirrored] {
-        assert!(body.size > 0.0, "measured when made");
-        let walked = body.mesh.as_ref().unwrap().positions.iter().fold(solidcraft_geom::Aabb3::EMPTY, |mut a, p| {
-            a.add(*p);
-            a
-        });
-        assert!((body.size() - walked.diagonal()).abs() < 1e-9, "{} vs {}", body.size(), walked.diagonal());
-    }
-    assert!((b.size() - 300.0f64.sqrt()).abs() < 1e-9);
     let solid = box_solid(Vec3::ZERO, Vec3::new(5.0, 5.0, 5.0)).unwrap();
     assert!(fillet(&b, &[Vec3::new(5.0, 0.0, 0.0)], 1.0).unwrap_err().to_string().contains("mesh"));
     assert!(boolean(&solid, &b, BoolOp::Union).is_err());
@@ -1452,6 +1364,46 @@ fn mesh_bodies_move_measure_and_refuse_solid_ops() {
     assert!(crate::mesh_body(&pos, &[[0, 1, 99]]).is_err());
     assert!(crate::mesh_body(&[Vec3::new(f64::NAN, 0.0, 0.0)], &[[0, 0, 0]]).is_err());
     assert!(crate::mesh_body(&pos, &[[0, 0, 1]]).is_err());
+
+    // A ray meets the closed mesh with its outward normal, from outside and from inside alike.
+    let hit = |b: &Body, o: Vec3, d: Vec3| b.fire_ray(o, d).unwrap().map(|h| (h.depth, h.normal));
+    assert_eq!(hit(&b, Vec3::new(5.0, 5.0, 25.0), Vec3::new(0.0, 0.0, -1.0)), Some((15.0, Vec3::Z)));
+    assert_eq!(hit(&b, Vec3::new(5.0, 5.0, 5.0), Vec3::Z), Some((5.0, Vec3::Z)));
+    assert_eq!(hit(&b, Vec3::new(5.0, 5.0, 5.0), Vec3::new(-1.0, 0.0, 0.0)), Some((5.0, Vec3::new(-1.0, 0.0, 0.0))));
+    // An open mesh has no outside: its normal faces the ray, from either side.
+    let sheet = crate::mesh_body(&[Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0)], &[[0, 1, 2]]).unwrap();
+    assert!(!sheet.is_closed_mesh());
+    assert_eq!(hit(&sheet, Vec3::new(2.0, 2.0, 4.0), Vec3::new(0.0, 0.0, -1.0)), Some((4.0, Vec3::Z)));
+    assert_eq!(hit(&sheet, Vec3::new(2.0, 2.0, -4.0), Vec3::Z), Some((4.0, Vec3::new(0.0, 0.0, -1.0))));
+}
+
+/// `Body::face_line_hit` on the Ø40 × 40 cylinder about +Z, exactly, in closed form.
+/// - A line through the axis meets the side at the same distance both ways, (±20, 0, 20): the tie
+///   goes to the meeting ahead along the direction, whichever way the line points.
+/// - A line lying on the side (a ruling, here at 33° and on the side's seam) is no single place
+///   on it: `None`, not a failure. Each end meets it once, on its rim, at z = 0 and z = 40.
+#[test]
+fn a_line_meets_a_cylinders_face_ahead_on_a_tie_and_not_at_all_along_it() {
+    let b = cylinder(Vec3::ZERO, Vec3::Z, 20.0, 40.0).unwrap();
+    let side = (0..b.face_count()).find(|&f| matches!(face_surface(&b, f), Some(FaceSurface::Cylinder { .. }))).unwrap();
+    let ends: Vec<usize> = (0..b.face_count()).filter(|&f| f != side).collect();
+    assert_eq!(ends.len(), 2);
+    let centre = Vec3::new(0.0, 0.0, 20.0);
+    for (dir, ahead) in [(Vec3::X, Vec3::new(20.0, 0.0, 20.0)), (-Vec3::X, Vec3::new(-20.0, 0.0, 20.0))] {
+        let got = b.face_line_hit(side, centre, dir).unwrap().unwrap();
+        assert!(got.dist(ahead) < 1e-9, "along {dir:?}: {got:?}, not {ahead:?}");
+    }
+    for a in [33f64.to_radians(), crate::build::SEAM_ANGLE] {
+        let rim = Vec3::new(20.0 * a.cos(), 20.0 * a.sin(), 0.0);
+        for (z, dir) in [(30.0, -Vec3::Z), (10.0, Vec3::Z)] {
+            let on = rim + Vec3::new(0.0, 0.0, z);
+            assert_eq!(b.face_line_hit(side, on, dir).unwrap(), None, "at {a} rad, z = {z}");
+            let mut met: Vec<Vec3> = ends.iter().filter_map(|&f| b.face_line_hit(f, on, dir).unwrap()).collect();
+            met.sort_by(|p, q| p.z.total_cmp(&q.z));
+            assert_eq!(met.len(), 2, "at {a} rad, z = {z}: {met:?}");
+            assert!(met[0].dist(rim) < 1e-9 && met[1].dist(rim + Vec3::new(0.0, 0.0, 40.0)) < 1e-9, "at {a} rad, z = {z}: {met:?}");
+        }
+    }
 }
 
 #[test]
@@ -1468,26 +1420,6 @@ fn concave_fillet() {
 }
 
 #[test]
-#[ignore]
-fn debug_pocket_corners() {
-    let b = box_solid(Vec3::ZERO, Vec3::new(80.0, 60.0, 20.0)).unwrap();
-    let p = box_solid(Vec3::new(15.0, 15.0, 12.0), Vec3::new(65.0, 45.0, 25.0)).unwrap();
-    let mut cur = boolean(&b, &p, BoolOp::Cut).unwrap().unwrap();
-    for e in [Vec3::new(65.0, 15.0, 16.0), Vec3::new(15.0, 15.0, 16.0), Vec3::new(65.0, 45.0, 16.0), Vec3::new(15.0, 45.0, 16.0)] {
-        match fillet(&cur, &[e], 5.0) {
-            Ok(n) => {
-                println!("ok {e:?} vol {}", measure(&n).unwrap().volume);
-                cur = n;
-            }
-            Err(err) => {
-                println!("fail {e:?}: {err}");
-                break;
-            }
-        }
-    }
-}
-
-#[test]
 fn pocket_floor_loop_fillet() {
     let b = box_solid(Vec3::ZERO, Vec3::new(80.0, 60.0, 20.0)).unwrap();
     let p = box_solid(Vec3::new(15.0, 15.0, 12.0), Vec3::new(65.0, 45.0, 25.0)).unwrap();
@@ -1495,18 +1427,23 @@ fn pocket_floor_loop_fillet() {
     cur = fillet(&cur, &[Vec3::new(65.0, 15.0, 16.0), Vec3::new(15.0, 15.0, 16.0), Vec3::new(65.0, 45.0, 16.0), Vec3::new(15.0, 45.0, 16.0)], 5.0)
         .unwrap();
     let v1 = measure(&cur).unwrap().volume;
+    // The 50 x 30 x 8 pocket, less the four concave R5 rounds of its corners filling r²(1 − π/4)
+    // of section along their 8.
+    let want1 = 80.0 * 60.0 * 20.0 - 50.0 * 30.0 * 8.0 + 4.0 * 25.0 * (1.0 - PI / 4.0) * 8.0;
+    assert!(rel(v1, want1) < 1e-6, "{v1} vs {want1}");
     let floor: Vec<Vec3> = [(40.0, 15.0), (65.0, 30.0), (40.0, 45.0), (15.0, 30.0)].iter().map(|(x, y)| Vec3::new(*x, *y, 12.0)).collect();
     let mut pts = floor.clone();
     let d = 5.0 - 5.0 / 2f64.sqrt();
     pts.extend([(15.0 + d, 15.0 + d), (65.0 - d, 15.0 + d), (65.0 - d, 45.0 - d), (15.0 + d, 45.0 - d)].iter().map(|(x, y)| Vec3::new(*x, *y, 12.0)));
     let f = fillet(&cur, &pts, 2.0).unwrap();
     let m = measure(&f).unwrap();
-    // Added: the fillet profile (r²(1 − π/4)) swept along the floor outline (Pappus for the
-    // corners: the profile's centroid sits 2 − 4·2/(3(4 − π))·… inward; check loosely).
-    let straight = 2.0 * (40.0 + 20.0);
-    let added_lines = (4.0 - PI) * straight;
-    assert!(m.volume > v1 + added_lines && m.volume < v1 + added_lines + 4.0 * 2.0 * PI * 5.0, "{} {}", m.volume, v1);
-    println!("pocket: {:?} vol {}", m.merged, m.volume);
+    // Added: the R2 round's section, a = r²(1 − π/4), along the floor outline's straight 2(40 + 20),
+    // and round its four R5 corners by Pappus: a quarter turn each at the radius of the section's
+    // centroid, which sits r(10 − 3π)/(3(4 − π)) in from the wall, at 5 from the corner's axis.
+    let a = 4.0 * (1.0 - PI / 4.0);
+    let centroid = 5.0 - 2.0 * (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI));
+    let want = v1 + a * 2.0 * (40.0 + 20.0) + 4.0 * a * (PI / 2.0) * centroid;
+    assert!(rel(m.volume, want) < 1e-6, "{} vs {want}", m.volume);
 }
 
 #[test]
@@ -1527,50 +1464,6 @@ fn round_every_edge_of_a_box() {
 }
 
 #[test]
-#[ignore]
-fn debug_heal_sphere_cut() {
-    let b = box_solid(Vec3::new(-25.0, -25.0, -20.0), Vec3::new(25.0, 25.0, 0.0)).unwrap();
-    let s = sphere(Vec3::ZERO, 15.0).unwrap();
-    let r = guard("t", || {
-        let mut sb = s.deep_copy();
-        sb.not();
-        Ok(truck_shapeops::and(&b.deep_copy(), &sb, 0.05))
-    })
-    .unwrap()
-    .unwrap();
-    let raw = Body::new(r.clone()).unwrap();
-    let healed = Body::new(crate::heal::heal(r, 60.0)).unwrap();
-    for (name, x) in [("raw", raw), ("healed", healed)] {
-        println!("{name}: vol {} faces {}", measure(&x).unwrap().volume, x.face_count());
-        for f in x.faces(0.05).unwrap() {
-            println!("  face {} area {:.2} c {:?}", f.index, f.area, f.centroid);
-        }
-    }
-}
-
-#[test]
-#[ignore]
-fn debug_coplanar_cylinder_union() {
-    let a = box_solid(Vec3::ZERO, Vec3::new(40.0, 40.0, 20.0)).unwrap();
-    let c = cylinder(Vec3::new(40.0, 20.0, 0.0), Vec3::Z, 12.0, 40.0).unwrap();
-    for op in [BoolOp::Union, BoolOp::Cut, BoolOp::Intersect] {
-        let r = guard("t", || {
-            let (sa, mut sb) = (a.deep_copy(), c.deep_copy());
-            Ok(match op {
-                BoolOp::Union => truck_shapeops::or(&sa, &sb, 0.05),
-                BoolOp::Cut => {
-                    sb.not();
-                    truck_shapeops::and(&sa, &sb, 0.05)
-                }
-                BoolOp::Intersect => truck_shapeops::and(&sa, &sb, 0.05),
-            }
-            .map(|s| s.face_iter().count()))
-        });
-        println!("{op:?}: {r:?}");
-    }
-}
-
-#[test]
 fn coplanar_curved_booleans() {
     // A box and a cylinder standing on the same plane, the cylinder's axis on the box's side.
     let a = box_solid(Vec3::ZERO, Vec3::new(40.0, 40.0, 20.0)).unwrap();
@@ -1583,7 +1476,25 @@ fn coplanar_curved_booleans() {
     assert!(rel(measure(&cut).unwrap().volume, 32000.0 - half * 20.0) < 1e-3);
     let i = boolean(&a, &c, BoolOp::Intersect).unwrap().unwrap();
     assert!(rel(measure(&i).unwrap().volume, half * 20.0) < 1e-3);
-    println!("union {:?}", m.merged);
+    // A cylinder of radius 5 through the middle of a 40 x 30 x 20 box, its caps flush with the
+    // box's top or bottom or past them: the cut takes the part inside, π·25 a mm of height, and
+    // the union adds the parts outside. A cylinder inside but for a flush cap adds nothing.
+    let b = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap();
+    let disc = PI * 25.0;
+    for (z0, z1, inside, outside) in [
+        (0.0, 20.0, 20.0, 0.0),
+        (-5.0, 20.0, 20.0, 5.0),
+        (0.0, 25.0, 20.0, 5.0),
+        (-5.0, 25.0, 20.0, 10.0),
+        (5.0, 20.0, 15.0, 0.0),
+        (5.0, 25.0, 15.0, 5.0),
+    ] {
+        let c = cylinder(Vec3::new(20.0, 15.0, z0), Vec3::Z, 5.0, z1 - z0).unwrap();
+        let cut = measure(&boolean(&b, &c, BoolOp::Cut).unwrap().unwrap()).unwrap().volume;
+        assert!(rel(cut, 24000.0 - disc * inside) < 1e-6, "cut z {z0}..{z1}: {cut}");
+        let union = measure(&boolean(&b, &c, BoolOp::Union).unwrap().unwrap()).unwrap().volume;
+        assert!(rel(union, 24000.0 + disc * outside) < 1e-6, "union z {z0}..{z1}: {union}");
+    }
 }
 
 #[test]
@@ -1600,103 +1511,43 @@ fn shell_non_convex() {
     assert!(rel(v, outer - cavity) < 1e-6, "{v} vs {}", outer - cavity);
 }
 
-/// A basin: a slab with a tapered pocket and a 4 mm front rim, shelled from below. A wall
-/// thicker than the rim (with the pocket's slope) would turn the top face inside out: refused,
-/// not a body with wrong mass properties.
+/// A basin: a 100 × 60 × 30 slab with a tapered pocket (60 × 46 at the top, 4 mm from the front,
+/// 40 × 20 at its floor 20 down) shelled from below, each wall moved in by t with sharp edges.
+/// The cavity is the slab shrunk by t (open at z = 0) less the pocket grown by t, each sloped side
+/// moved out along its normal; the volume, slab − pocket − cavity, is a cubic in z integrated by
+/// hand. From t ≈ 2.70 the front side's offset passes the front wall's below the 4 mm rim, and
+/// the rim stays solid: the cavity's front stops at y = t (from z = (28 − (1 + √1.64) t)/0.8 up).
 #[test]
-fn shell_thicker_than_a_rim_is_refused() {
+fn shell_of_a_basin_past_its_rim_keeps_the_rim_solid() {
     let slab = box_solid(Vec3::ZERO, Vec3::new(100.0, 60.0, 30.0)).unwrap();
     let rect = |x0: f64, y0: f64, x1: f64, y1: f64| Loop2::polygon(&[Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)]);
     let at = |z: f64| Plane::new(Vec3::new(0.0, 0.0, z), Vec3::X, Vec3::Y).unwrap();
     let pocket = loft(&[(at(30.0), rect(20.0, 4.0, 80.0, 50.0)), (at(10.0), rect(30.0, 20.0, 70.0, 40.0))]).unwrap();
     let basin = boolean(&slab, &pocket, BoolOp::Cut).unwrap().unwrap();
     let open = [Vec3::new(50.0, 30.0, 0.0)];
-    let e = shell(&basin, &open, 6.0).unwrap_err().to_string();
-    assert!(e.contains("rim or ledge"), "{e}");
-    let (whole, thin) = (measure(&basin).unwrap(), measure(&shell(&basin, &open, 1.0).unwrap()).unwrap());
-    assert!(thin.volume > 0.0 && thin.volume < whole.volume, "{} vs {}", thin.volume, whole.volume);
-    let (lo, hi) = (thin.bbox.min, thin.bbox.max);
-    let c = thin.centroid;
-    assert!(c.x > lo.x && c.x < hi.x && c.y > lo.y && c.y < hi.y && c.z > lo.z && c.z < hi.z, "{c:?}");
-    assert!((c.x - 50.0).abs() < 1e-3, "{c:?}");
-}
-
-#[test]
-#[ignore]
-fn debug_drilled_hole() {
-    let b = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 15.0)).unwrap();
-    let r = 3.4;
-    let half = (118f64 / 2.0).to_radians();
-    let tip = r / half.tan();
-    let (top, bottom) = (0.6, -12.0);
-    let a = std::env::var("ANG").ok().and_then(|x| x.parse::<f64>().ok()).unwrap_or(0.0);
-    let rp = Plane::new(Vec3::new(20.0, 15.0, 15.0), Vec3::new(a.cos(), a.sin(), 0.0), Vec3::Z).unwrap();
-    let tipv = if std::env::var_os("NOTIP").is_some() { 0.0 } else { tip };
-    let pts = [Vec2::new(0.0, top), Vec2::new(r, top), Vec2::new(r, bottom), Vec2::new(0.0, bottom - tipv)];
-    let region = Region2 { outer: Loop2::polygon(&pts), holes: vec![] };
-    let tool = revolve(&rp, &[region], Vec2::ZERO, Vec2::Y, std::f64::consts::TAU).unwrap().pop().unwrap();
-    println!("tool faces {} vol {}", tool.face_count(), measure(&tool).unwrap().volume);
-    let r = guard("t", || {
-        let mut sb = tool.deep_copy();
-        sb.not();
-        Ok(truck_shapeops::and(&b.deep_copy(), &sb, 0.02).map(|s| s.face_iter().count()))
-    });
-    println!("cut: {r:?}");
-}
-
-#[test]
-#[ignore]
-fn debug_face_param_areas() {
-    use truck_modeling::{BoundedCurve, ParametricCurve, SearchNearestParameter};
-    let rp = Plane::new(Vec3::new(20.0, 15.0, 15.0), Vec3::X, Vec3::Z).unwrap();
-    let pts = [Vec2::new(0.0, 0.6), Vec2::new(3.4, 0.6), Vec2::new(3.4, -12.0), Vec2::new(0.0, -12.0)];
-    let region = Region2 { outer: Loop2::polygon(&pts), holes: vec![] };
-    let tool = revolve(&rp, &[region], Vec2::ZERO, Vec2::Y, std::f64::consts::TAU).unwrap().pop().unwrap();
-    let ex = cylinder(Vec3::new(20.0, 15.0, 3.0), Vec3::Z, 3.4, 12.6).unwrap();
-    for (name, b) in [("revolve", &tool), ("extrude", &ex)] {
-        for f in b.solid.face_iter() {
-            let s = f.surface();
-            let mut poly: Vec<(f64, f64)> = Vec::new();
-            for w in f.absolute_boundaries() {
-                for e in w.edge_iter() {
-                    let c = e.oriented_curve();
-                    let (t0, t1) = c.range_tuple();
-                    for k in 0..8 {
-                        let p = c.subs(t0 + (t1 - t0) * k as f64 / 8.0);
-                        if let Some(uv) = s.search_nearest_parameter(p, poly.last().copied(), 100) {
-                            poly.push(uv);
-                        }
-                    }
-                }
-            }
-            let n = poly.len();
-            let area: f64 = (0..n)
-                .map(|i| {
-                    let (a, b) = (poly[i], poly[(i + 1) % n]);
-                    a.0 * b.1 - b.0 * a.1
-                })
-                .sum::<f64>()
-                / 2.0;
-            println!("{name}: orientation {} param area {area:.4} wires {}", f.orientation(), f.absolute_boundaries().len());
-        }
-    }
-}
-
-#[test]
-#[ignore]
-fn debug_revolved_tube_cut() {
-    let b = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 15.0)).unwrap();
-    let rp = Plane::new(Vec3::new(20.0, 15.0, 15.0), Vec3::X, Vec3::Z).unwrap();
-    for (name, inner) in [("tube", 1.0), ("solid", 0.0)] {
-        let pts = [Vec2::new(inner, 0.6), Vec2::new(3.4, 0.6), Vec2::new(3.4, -12.0), Vec2::new(inner, -12.0)];
-        let region = Region2 { outer: Loop2::polygon(&pts), holes: vec![] };
-        let tool = revolve(&rp, &[region], Vec2::ZERO, Vec2::Y, std::f64::consts::TAU).unwrap().pop().unwrap();
-        let r = guard("t", || {
-            let mut sb = tool.deep_copy();
-            sb.not();
-            Ok(truck_shapeops::and(&b.deep_copy(), &sb, 0.02).map(|s| s.face_iter().count()))
-        });
-        println!("{name}: faces {} cut {r:?}", tool.face_count());
+    // The pocket grown by t at height z: x from 35 − z/2 − t√5/2 to 65 + z/2 + t√5/2, y from
+    // 28 − 0.8 z − t√1.64 (or y = t, where that is less) to 35 + z/2 + t√5/2, for
+    // z = 10 − t … 30 − t; its sides stay inside the shrunk slab in x and at the back for t ≤ 6.
+    let (r5, r164) = (5f64.sqrt(), 1.64f64.sqrt());
+    let integral = |c: [f64; 3], lo: f64, hi: f64| c[0] * (hi - lo) + c[1] * (hi * hi - lo * lo) / 2.0 + c[2] * (hi.powi(3) - lo.powi(3)) / 3.0;
+    // (w0 + z)(h0 + h1 z) as coefficients in z.
+    let product = |w0: f64, h0: f64, h1: f64| [w0 * h0, w0 * h1 + h0, h1];
+    let grown = |t: f64| {
+        let (lo, hi, w0) = (10.0 - t, 30.0 - t, 30.0 + r5 * t);
+        let full = product(w0, 7.0 + t * (r5 / 2.0 + r164), 1.3);
+        let z0 = ((28.0 - r164 * t - t) / 0.8).clamp(lo, hi);
+        integral(full, lo, z0) + integral(product(w0, 35.0 + (r5 / 2.0 - 1.0) * t, 0.5), z0, hi)
+    };
+    let volume = |t: f64| 100.0 * 60.0 * 30.0 - grown(0.0) - (100.0 - 2.0 * t) * (60.0 - 2.0 * t) * (30.0 - t) + grown(t);
+    let whole = measure(&basin).unwrap();
+    assert!(rel(whole.volume, 180_000.0 - grown(0.0)) < 1e-9, "{}", whole.volume);
+    for (t, want) in [(1.0, 17_105.624_041_5), (4.0, 63_560.249_228_4), (6.0, 90_113.920_210_1)] {
+        assert!(rel(volume(t), want) < 1e-12, "the closed form at {t}: {}", volume(t));
+        let m = measure(&shell(&basin, &open, t).unwrap()).unwrap();
+        assert!(rel(m.volume, want) < 1e-6, "t {t}: {} vs {want}", m.volume);
+        let (lo, hi, c) = (m.bbox.min, m.bbox.max, m.centroid);
+        assert!(c.x > lo.x && c.x < hi.x && c.y > lo.y && c.y < hi.y && c.z > lo.z && c.z < hi.z, "{c:?}");
+        assert!((c.x - 50.0).abs() < 1e-3, "{c:?}");
     }
 }
 
@@ -1721,7 +1572,7 @@ fn circle_loop_fillets_and_chamfers() {
 
 #[test]
 fn trimmed_revolved_faces_measure_exactly() {
-    use solidcraft_geom::Seg2;
+    use solidcore_record::Seg2;
     use std::f64::consts::FRAC_PI_2;
     // A slot with concave ends sketched on the plane x = 12.5, cut 4 deep into a revolved shaft
     // of radius 12.5 (the cut faces' triangulation spans wide angles unless refined).
@@ -1777,7 +1628,7 @@ fn shell_with_cylindrical_faces() {
 
 #[test]
 fn draft_of_a_round_ended_pocket() {
-    use solidcraft_geom::Seg2;
+    use solidcore_record::Seg2;
     use std::f64::consts::FRAC_PI_2;
     let block = box_solid(Vec3::ZERO, Vec3::new(80.0, 60.0, 25.0)).unwrap();
     let segs = vec![
@@ -1851,8 +1702,9 @@ fn rounded_corners_rounded_again_make_spheres() {
     let bx = box_solid(Vec3::ZERO, Vec3::new(a, b, c)).unwrap();
     let vert: Vec<Vec3> = [(0.0, 0.0), (a, 0.0), (a, b), (0.0, b)].iter().map(|(x, y)| Vec3::new(*x, *y, c / 2.0)).collect();
     let f = fillet(&bx, &vert, r).unwrap();
-    let f = fillet(&f, &[Vec3::new(a / 2.0, 0.0, c)], r).unwrap();
-    let f = fillet(&f, &[Vec3::new(a / 2.0, 0.0, 0.0)], r).unwrap();
+    // Each loop by one pick and its tangent chain, as the Fillet feature asks for it.
+    let f = fillet(&f, &crate::tangent_chain(&f, &[Vec3::new(a / 2.0, 0.0, c)]).unwrap(), r).unwrap();
+    let f = fillet(&f, &crate::tangent_chain(&f, &[Vec3::new(a / 2.0, 0.0, 0.0)]).unwrap(), r).unwrap();
     let (ai, bi, ci) = (a - 2.0 * r, b - 2.0 * r, c - 2.0 * r);
     let area = 2.0 * (ai * bi + bi * ci + ai * ci) + PI * r * (ai + bi + ci) * 2.0 + 4.0 * PI * r * r;
     let vol = ai * bi * ci + 2.0 * r * (ai * bi + bi * ci + ai * ci) + PI * r * r * (ai + bi + ci) + 4.0 / 3.0 * PI * r * r * r;
@@ -1910,7 +1762,9 @@ fn overlapping_holes_and_mirror_joins() {
     let both = boolean(&half, &other, BoolOp::Union).unwrap().unwrap();
     let v = measure(&half).unwrap().volume;
     let mb = measure(&both).unwrap();
-    assert!(rel(mb.volume, 2.0 * v) < 1e-9, "{} vs {}", mb.volume, 2.0 * v);
+    // Both volumes are SMLib's integrals, each good to its relative accuracy (1e-8,
+    // measure::ACCURACY): they agree to the two together.
+    assert!(rel(mb.volume, 2.0 * v) < 2e-8, "{} vs {}", mb.volume, 2.0 * v);
     // One body: the shared face is gone and the faces either side of it merged.
     assert_eq!(mb.merged.faces, 10, "{:?}", mb.merged);
     // Two equal cylinders on one axis, overlapping: one longer cylinder.
@@ -1966,7 +1820,7 @@ fn fillet_where_a_branch_pipe_meets_a_main_pipe() {
 
 #[test]
 fn fillet_an_open_curved_edge() {
-    use solidcraft_geom::Seg2;
+    use solidcore_record::Seg2;
     // A D-shaped block: the round top edge only, ending at the flat wall's sharp corners.
     let d = Loop2 {
         segs: vec![
@@ -1975,12 +1829,9 @@ fn fillet_an_open_curved_edge() {
         ],
     };
     let b = extrude(&Plane::XY, &[Region2 { outer: d, holes: vec![] }], 0.0, 15.0).unwrap().pop().unwrap();
-    let v0 = measure(&b).unwrap().volume;
     let f = fillet(&b, &[Vec3::new(0.0, 10.0, 15.0)], 2.0).unwrap();
-    // (A fine tessellation: the difference of two measured volumes magnifies their error.)
-    let _ = v0;
-    let fine = |x: &Body| x.tessellate_with(0.002, true).unwrap().measure().volume;
-    let removed = fine(&b) - fine(&f);
+    // Exact volumes (SMLib's, to 1e-8): the difference of two mesh volumes magnifies their sag.
+    let removed = measure(&b).unwrap().volume - measure(&f).unwrap().volume;
     // Pappus: the corner's cross-section r²(1 − π/4), its centroid 0.2234 r in from the wall.
     let r = 2.0;
     let want = r * r * (1.0 - PI / 4.0) * (10.0 - r * (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI))) * PI;
@@ -1988,7 +1839,7 @@ fn fillet_an_open_curved_edge() {
 }
 
 fn mixed_arc_and_line_prism() -> Body {
-    use solidcraft_geom::Seg2;
+    use solidcore_record::Seg2;
     let d = Loop2 {
         segs: vec![
             Seg2::Arc { center: Vec2::ZERO, radius: 10.0, start: 0.0, sweep: PI },
@@ -2000,7 +1851,7 @@ fn mixed_arc_and_line_prism() -> Body {
 
 #[test]
 fn fillet_smooth_arc_and_line_loop_keeps_exact_removal() {
-    use solidcraft_geom::Seg2;
+    use solidcore_record::Seg2;
     // A stadium: four tangent joints, none of which should use a sharp-corner mitre.
     let outline = Loop2 {
         segs: vec![
@@ -2019,7 +1870,7 @@ fn fillet_smooth_arc_and_line_loop_keeps_exact_removal() {
     let area = r * r * (1.0 - PI / 4.0);
     let centroid = r * (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI));
     let want = area * (40.0 + 2.0 * PI * (10.0 - centroid));
-    let fine = |b: &Body| b.tessellate_with(1e-4, true).unwrap().measure().volume;
+    let fine = |b: &Body| b.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
     let removed = fine(&body) - fine(&blended);
     assert!(rel(removed, want) < 1e-3, "{removed} vs {want}");
 }
@@ -2057,11 +1908,11 @@ fn fillet_rounded_rectangle_with_tiny_end_edges() {
     let area = radius * radius * (1.0 - PI / 4.0);
     let centroid = radius * (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI));
     let removed = area * (2.0 * (w + h - 4.0 * r) + 2.0 * PI * (r - centroid));
-    let fine = |b: &Body| b.tessellate_with(1e-4, true).unwrap().measure().volume;
+    let fine = |b: &Body| b.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
     let initial = fine(&body);
     // Every rim edge, the tiny end alone (tangent chain), and the opposite selection order.
     for selection in [picks.to_vec(), vec![picks[3]], picks.into_iter().rev().collect()] {
-        let blended = fillet(&body, &selection, radius).unwrap();
+        let blended = fillet(&body, &crate::tangent_chain(&body, &selection).unwrap(), radius).unwrap();
         assert!(blended.validity().is_empty(), "{:?}", blended.validity());
         assert_eq!(blended.crossed_face_loops().unwrap(), 0);
         assert_eq!((blended.face_count(), blended.edge_count(), blended.vertex_count()), (18, 40, 24));
@@ -2073,7 +1924,7 @@ fn fillet_rounded_rectangle_with_tiny_end_edges() {
 
 #[test]
 fn fillet_sharp_arc_and_arc_loop() {
-    use solidcraft_geom::Seg2;
+    use solidcore_record::Seg2;
     // The intersection of two radius-10 disks whose centres are 10 mm apart.
     let outline = Loop2 {
         segs: vec![
@@ -2084,7 +1935,7 @@ fn fillet_sharp_arc_and_arc_loop() {
     let body = extrude(&Plane::XY, &[Region2 { outer: outline, holes: vec![] }], 0.0, 15.0).unwrap().pop().unwrap();
     let blended = fillet(&body, &[Vec3::new(5.0, 0.0, 15.0), Vec3::new(-5.0, 0.0, 15.0)], 0.5).unwrap();
     assert!(blended.validity().is_empty(), "{:?}", blended.validity());
-    let mesh = blended.tessellate_with(1e-4, true).unwrap();
+    let mesh = blended.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap();
     for p in &mesh.positions {
         assert!((p.x - 5.0).hypot(p.y) <= 10.0 + 1e-3 && (p.x + 5.0).hypot(p.y) <= 10.0 + 1e-3, "outside the lens: {p:?}");
     }
@@ -2096,21 +1947,35 @@ fn fillet_sharp_arc_and_arc_loop() {
             (area(10.0) - area(10.0 - 0.5 * (1.0 - theta.cos()))) * 0.5 * theta.cos() * dt
         })
         .sum();
-    let removed = body.tessellate_with(1e-4, true).unwrap().measure().volume - mesh.measure().volume;
+    // Exact volumes (SMLib's, to 1e-8): the difference of two mesh volumes magnifies their sag.
+    let removed = measure(&body).unwrap().volume - measure(&blended).unwrap().volume;
     assert!(rel(removed, want) < 1e-3, "{removed} vs {want}");
 }
 
-#[test]
-fn fillet_tabbed_plate_outer_loop_and_partial_selection_after_hole() {
-    use solidcraft_geom::Seg2;
-    // Reconstruct the outer outline from its seven public pick coordinates:
-    // R25 plate, x=+/-4 tab sides, R2 corners and a 4 mm straight top.
-    // The hole's dimensions come from the public reproduction, not an original design file.
+/// The area of the tabbed plate's outline (`fillet_tabbed_plate_outer_loop_and_partial_selection_after_hole`)
+/// with the R25 arc moved in by `da` and the tab's run (its sides, R2 corners and top) by `dt`,
+/// each element parallel to itself, by Green's theorem: an arc about c of radius ρ from a to b
+/// gives ½ (ρ² (b − a) + ρ (cx (sin b − sin a) − cy (cos b − cos a))), a segment p→q ½ (p × q).
+/// At the concave corners (±4, y) the moved elements meet where they cross: where one side moves
+/// the round runs into the other wall, where both do the two rounds are mitred (the owner's
+/// ruling for rounds meeting at a concave corner beside an unpicked sharp edge, 2026-10-30).
+fn tabbed_plate_area(da: f64, dt: f64) -> f64 {
+    let cy = 280.0 / 9.0;
+    let (big, rho) = (25.0 - da, 2.0 - dt);
+    let tab = rho * rho * PI + 2.0 * rho * (2.0 + cy) + 4.0 * (cy + rho);
+    let yc = (big * big - (4.0 - dt).powi(2)).sqrt();
+    let at = yc.atan2(4.0 - dt);
+    0.5 * (big * big * (PI + 2.0 * at) + tab) + (4.0 - dt) * (cy - yc)
+}
+
+/// The tabbed plate's outer outline, reconstructed from its seven public pick coordinates: an R25
+/// plate, x = ±4 tab sides, R2 corners centred at (±2, 280/9) and a 4 mm straight top.
+fn tabbed_plate_outline() -> Loop2 {
+    use solidcore_record::Seg2;
     let theta = (4.0_f64 / 25.0).acos();
     let y = (625.0_f64 - 16.0).sqrt();
     let corner_y = 280.0 / 9.0;
-    let hole_y = 262.0 / 9.0;
-    let outline = Loop2 {
+    Loop2 {
         segs: vec![
             Seg2::Arc { center: Vec2::ZERO, radius: 25.0, start: PI - theta, sweep: PI + 2.0 * theta },
             Seg2::Line { a: Vec2::new(4.0, y), b: Vec2::new(4.0, corner_y) },
@@ -2119,10 +1984,60 @@ fn fillet_tabbed_plate_outer_loop_and_partial_selection_after_hole() {
             Seg2::Arc { center: Vec2::new(-2.0, corner_y), radius: 2.0, start: PI / 2.0, sweep: PI / 2.0 },
             Seg2::Line { a: Vec2::new(-4.0, corner_y), b: Vec2::new(-4.0, y) },
         ],
-    };
+    }
+}
+
+/// solidcore#2223: the tabbed plate's R25 rim and one R2 tab corner arc, which share no vertex,
+/// rounded together at r 0.5 on the plate 2 high (no hole). Each rounds alone; together they
+/// failed 1001 in cliff_overflow. They take off the sum: the rim alone's closed form,
+/// 7.958672911836132 (its spandrel (1 − π/4) r² revolved about the disc's axis outside |x| < 4,
+/// solidcore#2176's test; the rim's End, `fillet_blend_corner`, builds it to 5e-8), and the
+/// corner arc's Pappus volume with flat ends, 0.15913583972191622 (the spandrel about the
+/// corner's axis at 2 − its centroid over a quarter turn), 8.117808752.
+#[test]
+fn fillet_tabbed_plate_rim_and_one_corner_arc_together() {
+    let body = extrude(&Plane::XY, &[Region2 { outer: tabbed_plate_outline(), holes: vec![] }], 0.0, 2.0).unwrap().pop().unwrap();
+    let r = 0.5;
+    let (spandrel, centroid) = ((1.0 - PI / 4.0) * r * r, r * (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI)));
+    let corner = spandrel * (PI / 2.0) * (2.0 - centroid);
+    assert!((corner - 0.159_135_839_721_916_22).abs() < 1e-12, "{corner}");
+    let want = 7.958_672_911_836_132 + corner;
+    let picks = [
+        Vec3::new(-24.91935125502191, -2.0064727829797544, 2.0),
+        Vec3::new(24.919351255429795, -2.006472777913911, 2.0),
+        Vec3::new(3.4142135598750105, 32.525324672801695, 2.0),
+    ];
+    let blended = fillet(&body, &picks, r).unwrap_or_else(|e| panic!("rim and corner arc together: {e}"));
+    assert!(blended.validity().is_empty(), "{:?}", blended.validity());
+    assert_eq!(blended.face_count(), 12);
+    let got = measure(&body).unwrap().volume - measure(&blended).unwrap().volume;
+    assert!((got - want).abs() < 1e-7, "removed {got}, expected {want}");
+}
+
+#[test]
+fn fillet_tabbed_plate_outer_loop_and_partial_selection_after_hole() {
+    // The hole's dimensions come from the public reproduction, not an original design file.
+    let theta = (4.0_f64 / 25.0).acos();
+    let y = (625.0_f64 - 16.0).sqrt();
+    let corner_y = 280.0 / 9.0;
+    let hole_y = 262.0 / 9.0;
+    let outline = tabbed_plate_outline();
     let body =
         extrude(&Plane::XY, &[Region2 { outer: outline, holes: vec![Loop2::circle(Vec2::new(0.0, hole_y), 1.5)] }], 0.0, 2.0).unwrap().pop().unwrap();
-    let inner = fillet(&body, &[Vec3::new(1.5, hole_y, 2.0)], 0.5).unwrap();
+    let r = 0.5;
+    // The section a round takes off, (1 − π/4) r², and its centroid's distance from both faces.
+    let (spandrel, centroid) = ((1.0 - PI / 4.0) * r * r, r * (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI)));
+    // The outline's area (Green's theorem, checked against the disc, the tab's rectangle and its
+    // two R2 corners), the plate its prism 2 high less the hole.
+    let outline_area = tabbed_plate_area(0.0, 0.0);
+    let parts = 312.5 * (PI + 2.0 * theta) + 4.0 * y + 8.0 * (corner_y - y) + 8.0 + 2.0 * PI;
+    assert!(rel(outline_area, parts) < 1e-14, "{outline_area} vs {parts}");
+    assert!(rel(measure(&body).unwrap().volume, 2.0 * (outline_area - PI * 2.25)) < 1e-9);
+    // The hole's rim round (Pappus: the spandrel about the hole's axis at 1.5 + its centroid).
+    let inner = fillet(&body, &[Vec3::new(1.5, hole_y, 2.0)], r).unwrap();
+    let rim = spandrel * 2.0 * PI * (1.5 + centroid);
+    let holed = measure(&inner).unwrap().volume;
+    assert!(rel(measure(&body).unwrap().volume - holed, rim) < 1e-5, "{} vs {rim}", measure(&body).unwrap().volume - holed);
     let edges = [
         Vec3::new(-24.91935125502191, -2.0064727829797544, 2.0),
         Vec3::new(24.919351255429795, -2.006472777913911, 2.0),
@@ -2132,13 +2047,37 @@ fn fillet_tabbed_plate_outer_loop_and_partial_selection_after_hole() {
         Vec3::new(-3.4142135648720653, 32.52532467287703, 2.0),
         Vec3::new(-4.0000000025087745, 27.89451823429679, 2.0),
     ];
+    // The selections that end only at the sharp concave corners at (±4, y): the R25 arc (its two
+    // edges, tangent at the bottom), the tab's run (tangent through its R2 corners), and both.
+    // Each takes off the outline's section less the section moved in by d = r (1 − cos φ) at the
+    // height r sin φ into the round, integrated over that height (midpoint rule in φ).
+    let removed = |arc: bool, tab: bool, steps: u32| {
+        let dphi = (PI / 2.0) / f64::from(steps);
+        (0..steps)
+            .map(|i| {
+                let phi = (f64::from(i) + 0.5) * dphi;
+                let d = r * (1.0 - phi.cos());
+                (outline_area - tabbed_plate_area(if arc { d } else { 0.0 }, if tab { d } else { 0.0 })) * r * phi.cos() * dphi
+            })
+            .sum::<f64>()
+    };
+    for (mask, arc, tab) in [(0b0000011_u32, true, false), (0b1111100, false, true), (0b1111111, true, true)] {
+        let want = removed(arc, tab, 8192);
+        assert!((want - removed(arc, tab, 4096)).abs() < 1e-7 * want, "the reference quadrature must converge");
+        let picks: Vec<_> = edges.iter().enumerate().filter(|(i, _)| mask & (1 << i) != 0).map(|(_, p)| *p).collect();
+        let blended = fillet(&inner, &picks, r).unwrap_or_else(|e| panic!("{picks:?}: {e}"));
+        assert!(blended.validity().is_empty(), "{picks:?}: {:?}", blended.validity());
+        // Exact volumes (SMLib's, to 1e-8); the blend's surfaces are SMLib's fits.
+        let got = holed - measure(&blended).unwrap().volume;
+        assert!(rel(got, want) < 1e-5, "arc {arc}, tab {tab}: removed {got}, expected {want}");
+    }
     // All 127 nonempty subsets: the whole rim, each individual edge, and every
     // contiguous or disjoint partial selection of the issue's seven picks.
     for mask in 1_u32..(1 << edges.len()) {
         let picks: Vec<_> = edges.iter().enumerate().filter(|(i, _)| mask & (1 << i) != 0).map(|(_, p)| *p).collect();
         let blended = fillet(&inner, &picks, 0.5).unwrap_or_else(|e| panic!("{picks:?}: {e}"));
         assert!(blended.validity().is_empty(), "{:?}", blended.validity());
-        let mesh = blended.display_mesh(0.01).unwrap();
+        let mesh = blended.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
         for p in &mesh.positions {
             let inside = p.x.hypot(p.y) <= 25.001
                 || (p.x.abs() <= 4.001 && p.y >= y - 0.001 && p.y <= corner_y)
@@ -2151,7 +2090,7 @@ fn fillet_tabbed_plate_outer_loop_and_partial_selection_after_hole() {
 }
 
 fn partial_mixed_run_prism() -> Body {
-    use solidcraft_geom::Seg2;
+    use solidcore_record::Seg2;
     let outline = Loop2 {
         segs: vec![
             Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(40.0, 0.0) },
@@ -2166,37 +2105,15 @@ fn partial_mixed_run_prism() -> Body {
 }
 
 #[test]
-fn mixed_loop_blend_guards_selection_and_construction() {
-    let body = mixed_arc_and_line_prism();
-    let solid = body.deep_copy();
-    let top = solid
-        .boundaries()
-        .iter()
-        .flat_map(|shell| shell.face_iter())
-        .find(|face| face.edge_iter().all(|edge| (edge.front().point().z - 15.0).abs() < 1e-9 && (edge.back().point().z - 15.0).abs() < 1e-9))
-        .unwrap();
-    let edges: Vec<_> = top.edge_iter().map(|edge| edge.id()).collect();
-    // The internal test-only assertions check the active guard during both selection and build.
-    assert!(!crate::guarded());
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| crate::loopblend::loop_blend(&solid, &edges, body.size(), 0.5, true)));
-    assert!(matches!(result, Ok(Some(Ok(_)))), "{result:?}");
-    assert!(!crate::guarded());
-    // A degenerate profile still returns a clean error and restores the guard depth.
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| crate::loopblend::loop_blend(&solid, &edges, body.size(), 0.0, true)));
-    assert!(matches!(result, Ok(Some(Err(_)))), "{result:?}");
-    assert!(!crate::guarded());
-}
-
-#[test]
 fn fillet_mixed_arc_and_line_perimeter_edges() {
     let body = mixed_arc_and_line_prism();
     let blended = fillet(&body, &[Vec3::new(0.0, 10.0, 15.0), Vec3::new(5.0, 0.0, 15.0)], 0.5).unwrap();
     assert!(blended.validity().is_empty(), "{:?}", blended.validity());
     let display_tol = (blended.size() * 1e-3).max(1e-3);
     for mesh in [
-        blended.tessellate_with(1e-4, true).unwrap(),
-        blended.display_mesh_angular(display_tol, crate::DISPLAY_ANGLE).unwrap(),
-        blended.reference_display_mesh_angular(display_tol, crate::DISPLAY_ANGLE).unwrap(),
+        blended.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap(),
+        blended.mesh(&crate::MeshTolerance { chord: display_tol, angle: Some(crate::DISPLAY_ANGLE) }).unwrap(),
+        blended.mesh(&crate::MeshTolerance { chord: display_tol, angle: Some(crate::DISPLAY_ANGLE) }).unwrap(),
     ] {
         let bounds = mesh.bounds();
         let tol = 1e-3;
@@ -2234,9 +2151,9 @@ fn d_fillet_removed_reference(r: f64, steps: u32) -> f64 {
 #[test]
 fn fillet_mixed_arc_and_line_removed_volume_converges() {
     let body = mixed_arc_and_line_prism();
-    let source_exact = PI * 100.0 * 15.0 / 2.0;
     let tolerances = [1e-4, 2.5e-5];
-    let source_volumes = tolerances.map(|tol| body.tessellate_with(tol, true).unwrap().measure().volume);
+    let source_volumes = tolerances.map(|tol| body.mesh(&crate::MeshTolerance::chord(tol)).unwrap().measure().volume);
+    let source = measure(&body).unwrap();
     for r in [0.5, 0.25] {
         let want = d_fillet_removed_reference(r, 8192);
         assert!((want - d_fillet_removed_reference(r, 4096)).abs() < 1e-7, "reference quadrature must converge");
@@ -2244,92 +2161,20 @@ fn fillet_mixed_arc_and_line_removed_volume_converges() {
             assert!((want - 2.715578447526581).abs() < 1e-7, "{want}");
         }
         let blended = fillet(&body, &[Vec3::new(0.0, 10.0, 15.0), Vec3::new(5.0, 0.0, 15.0)], r).unwrap();
-        let mut previous = None;
-        for (tol, source) in tolerances.into_iter().zip(source_volumes) {
-            let volume = blended.tessellate_with(tol, true).unwrap().measure().volume;
-            // Equal chord tolerances reduce (not necessarily cancel) the error from the
-            // unchanged walls. The convergence and exact-source checks below guard this.
-            let removed = source - volume;
-            assert!(rel(removed, want) < 1e-3, "r={r}, tol={tol}: removed {removed}, expected {want}");
-            if let Some(coarser) = previous {
-                assert!(rel(removed, coarser) < 1e-3, "r={r}: removal has not converged: {coarser} -> {removed}");
-                let exact_removed = source_exact - volume;
-                // The source's inscribed semicylinder loses at most pi*R*H*tol.
-                // Do not charge its chord error to the much smaller fillet volume.
-                let source_error = (source_exact - source).abs();
-                assert!(source_error < PI * 10.0 * 15.0 * tol, "source chord error {source_error}");
-                assert!((exact_removed - want).abs() < source_error + want * 1e-3, "r={r}: exact-source removal {exact_removed}, expected {want}");
-            }
-            previous = Some(removed);
+        // The removal from the exact volumes (SMLib's, to 1e-8): the reference to a hundred
+        // thousandth (the blend's surfaces are SMLib's fits; the rig's
+        // fillets/485-fillet-d-prism-top-outline-arc-and-flat grades the same round).
+        let done = measure(&blended).unwrap();
+        let exact = source.volume - done.volume;
+        assert!(rel(exact, want) < 1e-5, "r={r}: removed {exact}, expected {want}");
+        // From meshes, the removal converges on it: each mesh lies within its chord of its
+        // faces, so the two differ from the exact removal by at most their areas times it.
+        for (tol, source_mesh) in tolerances.into_iter().zip(source_volumes) {
+            let removed = source_mesh - blended.mesh(&crate::MeshTolerance::chord(tol)).unwrap().measure().volume;
+            let bound = (source.area + done.area) * tol;
+            assert!((removed - exact).abs() <= bound, "r={r}, tol={tol}: mesh removal {removed}, exact {exact} (within {bound})");
         }
     }
-}
-
-#[test]
-fn loop_chamfer_mixed_arc_and_line_uses_offset_intersections() {
-    let body = mixed_arc_and_line_prism();
-    // Exercise the shared loop builder; public chamfer prefers boolean cutters first.
-    let solid = body.deep_copy();
-    let top = solid
-        .face_iter()
-        .find(|face| face.edge_iter().all(|edge| (edge.front().point().z - 15.0).abs() < 1e-9 && (edge.back().point().z - 15.0).abs() < 1e-9))
-        .unwrap();
-    let edges: Vec<_> = top.edge_iter().map(|edge| edge.id()).collect();
-    let (result, history) = crate::loopblend::loop_blend(&solid, &edges, body.size(), 0.5, false).unwrap().unwrap();
-    let blended = crate::record::rebuilt(result, &[&solid], &history).unwrap();
-    assert!(blended.validity().is_empty(), "{:?}", blended.validity());
-    // A chamfer has a linear inset through its height instead of a circular section.
-    let step = 0.5 / 8192.0;
-    let want: f64 = (0..8192)
-        .map(|i| {
-            let d = (f64::from(i) + 0.5) * step;
-            let rho = 10.0 - d;
-            let remaining = rho * rho * (d / rho).acos() - d * (rho * rho - d * d).sqrt();
-            (PI * 50.0 - remaining) * step
-        })
-        .sum();
-    // The cone's triangulation needs this chord tolerance for the small volume difference.
-    let fine = |b: &Body| b.tessellate_with(2.5e-5, true).unwrap().measure().volume;
-    let removed = fine(&body) - fine(&blended);
-    assert!(rel(removed, want) < 1e-3, "{removed} vs {want}");
-}
-
-#[test]
-fn fillet_mixed_arc_and_line_joint_preserves_both_section_radii() {
-    use truck_modeling::{BoundedCurve, ParametricCurve};
-
-    let r = 0.5;
-    let body = mixed_arc_and_line_prism();
-    let blended = fillet(&body, &[Vec3::new(0.0, 10.0, 15.0), Vec3::new(5.0, 0.0, 15.0)], r).unwrap();
-    crate::guard("inspect mixed fillet mitres", || {
-        let solid = blended.deep_copy();
-        let mut mitres = std::collections::HashSet::new();
-        for edge in solid.boundaries().iter().flat_map(|shell| shell.edge_iter()) {
-            let a = crate::body::from_p3(edge.front().point());
-            let b = crate::body::from_p3(edge.back().point());
-            // Only the two corner profiles join the top contact to the wall contact.
-            if (a.z - b.z).abs() < r - 1e-8 || a.z.min(b.z) < 15.0 - r - 1e-8 || a.x * b.x <= 0.0 {
-                continue;
-            }
-            if !mitres.insert(edge.id()) {
-                continue;
-            }
-            let curve = edge.oriented_curve();
-            let (lo, hi) = curve.range_tuple();
-            for i in 0..=257 {
-                let p = crate::body::from_p3(curve.subs(lo + (hi - lo) * f64::from(i) / 257.0));
-                // The joint lies on both the cylindrical line blend and the toroidal
-                // arc blend, not their tangent-plane approximation.
-                let radius2 = (p.y - r).powi(2) + (p.z - (15.0 - r)).powi(2);
-                assert!((radius2 - r * r).abs() < 1e-7, "distorted line section at {p:?}: radius squared {radius2}");
-                let radius2 = (p.x.hypot(p.y) - (10.0 - r)).powi(2) + (p.z - (15.0 - r)).powi(2);
-                assert!((radius2 - r * r).abs() < 1e-7, "distorted arc section at {p:?}: radius squared {radius2}");
-            }
-        }
-        assert_eq!(mitres.len(), 2, "both arc/line corners must be checked");
-        Ok(())
-    })
-    .unwrap();
 }
 
 #[test]
@@ -2337,7 +2182,7 @@ fn fillet_partial_mixed_arc_and_line_perimeter_run() {
     let body = partial_mixed_run_prism();
     let blended = fillet(&body, &[Vec3::new(35.0, 20.0, 15.0), Vec3::new(20.0, 30.0, 15.0), Vec3::new(5.0, 20.0, 15.0)], 0.5).unwrap();
     assert!(blended.validity().is_empty(), "{:?}", blended.validity());
-    let mesh = blended.tessellate_with(1e-4, true).unwrap();
+    let mesh = blended.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap();
     let bounds = mesh.bounds();
     let tol = 1e-3;
     assert!(
@@ -2353,57 +2198,6 @@ fn fillet_partial_mixed_arc_and_line_perimeter_run() {
         if p.y > 20.0 + tol {
             assert!((p.x - 20.0).hypot(p.y - 20.0) <= 10.0 + tol, "outside the source semicircle: {p:?}");
         }
-    }
-}
-
-/// Boolean survey: random boxes, cylinders and spheres combined every way; prints what fails.
-#[test]
-#[ignore]
-fn boolean_survey() {
-    let mut seed: u64 = 0x2545_f491_4f6c_dd1d;
-    let mut rnd = || {
-        seed ^= seed << 13;
-        seed ^= seed >> 7;
-        seed ^= seed << 17;
-        (seed % 1_000_000) as f64 / 1_000_000.0
-    };
-    let mut shapes: Vec<(String, Body)> = Vec::new();
-    for i in 0..40 {
-        let kind = i % 4;
-        let (x, y, z) = ((rnd() - 0.5) * 20.0, (rnd() - 0.5) * 20.0, (rnd() - 0.5) * 20.0);
-        // Snap some coordinates to a 5 mm grid: coincident faces and tangencies.
-        let snap = |v: f64, s: bool| if s { (v / 5.0).round() * 5.0 } else { v };
-        let s = rnd() < 0.5;
-        let (x, y, z) = (snap(x, s), snap(y, s), snap(z, s));
-        let a = 5.0 + snap(rnd() * 20.0, s);
-        let ax = (rnd() * 3.0) as usize % 3;
-        let b = match kind {
-            0 => box_solid(Vec3::new(x, y, z), Vec3::new(x + a, y + a * 0.8, z + a * 0.6)),
-            1 => cylinder(Vec3::new(x, y, z), [Vec3::X, Vec3::Y, Vec3::Z][ax], a * 0.4, a),
-            2 => sphere(Vec3::new(x, y, z), a * 0.5),
-            _ => box_solid(Vec3::new(x, y, z), Vec3::new(x + a * 0.5, y + a, z + a * 0.3)),
-        };
-        if let Ok(b) = b {
-            shapes.push((format!("{}{i}@({x:.3},{y:.3},{z:.3}) a={a:.3} ax={ax}", ["box", "cyl", "sph", "slab"][kind]), b));
-        }
-    }
-    let (mut ok, mut empty, mut fail) = (0, 0, Vec::new());
-    for i in 0..shapes.len() {
-        for j in i + 1..(i + 4).min(shapes.len()) {
-            for op in [BoolOp::Union, BoolOp::Cut, BoolOp::Intersect] {
-                let (na, a) = &shapes[i];
-                let (nb, b) = &shapes[j];
-                match boolean(a, b, op) {
-                    Ok(Some(_)) => ok += 1,
-                    Ok(None) => empty += 1,
-                    Err(e) => fail.push(format!("{na} {op:?} {nb}: {}", e.to_string().chars().take(140).collect::<String>())),
-                }
-            }
-        }
-    }
-    println!("ok {ok} empty {empty} failed {}", fail.len());
-    for f in &fail {
-        println!("  {f}");
     }
 }
 
@@ -2458,14 +2252,21 @@ fn fillet_three_edges_at_a_corner() {
     let a = r * r * (1.0 - PI / 4.0);
     let want = a * (40.0 + 30.0 + 20.0) - 3.0 * a * r + (r * r * r - PI * r * r * r / 6.0);
     assert!(rel(removed, want) < 2e-3, "removed {removed} vs {want}");
+    // The corner is one face: SMLib builds it as a rational patch exactly on the ball's sphere
+    // (a ball patch, not SMLib's sphere), between the three cylinders and the six planes; the
+    // record keeps its sphere, so it counts as one.
     let m = measure(&f).unwrap().merged;
-    assert_eq!(m.face_types.get("sphere"), Some(&1), "{m:?}");
+    assert_eq!(
+        (m.faces, m.face_types.get("plane"), m.face_types.get("cylinder"), m.face_types.get("sphere")),
+        (10, Some(&6), Some(&3), Some(&1)),
+        "{m:?}"
+    );
 }
 
 #[test]
 fn shell_with_spherical_and_conical_faces() {
     // A cylinder capped by a hemisphere (a dome), revolved, opened at the bottom.
-    use solidcraft_geom::Seg2;
+    use solidcore_record::Seg2;
     let xz = Plane::new(Vec3::ZERO, Vec3::X, Vec3::new(0.0, 0.0, -1.0)).unwrap();
     let segs = vec![
         Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(10.0, 0.0) },
@@ -2571,10 +2372,11 @@ fn tangent_holes_pinch_alike() {
     assert_eq!(m.merged.faces, 12, "{:?}", m.merged);
 }
 
-/// A d10 tube bent at R5: the inside of the bend is a horn torus pinched to a point. One torus
-/// face, with a degenerate loop at the pinch (5 faces, 6 edges, 4 vertices).
+/// A d10 tube bent at R5: the inside of the bend is a horn torus pinched to a point, so the
+/// sweep just doesn't fold over itself. It is a valid solid of Pappus' volume, πr² times the
+/// path's length (20 + 5π/2 + 20).
 #[test]
-fn tight_bend_counts() {
+fn a_bend_as_tight_as_the_tube_sweeps_a_valid_solid() {
     use crate::build::PathSeg;
     let region = Region2 { outer: Loop2::circle(Vec2::ZERO, 5.0), holes: vec![] };
     let path = [
@@ -2588,27 +2390,11 @@ fn tight_bend_counts() {
         PathSeg::Line { a: Vec3::new(5.0, 0.0, 25.0), b: Vec3::new(25.0, 0.0, 25.0) },
     ];
     let b = sweep(&Plane::XY, &region, &path).unwrap();
-    let m = measure(&b).unwrap().merged;
-    assert_eq!((m.faces, m.edges, m.vertices), (5, 6, 4), "{m:?}");
-}
-
-#[test]
-#[ignore]
-fn boolean_identity_survey() {
-    let n: u64 = std::env::var("N").ok().and_then(|x| x.parse().ok()).unwrap_or(100);
-    let seeds: Vec<u64> = match std::env::var("SEEDS") {
-        Ok(s) => s.split(',').filter_map(|x| x.parse().ok()).collect(),
-        Err(_) => (0..n).collect(),
-    };
-    let mut bad = 0;
-    for seed in seeds {
-        let c = crate::fuzz::boolean_case(seed);
-        if c.outcome != "ok" {
-            bad += 1;
-            println!("{seed}: {} {} | {:?} | {:?}", c.outcome, c.detail, c.a, c.b);
-        }
-    }
-    println!("{bad}/{n} failed");
+    assert!(b.validity().is_empty(), "{:?}", b.validity());
+    let pi = std::f64::consts::PI;
+    let want = pi * 25.0 * (40.0 + 2.5 * pi);
+    let v = measure(&b).unwrap().volume;
+    assert!(rel(v, want) < 1e-6, "{v} vs {want}");
 }
 
 /// A quarter turn of a rectangle with an edge on the axis: no zero-area face along the axis, so
@@ -2630,6 +2416,42 @@ fn partial_revolve_on_the_axis() {
     assert!(vc < v - 1.0 && vc > v - PI * 3.75 * 3.75 * 2.5, "{vc}");
 }
 
+/// #17528: a profile corner 0.0000119 mm from the axis, as a sketch leaves it when nothing holds
+/// the corner on the axis line. It goes onto the axis, so the turn has no hair-thin cone face along
+/// the axis. That face went to STEP with its apex kilometres away: slicers hung on the file and
+/// SolidCraft read the body back open.
+#[test]
+fn revolve_puts_a_corner_next_to_the_axis_on_it() {
+    let off = 1.19e-5;
+    let profile = Region2 {
+        outer: Loop2::polygon(&[Vec2::new(0.0, -9.0), Vec2::new(2.1, -9.0), Vec2::new(4.25, -6.85), Vec2::new(4.25, 6.5), Vec2::new(off, 6.5)]),
+        holes: vec![],
+    };
+    let body = revolve(&Plane::XZ, &[profile], Vec2::ZERO, Vec2::Y, 2.0 * PI).unwrap().pop().unwrap();
+    assert!(body.validity().is_empty(), "{:?}", body.validity());
+    // The top and bottom discs, the cylinder and the cone: no face from the edge beside the axis.
+    assert_eq!(measure(&body).unwrap().merged.faces, 4);
+    let text = step_export(&[&body], "peg").unwrap();
+    let back = step_import(&text).unwrap().bodies.remove(0).body;
+    assert!(back.validity().is_empty(), "{:?}", back.validity());
+    assert_eq!(measure(&back).unwrap().merged.faces, 4);
+    // A corner as near on the far side of the axis doesn't count as crossing it: the rectangle
+    // turns into a cylinder, two discs and its side.
+    let across =
+        Region2 { outer: Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(5.0, 0.0), Vec2::new(5.0, 5.0), Vec2::new(-off, 5.0)]), holes: vec![] };
+    let cylinder = revolve(&Plane::XZ, &[across], Vec2::ZERO, Vec2::Y, 2.0 * PI).unwrap().pop().unwrap();
+    assert!(rel(measure(&cylinder).unwrap().volume, PI * 25.0 * 5.0) < 5e-4);
+    assert_eq!(measure(&cylinder).unwrap().merged.faces, 3);
+    // A partial turn goes toward the sketch normal's side from where the profile is once its
+    // corners are on the axis, not from the centroid it had before (here on the other side).
+    let sliver = Region2 { outer: Loop2::polygon(&[Vec2::new(-9e-5, 0.0), Vec2::new(1.1e-4, 1.0), Vec2::new(-9e-5, 2.0)]), holes: vec![] };
+    let on_axis = Region2 { outer: Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(1.1e-4, 1.0), Vec2::new(0.0, 2.0)]), holes: vec![] };
+    // Too thin for mass properties: the boxes come from the vertices and edges.
+    let quarter = |r: Region2| revolve(&Plane::XY, &[r], Vec2::ZERO, Vec2::Y, PI / 2.0).unwrap().pop().unwrap().outline_bounds();
+    let (a, b) = (quarter(sliver), quarter(on_axis));
+    assert!(a.min.dist(b.min) < 1e-9 && a.max.dist(b.max) < 1e-9, "{a:?} vs {b:?}");
+}
+
 /// Boolean identities on primitives the robustness runs found failing: cylinders tangent to box
 /// faces from inside and out, crossing cylinders touching along a line (their seams used to lie
 /// exactly where the other body cut them).
@@ -2643,6 +2465,27 @@ fn boolean_identity_on_tangent_primitives() {
     for (seed, c) in cases {
         assert_eq!(c.outcome, "ok", "seed {seed}: {} {:?} {:?}", c.detail, c.a, c.b);
     }
+}
+
+/// #1989: a boolean watched by someone who cancelled (an agent's request cancelled while it
+/// computes off the window thread) does not start, saying so; unwatched, or watched and not
+/// cancelled, it runs as before.
+#[test]
+fn a_cancelled_watch_stops_the_boolean() {
+    struct Cancelled(bool);
+    impl crate::watch::Watch for Cancelled {
+        fn cancelled(&self) -> bool {
+            self.0
+        }
+        fn progress(&self, _: &'static str, _: usize, _: usize) {}
+    }
+    let a = cylinder(Vec3::new(0.0, 0.0, -10.0), Vec3::Z, 3.0, 20.0).unwrap();
+    let b = cylinder(Vec3::new(-10.0, 0.0, 0.0), Vec3::X, 2.0, 20.0).unwrap();
+    let e = crate::watch::watching(std::sync::Arc::new(Cancelled(true)), || boolean(&a, &b, BoolOp::Intersect)).unwrap_err();
+    assert!(e.to_string().contains("cancelled"), "{e}");
+    let r = crate::watch::watching(std::sync::Arc::new(Cancelled(false)), || boolean(&a, &b, BoolOp::Intersect));
+    assert!(r.is_ok_and(|r| r.is_some()));
+    assert!(boolean(&a, &b, BoolOp::Intersect).unwrap().is_some());
 }
 
 /// A body in two pieces: booleans go a piece at a time.
@@ -2714,139 +2557,85 @@ fn raise_band_on_a_rounded_rim() {
     }
 }
 
+/// A lip wider than its rim (#16742): the band reaches past the rim's outer wall, so what is left of
+/// the face is the underside of the overhang. It faces down, away from the rim's top, and the
+/// ring's two edges round with a small fillet. Volume added is the band's area times its height.
+#[test]
+fn raise_band_wider_than_its_rim_leaves_a_downward_underside() {
+    let cup = extrude(&Plane::XY, &[Region2 { outer: Loop2::circle(Vec2::ZERO, 20.0), holes: vec![] }], 0.0, 15.0).unwrap().pop().unwrap();
+    let sh = shell(&cup, &[Vec3::new(0.0, 0.0, 15.0)], 1.0).unwrap();
+    let v0 = measure(&sh).unwrap().volume;
+    // The rim is 1 wide (r 19 to 20); the band is 3 wide, to r 22.
+    let lip = raise_band(&sh, Vec3::new(19.5, 0.0, 15.0), 3.0, 2.0, false).unwrap();
+    assert!(lip.validity().is_empty(), "{:?}", lip.validity());
+    let band = PI * (22.0 * 22.0 - 19.0 * 19.0) * 2.0;
+    let v = measure(&lip).unwrap().volume;
+    assert!(rel(v, v0 + band) < 1e-5, "{v} vs {}", v0 + band);
+    // The ring r 20 to 22 at z 15 faces down.
+    let mesh = lip.mesh(&MeshTolerance::chord(0.05)).unwrap();
+    let mut seen = 0;
+    for t in &mesh.triangles {
+        let Some([a, b, c]) = mesh.tri(t) else { continue };
+        let (m, n) = ((a + b + c) * (1.0 / 3.0), (b - a).cross(c - a));
+        let r = (m.x * m.x + m.y * m.y).sqrt();
+        if (m.z - 15.0).abs() < 1e-9 && r > 20.1 && r < 21.9 {
+            assert!(n.z < 0.0, "the underside faces up at r {r}: {n:?}");
+            seen += 1;
+        }
+    }
+    assert!(seen > 0, "no underside triangles");
+    // Both edges of the ring round at 0.1.
+    for at in [Vec3::new(20.0, 0.0, 15.0), Vec3::new(22.0, 0.0, 15.0)] {
+        let f = fillet(&lip, &[at], 0.1).unwrap();
+        assert!(f.validity().is_empty(), "{at:?}: {:?}", f.validity());
+    }
+    let both = fillet(&lip, &[Vec3::new(20.0, 0.0, 15.0), Vec3::new(22.0, 0.0, 15.0)], 0.1).unwrap();
+    assert!(both.validity().is_empty(), "{:?}", both.validity());
+}
+
+/// A band exactly as wide as the rim leaves no face beside it, and one whose far edge crosses the
+/// rim's other edge in places only leaves a face with no single side: both are refused by name.
+#[test]
+fn raise_band_refuses_a_band_as_wide_as_the_rim_and_one_that_crosses_it_in_part() {
+    let cup = extrude(&Plane::XY, &[Region2 { outer: Loop2::circle(Vec2::ZERO, 20.0), holes: vec![] }], 0.0, 15.0).unwrap().pop().unwrap();
+    let sh = shell(&cup, &[Vec3::new(0.0, 0.0, 15.0)], 1.0).unwrap();
+    let r = raise_band(&sh, Vec3::new(19.5, 0.0, 15.0), 1.0, 2.0, false);
+    assert_eq!(r.err(), Some(KernelError::Lip(LipRefusal::BandFillsRim)));
+    // A tube with its bore off the axis: the wall is 5 wide at +x only.
+    let tube = Region2 { outer: Loop2::circle(Vec2::ZERO, 20.0), holes: vec![Loop2::circle(Vec2::new(10.0, 0.0), 5.0)] };
+    let tube = extrude(&Plane::XY, &[tube], 0.0, 15.0).unwrap().pop().unwrap();
+    let r = raise_band(&tube, Vec3::new(-10.0, 0.0, 15.0), 6.0, 2.0, false);
+    assert_eq!(r.err(), Some(KernelError::Lip(LipRefusal::BandCrossesRim)));
+    // Narrower than the narrowest part of the wall it still builds.
+    assert!(raise_band(&tube, Vec3::new(-10.0, 0.0, 15.0), 4.0, 2.0, false).is_ok());
+}
+
+/// #11436: a tilted cut leaves a rim of ellipses, which a band cannot follow; the flat rim still takes it.
+#[test]
+fn raise_band_on_a_sloped_rim_of_ellipses_is_refused_as_not_supported_yet() {
+    let ring = Region2 { outer: Loop2::circle(Vec2::ZERO, 30.0), holes: vec![Loop2::circle(Vec2::ZERO, 22.0)] };
+    let ring = extrude(&Plane::XY, &[ring], 0.0, 20.0).unwrap().pop().unwrap();
+    let tilt = 20f64.to_radians();
+    let cut = Plane { origin: Vec3::new(0.0, 0.0, 10.0), x: Vec3::new(tilt.cos(), 0.0, -tilt.sin()), y: Vec3::Y };
+    let sloped = half_space(&ring, &cut, false).unwrap().0.unwrap();
+    let at = Vec3::new(-26.0, 0.0, 10.0 + 26.0 * tilt.tan());
+    let text = raise_band(&sloped, at, 1.5, 3.0, false).unwrap_err().to_string();
+    assert!(text.contains("not supported yet") && text.contains("ellipse"), "{text}");
+    assert!(raise_band(&ring, Vec3::new(-26.0, 0.0, 20.0), 1.5, 3.0, false).is_ok());
+}
+
 #[test]
 fn orientation_mesh_reuses_missing_face_check_at_matching_tolerance() {
     for scale in [0.001, 1.0, 1000.0] {
         let body = box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.) * scale).unwrap();
         let tol = (body.size() * 0.01).max(1e-3);
-        let mesh = body.tessellate(tol).unwrap();
+        let mesh = body.mesh(&crate::MeshTolerance::chord(tol)).unwrap();
         let mut present = vec![false; body.face_count()];
         for face in mesh.tri_face {
             present[face as usize] = true;
         }
         assert_eq!(body.unmeshed_faces(), present.iter().filter(|p| !**p).count());
-        if scale == 1.0 {
-            assert_eq!(body.coarse_missing, Some((tol, 0)));
-        }
     }
-}
-
-/// A trough whose floor falls about 1° toward a central drain, the fall starting right at the
-/// trough edges: four faces meet at each bottom corner (two walls, two fall facets) and at the
-/// drain (four facets). A tab on one end makes the body non-convex. The moved planes of four
-/// faces don't meet at one point, so each such corner of the cavity becomes two corners joined
-/// by a short edge. Checked against the volume integrated by hand.
-#[test]
-fn shell_where_four_faces_meet_at_a_corner() {
-    let (w, l, ht, t) = (100.0, 60.0, 40.0, 2.0);
-    // Drain depth: the long facets fall 1°.
-    let h = 30.0 * 1f64.to_radians().tan();
-    let facet = |n: Vec3, p: Vec3| {
-        let n = n.normalized().unwrap();
-        HalfSpace { n, d: n.dot(p) }
-    };
-    let facets = [
-        facet(Vec3::new(0.0, -h, -30.0), Vec3::ZERO),
-        facet(Vec3::new(0.0, h, -30.0), Vec3::new(0.0, l, 0.0)),
-        facet(Vec3::new(-h, 0.0, -50.0), Vec3::ZERO),
-        facet(Vec3::new(h, 0.0, -50.0), Vec3::new(w, 0.0, 0.0)),
-    ];
-    let mut hs = vec![
-        HalfSpace { n: -Vec3::X, d: 0.0 },
-        HalfSpace { n: Vec3::X, d: w },
-        HalfSpace { n: -Vec3::Y, d: 0.0 },
-        HalfSpace { n: Vec3::Y, d: l },
-        HalfSpace { n: Vec3::Z, d: ht },
-    ];
-    hs.extend(facets);
-    let trough = convex_polyhedron(&hs).unwrap();
-    let pyramid = w * l * h / 3.0;
-    assert!(rel(measure(&trough).unwrap().volume, w * l * ht + pyramid) < 1e-9);
-    let tab = box_solid(Vec3::new(w, 20.0, 20.0), Vec3::new(w + 20.0, 40.0, ht)).unwrap();
-    let body = boolean(&trough, &tab, BoolOp::Union).unwrap().unwrap();
-    let s = shell(&body, &[Vec3::new(50.0, 30.0, ht)], t).unwrap();
-    // The cavity: the walls in by t, above the floor facets moved in by t (midpoint rule; the
-    // floor is linear between its creases).
-    let floor = |x: f64, y: f64| facets.iter().map(|f| (f.d - t - f.n.x * x - f.n.y * y) / f.n.z).fold(f64::NEG_INFINITY, f64::max);
-    let (nx, ny) = (960, 560);
-    let (dx, dy) = ((w - 2.0 * t) / nx as f64, (l - 2.0 * t) / ny as f64);
-    let mut cavity = 0.0;
-    for i in 0..nx {
-        for j in 0..ny {
-            cavity += (ht - floor(t + (i as f64 + 0.5) * dx, t + (j as f64 + 0.5) * dy)) * dx * dy;
-        }
-    }
-    let tab_cavity = 20.0 * (20.0 - 2.0 * t) * (20.0 - t);
-    let want = w * l * ht + pyramid + 8000.0 - cavity - tab_cavity;
-    let m = measure(&s).unwrap();
-    assert!(rel(m.volume, want) < 1e-5, "{} vs {want}", m.volume);
-}
-
-/// The same trough cut as a pocket into a slab (four faces meet at each concave corner of the
-/// pocket floor), shelled with its top open.
-#[test]
-fn shell_of_a_pocket_whose_floor_falls_to_a_drain() {
-    let (px, py, pw, pl, top, depth, t) = (20.0, 15.0, 100.0, 60.0, 50.0, 30.0, 3.0);
-    let h = 30.0 * 1f64.to_radians().tan();
-    let z0 = top - depth;
-    let facet = |n: Vec3, p: Vec3| {
-        let n = n.normalized().unwrap();
-        HalfSpace { n, d: n.dot(p) }
-    };
-    let facets = [
-        facet(Vec3::new(0.0, -h, -30.0), Vec3::new(px, py, z0)),
-        facet(Vec3::new(0.0, h, -30.0), Vec3::new(px, py + pl, z0)),
-        facet(Vec3::new(-h, 0.0, -50.0), Vec3::new(px, py, z0)),
-        facet(Vec3::new(h, 0.0, -50.0), Vec3::new(px + pw, py, z0)),
-    ];
-    let mut hs = vec![
-        HalfSpace { n: -Vec3::X, d: -px },
-        HalfSpace { n: Vec3::X, d: px + pw },
-        HalfSpace { n: -Vec3::Y, d: -py },
-        HalfSpace { n: Vec3::Y, d: py + pl },
-        HalfSpace { n: Vec3::Z, d: top + 10.0 },
-    ];
-    hs.extend(facets);
-    let pocket = convex_polyhedron(&hs).unwrap();
-    let slab = box_solid(Vec3::ZERO, Vec3::new(140.0, 90.0, top)).unwrap();
-    let basin = boolean(&slab, &pocket, BoolOp::Cut).unwrap().unwrap();
-    let pocket_vol = pw * pl * depth + pw * pl * h / 3.0;
-    assert!(rel(measure(&basin).unwrap().volume, 140.0 * 90.0 * top - pocket_vol) < 1e-9);
-    let s = shell(&basin, &[Vec3::new(5.0, 5.0, top)], t).unwrap();
-    // The cavity's columns: from t up to the top, or up to the pocket floor moved down by t
-    // inside the pocket's walls moved out by t.
-    let floor = |x: f64, y: f64| facets.iter().map(|f| (f.d + t - f.n.x * x - f.n.y * y) / f.n.z).fold(f64::NEG_INFINITY, f64::max);
-    let (nx, ny) = (1340, 840);
-    let (dx, dy) = ((140.0 - 2.0 * t) / nx as f64, (90.0 - 2.0 * t) / ny as f64);
-    let mut cavity = 0.0;
-    for i in 0..nx {
-        for j in 0..ny {
-            let (x, y) = (t + (i as f64 + 0.5) * dx, t + (j as f64 + 0.5) * dy);
-            let inside = x > px - t && x < px + pw + t && y > py - t && y < py + pl + t;
-            let roof = if inside { floor(x, y) } else { top };
-            cavity += (roof - t) * dx * dy;
-        }
-    }
-    let want = 140.0 * 90.0 * top - pocket_vol - cavity;
-    let m = measure(&s).unwrap();
-    assert!(rel(m.volume, want) < 1e-4, "{} vs {want}", m.volume);
-}
-
-#[test]
-fn shell_open_beside_a_round_as_large_as_the_wall_is_refused() {
-    // Opening the bottom of a box whose bottom outline is rounded: the cavity's side walls stand
-    // the thickness in from the outside, where a round at least that large meets the bottom, so
-    // the rim would have no thickness. Smaller rounds leave a rim.
-    let b = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 10.0)).unwrap();
-    let loop_ = [Vec3::new(20.0, 0.0, 0.0), Vec3::new(40.0, 15.0, 0.0), Vec3::new(20.0, 30.0, 0.0), Vec3::new(0.0, 15.0, 0.0)];
-    let bottom = [Vec3::new(20.0, 15.0, 0.0)];
-    for r in [2.0, 2.4] {
-        let f = fillet(&b, &loop_, r).unwrap();
-        let e = shell(&f, &bottom, 2.0).unwrap_err();
-        assert!(e.to_string().starts_with("the operation failed: not supported yet: the rim"), "{r}: {e}");
-    }
-    let f = fillet(&b, &loop_, 1.5).unwrap();
-    assert!(shell(&f, &bottom, 2.0).unwrap().validity().is_empty());
 }
 
 #[test]
@@ -2872,7 +2661,7 @@ fn loft_joined_onto_a_box_top_is_one_shell() {
     // Overhanging the box edge (x = 20) the disc is not inside the top face: whatever the join
     // does, it never returns touching shells as one body.
     if let Ok(Some(r)) = boolean(&bx, &loft_at(17.0), BoolOp::Union) {
-        assert!(r.shell_count() == 1 || r.union_lumps().is_ok(), "{} touching shells", r.shell_count());
+        assert!(r.shell_count() == 1 || r.lumps().is_ok(), "{} touching shells", r.shell_count());
     }
 }
 
@@ -2902,18 +2691,73 @@ fn shell_of_a_disc_rounded_smaller_than_the_wall() {
     }
 }
 
-/// The cache-budget estimate counts edge and vertex uses on the borrowed boundaries; it must
-/// equal what walking the cloned wires (`Solid::edge_iter`, `vertex_iter`) counts.
+/// The cache-budget estimate counts faces and edge uses on the record: 2048 bytes a face and
+/// 512 + 96 an edge use.
 #[test]
 fn retained_bytes_matches_the_iterator_counts() {
     let block = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 10.0)).unwrap();
     let hole = cylinder(Vec3::new(20.0, 15.0, -5.0), Vec3::Z, 5.0, 30.0).unwrap();
     let drilled = boolean(&block, &hole, BoolOp::Cut).unwrap().unwrap();
     for body in [&block, &hole, &drilled] {
-        let s = &body.solid;
-        let walked = s.face_iter().count() * 2048 + s.edge_iter().count() * 512 + s.vertex_iter().count() * 96;
+        let r = body.record();
+        let uses: usize = r.edges.iter().map(|e| e.uses.len()).sum();
+        let walked = r.faces.len() * 2048 + uses * (512 + 96);
         assert_eq!(body.retained_bytes(), walked);
     }
+}
+
+/// #19629: a body lets go of its kernel forms, which are several times its record once it was
+/// measured, and the record gives each again on its next use with the same answers. Clones
+/// share the forms, so letting go through one lets go for all. A 40 x 30 x 10 block less a
+/// Ø 10 hole through it: 12 000 − 250 π mm³, and the point 3 above the middle of its top's
+/// front half is 3 from the top, its nearest face.
+#[test]
+fn released_kernel_forms_are_made_again_from_the_record() {
+    let block = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 10.0)).unwrap();
+    let hole = cylinder(Vec3::new(20.0, 15.0, -5.0), Vec3::Z, 5.0, 30.0).unwrap();
+    let drilled = boolean(&block, &hole, BoolOp::Cut).unwrap().unwrap();
+    assert!(!drilled.holds_kernel_form(), "the record alone until a use asks for a form");
+    // The SMLib form.
+    let before = drilled.smlib().unwrap().volume(1e-8).unwrap();
+    assert!(drilled.holds_kernel_form());
+    drilled.clone().release_kernel_form();
+    assert!(!drilled.holds_kernel_form(), "clones share the form");
+    let after = drilled.smlib().unwrap().volume(1e-8).unwrap();
+    assert!(drilled.holds_kernel_form(), "made again by the next use");
+    assert_eq!(before.to_bits(), after.to_bits(), "the record gives the same body");
+    let exact = 12_000.0 - 250.0 * std::f64::consts::PI;
+    assert!((after - exact).abs() < 1e-6 * exact, "{after} against {exact}");
+    // The solidcore-ops form.
+    drilled.release_kernel_form();
+    let above = Vec3::new(20.0, 5.0, 13.0);
+    let near = drilled.nearest_face(above).unwrap();
+    assert!(drilled.holds_kernel_form());
+    drilled.clone().release_kernel_form();
+    assert!(!drilled.holds_kernel_form());
+    let again = drilled.nearest_face(above).unwrap();
+    assert!(drilled.holds_kernel_form(), "made again by the next use");
+    assert_eq!((near.0.to_bits(), near.1), (again.0.to_bits(), again.1), "the record gives the same body");
+    assert!((again.0 - 3.0).abs() < 1e-9, "{again:?}");
+    // A measurement on forms made again is the measurement on forms in use, to the bit.
+    let warm = format!("{:?}", crate::measure(&drilled).unwrap());
+    drilled.release_kernel_form();
+    assert_eq!(format!("{:?}", crate::measure(&drilled).unwrap()), warm);
+    // So is an operation: a slot cut into the block with its forms in use, and let go.
+    let slot = box_solid(Vec3::new(5.0, 10.0, 5.0), Vec3::new(10.0, 20.0, 15.0)).unwrap();
+    let on_warm = boolean(&drilled, &slot, BoolOp::Cut).unwrap().unwrap();
+    drilled.release_kernel_form();
+    slot.release_kernel_form();
+    let on_cold = boolean(&drilled, &slot, BoolOp::Cut).unwrap().unwrap();
+    assert_eq!(format!("{:?}", on_cold.record()), format!("{:?}", on_warm.record()));
+    // The forms are let go without the body in hand too, until the body itself is gone.
+    let forms = drilled.kernel_forms();
+    drilled.smlib().unwrap();
+    assert!(forms.held() && !forms.gone());
+    forms.release();
+    assert!(!drilled.holds_kernel_form() && !forms.held());
+    drop(drilled);
+    assert!(forms.gone());
+    forms.release();
 }
 
 /// #881: a pleated band lofted to a nearly flat one, both 18 vertices from (-26, 3), counter-
@@ -2975,131 +2819,478 @@ fn loft_pairs_the_vertices_of_matching_non_convex_sections() {
     assert!(m.centroid.x.abs() < 0.05, "centre of mass x {}", m.centroid.x);
 }
 
-/// #2570: a circle lofted to a C-shaped outline. Seen from its centroid the C's vertices turn
-/// back on themselves; the circle was still split at those directions, forced to increase by
-/// whole turns, so it wound round several times (a closing arc of negative sweep), the walls
-/// crossed and the mesh grew huge. The circle is now split once round, in both section orders
-/// and from a plane facing the other way.
+/// #11849: a 25 × 15 rectangle ending in a point (two tangent arcs meeting at (37, 7.5)) lofted
+/// 15 up to a 40.4 × 25 slot, both symmetric about y = 7.5. The slot's four segments had to become
+/// five, and splitting its longest one in half split a long side (40.4) rather than the round end
+/// (39.3): the loft twisted, its seams ran diagonally and its centre of mass sat at y = 7.363.
+/// Each slot vertex pairs with the corner it lines up with and the point with the middle of the
+/// round end.
 #[test]
-fn loft_circle_to_non_star_profile_splits_circle_once() {
-    let c = Loop2::polygon(&[
-        Vec2::new(0.0, 0.0),
-        Vec2::new(30.0, 0.0),
-        Vec2::new(30.0, 8.0),
-        Vec2::new(8.0, 8.0),
-        Vec2::new(8.0, 22.0),
-        Vec2::new(30.0, 22.0),
-        Vec2::new(30.0, 30.0),
-        Vec2::new(0.0, 30.0),
-    ]);
-    let circle = (Plane::XY, Loop2::circle(Vec2::ZERO, 20.0));
-    let up = (Plane::XY.offset(48.0), c.clone());
-    let down = (Plane::new(Vec3::new(0.0, 0.0, 48.0), Vec3::Y, Vec3::X).unwrap(), c);
-    for secs in [vec![circle.clone(), up.clone()], vec![up, circle.clone()], vec![circle, down]] {
-        let numbered: Vec<(Plane, crate::numbered::NumberedLoop)> =
-            secs.iter().map(|(p, _)| *p).zip(crate::numbered::number_loops(secs.iter().map(|(_, l)| l))).collect();
-        for reversed in [false, true] {
-            let loops = crate::build::loft_section_loops(&numbered, reversed).unwrap();
-            let arcs: Vec<f64> = loops
-                .iter()
-                .flat_map(|(_, r)| r.lp.segs.iter())
-                .filter_map(|s| match s {
-                    Seg2::Arc { sweep, .. } => Some(*sweep),
-                    _ => None,
-                })
-                .collect();
-            assert_eq!(arcs.len(), 8, "{arcs:?}");
-            assert!(arcs.iter().all(|w| w.is_finite() && w.abs() > 1e-9), "{arcs:?}");
-            // One way round: every arc the same way, one turn in all.
-            assert!(arcs.iter().all(|w| w.signum() == arcs[0].signum()), "{arcs:?}");
-            let total: f64 = arcs.iter().sum();
-            assert!((total.abs() - std::f64::consts::TAU).abs() < 1e-9, "{total} {arcs:?}");
-        }
-        let body = loft(&secs).unwrap();
-        assert!(measure(&body).unwrap().volume > 0.0);
-        let mesh = body.tessellate(0.05).unwrap();
-        assert!(mesh.triangles.len() < 4000, "{} triangles", mesh.triangles.len());
+fn loft_pairs_a_point_with_the_middle_of_a_round_end() {
+    let line = |a: (f64, f64), b: (f64, f64)| Seg2::Line { a: Vec2::new(a.0, a.1), b: Vec2::new(b.0, b.1) };
+    // A counter-clockwise arc about `c` from `a` to `b`.
+    let arc = |c: (f64, f64), a: (f64, f64), b: (f64, f64)| {
+        let start = (a.1 - c.1).atan2(a.0 - c.0);
+        let sweep = ((b.1 - c.1).atan2(b.0 - c.0) - start).rem_euclid(2.0 * PI);
+        Seg2::Arc { center: Vec2::new(c.0, c.1), radius: Vec2::new(a.0 - c.0, a.1 - c.1).len(), start, sweep }
+    };
+    let tip = (37.0, 7.5);
+    let point = Loop2 {
+        segs: vec![
+            line((0.0, 0.0), (25.0, 0.0)),
+            arc((25.0, 13.35), (25.0, 0.0), tip),
+            arc((25.0, 1.65), tip, (25.0, 15.0)),
+            line((25.0, 15.0), (0.0, 15.0)),
+            line((0.0, 15.0), (0.0, 0.0)),
+        ],
+    };
+    let x = 35.4;
+    let slot = Loop2 {
+        segs: vec![
+            line((-5.0, 20.0), (-5.0, -5.0)),
+            line((-5.0, -5.0), (x, -5.0)),
+            arc((x, 7.5), (x, -5.0), (x, 20.0)),
+            line((x, 20.0), (-5.0, 20.0)),
+        ],
+    };
+    let secs = [(Plane::XY, point), (Plane::XY.offset(15.0), slot)];
+    let body = loft(&secs).unwrap();
+    let m = measure(&body).unwrap();
+    assert!((m.centroid.y - 7.5).abs() < 1e-6, "centre of mass y {}", m.centroid.y);
+    let at = |p: Vec3| body.record().vertices.iter().any(|v| Vec3::from(v.point).dist(p) < 1e-6);
+    assert!(at(Vec3::new(x + 12.5, 7.5, 15.0)), "the round end splits at its middle");
+    assert_eq!(body.record().vertices.len(), 10);
+    // The same with the sections given the other way round.
+    let back = [secs[1].clone(), secs[0].clone()];
+    let m = measure(&loft(&back).unwrap()).unwrap();
+    assert!((m.centroid.y - 7.5).abs() < 1e-6, "reversed: centre of mass y {}", m.centroid.y);
+}
+
+/// The loft's sections as its walls are built through them ([`crate::build::loft_numbered_loops`]):
+/// in the order given, each cut to the vertices it shares with the others.
+fn matched_sections(secs: &[(Plane, Loop2)]) -> Vec<Loop2> {
+    let numbered: Vec<_> = secs.iter().map(|(p, _)| *p).zip(crate::numbered::number_loops(secs.iter().map(|(_, l)| l))).collect();
+    let reversed = crate::build::loft_reversed(secs).unwrap();
+    let mut out: Vec<Loop2> = crate::build::loft_numbered_loops(&numbered, reversed).unwrap().into_iter().map(|(_, l)| l.lp).collect();
+    if reversed {
+        out.reverse();
     }
+    out
 }
 
-/// Two cylinders crossing at right angles need the kernel's own intersection: with no tries
-/// left the boolean fails at once, a budget inside another uses the outer one's up, and none
-/// lingers after.
-#[test]
-fn an_attempt_budget_stops_the_boolean_and_is_shared_by_nesting() {
-    let a = cylinder(Vec3::new(0.0, 0.0, -10.0), Vec3::Z, 3.0, 20.0).unwrap();
-    let b = cylinder(Vec3::new(-10.0, 0.0, 0.0), Vec3::X, 2.0, 20.0).unwrap();
-    assert!(with_attempt_budget(0, || boolean(&a, &b, BoolOp::Intersect)).is_err());
-    // The inner budget asks for more than the outer has left: it gets what is left.
-    let (inner, after) = with_attempt_budget(1, || {
-        let inner = with_attempt_budget(10, || boolean(&a, &b, BoolOp::Intersect).is_ok());
-        (inner, boolean(&a, &b, BoolOp::Intersect).is_ok())
-    });
-    assert!(inner && !after);
-    assert!(boolean(&a, &b, BoolOp::Intersect).unwrap().is_some());
+/// The two ends of every edge of `body`.
+fn edge_ends(body: &Body) -> Vec<(Vec3, Vec3)> {
+    let r = body.record();
+    let point = |k: u32| r.vertices.get(k as usize).map(|v| Vec3::from(v.point));
+    r.edges.iter().filter_map(|e| Some((point(e.vertices[0])?, point(e.vertices[1])?))).collect()
 }
 
-/// #2847: identical elliptic spline sections (3 x 5 mm, 30 mm off the Z axis) on planes turning
-/// about Z in 10 degree steps. The start vertex was matched by projecting the lead section's
-/// vertex directions onto each plane, which squeezes them as the plane turns (and flips them past
-/// 90 degrees), so the sections were paired round the wrong way and the loft folded (6 % of
-/// Pappus' volume at 180 degrees). The volume follows Pappus: area x 30 mm x angle.
-#[test]
-fn loft_through_identical_sections_turning_about_an_axis_keeps_its_volume() {
-    let pts: Vec<Vec2> = (0..12).map(|a| Vec2::new(30.0 + 3.0 * (a as f64 * PI / 6.0).cos(), 5.0 * (a as f64 * PI / 6.0).sin())).collect();
-    // Periodic Catmull-Rom through the points, as cubic Beziers.
-    let segs: Vec<Seg2> = (0..12)
-        .map(|i| {
-            let p = |k: usize| pts[(i + k + 11) % 12];
-            let (p0, p1, p2, p3) = (p(0), p(1), p(2), p(3));
-            Seg2::Cubic { p0: p1, p1: p1 + (p2 - p0) * (1.0 / 6.0), p2: p2 - (p3 - p1) * (1.0 / 6.0), p3: p2 }
+/// Whether an edge of `body` runs from `p` to `q` (either way).
+fn joins(body: &Body, p: Vec3, q: Vec3) -> bool {
+    edge_ends(body).iter().any(|&(a, b)| (a.dist(p) < 1e-6 && b.dist(q) < 1e-6) || (a.dist(q) < 1e-6 && b.dist(p) < 1e-6))
+}
+
+/// The ends of the edges of `body` that run from `p` to a point with `x` = `to_x`.
+fn joined_to(body: &Body, p: Vec3, to_x: f64) -> Vec<Vec3> {
+    edge_ends(body)
+        .into_iter()
+        .filter_map(|(a, b)| {
+            if a.dist(p) < 1e-6 {
+                Some(b)
+            } else if b.dist(p) < 1e-6 {
+                Some(a)
+            } else {
+                None
+            }
         })
-        .collect();
-    let section = Loop2 { segs };
-    let area = section.signed_area().abs();
-    for span in [90, 120, 180] {
-        let secs: Vec<(Plane, Loop2)> = (0..=span / 10)
-            .map(|i| {
-                let t = (i as f64 * 10.0).to_radians();
-                (Plane { origin: Vec3::ZERO, x: Vec3::new(t.cos(), t.sin(), 0.0), y: Vec3::Z }, section.clone())
-            })
-            .collect();
-        let want = area * 30.0 * (span as f64).to_radians();
-        let m = measure(&loft(&secs).unwrap()).unwrap();
-        assert!(rel(m.volume, want) < 0.03, "{span} degrees: volume {} vs Pappus {want}", m.volume);
+        .filter(|q| (q.x - to_x).abs() < 1e-6)
+        .collect()
+}
+
+/// Two hood profiles (a thin band with a hooked lip at each end) on the planes x = 29 and x = 50:
+/// 17 and 18 vertices, and each has a vertex the other lacks, on a straight side or nearly so (the
+/// second's right side has a point on it at (27.6, 40.8), its left side one at (-22.8, 41.25); the
+/// first's arch one at (-11.25, 48.47)). Splitting the one with fewer vertices to 18 shifted one
+/// of the lips by a vertex, so its seams ran diagonally across it (and an earlier rule sheared the
+/// whole top band). Each corner now pairs with the corner it lines up with, and each of the three
+/// extra vertices splits the other profile's side where it lands: 19 vertices in each section.
+const HOOD_A: [(f64, f64); 17] = [
+    (22.275732672046672, 42.4194875370215),
+    (24.15373450104431, 42.5852135407361),
+    (24.15373450104431, 46.40321410660799),
+    (13.601185077757782, 48.265425651573544),
+    (-7.956143139645345, 49.24551439515723),
+    (-11.252079715296125, 48.4718337596306),
+    (-18.555464567800477, 45.80523471830436),
+    (-18.50202907367915, 43.007831671402265),
+    (-17.2, 42.906809746055835),
+    (-17.2, 41.46),
+    (-18.723959594727756, 41.251188115959096),
+    (-22.8, 41.251188115959096),
+    (-22.8, 52.6),
+    (27.600000000000005, 52.6),
+    (27.600000000000005, 40.800000000000004),
+    (24.1, 40.800000000000004),
+    (22.31070331305888, 40.957898711557526),
+];
+
+/// The second hood profile ([`HOOD_A`]).
+const HOOD_B: [(f64, f64); 18] = [
+    (-22.8, 41.251188115959096),
+    (-22.8, 52.6),
+    (27.600000000000005, 52.6),
+    (27.600000000000005, 40.800000000000004),
+    (27.600000000000005, 38.0),
+    (24.0, 38.0),
+    (22.405477280919964, 38.20705014188878),
+    (22.405477280919964, 39.550000000000004),
+    (24.924192673472707, 39.772267172447684),
+    (24.924192673472707, 42.84813511542108),
+    (15.250770475114546, 45.97354789328374),
+    (-9.315605172301247, 47.10818298471791),
+    (-19.42968353817282, 42.3110290048853),
+    (-19.42968353817282, 40.25972628736644),
+    (-17.525020629683333, 40.10220901755372),
+    (-17.525020629683333, 38.64960388282376),
+    (-19.327507117348198, 38.51668382378396),
+    (-22.398563727493077, 38.51668382378396),
+];
+
+/// A hood profile on the plane x = `x` (sketch x along Y, sketch y along Z).
+fn hood_section(x: f64, points: &[(f64, f64)]) -> (Plane, Loop2) {
+    let plane = Plane::new(Vec3::new(x, 0.0, 0.0), Vec3::Y, Vec3::Z).unwrap();
+    (plane, Loop2::polygon(&points.iter().map(|&(u, v)| Vec2::new(u, v)).collect::<Vec<_>>()))
+}
+
+#[test]
+fn loft_pairs_the_corners_of_two_profiles_that_each_have_a_vertex_the_other_lacks() {
+    let secs = [hood_section(29.0, &HOOD_A), hood_section(50.0, &HOOD_B)];
+    let counts: Vec<usize> = matched_sections(&secs).iter().map(|l| l.segs.len()).collect();
+    assert_eq!(counts, [19, 19], "19 vertices in each section");
+    let body = loft(&secs).unwrap();
+    let at = |x: f64, p: (f64, f64)| Vec3::new(x, p.0, p.1);
+    // Each corner of the first profile joins the corner of the second it lines up with.
+    let pairs = [
+        (0, 7),
+        (1, 8),
+        (2, 9),
+        (3, 10),
+        (4, 11),
+        (6, 12),
+        (7, 13),
+        (8, 14),
+        (9, 15),
+        (10, 16),
+        (11, 17),
+        (12, 1),
+        (13, 2),
+        (14, 4),
+        (15, 5),
+        (16, 6),
+    ];
+    for (i, j) in pairs {
+        assert!(joins(&body, at(29.0, HOOD_A[i]), at(50.0, HOOD_B[j])), "{:?} joins {:?}", HOOD_A[i], HOOD_B[j]);
+    }
+    // The second profile's point on its left side splits the first's left side: the wall there
+    // stays in the plane y = -22.8. (Its point on the right side, where both right sides are
+    // straight, leaves the right wall one flat face in y = 27.6, between the corner pairs.)
+    let ends = joined_to(&body, at(50.0, HOOD_B[0]), 29.0);
+    assert!(ends.len() == 1 && ends.iter().all(|q| (q.y + 22.8).abs() < 1e-9 && q.z > 41.25 && q.z < 52.6), "{:?} joins {ends:?}", HOOD_B[0]);
+    let right = matched_sections(&secs);
+    let lone = right[1].segs.iter().position(|s| s.start().dist(Vec2::new(HOOD_B[3].0, HOOD_B[3].1)) < 1e-9).unwrap();
+    let partner = right[0].segs[lone].start();
+    assert!((partner.x - 27.6).abs() < 1e-9 && partner.y > 40.8 && partner.y < 52.6, "the right side's point pairs with {partner:?}");
+    // The first profile's vertex on its arch splits the second's arch between the corners
+    // either side of it.
+    let ends = joined_to(&body, at(29.0, HOOD_A[5]), 50.0);
+    let (p, q) = (Vec2::new(HOOD_B[11].0, HOOD_B[11].1), Vec2::new(HOOD_B[12].0, HOOD_B[12].1));
+    assert_eq!(ends.len(), 1);
+    assert!(
+        ends.iter().all(|e| {
+            let r = Vec2::new(e.y, e.z);
+            (r - p).cross(q - p).abs() < 1e-9 * (q - p).len2() && (r - p).dot(q - p) > 0.0 && (r - q).dot(p - q) > 0.0
+        }),
+        "the arch vertex joins {ends:?}"
+    );
+    // The sections given the other way round build the same body.
+    let v = measure(&body).unwrap().volume;
+    let back = measure(&loft(&[secs[1].clone(), secs[0].clone()]).unwrap()).unwrap().volume;
+    assert!(rel(back, v) < 1e-9, "{back} vs {v}");
+}
+
+/// A 40 x 20 rectangle with a point in the middle of its left side lofted 30 up to one with a
+/// point in the middle of its right side. Both have five vertices, so nothing was split: the
+/// vertices were paired in turn from the best start, which twisted two side faces (the left
+/// side's point joined a corner). Each point now splits the other rectangle's side: six vertices
+/// each, every side face flat, and the loft is the 40 x 20 x 30 box.
+#[test]
+fn loft_splits_a_straight_side_at_a_point_only_the_other_section_has() {
+    let poly = |p: &[(f64, f64)]| Loop2::polygon(&p.iter().map(|&(x, y)| Vec2::new(x, y)).collect::<Vec<_>>());
+    let left = poly(&[(0.0, 0.0), (40.0, 0.0), (40.0, 20.0), (0.0, 20.0), (0.0, 10.0)]);
+    let right = poly(&[(0.0, 0.0), (40.0, 0.0), (40.0, 10.0), (40.0, 20.0), (0.0, 20.0)]);
+    let secs = [(Plane::XY, left), (Plane::XY.offset(30.0), right)];
+    let matched = matched_sections(&secs);
+    let points = |l: &Loop2| l.segs.iter().map(|s| s.start()).collect::<Vec<_>>();
+    assert_eq!(points(&matched[0]), points(&matched[1]), "each vertex runs straight up");
+    assert_eq!(matched[0].segs.len(), 6);
+    let body = loft(&secs).unwrap();
+    let m = measure(&body).unwrap();
+    assert!(rel(m.volume, 24_000.0) < 1e-9, "{}", m.volume);
+    for (x, y) in [(0.0, 0.0), (40.0, 0.0), (40.0, 20.0), (0.0, 20.0)] {
+        assert!(joins(&body, Vec3::new(x, y, 0.0), Vec3::new(x, y, 30.0)), "({x}, {y}) runs straight up");
     }
 }
 
-/// Moving an assembly places every body of it again: a copy placed for showing keeps its
-/// revolved faces where its source turned them, so placing searches none of them again (that search was most
-/// of the time an occurrence move took on a large assembly, #3044), and the copy is the same
-/// solid as placing a freshly turned one.
+/// A 40 x 20 rectangle lofted 20 up to the same rectangle with its corners rounded (radius 4).
+/// Each corner joins a point near the middle of its rounded corner, and the rounded corners' ends
+/// split the rectangle's sides next to the corners: the loft is symmetric about both middle
+/// planes. Pairing a corner with one end of its rounded corner made it lopsided.
 #[test]
-fn placing_a_body_does_not_turn_its_revolved_faces_again() {
-    let body = cylinder(Vec3::new(1.0, 2.0, 0.0), Vec3::Z, 3.0, 5.0).unwrap();
-    assert!(body.phased);
-    let m = [[0.0, 1.0, 0.0, 0.0], [-1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [10.0, 20.0, 30.0, 1.0]];
-    crate::body::REPHASED.with(|c| c.set(0));
-    let mut placed = body.clone();
-    for _ in 0..10 {
-        placed = crate::place_matrix(&placed, m).unwrap();
+fn loft_joins_a_corner_to_the_middle_of_a_rounded_corner() {
+    let (w, h, r) = (40.0, 20.0, 4.0);
+    let line = |a: (f64, f64), b: (f64, f64)| Seg2::Line { a: Vec2::new(a.0, a.1), b: Vec2::new(b.0, b.1) };
+    let corner = |c: (f64, f64), start: f64| Seg2::Arc { center: Vec2::new(c.0, c.1), radius: r, start, sweep: PI / 2.0 };
+    let rounded = Loop2 {
+        segs: vec![
+            line((r, 0.0), (w - r, 0.0)),
+            corner((w - r, r), -PI / 2.0),
+            line((w, r), (w, h - r)),
+            corner((w - r, h - r), 0.0),
+            line((w - r, h), (r, h)),
+            corner((r, h - r), PI / 2.0),
+            line((0.0, h - r), (0.0, r)),
+            corner((r, r), PI),
+        ],
+    };
+    let square = Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(w, 0.0), Vec2::new(w, h), Vec2::new(0.0, h)]);
+    for secs in [
+        [(Plane::XY, square.clone()), (Plane::XY.offset(20.0), rounded.clone())],
+        [(Plane::XY, rounded.clone()), (Plane::XY.offset(20.0), square.clone())],
+    ] {
+        assert!(matched_sections(&secs).iter().all(|l| l.segs.len() == 12), "12 vertices in each section");
+        let body = loft(&secs).unwrap();
+        let m = measure(&body).unwrap();
+        assert!((m.centroid.x - w / 2.0).abs() < 1e-9 && (m.centroid.y - h / 2.0).abs() < 1e-9, "centre of mass {:?}", m.centroid);
+        let z = if secs[0].1.segs.len() == 4 { 0.0 } else { 20.0 };
+        for (x, y, cx, cy) in [(0.0, 0.0, r, r), (w, 0.0, w - r, r), (w, h, w - r, h - r), (0.0, h, r, h - r)] {
+            let ends = edge_ends(&body)
+                .into_iter()
+                .filter_map(|(a, b)| {
+                    if a.dist(Vec3::new(x, y, z)) < 1e-6 {
+                        Some(b)
+                    } else if b.dist(Vec3::new(x, y, z)) < 1e-6 {
+                        Some(a)
+                    } else {
+                        None
+                    }
+                })
+                .filter(|q| (q.z - 20.0 + z).abs() < 1e-6)
+                .collect::<Vec<_>>();
+            // On the rounded corner, within 10 degrees of its middle.
+            let (c, diagonal) = (Vec2::new(cx, cy), Vec2::new(x - cx, y - cy));
+            let near_middle = |q: &Vec3| {
+                let d = Vec2::new(q.x, q.y) - c;
+                (d.len() - r).abs() < 1e-9 && d.dot(diagonal) / (d.len() * diagonal.len()) > (10.0f64).to_radians().cos()
+            };
+            assert!(ends.len() == 1 && ends.iter().all(near_middle), "corner ({x}, {y}) joins {ends:?}");
+        }
     }
-    assert_eq!(crate::body::REPHASED.with(|c| c.get()), 0, "no placement searched the revolved faces again");
-    // A modelling move (a pattern's copy, a hole's tool) still turns them in its own frame.
-    let _ = crate::transform_matrix(&body, m).unwrap();
-    assert_eq!(crate::body::REPHASED.with(|c| c.get()), 1);
-    crate::body::REPHASED.with(|c| c.set(0));
-    assert!(placed.phased);
-    let unphased = Body { phased: false, ..body.clone() };
-    let mut turned = unphased;
-    for _ in 0..10 {
-        turned = crate::place_matrix(&turned, m).unwrap();
+}
+
+/// A 112.24 x 148.34 rectangle lofted 100 up to a circle of radius 55.76, the circle's arcs split
+/// at the directions of the rectangle's corners (#19478). The rule `solid.loft` uses between
+/// paired vertices, pinned here: each wall is ruled (degree 1 across the two sections), and each
+/// span runs on its own parameter (a line's linear one, an arc's rational Bezier one), so a point
+/// at share t of a rectangle side is paired with the arc point at share t of the arc's Bezier
+/// parameter, not its share of the arc length. The two 105.8 degree arcs are two conic spans each
+/// (`conic_data`, solidcore/crates/solidcore/src/nurbs/crv_basic.rs, the quarter-turn bound), so
+/// the x-sides are each two walls, meeting at their middle with the circle's 0 and 180 degree
+/// points; the 74.2 degree arcs are one span, so the y-sides are one wall each. The volume is that
+/// surface's integral (Gauss-Legendre, 40 points a span): 1 312 579.22 mm3.
+/// The expected volume for the same sections is 1 310 514.00 mm3, with four corner-to-corner walls. The
+/// same rule with each 105.8 degree arc as one span gives 1 310 501.28 mm3, so the two-span arcs
+/// account for the 2065 mm3. The remaining 12.72 mm3 is not the pairing points, which are exact
+/// (radius 55.76, and the corner directions to the last digit); the arc-length spans give
+/// 1 313 109.39 mm3 and the chord-length spans 1 313 370.97 mm3 on the kernel's walls.
+#[test]
+fn loft_rectangle_to_circle_pairs_each_span_on_its_own_parameter() {
+    let rect = Loop2::polygon(&[Vec2::new(56.12, -74.17), Vec2::new(56.12, 74.17), Vec2::new(-56.12, 74.17), Vec2::new(-56.12, -74.17)]);
+    let r = 55.76;
+    let secs = [(Plane::XY, rect), (Plane::XY.offset(100.0), Loop2::circle(Vec2::ZERO, r))];
+    let body = loft(&secs).unwrap();
+    assert!(body.validity().is_empty(), "{:?}", body.validity());
+    // Six side walls and two caps.
+    assert_eq!(body.face_count(), 8);
+    let m = measure(&body).unwrap();
+    // The rule's integral, computed independently: 1 312 579.2213408777 mm3.
+    assert!(rel(m.volume, 1_312_579.221_340_877) < 1e-9, "{}", m.volume);
+    // The four corners' side edges run straight to their paired circle points, and the x-sides'
+    // middles to the circle's 0 and 180 degree points.
+    let (cx, cy) = (33.644_666_293_548_83, 44.465_874_892_952_9);
+    for (x, y, px, py) in [(56.12, -74.17, cx, -cy), (56.12, 74.17, cx, cy), (-56.12, 74.17, -cx, cy), (-56.12, -74.17, -cx, -cy)] {
+        assert!(joins(&body, Vec3::new(x, y, 0.0), Vec3::new(px, py, 100.0)), "({x}, {y}) joins its paired point");
     }
-    assert!(crate::body::REPHASED.with(|c| c.get()) > 0, "a body not known to be turned still is");
-    let (a, b) = (measure(&placed).unwrap(), measure(&turned).unwrap());
-    assert!((a.volume - b.volume).abs() < 1e-9 * a.volume && (a.area - b.area).abs() < 1e-9 * a.area);
-    assert_eq!(a.faces, b.faces);
-    assert!(a.bbox.min.dist(b.bbox.min) < 1e-9 && a.bbox.max.dist(b.bbox.max) < 1e-9);
+    assert!(joins(&body, Vec3::new(56.12, 0.0, 0.0), Vec3::new(r, 0.0, 100.0)), "the x-side's middle joins the circle's 0 degree point");
+    assert!(joins(&body, Vec3::new(-56.12, 0.0, 0.0), Vec3::new(-r, 0.0, 100.0)), "the x-side's middle joins the circle's 180 degree point");
+}
+
+/// Three sections, the first hood profile, the second, then the first again ([`HOOD_A`]): the
+/// middle one gains the vertex only the outer ones have, and that vertex pairs with theirs, so all
+/// three get the same 19 vertices and the outer two are cut alike.
+#[test]
+fn loft_through_three_sections_pairs_each_with_the_next() {
+    let secs = [hood_section(29.0, &HOOD_A), hood_section(50.0, &HOOD_B), hood_section(71.0, &HOOD_A)];
+    let matched = matched_sections(&secs);
+    let counts: Vec<usize> = matched.iter().map(|l| l.segs.len()).collect();
+    assert_eq!(counts, [19, 19, 19]);
+    let (first, last) = (&matched[0].segs, &matched[2].segs);
+    for (a, b) in first.iter().zip(last) {
+        assert!(a.start().dist(b.start()) < 1e-9, "{:?} vs {:?}", a.start(), b.start());
+    }
+    // Vertex for vertex, the middle section's are the second profile's corners where the outer
+    // ones have the first's.
+    let middle: Vec<Vec2> = matched[1].segs.iter().map(|s| s.start()).collect();
+    for (i, j) in [(15, 5), (10, 16), (14, 4)] {
+        let a = Vec2::new(HOOD_A[i].0, HOOD_A[i].1);
+        let k = first.iter().position(|s| s.start().dist(a) < 1e-9).unwrap();
+        assert!(middle[k].dist(Vec2::new(HOOD_B[j].0, HOOD_B[j].1)) < 1e-9, "{a:?} pairs with {:?}", middle[k]);
+    }
+    // The loft through them is symmetric about the middle section's plane.
+    let m = measure(&loft(&secs).unwrap()).unwrap();
+    assert!((m.centroid.x - 50.0).abs() < 1e-6, "centre of mass {:?}", m.centroid);
+}
+
+/// A corner drawn twice (a segment of no length) is left out of the matching: the loft is the
+/// box it was before the matching paired the sections' vertices.
+#[test]
+fn loft_builds_through_a_section_with_a_segment_of_no_length() {
+    let poly = |p: &[(f64, f64)]| Loop2::polygon(&p.iter().map(|&(x, y)| Vec2::new(x, y)).collect::<Vec<_>>());
+    let mut twice = poly(&[(0.0, 0.0), (40.0, 0.0), (40.0, 20.0), (0.0, 20.0)]);
+    twice.segs.insert(1, Seg2::Line { a: Vec2::new(40.0, 0.0), b: Vec2::new(40.0, 0.0) });
+    let plain = poly(&[(0.0, 0.0), (40.0, 0.0), (40.0, 20.0), (0.0, 20.0)]);
+    let m = measure(&loft(&[(Plane::XY, twice), (Plane::XY.offset(10.0), plain)]).unwrap()).unwrap();
+    assert!(rel(m.volume, 8000.0) < 1e-9, "{}", m.volume);
+    assert_eq!(m.faces, 6, "four walls and two caps");
+    assert!(m.bbox.min.dist(Vec3::ZERO) < 1e-9 && m.bbox.max.dist(Vec3::new(40.0, 20.0, 10.0)) < 1e-9, "{:?}", m.bbox);
+}
+
+/// Two 5000-gons (a grid of their pairing would be past its bound): paired through a band of
+/// the grid, the loft builds, the regular prism to 1e-9.
+#[test]
+fn loft_through_sections_too_large_to_pair_builds() {
+    let n = 5000;
+    let gon = |r: f64| Loop2::polygon(&(0..n).map(|k| Vec2::from_angle(k as f64 * std::f64::consts::TAU / n as f64) * r).collect::<Vec<_>>());
+    let m = measure(&loft(&[(Plane::XY, gon(10.0)), (Plane::XY.offset(10.0), gon(10.0))]).unwrap()).unwrap();
+    let area = n as f64 / 2.0 * 100.0 * (std::f64::consts::TAU / n as f64).sin();
+    assert!(rel(m.volume, area * 10.0) < 1e-9, "{} vs {}", m.volume, area * 10.0);
+}
+
+/// The re-splitting that sections too large to match fall back to
+/// ([`crate::build::resplit_numbered_loops`]), on a small case: a 40 x 20 rectangle and the same
+/// rectangle with its bottom in thirds, numbered from its top right corner. The rectangle takes
+/// the most segments a section has (six) by halving its longest sides, the top first, each half
+/// over the side it came from; the thirded one is not split; and each is turned once, to the
+/// start whose vertices line up best (the largest sum of dot products of their directions from
+/// the centroids) with those of the same number in the section it follows (the rectangle follows
+/// the thirded one, which has the most segments, and the thirded one follows the rectangle).
+#[test]
+fn sections_too_large_to_match_are_re_split_and_turned_once() {
+    let poly = |p: &[(f64, f64)]| Loop2::polygon(&p.iter().map(|&(x, y)| Vec2::new(x, y)).collect::<Vec<_>>());
+    let rect = poly(&[(0.0, 0.0), (40.0, 0.0), (40.0, 20.0), (0.0, 20.0)]);
+    let thirds = poly(&[(40.0, 20.0), (0.0, 20.0), (0.0, 0.0), (40.0 / 3.0, 0.0), (80.0 / 3.0, 0.0), (40.0, 0.0)]);
+    let secs = [(Plane::XY, rect), (Plane::XY.offset(10.0), thirds.clone())];
+    let numbered: Vec<_> = secs.iter().map(|(p, _)| *p).zip(crate::numbered::number_loops(secs.iter().map(|(_, l)| l))).collect();
+    let out = crate::build::resplit_numbered_loops(&numbered).unwrap();
+    let [(_, a), (_, b)] = out.as_slice() else { panic!("two sections") };
+    assert_eq!((a.lp.segs.len(), b.lp.segs.len()), (6, 6));
+    assert!(a.lp.segs.iter().all(|s| (s.length() - 20.0).abs() < 1e-12), "the long sides halved: {:?}", a.lp.segs);
+    // Every half runs over the side it came from (the rectangle's segments are 0..4, bottom,
+    // right, top, left), in the order round the rectangle, from wherever it was turned to start.
+    let sides: Vec<usize> = a.from.iter().map(|f| *f.first().unwrap()).collect();
+    let round = [0, 0, 1, 2, 2, 3];
+    assert!((0..6).any(|k| (0..6).all(|i| sides[i] == round[(i + k) % 6])), "{:?}", a.from);
+    // The thirded section is not split: its segments as given, in their order round.
+    let starts = |l: &Loop2| l.segs.iter().map(Seg2::start).collect::<Vec<_>>();
+    let given = starts(&thirds);
+    let (sa, sb) = (starts(&a.lp), starts(&b.lp));
+    assert!((0..6).any(|k| (0..6).all(|i| sb[i] == given[(i + k) % 6])), "{sb:?}");
+    // Each is turned to the best start against the one it follows: no turn of it fits better.
+    let fit = |pts: &[Vec2], of: &Loop2, to: &[Vec2], to_of: &Loop2, k: usize| -> f64 {
+        let (c, d) = (of.centroid(), to_of.centroid());
+        (0..6).map(|i| (pts[(i + k) % 6] - c).dot(to[i] - d)).sum()
+    };
+    for k in 1..6 {
+        assert!(fit(&sa, &a.lp, &given, &thirds, 0) >= fit(&sa, &a.lp, &given, &thirds, k) - 1e-9, "the rectangle turned by {k} fits better");
+        assert!(fit(&sb, &b.lp, &sa, &a.lp, 0) >= fit(&sb, &b.lp, &sa, &a.lp, k) - 1e-9, "the thirded one turned by {k} fits better");
+    }
+}
+
+/// The 40 x 20 rectangle in `n` segments, all but three of them along its bottom side (or its
+/// top side).
+fn rectangle_split_along(top: bool, n: usize) -> Loop2 {
+    let split = n - 3;
+    let along = |k: usize| 40.0 * k as f64 / split as f64;
+    let mut pts = vec![Vec2::new(0.0, 0.0)];
+    if top {
+        pts.extend([Vec2::new(40.0, 0.0), Vec2::new(40.0, 20.0)]);
+        pts.extend((1..split).map(|k| Vec2::new(40.0 - along(k), 20.0)));
+        pts.push(Vec2::new(0.0, 20.0));
+    } else {
+        pts.extend((1..split).map(|k| Vec2::new(along(k), 0.0)));
+        pts.extend([Vec2::new(40.0, 0.0), Vec2::new(40.0, 20.0), Vec2::new(0.0, 20.0)]);
+    }
+    Loop2::polygon(&pts)
+}
+
+/// Two sections of 12 000 segments whose vertices do not pair (one's along the bottom of the
+/// rectangle, the other's along its top): solidcore's match would give each about 24 000
+/// segments, past the kernel's 20 000, so the ops call gives `None` and the sections are re-split
+/// as main split them, 12 000 each ([`crate::build::loft_numbered_loops`]). The solid loft of them
+/// is still refused, as on main: 24 000 curves are past the smlib wrapper's `MAX_CURVES` (16 384)
+/// whichever way they are matched. (A solid loft whose match is past 20 000 a section is always
+/// past that bound re-split too; the surface loft, which skins each column on its own, is what
+/// this fallback builds.)
+#[test]
+fn sections_whose_match_is_past_the_segment_bound_are_re_split() {
+    let n = 12_000;
+    let secs = [(Plane::XY, rectangle_split_along(false, n)), (Plane::XY.offset(10.0), rectangle_split_along(true, n))];
+    let given: Vec<_> = secs.iter().map(|(p, l)| solidcore_ops::sweep::LoftSection { plane: *p, segs: l.segs.clone() }).collect();
+    assert!(solidcore_ops::sweep::match_loft_sections(&given, 20_000).unwrap().is_none(), "the match is past the bound");
+    for l in matched_sections(&secs) {
+        assert_eq!(l.segs.len(), n, "re-split to the most segments a section has");
+    }
+    assert!(loft(&secs).is_err(), "24 000 curves are past the wrapper's bound, as on main");
+}
+
+/// A 40 x 0.001 strip whose bottom side is cut at `cuts` of the points 40 k / 8200 (k = 1 to
+/// 8199): each of `missing` left out.
+fn strip_cut_at(missing: &[usize]) -> Loop2 {
+    let mut pts = vec![Vec2::new(0.0, 0.0)];
+    pts.extend((1..8200).filter(|k| !missing.contains(k)).map(|k| Vec2::new(40.0 * k as f64 / 8200.0, 0.0)));
+    pts.extend([Vec2::new(40.0, 0.0), Vec2::new(40.0, 0.001), Vec2::new(0.0, 0.001)]);
+    Loop2::polygon(&pts)
+}
+
+/// Two sections of 8103 segments each, a 40 x 0.001 strip whose bottom side is cut at the same
+/// points except 100 that each leaves out where the other has one (30 points apart, so pairing
+/// them would shift 30 pairs a step along). Those 200 vertices do not pair: matching gives each
+/// section 8203 segments, 16 406 curves in all, past the 16 384 the smlib wrapper takes (`MAX_CURVES`), so the sections
+/// are re-split as before the matching (each to the most segments a section has, numbered from
+/// where they line up best), 16 206 curves, and the loft builds: the strip's prism, as the
+/// sections are the same strip. Main refuses no fewer: two sections of 12 000 segments are
+/// 24 000 curves, past the wrapper's bound whichever way they are matched.
+#[test]
+fn loft_through_sections_whose_match_is_past_the_skins_bound_builds() {
+    let left: Vec<usize> = (0..100).map(|i| 50 + 80 * i).collect();
+    let right: Vec<usize> = left.iter().map(|k| k + 30).collect();
+    let secs = [(Plane::XY, strip_cut_at(&left)), (Plane::XY.offset(10.0), strip_cut_at(&right))];
+    let given: Vec<_> = secs.iter().map(|(p, l)| solidcore_ops::sweep::LoftSection { plane: *p, segs: l.segs.clone() }).collect();
+    let matched: Vec<usize> = solidcore_ops::sweep::match_loft_sections(&given, 20_000).unwrap().unwrap().iter().map(|m| m.segs.len()).collect();
+    assert_eq!(matched, vec![8203, 8203], "the 200 lone vertices cut the other section");
+    assert!(matched.iter().sum::<usize>() > solidcraft_smlib::sweeps::MAX_CURVES);
+    let m = measure(&loft(&secs).unwrap()).unwrap();
+    assert!(rel(m.volume, 40.0 * 0.001 * 10.0) < 1e-9, "{}", m.volume);
+    assert!(m.bbox.min.dist(Vec3::ZERO) < 1e-9 && m.bbox.max.dist(Vec3::new(40.0, 0.001, 10.0)) < 1e-9, "{:?}", m.bbox);
 }
 
 /// A plate 3 m long and 2 mm thick with ten holes of radius `r` along a diagonal, turned by
@@ -3137,29 +3328,455 @@ fn a_box_cut_round_a_small_hole_of_a_long_plate_keeps_the_hole() {
             let piece = boolean(&p, &cut, BoolOp::Intersect).unwrap().unwrap();
             let walls = (0..piece.face_count()).filter(|&i| matches!(face_surface(&piece, i), Some(FaceSurface::Cylinder { .. }))).count();
             // Both faces of the plate in the box keep the hole: an outer loop and the rim.
-            let holed = piece.solid.face_iter().filter(|f| f.boundaries().len() == 2).count();
+            let holed = piece.record().faces.iter().filter(|f| f.loops.len() == 2).count();
             assert!(walls >= 1 && holed == 2, "r {r}, tilt {tilt}, hole at {q:?}: {walls} walls, {holed} faces with a hole");
             assert!(measure(&piece).unwrap().volume > 0.0, "r {r}, tilt {tilt}, hole at {q:?}");
         }
     }
 }
 
-/// A transform with a perspective term or a singular linear part is refused: placed into the
-/// body, it built a revolved ring whose mesh measured hundreds of millions of mm³, and cutting
-/// a pocket into it ran for over half an hour before failing. A translation still places it.
+/// A refusal is kept with its body for every later reader: which face it names doesn't depend on
+/// whether the job that found it had been stopped, whose probes would all be refused.
 #[test]
-fn transform_refuses_a_matrix_that_is_not_an_affine_placement() {
-    let rect = Loop2::polygon(&[Vec2::new(20.0, 0.0), Vec2::new(60.0, 0.0), Vec2::new(60.0, 10.0), Vec2::new(20.0, 10.0)]);
-    let ring = revolve(&Plane::XZ, &[Region2 { outer: rect, holes: vec![] }], Vec2::ZERO, Vec2::Y, std::f64::consts::TAU).unwrap().remove(0);
-    // Column-major: the last entry of the third column is a perspective term.
-    let perspective = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 10.0], [0.0, 0.0, 0.0, 1.0]];
-    let flat = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
-    for m in [perspective, flat] {
-        assert!(matches!(crate::transform_matrix(&ring, m), Err(KernelError::Invalid(_))), "{m:?}");
+fn a_stopped_job_does_not_decide_which_face_a_refusal_names() {
+    let body = crate::build::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+    let why = solidcraft_smlib::Error::Argument;
+    let plain = crate::body::Refusal::of(body.record(), &why);
+    assert_eq!(plain.face, None, "every face of a box is taken on its own");
+    let stop = crate::Stop::new();
+    stop.stop();
+    let stopped = stop.within(|| crate::body::Refusal::of(body.record(), &why));
+    assert_eq!(stopped.face, plain.face);
+}
+
+/// A boss R 5 standing 10 out of a 40 x 40 x 10 block (sunk 5 into it), its axis turned 0 to 3
+/// degrees off square to the block's top, its root rounded 1. Turned, the supports are a plane
+/// and a cylinder not square to it: a canal round, its spine an ellipse, whose net the
+/// definition's certificate cannot always prove on the offsets to rounding
+/// (tangency-labs/solidcraft#14000). The round is built as with the axis square, keeping a
+/// definition where it is proved and none where it is not. Square, it adds by Pappus
+/// 2 pi (R + x) r^2 (1 - pi / 4), x = r (10 - 3 pi) / (12 - 3 pi). Turned by a, the corner's
+/// angle round the root is 90 degrees + a cos t, so the change in its area is first order in a
+/// and cancels over the turn: the round adds the square amount to within O(a^2), held to 1 %.
+#[test]
+fn a_round_on_a_boss_tilted_a_few_degrees_is_built() {
+    let (big_r, r) = (5.0, 1.0);
+    let x = r * (10.0 - 3.0 * PI) / (12.0 - 3.0 * PI);
+    let square = 2.0 * PI * (big_r + x) * r * r * (1.0 - PI / 4.0);
+    for deg in [0.0_f64, 0.5, 1.0, 2.0, 3.0] {
+        let a = deg.to_radians();
+        let block = box_solid(Vec3::new(-20.0, -20.0, 0.0), Vec3::new(20.0, 20.0, 10.0)).unwrap();
+        let boss = cylinder(Vec3::new(0.0, 0.0, 5.0), Vec3::new(a.sin(), 0.0, a.cos()), big_r, 15.0).unwrap();
+        let body = boolean(&block, &boss, BoolOp::Union).unwrap().unwrap();
+        let before = measure(&body).unwrap().volume;
+        // the root, where the wall meets the top, as a tangent chain from a point on it off the
+        // turn's plane (as the fillet command takes it)
+        let root = crate::blend::tangent_chain(&body, &[Vec3::new(5.0 * a.tan(), big_r, 10.0)]).unwrap();
+        let round = fillet(&body, &root, r).unwrap_or_else(|e| panic!("{deg} degrees: {e}"));
+        assert!(round.validity().is_empty(), "{deg} degrees: {:?}", round.validity());
+        let added = measure(&round).unwrap().volume - before;
+        // and meshed fine, the round's volume the same to the chord's accuracy
+        let fine = |b: &Body| b.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
+        let added_fine = fine(&round) - fine(&body);
+        assert!(rel(added_fine, added) < 1e-3, "{deg} degrees: meshed {added_fine}, exact {added}");
+        // square: the closed form, to the volumes' accuracy (a difference of two of them);
+        // turned: to 1 % of the round's
+        let bound = if deg == 0.0 { 1e-9 * before } else { 1e-2 * square };
+        assert!((added - square).abs() <= bound, "{deg} degrees: adds {added}, square {square}");
     }
-    let lifted = crate::transform_matrix(&ring, [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 10.0, 1.0]]).unwrap();
-    let pocket = box_solid(Vec3::new(37.0, -3.0, 7.0), Vec3::new(43.0, 3.0, 12.0)).unwrap();
-    let cut = boolean(&lifted, &pocket, BoolOp::Cut).unwrap().unwrap();
-    let removed = measure(&lifted).unwrap().volume - measure(&cut).unwrap().volume;
-    assert!((removed - 6.0 * 6.0 * 3.0).abs() < 1.0, "{removed}");
+}
+
+/// The record edge passing nearest `p` (its exact curve sampled along its interval).
+fn edge_near(b: &Body, p: Vec3) -> usize {
+    let record = b.record();
+    let off = |e: &solidcore_record::brep::Edge| {
+        let c = solidcraft_geom::brep::eval::CurveEval::new(e.parameters()).unwrap();
+        let [t0, t1] = e.interval;
+        (0..=1024).filter_map(|k| c.point(t0 + (t1 - t0) * k as f64 / 1024.0)).map(|q| q.dist(p)).fold(f64::INFINITY, f64::min)
+    };
+    let (i, d) = record.edges.iter().map(off).enumerate().min_by(|a, b| a.1.total_cmp(&b.1)).unwrap();
+    assert!(d < 0.05, "no edge passes near {p:?} (nearest {i} at {d})");
+    i
+}
+
+/// A ball of radius 12.5 resting on the origin, a 10 wide slot cut from its top down to z = 15
+/// right through it: walls at x = ±5 (`walls_x`) or at y = ±5.
+fn slotted_ball(walls_x: bool) -> Body {
+    let ball = sphere(Vec3::new(0.0, 0.0, 12.5), 12.5).unwrap();
+    let (a, b) =
+        if walls_x { (Vec3::new(-5.0, -20.0, 15.0), Vec3::new(5.0, 20.0, 30.0)) } else { (Vec3::new(-20.0, -5.0, 15.0), Vec3::new(20.0, 5.0, 30.0)) };
+    let slotted = boolean(&ball, &box_solid(a, b).unwrap(), BoolOp::Cut).unwrap().unwrap();
+    assert!(slotted.validity().is_empty(), "{:?}", slotted.validity());
+    slotted
+}
+
+/// The ball's seam (its meridian at y = 0, x > 0) ends on the slot's rim, at the top of the x = +5
+/// wall's arc: that arc is two record edges, the x = -5 arc one (#16122). They are one edge each
+/// to the user; nothing else joins.
+#[test]
+fn a_slot_arc_split_by_a_balls_seam_is_one_whole_edge() {
+    let b = slotted_ball(true);
+    let mesh = b.mesh(&MeshTolerance::chord(1e-3)).unwrap();
+    let seams = seam_flags(&b, &mesh);
+    let (top, z) = (12.5 + (12.5f64 * 12.5 - 25.0).sqrt(), 21.5376);
+    let (plus_a, plus_b) = (edge_near(&b, Vec3::new(5.0, 7.0407, z)), edge_near(&b, Vec3::new(5.0, -7.0407, z)));
+    assert_ne!(plus_a, plus_b, "the seam splits the x = +5 arc");
+    let both = {
+        let mut v = vec![plus_a, plus_b];
+        v.sort_unstable();
+        v
+    };
+    assert_eq!(whole_edge(&b, plus_a), both);
+    assert_eq!(whole_edge(&b, plus_b), both);
+    let minus = edge_near(&b, Vec3::new(-5.0, 0.0, top));
+    assert_eq!(whole_edge(&b, minus), vec![minus]);
+    let seam = edge_near(&b, Vec3::new(12.5 * 0.5f64.sqrt(), 0.0, 12.5 - 12.5 * 0.5f64.sqrt()));
+    assert!(seams[seam], "the meridian at y = 0 is the seam");
+    for e in [
+        seam,
+        edge_near(&b, Vec3::new(0.0, 12.2474, 15.0)),
+        edge_near(&b, Vec3::new(0.0, -12.2474, 15.0)),
+        edge_near(&b, Vec3::new(5.0, 0.0, 15.0)),
+        edge_near(&b, Vec3::new(-5.0, 0.0, 15.0)),
+    ] {
+        assert_eq!(whole_edge(&b, e), vec![e], "edge {e}");
+    }
+    for e in [b.record().edges.len(), 10_000, usize::MAX] {
+        assert_eq!(whole_edge(&b, e), vec![e]);
+    }
+}
+
+/// The slot turned a quarter: the seam ends on the +x floor arc, whose two pieces are one edge;
+/// the wall arcs are whole. The -x floor arc comes in two pieces as well, at (-12.2474, 0, 15),
+/// a vertex no other edge reaches: two pieces of one edge, between the same faces, running on
+/// into each other, which are one edge too.
+#[test]
+fn a_floor_arc_split_by_a_balls_seam_is_one_whole_edge() {
+    let b = slotted_ball(false);
+    let y = 2.4774;
+    for x in [11.9943, -11.9943] {
+        let pieces = [edge_near(&b, Vec3::new(x, y, 15.0)), edge_near(&b, Vec3::new(x, -y, 15.0))];
+        assert_ne!(pieces[0], pieces[1], "the floor arc at x = {x} is two record edges");
+        let mut both = pieces.to_vec();
+        both.sort_unstable();
+        for e in pieces {
+            assert_eq!(whole_edge(&b, e), both, "x = {x}");
+        }
+    }
+    // Nothing but the two pieces meets at the -x floor arc's middle vertex.
+    let record = b.record();
+    let middle = record.vertices.iter().position(|v| Vec3::from(v.point).dist(Vec3::new(-12.5 * 0.96f64.sqrt(), 0.0, 15.0)) < 1e-6).unwrap();
+    assert_eq!(record.edges.iter().filter(|e| e.vertices.contains(&(middle as u32))).count(), 2);
+    let top = 12.5 + (12.5f64 * 12.5 - 25.0).sqrt();
+    for p in [Vec3::new(0.0, 5.0, top), Vec3::new(0.0, -5.0, top)] {
+        let e = edge_near(&b, p);
+        assert_eq!(whole_edge(&b, e), vec![e]);
+    }
+}
+
+/// A real corner, two tangent arcs of different radii, and an authored split keep their edges
+/// apart, each stopped by the edge that is not a seam at their vertex (the arcs' by the line
+/// between their two sides); a cylinder's rim, split by the side's seams, is gathered whole and
+/// the walk ends. No body built here reaches the face pair or the tangency rule alone: see
+/// `runs_on`.
+#[test]
+fn whole_edge_keeps_corners_tangent_arcs_and_authored_splits_apart() {
+    let block = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+    for e in 0..block.record().edges.len() {
+        assert_eq!(whole_edge(&block, e), vec![e], "box edge {e}");
+    }
+    // An arc of radius 10 running on tangentially into one of radius 20 at (10, 0). Their sides
+    // are two surfaces, so the upright line between them is not a seam and stops the walk.
+    let outline = Loop2 {
+        segs: vec![
+            Seg2::Arc { center: Vec2::ZERO, radius: 10.0, start: -PI / 2.0, sweep: PI / 2.0 },
+            Seg2::Arc { center: Vec2::new(-10.0, 0.0), radius: 20.0, start: 0.0, sweep: PI / 2.0 },
+            Seg2::Line { a: Vec2::new(-10.0, 20.0), b: Vec2::new(-10.0, -10.0) },
+            Seg2::Line { a: Vec2::new(-10.0, -10.0), b: Vec2::new(0.0, -10.0) },
+        ],
+    };
+    let cam = extrude(&Plane::XY, &[Region2 { outer: outline, holes: vec![] }], 0.0, 5.0).unwrap().pop().unwrap();
+    let s = 0.5f64.sqrt();
+    let small = edge_near(&cam, Vec3::new(10.0 * s, -10.0 * s, 5.0));
+    let large = edge_near(&cam, Vec3::new(-10.0 + 20.0 * s, 20.0 * s, 5.0));
+    assert_ne!(small, large);
+    assert_eq!(whole_edge(&cam, small), vec![small]);
+    assert_eq!(whole_edge(&cam, large), vec![large]);
+    // Split Face on the block's +x side along z = 5 divides its vertical edges there.
+    let side = block.faces(0.01).unwrap().iter().position(|f| f.plane_normal.is_some_and(|n| n.dot(Vec3::X) > 0.99)).unwrap();
+    let split = split_faces(&block, &[side], &SplitTool::Plane(Plane { origin: Vec3::new(0.0, 0.0, 5.0), ..Plane::XY })).unwrap();
+    let (low, high) = (edge_near(&split, Vec3::new(10.0, 0.0, 2.5)), edge_near(&split, Vec3::new(10.0, 0.0, 7.5)));
+    assert_ne!(low, high);
+    assert_eq!(whole_edge(&split, low), vec![low]);
+    assert_eq!(whole_edge(&split, high), vec![high]);
+    // Split Face across a cylinder's side, through its axis: its rim's pieces stay apart at the
+    // authored line, though the side's pieces are one surface.
+    let pin = cylinder(Vec3::ZERO, Vec3::Z, 5.0, 10.0).unwrap();
+    let round: Vec<usize> = (0..pin.record().faces.len())
+        .filter(|f| !matches!(crate::offset::surf_of(pin.record(), *f), Some(crate::offset::Surf::Plane { .. })))
+        .collect();
+    let cut_pin = split_faces(&pin, &round, &SplitTool::Plane(Plane::YZ)).unwrap();
+    let rim = |b: &Body| -> Vec<usize> {
+        let r = b.record();
+        (0..r.edges.len())
+            .filter(|e| {
+                crate::heal::edge_points(r, *e as u32)
+                    .iter()
+                    .all(|p| (p.z - 10.0).abs() < 1e-6 && ((p.x * p.x + p.y * p.y).sqrt() - 5.0).abs() < 1e-6)
+            })
+            .collect()
+    };
+    for e in rim(&cut_pin) {
+        let whole = whole_edge(&cut_pin, e);
+        let pts: Vec<Vec3> = whole.iter().flat_map(|w| crate::heal::edge_points(cut_pin.record(), *w as u32)).collect();
+        assert!(pts.iter().all(|p| p.x >= -1e-6) || pts.iter().all(|p| p.x <= 1e-6), "rim piece {e} gathers {whole:?} across the split at x = 0");
+    }
+    // A whole rim is one closed edge, itself alone.
+    let whole_rim = rim(&pin);
+    assert_eq!(whole_rim.len(), 1);
+    assert_eq!(whole_edge(&pin, whole_rim[0]), whole_rim);
+    // A slot across the pin's top: the side's seam ends on one of the rim's two arcs, which is
+    // two edges and one to the user; the other arc is one edge.
+    let slotted = boolean(&pin, &box_solid(Vec3::new(-1.0, -10.0, 9.0), Vec3::new(1.0, 10.0, 12.0)).unwrap(), BoolOp::Cut).unwrap().unwrap();
+    let arcs = rim(&slotted);
+    assert_eq!(arcs.len(), 3, "{arcs:?}");
+    let mut split: Vec<usize> = arcs.iter().copied().filter(|e| whole_edge(&slotted, *e).len() == 2).collect();
+    split.sort_unstable();
+    assert_eq!(split.len(), 2, "{arcs:?}");
+    for e in &arcs {
+        assert_eq!(whole_edge(&slotted, *e), if split.contains(e) { split.clone() } else { vec![*e] });
+    }
+    // The ball with its top cut off level: its rim is a closed ring of pieces meeting where the
+    // seam ends. The walk gathers the ring and stops.
+    let ball = sphere(Vec3::new(0.0, 0.0, 12.5), 12.5).unwrap();
+    let capped = boolean(&ball, &box_solid(Vec3::new(-20.0, -20.0, 15.0), Vec3::new(20.0, 20.0, 30.0)).unwrap(), BoolOp::Cut).unwrap().unwrap();
+    let r = capped.record();
+    let ring: Vec<usize> = (0..r.edges.len()).filter(|e| crate::heal::edge_points(r, *e as u32).iter().all(|p| (p.z - 15.0).abs() < 1e-6)).collect();
+    assert!(ring.len() >= 2, "{ring:?}");
+    for &e in &ring {
+        assert_eq!(whole_edge(&capped, e), ring, "ring {ring:?}");
+    }
+}
+
+/// A round larger than a narrow concave round on its tangent chain is refused at once, naming
+/// that round's radius. A stem whose outline has three slight inward kinks (3, 5 and 9 degrees
+/// where its arcs meet) is joined into a bulged bar and its six corners are rounded at 2: at the
+/// kinks those rounds are concave faces 0.1 to 0.3 mm wide. A ball of 8 or of 5 does not roll
+/// inside a round of 2, so the round of the stem's foot does not fit them. The kernel found no
+/// ball on those three edges and let them pass; it went on for 18 s to refuse two of the chain's
+/// bands as overlapping, with 0.158 mm as the radius that fits.
+#[test]
+fn a_foot_round_wider_than_a_narrow_concave_round_on_its_chain_is_refused_naming_it() {
+    let bar_plane = Plane { origin: Vec3::new(0.0, 0.0, 3.0), x: Vec3::new(1.0, 0.0, 0.0), y: Vec3::new(0.0, 0.0, 1.0) };
+    let bar_loop = Loop2 {
+        segs: vec![
+            Seg2::Line { a: Vec2::new(-30.0, 0.0), b: Vec2::new(30.0, 0.0) },
+            Seg2::Line { a: Vec2::new(30.0, 0.0), b: Vec2::new(30.0, 17.5) },
+            // from (30, 17.5) through (0, 22.5) to (-30, 17.5)
+            Seg2::Arc { center: Vec2::new(0.0, -70.0), radius: 92.5, start: 1.240498971965643, sweep: 0.6605947096585074 },
+            Seg2::Line { a: Vec2::new(-30.0, 17.5), b: Vec2::new(-30.0, 0.0) },
+        ],
+    };
+    let bar = revolve(&bar_plane, &[Region2 { outer: bar_loop, holes: vec![] }], Vec2::ZERO, Vec2::new(1.0, 0.0), 2.0 * PI).unwrap().remove(0);
+    // The stem's outline: five arcs and a line, corner to corner, each arc given by the three
+    // points the sketch drew it through (its start, a point on it, its end).
+    let corners = [[21.54, -6.4], [13.71, 13.47], [-12.17, 14.52], [-21.5, -5.01], [-15.57, -15.06], [13.88, -15.91]];
+    let segs = vec![
+        // through (18.8, 4)
+        Seg2::Arc {
+            center: Vec2::new(-23.764857456221563, -12.77514513750452),
+            radius: 45.75120309514059,
+            start: 0.13979868890741112,
+            sweep: 0.4711554890184193,
+        },
+        // through (0.94, 17.9)
+        Seg2::Arc {
+            center: Vec2::new(-0.020515226704094107, -5.489318159144774),
+            radius: 23.409032304869626,
+            start: 0.9440065846664395,
+            sweep: 1.1724802229343485,
+        },
+        // through (-17.68, 5.16)
+        Seg2::Arc {
+            center: Vec2::new(39.13116330153082, -21.98152348199092),
+            radius: 62.96165954449315,
+            start: 2.5231805421562297,
+            sweep: 0.3454829737892329,
+        },
+        // through (-20.99, -11.41)
+        Seg2::Arc {
+            center: Vec2::new(-14.535971623535861, -7.675374301250519),
+            radius: 7.456668920769142,
+            start: 2.7760583061845803,
+            sweep: 1.7972107229845715,
+        },
+        Seg2::Line { a: Vec2::new(-15.57, -15.06), b: Vec2::new(13.88, -15.91) },
+        // through (20.24, -13.18)
+        Seg2::Arc {
+            center: Vec2::new(14.49239208224037, -8.563320015768795),
+            radius: 7.372159171714493,
+            start: -1.6539603698181953,
+            sweep: 1.9517884128893068,
+        },
+    ];
+    let stem_plane = Plane { origin: Vec3::new(0.0, 0.0, 65.0), ..Plane::XY };
+    let stem = extrude(&stem_plane, &[Region2 { outer: Loop2 { segs }, holes: vec![] }], -55.0, 0.0).unwrap().remove(0);
+    let body = boolean(&bar, &stem, BoolOp::Union).unwrap().unwrap();
+    let picks: Vec<Vec3> = corners.iter().map(|c| Vec3::new(c[0], c[1], 45.0)).collect();
+    let body = fillet(&body, &picks, 2.0).unwrap();
+    let chain = tangent_chain(&body, &[Vec3::new(-0.85, -15.48, 19.32)]).unwrap();
+    assert_eq!(chain.len(), 14, "the foot: six sides, six corner rounds and the bar's seam twice");
+    for r in [8.0, 5.0] {
+        let Err(KernelError::TooLarge(why)) = fillet(&body, &chain, r) else { panic!("{r}: refused as too large") };
+        assert!(why.contains("the rolling ball does not fit a face it rolls on"), "{r}: {why}");
+        assert_eq!(named_fit(&why), Some(2.0), "{r}: {why}");
+    }
+}
+
+#[test]
+fn iso_line_crosses_a_quadratic_trim_twice_within_one_sample_step() {
+    use solidcore_record::brep as b;
+    let tol = 1e-7;
+    let c: f64 = 33.0 / 128.0;
+    let r: f64 = 1.0 / 256.0;
+    // The bottom trim is y = 1000 ((t - c)^2 - r^2), x = 1000 t.
+    // Its two roots are strictly between adjacent samples 16/64 and 17/64.
+    let y0 = 1000.0 * (c * c - r * r);
+    let y1 = 1000.0 * ((1.0 - c) * (1.0 - c) - r * r);
+    let uv = [[0.0, y0], [1000.0, y1], [1000.0, 900.0], [0.0, 900.0]];
+    let xyz = |p: [f64; 2]| [p[0], p[1], 0.0];
+    let mut edges = vec![];
+    let mut oriented = vec![];
+    for i in 0..4 {
+        let next = (i + 1) % 4;
+        let points = if i == 0 { vec![uv[i], [500.0, y0 - 1000.0 * c], uv[next]] } else { vec![uv[i], uv[next]] };
+        let knots: Vec<f64> = [vec![0.0; points.len()], vec![1.0; points.len()]].concat();
+        edges.push(b::Edge {
+            curve: b::Curve::Spline { knots: knots.clone(), points: points.iter().copied().map(xyz).collect() },
+            nurbs: None,
+            interval: [0.0, 1.0],
+            vertices: [i as u32, next as u32],
+            tolerance: tol,
+            uses: vec![b::EdgeUseRef { face: 0, r#loop: 0, position: i as u32, upper: false }],
+        });
+        oriented.push(b::OrientedEdge { edge: i as u32, forward: true, pcurve: b::Curve2::Spline { points, knots } });
+    }
+    let record = b::Brep {
+        version: b::VERSION,
+        tolerance: tol,
+        regions: vec![b::Region { shells: vec![0], void: false }],
+        shells: vec![b::Shell::Faces { faces: vec![b::OrientedFace { face: 0, forward: true }], wires: vec![] }],
+        faces: vec![b::Face {
+            surface: b::Surface::Plane { origin: [0.0; 3], u_axis: [1.0, 0.0, 0.0], v_axis: [0.0, 1.0, 0.0] },
+            nurbs: None,
+            domain: [[0.0, 1000.0], [-1.0, 900.0]],
+            loops: vec![b::Loop::Edges { edges: oriented }],
+        }],
+        edges,
+        vertices: uv.map(|p| b::Vertex { point: xyz(p), tolerance: tol }).to_vec(),
+    };
+    let mut rational = record.clone();
+    // Weights 1, 2, 4 reparameterize the same parabola by t = 2s/(1+s).
+    let b::Loop::Edges { edges: boundary } = &mut rational.faces[0].loops[0] else { panic!("edge loop") };
+    let b::Curve2::Spline { knots, points } = &boundary[0].pcurve else { panic!("quadratic trim") };
+    let h: Vec<_> = points.iter().zip([1.0, 2.0, 4.0]).map(|(p, w)| [p[0] * w, p[1] * w, w]).collect();
+    rational.edges[0].curve = b::Curve::RationalSpline { knots: knots.clone(), homogeneous: h.iter().map(|&[x, y, w]| [x, y, 0.0, w]).collect() };
+    boundary[0].pcurve = b::Curve2::RationalSpline { knots: knots.clone(), homogeneous: h };
+    for data in [record, rational] {
+        let body = Body::from_record(data).unwrap();
+        for y in [1.0, 0.0] {
+            let pieces = iso_curves(&body, 0, Vec3::new(1000.0 * c, y, 0.0), true).unwrap();
+            let half = 1000.0 * (r * r + y / 1000.0).sqrt();
+            assert_eq!(pieces.len(), 1);
+            let b::Curve::Line { start, end } = pieces[0].0 else { panic!("expected a line") };
+            assert!((start[0] - (1000.0 * c - half)).abs() < 1e-7 && (end[0] - (1000.0 * c + half)).abs() < 1e-7);
+        }
+        assert!(iso_curves(&body, 0, Vec3::new(1000.0 * c, -0.02, 0.0), true).is_err());
+        let boundary = iso_curves(&body, 0, Vec3::new(500.0, 900.0, 0.0), true).unwrap();
+        assert_eq!(boundary.len(), 1);
+        let b::Curve::Line { start, end } = boundary[0].0 else { panic!("expected the upper boundary") };
+        assert_eq!((start, end), ([0.0, 900.0, 0.0], [1000.0, 900.0, 0.0]));
+    }
+}
+
+#[test]
+fn iso_line_across_a_round_hole_stops_at_both_sides() {
+    use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
+    let region = Region2 { outer: rect(40.0, 30.0).outer, holes: vec![Loop2::circle(Vec2::new(20.0, 15.0), 5.0).reversed()] };
+    let body = extrude(&Plane::XY, &[region], 0.0, 5.0).unwrap().pop().unwrap();
+    let (fi, face) = body.record().faces.iter().enumerate().find(|(_, f)| f.loops.len() == 2).unwrap();
+    let surface = SurfaceEval::new(face.parameters()).unwrap();
+    let center = Vec3::new(20.0, 15.0, surface.point([0.0, 0.0]).unwrap().z);
+    let uv = surface.project(center, None, 1e-7).unwrap();
+    let dir = surface.partials(uv[0], uv[1]).unwrap()[1][0].normalized().unwrap();
+    let sections = iso_curves(&body, fi, center + dir * 8.0, true).unwrap();
+    assert_eq!(sections.len(), 2);
+    for ((curve, range), end) in sections.iter().zip([1, 0]) {
+        let point = CurveEval::new(curve).unwrap().point(range[end]).unwrap();
+        assert!((point.dist(center) - 5.0).abs() < 1e-7);
+    }
+}
+
+#[test]
+fn ray_meets_exact_bounds_culls_misses_and_keeps_hits_for_solid_and_mesh() {
+    let solid = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+    assert!(solid.ray_meets_exact_bounds(Vec3::new(5.0, 5.0, 50.0), Vec3::new(0.0, 0.0, -1.0)));
+    assert!(solid.ray_meets_exact_bounds(Vec3::new(5.0, 5.0, 5.0), Vec3::X));
+    assert!(!solid.ray_meets_exact_bounds(Vec3::new(5.0, 5.0, 50.0), Vec3::Z));
+    assert!(!solid.ray_meets_exact_bounds(Vec3::new(25.0, 5.0, 50.0), Vec3::new(0.0, 0.0, -1.0)));
+
+    let mesh = mesh_body(&[Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0)], &[[0, 1, 2]]).unwrap();
+    assert!(mesh.ray_meets_exact_bounds(Vec3::new(2.0, 2.0, 10.0), Vec3::new(0.0, 0.0, -1.0)));
+    assert!(!mesh.ray_meets_exact_bounds(Vec3::new(25.0, 2.0, 10.0), Vec3::new(0.0, 0.0, -1.0)));
+}
+
+/// #21519: a panic the mesher catches is one a crash report marks recovered. Two loops with
+/// corners 1e-9 apart stop the triangulation library on an assertion; the mesher's own guard
+/// catches it and returns an internal error, but the crash reports read [`guarded`], which did
+/// not count the mesher's guard, so a caught panic was reported as a crash.
+#[test]
+fn a_panic_the_mesher_catches_counts_as_guarded() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let loops = vec![
+        vec![
+            [1.999999999609, 4.000000000408],
+            [2.999999999249, 5.77e-10],
+            [1.000000000478, 2.000000000614],
+            [1.000000000991, 1.000000000228],
+            [2.000000000482, 3.99999999949],
+            [1.999999999672, -9.53e-10],
+            [3.000000000364, 0.99999999994],
+            [-1.05e-10, 3.999999999914],
+            [1.999999999286, 1.000000000788],
+        ],
+        vec![
+            [4.000000000261, 1.999999999246],
+            [1.999999999553, -4.57e-10],
+            [1.999999999469, 1.000000000877],
+            [3.999999999666, 2.000000000137],
+            [3.76e-10, 2.99999999915],
+            [4.000000000737, 3.000000000668],
+            [1.000000000447, 1.000000000422],
+            [0.999999999585, 0.999999999164],
+            [0.999999999585, 3.000000000598],
+        ],
+    ];
+    let me = std::thread::current().id();
+    let (panics, unguarded) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+    let (p, u) = (panics.clone(), unguarded.clone());
+    let prev = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |_| {
+        if std::thread::current().id() == me {
+            p.fetch_add(1, Ordering::SeqCst);
+            if !guarded() {
+                u.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+    }));
+    let result = solidcore_tess::triangulate_planar(&loops);
+    std::panic::set_hook(prev);
+    assert!(matches!(&result, Err(solidcore_tess::TessError::Internal(m)) if m.contains("previous_region")), "{result:?}");
+    assert_eq!(panics.load(Ordering::SeqCst), 1, "the triangulation library panics once");
+    assert_eq!(unguarded.load(Ordering::SeqCst), 0, "the panic is inside a guard the crash reports see");
 }

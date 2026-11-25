@@ -1,0 +1,342 @@
+{
+  "cases": [
+    {
+      "name": "real_blade_hub_orient_multi_face_f0_same",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:11672-11726",
+      "inputs": {
+        "op": 1,
+        "brep": {
+          "kind": "file",
+          "file": "Fillet/blade_hub.smb"
+        },
+        "selector": 0,
+        "same": true
+      }
+    },
+    {
+      "name": "real_blade_hub_orient_multi_face_f0_opposite",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:11672-11726",
+      "inputs": {
+        "op": 1,
+        "brep": {
+          "kind": "file",
+          "file": "Fillet/blade_hub.smb"
+        },
+        "selector": 0,
+        "same": false
+      }
+    },
+    {
+      "name": "real_blade_hub_orient_multi_face_f1_same",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:11672-11726",
+      "inputs": {
+        "op": 1,
+        "brep": {
+          "kind": "file",
+          "file": "Fillet/blade_hub.smb"
+        },
+        "selector": 1,
+        "same": true
+      }
+    },
+    {
+      "name": "real_blade_hub_orient_multi_face_f1_opposite",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:11672-11726",
+      "inputs": {
+        "op": 1,
+        "brep": {
+          "kind": "file",
+          "file": "Fillet/blade_hub.smb"
+        },
+        "selector": 1,
+        "same": false
+      }
+    },
+    {
+      "name": "real_caps_nside_orient_multi_face_f0_same",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:11672-11726",
+      "inputs": {
+        "op": 1,
+        "brep": {
+          "kind": "file",
+          "file": "Fillet/caps_nside.smb"
+        },
+        "selector": 0,
+        "same": true
+      }
+    },
+    {
+      "name": "real_caps_nside_orient_multi_face_f0_opposite",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:11672-11726",
+      "inputs": {
+        "op": 1,
+        "brep": {
+          "kind": "file",
+          "file": "Fillet/caps_nside.smb"
+        },
+        "selector": 0,
+        "same": false
+      }
+    },
+    {
+      "name": "real_caps_nside_orient_multi_face_f1_same",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:11672-11726",
+      "inputs": {
+        "op": 1,
+        "brep": {
+          "kind": "file",
+          "file": "Fillet/caps_nside.smb"
+        },
+        "selector": 1,
+        "same": true
+      }
+    },
+    {
+      "name": "real_caps_nside_orient_multi_face_f1_opposite",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:11672-11726",
+      "inputs": {
+        "op": 1,
+        "brep": {
+          "kind": "file",
+          "file": "Fillet/caps_nside.smb"
+        },
+        "selector": 1,
+        "same": false
+      }
+    },
+    {
+      "name": "real_coons_01_03_29_orient_multi_face_f0_same",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:11672-11726",
+      "inputs": {
+        "op": 1,
+        "brep": {
+          "kind": "file",
+          "file": "Fillet/coons_01_03_29.smb"
+        },
+        "selector": 0,
+        "same": true
+      }
+    },
+    {
+      "name": "real_coons_01_03_29_orient_multi_face_f0_opposite",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:11672-11726",
+      "inputs": {
+        "op": 1,
+        "brep": {
+          "kind": "file",
+          "file": "Fillet/coons_01_03_29.smb"
+        },
+        "selector": 0,
+        "same": false
+      }
+    },
+    {
+      "name": "real_coons_01_03_29_orient_multi_face_f1_same",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:11672-11726",
+      "inputs": {
+        "op": 1,
+        "brep": {
+          "kind": "file",
+          "file": "Fillet/coons_01_03_29.smb"
+        },
+        "selector": 1,
+        "same": true
+      }
+    },
+    {
+      "name": "real_coons_01_03_29_orient_multi_face_f1_opposite",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:11672-11726",
+      "inputs": {
+        "op": 1,
+        "brep": {
+          "kind": "file",
+          "file": "Fillet/coons_01_03_29.smb"
+        },
+        "selector": 1,
+        "same": false
+      }
+    },
+    {
+      "name": "real_sphere_dif_box_orient_multi_face_f0_same",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:11672-11726",
+      "inputs": {
+        "op": 1,
+        "brep": {
+          "kind": "file",
+          "file": "Fillet/sphere_dif_box.smb"
+        },
+        "selector": 0,
+        "same": true
+      }
+    },
+    {
+      "name": "real_sphere_dif_box_orient_multi_face_f0_opposite",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:11672-11726",
+      "inputs": {
+        "op": 1,
+        "brep": {
+          "kind": "file",
+          "file": "Fillet/sphere_dif_box.smb"
+        },
+        "selector": 0,
+        "same": false
+      }
+    },
+    {
+      "name": "real_sphere_dif_box_orient_multi_face_f1_same",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:11672-11726",
+      "inputs": {
+        "op": 1,
+        "brep": {
+          "kind": "file",
+          "file": "Fillet/sphere_dif_box.smb"
+        },
+        "selector": 1,
+        "same": true
+      }
+    },
+    {
+      "name": "real_sphere_dif_box_orient_multi_face_f1_opposite",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:11672-11726",
+      "inputs": {
+        "op": 1,
+        "brep": {
+          "kind": "file",
+          "file": "Fillet/sphere_dif_box.smb"
+        },
+        "selector": 1,
+        "same": false
+      }
+    },
+    {
+      "name": "real_cap1_orient_multi_face_f0_same",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:11672-11726",
+      "inputs": {
+        "op": 1,
+        "brep": {
+          "kind": "file",
+          "file": "Fillet/cap1.smb"
+        },
+        "selector": 0,
+        "same": true
+      }
+    },
+    {
+      "name": "real_cap1_orient_multi_face_f0_opposite",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:11672-11726",
+      "inputs": {
+        "op": 1,
+        "brep": {
+          "kind": "file",
+          "file": "Fillet/cap1.smb"
+        },
+        "selector": 0,
+        "same": false
+      }
+    },
+    {
+      "name": "real_cap1_orient_multi_face_f1_same",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:11672-11726",
+      "inputs": {
+        "op": 1,
+        "brep": {
+          "kind": "file",
+          "file": "Fillet/cap1.smb"
+        },
+        "selector": 1,
+        "same": true
+      }
+    },
+    {
+      "name": "real_cap1_orient_multi_face_f1_opposite",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:11672-11726",
+      "inputs": {
+        "op": 1,
+        "brep": {
+          "kind": "file",
+          "file": "Fillet/cap1.smb"
+        },
+        "selector": 1,
+        "same": false
+      }
+    },
+    {
+      "name": "real_test8_orient_multi_face_f0_same",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:11672-11726",
+      "inputs": {
+        "op": 1,
+        "brep": {
+          "kind": "file",
+          "file": "Fillet/test8.smb"
+        },
+        "selector": 0,
+        "same": true
+      }
+    },
+    {
+      "name": "real_test8_orient_multi_face_f0_opposite",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:11672-11726",
+      "inputs": {
+        "op": 1,
+        "brep": {
+          "kind": "file",
+          "file": "Fillet/test8.smb"
+        },
+        "selector": 0,
+        "same": false
+      }
+    },
+    {
+      "name": "real_test8_orient_multi_face_f1_same",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:11672-11726",
+      "inputs": {
+        "op": 1,
+        "brep": {
+          "kind": "file",
+          "file": "Fillet/test8.smb"
+        },
+        "selector": 1,
+        "same": true
+      }
+    },
+    {
+      "name": "real_test8_orient_multi_face_f1_opposite",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:11672-11726",
+      "inputs": {
+        "op": 1,
+        "brep": {
+          "kind": "file",
+          "file": "Fillet/test8.smb"
+        },
+        "selector": 1,
+        "same": false
+      }
+    },
+    {
+      "name": "real_test7_orient_oriented_multi_face_same",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:11660-11670",
+      "inputs": {
+        "op": 1,
+        "brep": {
+          "kind": "file",
+          "file": "Fillet/test7.smb"
+        },
+        "selector": 0,
+        "same": true
+      }
+    },
+    {
+      "name": "real_test7_orient_oriented_multi_face_opposite",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp:11660-11670",
+      "inputs": {
+        "op": 1,
+        "brep": {
+          "kind": "file",
+          "file": "Fillet/test7.smb"
+        },
+        "selector": 0,
+        "same": false
+      }
+    }
+  ]
+}

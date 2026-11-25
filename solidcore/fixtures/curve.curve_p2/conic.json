@@ -1,0 +1,11 @@
+{ "cases": [
+  { "name": "read_db_conic_parabola", "upstream_ref": "source/SMLib/src/SmCurve.cpp:23728 (SmConic::ReadFromDB dispatch)",
+    "inputs": { "op": "read_db", "type": 14020, "dim": 2, "version": 33,
+                "text": "2 SmConic conic type \n1.5 SmConic A of conic eqn \n0 SmConic B of conic eqn \n0.25 -0.5 SmConic origin of displaced conic curve \n0.75 SmConic rotation from X in radians of displaced conic curve\n" } },
+  { "name": "read_db_conic_ellipse", "upstream_ref": "source/SMLib/src/SmCurve.cpp:23728 (SmConic::ReadFromDB dispatch)",
+    "inputs": { "op": "read_db", "type": 14020, "dim": 2, "version": 33,
+                "text": "0\n2\n1\n0 0\n0\n" } },
+  { "name": "read_db_conic_hyperbola_rotated", "upstream_ref": "source/SMLib/src/SmCurve.cpp:23728 (SmConic::ReadFromDB dispatch)",
+    "inputs": { "op": "read_db", "type": 14020, "dim": 2, "version": 33,
+                "text": "1\n1.4142135623730951\n0.7071067811865476\n-1 2\n3.141592653589793\n" } }
+] }

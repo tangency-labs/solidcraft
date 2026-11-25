@@ -1,0 +1,85 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 30,
+    "height": 10,
+    "corner": [
+     0,
+     0,
+     0
+    ],
+    "operation": "new",
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "Bracket",
+    "parent": "root",
+    "activate": false,
+    "grounded": false
+   }
+  },
+  {
+   "command": "component.move_bodies",
+   "params": {
+    "bodies": [
+     "Plate"
+    ],
+    "component": "Bracket"
+   }
+  },
+  {
+   "command": "occurrence.move",
+   "params": {
+    "occurrence": "Bracket:1",
+    "translate": [
+     100,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "face": [
+      120,
+      15,
+      10
+     ]
+    }
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 5
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 8,
+    "operation": "new"
+   }
+  },
+  {
+   "command": "component.move_sketches.to_parts",
+   "params": {}
+  }
+ ]
+}

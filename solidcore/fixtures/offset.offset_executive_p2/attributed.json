@@ -1,0 +1,1425 @@
+{
+ "coverage": "Attributed offsets and shells (#1462): each source face and edge carries its own SmLongAttribute (copy by default; reference, standalone and temp variants) and the result's face and edge attribute sets are compared, so the COPY of each offset face's source (SmOffsetExecutive.cpp:1237), the shell difference's edits and the merging PiecewiseMerge carry them as upstream.",
+ "cases": [
+  {
+   "name": "api_offset_box_round_out",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_offset",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": 1.0,
+     "extend_convex": false,
+     "merge_results": false
+    },
+    "attributed": 0
+   }
+  },
+  {
+   "name": "api_offset_box_round_in",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_offset",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -1.0,
+     "extend_convex": false,
+     "merge_results": false
+    },
+    "attributed": 0
+   }
+  },
+  {
+   "name": "api_shell_box_top_round_in",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -1.0,
+     "extend_convex": false,
+     "merge_results": false
+    },
+    "attributed": 0,
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "api_shell_box_top_round_out",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": 1.0,
+     "extend_convex": false,
+     "merge_results": false
+    },
+    "attributed": 0,
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "static_offset_box_round_out",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "static_offset",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": 1.0,
+     "extend_convex": false,
+     "merge_results": false
+    },
+    "attributed": 0
+   }
+  },
+  {
+   "name": "static_shell_box_top_round_in",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "static_shell",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -1.0,
+     "extend_convex": false,
+     "merge_results": false
+    },
+    "attributed": 0,
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "api_offset_box_extend_out",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_offset",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": 1.0,
+     "extend_convex": true,
+     "merge_results": false
+    },
+    "attributed": 0
+   }
+  },
+  {
+   "name": "api_offset_box_extend_in",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_offset",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -1.0,
+     "extend_convex": true,
+     "merge_results": false
+    },
+    "attributed": 0
+   }
+  },
+  {
+   "name": "api_shell_box_top_extend_in",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -1.0,
+     "extend_convex": true,
+     "merge_results": false
+    },
+    "attributed": 0,
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "api_shell_box_top_extend_out",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": 1.0,
+     "extend_convex": true,
+     "merge_results": false
+    },
+    "attributed": 0,
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "static_offset_box_extend_out",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "static_offset",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": 1.0,
+     "extend_convex": true,
+     "merge_results": false
+    },
+    "attributed": 0
+   }
+  },
+  {
+   "name": "static_shell_box_top_extend_in",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "static_shell",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -1.0,
+     "extend_convex": true,
+     "merge_results": false
+    },
+    "attributed": 0,
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "api_offset_box_round_merge_out",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_offset",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": 1.0,
+     "extend_convex": false,
+     "merge_results": true
+    },
+    "attributed": 0
+   }
+  },
+  {
+   "name": "api_offset_box_round_merge_in",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_offset",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -1.0,
+     "extend_convex": false,
+     "merge_results": true
+    },
+    "attributed": 0
+   }
+  },
+  {
+   "name": "api_shell_box_top_round_merge_in",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -1.0,
+     "extend_convex": false,
+     "merge_results": true
+    },
+    "attributed": 0,
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "api_shell_box_top_round_merge_out",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": 1.0,
+     "extend_convex": false,
+     "merge_results": true
+    },
+    "attributed": 0,
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "static_offset_box_round_merge_out",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "static_offset",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": 1.0,
+     "extend_convex": false,
+     "merge_results": true
+    },
+    "attributed": 0
+   }
+  },
+  {
+   "name": "static_shell_box_top_round_merge_in",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "static_shell",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -1.0,
+     "extend_convex": false,
+     "merge_results": true
+    },
+    "attributed": 0,
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "api_offset_box_extend_merge_out",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_offset",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": 1.0,
+     "extend_convex": true,
+     "merge_results": true
+    },
+    "attributed": 0
+   }
+  },
+  {
+   "name": "api_offset_box_extend_merge_in",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_offset",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -1.0,
+     "extend_convex": true,
+     "merge_results": true
+    },
+    "attributed": 0
+   }
+  },
+  {
+   "name": "api_shell_box_top_extend_merge_in",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -1.0,
+     "extend_convex": true,
+     "merge_results": true
+    },
+    "attributed": 0,
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "api_shell_box_top_extend_merge_out",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": 1.0,
+     "extend_convex": true,
+     "merge_results": true
+    },
+    "attributed": 0,
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "static_offset_box_extend_merge_out",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "static_offset",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": 1.0,
+     "extend_convex": true,
+     "merge_results": true
+    },
+    "attributed": 0
+   }
+  },
+  {
+   "name": "static_shell_box_top_extend_merge_in",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "static_shell",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -1.0,
+     "extend_convex": true,
+     "merge_results": true
+    },
+    "attributed": 0,
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "api_shell_box_closed_extend_merge_in",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -1.0,
+     "extend_convex": true,
+     "merge_results": true
+    },
+    "attributed": 0
+   }
+  },
+  {
+   "name": "api_shell_box_two_faces_extend_merge_in",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -1.0,
+     "extend_convex": true,
+     "merge_results": true
+    },
+    "attributed": 0,
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     },
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "api_offset_cylinder_extend_merge_out",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_offset",
+    "source": {
+     "kind": "cylinder",
+     "origin": [
+      1,
+      -2,
+      0.5
+     ],
+     "radius": 3,
+     "height": 5
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": 0.5,
+     "extend_convex": true,
+     "merge_results": true
+    },
+    "attributed": 0
+   }
+  },
+  {
+   "name": "api_shell_cylinder_top_extend_merge_in",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "cylinder",
+     "origin": [
+      1,
+      -2,
+      0.5
+     ],
+     "radius": 3,
+     "height": 5
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -0.5,
+     "extend_convex": true,
+     "merge_results": true
+    },
+    "attributed": 0,
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "api_offset_sphere_extend_merge_out",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_offset",
+    "source": {
+     "kind": "sphere",
+     "origin": [
+      0.5,
+      0.5,
+      0.5
+     ],
+     "radius": 2
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": 0.5,
+     "extend_convex": true,
+     "merge_results": true
+    },
+    "attributed": 0
+   }
+  },
+  {
+   "name": "api_shell_sphere_extend_merge_in",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "sphere",
+     "origin": [
+      0.5,
+      0.5,
+      0.5
+     ],
+     "radius": 2
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -0.5,
+     "extend_convex": true,
+     "merge_results": true
+    },
+    "attributed": 0
+   }
+  },
+  {
+   "name": "api_shell_box_closed_round_in",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -1.0,
+     "extend_convex": false,
+     "merge_results": false
+    },
+    "attributed": 0
+   }
+  },
+  {
+   "name": "api_shell_box_two_faces_round_in",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -1.0,
+     "extend_convex": false,
+     "merge_results": false
+    },
+    "attributed": 0,
+    "faces": [
+     {
+      "origin": "source",
+      "index": 0
+     },
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "api_offset_cylinder_round_out",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_offset",
+    "source": {
+     "kind": "cylinder",
+     "origin": [
+      1,
+      -2,
+      0.5
+     ],
+     "radius": 3,
+     "height": 5
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": 0.5,
+     "extend_convex": false,
+     "merge_results": false
+    },
+    "attributed": 0
+   }
+  },
+  {
+   "name": "api_shell_cylinder_top_round_in",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "cylinder",
+     "origin": [
+      1,
+      -2,
+      0.5
+     ],
+     "radius": 3,
+     "height": 5
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -0.5,
+     "extend_convex": false,
+     "merge_results": false
+    },
+    "attributed": 0,
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "api_offset_sphere_round_out",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_offset",
+    "source": {
+     "kind": "sphere",
+     "origin": [
+      0.5,
+      0.5,
+      0.5
+     ],
+     "radius": 2
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": 0.5,
+     "extend_convex": false,
+     "merge_results": false
+    },
+    "attributed": 0
+   }
+  },
+  {
+   "name": "api_shell_sphere_round_in",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "sphere",
+     "origin": [
+      0.5,
+      0.5,
+      0.5
+     ],
+     "radius": 2
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -0.5,
+     "extend_convex": false,
+     "merge_results": false
+    },
+    "attributed": 0
+   }
+  },
+  {
+   "name": "api_offset_box_extend_merge_out_reference",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_offset",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": 1.0,
+     "extend_convex": true,
+     "merge_results": true
+    },
+    "attributed": 1
+   }
+  },
+  {
+   "name": "api_shell_box_top_extend_merge_in_reference",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -1.0,
+     "extend_convex": true,
+     "merge_results": true
+    },
+    "attributed": 1,
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "api_shell_box_top_round_in_reference",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -1.0,
+     "extend_convex": false,
+     "merge_results": false
+    },
+    "attributed": 1,
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "api_offset_box_extend_merge_out_standalone_copy",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_offset",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": 1.0,
+     "extend_convex": true,
+     "merge_results": true
+    },
+    "attributed": 2
+   }
+  },
+  {
+   "name": "api_shell_box_top_extend_merge_in_standalone_copy",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -1.0,
+     "extend_convex": true,
+     "merge_results": true
+    },
+    "attributed": 2,
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "api_shell_box_top_round_in_standalone_copy",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -1.0,
+     "extend_convex": false,
+     "merge_results": false
+    },
+    "attributed": 2,
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "api_offset_box_extend_merge_out_standalone_reference",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_offset",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": 1.0,
+     "extend_convex": true,
+     "merge_results": true
+    },
+    "attributed": 3
+   }
+  },
+  {
+   "name": "api_shell_box_top_extend_merge_in_standalone_reference",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -1.0,
+     "extend_convex": true,
+     "merge_results": true
+    },
+    "attributed": 3,
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "api_shell_box_top_round_in_standalone_reference",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -1.0,
+     "extend_convex": false,
+     "merge_results": false
+    },
+    "attributed": 3,
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "api_offset_box_extend_merge_out_temp",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_offset",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": 1.0,
+     "extend_convex": true,
+     "merge_results": true
+    },
+    "attributed": 4
+   }
+  },
+  {
+   "name": "api_shell_box_top_extend_merge_in_temp",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -1.0,
+     "extend_convex": true,
+     "merge_results": true
+    },
+    "attributed": 4,
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "api_shell_box_top_round_in_temp",
+   "upstream_ref": "#1462",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -1.0,
+     "extend_convex": false,
+     "merge_results": false
+    },
+    "attributed": 4,
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ]
+   }
+  }
+ ]
+}

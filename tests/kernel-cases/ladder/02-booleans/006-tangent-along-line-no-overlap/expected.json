@@ -1,0 +1,11 @@
+{
+ "sources": [],
+ "what": "a cylinder r10 along X lying on the top face (tangent along a line), cut",
+ "source": "analytic",
+ "method": "the cylinder (axis y=20, z=30) touches the top face z=20 only along the line y=20: nothing is removed",
+ "body_count": 1,
+ "volume_mm3": 48000,
+ "faces": 6,
+ "edges": 12,
+ "vertices": 8
+}

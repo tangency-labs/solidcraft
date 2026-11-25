@@ -1,0 +1,110 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "YZ"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -63,
+      0
+     ],
+     [
+      -3,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -3,
+      0
+     ],
+     [
+      -63,
+      60
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -63,
+      60
+     ],
+     [
+      -63,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 1.2,
+    "start_offset": 4.4,
+    "operation": "new",
+    "body_name": "Prism"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.rectangle.rounded",
+   "params": {
+    "p0": [
+     0,
+     -67
+    ],
+    "p1": [
+     10,
+     -3
+    ],
+    "radius": 4.9
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 0.4,
+    "operation": "new",
+    "body_name": "Slab"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Prism",
+    "tools": [
+     "Slab"
+    ],
+    "operation": "join"
+   }
+  }
+ ]
+}

@@ -1,0 +1,16 @@
+#### WR-605. `SmBrep::DeleteFilletFace` refuses a ring fillet (a round all the way round a boss)
+- **Severity:** Wrong result (a removable fillet is refused: `SmApiRemoveFillet` fails with 1001 and leaves it)
+- **Area:** Blends / fillet removal
+- **Location:** `source/SMLib/src/SmFilletRemoval.cpp`, `SmBrep::DeleteFilletFace` and `SmFilletRemoval::CollectFilletTopology` (def. `:124` ff.): only a four-sided fillet, two tangent sides and two ends, is taken.
+- **What happens:** a round all the way round a boss's foot or rim has no ends. Its rails are closed edges with one vertex each, and its surface's seam is an edge between those vertices. `CollectFilletTopology` refuses it, and the defeature `SmApiRemoveFillet` falls back on (`sm_DefeatureFillets`) does not take it either.
+- **Trigger:** a 60 x 40 x 10 plate with a boss r 10, 10 high, at (30, 20); an r 2 round at the boss's foot (or its rim). The port's test (`crates/solidcore/tests/fork_52bfef0_ring_fillet_removal.rs`): `delete_fillet_face` of the foot round fails with the opt-in off.
+- **How found:** SolidCraft (the fork, tangency-labs/smlib 52bfef0), #1060 step 3.
+- **Confirmed:** no. The pinned C++ refuses the face (the four-sided collection), as the port does with the opt-in off; the fork's commit is the evidence for the removal.
+- **Fix (fork):** tangency-labs/smlib 52bfef0 adds `SmRingFilletRemoval`, which `DeleteFilletFace` uses for a face `IsRing` accepts: two closed tangent manifold edges and at most one edge whose only face is the fillet.
+  - The sharp edge is the global intersection of the two tangent faces' surfaces within their natural domains: of the closed curves, the nearest within six rail chords of every rail sample. It runs as rail 0 and starts where it crosses a tangent face's seam.
+  - A seam that stops short of the sharp edge runs on along its line (end span continued). Its UV trims run on too and must reach the surface at the new vertex.
+  - The fillet and its seam are deleted, both vertices move to the new one, the rails take the sharp edge's curve and are glued (vertices, then edges), and the sharp edge's UV trims are made on both faces, whose domains take them in.
+  - A sharp edge outside a surface's domain, or a curved seam that would have to be continued, is refused before any change (`NotExact`).
+  - The fork's `SmBrep::JoinShellsAtVertex` rejoins the shells the deletion split. 661f79c later replaced it by the glue's own fix (WR-607) and dropped the clip of the faces' domains to their surfaces'.
+  - Result: the foot round removed, 27141.592653590 = 24000 + 1000 pi (to 2e-10), eight faces, check clean; the rim round the same.
+- **Rust port:** opt-in `Kernel::fixes.fillet_removal_takes_ring_fillets` (default `false`, upstream's behaviour) in `delete_fillet_face`, through `blend::fillet_removal::ring::RingFilletRemoval` and `join_shells_at_vertex` (`crates/solidcore/src/blend/fillet_removal/ring.rs`). With `glue_vertices_joins_every_region` (WR-607) on too, the removal follows 661f79c. Tests: `upstream_refuses_a_ring_fillet` (opt-in off: error, body unchanged), `ring_fillet_is_removed_to_the_sharp_edge` and `ring_fillet_is_removed_with_every_region_glue` (eight faces, manifold, volume 24000 + 1000 pi to 1e-6, check clean).

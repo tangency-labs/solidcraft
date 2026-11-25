@@ -1,0 +1,359 @@
+//! What draws a headless picture: every adapter the platform's native backends offer is
+//! classified as hardware (a discrete, integrated or virtual GPU) or software (a GPU driver that
+//! runs on the CPU, such as llvmpipe, lavapipe or WARP), and a [`Policy`] picks one. The last
+//! tier, below any adapter, is the viewport's CPU rasterizer (no surface analysis, highlights
+//! or legends): `auto` lands there only when no adapter qualifies, `cpu` forces it, `hardware`
+//! and `software` never use it. macOS uses Metal only, and has no software adapter. The host
+//! chooses the policy (from its settings or environment) and passes it; `WGPU_BACKEND`, wgpu's
+//! own variable, still narrows the backends.
+
+use serde::Serialize;
+
+/// Whether an adapter is a GPU or a software rasterizer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Tier {
+    Hardware,
+    Software,
+}
+
+/// Which adapters a headless device may open.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Policy {
+    /// The best hardware adapter, else a software one.
+    #[default]
+    Auto,
+    /// A hardware adapter or nothing.
+    Hardware,
+    /// A software adapter or nothing.
+    Software,
+    /// The CPU rasterizer, whatever adapters there are.
+    Cpu,
+}
+
+/// Where a policy lands: an adapter of a tier, or the CPU rasterizer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Landing {
+    Hardware,
+    Software,
+    Cpu,
+}
+
+impl Landing {
+    /// What a picture's reply names as its renderer: `gpu`, `gpu-software` or `cpu`.
+    pub fn renderer(self) -> &'static str {
+        match self {
+            Landing::Hardware => "gpu",
+            Landing::Software => "gpu-software",
+            Landing::Cpu => "cpu",
+        }
+    }
+}
+
+impl From<Tier> for Landing {
+    fn from(t: Tier) -> Self {
+        match t {
+            Tier::Hardware => Landing::Hardware,
+            Tier::Software => Landing::Software,
+        }
+    }
+}
+
+impl Policy {
+    /// `auto`, `hardware`, `software` or `cpu` (case-insensitive).
+    pub fn parse(s: &str) -> Option<Policy> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "auto" => Some(Policy::Auto),
+            "hardware" | "hw" | "gpu" => Some(Policy::Hardware),
+            "software" | "sw" => Some(Policy::Software),
+            "cpu" => Some(Policy::Cpu),
+            _ => None,
+        }
+    }
+
+    /// `auto`, `hardware`, `software` or `cpu`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Policy::Auto => "auto",
+            Policy::Hardware => "hardware",
+            Policy::Software => "software",
+            Policy::Cpu => "cpu",
+        }
+    }
+
+    /// Whether an adapter of `tier` may serve this policy.
+    pub fn admits(self, tier: Tier) -> bool {
+        match self {
+            Policy::Auto => true,
+            Policy::Hardware => tier == Tier::Hardware,
+            Policy::Software => tier == Tier::Software,
+            Policy::Cpu => false,
+        }
+    }
+
+    /// Where the policy lands when the best qualifying adapter is of tier `adapter` (`None`: no
+    /// adapter qualifies): that adapter; else the CPU rasterizer under `auto` (and always under
+    /// `cpu`); else nowhere, and a picture is an error.
+    pub fn lands_on(self, adapter: Option<Tier>) -> Option<Landing> {
+        match (self, adapter) {
+            (Policy::Cpu, _) => Some(Landing::Cpu),
+            (_, Some(t)) => Some(t.into()),
+            (Policy::Auto, None) => Some(Landing::Cpu),
+            (Policy::Hardware | Policy::Software, None) => None,
+        }
+    }
+}
+
+/// One adapter as the survey saw it.
+#[derive(Clone, Debug, Serialize)]
+pub struct AdapterReport {
+    pub name: String,
+    pub backend: String,
+    pub device_type: String,
+    pub driver: String,
+    pub tier: Tier,
+}
+
+/// The backends a headless device looks at on this platform: Metal on macOS, Vulkan and D3D12
+/// on Windows, Vulkan elsewhere; `WGPU_BACKEND` narrows them further. One rule on every machine,
+/// whatever its driver. Where Vulkan offers no adapter at all, Linux and the BSDs also look at
+/// OpenGL ([`gl_when_vulkan_has_none`]).
+pub fn native_backends() -> wgpu::Backends {
+    let native = if cfg!(target_os = "macos") {
+        wgpu::Backends::METAL
+    } else if cfg!(target_os = "windows") {
+        wgpu::Backends::DX12 | wgpu::Backends::VULKAN
+    } else {
+        wgpu::Backends::VULKAN
+    };
+    match wgpu::Backends::from_env() {
+        Some(env) if !(env & native).is_empty() => env & native,
+        _ => native,
+    }
+}
+
+pub fn tier_of(t: wgpu::DeviceType) -> Tier {
+    match t {
+        wgpu::DeviceType::Cpu => Tier::Software,
+        wgpu::DeviceType::DiscreteGpu | wgpu::DeviceType::IntegratedGpu | wgpu::DeviceType::VirtualGpu | wgpu::DeviceType::Other => Tier::Hardware,
+    }
+}
+
+/// Preference among adapters (higher first): a discrete GPU, an integrated one, a virtual one,
+/// an unknown kind, a software rasterizer.
+fn rank(t: wgpu::DeviceType) -> u8 {
+    match t {
+        wgpu::DeviceType::DiscreteGpu => 4,
+        wgpu::DeviceType::IntegratedGpu => 3,
+        wgpu::DeviceType::VirtualGpu => 2,
+        wgpu::DeviceType::Other => 1,
+        wgpu::DeviceType::Cpu => 0,
+    }
+}
+
+fn report(info: &wgpu::AdapterInfo) -> AdapterReport {
+    AdapterReport {
+        name: info.name.clone(),
+        backend: format!("{:?}", info.backend),
+        device_type: format!("{:?}", info.device_type),
+        driver: [info.driver.as_str(), info.driver_info.as_str()].iter().filter(|s| !s.is_empty()).copied().collect::<Vec<_>>().join(" "),
+        tier: tier_of(info.device_type),
+    }
+}
+
+/// Starts a wgpu instance; a process starts one at a time. Starting an instance loads the Vulkan
+/// drivers, and a second thread that started one meanwhile called into NVIDIA's half-loaded
+/// driver on Linux: the process crashed inside `vkEnumerateInstanceExtensionProperties` (#10232).
+/// Tests open a device each on parallel threads, so they met the crash as they began. Adapters,
+/// devices and rendering still run side by side.
+pub fn start_instance(desc: wgpu::InstanceDescriptor) -> wgpu::Instance {
+    static STARTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _one_at_a_time = STARTING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    wgpu::Instance::new(desc)
+}
+
+fn instance() -> wgpu::Instance {
+    let mut desc = crate::instance_descriptor_from_env();
+    desc.backends = native_backends();
+    start_instance(desc)
+}
+
+// Some Windows Vulkan drivers crash or hang while unloading their DLL during FLS cleanup.
+// Retain one successful instance for the process, while every call still creates its own
+// descriptor and devices. Retaining no device also leaves device loss and limits per caller.
+#[cfg(target_os = "windows")]
+fn retain_vulkan_instance(instance: &wgpu::Instance, found: &[wgpu::Adapter]) {
+    if found.iter().any(|adapter| adapter.get_info().backend == wgpu::Backend::Vulkan) {
+        static INSTANCE: std::sync::OnceLock<wgpu::Instance> = std::sync::OnceLock::new();
+        let _ = INSTANCE.get_or_init(|| instance.clone());
+    }
+}
+
+/// Whether a headless device also looks at OpenGL: only on Linux and the BSDs, only when the
+/// native backends (Vulkan) offered no adapter at all (`vulkan_found`), and only when
+/// `WGPU_BACKEND` (`env`) is unset or names OpenGL. That is a machine with no Vulkan driver, not
+/// even lavapipe, where Mesa's llvmpipe or a GL-only driver still draws: through 0.48 it drew
+/// headless pictures there (#22109). A machine with any Vulkan adapter never starts OpenGL, so
+/// the EGL context that deadlocked against a Vulkan device (#10232) is never made next to one.
+#[cfg(not(target_arch = "wasm32"))]
+fn gl_when_vulkan_has_none(vulkan_found: usize, env: Option<wgpu::Backends>) -> bool {
+    !cfg!(any(target_os = "macos", target_os = "windows")) && vulkan_found == 0 && env.is_none_or(|e| e.contains(wgpu::Backends::GL))
+}
+
+/// Every adapter the native backends offer, best first, and the backends that were searched:
+/// the native ones, plus OpenGL where [`gl_when_vulkan_has_none`].
+#[cfg(not(target_arch = "wasm32"))]
+fn adapters(instance: &wgpu::Instance) -> (Vec<wgpu::Adapter>, wgpu::Backends) {
+    let mut searched = native_backends();
+    let mut all = pollster::block_on(instance.enumerate_adapters(searched));
+    #[cfg(target_os = "windows")]
+    retain_vulkan_instance(instance, &all);
+    // This crate's own tests keep the Vulkan-only set: they check the headless device's
+    // multisampling and compositing on Vulkan, Metal or D3D12, and OpenGL has tests of its own on
+    // an OpenGL instance (`opengl_window_device`). A test runner without Vulkan skips them as
+    // before instead of running them on llvmpipe.
+    if !cfg!(test) && gl_when_vulkan_has_none(all.len(), wgpu::Backends::from_env()) {
+        let mut desc = crate::instance_descriptor_from_env();
+        desc.backends = wgpu::Backends::GL;
+        all = pollster::block_on(start_instance(desc).enumerate_adapters(wgpu::Backends::GL));
+        searched |= wgpu::Backends::GL;
+    }
+    all.sort_by_key(|a| std::cmp::Reverse(rank(a.get_info().device_type)));
+    (all, searched)
+}
+
+/// What a survey found, which adapter the policy picks (`chosen` indexes `adapters`) and where
+/// it lands (`None`: nowhere, a picture is an error).
+#[derive(Clone, Debug, Serialize)]
+pub struct Survey {
+    pub backends: String,
+    pub adapters: Vec<AdapterReport>,
+    pub chosen: Option<usize>,
+    pub lands_on: Option<Landing>,
+}
+
+/// Every adapter the native backends offer, best first, and which one `policy` picks.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn survey(policy: Policy) -> Survey {
+    let (all, searched) = adapters(&instance());
+    let found: Vec<AdapterReport> = all.iter().map(|a| report(&a.get_info())).collect();
+    let chosen = found.iter().position(|r| policy.admits(r.tier));
+    let lands_on = policy.lands_on(chosen.and_then(|i| found.get(i)).map(|r| r.tier));
+    Survey { backends: format!("{searched:?}"), adapters: found, chosen, lands_on }
+}
+
+/// The backends the GPU path tracer may use among the native ones: Vulkan, and Metal on macOS
+/// (D3D12 is out, #3217: it was never faster in our measurements and needs minutes to compile
+/// its shader at every start, where Vulkan keeps compiled pipelines between runs).
+pub fn path_backends() -> wgpu::Backends {
+    native_backends() & (wgpu::Backends::VULKAN | wgpu::Backends::METAL)
+}
+
+/// The path-tracer adapter `policy` picks among those `keep` accepts, with its report; `None`
+/// where `path_backends` is empty (`WGPU_BACKEND=dx12`) or no adapter qualifies.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn pick_path(policy: Policy, keep: impl Fn(&wgpu::AdapterInfo) -> bool) -> Option<(wgpu::Adapter, AdapterReport)> {
+    let backends = path_backends();
+    if backends.is_empty() {
+        return None;
+    }
+    let mut desc = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
+    desc.backends = backends;
+    let instance = start_instance(desc);
+    let mut all = pollster::block_on(instance.enumerate_adapters(backends));
+    #[cfg(target_os = "windows")]
+    retain_vulkan_instance(&instance, &all);
+    all.sort_by_key(|a| std::cmp::Reverse(rank(a.get_info().device_type)));
+    all.into_iter()
+        .filter(|a| keep(&a.get_info()))
+        .map(|a| {
+            let r = report(&a.get_info());
+            (a, r)
+        })
+        .find(|(_, r)| policy.admits(r.tier))
+}
+
+/// The adapter `policy` picks, with its report; `None` when no adapter qualifies.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn pick(policy: Policy) -> Option<(wgpu::Adapter, AdapterReport)> {
+    pick_among(adapters(&instance()).0, policy)
+}
+
+/// The adapter `policy` picks among `found`, as [`pick`] picks among the native backends' (best
+/// first, the first whose tier the policy admits), with its report; `None` when none qualifies.
+/// For a caller with an instance of its own, such as the UI's offscreen tests.
+pub fn pick_among(mut found: Vec<wgpu::Adapter>, policy: Policy) -> Option<(wgpu::Adapter, AdapterReport)> {
+    found.sort_by_key(|a| std::cmp::Reverse(rank(a.get_info().device_type)));
+    found
+        .into_iter()
+        .map(|a| {
+            let r = report(&a.get_info());
+            (a, r)
+        })
+        .find(|(_, r)| policy.admits(r.tier))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn policies_parse_and_admit_their_tiers() {
+        assert_eq!(Policy::parse(" Hardware "), Some(Policy::Hardware));
+        assert_eq!(Policy::parse("sw"), Some(Policy::Software));
+        assert_eq!(Policy::parse("metal"), None);
+        assert_eq!(Policy::parse("CPU"), Some(Policy::Cpu));
+        assert!(!Policy::Cpu.admits(Tier::Software) && !Policy::Cpu.admits(Tier::Hardware));
+        assert!(Policy::Auto.admits(Tier::Software) && Policy::Auto.admits(Tier::Hardware));
+        assert!(!Policy::Hardware.admits(Tier::Software));
+        assert!(!Policy::Software.admits(Tier::Hardware));
+    }
+
+    /// Hardware GPU, then a software adapter, then the CPU rasterizer: `auto` walks all three,
+    /// `hardware` and `software` never fall to the CPU, and `cpu` always lands there.
+    #[test]
+    fn policies_land_on_their_tiers() {
+        use Landing as L;
+        let (hw, sw) = (Some(Tier::Hardware), Some(Tier::Software));
+        assert_eq!([hw, sw, None].map(|t| Policy::Auto.lands_on(t)), [Some(L::Hardware), Some(L::Software), Some(L::Cpu)]);
+        assert_eq!(Policy::Hardware.lands_on(hw), Some(L::Hardware));
+        assert_eq!(Policy::Hardware.lands_on(None), None);
+        assert_eq!(Policy::Software.lands_on(sw), Some(L::Software));
+        assert_eq!(Policy::Software.lands_on(None), None);
+        assert_eq!([hw, sw, None].map(|t| Policy::Cpu.lands_on(t)), [Some(L::Cpu); 3]);
+        assert_eq!([L::Hardware, L::Software, L::Cpu].map(L::renderer), ["gpu", "gpu-software", "cpu"]);
+    }
+
+    #[test]
+    fn software_rasterizers_rank_last() {
+        assert_eq!(tier_of(wgpu::DeviceType::Cpu), Tier::Software);
+        assert!(rank(wgpu::DeviceType::IntegratedGpu) > rank(wgpu::DeviceType::Cpu));
+        assert!(rank(wgpu::DeviceType::DiscreteGpu) > rank(wgpu::DeviceType::IntegratedGpu));
+    }
+
+    /// OpenGL is searched only where Vulkan found nothing, on Linux and the BSDs, unless
+    /// `WGPU_BACKEND` leaves it out (#22109).
+    #[test]
+    fn opengl_only_where_vulkan_has_no_adapter() {
+        use wgpu::Backends as B;
+        let unix = !cfg!(any(target_os = "macos", target_os = "windows"));
+        assert_eq!(gl_when_vulkan_has_none(0, None), unix);
+        assert_eq!(gl_when_vulkan_has_none(0, Some(B::GL)), unix);
+        assert_eq!(gl_when_vulkan_has_none(0, Some(B::VULKAN | B::GL)), unix);
+        assert!(!gl_when_vulkan_has_none(0, Some(B::VULKAN)), "WGPU_BACKEND=vulkan keeps OpenGL out");
+        for found in [1, 2] {
+            for env in [None, Some(B::GL), Some(B::VULKAN)] {
+                assert!(!gl_when_vulkan_has_none(found, env), "a Vulkan adapter keeps the Vulkan-only path");
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_surveys_metal_only() {
+        assert_eq!(native_backends() & !wgpu::Backends::METAL, wgpu::Backends::empty());
+        let s = survey(Policy::Auto);
+        assert!(s.adapters.iter().all(|a| a.backend == "Metal"), "{s:?}");
+    }
+}

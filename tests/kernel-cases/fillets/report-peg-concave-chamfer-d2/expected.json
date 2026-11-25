@@ -1,0 +1,10 @@
+{
+ "what": "the peg's concave arc where its top meets the cylinder alone chamfered 2: the chamfer's cone runs out over the front top edge at both ends, past the point where the front face runs tangent into the cylinder; reported from the app (2026-10-30, test-peg part)",
+ "source": "analytic",
+ "method": "a bar 40 x 16 x 10 whose far end is a half disc R8 about (40, 8), a disc R8 about the same centre sketched on its top (the top's outline projected) and extruded 10 up, joined: the bar's front face y = 0 runs tangent into the cylinder along x = 40, V0 = 6400 + 960 pi; the 2 x 2 chamfer of the concave arc adds the cone's spandrel ring, clipped by the bar's sides y = 0 and y = 16 (as report-fillet-concave-arc-bar-top-into-cylinder): added = integral over rho in [8, 10] of (10 - rho) rho 2 asin(8 / rho) d rho = 41.6567842489 (tanh-sinh quadrature)",
+ "body_count": 1,
+ "volume_mm3": 9457.5857316951,
+ "continuity": {
+  "order": "g0"
+ }
+}

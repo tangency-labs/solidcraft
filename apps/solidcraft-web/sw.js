@@ -44,8 +44,10 @@ const UPDATE_TIMEOUT_MS = 20000;
 const COMPLETE = "build-complete";
 /** The entry that marks a build replaced by a newer worker. */
 const RETIRED = "build-retired";
-/** A page remembered this recently may still be loading (not yet listed among the clients). */
-const PAGE_LOADING_MS = 30 * 1000;
+/** A page remembered this recently may still be loading (not yet listed among the clients). A slow
+ * device can take minutes between the launch's answer and the page appearing; a live page's record is
+ * kept for as long as it is listed. */
+const PAGE_LOADING_MS = 10 * 60 * 1000;
 
 const url = (file) => new URL(file, self.registration.scope).href;
 const has = (name, entry) => caches.match(url(entry), { cacheName: name }).then(Boolean);
@@ -102,10 +104,13 @@ async function started(id, build) {
   await (await caches.open(PAGES)).put(pageEntry(id), new Response(record));
 }
 
-/** The build a page started; a page started before it was remembered gets this worker's. */
+/**
+ * The build a page started, or null when it was not remembered. Never this worker's build instead:
+ * after an update that is another build than the page's, and its files would be mixed into the page.
+ */
 async function startedBy(id) {
   const response = id ? await caches.match(pageEntry(id), { cacheName: PAGES }) : null;
-  return response ? (await response.json()).build : CACHE;
+  return response ? (await response.json()).build : null;
 }
 
 /** The builds open pages use (pages closed since are forgotten). */
@@ -143,11 +148,22 @@ self.addEventListener("activate", (event) => {
         for (const name of await caches.keys()) if (name.startsWith(CACHE_PREFIX) || name === PAGES) await caches.delete(name);
         return self.registration.unregister();
       }
-      for (const name of await caches.keys()) {
-        if (name.startsWith(CACHE_PREFIX) && name !== CACHE) await (await caches.open(name)).put(url(RETIRED), new Response(""));
-      }
-      await sweep();
+      const older = (await caches.keys()).filter((name) => name.startsWith(CACHE_PREFIX) && name !== CACHE);
+      // Claim first: from the moment this worker is the active one, a page the old worker controlled has
+      // no controller until it is claimed, and a request it makes then goes straight to the network, which
+      // serves the newest build, not the page's. Nothing slow goes before this.
       await self.clients.claim();
+      for (const name of older) await (await caches.open(name)).put(url(RETIRED), new Response(""));
+      await sweep();
+      // With no earlier build kept, the pages open when the first worker takes over came from the
+      // network, and get their files from it. After an update a page with no record is not
+      // assumed to be anything: its record may only be late, and the network now serves a newer
+      // build than the page's.
+      if (!older.length) {
+        for (const client of await self.clients.matchAll({ includeUncontrolled: true })) {
+          if (!(await startedBy(client.id).catch(() => null))) await started(client.id, NETWORK).catch(() => {});
+        }
+      }
     })(),
   );
 });
@@ -221,7 +237,12 @@ async function launchOrKept(event) {
 
 /** A page's files come from the build it started, else the network. */
 async function asset(event) {
-  const build = await startedBy(event.clientId).catch(() => CACHE);
+  const build = await startedBy(event.clientId).catch(() => null);
+  // A page whose build is not known, or whose build's copy is gone, would get another build's files
+  // (a mixed page that never starts). It fails visibly instead: reloading starts a whole build.
+  if (!build || (build !== NETWORK && !(await caches.has(build)))) {
+    return new Response("This page's version of the app is no longer kept. Reload the page.", { status: 503, headers: { "Content-Type": "text/plain" } });
+  }
   const kept = build === NETWORK ? null : await caches.match(event.request, { cacheName: build, ignoreSearch: true });
   return kept || fetch(event.request);
 }

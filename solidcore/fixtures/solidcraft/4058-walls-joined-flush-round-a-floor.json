@@ -1,0 +1,513 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/4058",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+ "test": "none: open on SolidCraft's truck kernel (kernel work paused under tangency-labs/solidcraft#3992); geometry is the issue's",
+ "summary": "Walls extruded as a join from a ring sketched round a part's floor failed with 'no result' on SolidCraft's truck kernel (#4058). The floor is a 60 x 50 rounded rectangle (r 4) 3.25 thick, with a 40 x 30 (r 3) pocket 2.25 deep whose sides slope 15 degrees (a ruled loft to the outline inset 2.25 tan 15, r 3 - inset) and a 36 x 26 socket 4.75 deep under it. The ring round it, 80 x 70 with r 14 corners less the floor's outline, is extruded 40 and joined. The ring only touches the floor, back to back on its sides and round corners, so the union adds exactly the ring's area times 40 (the issue's own figure, 97 819.5): checked as the volume removed from the floor, negative.",
+ "cases": [
+  {
+   "name": "ring_walls_joined",
+   "note": "union(floor, walls).",
+   "steps": [
+    {
+     "op": "extrude",
+     "id": "floor0",
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        4,
+        0
+       ],
+       "to": [
+        56,
+        0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        56,
+        4
+       ],
+       "radius": 4,
+       "start_deg": -90,
+       "end_deg": 0
+      },
+      {
+       "kind": "line",
+       "from": [
+        60,
+        4
+       ],
+       "to": [
+        60,
+        46
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        56,
+        46
+       ],
+       "radius": 4,
+       "start_deg": 0,
+       "end_deg": 90
+      },
+      {
+       "kind": "line",
+       "from": [
+        56,
+        50
+       ],
+       "to": [
+        4,
+        50
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        4,
+        46
+       ],
+       "radius": 4,
+       "start_deg": 90,
+       "end_deg": 180
+      },
+      {
+       "kind": "line",
+       "from": [
+        0,
+        46
+       ],
+       "to": [
+        0,
+        4
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        4,
+        4
+       ],
+       "radius": 4,
+       "start_deg": 180,
+       "end_deg": 270
+      }
+     ],
+     "distance": 3.25
+    },
+    {
+     "op": "loft",
+     "id": "pocket",
+     "sections": [
+      {
+       "profile": [
+        {
+         "kind": "line",
+         "from": [
+          13,
+          10
+         ],
+         "to": [
+          47,
+          10
+         ]
+        },
+        {
+         "kind": "arc",
+         "center": [
+          47,
+          13
+         ],
+         "radius": 3,
+         "start_deg": -90,
+         "end_deg": 0
+        },
+        {
+         "kind": "line",
+         "from": [
+          50,
+          13
+         ],
+         "to": [
+          50,
+          37
+         ]
+        },
+        {
+         "kind": "arc",
+         "center": [
+          47,
+          37
+         ],
+         "radius": 3,
+         "start_deg": 0,
+         "end_deg": 90
+        },
+        {
+         "kind": "line",
+         "from": [
+          47,
+          40
+         ],
+         "to": [
+          13,
+          40
+         ]
+        },
+        {
+         "kind": "arc",
+         "center": [
+          13,
+          37
+         ],
+         "radius": 3,
+         "start_deg": 90,
+         "end_deg": 180
+        },
+        {
+         "kind": "line",
+         "from": [
+          10,
+          37
+         ],
+         "to": [
+          10,
+          13
+         ]
+        },
+        {
+         "kind": "arc",
+         "center": [
+          13,
+          13
+         ],
+         "radius": 3,
+         "start_deg": 180,
+         "end_deg": 270
+        }
+       ],
+       "origin": [
+        0,
+        0,
+        3.25
+       ]
+      },
+      {
+       "profile": [
+        {
+         "kind": "line",
+         "from": [
+          13.0,
+          10.602885682970026
+         ],
+         "to": [
+          47.0,
+          10.602885682970026
+         ]
+        },
+        {
+         "kind": "arc",
+         "center": [
+          47.0,
+          13.0
+         ],
+         "radius": 2.397114317029974,
+         "start_deg": -90,
+         "end_deg": 0
+        },
+        {
+         "kind": "line",
+         "from": [
+          49.397114317029974,
+          13.0
+         ],
+         "to": [
+          49.397114317029974,
+          37.0
+         ]
+        },
+        {
+         "kind": "arc",
+         "center": [
+          47.0,
+          37.0
+         ],
+         "radius": 2.397114317029974,
+         "start_deg": 0,
+         "end_deg": 90
+        },
+        {
+         "kind": "line",
+         "from": [
+          47.0,
+          39.397114317029974
+         ],
+         "to": [
+          13.0,
+          39.397114317029974
+         ]
+        },
+        {
+         "kind": "arc",
+         "center": [
+          13.0,
+          37.0
+         ],
+         "radius": 2.397114317029974,
+         "start_deg": 90,
+         "end_deg": 180
+        },
+        {
+         "kind": "line",
+         "from": [
+          10.602885682970026,
+          37.0
+         ],
+         "to": [
+          10.602885682970026,
+          13.0
+         ]
+        },
+        {
+         "kind": "arc",
+         "center": [
+          13.0,
+          13.0
+         ],
+         "radius": 2.397114317029974,
+         "start_deg": 180,
+         "end_deg": 270
+        }
+       ],
+       "origin": [
+        0,
+        0,
+        1.0
+       ]
+      }
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "floor1",
+     "a": "floor0",
+     "b": "pocket"
+    },
+    {
+     "op": "box",
+     "id": "socket",
+     "origin": [
+      12,
+      12,
+      -4.75
+     ],
+     "size": [
+      36,
+      26,
+      4.75
+     ]
+    },
+    {
+     "op": "union",
+     "id": "floor",
+     "a": "floor1",
+     "b": "socket"
+    },
+    {
+     "op": "extrude",
+     "id": "walls",
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        4,
+        -10
+       ],
+       "to": [
+        56,
+        -10
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        56,
+        4
+       ],
+       "radius": 14,
+       "start_deg": -90,
+       "end_deg": 0
+      },
+      {
+       "kind": "line",
+       "from": [
+        70,
+        4
+       ],
+       "to": [
+        70,
+        46
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        56,
+        46
+       ],
+       "radius": 14,
+       "start_deg": 0,
+       "end_deg": 90
+      },
+      {
+       "kind": "line",
+       "from": [
+        56,
+        60
+       ],
+       "to": [
+        4,
+        60
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        4,
+        46
+       ],
+       "radius": 14,
+       "start_deg": 90,
+       "end_deg": 180
+      },
+      {
+       "kind": "line",
+       "from": [
+        -10,
+        46
+       ],
+       "to": [
+        -10,
+        4
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        4,
+        4
+       ],
+       "radius": 14,
+       "start_deg": 180,
+       "end_deg": 270
+      },
+      {
+       "kind": "line",
+       "from": [
+        4,
+        0
+       ],
+       "to": [
+        56,
+        0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        56,
+        4
+       ],
+       "radius": 4,
+       "start_deg": -90,
+       "end_deg": 0
+      },
+      {
+       "kind": "line",
+       "from": [
+        60,
+        4
+       ],
+       "to": [
+        60,
+        46
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        56,
+        46
+       ],
+       "radius": 4,
+       "start_deg": 0,
+       "end_deg": 90
+      },
+      {
+       "kind": "line",
+       "from": [
+        56,
+        50
+       ],
+       "to": [
+        4,
+        50
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        4,
+        46
+       ],
+       "radius": 4,
+       "start_deg": 90,
+       "end_deg": 180
+      },
+      {
+       "kind": "line",
+       "from": [
+        0,
+        46
+       ],
+       "to": [
+        0,
+        4
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        4,
+        4
+       ],
+       "radius": 4,
+       "start_deg": 180,
+       "end_deg": 270
+      }
+     ],
+     "distance": 40
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "floor",
+     "b": "walls"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "removed": {
+     "from": "floor",
+     "value": -97819.46710584653,
+     "tol": 0.001,
+     "formula": "-((80*70 - (4 - pi)*14^2) - (60*50 - (4 - pi)*4^2)) * 40: the union adds exactly the ring"
+    }
+   }
+  }
+ ]
+}

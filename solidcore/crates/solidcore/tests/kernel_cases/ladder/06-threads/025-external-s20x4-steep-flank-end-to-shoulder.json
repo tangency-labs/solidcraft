@@ -1,0 +1,192 @@
+{
+  "area": "ladder/06-threads",
+  "bodies": {
+    "b13": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b27": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b28"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b28"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b29"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b27"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b30"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b30"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b31"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b29"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b32"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b31"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b33"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b32",
+        "b33"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b34"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "025-external-s20x4-steep-flank-end-to-shoulder",
+  "expected": {
+    "bbox": {
+      "max": [
+        15,
+        15,
+        40
+      ],
+      "min": [
+        -15,
+        -15,
+        0
+      ]
+    },
+    "body_count": 1,
+    "method": "DIN 513-1 S20x4: 3 deg load flank, 30 deg clearance flank, flats (P - 0.75 P (tan3 + tan30))/2 = 0.26384 P, external minor d3 = d - 2 x 0.86777 P = 13.058. steep_flank end puts the 3 deg wall on the groove's side toward the shoulder (z = 10); the groove stops with its section clear of the shoulder, its centre 0.571741 above it (the section's extent that way at r = 10.2, 0.05 P past the crest, the tool's outer edge), and runs out a pitch past the free top end. V = pi 15^2 10 + pi 10^2 30 - the groove 2 pi int_0^T (int int r dA of the section within the shaft) dt (2507.160140; a straight screw sweep, Pappus turn by turn, with the free end's partial turn integrated). 025 and 026 differ by where the groove stops",
+    "source": "analytic",
+    "sources": [],
+    "tolerance": {
+      "rel": 0.0001
+    },
+    "volume_mm3": 13986.201291602,
+    "what": "a modelled S20x4 buttress thread on a d20 shaft down to a d30 shoulder, the steep flank toward the thread's end (up, the default): the 3 deg wall faces the shoulder"
+  },
+  "expressible": true,
+  "golden": {
+    "measured": {
+      "area_mm2": 5883.043222895581,
+      "body_count": 1,
+      "edges": 102,
+      "faces": 37,
+      "vertices": 68,
+      "volume_mm3": 13986.200396963923
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 134,
+      "faces": 57,
+      "vertices": 80
+    }
+  },
+  "records": "025-external-s20x4-steep-flank-end-to-shoulder.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b34"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 5883.043222895581,
+      "body_count": 1,
+      "edges": 102,
+      "faces": 37,
+      "vertices": 68,
+      "volume_mm3": 13986.200396963923
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "extrude",
+    "screw_sweep",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a modelled S20x4 buttress thread on a d20 shaft down to a d30 shoulder, the steep flank toward the thread's end (up, the default): the 3 deg wall faces the shoulder",
+  "why_not": []
+}

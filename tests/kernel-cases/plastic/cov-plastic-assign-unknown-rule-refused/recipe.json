@@ -1,0 +1,22 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 60,
+    "width": 40,
+    "height": 3,
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "plastic.assign_rule",
+   "params": {
+    "bodies": [
+     "Plate"
+    ],
+    "rule": "Nope"
+   }
+  }
+ ]
+}

@@ -1,0 +1,2024 @@
+{
+ "cases": [
+  {
+   "name": "corner_pts_TestSmCreateSurfaceFromCornerPoints",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:199 TestSmCreateSurfaceFromCornerPoints",
+   "inputs": {
+    "op": "corner_pts",
+    "p00": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "p10": [
+     10.0,
+     0.0,
+     0.0
+    ],
+    "p01": [
+     0.0,
+     12.0,
+     0.0
+    ],
+    "p11": [
+     10.0,
+     12.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "corner_pts_skew",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:199 TestSmCreateSurfaceFromCornerPoints (non-planar variant)",
+   "inputs": {
+    "op": "corner_pts",
+    "p00": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "p10": [
+     10.0,
+     0.0,
+     1.0
+    ],
+    "p01": [
+     0.0,
+     12.0,
+     -1.0
+    ],
+    "p11": [
+     10.0,
+     12.0,
+     3.5
+    ]
+   }
+  },
+  {
+   "name": "corner_pts_degenerate",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:199 TestSmCreateSurfaceFromCornerPoints (all corners equal)",
+   "inputs": {
+    "op": "corner_pts",
+    "p00": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "p10": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "p01": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "p11": [
+     1.0,
+     1.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "extrude_TestSmCreateExtrude_dir1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:245 TestSmCreateExtrude",
+   "inputs": {
+    "op": "extrude_crv",
+    "crv": {
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       4.0,
+       2.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       6.0,
+       -2.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       8.0,
+       2.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       10.0,
+       4.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       12.0,
+       0.0,
+       0.0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.3333333333333333,
+      0.6666666666666666,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    "w": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "d": 1.0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "extrude_TestSmCreateExtrude_dir2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:245 TestSmCreateExtrude",
+   "inputs": {
+    "op": "extrude_crv",
+    "crv": {
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       4.0,
+       2.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       6.0,
+       -2.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       8.0,
+       2.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       10.0,
+       4.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       12.0,
+       0.0,
+       0.0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.3333333333333333,
+      0.6666666666666666,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    "w": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "d": 1.0,
+    "dir": 2
+   }
+  },
+  {
+   "name": "extrude_TestSmCreateExtrude_dir3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:245 TestSmCreateExtrude",
+   "inputs": {
+    "op": "extrude_crv",
+    "crv": {
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       4.0,
+       2.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       6.0,
+       -2.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       8.0,
+       2.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       10.0,
+       4.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       12.0,
+       0.0,
+       0.0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.3333333333333333,
+      0.6666666666666666,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    "w": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "d": 1.0,
+    "dir": 3
+   }
+  },
+  {
+   "name": "extrude_TestSmCreateExtrude_zero_vector",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:245 TestSmCreateExtrude (zero vector fails)",
+   "inputs": {
+    "op": "extrude_crv",
+    "crv": {
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       4.0,
+       2.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       6.0,
+       -2.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       8.0,
+       2.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       10.0,
+       4.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       12.0,
+       0.0,
+       0.0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.3333333333333333,
+      0.6666666666666666,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    "w": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "d": 1.0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "extrude_2d_rational",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:245 TestSmCreateExtrude (2D rational variant)",
+   "inputs": {
+    "op": "extrude_crv",
+    "crv": {
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       1.7976931348623157e+308,
+       1.0
+      ],
+      [
+       1.0,
+       1.0,
+       1.7976931348623157e+308,
+       0.5
+      ],
+      [
+       4.0,
+       0.0,
+       1.7976931348623157e+308,
+       2.0
+      ]
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "w": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "d": -2.5,
+    "dir": 2
+   }
+  },
+  {
+   "name": "extrude_curve0_dir1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input)",
+   "inputs": {
+    "op": "extrude_crv",
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "w": [
+     0.3,
+     -1.0,
+     2.0
+    ],
+    "d": 3.0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "extrude_curve0_dir2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input)",
+   "inputs": {
+    "op": "extrude_crv",
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "w": [
+     0.3,
+     -1.0,
+     2.0
+    ],
+    "d": 3.0,
+    "dir": 2
+   }
+  },
+  {
+   "name": "revolve_curve0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input)",
+   "inputs": {
+    "op": "revolved_srf",
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "t": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "al": 270.0,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "extrude_DropCurveCurve_dir1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input)",
+   "inputs": {
+    "op": "extrude_crv",
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "w": [
+     0.3,
+     -1.0,
+     2.0
+    ],
+    "d": 3.0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "extrude_DropCurveCurve_dir2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input)",
+   "inputs": {
+    "op": "extrude_crv",
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "w": [
+     0.3,
+     -1.0,
+     2.0
+    ],
+    "d": 3.0,
+    "dir": 2
+   }
+  },
+  {
+   "name": "revolve_DropCurveCurve",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input)",
+   "inputs": {
+    "op": "revolved_srf",
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "t": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "al": 270.0,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "extrude_closedCurve_dir1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input)",
+   "inputs": {
+    "op": "extrude_crv",
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "w": [
+     0.3,
+     -1.0,
+     2.0
+    ],
+    "d": 3.0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "extrude_closedCurve_dir2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input)",
+   "inputs": {
+    "op": "extrude_crv",
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "w": [
+     0.3,
+     -1.0,
+     2.0
+    ],
+    "d": 3.0,
+    "dir": 2
+   }
+  },
+  {
+   "name": "revolve_closedCurve",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input)",
+   "inputs": {
+    "op": "revolved_srf",
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "t": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "al": 270.0,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "extrude_crvToOffset_dir1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input)",
+   "inputs": {
+    "op": "extrude_crv",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "w": [
+     0.3,
+     -1.0,
+     2.0
+    ],
+    "d": 3.0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "extrude_crvToOffset_dir2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input)",
+   "inputs": {
+    "op": "extrude_crv",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "w": [
+     0.3,
+     -1.0,
+     2.0
+    ],
+    "d": 3.0,
+    "dir": 2
+   }
+  },
+  {
+   "name": "revolve_crvToOffset",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input)",
+   "inputs": {
+    "op": "revolved_srf",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "t": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "al": 270.0,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "extrude_crvTrim1_dir1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input)",
+   "inputs": {
+    "op": "extrude_crv",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "w": [
+     0.3,
+     -1.0,
+     2.0
+    ],
+    "d": 3.0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "extrude_crvTrim1_dir2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input)",
+   "inputs": {
+    "op": "extrude_crv",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "w": [
+     0.3,
+     -1.0,
+     2.0
+    ],
+    "d": 3.0,
+    "dir": 2
+   }
+  },
+  {
+   "name": "revolve_crvTrim1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input)",
+   "inputs": {
+    "op": "revolved_srf",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "t": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "al": 270.0,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "extrude_crvTrim2_dir1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input)",
+   "inputs": {
+    "op": "extrude_crv",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "w": [
+     0.3,
+     -1.0,
+     2.0
+    ],
+    "d": 3.0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "extrude_crvTrim2_dir2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input)",
+   "inputs": {
+    "op": "extrude_crv",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "w": [
+     0.3,
+     -1.0,
+     2.0
+    ],
+    "d": 3.0,
+    "dir": 2
+   }
+  },
+  {
+   "name": "revolve_crvTrim2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input)",
+   "inputs": {
+    "op": "revolved_srf",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "t": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "al": 270.0,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "ruled_TestSmCreateRuledSurface_dir1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:302 TestSmCreateRuledSurface",
+   "inputs": {
+    "op": "ruled_srf",
+    "a": {
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       4.0,
+       2.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       6.0,
+       -2.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       8.0,
+       2.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       10.0,
+       4.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       12.0,
+       0.0,
+       0.0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.3333333333333333,
+      0.6666666666666666,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    "b": {
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       10.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       4.0,
+       2.0,
+       10.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       6.0,
+       -2.0,
+       10.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       8.0,
+       2.0,
+       10.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       10.0,
+       4.0,
+       10.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       12.0,
+       0.0,
+       10.0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.3333333333333333,
+      0.6666666666666666,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    "dir": 1
+   }
+  },
+  {
+   "name": "ruled_TestSmCreateRuledSurface_dir2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:302 TestSmCreateRuledSurface",
+   "inputs": {
+    "op": "ruled_srf",
+    "a": {
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       4.0,
+       2.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       6.0,
+       -2.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       8.0,
+       2.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       10.0,
+       4.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       12.0,
+       0.0,
+       0.0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.3333333333333333,
+      0.6666666666666666,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    "b": {
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       10.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       4.0,
+       2.0,
+       10.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       6.0,
+       -2.0,
+       10.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       8.0,
+       2.0,
+       10.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       10.0,
+       4.0,
+       10.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       12.0,
+       0.0,
+       10.0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.3333333333333333,
+      0.6666666666666666,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    "dir": 2
+   }
+  },
+  {
+   "name": "ruled_TestSmCreateRuledSurface_dir3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:302 TestSmCreateRuledSurface",
+   "inputs": {
+    "op": "ruled_srf",
+    "a": {
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       4.0,
+       2.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       6.0,
+       -2.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       8.0,
+       2.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       10.0,
+       4.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       12.0,
+       0.0,
+       0.0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.3333333333333333,
+      0.6666666666666666,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    "b": {
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       10.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       4.0,
+       2.0,
+       10.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       6.0,
+       -2.0,
+       10.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       8.0,
+       2.0,
+       10.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       10.0,
+       4.0,
+       10.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       12.0,
+       0.0,
+       10.0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.3333333333333333,
+      0.6666666666666666,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    "dir": 3
+   }
+  },
+  {
+   "name": "ruled_crvTrim1_crvTrim2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc, crvTrim2.smc (prog_test curve inputs)",
+   "inputs": {
+    "op": "ruled_srf",
+    "a": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "b": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "dir": 2
+   }
+  },
+  {
+   "name": "ruled_line_vs_cubic",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:302 TestSmCreateRuledSurface (incompatible degrees)",
+   "inputs": {
+    "op": "ruled_srf",
+    "a": {
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       12.0,
+       0.0,
+       0.0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0.0,
+      0.0,
+      1.0,
+      1.0
+     ]
+    },
+    "b": {
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       10.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       4.0,
+       2.0,
+       10.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       6.0,
+       -2.0,
+       10.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       8.0,
+       2.0,
+       10.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       10.0,
+       4.0,
+       10.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       12.0,
+       0.0,
+       10.0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.3333333333333333,
+      0.6666666666666666,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    "dir": 1
+   }
+  },
+  {
+   "name": "revolve_TestSmCreateSurfaceRevolution_ctp2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:356 TestSmCreateSurfaceRevolution",
+   "inputs": {
+    "op": "revolved_srf",
+    "crv": {
+     "cpts": [
+      [
+       0.0,
+       3.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       4.0,
+       5.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       6.0,
+       1.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       8.0,
+       5.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       10.0,
+       7.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       12.0,
+       3.0,
+       0.0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.3333333333333333,
+      0.6666666666666666,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "t": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "al": 180.0,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "revolve_TestSmCreateSurfaceRevolution_ctp4",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:356 TestSmCreateSurfaceRevolution",
+   "inputs": {
+    "op": "revolved_srf",
+    "crv": {
+     "cpts": [
+      [
+       0.0,
+       3.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       4.0,
+       5.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       6.0,
+       1.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       8.0,
+       5.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       10.0,
+       7.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       12.0,
+       3.0,
+       0.0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.3333333333333333,
+      0.6666666666666666,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "t": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "al": 180.0,
+    "ctp": 4
+   }
+  },
+  {
+   "name": "revolve_TestSmCreateSurfaceRevolution_ctp5",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:356 TestSmCreateSurfaceRevolution",
+   "inputs": {
+    "op": "revolved_srf",
+    "crv": {
+     "cpts": [
+      [
+       0.0,
+       3.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       4.0,
+       5.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       6.0,
+       1.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       8.0,
+       5.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       10.0,
+       7.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       12.0,
+       3.0,
+       0.0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.3333333333333333,
+      0.6666666666666666,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "t": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "al": 180.0,
+    "ctp": 5
+   }
+  },
+  {
+   "name": "revolve_TestSmCreateSurfaceRevolution_degenerate",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:356 TestSmCreateSurfaceRevolution (zero-length generatrix)",
+   "inputs": {
+    "op": "revolved_srf",
+    "crv": {
+     "cpts": [
+      [
+       0.0,
+       5.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.0,
+       5.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.0,
+       5.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       0.0,
+       5.0,
+       0.0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "t": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "al": 180.0,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "revolve_all_on_axis",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:356 TestSmCreateSurfaceRevolution (profile on the axis)",
+   "inputs": {
+    "op": "revolved_srf",
+    "crv": {
+     "cpts": [
+      [
+       0.0,
+       0.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       3.0,
+       0.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       6.0,
+       0.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       9.0,
+       0.0,
+       0.0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "t": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "al": 360.0,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "revolve_end_on_axis_full",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:356 TestSmCreateSurfaceRevolution (sphere-like, ends on the axis)",
+   "inputs": {
+    "op": "revolved_srf",
+    "crv": {
+     "cpts": [
+      [
+       -2.0,
+       0.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       -2.0,
+       2.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       2.0,
+       2.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       2.0,
+       0.0,
+       0.0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "t": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "al": 360.0,
+    "ctp": 5
+   }
+  },
+  {
+   "name": "revolve_zero_axis",
+   "upstream_ref": "tests/SM_API_test/src/TestSmSurfaces.cpp:356 TestSmCreateSurfaceRevolution (zero axis)",
+   "inputs": {
+    "op": "revolved_srf",
+    "crv": {
+     "cpts": [
+      [
+       0.0,
+       3.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       4.0,
+       5.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       6.0,
+       1.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       8.0,
+       5.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       10.0,
+       7.0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       12.0,
+       3.0,
+       0.0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.3333333333333333,
+      0.6666666666666666,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    "s": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "t": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "al": 90.0,
+    "ctp": 2
+   }
+  },
+  {
+   "name": "cylcone_my_test_surf_methods_cylinder_ctp2_dir1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:3984 my_test_surf_methods (CreateConePatch)",
+   "inputs": {
+    "op": "cyl_cone",
+    "c": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rb": 1.0,
+    "rt": 1.0,
+    "as": 0.0,
+    "ae": 360.0,
+    "h": 1.0,
+    "ctp": 2,
+    "dir": 1
+   }
+  },
+  {
+   "name": "cylcone_my_test_surf_methods_cylinder_ctp2_dir2",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:3984 my_test_surf_methods (CreateConePatch)",
+   "inputs": {
+    "op": "cyl_cone",
+    "c": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rb": 1.0,
+    "rt": 1.0,
+    "as": 0.0,
+    "ae": 360.0,
+    "h": 1.0,
+    "ctp": 2,
+    "dir": 2
+   }
+  },
+  {
+   "name": "cylcone_my_test_surf_methods_cylinder_ctp4_dir1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:3984 my_test_surf_methods (CreateConePatch)",
+   "inputs": {
+    "op": "cyl_cone",
+    "c": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rb": 1.0,
+    "rt": 1.0,
+    "as": 0.0,
+    "ae": 360.0,
+    "h": 1.0,
+    "ctp": 4,
+    "dir": 1
+   }
+  },
+  {
+   "name": "cylcone_my_test_surf_methods_cylinder_ctp4_dir2",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:3984 my_test_surf_methods (CreateConePatch)",
+   "inputs": {
+    "op": "cyl_cone",
+    "c": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rb": 1.0,
+    "rt": 1.0,
+    "as": 0.0,
+    "ae": 360.0,
+    "h": 1.0,
+    "ctp": 4,
+    "dir": 2
+   }
+  },
+  {
+   "name": "cylcone_my_test_surf_methods_cylinder_ctp5_dir1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:3984 my_test_surf_methods (CreateConePatch)",
+   "inputs": {
+    "op": "cyl_cone",
+    "c": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rb": 1.0,
+    "rt": 1.0,
+    "as": 0.0,
+    "ae": 360.0,
+    "h": 1.0,
+    "ctp": 5,
+    "dir": 1
+   }
+  },
+  {
+   "name": "cylcone_my_test_surf_methods_cylinder_ctp5_dir2",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:3984 my_test_surf_methods (CreateConePatch)",
+   "inputs": {
+    "op": "cyl_cone",
+    "c": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rb": 1.0,
+    "rt": 1.0,
+    "as": 0.0,
+    "ae": 360.0,
+    "h": 1.0,
+    "ctp": 5,
+    "dir": 2
+   }
+  },
+  {
+   "name": "cylcone_my_test_surf_methods_cone45",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:3984 my_test_surf_methods (CreateConeThroughBox, 45 degree cone)",
+   "inputs": {
+    "op": "cyl_cone",
+    "c": [
+     0.0,
+     0.0,
+     -2.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rb": 1.0,
+    "rt": 5.0,
+    "as": 0.0,
+    "ae": 180.0,
+    "h": 4.0,
+    "ctp": 5,
+    "dir": 1
+   }
+  },
+  {
+   "name": "cylcone_apex_bottom",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:3984 my_test_surf_methods (cone with apex at the bottom)",
+   "inputs": {
+    "op": "cyl_cone",
+    "c": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "x": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "rb": 0.0,
+    "rt": 2.0,
+    "as": 30.0,
+    "ae": 300.0,
+    "h": 5.0,
+    "ctp": 2,
+    "dir": 1
+   }
+  },
+  {
+   "name": "cylcone_apex_top",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:3984 my_test_surf_methods (cone with apex at the top)",
+   "inputs": {
+    "op": "cyl_cone",
+    "c": [
+     1.0,
+     2.0,
+     3.0
+    ],
+    "x": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     0.0,
+     1.0
+    ],
+    "rb": 2.0,
+    "rt": 1e-07,
+    "as": -45.0,
+    "ae": 45.0,
+    "h": 5.0,
+    "ctp": 4,
+    "dir": 2
+   }
+  },
+  {
+   "name": "cylcone_both_radii_zero",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:3984 my_test_surf_methods (both radii zero fails)",
+   "inputs": {
+    "op": "cyl_cone",
+    "c": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rb": 0.0,
+    "rt": 1e-07,
+    "as": 0.0,
+    "ae": 360.0,
+    "h": 1.0,
+    "ctp": 2,
+    "dir": 1
+   }
+  },
+  {
+   "name": "cylcone_parallel_axes",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:3984 my_test_surf_methods (parallel axes fail)",
+   "inputs": {
+    "op": "cyl_cone",
+    "c": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     2.0,
+     0.0,
+     0.0
+    ],
+    "rb": 1.0,
+    "rt": 1.0,
+    "as": 0.0,
+    "ae": 360.0,
+    "h": 1.0,
+    "ctp": 2,
+    "dir": 1
+   }
+  },
+  {
+   "name": "cylcone_bad_dir",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:3984 my_test_surf_methods (dir NL_UVDIR fails)",
+   "inputs": {
+    "op": "cyl_cone",
+    "c": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rb": 1.0,
+    "rt": 1.0,
+    "as": 0.0,
+    "ae": 360.0,
+    "h": 1.0,
+    "ctp": 2,
+    "dir": 3
+   }
+  }
+ ]
+}

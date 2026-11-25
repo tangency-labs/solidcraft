@@ -1,0 +1,147 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  2.0,
+                  2.0,
+                  0.0
+                ],
+                [
+                  2.0,
+                  2.0,
+                  10.0
+                ]
+              ],
+              "index": 12
+            }
+          ],
+          "points": [
+            [
+              2.0,
+              2.0,
+              5.0
+            ]
+          ],
+          "tolerance": 1.5421035007422441
+        },
+        "kind": "chamfer",
+        "sizes": [
+          2.0
+        ]
+      }
+    }
+  ],
+  "case": "4859-chamfer-inside-corner-of-thin-wall-ring",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g0"
+    },
+    "faces": 11,
+    "method": "a chamfer of a concave edge fills it: + 2*2/2 * 10 = 20. V = (25*15 - 21*11)*10 + 20 = 1460. Faces: 4 outer, 4 inner, the chamfer, top, bottom = 11",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#4859"
+    ],
+    "volume_mm3": 1460.0,
+    "what": "an inside (concave) vertical corner of a 25x15 ring with a 2 mm wall, 10 high, chamfered 2 mm: truck refused it ('2 mm is too large for this chamfer: the result changes 108 mm3')"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 27,
+      "faces": 11,
+      "vertices": 18
+    }
+  },
+  "records": "4859-chamfer-inside-corner-of-thin-wall-ring.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b6"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 1720.284271247462,
+      "body_count": 1,
+      "edges": 27,
+      "faces": 11,
+      "vertices": 18,
+      "volume_mm3": 1460.0
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#4859"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "an inside (concave) vertical corner of a 25x15 ring with a 2 mm wall, 10 high, chamfered 2 mm: truck refused it ('2 mm is too large for this chamfer: the result changes 108 mm3')",
+  "why_not": []
+}

@@ -1,0 +1,289 @@
+{
+  "cases": [
+    {
+      "name": "public_scale_phase2_box_anisotropic",
+      "upstream_ref": "source/SM_API/src/SmApiGeneral.cpp:SmApiScale;source/SMLib/src/SmBrep.cpp:Transform;TurnToNURBS",
+      "inputs": {
+        "script": "scale_probe",
+        "obj": {
+          "primitive_box": {
+            "origin": [
+              2,
+              3,
+              5
+            ],
+            "size": [
+              2,
+              3,
+              4
+            ]
+          }
+        },
+        "op": {
+          "scale": {
+            "s": [
+              2,
+              3,
+              0.5
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "public_scale_phase2_sphere_anisotropic",
+      "upstream_ref": "source/SM_API/src/SmApiGeneral.cpp:SmApiScale;source/SMLib/src/SmBrep.cpp:Transform;TurnToNURBS",
+      "inputs": {
+        "script": "scale_probe",
+        "obj": {
+          "primitive_sphere": {
+            "origin": [
+              2,
+              3,
+              5
+            ],
+            "radius": 2
+          }
+        },
+        "op": {
+          "scale": {
+            "s": [
+              2,
+              3,
+              0.5
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "public_scale_phase2_copied_box_anisotropic",
+      "upstream_ref": "source/SM_API/src/SmApiGeneral.cpp:SmApiScale;source/SMLib/src/SmBrep.cpp:Transform;TurnToNURBS",
+      "inputs": {
+        "script": "scale_probe",
+        "obj": {
+          "copied_box": {
+            "origin": [
+              2,
+              3,
+              5
+            ],
+            "size": [
+              2,
+              3,
+              4
+            ]
+          }
+        },
+        "op": {
+          "scale": {
+            "s": [
+              2,
+              3,
+              0.5
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "public_scale_phase2_copied_sphere_anisotropic",
+      "upstream_ref": "source/SM_API/src/SmApiGeneral.cpp:SmApiScale;source/SMLib/src/SmBrep.cpp:Transform;TurnToNURBS",
+      "inputs": {
+        "script": "scale_probe",
+        "obj": {
+          "copied_sphere": {
+            "origin": [
+              2,
+              3,
+              5
+            ],
+            "radius": 2
+          }
+        },
+        "op": {
+          "scale": {
+            "s": [
+              2,
+              3,
+              0.5
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "public_scale_phase2_box_odd_reflection",
+      "upstream_ref": "source/SM_API/src/SmApiGeneral.cpp:SmApiScale;source/SMLib/src/SmBrep.cpp:Transform;TurnToNURBS",
+      "inputs": {
+        "script": "scale_probe",
+        "obj": {
+          "primitive_box": {
+            "origin": [
+              2,
+              3,
+              5
+            ],
+            "size": [
+              2,
+              3,
+              4
+            ]
+          }
+        },
+        "op": {
+          "scale": {
+            "s": [
+              -1,
+              1,
+              1
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "public_scale_phase2_sphere_odd_reflection",
+      "upstream_ref": "source/SM_API/src/SmApiGeneral.cpp:SmApiScale;source/SMLib/src/SmBrep.cpp:Transform;TurnToNURBS",
+      "inputs": {
+        "script": "scale_probe",
+        "obj": {
+          "primitive_sphere": {
+            "origin": [
+              2,
+              3,
+              5
+            ],
+            "radius": 2
+          }
+        },
+        "op": {
+          "scale": {
+            "s": [
+              -1,
+              1,
+              1
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "public_scale_phase2_box_even_reflection",
+      "upstream_ref": "source/SM_API/src/SmApiGeneral.cpp:SmApiScale;source/SMLib/src/SmBrep.cpp:Transform;TurnToNURBS",
+      "inputs": {
+        "script": "scale_probe",
+        "obj": {
+          "primitive_box": {
+            "origin": [
+              2,
+              3,
+              5
+            ],
+            "size": [
+              2,
+              3,
+              4
+            ]
+          }
+        },
+        "op": {
+          "scale": {
+            "s": [
+              -1,
+              -1,
+              1
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "public_scale_phase2_sphere_all_negative",
+      "upstream_ref": "source/SM_API/src/SmApiGeneral.cpp:SmApiScale;source/SMLib/src/SmBrep.cpp:Transform;TurnToNURBS",
+      "inputs": {
+        "script": "scale_probe",
+        "obj": {
+          "primitive_sphere": {
+            "origin": [
+              2,
+              3,
+              5
+            ],
+            "radius": 2
+          }
+        },
+        "op": {
+          "scale": {
+            "s": [
+              -1,
+              -1,
+              -1
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "public_scale_phase2_copied_sphere_scale_by_point",
+      "upstream_ref": "source/SM_API/src/SmApiGeneral.cpp:SmApiScale;source/SMLib/src/SmBrep.cpp:Transform;TurnToNURBS",
+      "inputs": {
+        "script": "scale_probe",
+        "obj": {
+          "copied_sphere": {
+            "origin": [
+              2,
+              3,
+              5
+            ],
+            "radius": 2
+          }
+        },
+        "op": {
+          "scale_by_pt": {
+            "r": [
+              1,
+              -2,
+              3
+            ],
+            "s": [
+              2,
+              3,
+              0.5
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "public_scale_phase2_box_zero_rejected",
+      "upstream_ref": "source/SM_API/src/SmApiGeneral.cpp:SmApiScale;source/SMLib/src/SmBrep.cpp:Transform;TurnToNURBS",
+      "inputs": {
+        "script": "scale_probe",
+        "obj": {
+          "primitive_box": {
+            "origin": [
+              2,
+              3,
+              5
+            ],
+            "size": [
+              2,
+              3,
+              4
+            ]
+          }
+        },
+        "op": {
+          "scale": {
+            "s": [
+              0,
+              1,
+              1
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

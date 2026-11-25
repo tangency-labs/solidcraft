@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#5322"
+ ],
+ "what": "an r2.5 hole cut through a 40x30x10 block's 30 mm side by a 5000 mm extrude: truck panicked ('tolerance must be no less than 1e-6') at 5000 mm (4999 worked)",
+ "source": "analytic",
+ "method": "the sketch plane's normal is -y, so the negative extrude runs +y through the block whatever its length: V = 40*30*10 - pi*2.5^2*30 = 11410.951",
+ "body_count": 1,
+ "volume_mm3": 11410.9514
+}

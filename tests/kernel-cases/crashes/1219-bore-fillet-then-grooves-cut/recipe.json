@@ -1,0 +1,118 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 140,
+    "width": 140,
+    "height": 25,
+    "corner": [
+     -70,
+     -70,
+     0
+    ],
+    "name": "Block",
+    "body_name": "Frame"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "BoreSketch"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 68.2
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 25,
+    "operation": "cut",
+    "name": "Bore"
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      0,
+      68.2,
+      25
+     ]
+    ],
+    "radius": 1,
+    "name": "BoreRound"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "offset": 19,
+    "name": "GrooveSketch"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     67.8,
+     -0.3
+    ],
+    "p1": [
+     68.7,
+     0.3
+    ]
+   }
+  },
+  {
+   "command": "sketch.pattern.circular",
+   "params": {
+    "entities": [
+     "l1",
+     "l2",
+     "l3",
+     "l4"
+    ],
+    "center": "origin",
+    "count": 24
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 4.5,
+    "operation": "cut",
+    "targets": [
+     "Frame"
+    ],
+    "name": "Grooves"
+   }
+  },
+  {
+   "command": "document.inspect",
+   "params": {
+    "measure": true,
+    "sketches": false
+   }
+  }
+ ]
+}

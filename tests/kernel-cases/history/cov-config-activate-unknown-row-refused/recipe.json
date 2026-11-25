@@ -1,0 +1,11 @@
+{
+ "base": "../cov-config-configure-default-row",
+ "commands": [
+  {
+   "command": "config.activate",
+   "params": {
+    "row": "Nope"
+   }
+  }
+ ]
+}

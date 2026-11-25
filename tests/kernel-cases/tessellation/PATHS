@@ -1,0 +1,7 @@
+# The source files whose change reruns this area of the kernel rig (scripts/ci/kernel_rig_plan.py),
+# besides the shared core in ../PATHS-ALL. One git pathspec glob a line, relative to the
+# repository root; `#` starts a comment.
+# Display meshes (the tessellator itself is in the shared core): which edges the shaded view
+# smooths over, and mesh bodies.
+crates/kernel/src/meshbody.rs
+crates/kernel/src/smooth_edges.rs

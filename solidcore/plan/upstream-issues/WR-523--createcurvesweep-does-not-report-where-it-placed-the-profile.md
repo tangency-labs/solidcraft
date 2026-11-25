@@ -1,0 +1,11 @@
+#### WR-523. `SmApiCreateCurveSweep` does not say where it placed the profile
+- **Severity:** Wrong result
+- **Area:** Primitive creation / sweeps
+- **Location:** `source/SMLib/src/NL_SrfAdv.cpp`, `N_CreateSweepScale` (the local systems `OL, XL, YL, ZL` of each placed section); `source/SMLib/src/SmBSplineSurfaceNLib.cpp`, `SmBSplineSurface::CreateSweepSurface`; `source/SMLib/src/SmPrimitiveCreation.cpp`, `SmPrimitiveCreation::CreateCurveSweep`; `source/SM_API/src/SmApiBrep.cpp`, `SmApiCreateCurveSweep`.
+- **What happens:** the sweep carries the section on frames it computes from point to point along the trajectory (each z the last one projected square to the next tangent, at NLib's own sample parameters), so along a path in space only the sweep knows where it leaves the profile. None of the four functions outputs those frames, so a caller sweeping a cornered path piece by piece cannot start each piece where the last one left the profile. A missing output, not a wrong value.
+- **Trigger:** any curve sweep whose caller needs the end section's placement.
+- **How found:** reported from SolidCraft (tangency-labs/solidcore#1450); added in the SolidCraft fork tangency-labs/smlib 5d3939e (optional `pOptPlacements`, default none).
+- **Confirmed:** no (read at the pin)
+- **Fix:** an optional output of the first, middle and last sections' placements: from `CreateCurveSweep` up, the rigid motions carrying the profile as given onto them (refused with a scale curve, `SM_ERR_INVALID_INPUT`); a translational sweep reports its translations.
+- **Rust port:** siblings that leave the existing signatures unchanged: `sweep::api_brep::create_curve_sweep_with_placements` (`PlacedCurveSweep`), `PrimitiveCreation::create_curve_sweep_with_placements`, `BSplineSurface::create_sweep_surface_with_placements`, `nurbs::srf_adv::p6::create_sweep_scale_with_placements`. No result changes, so no `Kernel::fixes` field. Test: `crates/solidcore/tests/issue_1450_curve_sweep_profile_placement.rs`.
+- Fixes tangency-labs/solidcore#1450 (with WR-522).

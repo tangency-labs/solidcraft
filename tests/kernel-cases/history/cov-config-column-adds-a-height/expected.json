@@ -1,0 +1,41 @@
+{
+ "sources": [],
+ "what": "config.column adds the height H; a row with H = 20 makes the block 20 high",
+ "method": "40x30x20 with the 10 mm hole through: V = 24000 - pi 25 20; faces 7; the column fills Default with H's 10 mm",
+ "body_count": 1,
+ "volume_mm3": 22429.203673205102,
+ "faces": 7,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   30,
+   20
+  ]
+ },
+ "results": [
+  {
+   "step": 6,
+   "json": {
+    "columns": [
+     "param:W",
+     "suppress:Hole",
+     "param:H"
+    ],
+    "rows": [
+     {
+      "name": "Default",
+      "values": {
+       "param:H": "10 mm"
+      }
+     }
+    ]
+   }
+  }
+ ],
+ "source": "analytic"
+}

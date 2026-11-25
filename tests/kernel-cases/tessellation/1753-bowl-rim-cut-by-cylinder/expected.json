@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1753"
+ ],
+ "what": "a revolved bowl whose rim is cut by a large cylinder (R320, axis across the bowl): the cut edge is an intersection curve between the cylinder and the cone walls, whose two faces used to put different vertices on it, so the STL/3MF export had a 0.001 mm crack",
+ "source": "analytic",
+ "method": "Section (r,z): (0,0),(40,0),(70,40),(64,40),(34,6),(0,6), revolved 360 deg about Z: Pappus/shoelace V = (pi/3)|sum (x_i y_{i+1}-x_{i+1} y_i)(x_i+x_{i+1})| = 125085.653 uncut. The cutter is the cylinder r=320 with axis along X, lowest line at z=36 (centre z=356): it removes everything above z_c(y) = 356 - sqrt(320^2 - y^2), which cuts the rim (z=40) only for |y| small (z_c(70)=43.75 > 40). The column of material at (x,y), r=sqrt(x^2+y^2), runs from z_low(r) (0 for r<=40, (r-40)*4/3 beyond) to min(z_up(r), z_c(y)) with z_up = 6 for r<=34, 6+(r-34)*34/30 for r<=64, 40 beyond. Integrating in polar coordinates (2800x2880 midpoint cells, converged to 1e-7) gives V = 121495.05. The export mesh being closed (every edge used by two triangles) is not graded by the rig. Watertight: each body's mesh has no open or over-shared edge (the reports were holes in the exported mesh).",
+ "body_count": 1,
+ "volume_mm3": 121495.05,
+ "watertight": true
+}

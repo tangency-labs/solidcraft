@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1095"
+ ],
+ "what": "a flange unfolded, a triangular cut-out with a corner on the sheet's own edge at the middle of the bend zone, refolded: sew failed (this wire is not simple)",
+ "source": "analytic",
+ "method": "T = 2, R = 2, K = 0.5. Flat area: base 100 x (60 - 4) + bend 100*BA with BA = (pi/2)(2 + 1) + flange straight 100*(20 - 4) = 7671.2389; the triangle (0, yc), (3, yc-1), (3, yc+1) has area 3 and lies inside it. K = 0.5, so the folded volume is the flat area times t: V = 2*(7671.2389 - 3)",
+ "body_count": 1,
+ "volume_mm3": 15336.477796076937
+}

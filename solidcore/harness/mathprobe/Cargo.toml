@@ -1,0 +1,16 @@
+# Standalone (not a workspace member): compares the f64 math functions solidcore calls
+# across platforms. See README.md.
+[package]
+name = "mathprobe"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "Apache-2.0"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[profile.release]
+opt-level = 2
+
+[workspace]

@@ -19,7 +19,7 @@ fn moved_component_picks_and_frames() {
     run(&mut s, "solid.box", json!({"corner": [20, 0, 0], "length": 10, "width": 4, "height": 4, "body_name": "ArmBody"}));
     run(&mut s, "component.activate", json!({"component": 0}));
     run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": [0, 50, 0]}));
-    let wbox = |s: &Session, b: &str| s.world_state().body(b).unwrap().mesh().bounds();
+    let wbox = |s: &Session, b: &str| s.world_state().unwrap().body(b).unwrap().mesh().bounds();
     let vol = |s: &mut Session, b: &str| run(s, "inspect.measure", json!({"bodies": [b]}))["total"]["volume_mm3"].as_f64().unwrap();
     // Root active: a fillet picked at the moved edge in the world.
     run(&mut s, "solid.fillet", json!({"edges": [[25, 54, 4]], "radius": 1}));
@@ -40,7 +40,7 @@ fn moved_component_picks_and_frames() {
     // A pasted instance: a pick on it lands on the shared definition.
     run(&mut s, "occurrence.copy", json!({"component": cid, "translate": [0, 20, 0]}));
     let v0 = vol(&mut s, "ArmBody");
-    let names: Vec<String> = s.world_state().bodies.iter().map(|b| b.name.clone()).collect();
+    let names: Vec<String> = s.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
     let inst = names.iter().find(|n| n.starts_with("ArmBody (")).cloned().unwrap();
     let ib = wbox(&s, &inst);
     // Its bottom edge along x at the far side (y max, z 0).
@@ -71,7 +71,7 @@ fn extrude_in_a_moved_component_from_a_root_sketch() {
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "component.activate", json!({"component": jaw}));
     run(&mut s, "solid.extrude", json!({"sketch": "Tab", "distance": 10, "operation": "join", "targets": ["Jaw"]}));
-    let b = s.world_state().body("Jaw").unwrap().mesh().bounds();
+    let b = s.world_state().unwrap().body("Jaw").unwrap().mesh().bounds();
     let near = |a: f64, e: f64| (a - e).abs() < 1e-6;
     assert!(near(b.min.x, 0.0) && near(b.max.x, 40.0) && near(b.min.y, -5.0) && near(b.max.y, 7.0), "{b:?}");
     let v = run(&mut s, "inspect.measure", json!({"bodies": ["Jaw"]}))["total"]["volume_mm3"].as_f64().unwrap();
@@ -101,7 +101,7 @@ fn extrude_to_a_face_in_a_moved_component() {
     run(&mut s, "component.activate", json!({"component": jaw}));
     // Up to the jaw's top face, picked in the world at its middle: the tab rises from z 0 to 15.
     run(&mut s, "solid.extrude", json!({"sketch": "Tab", "to": [20, 0, 15], "operation": "join", "targets": ["Jaw"]}));
-    let b = s.world_state().body("Jaw").unwrap().mesh().bounds();
+    let b = s.world_state().unwrap().body("Jaw").unwrap().mesh().bounds();
     let near = |a: f64, e: f64| (a - e).abs() < 1e-6;
     assert!(
         near(b.min.x, 0.0) && near(b.max.x, 40.0) && near(b.min.y, -5.0) && near(b.max.y, 7.0) && near(b.min.z, 0.0) && near(b.max.z, 15.0),
@@ -164,8 +164,9 @@ fn extrude_to_a_slanted_face_in_another_moved_component() {
     assert!(rel(v, 36.0 * 18.0) < 1e-6, "{v}");
 }
 
-/// From Object on a slanted face in another, moved component: the extrude starts where the
-/// pad's middle meets the face as shown (z -22.5), not where it is in the component's frame.
+/// From Object on a slanted face in another, moved component: the extrude starts on the face as
+/// shown, z = -20 + (y - 5)/2, so from z -21 at y 3 to -24 at y -3 and 4 mm on, down to -28; not
+/// on the face in the component's frame, which would start it at z -18.5 (#17639).
 #[test]
 fn extrude_from_a_slanted_face_in_another_moved_component() {
     let mut s = Session::default();
@@ -175,8 +176,10 @@ fn extrude_from_a_slanted_face_in_another_moved_component() {
         "solid.extrude",
         json!({"sketch": "Pad", "from": [0, 5, -20], "distance": 4, "direction": "negative", "operation": "new", "body_name": "Leg"}),
     );
-    let b = s.world_state().body("Leg").unwrap().mesh().bounds();
-    assert!((b.max.z + 22.5).abs() < 1e-6 && (b.min.z + 26.5).abs() < 1e-6, "{b:?}");
+    let b = s.world_state().unwrap().body("Leg").unwrap().mesh().bounds();
+    assert!((b.max.z + 21.0).abs() < 1e-6 && (b.min.z + 28.0).abs() < 1e-6, "{b:?}");
+    let v = leg_volume(&mut s);
+    assert!(rel(v, 36.0 * 4.0) < 1e-6, "{v}");
 }
 
 /// The To face in another component is kept by name, as one in the same component is: when that
@@ -220,14 +223,14 @@ fn revolve_to_a_cylinder_in_another_moved_component() {
         "solid.revolve",
         json!({"sketch": "Profile", "axis": {"origin": [0, 0, 0], "dir": [0, 0, 1]}, "to": to, "operation": "new", "body_name": "Arc"}),
     );
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let arc = &world.body("Arc").unwrap().body;
     let post = &world.body("PostBody").unwrap().body;
     let overlap = solidcraft_kernel::boolean(arc, post, solidcraft_kernel::BoolOp::Intersect).unwrap();
     assert!(overlap.is_none_or(|b| solidcraft_kernel::measure(&b).unwrap().volume < 1e-3), "the arc runs into the post");
     // Past the picked point's angle (29°) on the inner side, where the post leaves room.
     let at = |r: f64, deg: f64| Vec3::new(r * deg.to_radians().cos(), r * deg.to_radians().sin(), -2.5);
-    assert!(arc.contains(at(10.2, 35.0)), "the arc is not cut back to the post's surface");
+    assert_eq!(arc.classify_point(at(10.2, 35.0)).unwrap(), solidcraft_kernel::PointClass::Inside, "the arc is not cut back to the post's surface");
 }
 
 /// A To Object pick is named after the face it is on, the nearest one, even when a face of a
@@ -255,7 +258,7 @@ fn extrude_to_names_the_face_it_is_on() {
             "solid.extrude",
             json!({"sketch": "Pad", "distance": "1 mm", "direction": "negative", "to": [5, 5, -20], "operation": "new", "body_name": "Leg"}),
         );
-        let b = s.world_state().body("Leg").unwrap().mesh().bounds();
+        let b = s.world_state().unwrap().body("Leg").unwrap().mesh().bounds();
         assert!((b.min.z + 20.0).abs() < 1e-9 && b.max.z.abs() < 1e-9, "moved {moved}: {b:?}");
     }
 }
@@ -290,4 +293,259 @@ fn extrude_to_a_named_face_keeps_it_when_another_part_touches_it() {
     run(&mut s, "occurrence.move", json!({"occurrence": "Other:1", "space": "world", "translate": [0, 0, -69]}));
     let v = leg_volume(&mut s);
     assert!(rel(v, 36.0 * 20.0) < 1e-6, "the extrude ended at the plate: {v}");
+}
+
+/// A body built in a component from a sketch of the root keeps the place its component was moved
+/// to when the move is captured (#14513): the body belongs to its component, so it moves with it.
+#[test]
+fn extrude_from_root_sketch_keeps_the_captured_position_of_its_component() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Profile"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "component.create", json!({"name": "A", "activate": false}));
+    run(&mut s, "component.create", json!({"name": "B", "activate": false}));
+    run(&mut s, "component.activate", json!({"component": "A"}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Profile", "distance": 10, "body_name": "PartA"}));
+    run(&mut s, "component.activate", json!({"component": "B"}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Profile", "distance": 10, "body_name": "PartB"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "B:1", "translate": [40, 0, 0], "capture": false}));
+    run(&mut s, "component.capture_position", json!({}));
+    let near = |a: f64, e: f64| (a - e).abs() < 1e-5;
+    let b = s.world_state().unwrap().body("PartB").unwrap().mesh().bounds();
+    assert!(near(b.min.x, 40.0) && near(b.max.x, 50.0), "PartB must keep the captured position: {b:?}");
+    let a = s.world_state().unwrap().body("PartA").unwrap().mesh().bounds();
+    assert!(near(a.min.x, 0.0) && near(a.max.x, 10.0), "PartA stays where its component stands: {a:?}");
+}
+
+/// A sweep in a component, from a profile and a path of the root, is built where they are shown.
+/// When the component is moved and the move is captured, the swept body keeps the place the
+/// component was moved to, as an extrude from the same sketch does (#14513).
+#[test]
+fn sweep_from_root_sketches_keeps_the_captured_position_of_its_component() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Profile"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-2, -2], "p1": [2, 2]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Path"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, -40]], "ids": ["down"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let made = run(&mut s, "component.create", json!({"name": "Rail", "grounded": false, "activate": true}));
+    let occurrence = made["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.sweep", json!({"sketch": "Profile", "path_sketch": "Path", "path": ["down"], "operation": "new", "body_name": "Tube"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": occurrence, "translate": [40, 0, 0], "capture": false}));
+    run(&mut s, "component.capture_position", json!({}));
+    let near = |a: f64, e: f64| (a - e).abs() < 1e-5;
+    let b = s.world_state().unwrap().body("Tube").unwrap().mesh().bounds();
+    assert!(near(b.min.x, 38.0) && near(b.max.x, 42.0), "the swept body must keep the captured position: {b:?}");
+}
+
+/// An extrude in a child component from a shared root sketch captures the relative sketch frame
+/// at creation time, so joining or moving that component later moves the extruded body rigidly
+/// with the component instead of pulling it back to the root sketch's world placement.
+#[test]
+fn extrude_from_root_sketch_moves_with_component_after_joint() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "20 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Profile"}));
+    run(
+        &mut s,
+        "sketch.draw.dimensioned",
+        json!({"command": "sketch.rectangle.center", "params": {"center": [0, 0], "corner": [10, 10]}, "dimensions": {"width": "w", "height": "w"}}),
+    );
+    run(&mut s, "sketch.finish", json!({}));
+
+    run(&mut s, "component.create", json!({"name": "Post", "parent": "root", "grounded": true, "activate": true}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Profile", "distance": "500 mm", "operation": "new", "body_name": "PostBody"}));
+
+    run(&mut s, "component.create", json!({"name": "RailX", "parent": "root", "grounded": false, "activate": true}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Profile", "distance": "400 mm", "operation": "new", "body_name": "RailXBody"}));
+
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "rigid",
+            "name": "Corner",
+            "a": {"occurrence": "RailX:1", "point": [0, 0, 0], "z": [0, 0, -1]},
+            "b": {"occurrence": "Post:1", "point": [0, 0, 10], "z": [1, 0, 0]},
+            "offset": "10 mm"
+        }),
+    );
+
+    let b = s.world_state().unwrap().body("RailXBody").unwrap().mesh().bounds();
+    let near = |a: f64, e: f64| (a - e).abs() < 1e-5;
+    assert!(
+        near(b.min.x, 10.0) && near(b.max.x, 410.0) && near(b.min.y, -10.0) && near(b.max.y, 10.0) && near(b.min.z, 0.0) && near(b.max.z, 20.0),
+        "RailXBody must move with its joint, not snap back to root Profile: {b:?}"
+    );
+
+    // Editing the shared root sketch updates both components while RailX stays along +X.
+    run(&mut s, "parameters.change", json!({"name": "w", "expression": "24 mm"}));
+    let b2 = s.world_state().unwrap().body("RailXBody").unwrap().mesh().bounds();
+    assert!(
+        near(b2.min.x, 10.0)
+            && near(b2.max.x, 410.0)
+            && near(b2.min.y, -12.0)
+            && near(b2.max.y, 12.0)
+            && near(b2.min.z, -2.0)
+            && near(b2.max.z, 22.0),
+        "RailXBody must reflect updated root profile while staying joined along +X: {b2:?}"
+    );
+}
+
+/// When both the sketch component and the extruding component live under a shared subassembly,
+/// moving the subassembly moves the extruded body once (no double transform), moving the
+/// extruding component moves its body rigidly, and moving the sketch's component still propagates.
+#[test]
+fn extrude_from_sibling_sketch_in_subassembly_moves_once_with_parent() {
+    let mut s = Session::default();
+    let sub = run(&mut s, "component.create", json!({"name": "Sub", "parent": "root", "grounded": false, "activate": true}));
+    let sub_occ = sub["occurrence"].as_u64().unwrap();
+
+    let master = run(&mut s, "component.create", json!({"name": "Master", "parent": "Sub", "grounded": false, "activate": true}));
+    let master_occ = master["occurrence"].as_u64().unwrap();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Profile"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+
+    let rail = run(&mut s, "component.create", json!({"name": "Rail", "parent": "Sub", "grounded": false, "activate": true}));
+    let rail_occ = rail["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.extrude", json!({"sketch": "Profile", "distance": 20, "operation": "new", "body_name": "RailBody"}));
+
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let near = |a: f64, e: f64| (a - e).abs() < 1e-5;
+
+    // Move Sub by +100 X: RailBody moves once (+100 X, not +200 X).
+    run(&mut s, "occurrence.move", json!({"occurrence": sub_occ, "translate": [100, 0, 0]}));
+    let b = s.world_state().unwrap().body("RailBody").unwrap().mesh().bounds();
+    assert!(near(b.min.x, 100.0) && near(b.min.y, 0.0) && near(b.min.z, 0.0), "subassembly move must apply once: {b:?}");
+
+    // Move Rail by +50 Y inside Sub: RailBody moves rigidly with Rail.
+    run(&mut s, "occurrence.move", json!({"occurrence": rail_occ, "translate": [0, 50, 0]}));
+    let b = s.world_state().unwrap().body("RailBody").unwrap().mesh().bounds();
+    assert!(near(b.min.x, 100.0) && near(b.min.y, 50.0) && near(b.min.z, 0.0), "consumer move must carry body: {b:?}");
+
+    // Move Master by +30 Z inside Sub: RailBody follows the source sketch's component.
+    run(&mut s, "occurrence.move", json!({"occurrence": master_occ, "translate": [0, 0, 30]}));
+    let b = s.world_state().unwrap().body("RailBody").unwrap().mesh().bounds();
+    assert!(near(b.min.x, 100.0) && near(b.min.y, 50.0) && near(b.min.z, 30.0), "sketch owner move must propagate: {b:?}");
+
+    // Round-trip through JSON preserves the exact same placement.
+    let mut reopened = Session { doc: solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap().into(), ..Session::default() };
+    reopened.refresh();
+    let b2 = reopened.world_state().unwrap().body("RailBody").unwrap().mesh().bounds();
+    assert!(near(b2.min.x, 100.0) && near(b2.min.y, 50.0) && near(b2.min.z, 30.0), "reopened placement must match: {b2:?}");
+
+    // Reparenting Rail out of the moved Sub into root preserves RailBody's world position.
+    run(&mut s, "occurrence.reparent", json!({"occurrence": rail_occ, "parent": "root"}));
+    let b3 = s.world_state().unwrap().body("RailBody").unwrap().mesh().bounds();
+    assert!(near(b3.min.x, 100.0) && near(b3.min.y, 50.0) && near(b3.min.z, 30.0), "reparent must preserve world placement: {b3:?}");
+}
+
+/// A revolve in a child component using a root sketch and a qualified axis line in that same
+/// sketch keeps its axis and profile in the same captured frame when the component moves.
+#[test]
+fn revolve_from_root_sketch_with_qualified_axis_moves_with_component() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Profile"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 0], "p1": [20, 10]}));
+    let axis_line = run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 20]], "construction": true}));
+    let line_id = axis_line["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+
+    let part = run(&mut s, "component.create", json!({"name": "Ring", "parent": "root", "grounded": false, "activate": true}));
+    let ring_occ = part["occurrence"].as_u64().unwrap();
+    run(
+        &mut s,
+        "solid.revolve",
+        json!({"sketch": "Profile", "axis": {"sketch": "Profile", "curve": line_id}, "angle": "360 deg", "operation": "new", "body_name": "RingBody"}),
+    );
+
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "occurrence.move", json!({"occurrence": ring_occ, "translate": [0, 0, 10]}));
+
+    let b = s.world_state().unwrap().body("RingBody").unwrap().mesh().bounds();
+    let near = |a: f64, e: f64| (a - e).abs() < 1e-3;
+    assert!(
+        near(b.min.x, -20.0) && near(b.max.x, 20.0) && near(b.min.y, 0.0) && near(b.max.y, 10.0) && near(b.min.z, -10.0) && near(b.max.z, 30.0),
+        "RingBody must move +10 in Z with its component: {b:?}"
+    );
+}
+
+/// Redefining a cross-component extrude keeps its captured `profile_frame` when only parameters
+/// change, and updates it when the profile sketch changes to another component's sketch.
+#[test]
+fn redefine_preserves_profile_frame_on_param_edit_and_updates_on_sketch_change() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "RootProfile"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+
+    let sub = run(&mut s, "component.create", json!({"name": "Sub", "parent": "root", "grounded": false, "activate": true}));
+    let sub_occ = sub["occurrence"].as_u64().unwrap();
+    run(&mut s, "occurrence.move", json!({"occurrence": sub_occ, "translate": [100, 0, 0]}));
+
+    run(&mut s, "component.create", json!({"name": "Master", "parent": "Sub", "grounded": false, "activate": true}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "SubProfile"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+
+    let rail = run(&mut s, "component.create", json!({"name": "Rail", "parent": "Sub", "grounded": false, "activate": true}));
+    let rail_occ = rail["occurrence"].as_u64().unwrap();
+    let ext = run(&mut s, "solid.extrude", json!({"sketch": "SubProfile", "distance": 20, "operation": "new", "body_name": "RailBody"}));
+    let ext_id = ext["feature"].as_u64().unwrap();
+
+    // Move Rail by +25 Y, then redefine distance only: body must stay at y = 25..35.
+    run(&mut s, "occurrence.move", json!({"occurrence": rail_occ, "translate": [0, 25, 0]}));
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": ext_id, "command": "solid.extrude", "params": {"sketch": "SubProfile", "distance": 40, "operation": "new"}}),
+    );
+    let near = |a: f64, e: f64| (a - e).abs() < 1e-5;
+    let b1 = s.world_state().unwrap().body("RailBody").unwrap().mesh().bounds();
+    assert!(
+        near(b1.min.x, 100.0) && near(b1.min.y, 25.0) && near(b1.max.z, 40.0),
+        "param-only redefine must preserve captured profile frame: {b1:?}"
+    );
+
+    // Redefine to RootProfile (at world x = 0..10, y = 0..10): profile_frame must update to root-relative.
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": ext_id, "command": "solid.extrude", "params": {"sketch": "RootProfile", "distance": 40, "operation": "new"}}),
+    );
+    let b2 = s.world_state().unwrap().body("RailBody").unwrap().mesh().bounds();
+    assert!(
+        near(b2.min.x, 0.0) && near(b2.max.x, 10.0) && near(b2.min.y, 0.0) && near(b2.max.y, 10.0),
+        "sketch-changing redefine must update profile frame to new LCA: {b2:?}"
+    );
+}
+
+/// Pasting an extrude that references a root sketch into another child component captures the
+/// target component's profile frame so later moves carry the pasted body with it.
+#[test]
+fn pasted_extrude_from_root_sketch_moves_with_target_component() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Profile"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+
+    run(&mut s, "component.create", json!({"name": "RailA", "parent": "root", "grounded": false, "activate": true}));
+    let ext = run(&mut s, "solid.extrude", json!({"sketch": "Profile", "distance": 20, "operation": "new", "body_name": "RailABody"}));
+    let ext_id = ext["feature"].as_u64().unwrap();
+
+    let rail_b = run(&mut s, "component.create", json!({"name": "RailB", "parent": "root", "grounded": false, "activate": true}));
+    let rail_b_occ = rail_b["occurrence"].as_u64().unwrap();
+    run(&mut s, "timeline.copy", json!({"features": [ext_id]}));
+    run(&mut s, "timeline.paste", json!({}));
+
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "occurrence.move", json!({"occurrence": rail_b_occ, "translate": [60, 0, 0]}));
+
+    let pasted = s.world_state().unwrap().bodies.iter().find(|b| b.name != "RailABody").unwrap().mesh().bounds();
+    let near = |a: f64, e: f64| (a - e).abs() < 1e-5;
+    assert!(near(pasted.min.x, 60.0) && near(pasted.max.x, 70.0), "pasted body must move with RailB: {pasted:?}");
 }
