@@ -201,6 +201,7 @@ intersect	false
 intersection_curve	false
 iso_analysis	false
 iso_curve	false
+isolate	false
 joint	false
 joint_origin	false
 kofi	false
@@ -400,6 +401,7 @@ trace	false
 trim	false
 undo	false
 unfold	false
+unisolate	false
 update	false
 warning	false
 web	false
