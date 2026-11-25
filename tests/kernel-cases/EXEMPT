@@ -571,6 +571,7 @@ view.origin_axes_across_view       display-only preference: crates/engine/src/cm
 view.pan_mode                     the view: camera only: crates/ui-egui/src/nav_mode_tests.rs
 view.perspective                  the view: camera, layout, display
 view.pick                         read-only ray pick, no geometry made: tested in crates/engine/src/cmd/view_pick.rs and solidcore/crates/solidcore-ops/tests/measure.rs
+view.plane_size                   construction plane display size only: crates/engine/src/construct_tests.rs::a_construction_plane_keeps_the_size_it_is_given
 view.previous_tab                 the view: camera, layout, display
 view.rename                       the view: camera, layout, display
 view.render_browser               the view: camera, layout, display
