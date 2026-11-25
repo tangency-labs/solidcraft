@@ -1568,6 +1568,64 @@ fn edit_anchor(at: Pos2, live: bool, drawable: Option<egui::Rect>, size: egui::V
     Pos2::new(clamp_x(right), clamp_y(below))
 }
 
+/// How far the dimension value box or window was dragged. Kept only while it stays open, so the
+/// next opens beside its own dimension.
+fn moved_id() -> egui::Id {
+    egui::Id::unique("sc_dim_box_moved")
+}
+
+pub(crate) fn moved(ctx: &egui::Context) -> egui::Vec2 {
+    let frame = ctx.cumulative_frame_nr();
+    let open = ctx.data(|d| d.get_temp::<u64>(moved_id().with("shown"))).is_some_and(|f| f.saturating_add(1) >= frame);
+    if !open {
+        ctx.data_mut(|d| d.insert_temp(moved_id(), egui::Vec2::ZERO));
+        return egui::Vec2::ZERO;
+    }
+    ctx.data(|d| d.get_temp::<egui::Vec2>(moved_id())).filter(|v| v.is_finite()).unwrap_or(egui::Vec2::ZERO)
+}
+
+fn set_moved(ctx: &egui::Context, by: egui::Vec2) {
+    if by.is_finite() {
+        ctx.data_mut(|d| d.insert_temp(moved_id(), by));
+    }
+}
+
+pub(crate) fn note_shown(ctx: &egui::Context) {
+    let frame = ctx.cumulative_frame_nr();
+    ctx.data_mut(|d| d.insert_temp(moved_id().with("shown"), frame));
+}
+
+pub(crate) fn kept_in(pos: Pos2, size: egui::Vec2, drawable: Option<egui::Rect>) -> Pos2 {
+    let Some(rect) = drawable else { return pos };
+    let x = pos.x.clamp(rect.left(), (rect.right() - size.x - EDIT_MARGIN).max(rect.left()));
+    let y = pos.y.clamp(rect.top(), (rect.bottom() - size.y - EDIT_MARGIN).max(rect.top()));
+    if x.is_finite() && y.is_finite() { Pos2::new(x, y) } else { rect.min }
+}
+
+pub(crate) fn grip_dots(ui: &mut egui::Ui) -> Rect {
+    let rect = crate::ui_kit::panel_grip(ui).rect;
+    crate::scenario::publish_target("dimension:grip", rect);
+    rect
+}
+
+/// Lets `band`, a dimension's name line, drag its box or window. Registered over the name, so a
+/// press there drags rather than selects it. Returns this frame's move and whether the pointer
+/// is on it (the value field then keeps the keyboard).
+pub(crate) fn grip(ui: &egui::Ui, band: Rect) -> (egui::Vec2, bool) {
+    let response = ui.interact(band, ui.scope_id().with("sc_dim_grip"), egui::Sense::click_and_drag());
+    let held = response.is_pointer_button_down_on() || response.clicked() || response.drag_stopped();
+    if response.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+        let by = response.drag_delta();
+        set_moved(ui.ctx(), moved(ui.ctx()) + by);
+        return (by, true);
+    }
+    if response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+    }
+    (egui::Vec2::ZERO, held)
+}
+
 fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
     if !ctx.input(|i| i.pointer.any_down() || i.pointer.primary_clicked() || i.pointer.primary_released()) {
         CONSUMED_OUTSIDE_PRESS.set(false);
@@ -1609,7 +1667,18 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
     // taller box flipped above the pointer still ends short of it.
     let drawn = ctx.memory(|m| m.area_rect(egui::Id::unique("sc_dim_edit_area"))).map(|r| r.size()).filter(|s| s.is_finite());
     let size = drawn.map_or(vec2(popup_width, EDIT_HEIGHT), |s| s.max(vec2(popup_width, EDIT_HEIGHT)));
-    let anchor = edit_anchor(at, e.live.is_some(), drawable, size);
+    let drag = app.preferences.drag_dialogs;
+    let grips = app.preferences.show_drag_grips;
+    let opens = edit_anchor(at, e.live.is_some() || drag, drawable, size);
+    let anchor = if e.live.is_some() {
+        set_moved(ctx, egui::Vec2::ZERO);
+        opens
+    } else if drag {
+        kept_in(opens + moved(ctx), size, drawable)
+    } else {
+        opens
+    };
+    note_shown(ctx);
     // Background: under Preferences and Report a bug (#9016), like canvas value boxes.
     Container::new(ctx, Surface::Canvas).area(egui::Id::unique("sc_dim_edit_area")).fixed_pos(anchor).order(egui::Order::Background).show(
         ctx,
@@ -1618,16 +1687,31 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
             Container::show_backing(ui, frame, |ui| {
                 crate::ui_kit::scope(ui, |ui| {
                     ui.set_max_width(popup_width);
-                    if e.sheet.is_some() {
-                        crate::ui_kit::text(ui, &e.param, crate::ui_kit::Text::Inline);
+                    let name_line = |ui: &mut egui::Ui| {
+                        if e.sheet.is_some() {
+                            crate::ui_kit::text(ui, &e.param, crate::ui_kit::Text::Inline)
+                        } else {
+                            crate::ui_kit::text(
+                                ui,
+                                &solidcraft_ui_text::format("dialog.dimension_name", &[("name", &e.param)]),
+                                crate::ui_kit::Text::Inline,
+                            )
+                            .backing_on_hover_text(solidcraft_ui_text::tr("dialog.dimension_insert_hint"))
+                        }
+                    };
+                    let held = if e.live.is_none() && drag {
+                        let band = ui
+                            .horizontal(|ui| {
+                                let dots = grips.then(|| grip_dots(ui));
+                                let name = name_line(ui).rect;
+                                dots.map_or(name, |d| d.union(name))
+                            })
+                            .inner;
+                        grip(ui, band.with_max_x(band.left().max(ui.max_rect().right()))).1
                     } else {
-                        crate::ui_kit::text(
-                            ui,
-                            &solidcraft_ui_text::format("dialog.dimension_name", &[("name", &e.param)]),
-                            crate::ui_kit::Text::Inline,
-                        )
-                        .backing_on_hover_text(solidcraft_ui_text::tr("dialog.dimension_insert_hint"));
-                    }
+                        name_line(ui);
+                        false
+                    };
                     if !e.owned {
                         // The whole value is selected before the field reads its state, every frame
                         // until the person takes it over, so typing replaces it (#11204). Only on the
@@ -1645,6 +1729,9 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
                         e.owned = focused && ui.input(|i| i.events.iter().any(|ev| matches!(ev, egui::Event::Key { pressed: true, .. })));
                     }
                     let r = crate::ui_kit::cell_editor(ui, id, &mut e.expr, "", false);
+                    if held {
+                        r.request_focus();
+                    }
                     // A press into the field puts the caret where it landed; not the press that placed
                     // or pinned the value, which began before the box sat there.
                     let settled = e.shown == Some(anchor);

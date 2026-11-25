@@ -40,10 +40,11 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     // Test change: show_design_view_switcher is a portable key; 110 -> 109 because the
     // wide_panel_grab key left Preferences, so one fewer portable key; 109 -> 107 because the
     // documents browser's show_document_browser and library_thumbnail_size left with it (#8206);
-    // 108 -> 109 because Turn Around adds one portable Navigation preference.
+    // 108 -> 109 because Turn Around adds one portable Navigation preference; 110 -> 112 for
+    // drag_dialogs and show_drag_grips.
     assert_eq!(
         keys.len(),
-        110,
+        112,
         "include the repeated-shortcut preference, the browser scroll wheel preferences and the centred command search among the current portable settings"
     );
     for key in [
@@ -825,6 +826,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "design_views_as_tabs",
         "dialog_buttons",
         "direct_interaction",
+        "drag_dialogs",
         "escape_twice_finishes_sketch",
         "free_orbit",
         "free_orbit_key",
@@ -881,6 +883,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "shortcut_again_ends_tool",
         "shortcut_cycles_modes",
         "show_design_view_switcher",
+        "show_drag_grips",
         "show_selected_hidden_edges",
         "sketch_align_points",
         "sketch_auto_dimensions",
@@ -930,7 +933,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
     // Test change: one more portable key, free_orbit_key (the key that makes one orbit drag free).
     // Test change: two fewer portable keys, show_document_browser and library_thumbnail_size, gone with the document browser;
     // Turn Around adds one portable Navigation preference to the 108 keys on main.
-    assert_eq!(expected.len(), 110);
+    assert_eq!(expected.len(), 112);
     assert_eq!(actual, expected);
 }
 

@@ -519,6 +519,18 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 &mut app.preferences.live_panel_drag_preview,
                 "live_panel_drag_preview",
             );
+            layout_check(ui, app.tr("prefs.drag_dialogs"), app.tr("prefs.drag_dialogs_help"), &mut app.preferences.drag_dialogs, "drag_dialogs");
+            ui.add_enabled_ui(app.preferences.drag_dialogs, |ui| {
+                ui.indent("show_drag_grips", |ui| {
+                    layout_check(
+                        ui,
+                        app.tr("prefs.show_drag_grips"),
+                        app.tr("prefs.show_drag_grips_help"),
+                        &mut app.preferences.show_drag_grips,
+                        "show_drag_grips",
+                    );
+                });
+            });
             layout_check(
                 ui,
                 app.tr("prefs.history_in_browser"),

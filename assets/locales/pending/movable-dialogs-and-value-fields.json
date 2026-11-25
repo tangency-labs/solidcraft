@@ -1,0 +1,38 @@
+{
+  "en": {
+    "prefs.drag_dialogs": "Movable dialogs and value fields",
+    "prefs.drag_dialogs_help": "Value fields and the dimension window can be dragged, and a dialog or value you drag stays there until it closes; the next one opens in its usual place. When off, they stay put and only dialogs drag, by their title, keeping that place for the next one.",
+    "prefs.show_drag_grips": "Show drag grips",
+    "prefs.show_drag_grips_help": "Draws grip dots where value fields and the dimension window drag. Without them they still drag by their frame or name line."
+  },
+  "ar": {
+    "prefs.drag_dialogs": "مربعات حوار وحقول قيم قابلة للتحريك",
+    "prefs.drag_dialogs_help": "يمكن سحب حقول القيم ونافذة الأبعاد، ويبقى مربع الحوار أو القيمة التي تسحبها في مكانه حتى يُغلق؛ ويُفتح التالي في موضعه المعتاد. عند الإيقاف تبقى في أماكنها ولا تُسحب إلا مربعات الحوار، من عنوانها، مع الاحتفاظ بذلك الموضع للمربع التالي.",
+    "prefs.show_drag_grips": "إظهار مقابض السحب",
+    "prefs.show_drag_grips_help": "يرسم نقاط المقبض حيث تُسحب حقول القيم ونافذة الأبعاد. بدونها تظل قابلة للسحب من إطارها أو سطر اسمها."
+  },
+  "he": {
+    "prefs.drag_dialogs": "תיבות דו-שיח ושדות ערך ניתנים להזזה",
+    "prefs.drag_dialogs_help": "אפשר לגרור שדות ערך ואת חלון המידה, ותיבת דו-שיח או ערך שגוררים נשארים במקומם עד שהם נסגרים; הבאים נפתחים במקומם הרגיל. כשהאפשרות כבויה הם נשארים במקום ורק תיבות דו-שיח נגררות, בשורת הכותרת, ושומרות על המקום עבור הבאה.",
+    "prefs.show_drag_grips": "הצגת ידיות גרירה",
+    "prefs.show_drag_grips_help": "מציג נקודות ידית במקום שבו גוררים שדות ערך ואת חלון המידה. בלעדיהן עדיין אפשר לגרור אותם במסגרת או בשורת השם."
+  },
+  "ja": {
+    "prefs.drag_dialogs": "ダイアログと値フィールドを移動可能にする",
+    "prefs.drag_dialogs_help": "値フィールドと寸法ウィンドウをドラッグできます。ドラッグしたダイアログや値は閉じるまでその位置にとどまり、次は通常の位置に開きます。オフにすると移動できず、ダイアログだけがタイトルでドラッグでき、その位置は次のダイアログにも引き継がれます。",
+    "prefs.show_drag_grips": "ドラッグ用グリップを表示",
+    "prefs.show_drag_grips_help": "値フィールドと寸法ウィンドウのドラッグ位置にグリップの点を表示します。表示しなくても、枠や名前の行でドラッグできます。"
+  },
+  "vi": {
+    "prefs.drag_dialogs": "Hộp thoại và trường giá trị có thể di chuyển",
+    "prefs.drag_dialogs_help": "Có thể kéo các trường giá trị và cửa sổ kích thước; hộp thoại hoặc giá trị bạn kéo sẽ ở yên đó cho đến khi đóng, và cái tiếp theo mở ở vị trí thông thường. Khi tắt, chúng đứng yên và chỉ hộp thoại kéo được, bằng thanh tiêu đề, và giữ vị trí đó cho lần sau.",
+    "prefs.show_drag_grips": "Hiện tay nắm kéo",
+    "prefs.show_drag_grips_help": "Vẽ các chấm tay nắm ở chỗ kéo trường giá trị và cửa sổ kích thước. Không có chúng, bạn vẫn kéo được bằng khung hoặc dòng tên."
+  },
+  "zh": {
+    "prefs.drag_dialogs": "可移动的对话框和数值字段",
+    "prefs.drag_dialogs_help": "可以拖动数值字段和尺寸窗口；拖动后的对话框或数值会停留在原处直到关闭，下一个在常规位置打开。关闭后它们保持不动，只有对话框可以通过标题拖动，并为下一个保留该位置。",
+    "prefs.show_drag_grips": "显示拖动手柄",
+    "prefs.show_drag_grips_help": "在数值字段和尺寸窗口的拖动处绘制手柄圆点。不显示时，仍可通过边框或名称行拖动。"
+  }
+}
