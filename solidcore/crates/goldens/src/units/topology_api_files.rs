@@ -1331,7 +1331,7 @@ mod tests {
                     records: &mut records,
                     next_key: WRITE_GEOMETRY_KEYS,
                 };
-                crate::refit::read_from_file(
+                read_from_file(
                     &mut k,
                     &mut b,
                     read_bytes(file).unwrap(),
@@ -1341,7 +1341,6 @@ mod tests {
                 )
                 .unwrap();
             }
-            crate::tolsub::after_read(&mut b);
             let raises = b.trim_cover_raises().clone();
             assert!(raises.end_checked, "{name}");
             let written = file_of(&rust(&op).unwrap()).unwrap_or_else(|| panic!("{name}"));
