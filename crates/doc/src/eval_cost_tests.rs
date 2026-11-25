@@ -5200,3 +5200,80 @@ fn mirroring_overlapping_holes_flushes_and_matches_sequential_cut() {
     assert_eq!(f_batch, f_seq);
     assert_eq!(n_batch, n_seq);
 }
+
+/// Mirroring disjoint cuts where one splits the target body falls back to sequential replay so
+/// split body names, piece order, volumes and face names match sequential execution identically.
+#[test]
+fn mirroring_cuts_that_split_a_body_matches_sequential_pieces_and_names() {
+    let run = |limit: usize| {
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(limit));
+        let mut doc = Document::new("split mirror");
+        block(&mut doc, "Bar", Vec3::new(-60.0, 0.0, 0.0), [120.0, 10.0, 10.0]);
+        let slice = FeatureKind::Box {
+            corner: point_expr(Vec3::new(18.0, -1.0, -1.0)),
+            length: "4".into(),
+            width: "12".into(),
+            height: "12".into(),
+            operation: Operation::Cut,
+            centred: false,
+        };
+        let c1 = doc.add_feature(slice, Some("Slice")).unwrap();
+        let c2 = doc.add_feature(hole(Vec3::new(40.0, 5.0, 10.0), Vec3::new(0.0, 0.0, -1.0), 4.0), Some("Hole")).unwrap();
+        mirror_of(&mut doc, &[c1, c2], PlaneRef::Origin { name: "YZ".into() });
+        let mut model = Model::new();
+        model.evaluate(&doc);
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(super::MAX_JOINED_TOOLS));
+        assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+        let bodies: Vec<(String, f64, usize, Vec<String>)> = model
+            .state()
+            .bodies
+            .iter()
+            .map(|b| {
+                let mut names = crate::naming::face_names(b).to_vec();
+                names.sort();
+                (b.name.clone(), kernel::measure(&b.body).unwrap().volume, b.body.face_count(), names)
+            })
+            .collect();
+        bodies
+    };
+    let batch = run(super::MAX_JOINED_TOOLS);
+    let seq = run(1);
+    assert_eq!(batch.len(), 3, "{batch:?}");
+    assert_eq!(batch.len(), seq.len());
+    for (a, b) in batch.iter().zip(&seq) {
+        assert_eq!(a.0, b.0);
+        assert!((a.1 - b.1).abs() < 1e-6 * b.1.max(1.0), "{} vs {}", a.1, b.1);
+        assert_eq!(a.2, b.2);
+        assert_eq!(a.3, b.3);
+    }
+}
+
+/// Mirroring disjoint cuts where the first consumes the only target body falls back to sequential
+/// replay so the second cut reports the same "no body to cut or intersect" refusal as sequential.
+#[test]
+fn mirroring_cuts_that_consume_the_target_matches_sequential_refusal() {
+    let run = |limit: usize| {
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(limit));
+        let mut doc = Document::new("consume mirror");
+        block(&mut doc, "Stub", Vec3::new(-25.0, 0.0, 0.0), [20.0, 10.0, 10.0]);
+        let cover = FeatureKind::Box {
+            corner: point_expr(Vec3::new(4.0, -1.0, -1.0)),
+            length: "22".into(),
+            width: "12".into(),
+            height: "12".into(),
+            operation: Operation::Cut,
+            centred: false,
+        };
+        let c1 = doc.add_feature(cover, Some("Cover")).unwrap();
+        let c2 = doc.add_feature(hole(Vec3::new(40.0, 5.0, 10.0), Vec3::new(0.0, 0.0, -1.0), 4.0), Some("Hole")).unwrap();
+        let mirror = mirror_of(&mut doc, &[c1, c2], PlaneRef::Origin { name: "YZ".into() });
+        let mut model = Model::new();
+        model.evaluate(&doc);
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(super::MAX_JOINED_TOOLS));
+        model.result(mirror).and_then(|r| r.error.clone())
+    };
+    let err_batch = run(super::MAX_JOINED_TOOLS);
+    let err_seq = run(1);
+    assert!(err_batch.as_deref().is_some_and(|e| e.contains("no body to cut")), "{err_batch:?}");
+    assert_eq!(err_batch, err_seq);
+}
