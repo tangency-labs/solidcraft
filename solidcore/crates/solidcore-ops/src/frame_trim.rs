@@ -26,7 +26,8 @@ impl Member {
     /// section's box `lo`..`hi` in the plane's coordinates.
     ///
     /// # Errors
-    /// [`Refusal::Degenerate`] when the line has no length or the box is empty.
+    /// [`Refusal::Degenerate`] when the line has no length, the box is empty, a number is not
+    /// finite or the plane's axes are not unit and square (`solidcore::prism::member::Member::along`).
     pub fn along(
         section: &Plane,
         start: Vec3,
@@ -47,13 +48,7 @@ impl Member {
     /// Its frame, direction, length and section box, field for field.
     #[must_use]
     pub fn data(&self) -> MemberData {
-        MemberData {
-            frame: convert::record_plane(&self.0.frame),
-            dir: convert::record_vec3(self.0.dir),
-            length: self.0.length,
-            lo: convert::record_vec2(self.0.lo),
-            hi: convert::record_vec2(self.0.hi),
-        }
+        convert::frame::record_member(&self.0)
     }
 
     /// The member whose data is `data`, checked as the kernel checks its own members
@@ -61,8 +56,8 @@ impl Member {
     /// makes that member again, field for field.
     ///
     /// # Errors
-    /// [`Refusal::Degenerate`] when the direction is not a unit vector, the length is not above
-    /// zero or the box is empty.
+    /// [`Refusal::Degenerate`] for data [`Member::along`] never gives: a number not finite, a
+    /// plane or direction not unit and square, a length not above zero or an empty box.
     pub fn from_data(data: &MemberData) -> Result<Self, Refusal> {
         km::Member::from_parts(
             convert::plane(&data.frame),
@@ -127,25 +122,6 @@ pub enum TrimRefusal {
     MeetsNone,
 }
 
-/// The record's end choice as the kernel's.
-fn kernel_end(end: End) -> km::End {
-    match end {
-        End::Nearer => km::End::Nearer,
-        End::Start => km::End::Start,
-        End::End => km::End::End,
-    }
-}
-
-/// The record's side as the kernel's.
-fn kernel_side(side: Side) -> km::Side {
-    match side {
-        Side::Right => km::Side::Right,
-        Side::Left => km::Side::Left,
-        Side::Top => km::Side::Top,
-        Side::Bottom => km::Side::Bottom,
-    }
-}
-
 /// The record's ends (start, end) as the kernel's frames.
 fn frames(ends: &[Option<Plane>; 2]) -> [Option<Frame>; 2] {
     ends.each_ref().map(|e| e.as_ref().map(convert::plane))
@@ -157,13 +133,7 @@ fn frames(ends: &[Option<Plane>; 2]) -> [Option<Frame>; 2] {
 /// # Errors
 /// [`Refusal::RunsAlong`] when an end's plane runs along the member.
 pub fn axis(m: &Member, ends: &[Option<Plane>; 2]) -> Result<Axis, Refusal> {
-    let a = km::axis(&m.0, &frames(ends))?;
-    Ok(Axis {
-        centre: convert::record_vec3(a.centre),
-        t0: a.t0,
-        t1: a.t1,
-        length: a.length,
-    })
+    km::axis(&m.0, &frames(ends)).map(|a| convert::frame::record_axis(&a))
 }
 
 /// The range `m`'s section is extruded over for its `ends`, and which ends are then cut at a
@@ -172,12 +142,7 @@ pub fn axis(m: &Member, ends: &[Option<Plane>; 2]) -> Result<Axis, Refusal> {
 /// # Errors
 /// The kernel's refusal: an end facing the wrong way, too far, or ends that cross.
 pub fn extent(m: &Member, ends: &[Option<Plane>; 2]) -> Result<Extent, Refusal> {
-    let e = km::extent(&m.0, &frames(ends))?;
-    Ok(Extent {
-        from: e.from,
-        to: e.to,
-        cut: e.cut,
-    })
+    km::extent(&m.0, &frames(ends)).map(|e| convert::frame::record_extent(&e))
 }
 
 /// Where the ends (start, end) of `m`, now as `ends`, are cut after trimming it to `targets`: each
@@ -213,17 +178,21 @@ pub fn trim(
                 km::butt(
                     &m.0,
                     &axis,
-                    kernel_end(end),
+                    convert::frame::end(end),
                     &member.0,
                     &target_axis,
-                    side.map(kernel_side),
+                    side.map(convert::frame::side),
                     gap,
                 )
                 .map_err(refused)?
             }
-            Target::Plane(plane) => {
-                km::to_plane(&m.0, &axis, kernel_end(end), &convert::plane(plane), gap)
-            }
+            Target::Plane(plane) => km::to_plane(
+                &m.0,
+                &axis,
+                convert::frame::end(end),
+                &convert::plane(plane),
+                gap,
+            ),
         };
         let Some((which, cut)) = cut else { continue };
         if let Some(first) = by.get(which).copied().flatten() {
@@ -235,10 +204,7 @@ pub fn trim(
         }
         if let (Some(slot), Some(e)) = (by.get_mut(which), out.get_mut(which)) {
             *slot = Some(k);
-            *e = Some(Cut {
-                origin: convert::record_vec3(cut.origin),
-                normal: convert::record_vec3(cut.normal),
-            });
+            *e = Some(convert::frame::record_cut(&cut));
         }
     }
     if by.iter().all(Option::is_none) {
