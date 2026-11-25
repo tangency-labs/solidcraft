@@ -7205,7 +7205,8 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
         for (name, a, b) in construction_axis_segments(app).into_iter().chain(hidden_part_axis) {
             let on = sel.iter().any(|x| matches!(x, Sel::Axis { name: n } if *n == name))
                 || matches!(hover, Some(Hit::Axis { name: n }) if *n == name)
-                || browser_lit == Some(name.as_str());
+                || browser_lit == Some(name.as_str())
+                || app.viewport.hover_feature.is_some_and(|id| app.session.doc.features.iter().any(|f| f.id == id && f.name == *name));
             let len = a.dist(b);
             let dash = size * 0.08;
             if let Some(item) = component_origin_item_with(&feature_names, &name) {
@@ -7244,7 +7245,8 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
                 continue;
             }
             let on = sel.iter().any(|x| matches!(x, Sel::ConstructionPoint { name: n } if *n == name))
-                || matches!(hover, Some(Hit::ConstructionPoint { name: n }) if *n == name);
+                || matches!(hover, Some(Hit::ConstructionPoint { name: n }) if *n == name)
+                || app.viewport.hover_feature.is_some_and(|id| app.session.doc.features.iter().any(|f| f.id == id && f.name == *name));
             let col = sc.color(c4(if on { t.sel_edge } else { t.construction_geom }));
             let r = size * 0.04;
             for d in [Vec3::X, Vec3::Y, Vec3::Z] {

@@ -136,10 +136,36 @@ pub(super) fn rows(app: &mut SolveApp, rows: &mut Rows<'_>, component: u64, path
             }
         }
     };
+    let [hover_or_picked, picked] = acts.lit.features_from_view(app);
+    let mut lit_features: BTreeSet<u64> = [hover_or_picked, picked].into_iter().flatten().collect();
+    if compact {
+        lit_features.extend(lit_by_selection(app));
+    }
+    for thing in acts.lit.selected.iter().chain(&acts.lit.hovered) {
+        match thing {
+            Thing::Feature(id) | Thing::Sketch(id) => {
+                lit_features.insert(*id);
+            }
+            _ => {}
+        }
+    }
+    let mark = if acts.lit.any()
+        && app
+            .session
+            .doc
+            .features
+            .iter()
+            .take(shown)
+            .any(|f| f.component == component && (compact || !matches!(f.kind, FeatureKind::Sketch { .. })) && lit_features.contains(&f.id))
+    {
+        Mark::Branch
+    } else {
+        Mark::None
+    };
     let r = node_row(
         rows,
         Spec { key: &key, ..Default::default() },
-        Row { depth, fold: Some(open), icon: "folder", label, status, status_tip: tip.as_ref(), ..Default::default() },
+        Row { depth, fold: Some(open), icon: "folder", label, status, status_tip: tip.as_ref(), mark, ..Default::default() },
     );
     if r.fold || r.clicked {
         toggle(app, &key, compact);
@@ -164,13 +190,9 @@ pub(super) fn rows(app: &mut SolveApp, rows: &mut Rows<'_>, component: u64, path
             .collect(),
     };
     let here = Here { component, path, scope: &scope, body_row: None };
-    // The feature that made what is under the cursor or picked in the viewport, as the history
-    // lights it, and in the history layout what a selected history row lights.
-    let from_view = acts.lit.features_from_view(app);
-    let lit = if compact { lit_by_selection(app) } else { BTreeSet::new() };
     let mark = |app: &SolveApp, index: usize| {
         let id = app.session.doc.features.get(index).map(|f| f.id);
-        if id.is_some_and(|id| lit.contains(&id) || from_view.contains(&Some(id))) { Mark::Here } else { Mark::None }
+        if id.is_some_and(|id| lit_features.contains(&id)) { Mark::Here } else { Mark::None }
     };
     // Only the rows in view, and one either side, are built; the others only take their place
     // (#14850). One order key buffer serves every row passed over.
