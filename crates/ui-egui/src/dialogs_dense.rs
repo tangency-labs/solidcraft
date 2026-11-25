@@ -94,6 +94,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::FrameTrim(_) => Some("frame.trim"),
         Kind::Gusset(_) => Some("frame.gusset"),
         Kind::FramePlate(_) => Some("frame.plate"),
+        Kind::Pulley(_) => Some("pulley.insert"),
         Kind::Plastic(k) => match k {
             crate::dialogs_plastic::Pl::SnapFit { .. } => Some("plastic.snap_fit"),
             crate::dialogs_plastic::Pl::Assign { .. } => Some("plastic.assign_rule"),
@@ -479,6 +480,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         ui_kit::text(ui, &hint, ui_kit::Text::Hint("auto"));
     }
     placement_row(d, ui, app);
+    crate::dialogs_sweep::grow_loft_rails(d);
     if crate::hole_refs::takes(d) {
         // Each reference edge with its distance (#37, #6380).
         enter |= crate::hole_refs::input_rows(d, ui, &app.session, app.preferences.origin_plane_names, app.preferences.length_decimals);
@@ -494,6 +496,13 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
     } else if matches!(d.kind, Kind::Frame(_)) {
         // Corner Overrides shows among Frame Member's own rows, under the corner settings.
         input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 0..2);
+    } else if matches!(d.kind, Kind::Loft { .. } | Kind::Surface(crate::dialogs_surface::Surf::Loft { .. })) && d.inputs.len() > 5 {
+        // More than four rails: the rail rows share one list that scrolls, about four in view (#12185).
+        let rail_list_height = Tokens::get().control_height * 4.5;
+        input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 0..1);
+        egui::ScrollArea::vertical().id_salt("loft_rails").max_height(rail_list_height).show(ui, |ui| {
+            input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 1..d.inputs.len());
+        });
     } else {
         input_rows(d, ui, &app.session, app.preferences.origin_plane_names);
         crate::command_sketch::offer_row(app, d, ui);
@@ -561,7 +570,10 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             }
             ui_kit::row(ui, tr("ui.sketch_intersect_projection_link"), |ui| ui_kit::checkbox(ui, "", projection_link));
         }
-        Kind::SketchModify(k) => enter |= crate::sketch_modify_ui::rows(ui, k, &app.session.doc),
+        Kind::SketchModify(k) => {
+            let two_parallel_lines = crate::sketch_modify_ui::picks_two_parallel_lines(app, &d.inputs);
+            enter |= crate::sketch_modify_ui::rows(ui, k, &app.session.doc, two_parallel_lines);
+        }
         Kind::Text(k) => enter |= crate::sketch_text::rows(ui, k, &mut d.inputs, &mut d.active),
         Kind::TextMove(k) => enter |= crate::sketch_text_move::rows(ui, k),
         Kind::EditParam { name, expr } => {
@@ -1426,11 +1438,21 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 }
             });
         }
-        Kind::Surface(k) => enter |= crate::dialogs_surface::rows(ui, k, &mut d.inputs, &mut d.active),
+        Kind::Surface(k) => {
+            enter |= crate::dialogs_surface::rows(ui, k, &mut d.inputs, &mut d.active);
+            // Extend's Distance drops a kept plane or face (one the dialog couldn't pick), so
+            // going back to To Object needs a new pick; the null clears it from the feature.
+            if matches!(k, crate::dialogs_surface::Surf::Extend { to_object: false, .. })
+                && d.extra.get("up_to").is_some_and(|v| !v.is_null() && v != "bounds")
+            {
+                d.extra.insert("up_to".into(), Value::Null);
+            }
+        }
         Kind::Sheet(k) => enter |= crate::dialogs_sheet::rows(app, ui, k, &mut d.inputs),
         Kind::Plastic(k) => enter |= crate::dialogs_plastic::rows(app, ui, k, &d.inputs),
         Kind::Frame(_) => enter |= crate::dialogs_frame::rows(app, ui, d),
         Kind::EndCap(k) => enter |= crate::dialogs_end_cap::rows(app, ui, k, &d.inputs),
+        Kind::Pulley(k) => enter |= crate::dialogs_pulley::rows(app, ui, k),
         Kind::RotateMember(k) => enter |= crate::dialogs_rotate_member::rows(app, ui, k, &mut d.inputs),
         Kind::FrameTrim(k) => enter |= crate::dialogs_frame::trim_rows(ui, k),
         Kind::Gusset(k) => enter |= crate::dialogs_gusset::rows(app, ui, k),

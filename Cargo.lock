@@ -6554,6 +6554,7 @@ dependencies = [
  "thiserror 2.0.21",
  "ttf-parser",
  "unicode-bidi",
+ "winreg",
 ]
 
 [[package]]
@@ -6596,6 +6597,7 @@ name = "solidcraft-ui-egui"
 version = "0.49.1"
 dependencies = [
  "arboard",
+ "craft-plugin",
  "egui",
  "egui-wgpu",
  "flate2",
@@ -6608,6 +6610,7 @@ dependencies = [
  "nix 0.31.3",
  "pollster 0.4.0",
  "proc-macro2",
+ "quote",
  "semver",
  "serde",
  "serde_json",

@@ -422,15 +422,19 @@ pub use repair::RepairRefusal;
 pub use repair::RepairReport;
 pub use repair::SewnGap;
 pub use repair::repair;
+pub use route::CELL_GRID_LIMITS;
 pub use route::Which;
 pub use route::boolean;
 pub use route::box_solid;
+pub use route::cell_regions;
 pub use route::chamfer;
 pub use route::chamfer_sides;
 pub use route::cylinder;
+pub use route::default_cell_grid;
 pub use route::extrude;
 pub use route::fillet;
 pub use route::offset_faces;
+pub use route::plan_cell_grid;
 pub use route::revolve;
 pub use route::revolve_whole;
 pub use route::shell;
@@ -623,6 +627,10 @@ pub enum KernelError {
 }
 
 pub type Result<T> = std::result::Result<T, KernelError>;
+
+/// Most guide rails a loft takes. solidcore states the same limit (`solidcore::sweep::loft_rails`);
+/// the kernel does not depend on solidcore, so the number is repeated here.
+pub const MAX_LOFT_RAILS: usize = 16;
 
 /// The mesher's error as the kernel's: the same words.
 impl From<solidcore_tess::TessError> for KernelError {

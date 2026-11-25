@@ -32,6 +32,7 @@ use solidcore::topology::brep::p3::{
 };
 use solidcore::topology::edgeuse::p1 as eu1;
 use solidcore::topology::face::p2::{self as face_p2, face_side_regions};
+use solidcore::topology::face::p4 as face_p4;
 use solidcore::topology::loopuse::loop_edges;
 use solidcore::topology::proto_topology::p1::CopyBrepMap;
 use solidcore::topology::{edge, face, vertex};
@@ -1503,9 +1504,109 @@ impl Body {
         })?
     }
 
+    /// The body's topology in `order`'s indices ([`Adjacency`]): each face's edges, each edge's
+    /// faces and end vertices, each vertex's point, read in one pass. For an application that
+    /// reads what its operations did face by face and edge by edge (its construction history)
+    /// without a call per entity. The body is only read.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an entity of the body that `order` does not hold; any other
+    /// kernel error.
+    pub fn adjacency(&self, order: &Order) -> Result<Adjacency> {
+        let at = |list: &[EdgeId], e: EdgeId| list.iter().position(|&x| x == e);
+        read_body("adjacency", self, |_, b| {
+            let mut face_edges = Vec::with_capacity(order.faces.len());
+            for &f in &order.faces {
+                let mut edges = Vec::new();
+                for e in face_p4::edges(b, f, None, false, None)? {
+                    let Some(i) = at(&order.edges, e) else {
+                        return Ok(Err(Error::Argument));
+                    };
+                    edges.push(i);
+                }
+                face_edges.push(edges);
+            }
+            let mut edge_faces = Vec::with_capacity(order.edges.len());
+            let mut edge_vertices = Vec::with_capacity(order.edges.len());
+            for &e in &order.edges {
+                let mut faces = Vec::new();
+                for f in edge::faces(b, e, None)? {
+                    let Some(i) = order.faces.iter().position(|&x| x == f) else {
+                        return Ok(Err(Error::Argument));
+                    };
+                    faces.push(i);
+                }
+                edge_faces.push(faces);
+                let ends = match edge::start_end_vertices(b, e)? {
+                    (Some(s), Some(t)) => {
+                        let index = |v: VertexId| order.vertices.iter().position(|&x| x == v);
+                        let (Some(s), Some(t)) = (index(s), index(t)) else {
+                            return Ok(Err(Error::Argument));
+                        };
+                        Some([s, t])
+                    }
+                    _ => None,
+                };
+                edge_vertices.push(ends);
+            }
+            let mut vertex_points = Vec::with_capacity(order.vertices.len());
+            for &v in &order.vertices {
+                vertex_points.push(array(b.vertex(v)?.point));
+            }
+            Ok(Ok(Adjacency {
+                face_edges,
+                edge_faces,
+                edge_vertices,
+                vertex_points,
+            }))
+        })?
+    }
+
+    /// Points along each edge of `order`, at each of `fractions` of the way along its parameter
+    /// interval (`lo + t (hi - lo)` for `t` in `fractions`, in their order: 0 is the start and 1
+    /// the end), the kernel's evaluation of its curve there. An edge with no curve, or whose
+    /// curve the kernel answers with a status at any of them, has none (an empty list). For an
+    /// application that records where an edge lay, to tell later whether an edit moved it. The
+    /// body is only read.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for a fraction that is not finite; any other kernel error.
+    pub fn edge_samples(&self, order: &Order, fractions: &[f64]) -> Result<Vec<Vec<[f64; 3]>>> {
+        if !fractions.iter().all(|t| t.is_finite()) {
+            return Err(Error::Argument);
+        }
+        read_body("edge_samples", self, |k, b| {
+            let mut out = Vec::with_capacity(order.edges.len());
+            for &e in &order.edges {
+                let ed = b.edge(e)?;
+                let Some(curve) = ed.curve.as_ref() else {
+                    out.push(Vec::new());
+                    continue;
+                };
+                let (lo, hi) = (ed.interval.min(), ed.interval.max());
+                let mut points = Vec::with_capacity(fractions.len());
+                for &t in fractions {
+                    let Some(v) = answer(curve.evaluate(k, along(lo, hi, t), 0, true, false))?
+                    else {
+                        points.clear();
+                        break;
+                    };
+                    let Some(v) = v.first() else {
+                        points.clear();
+                        break;
+                    };
+                    points.push([v.x, v.y, v.z]);
+                }
+                out.push(points);
+            }
+            Ok(out)
+        })
+    }
+
     /// The loops of record face `face`, each as the record edges it runs along (through `order`),
     /// in the order the loop runs: the loops as the kernel lists them on the face's primary use,
-    /// the outer loop first and then the holes. A loop of a lone vertex has no edges. An
+    /// the outer loop first and then the holes. An edge a loop runs along twice (a seam) is
+    /// listed once, where the loop first meets it. A loop of a lone vertex has no edges. An
     /// application that names a hole by a pick reads the hole's edges here, and measures them
     /// with [`Body::edge_closest_point`].
     ///
@@ -1992,6 +2093,30 @@ impl Body {
         }
         Ok(points)
     }
+}
+
+/// A body's topology in an [`Order`]'s indices ([`Body::adjacency`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Adjacency {
+    /// Per face, its edges loop by loop as the kernel lists them on the face's upward use, each
+    /// once within a loop (an edge two of its loops share, as a seam, twice).
+    pub face_edges: Vec<Vec<usize>>,
+    /// Per edge, the distinct faces its uses lie on, in the kernel's order of its uses.
+    pub edge_faces: Vec<Vec<usize>>,
+    /// Per edge, its start and end vertices; `None` for an edge without both.
+    pub edge_vertices: Vec<Option<[usize; 2]>>,
+    /// Per vertex, its point.
+    pub vertex_points: Vec<[f64; 3]>,
+}
+
+/// The parameter `t` of the way along `[lo, hi]`, as `lo + t (hi - lo)`: a sample position the
+/// application chose ([`Body::edge_samples`]).
+#[allow(
+    clippy::float_arithmetic,
+    reason = "a sample parameter the caller chooses, not a geometric quantity (docs/layers.md)"
+)]
+fn along(lo: f64, hi: f64, t: f64) -> f64 {
+    lo + t * (hi - lo)
 }
 
 /// The most points [`Body::edge_points`] gives along one edge.
@@ -3735,6 +3860,74 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn adjacency_is_a_boxs_topology() {
+        // a box: six faces of four edges, each edge between two faces and two corners
+        all_fixes();
+        let b = make_box([0.0, 0.0, 0.0], [1.0, 2.0, 3.0]).unwrap();
+        let o = kernel_order(&b);
+        let a = b.adjacency(&o).unwrap();
+        assert_eq!(
+            (
+                a.face_edges.len(),
+                a.edge_faces.len(),
+                a.vertex_points.len()
+            ),
+            (6, 12, 8)
+        );
+        for (f, edges) in a.face_edges.iter().enumerate() {
+            assert_eq!(edges.len(), 4, "face {f}");
+            for &e in edges {
+                assert!(a.edge_faces[e].contains(&f), "edge {e} of face {f}");
+            }
+        }
+        for (e, faces) in a.edge_faces.iter().enumerate() {
+            assert_eq!(faces.len(), 2, "edge {e}");
+            let [s, t] = a.edge_vertices[e].unwrap();
+            assert_ne!(s, t);
+            // the corners are the box's
+            for p in [a.vertex_points[s], a.vertex_points[t]] {
+                assert!(
+                    p.iter()
+                        .zip([1.0, 2.0, 3.0])
+                        .all(|(x, m)| *x == 0.0 || *x == m),
+                    "{p:?}"
+                );
+            }
+        }
+        // an order that does not hold the body's edges
+        let short = Order {
+            edges: Vec::new(),
+            ..o.clone()
+        };
+        assert_eq!(b.adjacency(&short), Err(Error::Argument));
+    }
+
+    #[test]
+    fn edge_samples_run_from_start_to_end() {
+        // a box's edges are lines: the samples at 0 and 1 are its corners, the one at a half
+        // its middle
+        all_fixes();
+        let b = make_box([0.0, 0.0, 0.0], [1.0, 2.0, 3.0]).unwrap();
+        let o = kernel_order(&b);
+        let a = b.adjacency(&o).unwrap();
+        let samples = b.edge_samples(&o, &[0.0, 1.0, 0.5]).unwrap();
+        assert_eq!(samples.len(), 12);
+        let near = |p: [f64; 3], q: [f64; 3]| p.iter().zip(q).all(|(x, y)| (x - y).abs() <= 1e-12);
+        for (e, s) in samples.iter().enumerate() {
+            let [v0, v1] = a.edge_vertices[e].unwrap();
+            assert_eq!(s.len(), 3, "edge {e}");
+            assert!(near(s[0], a.vertex_points[v0]), "edge {e} start {:?}", s[0]);
+            assert!(near(s[1], a.vertex_points[v1]), "edge {e} end {:?}", s[1]);
+            assert!(near(s[2], b.edge_middle(&o, e).unwrap()), "edge {e} middle");
+        }
+        assert_eq!(b.edge_samples(&o, &[f64::NAN]), Err(Error::Argument));
+        assert_eq!(
+            b.edge_samples(&o, &[]).unwrap(),
+            vec![Vec::<[f64; 3]>::new(); 12]
+        );
+    }
+
+    #[test]
     fn face_loops_are_the_outer_loop_then_the_holes() {
         // the corpus's block 20 x 20 x 10 with a round hole through it: record face 0 (the top)
         // has an outer loop of edges 0-3 and a hole of edge 4; a box's top face has its four
@@ -3748,6 +3941,26 @@ pub(crate) mod tests {
         assert_eq!(outer, vec![0, 1, 2, 3]);
         assert_eq!(loops[1], vec![4]);
         assert_eq!(b.face_loops(&o, o.faces.len()), Err(Error::Argument));
+        // each loop of the block's faces runs edge to edge: consecutive edges, the last and the
+        // first included, share a vertex (a loop with a closed edge, a circle or a seam's
+        // neighbours, is left out)
+        let (record, ro) = b.to_record().unwrap();
+        let ends = |e: usize| record.edges[e].vertices;
+        for f in 0..ro.faces.len() {
+            for l in b.face_loops(&ro, f).unwrap() {
+                if l.len() < 2 || l.iter().any(|&e| ends(e)[0] == ends(e)[1]) {
+                    continue;
+                }
+                for (i, &e) in l.iter().enumerate() {
+                    let next = l[(i + 1) % l.len()];
+                    let shared = ends(e).iter().any(|v| ends(next).contains(v));
+                    assert!(
+                        shared,
+                        "face {f}: edges {e} and {next} of {l:?} do not meet"
+                    );
+                }
+            }
+        }
         all_fixes();
         let bx = make_box([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap();
         let bo = kernel_order(&bx);

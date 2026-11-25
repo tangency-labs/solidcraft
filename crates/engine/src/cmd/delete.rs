@@ -831,6 +831,7 @@ mod tests {
             place: ViewPlace::At([100.0, 100.0]),
             settings: ViewOverrides::default(),
             reference_shown_percent: 0.0,
+            centre_marks: None,
             label: None,
         };
         d.add_views([Arc::new(on_other)]);
@@ -917,7 +918,16 @@ mod tests {
         let line = CuttingLine::new(SectionKind::Full, vec![Vec2::new(-30.0, 0.0), Vec2::new(30.0, 0.0)], ArrowSide::Right).unwrap();
         let kind = ViewKind::Section { parent: front, line };
         let place = ViewPlace::At([300.0, 60.0]);
-        let cut = View { id, sheet: d.sheets[0].id, kind, place, settings: ViewOverrides::default(), reference_shown_percent: 0.0, label: None };
+        let cut = View {
+            id,
+            sheet: d.sheets[0].id,
+            kind,
+            place,
+            settings: ViewOverrides::default(),
+            reference_shown_percent: 0.0,
+            centre_marks: None,
+            label: None,
+        };
         d.add_views([Arc::new(cut)]);
         s.doc_mut().put_drawing(Arc::new(d));
         let e = s.execute("selection.delete", &json!({"items": [item(drawing, front)]})).unwrap_err().to_string();
