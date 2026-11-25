@@ -7,8 +7,8 @@ came from, so a number that changes is a one-line edit, and a rule whose pages d
 
 The built-in profiles are `assets/sheet-metal/shop-rules.json`: `generic` (what PCBWay, JLCCNC
 and SendCutSend ask in common, taken strictly), `pcbway`, `jlccnc` and `sendcutsend`. Every value
-there was read on 2026-11-25 from page summaries, so each needs a spot check against the shop's
-page before you rely on it; the file says so. `sheet.check_shop` also takes a profile as an object,
+there was checked against the shop's own page on 2026-11-25; a profile's note names the few
+values that still need a spot check. `sheet.check_shop` also takes a profile as an object,
 or the path of a file holding one (a path ends in `.json`). Profiles are read only from files you
 name; SolidCraft never fetches one.
 

@@ -1,12 +1,12 @@
 {
   "format": "solidcraft-shop-rules",
   "version": 1,
-  "note": "Fabrication shop rules read 2026-11-25. Each value carries the page it came from, in our own words. The values came from page summaries: spot check each against the shop's page before relying on it.",
+  "note": "Fabrication shop rules, each value checked against its shop page on 2026-11-25 and carrying that page in our own words. A profile note names any value still to spot check.",
   "profiles": [
     {
       "id": "generic",
       "name": "Generic",
-      "note": "What the three shops read here (PCBWay, JLCCNC, SendCutSend) ask in common, taken strictly: a part that passes should be accepted by any of them. It has no stock list or sheet size, which differ. Values came from page summaries and need a spot check against the shops' pages before you rely on them.",
+      "note": "What the three shops read here (PCBWay, JLCCNC, SendCutSend) ask in common, taken strictly: a part that passes should be accepted by any of them. It has no stock list or sheet size, which differ. Values were checked against the pages on 2026-11-25. A spot check is still wanted for PCBWay's hole to bend, which one page measures to the bend line and the other to the bend region; the default here (to where the bend starts) is the stricter reading.",
       "rules": [
         {
           "id": "file.one_body",
@@ -14,12 +14,12 @@
             {
               "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/sheet-cutting.html",
               "read": "2026-11-25",
-              "says": "one solid sheet-metal body per STEP file"
+              "says": "each STEP file holds exactly one solid sheet-metal body; multi-body solids and assemblies are not processed in one part file"
             },
             {
               "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
               "read": "2026-11-25",
-              "says": "one solid sheet-metal body per file"
+              "says": "the STEP file holds a single solid sheet-metal body; files with several bodies or assemblies do not upload"
             }
           ]
         },
@@ -29,12 +29,12 @@
             {
               "url": "https://jlccnc.com/help/article/sheet-metal-fabrication-file-requirements",
               "read": "2026-11-25",
-              "says": "one thickness for every feature of a one-piece bent part"
+              "says": "for a part bent in one piece, every feature is modelled at the same sheet thickness; thicknesses are the listed stock"
             },
             {
               "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
               "read": "2026-11-25",
-              "says": "uniform thickness, modelled at stock thickness"
+              "says": "thickness is uniform, with a face at every edge, and modelled at the stock thickness that will be ordered"
             }
           ]
         },
@@ -50,17 +50,17 @@
                 {
                   "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/sheet-cutting.html",
                   "read": "2026-11-25",
-                  "says": "laser holes at least half the thickness"
+                  "says": "laser holes at least 0.5 times the thickness (capability table), at least 50% of the thickness in the guide"
                 },
                 {
                   "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
                   "read": "2026-11-25",
-                  "says": "laser holes at least half the material thickness"
+                  "says": "laser holes and cut-outs at least 50% of the material thickness; the exact figure per material is on each material page"
                 },
                 {
                   "url": "https://jlccnc.com/help/article/sheet-metal-fabrication-guidelines",
                   "read": "2026-11-25",
-                  "says": "at least half the thickness"
+                  "says": "cutting holes at least half the sheet thickness"
                 }
               ]
             },
@@ -70,12 +70,7 @@
                 {
                   "url": "https://jlccnc.com/help/article/sheet-metal-fabrication-guidelines",
                   "read": "2026-11-25",
-                  "says": "and at least 1 mm for cutting"
-                },
-                {
-                  "url": "https://jlccnc.com/sheet-metal-fabrication",
-                  "read": "2026-11-25",
-                  "says": "1 mm floor on the capability page"
+                  "says": "cutting holes also at least 1 mm across, whatever the thickness"
                 }
               ]
             }
@@ -93,7 +88,7 @@
                 {
                   "url": "https://jlccnc.com/blog/sheet-metal-design",
                   "read": "2026-11-25",
-                  "says": "1.5 times the thickness (blog)"
+                  "says": "hole edge to sheet edge at least 1.5 times the thickness; more for heavily formed or loaded parts (blog)"
                 }
               ]
             },
@@ -104,7 +99,7 @@
                 {
                   "url": "https://sendcutsend.com/materials/5052-aluminum/",
                   "read": "2026-11-25",
-                  "says": "2 times the thickness (one material page)"
+                  "says": "a hole at least 2 times the thickness from an edge (this one material page; the guideline page gives no figure)"
                 }
               ]
             }
@@ -122,12 +117,12 @@
                 {
                   "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/bending.html",
                   "read": "2026-11-25",
-                  "says": "2 times the thickness"
+                  "says": "holes at least 2 times the thickness from the bend line as a starting point; the page adds that the hole edge to the bend region is what counts, and that tight radii or large holes call for more"
                 },
                 {
                   "url": "https://jlccnc.com/blog/sheet-metal-design",
                   "read": "2026-11-25",
-                  "says": "2 times the thickness in its rules table"
+                  "says": "hole edge to the bend tangent line at least 2 times the thickness (rules table; its mistakes table says 1.5 to 2 times)"
                 }
               ]
             },
@@ -139,7 +134,7 @@
                 {
                   "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/sheet-cutting.html",
                   "read": "2026-11-25",
-                  "says": "2 times the thickness plus the bend radius"
+                  "says": "hole to bend line at least 2 times the thickness plus the bend radius (formula in the bending section)"
                 }
               ]
             }
@@ -157,7 +152,7 @@
                 {
                   "url": "https://jlccnc.com/blog/sheet-metal-design",
                   "read": "2026-11-25",
-                  "says": "3 times the thickness, varies with tooling"
+                  "says": "flange at least 3 times the thickness; varies with press brake tooling and die width"
                 }
               ]
             },
@@ -168,7 +163,7 @@
                 {
                   "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/sheet-cutting.html",
                   "read": "2026-11-25",
-                  "says": "4 times the thickness"
+                  "says": "minimum flange length is 4 times the thickness, so the flange sits stably on the lower die"
                 }
               ]
             }
@@ -180,12 +175,12 @@
             {
               "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/tapping.html",
               "read": "2026-11-25",
-              "says": "model the pilot hole, not the thread"
+              "says": "the tap-size pilot hole is what goes in the 2D or 3D model (a drill chart is given); the page does not say to model the thread itself"
             },
             {
               "url": "https://sendcutsend.com/services/tapping/",
               "read": "2026-11-25",
-              "says": "threads are not modelled; a plain hole at the tap size"
+              "says": "model a plain hole at the size listed for the tap; the laser-cut hole is resized to the drill size automatically"
             }
           ],
           "wanted": "plain"
@@ -196,12 +191,12 @@
             {
               "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/Laser-Cutting.html",
               "read": "2026-11-25",
-              "says": "cut paths go on one designated cut layer"
+              "says": "all final cut paths go on one designated cut layer; construction geometry and notes go on other layers or are deleted"
             },
             {
               "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
               "read": "2026-11-25",
-              "says": "all cut geometry goes on a single layer"
+              "says": "all cut-path geometry on the same layer; guides and construction lines moved off it or deleted"
             }
           ]
         },
@@ -211,12 +206,12 @@
             {
               "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/Laser-Cutting.html",
               "read": "2026-11-25",
-              "says": "every cut path is closed; duplicate, overlapping and intersecting entities are deleted"
+              "says": "every cut path forms a fully closed shape; duplicate, overlapping and intersecting entities are deleted"
             },
             {
               "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
               "read": "2026-11-25",
-              "says": "all cut paths are closed, with no intersecting or overlapping lines"
+              "says": "every cut path is a closed shape; no shared or overlapping lines inside a part"
             }
           ]
         },
@@ -226,12 +221,12 @@
             {
               "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/Laser-Cutting.html",
               "read": "2026-11-25",
-              "says": "text is converted to vector outlines"
+              "says": "all text converted to vector outlines; editable text cannot be recognised as cutting geometry"
             },
             {
               "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
               "read": "2026-11-25",
-              "says": "text is sent as outlines"
+              "says": "text converted to outlines; text that can still be edited does not cut"
             }
           ]
         }
@@ -240,7 +235,7 @@
     {
       "id": "pcbway",
       "name": "PCBWay",
-      "note": "From PCBWay's sheet metal pages. Values came from page summaries and need a spot check. Its pages disagree in places (thickness range, hole to bend, flange): those rules are marked and the strictest value is used.",
+      "note": "From PCBWay's sheet metal pages, checked against them on 2026-11-25. Its pages disagree in places (thickness range, hole to bend, flange): those rules are marked and the strictest value is used. A spot check is still wanted for the general hole-to-edge rule, whose page text gives only 0.5 mm in a table and calls it thread-dependent elsewhere; hole to bend, measured here to where the bend starts. Its hardware rule is left out: no page says how hardware is modelled. Aluminium, titanium and copper sheets are smaller than the 3000 by 1500 mm given.",
       "rules": [
         {
           "id": "file.one_body",
@@ -248,12 +243,7 @@
             {
               "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/sheet-cutting.html",
               "read": "2026-11-25",
-              "says": "one solid sheet-metal body per STEP file"
-            },
-            {
-              "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/Laser-Cutting.html",
-              "read": "2026-11-25",
-              "says": "one single-part file per upload"
+              "says": "each STEP file holds exactly one solid sheet-metal body; multi-body solids and assemblies are not processed in one part file"
             }
           ]
         },
@@ -268,17 +258,17 @@
                 {
                   "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/Laser-Cutting.html",
                   "read": "2026-11-25",
-                  "says": "cutting 0.1 to 10 mm, bending 0.1 to 6 mm"
+                  "says": "process table: cutting 0.1 to 10 mm, bending 0.1 to 6 mm"
                 },
                 {
                   "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/bending.html",
                   "read": "2026-11-25",
-                  "says": "bending 0.1 to 10 mm"
+                  "says": "bending page header gives 0.1 to 10 mm for its materials, with no separate bending limit; no list of stock sizes"
                 },
                 {
                   "url": "https://www.pcbway.com/rapid-prototyping/sheet-metal/",
                   "read": "2026-11-25",
-                  "says": "table gives 0.5 to 10 mm cutting and 0.5 to 6 mm bending; no list of stock sizes is published"
+                  "says": "process table: cutting 0.5 to 10 mm, bending 0.5 to 6 mm; no list of stock sizes"
                 }
               ]
             }
@@ -295,12 +285,12 @@
                 {
                   "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/bending.html",
                   "read": "2026-11-25",
-                  "says": "3000 by 1500 mm"
+                  "says": "largest flat part for bending 3000 by 1500 mm; raw sheets are smaller for aluminium and titanium (1220 by 2440 mm) and copper (600 by 1500 mm), with a 5 mm margin at each sheet edge"
                 },
                 {
                   "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/sheet-cutting.html",
                   "read": "2026-11-25",
-                  "says": "3000 by 1500 mm; smaller sheets for aluminium, titanium and copper"
+                  "says": "largest part 3000 by 1500 mm (capability table); no per-material sizes on this page"
                 }
               ]
             }
@@ -318,12 +308,12 @@
                 {
                   "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/sheet-cutting.html",
                   "read": "2026-11-25",
-                  "says": "at least half the thickness; no absolute minimum stated"
+                  "says": "laser holes at least 0.5 times the thickness (capability table) and at least 50% of the thickness in the guide; no absolute minimum stated"
                 },
                 {
                   "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/Laser-Cutting.html",
                   "read": "2026-11-25",
-                  "says": "at least half the thickness"
+                  "says": "general guideline: hole or cut-out at least 50% of the thickness; the real limit varies with material and may need engineering review"
                 }
               ]
             }
@@ -340,7 +330,7 @@
                 {
                   "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/sheet-cutting.html",
                   "read": "2026-11-25",
-                  "says": "0.5 mm in a table; the general edge rule is an image that could not be read"
+                  "says": "capability table: hole to edge 0.5 mm; the sizing panel at the top of the same page says thread-dependent, and no general rule is in the page text"
                 }
               ]
             }
@@ -358,7 +348,7 @@
                 {
                   "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/bending.html",
                   "read": "2026-11-25",
-                  "says": "2 times the thickness"
+                  "says": "holes at least 2 times the thickness from the bend line as a starting point; the page adds that the hole edge to the bend region is what counts, and that tight radii or large holes call for more"
                 }
               ]
             },
@@ -370,7 +360,7 @@
                 {
                   "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/sheet-cutting.html",
                   "read": "2026-11-25",
-                  "says": "2 times the thickness plus the bend radius"
+                  "says": "hole to bend line at least 2 times the thickness plus the bend radius (formula in the bending section)"
                 }
               ]
             }
@@ -388,7 +378,7 @@
                 {
                   "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/sheet-cutting.html",
                   "read": "2026-11-25",
-                  "says": "4 times the thickness"
+                  "says": "minimum flange length is 4 times the thickness, so the flange sits stably on the lower die"
                 }
               ]
             },
@@ -399,7 +389,7 @@
                 {
                   "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/bending.html",
                   "read": "2026-11-25",
-                  "says": "2.5 to 4 times the thickness"
+                  "says": "flange length generally recommended at 2.5 to 4 times the thickness (and over half the punch tip width); the same page gives the standard minimum bend height as about 4 times, and 3 mm possible for 1 mm sheet or less"
                 }
               ]
             }
@@ -411,18 +401,7 @@
             {
               "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/tapping.html",
               "read": "2026-11-25",
-              "says": "model a pilot hole, not the thread; give the thread at the quote"
-            }
-          ],
-          "wanted": "plain"
-        },
-        {
-          "id": "hardware.modelling",
-          "sources": [
-            {
-              "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/hardware-insertion.html",
-              "read": "2026-11-25",
-              "says": "hardware is named at the order: part, place, material, side"
+              "says": "the tap-size pilot hole is what goes in the 2D or 3D model (a drill chart is given); the page does not say to model the thread itself"
             }
           ],
           "wanted": "plain"
@@ -433,7 +412,7 @@
             {
               "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/Laser-Cutting.html",
               "read": "2026-11-25",
-              "says": "cut paths go on one designated cut layer"
+              "says": "all final cut paths go on one designated cut layer; construction geometry and notes go on other layers or are deleted"
             }
           ]
         },
@@ -443,7 +422,7 @@
             {
               "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/Laser-Cutting.html",
               "read": "2026-11-25",
-              "says": "every cut path is closed; duplicate, overlapping and intersecting entities are deleted"
+              "says": "every cut path forms a fully closed shape; duplicate, overlapping and intersecting entities are deleted"
             }
           ]
         },
@@ -453,7 +432,7 @@
             {
               "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/Laser-Cutting.html",
               "read": "2026-11-25",
-              "says": "text is converted to vector outlines"
+              "says": "all text converted to vector outlines; editable text cannot be recognised as cutting geometry"
             }
           ]
         }
@@ -462,7 +441,7 @@
     {
       "id": "jlccnc",
       "name": "JLCCNC",
-      "note": "From JLCCNC's help pages and design blog. Values came from page summaries and need a spot check. Its blog gives a hole minimum of 1 times the thickness where the help page says half: both are kept and the strictest used.",
+      "note": "From JLCCNC's help pages and design blog, checked against them on 2026-11-25. Its blog gives a hole minimum of 1 times the thickness where the help page says half: both are kept and the strictest used. A spot check is still wanted for hole to edge, which only the blog gives; the help pages leave hole to bend to platform limits.",
       "rules": [
         {
           "id": "file.one_body",
@@ -470,7 +449,7 @@
             {
               "url": "https://jlccnc.com/help/article/sheet-metal-fabrication-file-requirements",
               "read": "2026-11-25",
-              "says": "no extra reference parts or hidden solids in the model"
+              "says": "the file holds no extra reference parts or hidden invalid solids; a sheet-metal assembly is one STEP file"
             }
           ]
         },
@@ -480,7 +459,7 @@
             {
               "url": "https://jlccnc.com/help/article/sheet-metal-fabrication-file-requirements",
               "read": "2026-11-25",
-              "says": "one thickness for every feature of a one-piece bent part, from the listed stock"
+              "says": "for a part bent in one piece, every feature is modelled at the same sheet thickness; thicknesses are the listed stock"
             }
           ]
         },
@@ -505,12 +484,12 @@
                 {
                   "url": "https://jlccnc.com/sheet-metal-fabrication",
                   "read": "2026-11-25",
-                  "says": "0.5 to 6 mm"
+                  "says": "capability table lists 0.5, 0.8, 1.0, 1.2, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0 and 6.0 mm"
                 },
                 {
                   "url": "https://jlccnc.com/help/article/sheet-metal-fabrication-file-requirements",
                   "read": "2026-11-25",
-                  "says": "thicknesses limited to the listed stock"
+                  "says": "model at the available thicknesses, the same eleven values from 0.5 to 6 mm"
                 }
               ]
             }
@@ -526,7 +505,7 @@
                 {
                   "url": "https://jlccnc.com/sheet-metal-fabrication",
                   "read": "2026-11-25",
-                  "says": "longest side 800 mm; no width given"
+                  "says": "capability table: maximum length 800 mm; no width given"
                 }
               ]
             }
@@ -545,7 +524,7 @@
                 {
                   "url": "https://jlccnc.com/help/article/sheet-metal-fabrication-guidelines",
                   "read": "2026-11-25",
-                  "says": "at least half the thickness"
+                  "says": "cutting holes at least half the sheet thickness"
                 }
               ]
             },
@@ -555,12 +534,7 @@
                 {
                   "url": "https://jlccnc.com/help/article/sheet-metal-fabrication-guidelines",
                   "read": "2026-11-25",
-                  "says": "and at least 1 mm"
-                },
-                {
-                  "url": "https://jlccnc.com/sheet-metal-fabrication",
-                  "read": "2026-11-25",
-                  "says": "1 mm floor"
+                  "says": "cutting holes also at least 1 mm across, whatever the thickness"
                 }
               ]
             },
@@ -571,7 +545,7 @@
                 {
                   "url": "https://jlccnc.com/blog/sheet-metal-design",
                   "read": "2026-11-25",
-                  "says": "blog: at least the thickness"
+                  "says": "blog rules table: hole diameter at least the material thickness (the help page says half the thickness and 1 mm)"
                 }
               ]
             }
@@ -588,7 +562,7 @@
                 {
                   "url": "https://jlccnc.com/blog/sheet-metal-design",
                   "read": "2026-11-25",
-                  "says": "1.5 times the thickness (blog; the help page keeps it in an image)"
+                  "says": "hole edge to sheet edge at least 1.5 times the thickness; more for heavily formed or loaded parts (blog); the help pages give no edge value in their text"
                 }
               ]
             }
@@ -606,7 +580,7 @@
                 {
                   "url": "https://jlccnc.com/blog/sheet-metal-design",
                   "read": "2026-11-25",
-                  "says": "2 times the thickness in its rules table"
+                  "says": "rules table: hole edge to the bend tangent line at least 2 times the thickness, more for tight tolerances"
                 }
               ]
             },
@@ -617,7 +591,7 @@
                 {
                   "url": "https://jlccnc.com/blog/sheet-metal-design",
                   "read": "2026-11-25",
-                  "says": "1.5 to 2 times the thickness in its mistakes table"
+                  "says": "mistakes table: hole distance from bend lines at least 1.5 to 2 times the thickness; the help page leaves the figure to platform limits"
                 }
               ]
             }
@@ -634,7 +608,7 @@
                 {
                   "url": "https://jlccnc.com/blog/sheet-metal-design",
                   "read": "2026-11-25",
-                  "says": "3 times the thickness, varies with tooling and die width"
+                  "says": "flange at least 3 times the thickness; varies with press brake tooling and die width"
                 }
               ]
             }
@@ -646,7 +620,7 @@
             {
               "url": "https://jlccnc.com/help/article/sheet-metal-fabrication-file-requirements",
               "read": "2026-11-25",
-              "says": "clinch nuts, studs and weld nuts are modelled in the file with their full shape"
+              "says": "clinch nuts, studs and weld nuts are modelled with full geometry and height; a fastener only inserted as an assembly part makes the order an assembly order"
             }
           ],
           "wanted": "modelled"
@@ -656,7 +630,7 @@
     {
       "id": "sendcutsend",
       "name": "SendCutSend",
-      "note": "From SendCutSend's guidelines, material pages and calculators; inch sizes are converted to mm. Values came from page summaries and need a spot check. Mild steel sizes were inferred from calculator rows. The bend distances use the 5052, mild steel and 304 die tables.",
+      "note": "From SendCutSend's guidelines, material pages and calculators, checked against them on 2026-11-25; inch sizes are converted to mm. The bend distances use the 5052, mild steel and 304 die tables. A spot check is still wanted for the flange minimum, for 5052 only: the calculator gives formed lengths, converted here to the flat reach from the bend line (formed less half the bend deduction); mild steel and 304 have their own rows, not entered.",
       "rules": [
         {
           "id": "file.one_body",
@@ -664,7 +638,7 @@
             {
               "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
               "read": "2026-11-25",
-              "says": "one solid sheet-metal body per file"
+              "says": "the STEP file holds a single solid sheet-metal body; files with several bodies or assemblies do not upload"
             }
           ]
         },
@@ -674,12 +648,12 @@
             {
               "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
               "read": "2026-11-25",
-              "says": "uniform thickness, modelled at stock thickness"
+              "says": "thickness is uniform, with a face at every edge, and modelled at the stock thickness that will be ordered"
             },
             {
               "url": "https://sendcutsend.com/services/cnc-bending/",
               "read": "2026-11-25",
-              "says": "modelled at stock thickness with the calculator's K-factor and radius"
+              "says": "3D files: single body at uniform stock thickness with the bend radius and K-factor of the shop's bending specs"
             }
           ]
         },
@@ -707,7 +681,7 @@
                 {
                   "url": "https://sendcutsend.com/materials/min-max/",
                   "read": "2026-11-25",
-                  "says": "5052 aluminium sizes"
+                  "says": "5052 H32 aluminium thicknesses, 0.040 to 0.500 in (also on the materials page); inch sizes converted to mm"
                 }
               ]
             },
@@ -733,7 +707,7 @@
                 {
                   "url": "https://sendcutsend.com/materials/min-max/",
                   "read": "2026-11-25",
-                  "says": "6061 aluminium sizes"
+                  "says": "6061 T6 aluminium thicknesses, 0.040 to 0.750 in (also on the materials page); inch sizes converted to mm"
                 }
               ]
             },
@@ -759,7 +733,7 @@
                 {
                   "url": "https://sendcutsend.com/materials/",
                   "read": "2026-11-25",
-                  "says": "mild steel sizes (some inferred from calculator rows)"
+                  "says": "mild steel thicknesses, 0.030 to 0.500 in; inch sizes converted to mm"
                 }
               ]
             },
@@ -783,7 +757,7 @@
                 {
                   "url": "https://sendcutsend.com/materials/",
                   "read": "2026-11-25",
-                  "says": "304 stainless sizes"
+                  "says": "304 stainless thicknesses, 0.030 to 0.500 in; inch sizes converted to mm"
                 }
               ]
             },
@@ -801,7 +775,7 @@
                 {
                   "url": "https://sendcutsend.com/materials/",
                   "read": "2026-11-25",
-                  "says": "316 stainless sizes"
+                  "says": "316 stainless thicknesses, 0.060 to 0.250 in; inch sizes converted to mm"
                 }
               ]
             },
@@ -820,7 +794,7 @@
                 {
                   "url": "https://sendcutsend.com/materials/",
                   "read": "2026-11-25",
-                  "says": "G90 galvanised steel sizes"
+                  "says": "G90 galvanised steel thicknesses, 0.030 to 0.074 in; inch sizes converted to mm"
                 }
               ]
             },
@@ -840,7 +814,7 @@
                 {
                   "url": "https://sendcutsend.com/materials/",
                   "read": "2026-11-25",
-                  "says": "brass sizes"
+                  "says": "brass thicknesses, 0.040 to 0.250 in; inch sizes converted to mm"
                 }
               ]
             },
@@ -861,7 +835,7 @@
                 {
                   "url": "https://sendcutsend.com/materials/",
                   "read": "2026-11-25",
-                  "says": "copper sizes"
+                  "says": "copper thicknesses, 0.032 to 0.250 in; inch sizes converted to mm"
                 }
               ]
             },
@@ -878,7 +852,7 @@
                 {
                   "url": "https://sendcutsend.com/materials/",
                   "read": "2026-11-25",
-                  "says": "7075 aluminium sizes"
+                  "says": "7075 T6 aluminium thicknesses, 0.125, 0.190 and 0.250 in; inch sizes converted to mm"
                 }
               ]
             }
@@ -895,7 +869,7 @@
                 {
                   "url": "https://sendcutsend.com/services/cnc-bending/",
                   "read": "2026-11-25",
-                  "says": "bending up to 30 by 44 in"
+                  "says": "flat parts for bending up to 30 by 44 in; maximum bend length 16 to 44 in by thickness"
                 }
               ]
             }
@@ -914,7 +888,7 @@
                 {
                   "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
                   "read": "2026-11-25",
-                  "says": "at least half the material thickness"
+                  "says": "laser holes and cut-outs at least 50% of the material thickness; the exact figure per material is on each material page"
                 }
               ]
             },
@@ -925,7 +899,7 @@
                 {
                   "url": "https://sendcutsend.com/materials/5052-aluminum/",
                   "read": "2026-11-25",
-                  "says": "about the thickness (5052 page)"
+                  "says": "5052 page: minimum hole size equal to the material thickness"
                 }
               ]
             }
@@ -942,7 +916,7 @@
                 {
                   "url": "https://sendcutsend.com/materials/5052-aluminum/",
                   "read": "2026-11-25",
-                  "says": "2 times the thickness; one material page only"
+                  "says": "a hole at least 2 times the thickness from an edge (this one material page; the guideline page gives no figure)"
                 }
               ]
             }
@@ -978,12 +952,12 @@
                 {
                   "url": "https://sendcutsend.com/bending-calculator/",
                   "read": "2026-11-25",
-                  "says": "half the die width from the bend centre line; 5052 dies 12, 16, 25 and 40 mm by thickness"
+                  "says": "5052 die widths 12, 16, 25 and 40 mm by thickness (0.472, 0.630, 0.984 and 1.575 in); features at least half the die width from the bend line"
                 },
                 {
                   "url": "https://sendcutsend.com/guidelines/bend-deformation/",
                   "read": "2026-11-25",
-                  "says": "half the die width"
+                  "says": "keep cut features at least half the die width from the centre of the bend"
                 }
               ],
               "from": "bend_line"
@@ -1014,7 +988,7 @@
                 {
                   "url": "https://sendcutsend.com/bending-calculator/",
                   "read": "2026-11-25",
-                  "says": "half the die width; mild steel dies by thickness, pattern read from the calculator tables"
+                  "says": "mild steel die widths 12, 16, 25 and 40 mm by thickness; features at least half the die width from the bend line"
                 }
               ],
               "from": "bend_line"
@@ -1041,7 +1015,7 @@
                 {
                   "url": "https://sendcutsend.com/bending-calculator/",
                   "read": "2026-11-25",
-                  "says": "half the die width; 304 dies by thickness, pattern read from the calculator tables"
+                  "says": "304 die widths 12, 25 and 40 mm by thickness; features at least half the die width from the bend line"
                 }
               ],
               "from": "bend_line"
@@ -1055,20 +1029,24 @@
             {
               "steps": [
                 {
-                  "up_to_mm": 1.02,
-                  "value": 7.26
+                  "up_to_mm": 2.286,
+                  "value": 6.48
                 },
                 {
-                  "up_to_mm": 1.6,
-                  "value": 7.7
+                  "up_to_mm": 2.54,
+                  "value": 9.33
                 },
                 {
-                  "up_to_mm": 3.18,
-                  "value": 12.09
+                  "up_to_mm": 3.175,
+                  "value": 9.35
+                },
+                {
+                  "up_to_mm": 4.7498,
+                  "value": 15.75
                 },
                 {
                   "up_to_mm": 6.35,
-                  "value": 34.82
+                  "value": 29.21
                 }
               ],
               "materials": [
@@ -1078,9 +1056,15 @@
                 {
                   "url": "https://sendcutsend.com/bending-calculator/",
                   "read": "2026-11-25",
-                  "says": "smallest formed flange, 5052, from the calculator table; mild steel and 304 have their own"
+                  "says": "5052 table gives the least formed flange length, measured to the bend apex; the flat reach from the bend line is that less half the bend deduction (0.250 in: 1.371 less 0.221 is 1.150 in, as the deformation page states for the flat flange)"
+                },
+                {
+                  "url": "https://sendcutsend.com/guidelines/bend-deformation/",
+                  "read": "2026-11-25",
+                  "says": "0.250 in 5052: least flat flange length before bending 1.150 in; the other thicknesses are on the calculator table"
                 }
-              ]
+              ],
+              "from": "bend_line"
             }
           ]
         },
@@ -1090,7 +1074,7 @@
             {
               "url": "https://sendcutsend.com/services/tapping/",
               "read": "2026-11-25",
-              "says": "model a plain hole at the tap size; threads are not modelled"
+              "says": "model a plain hole at the size listed for the tap; the laser-cut hole is resized to the drill size automatically"
             }
           ],
           "wanted": "plain"
@@ -1101,7 +1085,7 @@
             {
               "url": "https://sendcutsend.com/services/hardware/",
               "read": "2026-11-25",
-              "says": "hardware is chosen at the order; the hole is resized to the catalogue's"
+              "says": "hardware is chosen in the app; the hole is resized automatically to the catalogue size, so a plain hole is modelled"
             }
           ],
           "wanted": "plain"
@@ -1112,7 +1096,7 @@
             {
               "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
               "read": "2026-11-25",
-              "says": "all cut geometry goes on a single layer"
+              "says": "all cut-path geometry on the same layer; guides and construction lines moved off it or deleted"
             }
           ]
         },
@@ -1122,7 +1106,7 @@
             {
               "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
               "read": "2026-11-25",
-              "says": "all cut paths are closed, with no intersecting or overlapping lines"
+              "says": "every cut path is a closed shape; no shared or overlapping lines inside a part"
             }
           ]
         },
@@ -1132,7 +1116,7 @@
             {
               "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
               "read": "2026-11-25",
-              "says": "text is sent as outlines"
+              "says": "text converted to outlines; text that can still be edited does not cut"
             }
           ]
         },
@@ -1143,7 +1127,7 @@
             {
               "url": "https://sendcutsend.com/services/cnc-bending/",
               "read": "2026-11-25",
-              "says": "a flat 2D file marks the centre of each bend with a line, dashed in a DXF; a 3D file needs none"
+              "says": "2D files: a line at the centre of each bend (dashed, not hidden, for DXF from SolidWorks or AutoCAD); 3D files need no bend lines"
             }
           ]
         }
