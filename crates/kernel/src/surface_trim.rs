@@ -131,21 +131,55 @@ pub fn stop_at_bodies(walls: &Body, bodies: &[&Body], starts: &[Vec3], along: Ve
         return Ok((walls.clone(), false));
     }
     let starts: Vec<[f64; 3]> = starts.iter().map(|s| [s.x, s.y, s.z]).collect();
-    let stop = || solidcore_ops::stop::stop_at_bodies(ops, order, &tools, &starts, [along.x, along.y, along.z]);
-    let stopped = match solidcraft_smlib::stop::token() {
+    let stopped = stopped(NAME, || solidcore_ops::stop::stop_at_bodies(ops, order, &tools, &starts, [along.x, along.y, along.z]))?;
+    match stopped {
+        Some(stopped) => Ok((pieces(stopped, walls)?, true)),
+        None => Ok((walls.clone(), false)),
+    }
+}
+
+/// `long`, the surface body `original` extended past some of its edges, cut where it first runs
+/// into `target`, as solidcore-ops does it ([`solidcore_ops::stop::stop_extension`]): the target's
+/// faces exactly as they are, never extended. The pieces kept are those joined to `inside`, points
+/// inside the original's faces. An extension part of which never meets the target, or that runs on
+/// past a side of it, is refused. The history is over `[long]`, as [`stop_at_bodies`]'s.
+pub(crate) fn stop_extension(long: &Body, original: &Body, inside: &[Vec3], target: &Body) -> Result<Body> {
+    const NAME: &str = "the imprint of the body the surface extends up to";
+    let _span = solidcraft_profile::span("kernel", "stop_extension");
+    if target.is_mesh() {
+        return Err(KernelError::Invalid("not supported yet: extending a surface up to a mesh body (pick a solid or surface body)".into()));
+    }
+    let missed = || KernelError::Invalid("part of the extension never meets the body it would extend up to".into());
+    if crate::apart(long, target)? {
+        return Err(missed());
+    }
+    let no_form = || KernelError::Failed(format!("{NAME}: a body has no solidcore form"));
+    let (form, before, tool) =
+        (long.ops_body().ok_or_else(no_form)?, original.ops_body().ok_or_else(no_form)?, target.ops_body().ok_or_else(no_form)?);
+    let inside: Vec<[f64; 3]> = inside.iter().map(|p| [p.x, p.y, p.z]).collect();
+    let stopped = stopped(NAME, || solidcore_ops::stop::stop_extension(&form.0, &form.1, &before.0, &inside, &tool.0))?;
+    pieces(stopped.ok_or_else(missed)?, long)
+}
+
+/// A solidcore-ops stop run under this call's cancellation, its errors as this crate's.
+fn stopped<T>(name: &str, stop: impl FnOnce() -> solidcore_ops::Result<T>) -> Result<T> {
+    match solidcraft_smlib::stop::token() {
         Some(token) => solidcore_ops::cancel::within(&token, stop),
         None => stop(),
     }
     .map_err(|e| match e {
         solidcore_ops::Error::Unsupported(_) | solidcore_ops::Error::Argument => KernelError::Invalid(e.to_string()),
         // a panic the session caught stays the kernel's internal error, as SMLib's do
-        solidcore_ops::Error::Internal(m) => KernelError::Internal(format!("{NAME}: {m}")),
-        e => KernelError::Failed(format!("{NAME}: {e}")),
-    })?;
-    let Some(stopped) = stopped else { return Ok((walls.clone(), false)) };
+        solidcore_ops::Error::Internal(m) => KernelError::Internal(format!("{name}: {m}")),
+        e => KernelError::Failed(format!("{name}: {e}")),
+    })
+}
+
+/// What a stop kept of `walls`: each face the face of `walls` it is a piece of.
+fn pieces(stopped: solidcore_ops::stop::Stopped, walls: &Body) -> Result<Body> {
     let kept = Body::from_record(stopped.record)?.with_color(walls.color());
     let faces = stopped.from.iter().map(|f| crate::record::from_face(0, *f, crate::history::Change::Kept)).collect();
-    Ok((crate::record::attach(kept, &crate::record::counts(&[walls]), Some(faces), &[]), true))
+    Ok(crate::record::attach(kept, &crate::record::counts(&[walls]), Some(faces), &[]))
 }
 
 /// A surface body trimmed along sketch curves (chains of segments in `plane`) dropped square

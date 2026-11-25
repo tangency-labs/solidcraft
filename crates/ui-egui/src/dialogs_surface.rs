@@ -40,12 +40,12 @@ crate::dialog_descriptor::dialog_descriptors! {
             symmetric: bool = false => *symmetric,
             operation: usize = 0 => op_index(operation),
         } => json!({"thickness": thickness, "symmetric": symmetric, "operation": OPS.get(*operation).copied().unwrap_or("new")});
-        // `to_object`: the edges go up to the plane or face in the To Object input, not a
+        // `to_object`: the edges go up to the plane, face or body in the To Object input, not a
         // distance. An extension back to the surface's own bounds shows as Distance.
         Extend("surface.extend", "EXTEND", [("Edges", EDGES, true)],
             FeatureKind::SurfaceExtend { distance, up_to, .. }) {
             distance: String = "10 mm".into() => distance.to_string(),
-            to_object: bool = false => matches!(up_to, Some(ExtendTo::Plane(_) | ExtendTo::Face(_))),
+            to_object: bool = false => matches!(up_to, Some(ExtendTo::Plane(_) | ExtendTo::Face(_) | ExtendTo::Body(_))),
         } => if *to_object { json!({}) } else { json!({"distance": distance}) };
         Fair("surface.fair", "ui.fair_surface_title", [("Surface or faces", BODIES | FACES, true)],
             FeatureKind::SurfaceFair { strength, iterations, keep_edges, tolerance, .. }) {
@@ -237,6 +237,7 @@ const EXTEND_EXTENTS: [&str; 2] = ["Distance", "To Object"];
 /// Extend's pick input for what the edges go up to: Extrude's To Object label, taking what
 /// `surface.extend`'s `up_to` takes.
 const EXTEND_TO: &str = "To Object";
+const EXTEND_TARGETS: crate::selection::Accept = PLANES | FACES | BODIES;
 
 /// How far a surface extrude goes: a distance, to a picked face or point, or to the first body
 /// in the way.
@@ -362,7 +363,7 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Surf, inputs: &mut Vec<SelInput>, active:
                 combo(ui, "sx_ext", &EXTEND_EXTENTS, &mut extent);
             });
             *to_object = extent == 1;
-            crate::dialogs::set_object_accepting(inputs, active, EXTEND_TO, PLANES | FACES, *to_object);
+            crate::dialogs::set_object_accepting(inputs, active, EXTEND_TO, EXTEND_TARGETS, *to_object);
             if !*to_object {
                 enter |= expr_row(ui, "Distance", distance);
             }
@@ -946,9 +947,10 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
             match (*to_object, picked) {
                 (true, Some(Sel::Plane { name })) => p["up_to"] = json!(name),
                 (true, Some(Sel::Face { body, point, .. })) => p["up_to"] = json!({"body": body, "point": pt(*point)}),
+                (true, Some(Sel::Body { name })) => p["up_to"] = json!({"body": name}),
                 (true, None) if kept => {}
-                (true, _) => return Err("select the plane or face to extend up to first".into()),
-                // A distance replaces the kept plane or face.
+                (true, _) => return Err("select the plane, face or body to extend up to first".into()),
+                // A distance replaces the kept target.
                 (false, _) if kept => p["up_to"] = Value::Null,
                 (false, _) => {}
             }
@@ -1339,7 +1341,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
             (Surf::simple_restore(kind)?, vec![bodies.iter().map(|n| Sel::Body { name: n.to_string() }).collect()])
         }
         FeatureKind::SurfaceExtend { edges, mode, up_to, neighbours, .. } => {
-            // The dialog edits the edges and the distance or the plane or face they go up to; the
+            // The dialog edits the edges and the distance or the plane, face or body they go up to; the
             // rest is kept as it was.
             let mut extra = Map::new();
             if !mode.is_natural() {
@@ -1348,11 +1350,12 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
             if !*neighbours {
                 extra.insert("neighbours".into(), json!(false));
             }
-            // The plane or face shows in the To Object input; one that can't be picked here is
+            // The plane, face or body shows in the To Object input; one that can't be picked here is
             // kept as stored.
             let to_pick = match up_to {
                 Some(ExtendTo::Face(t)) => crate::dialogs::face_sel_on(s, Some(t.body.as_ref()), t.point.0),
                 Some(ExtendTo::Plane(plane)) => crate::dialogs::plane_sel(s, plane),
+                Some(ExtendTo::Body(name)) => Some(Sel::Body { name: name.to_string() }),
                 _ => None,
             };
             match up_to {
@@ -1379,7 +1382,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
             }
             if matches!(k, Surf::Extend { to_object: true, .. }) {
                 let mut active = 0;
-                crate::dialogs::set_object_accepting(&mut ins, &mut active, EXTEND_TO, PLANES | FACES, true);
+                crate::dialogs::set_object_accepting(&mut ins, &mut active, EXTEND_TO, EXTEND_TARGETS, true);
                 if let Some(inp) = ins.iter_mut().find(|i| i.label == EXTEND_TO) {
                     inp.items = to_pick.into_iter().collect();
                 }

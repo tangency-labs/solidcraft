@@ -66,7 +66,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("surface_extend")
         .contract(&SURFACE_EXTEND_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("body: surface name; edges: [[x,y,z]] (points on boundary edges to push out); distance: expr (unless up_to); mode?: natural (the surface itself continued: a B-spline's end spans continued, which keeps planes and surfaces of revolution on themselves; the default) | tangent (the face continued tangent to its surface across the edge, G1) | curvature (continued keeping the surface's curvature across the edge too, G2); up_to?: plane (XY|XZ|YZ|plane name|{origin, normal}) | {body, point} (a face, its surface extended) | \"bounds\" (natural: back to the surface's own bounds, undoing a trim); neighbours?: bool (default true: the edges next to an extended edge are lengthened to meet it; false: the extension's sides run square to the edge)"),
+        .params("body: surface name; edges: [[x,y,z]] (points on boundary edges to push out); distance: expr (unless up_to); mode?: natural (the surface itself continued: a B-spline's end spans continued, which keeps planes and surfaces of revolution on themselves; the default) | tangent (the face continued tangent to its surface across the edge, G1) | curvature (continued keeping the surface's curvature across the edge too, G2); up_to?: plane (XY|XZ|YZ|plane name|{origin, normal}) | {body, point} (a face, its surface extended) | {body} (a whole body, where the surface first runs into any of its faces; natural only) | \"bounds\" (natural: back to the surface's own bounds, undoing a trim); neighbours?: bool (default true: the edges next to an extended edge are lengthened to meet it; false: the extension's sides run square to the edge)"),
     CommandSpec::new("surface.trim", "Trim", crate::checked!("surface.trim", trim)).begins_edit()
         .at("SURFACE", "MODIFY")
         .icon("surface_trim")
@@ -715,11 +715,20 @@ fn extend(s: &mut Session, p: &Value) -> Result<Value> {
             if s.model.state().body(&tb).is_none() {
                 return Err(bad(cmd, format!("no body `{tb}`")));
             }
-            let point = t.get("point").and_then(vec3).ok_or_else(|| bad(cmd, "`up_to.point` must be [x, y, z] on the target face"))?;
-            Some(ExtendTo::Face(FaceAt { body: BodyName(tb), point: Position(point) }))
+            match t.get("point").filter(|v| !v.is_null()) {
+                None if tb == body => return Err(bad(cmd, "a surface can't extend up to itself")),
+                None => Some(ExtendTo::Body(BodyName(tb))),
+                Some(point) => {
+                    let point = vec3(point).ok_or_else(|| bad(cmd, "`up_to.point` must be [x, y, z] on the target face"))?;
+                    Some(ExtendTo::Face(FaceAt { body: BodyName(tb), point: Position(point) }))
+                }
+            }
         }
         Some(v) => Some(ExtendTo::Plane(plane_param(s, Some(v), cmd)?)),
     };
+    if matches!(up_to, Some(ExtendTo::Body(_))) && mode != ExtendMode::Natural {
+        return Err(bad(cmd, "only a natural extension goes up to a whole body (give a `point` on a face of it)"));
+    }
     if up_to == Some(ExtendTo::Bounds) && mode != ExtendMode::Natural {
         return Err(bad(cmd, "only a natural extension goes back to the surface's bounds"));
     }
@@ -1796,6 +1805,40 @@ mod tests {
             assert!(near.len() == 2 && near.iter().all(|d| *d < 1e-6), "{mode}: {corners:?}");
             assert!(far.len() == 2 && far.iter().all(|d| (d - 20.0).abs() < 1e-6), "{mode}: {far:?}");
         }
+    }
+
+    /// Extend up to a whole body: the sheet 0…10 × 0…10 extended in x under two blocks made one
+    /// body, whose near faces are at x = 15 (y up to 5) and x = 18 (y from 5): it stops on both,
+    /// 5 · 15 + 5 · 18 = 165. A face of the same body alone takes its one plane: 150. Reopening
+    /// gives the same; a body covering half the edge, and a tangent extension, are refused.
+    #[test]
+    fn extend_up_to_a_whole_body() {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "F"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "surface.patch", json!({"sketch": "F", "body_name": "Sheet"}));
+        run(&mut s, "solid.box", json!({"corner": [15, -5, -5], "length": 10, "width": 10, "height": 10, "body_name": "Step"}));
+        run(&mut s, "solid.box", json!({"corner": [18, 5, -5], "length": 7, "width": 10, "height": 10, "operation": "join", "targets": ["Step"]}));
+        run(&mut s, "solid.box", json!({"corner": [30, -5, -5], "length": 5, "width": 10, "height": 10, "body_name": "Half"}));
+        let edge = [10, 5, 0];
+        let before = s.doc.features.len();
+        for p in [
+            json!({"body": "Sheet", "edges": [edge], "up_to": {"body": "Half"}}),
+            json!({"body": "Sheet", "edges": [edge], "up_to": {"body": "Sheet"}}),
+            json!({"body": "Sheet", "edges": [edge], "up_to": {"body": "Step", "point": "near"}}),
+            json!({"body": "Sheet", "edges": [edge], "up_to": {"body": "Step"}, "mode": "tangent"}),
+        ] {
+            assert!(s.execute("surface.extend", &p).is_err(), "{p}");
+        }
+        assert_eq!(s.doc.features.len(), before);
+        run(&mut s, "surface.extend", json!({"body": "Sheet", "edges": [edge], "up_to": {"body": "Step"}}));
+        assert!((area(&s, "Sheet") - 165.0).abs() < 1e-6, "{}", area(&s, "Sheet"));
+        let cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        assert!((area(&cold, "Sheet") - 165.0).abs() < 1e-6);
+        run(&mut s, "edit.undo", json!({}));
+        run(&mut s, "surface.extend", json!({"body": "Sheet", "edges": [edge], "up_to": {"body": "Step", "point": [15, 0, 0]}}));
+        assert!((area(&s, "Sheet") - 150.0).abs() < 1e-6, "{}", area(&s, "Sheet"));
     }
 
     /// A 40 × 20 × 2 plate with three holes of radius 2 through it at x = 10, 20, 30 on y = 10.

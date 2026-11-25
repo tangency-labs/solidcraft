@@ -1,5 +1,5 @@
 //! Extend (Surface › Extend): boundary edges of a surface body pushed outward across their
-//! face, by a distance, up to a plane or a face, or (natural only) back to the surface's own
+//! face, by a distance, up to a plane, a face or a whole body, or (natural only) back to the surface's own
 //! bounds. Three ways to continue past an edge, each SMLib's extension of the surface
 //! (`smlib_extend_sheet`, `SmBSplineSurface::CreateExtendedSurface`):
 //!
@@ -21,7 +21,8 @@
 //! the face beside it). The lengthened sides must meet again: faces whose extensions part are
 //! refused. Up to a target, the face is extended
 //! past it and trimmed back where the target meets it ([`crate::trim_keep`]: SMLib's exact
-//! intersection). Back to the bounds is the face untrimmed to its surface's box
+//! intersection). Up to a whole body, it is cut where it first runs into the body's faces as they
+//! are, bounded where they end ([`crate::surface_trim::stop_extension`]). Back to the bounds is the face untrimmed to its surface's box
 //! ([`crate::untrim`]). A plane's straight edges pushed out with their neighbours lengthened
 //! keep the exact planar extension ([`crate::surfaces::extend`]).
 //!
@@ -71,6 +72,9 @@ pub enum ExtendLimit<'a> {
     Distance(f64),
     /// To where it meets a plane, or the surface of a face (extended).
     UpTo(&'a SplitTool<'a>),
+    /// To where it first runs into a whole body, any face of it as it is, never extended (natural
+    /// only). An extension part of which never meets the body is refused.
+    UpToBody(&'a Body),
     /// Back to the surface's own bounds (natural only), undoing a trim: a free-form surface's
     /// parameter box, an analytic surface's the box of the face's own span.
     Bounds,
@@ -107,6 +111,10 @@ pub fn extend_surface(body: &Body, at: &[Vec3], opts: &ExtendOptions) -> Result<
         ExtendLimit::Bounds if opts.mode != ExtendMode::Natural => {
             return Err(KernelError::Invalid("only a natural extension goes back to the surface's bounds".into()));
         }
+        // A run-off face has sides of its own, which the far end can't be told from.
+        ExtendLimit::UpToBody(_) if opts.mode != ExtendMode::Natural => {
+            return Err(KernelError::Invalid("not supported yet: a tangent or curvature extension up to a whole body (pick a face of it)".into()));
+        }
         _ => {}
     }
     let record = crate::native::brep_record(body)?;
@@ -125,6 +133,7 @@ pub fn extend_surface(body: &Body, at: &[Vec3], opts: &ExtendOptions) -> Result<
         }
         ExtendLimit::Distance(d) => continued(body, at, &picked, d, opts.mode).map(|(out, _)| out),
         ExtendLimit::UpTo(tool) => up_to(body, at, &picked, tool, opts.mode),
+        ExtendLimit::UpToBody(target) => up_to_body(body, at, &picked, target, opts.mode),
     }
 }
 
@@ -374,6 +383,15 @@ fn up_to(body: &Body, at: &[Vec3], picked: &[(usize, usize)], tool: &SplitTool, 
     Ok(crate::record::after(cut, &long, &crate::record::counts(&[body])))
 }
 
+/// The faces extended past the target body and cut where they first run into it, keeping the
+/// pieces the surface's own faces lie in.
+fn up_to_body(body: &Body, at: &[Vec3], picked: &[(usize, usize)], target: &Body, mode: ExtendMode) -> Result<Body> {
+    let (long, _) = continued(body, at, picked, body.size().max(1e-6) * REACH, mode)?;
+    let inside = (0..body.face_count()).map(|f| crate::surface_untrim::face_point(body, f)).collect::<Result<Vec<_>>>()?;
+    let cut = crate::surface_trim::stop_extension(&long, body, &inside, target)?;
+    Ok(crate::record::after(cut, &long, &crate::record::counts(&[body])))
+}
+
 /// The faces of the picked edges back on their surfaces' bounds: each untrimmed in place, its
 /// holes kept. One already there is refused.
 fn back_to_bounds(body: &Body, faces: &[usize]) -> Result<Body> {
@@ -618,6 +636,32 @@ mod tests {
         let both = extend_surface(&s, &[Vec3::new(5.0, 0.0, 20.0), Vec3::new(10.0, 5.0, 20.0)], &natural(5.0)).unwrap();
         assert!(rel(area(&both), 500.0) < 1e-9, "{}", area(&both));
         assert_eq!((both.face_count(), edges(&both)), (2, edges(&s)));
+    }
+
+    /// Up to a whole body: a square sheet extended in x under a stair of two risers, x = 15 for
+    /// y < 5 and x = 18 for y > 5, stops on each: 5 * 15 + 5 * 18 = 165. Up to a wall over half of
+    /// the edge it is refused, and so are a tangent extension and a body through the sheet.
+    #[test]
+    fn extends_up_to_every_face_of_a_whole_body() {
+        let s = square();
+        let at = [Vec3::new(10.0, 5.0, 0.0)];
+        let wall = |points: &[[f64; 2]]| {
+            let v = |p: &[f64; 2]| Vec2::new(p[0], p[1]);
+            let chain = points.windows(2).map(|w| Seg2::Line { a: v(&w[0]), b: v(&w[1]) }).collect::<Vec<_>>();
+            crate::extrude_sheet(&Plane::XY, &[chain], -5.0, 5.0).unwrap()
+        };
+        let to = |body: &Body, mode| extend_surface(&s, &at, &with(mode, ExtendLimit::UpToBody(body), true));
+        let stair = wall(&[[15.0, -1.0], [15.0, 5.0], [18.0, 5.0], [18.0, 11.0]]);
+        let out = to(&stair, ExtendMode::Natural).unwrap();
+        assert!(rel(area(&out), 165.0) < 1e-9, "{}", area(&out));
+        let bb = measure(&out).unwrap().bbox;
+        assert!(bb.min.x.abs() < 1e-9 && (bb.max.x - 18.0).abs() < 1e-9, "{bb:?}");
+        let half = wall(&[[15.0, -1.0], [15.0, 5.0]]);
+        let e = to(&half, ExtendMode::Natural).unwrap_err();
+        assert!(e.to_string().contains("never meets"), "{e}");
+        let through = wall(&[[5.0, -1.0], [5.0, 11.0]]);
+        assert!(to(&through, ExtendMode::Natural).is_err());
+        assert!(to(&stair, ExtendMode::Tangent).is_err());
     }
 
     /// Hostile and unsupported requests are refused, never panic.

@@ -2793,6 +2793,8 @@ pub enum ExtendTo {
     Plane(PlaneRef),
     /// The surface of a body's face (extended).
     Face(FaceAt),
+    /// A whole body: where the surface first runs into any of its faces, as they are.
+    Body(BodyName),
     /// The surface's own bounds (natural only): a trim undone.
     Bounds,
 }

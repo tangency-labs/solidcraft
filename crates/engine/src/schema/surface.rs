@@ -472,10 +472,16 @@ fn face_on_body(generator: &mut SchemaGenerator) -> Schema {
 
 fn up_to_schema(generator: &mut SchemaGenerator) -> Schema {
     let face = face_on_body(generator);
+    let whole = json_schema!({
+        "type": "object",
+        "properties": {"body": {"type": "string", "description": "The body, by name."}},
+        "required": ["body"],
+        "additionalProperties": false
+    });
     let plane = generator.subschema_for::<PlaneParam>();
     json_schema!({
-        "description": "Extend up to this instead of by `distance`: `bounds`, back to the surface's own bounds (natural mode only); a face, its surface extended; or a plane.",
-        "anyOf": [{"const": "bounds"}, face, plane]
+        "description": "Extend up to this instead of by `distance`: `bounds`, back to the surface's own bounds (natural mode only); a face, its surface extended; a whole body, where the surface first runs into any of its faces (natural mode only); or a plane.",
+        "anyOf": [{"const": "bounds"}, face, whole, plane]
     })
 }
 
