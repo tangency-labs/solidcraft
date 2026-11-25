@@ -319,6 +319,7 @@ pointcloud.edit                   point clouds: points drawn, never a body
 pointcloud.insert                 point clouds: points drawn, never a body
 pointcloud.list                   point clouds: points drawn, never a body
 pointcloud.reload                 point clouds: points drawn, never a body; tested in crates/engine/src/cmd/point_cloud.rs
+pulley.insert                     timing-belt pulleys built from sketch, extrude and cylinder features: volumes against the outline's area worked out by hand in crates/engine/src/cmd/pulleys_tests.rs
 render.aging.describe             rendering: images, cameras, stages
 render.backends                   rendering: images, cameras, stages
 render.batch                      rendering: images, cameras, stages
