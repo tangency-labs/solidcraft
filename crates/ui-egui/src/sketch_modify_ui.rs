@@ -155,7 +155,7 @@ pub enum Mod {
     /// `sketch.equation_curve` (or `.edit` on the curve the window's `curve` extra names): the
     /// form (an index into [`EQUATION_FORMS`]), x(t) and y(t) (or y(x)), the variable's range and
     /// how far the curve may stray from the formulas.
-    Equation { form: usize, x: String, y: String, start: String, end: String, tolerance: String, range_unit: bool },
+    Equation { form: usize, x: String, y: String, start: String, end: String, tolerance: String, range_unit: bool, radians_trig: bool },
     /// `sketch.point.divide` (#8969): the curves picked are each divided into `count` pieces of equal
     /// length by points held at their shares of it.
     Divide { count: String },
@@ -217,7 +217,13 @@ fn inputs(k: &Mod) -> Vec<SelInput> {
         Mod::Offset { .. } => vec![SelInput::new("Curves", CURVES, true)],
         // AXES is the mask that takes a straight sketch curve (`selection::SelInput::accepts`).
         Mod::Mirror => vec![SelInput::new("Entities", CURVES | SKETCH_POINTS | PROFILES, true), SelInput::new("Mirror line", AXES, false)],
-        Mod::Move { .. } => vec![SelInput::new("Entities", CURVES | SKETCH_POINTS | PROFILES, true), SelInput::new("Center", SKETCH_POINTS, false)],
+        // From and To (#21235): with both picked, the entities move by To - From (Point to Point).
+        Mod::Move { .. } => vec![
+            SelInput::new("Entities", CURVES | SKETCH_POINTS | PROFILES, true),
+            SelInput::new("Center", SKETCH_POINTS, false),
+            SelInput::new("From", SKETCH_POINTS, false),
+            SelInput::new("To", SKETCH_POINTS, false),
+        ],
         // Center: the point Scale and Angle work about (#11718); empty, the middle of the picks' box.
         Mod::Transform { .. } => {
             vec![SelInput::new("Entities", CURVES | SKETCH_POINTS | PROFILES, true), SelInput::new("Center", SKETCH_POINTS, false)]
@@ -298,12 +304,13 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         // A sine wave to start from: one period, 40 wide and 10 high in the design's unit.
         "sketch.equation_curve" => Mod::Equation {
             form: 0,
-            x: "20 * t / pi".into(),
+            x: "t / 9".into(),
             y: "5 * sin(t)".into(),
             start: "0".into(),
-            end: "2 * pi".into(),
+            end: "360".into(),
             tolerance: "0.01 mm".into(),
             range_unit: false,
+            radians_trig: false,
         },
         "sketch.point.divide" => Mod::Divide { count: "4".into() },
         _ => return None,
@@ -326,6 +333,7 @@ pub fn edit_equation(app: &mut SolveApp, id: &str) -> bool {
         end: eq.end,
         tolerance: format!("{} mm", eq.tolerance),
         range_unit: eq.variable_unit == VariableUnit::Range,
+        radians_trig: eq.radians_trig,
     };
     let mut dialog = Dialog::new(Kind::SketchModify(kind), Vec::new());
     dialog.extra.insert("curve".into(), json!(id));
@@ -727,7 +735,9 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document, two_parallel_lines: 
             enter |= quantity(ui, doc, "Segments", count, 2, DIVIDE_MAX);
             ui_kit::text(ui, solidcraft_ui_text::tr("sketch.divide_hint"), ui_kit::Text::Note("divide"));
         }
-        Mod::Equation { form, x, y, start, end, tolerance, range_unit } => {
+        Mod::Equation { form, x, y, start, end, tolerance, range_unit, radians_trig } => {
+            let note = if *radians_trig { "ui.equation_angles_legacy" } else { "ui.equation_angles_degrees" };
+            ui_kit::text(ui, solidcraft_ui_text::tr(note), ui_kit::Text::Note("equation"));
             ui_kit::choice_row(ui, "Form", "equation_form", form, &EQUATION_FORMS);
             if *form == 0 {
                 enter |= number(ui, "x(t)", x);
@@ -739,8 +749,9 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document, two_parallel_lines: 
             enter |= number(ui, "End", end);
             enter |= number(ui, "Tolerance", tolerance);
             ui_kit::checkbox_grid(ui, &mut [(solidcraft_ui_text::tr("ui.equation_variable_unit"), range_unit)], 1);
-            let note = if *range_unit { "ui.equation_note_range" } else { "ui.equation_note" };
-            ui_kit::text(ui, solidcraft_ui_text::tr(note), ui_kit::Text::Note("equation"));
+            if *range_unit {
+                ui_kit::text(ui, solidcraft_ui_text::tr("ui.equation_note_range"), ui_kit::Text::Note("equation_range"));
+            }
         }
         Mod::Corner { chamfer, ctype, size, distance2, angle, flip } => {
             if *chamfer {
@@ -844,6 +855,31 @@ pub(crate) fn corner_hit(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<(Hit,
     let (at, id) = crate::sketch_tools::corner_point(app, proj, pos, !*chamfer)?;
     let sel = Sel::SketchPoint { id: id.clone() };
     Some((Hit::SketchPoint { sketch, id, at }, sel))
+}
+
+/// The Move window's Point to Point step (#21235): To minus From, on the sketch, when both rows
+/// hold a point of the sketch being edited.
+pub(crate) fn point_to_point(app: &SolveApp, inputs: &[SelInput]) -> Option<Vec2> {
+    let state = crate::open_meshing::session_world(&app.session);
+    let sk = &state.sketch(app.session.active_sketch?)?.sketch;
+    let at = |i: usize| {
+        let id = point_id(&app.session, items(inputs, i).first()?)?;
+        sk.resolve_point(id).and_then(|p| sk.point(p))
+    };
+    Some(at(3)? - at(2)?)
+}
+
+/// Keep the Move window's X and Y on To minus From while both are picked, so the rows, the value
+/// box and the preview show the step OK will make.
+pub fn refresh_move(app: &mut SolveApp) {
+    let Some(d) = app.dialog.as_ref().filter(|d| matches!(d.kind, Kind::SketchModify(Mod::Move { .. }))) else { return };
+    let Some(step) = point_to_point(app, &d.inputs) else { return };
+    // Whole nanometres: a step of 40 reads "40 mm", not "40.00000000000001 mm".
+    let mm = |v: f64| format!("{} mm", (v * 1e6).round() / 1e6 + 0.0);
+    if let Some(Kind::SketchModify(Mod::Move { x, y, .. })) = app.dialog.as_mut().map(|d| &mut d.kind) {
+        *x = mm(step.x);
+        *y = mm(step.y);
+    }
 }
 
 /// What input `i` holds.
@@ -1126,8 +1162,10 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             if entities.is_empty() {
                 return Err("Select the sketch curves or points to move first".into());
             }
-            let dx = value(app, x, ValueKind::Length, "X Distance")?;
-            let dy = value(app, y, ValueKind::Length, "Y Distance")?;
+            let (dx, dy) = match point_to_point(app, inputs) {
+                Some(d) => (d.x, d.y),
+                None => (value(app, x, ValueKind::Length, "X Distance")?, value(app, y, ValueKind::Length, "Y Distance")?),
+            };
             let deg = value(app, angle, ValueKind::Angle, "Angle")?.to_degrees();
             let dz = if *three_d { value(app, z, ValueKind::Length, "Z Distance")? } else { 0.0 };
             if dx.abs() < 1e-9 && dy.abs() < 1e-9 && dz.abs() < 1e-9 && deg.abs() < 1e-9 {
@@ -1258,7 +1296,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 _ => ("sketch.chamfer.equal_distance", p),
             }
         }
-        Mod::Equation { form, x, y, start, end, tolerance, range_unit } => {
+        Mod::Equation { form, x, y, start, end, tolerance, range_unit, .. } => {
             let filled = |label: &str, text: &str| -> Result<String, String> {
                 let text = text.trim();
                 if text.is_empty() { Err(format!("{label} is empty")) } else { Ok(text.to_string()) }
