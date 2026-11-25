@@ -3475,3 +3475,27 @@ fn the_duplicate_fold_is_reserved_in_the_tolerance_budget() {
     let fit = crate::fit_within_tolerance(&given, 0.0001, false).unwrap();
     assert!(fit.deviation <= 0.0001, "deviation {}", fit.deviation);
 }
+
+/// A sketch stops at the curve limit in force ([`crate::limits::max_curves`]; past the ceiling a
+/// design file is not opened), and the generic add refuses the circle radii the dedicated one does
+/// (a radius that is not a number would save and not open again).
+#[test]
+fn curves_stop_at_the_cap_and_circle_radii_are_checked() {
+    let mut sk = Sketch::new();
+    let a = sk.add_point(v(0.0, 0.0), None).unwrap();
+    let b = sk.add_point(v(10.0, 0.0), None).unwrap();
+    for r in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        assert!(sk.add_curve(CurveKind::Circle { c: a, r }, None).is_err(), "radius {r}");
+    }
+    let first = sk.add_line_pts(a, b, None).unwrap();
+    let line = sk.curves[first].clone();
+    let cap = crate::limits::max_curves();
+    sk.curves.extend((1..cap).map(|i| Curve { id: format!("filler{i}"), ..line.clone() }));
+    assert_eq!(sk.curves.len(), cap);
+    let points = sk.points.len();
+    assert_eq!(sk.add_line_pts(a, b, None), Err(SketchError::TooLarge));
+    assert_eq!(sk.add_line(v(0.0, 5.0), v(5.0, 5.0), None, None, None), Err(SketchError::TooLarge));
+    assert_eq!(sk.add_circle(v(0.0, 0.0), 1.0, Some(a), None), Err(SketchError::TooLarge));
+    assert_eq!(sk.add_curve(CurveKind::Line { a, b }, None), Err(SketchError::TooLarge));
+    assert_eq!(sk.points.len(), points, "a refused curve adds no points");
+}

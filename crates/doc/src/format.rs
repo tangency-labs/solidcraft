@@ -1242,7 +1242,7 @@ fn validate_freeform_chain_offsets(value: &Value) -> Result<()> {
 
 /// Largest coordinate or size a design may hold (mm): a kilometre-scale part is already far
 /// outside what the kernel's tolerances serve.
-pub(crate) const MAX_REAL: f64 = 1e9;
+pub const MAX_REAL: f64 = 1e9;
 
 /// Every number the design itself holds is in range ([`check_numbers`]). `metadata` is left
 /// alone: it is other tools' data, kept as it is and never read as a number (#1015); parsing
