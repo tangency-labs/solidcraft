@@ -11487,6 +11487,9 @@ mod refused_ok_tests {
         assert_eq!(commands(&harness)[0].1["corners"][0]["kind"], "full_overlap");
         assert_eq!(commands(&harness)[0].1["corners"][0]["covering"], sources[0].to_string());
         assert_eq!(crate::scenario::rect_of("dialog:segments:ui.surface_corner_type").unwrap().min.x, chooser.min.x);
+        let viewport = crate::scenario::rect_of("dialog:body:viewport").unwrap();
+        harness.call("ui.scroll", json!({"x":viewport.center().x,"y":viewport.center().y,"delta":-100_000}));
+        harness.frames(40);
         let gap = crate::scenario::rect_of("dialog:ui.surface_corner_gap").unwrap();
         let overlap = crate::scenario::rect_of("dialog:ui.surface_corner_overlap").unwrap();
         assert!(gap.max.y <= overlap.min.y, "gap precedes the optional overlap");
