@@ -72,7 +72,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("surface_trim")
         .contract(&SURFACE_TRIM_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("body: surface name; plane: XY|XZ|YZ|plane name|{origin, normal} or tool: {body, point} (a face, its surface extended) or curves: {sketch, curves?: [curve ids] (chains of curves meeting end to end; default every curve), direction?: normal|face_normal|[x,y,z] (swept onto the surface along the sketch's normal, the default, or this direction; face_normal: projected along the surface's own normal, each point of a curve to its nearest point of the surface, and `keep` picks regions)}; keep: [x,y,z] (a point on the side to keep) or [[x,y,z], ...] (points on the regions to keep: the pieces that hang together once cut). Mutual trim: with: another surface (one face each; leave out plane, tool and curves), keep_with: [x,y,z] or [[x,y,z], ...] (what to keep of it); each is cut where the other's surface (extended) meets it; extend?: bool (a surface that stops short of the other is extended to meet it); stitch?: bool (the kept pieces sewn into `body`; `with` is then gone)"),
+        .params("body: surface name; plane: XY|XZ|YZ|plane name|{origin, normal} or tool: {body} (the whole bounded cutting sheet) | {body, point} (a face, its surface extended) or curves: {sketch, curves?: [curve ids] (chains of curves meeting end to end; default every curve), direction?: normal|face_normal|[x,y,z] (swept onto the surface along the sketch's normal, the default, or this direction; face_normal: projected along the surface's own normal, each point of a curve to its nearest point of the surface, and `keep` picks regions)}; keep: [x,y,z] (a point on the side to keep) or [[x,y,z], ...] (points on the regions to keep: the pieces that hang together once cut). Mutual trim: with: another surface (one face each; leave out plane, tool and curves), keep_with: [x,y,z] or [[x,y,z], ...] (what to keep of it); each is cut where the other's surface (extended) meets it; extend?: bool (a surface that stops short of the other is extended to meet it); stitch?: bool (the kept pieces sewn into `body`; `with` is then gone)"),
     CommandSpec::new("surface.extrude", "Surface Extrude", crate::checked!("surface.extrude", surface_extrude)).begins_edit()
         .at("SURFACE", "CREATE")
         .icon("surface_extrude")
@@ -84,7 +84,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("surface_revolve")
         .contract(&SURFACE_REVOLVE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("sketch?: id|name; curves?: [curve ids] and/or profiles? (as surface.extrude); axis: sketch line id|x|y|X|Y|Z|{type: world, axis: X|Y|Z}|{sketch, curve} (a line of another sketch, followed in that sketch)|construction axis name|{origin, dir} (origin: numbers or length expressions, followed when parameters change) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle?: expr (default 360 deg); angle2?: expr (the other side); symmetric?: bool; faced?: bool (default true: each face faces the side Surface Extrude's would, the curve's direction crossed with the sketch normal, so out of a profile; false: each face along its surface's own normal, as surface revolves saved before it keep); name?, body_name? (a surface body, no caps; a solid where a full turn closes it)"),
+        .params("sketch?: id|name; curves?: [curve ids] and/or profiles? (as surface.extrude); axis: sketch line id|x|y|X|Y|Z|{type: world, axis: X|Y|Z}|{sketch, curve} (a line of another sketch, followed in that sketch)|construction axis name|{origin, dir} (origin: numbers or length expressions, followed when parameters change) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle?: expr (default 360 deg); angle2?: expr (the other side); symmetric?: bool; faced?: bool (default true: each face faces the side Surface Extrude's would, the curve's direction crossed with the sketch normal, so out of a profile; false: each face along its surface's own normal, as surface revolves saved before it keep); stays_surface?: bool (default true: a full turn that closes the walls is a closed surface body, which Stitch makes a solid; false: it becomes a solid, as surface revolves saved before it keep); name?, body_name? (a surface body, no caps)"),
     CommandSpec::new("surface.sweep", "Surface Sweep", crate::checked!("surface.sweep", surface_sweep)).begins_edit()
         .at("SURFACE", "CREATE")
         .icon("surface_sweep")
@@ -428,7 +428,15 @@ fn surface_revolve(s: &mut Session, p: &Value) -> Result<Value> {
         None | Some(Value::Null) => true,
         Some(v) => v.as_bool().ok_or_else(|| bad(cmd, "`faced` must be true or false"))?,
     };
-    add_feature(s, p, FeatureKind::SurfaceRevolve { sketch: SketchId(sketch), profiles, curves, axis, angle, angle2, symmetric, faced })
+    let stays_surface = match p.get("stays_surface") {
+        None | Some(Value::Null) => true,
+        Some(v) => v.as_bool().ok_or_else(|| bad(cmd, "`stays_surface` must be true or false"))?,
+    };
+    add_feature(
+        s,
+        p,
+        FeatureKind::SurfaceRevolve { sketch: SketchId(sketch), profiles, curves, axis, angle, angle2, symmetric, faced, stays_surface },
+    )
 }
 
 fn surface_sweep(s: &mut Session, p: &Value) -> Result<Value> {
@@ -767,6 +775,7 @@ fn trim(s: &mut Session, p: &Value) -> Result<Value> {
             body: BodyName(body),
             plane: xy(),
             tool: None,
+            tool_body: None,
             keep: Position(keep),
             keep_more: keep_more.into_iter().map(Position).collect(),
             curves: None,
@@ -780,12 +789,22 @@ fn trim(s: &mut Session, p: &Value) -> Result<Value> {
     if given("keep_with") || given("stitch") || given("extend") {
         return Err(bad(cmd, "`keep_with`, `stitch` and `extend` belong to a mutual trim (`with`)"));
     }
-    let (plane, tool, curves) = match (p.get("tool").filter(|t| !t.is_null()), p.get("curves").filter(|c| !c.is_null())) {
+    let (plane, tool, tool_body, curves) = match (p.get("tool").filter(|t| !t.is_null()), p.get("curves").filter(|c| !c.is_null())) {
         (Some(_), Some(_)) => return Err(bad(cmd, "give `tool` or `curves`, not both")),
         (Some(t), None) => {
             let tb = t.get("body").and_then(Value::as_str).ok_or_else(|| bad(cmd, "`tool.body` must name a body"))?.to_string();
-            let point = t.get("point").and_then(vec3).ok_or_else(|| bad(cmd, "`tool.point` must be [x, y, z] on the tool face"))?;
-            (xy(), Some(FaceAt { body: BodyName(tb), point: Position(point) }), None)
+            match t.get("point") {
+                None => {
+                    if tb == body {
+                        return Err(bad(cmd, "the cutting sheet must be another body"));
+                    }
+                    (xy(), None, Some(BodyName(tb)), None)
+                }
+                Some(v) => {
+                    let point = vec3(v).ok_or_else(|| bad(cmd, "`tool.point` must be [x, y, z] on the tool face"))?;
+                    (xy(), Some(FaceAt { body: BodyName(tb), point: Position(point) }), None, None)
+                }
+            }
         }
         (None, Some(c)) => {
             let sketch = sketch_id(s, c.get("sketch"), cmd, "curves.sketch")?;
@@ -810,14 +829,15 @@ fn trim(s: &mut Session, p: &Value) -> Result<Value> {
                     (Some(d), false)
                 }
             };
-            (xy(), None, Some(TrimCurves { sketch: SketchId(sketch), curves: ids, direction: direction.map(Dir), face_normal }))
+            (xy(), None, None, Some(TrimCurves { sketch: SketchId(sketch), curves: ids, direction: direction.map(Dir), face_normal }))
         }
-        (None, None) => (plane_param(s, p.get("plane"), cmd)?, None, None),
+        (None, None) => (plane_param(s, p.get("plane"), cmd)?, None, None, None),
     };
     let kind = FeatureKind::SurfaceTrim {
         body: BodyName(body),
         plane,
         tool,
+        tool_body,
         keep: Position(keep),
         keep_more: keep_more.into_iter().map(Position).collect(),
         curves,
@@ -1192,7 +1212,8 @@ mod tests {
         run(&mut s, "edit.redo", json!({}));
         let cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
         assert!((area(&cold, "Cone") - area(&s, "Cone")).abs() < 1e-9);
-        // A rectangle off the axis turned all the way round closes into the ring solid.revolve makes.
+        // A rectangle off the axis turned all the way round closes on the ring solid.revolve makes
+        // (its shells close; the body stays a surface, #21969).
         run(&mut s, "sketch.create", json!({"plane": "XY", "name": "R"}));
         run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 0], "p1": [7, 3]}));
         run(&mut s, "sketch.finish", json!({}));
@@ -1247,6 +1268,76 @@ mod tests {
         run(&mut s, "surface.revolve", turn("NewTurn", "NewRing"));
         assert!(faced(&s, "NewTurn"));
         assert_eq!(ends(&s, "NewRing"), (-1.0, 1.0));
+    }
+
+    /// #21969: a closed profile turned all the way round is a closed surface body, as every other
+    /// surface revolve's result is a surface: no volume, and a boolean refuses it until Stitch
+    /// makes it a solid. The rectangle x 5…10, z 0…10 about Z: walls 2π·10·10 + 2π·5·10 and two
+    /// annuli π(10² − 5²) each, 450π mm² in all; the solid Stitch makes is π(10² − 5²)·10 = 750π
+    /// mm³, positive, so its faces face out. A design saved before `stays_surface` keeps the solid
+    /// it built through reopening and a redefine.
+    #[test]
+    fn surface_revolve_of_a_closed_profile_through_a_full_turn_stays_a_surface() {
+        use std::f64::consts::PI;
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "S"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 0], "p1": [10, -10]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let turn = json!({"sketch": "S", "axis": {"origin": [0, 0, 0], "dir": [0, 0, 1]}, "name": "Turn", "body_name": "R"});
+        run(&mut s, "surface.revolve", turn.clone());
+        let close = |a: f64, want: f64| assert!((a - want).abs() < want * 2e-3, "{a} vs {want}"); // (measured on meshes)
+        let kind = |s: &Session| {
+            let st = s.world_state().unwrap();
+            let b = st.body("R").unwrap();
+            (b.is_surface(), b.is_closed())
+        };
+        assert_eq!(kind(&s), (true, false), "a closed full turn stays a surface body");
+        close(area(&s, "R"), 450.0 * PI);
+        let measured = run(&mut s, "inspect.measure", json!({"bodies": ["R"]}));
+        let r = &measured["bodies"][0];
+        assert_eq!((r["faces"].as_u64(), r["closed"].as_bool(), r["volume_mm3"].is_null()), (Some(4), Some(false), true), "{r}");
+        // Reopened, it is still a surface.
+        let mut s = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        assert_eq!(kind(&s), (true, false));
+        // A boolean refuses it, as target or tool, and names the way to a solid.
+        run(&mut s, "solid.box", json!({"length": 3, "width": 4, "height": 4, "corner": [6, -2, 2], "body_name": "Block"}));
+        for (target, tools, operation) in
+            [("R", ["Block"], "join"), ("Block", ["R"], "join"), ("Block", ["R"], "cut"), ("Block", ["R"], "intersect"), ("R", ["Block"], "cut")]
+        {
+            let err = s.execute("solid.combine", &json!({"target": target, "tools": tools, "operation": operation})).unwrap_err().to_string();
+            assert!(err.contains("R is a surface body: Stitch it into a solid first."), "{target} {operation}: {err}");
+        }
+        // Stitch takes the one closed body and makes the ring's solid, faces out.
+        run(&mut s, "surface.stitch", json!({"bodies": ["R"]}));
+        assert_eq!(kind(&s), (false, true));
+        close(volume(&s, "R"), 750.0 * PI);
+        run(&mut s, "solid.combine", json!({"target": "R", "tools": ["Block"], "operation": "cut"}));
+        // A design saved before `stays_surface`: the closed full turn is the solid it built.
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "S"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 0], "p1": [10, -10]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "surface.revolve", turn.clone());
+        let mut saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+        for f in saved["features"].as_array_mut().unwrap() {
+            f.as_object_mut().unwrap().remove("stays_surface");
+        }
+        let mut s = Session::new(solidcraft_doc::Document::from_json(&saved.to_string()).unwrap());
+        assert_eq!(kind(&s), (false, true), "an older design keeps its solid");
+        close(volume(&s, "R"), 750.0 * PI);
+        let mut params = turn.clone();
+        params.as_object_mut().unwrap().remove("name");
+        run(&mut s, "timeline.redefine", json!({"feature": "Turn", "command": "surface.revolve", "params": params}));
+        assert_eq!(kind(&s), (false, true), "a redefine keeps what the design built");
+        // Asked for, a new surface revolve makes the solid too.
+        let mut legacy = turn;
+        legacy.as_object_mut().unwrap().extend([
+            ("name".into(), json!("Solid")),
+            ("body_name".into(), json!("Q")),
+            ("stays_surface".into(), json!(false)),
+        ]);
+        run(&mut s, "surface.revolve", legacy);
+        assert!(s.world_state().unwrap().body("Q").unwrap().is_closed());
     }
 
     /// Surface Sweep: a line along y carried up a path in the XZ plane, straight then round a
@@ -2117,6 +2208,63 @@ mod tests {
             .to_string();
         assert!(e.contains("normal, face_normal or [x, y, z]"), "{e}");
         assert_eq!(s.doc.to_json(), before);
+    }
+
+    /// The cutter bends at (5, 3): the lower part of a 10 × 10 square is
+    /// 5·3 + 5·(3+5)/2 = 35. Extending either face alone gives the wrong cut.
+    #[test]
+    fn trim_by_a_whole_sheet_preserves_face_tools_and_rebuilds() {
+        let mut s = Session::default();
+        sheet(&mut s, "XY", "Floor", [0.0, 0.0], [10.0, 10.0]);
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Cutter sketch"}));
+        let made = run(&mut s, "sketch.line", json!({"points": [[-5, 3], [5, 3], [15, 7]]}));
+        let ids = made["created"]["curves"].clone();
+        run(&mut s, "sketch.finish", json!({}));
+        run(
+            &mut s,
+            "surface.extrude",
+            json!({"sketch": "Cutter sketch", "curves": ids,
+            "start_offset": -5, "distance": 10, "body_name": "Cutter"}),
+        );
+        assert_eq!(s.model.state().body("Cutter").unwrap().body.face_count(), 2);
+        s.param_check = crate::schema::ParamCheck::Strict;
+        run(&mut s, "surface.trim", json!({"body": "Floor", "tool": {"body": "Cutter"}, "keep": [2, 1, 0]}));
+        assert!((area(&s, "Floor") - 35.0).abs() < 1e-9);
+        let saved = s.doc.to_json();
+        let cold = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+        assert!((area(&cold, "Floor") - 35.0).abs() < 1e-9);
+        run(&mut s, "edit.undo", json!({}));
+        assert!((area(&s, "Floor") - 100.0).abs() < 1e-9);
+        run(&mut s, "edit.redo", json!({}));
+        assert!((area(&s, "Floor") - 35.0).abs() < 1e-9);
+        run(&mut s, "edit.undo", json!({}));
+        run(&mut s, "surface.trim", json!({"body": "Floor", "tool": {"body": "Cutter", "point": [0, 3, 0]}, "keep": [2, 1, 0]}));
+        assert!((area(&s, "Floor") - 30.0).abs() < 1e-9, "an explicit face still extends that face");
+    }
+
+    /// A cutting sheet in a component placed 50 mm along X cuts where it is shown. The wall is
+    /// drawn at local x = -47 (y from -5 to 15, z from -5 to 5), so it is shown at x = -47 + 50 = 3,
+    /// across the root's 10 × 10 floor (x 0 to 10, y 0 to 10): the kept side x > 3 is 7 × 10 = 70.
+    /// At its local x = -47 it would miss the floor, which would stay 100 or be refused. The
+    /// tool-face form picks the wall at its shown point (3, 5, 0) and keeps the same 70.
+    #[test]
+    fn trim_by_a_cutting_body_in_a_placed_component_cuts_where_it_is_shown() {
+        let mut s = Session::default();
+        sheet(&mut s, "XY", "Floor", [0.0, 0.0], [10.0, 10.0]);
+        run(&mut s, "component.create", json!({"name": "CutPart", "grounded": false}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Wall sketch"}));
+        let made = run(&mut s, "sketch.line", json!({"points": [[-47, -5], [-47, 15]]}));
+        let ids = made["created"]["curves"].clone();
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "surface.extrude", json!({"sketch": "Wall sketch", "curves": ids, "start_offset": -5, "distance": 10, "body_name": "Wall"}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "occurrence.move", json!({"occurrence": "CutPart:1", "space": "world", "translate": [50, 0, 0]}));
+        run(&mut s, "surface.trim", json!({"body": "Floor", "tool": {"body": "Wall"}, "keep": [6, 5, 0]}));
+        assert!((area(&s, "Floor") - 70.0).abs() < 1e-9);
+        run(&mut s, "edit.undo", json!({}));
+        assert!((area(&s, "Floor") - 100.0).abs() < 1e-9);
+        run(&mut s, "surface.trim", json!({"body": "Floor", "tool": {"body": "Wall", "point": [3, 5, 0]}, "keep": [6, 5, 0]}));
+        assert!((area(&s, "Floor") - 70.0).abs() < 1e-9);
     }
 
     /// A U-shaped sheet (legs at x = 0 and 10, 10 high; base along y = 0; 10 deep) cut by the
