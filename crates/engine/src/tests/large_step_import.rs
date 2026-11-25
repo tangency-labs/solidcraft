@@ -89,9 +89,11 @@ fn a_cancelled_preview_import_leaves_no_failure_in_the_shared_cache() {
     s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "body_name": "first"})).unwrap();
     s.execute("file.insert_step", &json!({"path": path})).unwrap();
     let import = s.doc.features.iter().position(|f| matches!(f.kind, FeatureKind::Import { .. })).unwrap();
-    // A new length for the box: the import after it is evaluated again on new inputs.
-    let redefine =
-        json!({"feature": s.doc.features[0].id, "command": "solid.box", "params": {"length": 20, "width": 10, "height": 10, "body_name": "first"}});
+    let import_id = s.doc.features[import].id;
+    let imported_name = s.model.state().bodies.iter().find(|b| b.feature == import_id).unwrap().name.clone();
+    // Renaming the earlier box to collide with an imported body name forces the import after it
+    // to evaluate again on new inputs.
+    let redefine = json!({"feature": s.doc.features[0].id, "command": "solid.box", "params": {"length": 20, "width": 10, "height": 10, "body_name": imported_name}});
     let mut scratch = s.scratch();
     let progress = Arc::new(Progress::default());
     let canceller = {

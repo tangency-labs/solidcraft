@@ -691,11 +691,18 @@ fn add_imported_part(doc: &mut Document, part_name: &str, body_name: &str, origi
     (comp, id)
 }
 
-/// Snapshot of a model's bodies (name, cache key, owning component, face names) and threads for
-/// verifying cached replay matches fresh evaluation identically.
-fn import_snapshot(model: &Model) -> (Vec<(String, u64, u64, Vec<String>)>, Vec<ThreadInfo>) {
+/// Snapshot of a model's bodies (name, cache key, owning component, quantized volume, face names)
+/// and threads for verifying cached replay matches fresh evaluation identically.
+fn import_snapshot(model: &Model) -> (Vec<(String, u64, u64, i64, Vec<String>)>, Vec<ThreadInfo>) {
     let st = model.state();
-    let bodies = st.bodies.iter().map(|b| (b.name.clone(), b.key, b.component, (*crate::naming::face_names(b)).clone())).collect();
+    let bodies = st
+        .bodies
+        .iter()
+        .map(|b| {
+            let vol = (kernel::measure(&b.body).unwrap().volume * 1e6).round() as i64;
+            (b.name.clone(), b.key, b.component, vol, (*crate::naming::face_names(b)).clone())
+        })
+        .collect();
     (bodies, st.threads.clone())
 }
 
