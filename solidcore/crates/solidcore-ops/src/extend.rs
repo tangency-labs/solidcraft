@@ -355,11 +355,12 @@ fn one_face(
     // refused, it grows its trim within the surface, the same for every continuation, its holes
     // kept
     if !holed && surf.is_whole_box(k, &dom)? {
-        match surface_grown(k, b, f, &surf, &dom, holed, picked, how, distance)? {
-            // a distance below the side's resolution is the answer whatever the route: there is
-            // no extension that short (the trim's route would only refuse it otherwise)
-            r @ (Ok(_) | Err(Error::NoEffect)) => return Ok(r),
-            Err(_) => {}
+        // a distance below the side's resolution is the answer whatever the route: there is no
+        // extension that short (the trim's route would only refuse it otherwise)
+        if let r @ (Ok(_) | Err(Error::NoEffect)) =
+            surface_grown(k, b, f, &surf, &dom, holed, picked, how, distance)?
+        {
+            return Ok(r);
         }
     }
     trim_grown(k, b, f, picked, distance)
