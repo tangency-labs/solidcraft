@@ -4418,3 +4418,12 @@ fn the_documented_shader_examples_compile() {
         craft_plugin::shader::compile(&manifest.shaders[0], source).unwrap_or_else(|e| panic!("{folder}: {e}"));
     }
 }
+
+/// The tint example in docs/plugin-examples/accent-sweep parses with its two settings and compiles.
+#[test]
+fn the_documented_tint_example_compiles() {
+    let manifest =
+        craft_plugin::parse_manifest(include_str!("../../../../docs/plugin-examples/accent-sweep/plugin.json").as_bytes(), "accent-sweep").unwrap();
+    assert_eq!(manifest.shaders[0].settings.len(), 2);
+    craft_plugin::shader::compile(&manifest.shaders[0], include_str!("../../../../docs/plugin-examples/accent-sweep/accent-sweep.wgsl")).unwrap();
+}

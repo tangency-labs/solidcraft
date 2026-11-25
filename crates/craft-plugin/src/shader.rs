@@ -1,5 +1,6 @@
-//! Capability `shaders@0.1`: a plugin writes one WGSL function, `background`; the host checks it
-//! and adds the entry points, uniforms, samplers, textures and a per-pixel loop cap.
+//! Capability `shaders@0.2` (and 0.1, backgrounds only): a plugin writes one WGSL function,
+//! `background` or `tint`; the host checks it and adds the entry points, uniforms, samplers,
+//! textures, settings and a loop cap.
 //!
 //! A background shader is source like this, in the plugin's folder and named in its manifest:
 //!
@@ -21,6 +22,8 @@ pub const MAX_SHADERS: usize = 8;
 /// The largest shader source, in bytes.
 pub const MAX_SOURCE_BYTES: usize = 64 * 1024;
 pub const MAX_TEXTURES: usize = 4;
+/// The most sliders one shader has on its plugin's card (`sc.settings`).
+pub const MAX_SETTINGS: usize = 4;
 /// The largest texture file, in bytes.
 pub const MAX_TEXTURE_BYTES: usize = 16 * 1024 * 1024;
 /// The longest side of a texture after the host loads it; larger pictures are scaled down.
@@ -30,12 +33,31 @@ pub const MAX_TEXTURE_SIDE: u32 = 8192;
 /// so the work per pixel is bounded by the budget times the size of the source.
 pub const LOOP_BUDGET: u32 = 1024;
 
-/// What a shader draws. Only view backgrounds in 0.1.
+/// What a shader draws.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ShaderKind {
     /// Behind the model in the 3D view, over the theme's background.
     Background,
+    /// A colour for each ribbon icon, button block and panel the host asks about (`shaders@0.2`).
+    Tint,
+}
+
+impl ShaderKind {
+    /// The function the plugin's source must define.
+    fn function(self) -> &'static str {
+        match self {
+            ShaderKind::Background => "background",
+            ShaderKind::Tint => "tint",
+        }
+    }
+
+    fn signature(self) -> &'static str {
+        match self {
+            ShaderKind::Background => "needs fn background(px: ScPixel) -> vec4<f32>",
+            ShaderKind::Tint => "needs fn tint(r: ScRegion) -> vec4<f32>",
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
@@ -62,6 +84,34 @@ pub struct Shader {
     /// view changes, and `sc.time` stays at 0.
     #[serde(default)]
     pub animated: bool,
+    /// Sliders on the plugin's card, read as `sc.settings` in order (`shaders@0.2`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub settings: Vec<ShaderSetting>,
+}
+
+/// A slider on the plugin's card; the shader reads its value as one component of `sc.settings`.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ShaderSetting {
+    pub id: String,
+    pub name: String,
+    pub min: f32,
+    pub max: f32,
+    pub default: f32,
+}
+
+impl Eq for ShaderSetting {}
+
+impl Shader {
+    /// The values for `sc.settings`: each setting's value from `value` (by id) within its range,
+    /// else its default; 0 past the last setting.
+    pub fn setting_values(&self, value: impl Fn(&str) -> Option<f32>) -> [f32; MAX_SETTINGS] {
+        let mut out = [0.0; MAX_SETTINGS];
+        for (slot, s) in out.iter_mut().zip(&self.settings) {
+            *slot = value(&s.id).filter(|v| v.is_finite()).map_or(s.default, |v| v.clamp(s.min, s.max));
+        }
+        out
+    }
 }
 
 fn plain_file(name: &str, extensions: &[&str]) -> bool {
@@ -79,7 +129,7 @@ fn texture_name(name: &str) -> bool {
         && name.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_')
         && name.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
         && !name.starts_with("sc_")
-        && !matches!(name, "sc" | "background")
+        && !matches!(name, "sc" | "background" | "tint")
 }
 
 /// Checks a manifest's `shaders` list: count, distinct ids, file names and texture names.
@@ -114,17 +164,31 @@ pub fn validate(shaders: &[Shader]) -> Result<()> {
                 return Err(invalid(format!("{field}.textures.{}", texture.name), "must be one lowercase .png or .jpg file name"));
             }
         }
+        if shader.settings.len() > MAX_SETTINGS {
+            return Err(invalid(format!("{field}.settings"), format!("at most {MAX_SETTINGS} settings")));
+        }
+        let mut setting_ids = BTreeSet::new();
+        for s in &shader.settings {
+            let range = s.min.is_finite() && s.max.is_finite() && s.min < s.max && (s.min..=s.max).contains(&s.default);
+            if !valid_id(&s.id) || !setting_ids.insert(&s.id) || !crate::plain(&s.name, 80) || !range {
+                return Err(invalid(
+                    format!("{field}.settings"),
+                    "each setting needs a distinct lowercase id, a name, and min < max with the default between them",
+                ));
+            }
+        }
     }
     Ok(())
 }
 
-/// What the host declares around a background shader's source. The plugin's source comes first,
-/// so the line numbers in an error are the plugin's own. `{textures}` becomes one binding per
-/// declared texture.
-pub const PRELUDE: &str = r"
-// ---- SolidCraft host (shaders@0.1) ----
+/// The host's uniforms, samplers and textures, the same for every kind. `{textures}` becomes one
+/// binding per declared texture.
+macro_rules! host_declarations {
+    () => {
+        r"
+// ---- SolidCraft host (shaders@0.2) ----
 struct ScHost {
-    // The view's size in pixels.
+    // The view's size in pixels (a tint: the window's).
     size: vec2<f32>,
     // Seconds, for an animated shader; 0 otherwise. Comes back to 0 each hour.
     time: f32,
@@ -146,6 +210,8 @@ struct ScHost {
     sc_pad0: f32,
     sc_pad1: f32,
     sc_pad2: f32,
+    // The values of the shader's settings, in the order its manifest lists them; 0 past the last.
+    settings: vec4<f32>,
 }
 
 struct ScPixel {
@@ -161,7 +227,15 @@ struct ScPixel {
 @group(0) @binding(1) var sc_clamp: sampler;
 @group(0) @binding(2) var sc_repeat: sampler;
 {textures}
-struct ScVarying {
+"
+    };
+}
+
+/// What the host declares around a background shader's source. The plugin's source comes first,
+/// so the line numbers in an error are the plugin's own.
+pub const PRELUDE: &str = concat!(
+    host_declarations!(),
+    r"struct ScVarying {
     @builtin(position) clip: vec4<f32>,
     @location(0) uv: vec2<f32>,
     @location(1) ray: vec3<f32>,
@@ -188,18 +262,61 @@ fn sc_fragment(v: ScVarying) -> @location(0) vec4<f32> {
     let colour = clamp(background(ScPixel(v.uv, v.uv * sc.size, normalize(v.ray))), vec4<f32>(0.0), vec4<f32>(1.0));
     return vec4<f32>(sc_encode(colour.rgb) * colour.a, colour.a);
 }
-";
+"
+);
+
+/// What the host declares around a tint shader's source: the region it asks about and the compute
+/// entry point that answers a list of them.
+pub const TINT_PRELUDE: &str = concat!(
+    host_declarations!(),
+    r"
+const SC_ICON: u32 = 0u;
+const SC_BUTTON: u32 = 1u;
+const SC_PANEL: u32 = 2u;
+
+struct ScRegion {
+    // Left, top, right and bottom, in points from the window's top left.
+    rect: vec4<f32>,
+    // The region's own colour, linear.
+    base: vec4<f32>,
+    // The point asked about, in points: an icon's or button's centre, or a point on a panel.
+    position: vec2<f32>,
+    // SC_ICON, SC_BUTTON or SC_PANEL.
+    kind: u32,
+    // 1 for an enabled control, less for a disabled one.
+    enabled: f32,
+}
+
+@group(1) @binding(0) var<storage, read> sc_regions: array<ScRegion>;
+@group(1) @binding(1) var<storage, read_write> sc_tints: array<vec4<f32>>;
+
+@compute @workgroup_size(64)
+fn sc_tint_main(@builtin(global_invocation_id) id: vec3<u32>) {
+    if id.x >= arrayLength(&sc_tints) {
+        return;
+    }
+    sc_tints[id.x] = clamp(tint(sc_regions[id.x]), vec4<f32>(0.0), vec4<f32>(1.0));
+}
+"
+);
+
+/// The bytes of one `ScRegion` in the host's list.
+pub const TINT_REGION_BYTES: usize = 48;
+/// The most regions the host asks about in one frame; more are left untinted.
+pub const MAX_TINT_REGIONS: usize = 8192;
+/// Threads in one `sc_tint_main` workgroup.
+pub const TINT_WORKGROUP: u32 = 64;
 
 /// The first texture's binding; the textures follow in manifest order.
 pub const FIRST_TEXTURE_BINDING: u32 = 3;
 /// The size of `ScHost` in bytes, as the host writes it.
-pub const HOST_UNIFORM_BYTES: usize = 144;
+pub const HOST_UNIFORM_BYTES: usize = 160;
 
-/// A background shader, checked and ready for the GPU.
+/// A shader, checked and ready for the GPU.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Compiled {
     /// The whole module: the plugin's source with the loop cap, and the host's declarations.
-    /// Entry points `sc_vertex` and `sc_fragment`.
+    /// Entry points `sc_vertex` and `sc_fragment` for a background, `sc_tint_main` for a tint.
     pub wgsl: String,
 }
 
@@ -207,14 +324,12 @@ pub struct Compiled {
 /// pixel that spent it all still gets its colour encoded for the screen.
 const HOST_FUNCTIONS: [&str; 1] = ["sc_encode"];
 
-const NEEDS_BACKGROUND: &str = "needs fn background(px: ScPixel) -> vec4<f32>";
-
 fn refuse(shader: &Shader, reason: impl Into<String>) -> HostError {
     invalid(format!("shaders.{}", shader.id), format!("{}: {}", shader.source, reason.into()))
 }
 
 /// Refuses entry points, resource bindings or overrides of the plugin's own, and a missing
-/// `background` function.
+/// `background` or `tint` function (by the shader's kind).
 pub fn compile(shader: &Shader, source: &str) -> Result<Compiled> {
     if source.len() > MAX_SOURCE_BYTES {
         return Err(refuse(shader, format!("larger than {} KiB", MAX_SOURCE_BYTES / 1024)));
@@ -226,26 +341,34 @@ pub fn compile(shader: &Shader, source: &str) -> Result<Compiled> {
         .map(|(i, t)| format!("@group(0) @binding({}) var {}: texture_2d<f32>;\n", FIRST_TEXTURE_BINDING as usize + i, t.name))
         .collect();
     let lines = source.lines().count();
-    let full = format!("{source}\n{}", PRELUDE.replace("{textures}", &textures));
+    let prelude = match shader.kind {
+        ShaderKind::Background => PRELUDE,
+        ShaderKind::Tint => TINT_PRELUDE,
+    };
+    let (function, needs) = (shader.kind.function(), shader.kind.signature());
+    let full = format!("{source}\n{}", prelude.replace("{textures}", &textures));
     let at = |location: Option<naga::SourceLocation>| match location {
         Some(l) if l.line_number as usize <= lines => format!("line {}: ", l.line_number),
         Some(_) => "where it meets the host's declarations (a name starting sc or ScHost?): ".to_string(),
         None => String::new(),
     };
     let mut module = naga::front::wgsl::parse_str(&full).map_err(|e| {
-        // With no `background` of the plugin's own, the host's call to it is what fails to parse.
+        // Without the plugin's own function, the host's call to it is what fails to parse.
         let in_host = e.location(&full).is_some_and(|l| l.line_number as usize > lines);
-        if in_host && e.message().contains("background") {
-            refuse(shader, NEEDS_BACKGROUND)
+        if in_host && e.message().contains(function) {
+            refuse(shader, needs)
         } else {
             refuse(shader, format!("{}{}", at(e.location(&full)), e.message()))
         }
     })?;
-    if !module.functions.iter().any(|(_, f)| f.name.as_deref() == Some("background")) {
-        return Err(refuse(shader, NEEDS_BACKGROUND));
+    if !module.functions.iter().any(|(_, f)| f.name.as_deref() == Some(function)) {
+        return Err(refuse(shader, needs));
     }
-    let host: BTreeSet<&str> = ["sc", "sc_clamp", "sc_repeat"].into_iter().chain(shader.textures.iter().map(|t| t.name.as_str())).collect();
-    if module.entry_points.iter().any(|e| !matches!(e.name.as_str(), "sc_vertex" | "sc_fragment")) {
+    let mut host: BTreeSet<&str> = ["sc", "sc_clamp", "sc_repeat"].into_iter().chain(shader.textures.iter().map(|t| t.name.as_str())).collect();
+    if shader.kind == ShaderKind::Tint {
+        host.extend(["sc_regions", "sc_tints"]);
+    }
+    if module.entry_points.iter().any(|e| !matches!(e.name.as_str(), "sc_vertex" | "sc_fragment" | "sc_tint_main")) {
         return Err(refuse(shader, "declares an entry point (@vertex, @fragment or @compute); the host supplies them"));
     }
     if let Some((_, global)) = module
@@ -256,7 +379,7 @@ pub fn compile(shader: &Shader, source: &str) -> Result<Compiled> {
         return Err(refuse(
             shader,
             format!(
-                "declares the resource `{}`; a shader reads only what the host binds: sc, sc_clamp, sc_repeat and the textures its manifest names",
+                "declares the resource `{}`; a shader reads only what the host binds: sc, sc_clamp, sc_repeat, the textures its manifest names, and a tint's sc_regions and sc_tints",
                 global.name.as_deref().unwrap_or("?")
             ),
         ));
@@ -269,6 +392,19 @@ pub fn compile(shader: &Shader, source: &str) -> Result<Compiled> {
             shader,
             format!("declares the function `{}`; names starting sc_ belong to the host", function.name.as_deref().unwrap_or("?")),
         ));
+    }
+    // The region list and the answers are the entry point's: a plugin function reading or writing
+    // them would see or change other regions.
+    let entry_only: Vec<_> =
+        module.global_variables.iter().filter(|(_, g)| matches!(g.name.as_deref(), Some("sc_regions" | "sc_tints"))).map(|(h, _)| h).collect();
+    for (_, function) in module.functions.iter() {
+        let used = function.expressions.iter().find(|(_, e)| matches!(e, naga::Expression::GlobalVariable(g) if entry_only.contains(g)));
+        if let Some((handle, naga::Expression::GlobalVariable(global))) = used {
+            let name = module.global_variables[*global].name.as_deref().unwrap_or("?");
+            let span = function.expressions.get_span(handle);
+            let location = span.is_defined().then(|| span.location(&full));
+            return Err(refuse(shader, format!("{}uses `{name}`; the host passes the region to tint and keeps its answer", at(location))));
+        }
     }
     if !module.overrides.is_empty() {
         return Err(refuse(shader, "declares an override; use a const"));

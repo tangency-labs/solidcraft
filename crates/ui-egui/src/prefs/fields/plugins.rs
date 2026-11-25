@@ -21,6 +21,10 @@ macro_rules! plugins_preferences {
             /// Remember a moved plugin command window's position for the current design, until the
             /// application closes (#18684). Off keeps the previously centred reopen behaviour.
             plugin_remember_dialog_position: bool = false, PAGE_PLUGINS;
+            /// Plugin shaders' slider values, keyed `plugin-id/shader-id/setting-id`; a missing one is its default.
+            shader_settings: std::collections::BTreeMap<String, f32> = Default::default(), PAGE_PLUGINS;
+            /// A plugin's tint for the ribbon and panels, `plugin-id/shader-id` (`shaders@0.2`); empty for none.
+            tint_shader: String = String::new(), PAGE_PLUGINS;
         }
     };
 }

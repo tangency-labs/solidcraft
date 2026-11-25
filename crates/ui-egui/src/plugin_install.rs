@@ -186,6 +186,11 @@ pub(crate) fn permission_lines(plugin: &Value) -> Vec<String> {
     if !shaders.is_empty() {
         lines.push(format("plugin_install.shaders", &[("names", &shaders.join(", "))]));
     }
+    // Colours for the ribbon and panels (shaders@0.2), also only when picked in Preferences.
+    let tints = list(plugin.get("tints"));
+    if !tints.is_empty() {
+        lines.push(format("plugin_install.tints", &[("names", &tints.join(", "))]));
+    }
     lines
 }
 
