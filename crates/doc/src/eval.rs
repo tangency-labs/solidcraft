@@ -11680,6 +11680,30 @@ fn hole_targets<'a>(st: &'a ModelState, f: &Feature) -> Vec<&'a ModelBody> {
         .collect()
 }
 
+/// Whether every face of `mb`, as the feature that made it traces them, came from `mb` as it was
+/// before the feature, none from a tool: the feature's tools took no material from it. A tool
+/// that shares material with a body leaves some of its boundary inside the body (unless the body
+/// lies inside the tool, and is gone), and a cut keeps that boundary as faces of the body. A body
+/// the history does not trace, or a face it traces to anything else (a tool's face, edge,
+/// profile or cap), says nothing.
+fn no_face_from_tools(mb: &ModelBody) -> bool {
+    use solidcraft_kernel::history::FaceOrigin;
+    let crate::lineage::Made::Traced(lineage) = &mb.made else { return false };
+    if lineage.history.faces.len() != mb.body.face_count() {
+        return false;
+    }
+    let own: Vec<bool> = lineage.operands.iter().map(|op| matches!(op.as_ref(), crate::lineage::Operand::Body(n) if *n == mb.name)).collect();
+    lineage.history.faces.iter().all(|face| {
+        !face.origins.is_empty()
+            && face.origins.iter().all(|origin| match *origin {
+                FaceOrigin::Face { operand, .. } | FaceOrigin::Edge { operand, .. } | FaceOrigin::Offset { operand, .. } => {
+                    own.get(operand) == Some(&true)
+                }
+                _ => false,
+            })
+    })
+}
+
 /// Whether `new` has a face on a surface no face of `old` lies on. A plane, cylinder, cone,
 /// sphere or torus is compared by its geometry, to within a ten-millionth of the bodies' size;
 /// any other surface (a spline) by its exact definition in the record. A cut that removes
@@ -14251,12 +14275,22 @@ fn eval_feature_kind(
                 // same exact volume (the faces it split add up to the faces they were), while a cut
                 // can remove very little of a large body (a 0.005 mm wall between two pockets in a
                 // 1 m cube is 5e-10 of it).
-                let same_volume = |old: &Body, new: &Body| match (old.volume_at(0.0), new.volume_at(0.0)) {
-                    (Some(a), Some(b)) => (a - b).abs() <= 1e-12 * a.abs().max(b.abs()),
-                    _ => false,
+                let same_volume = |old: &Body, new: &Body| {
+                    #[cfg(test)]
+                    cost_tests::count(|c| c.measures += 1);
+                    match (old.volume_at(0.0), new.volume_at(0.0)) {
+                        (Some(a), Some(b)) => (a - b).abs() <= 1e-12 * a.abs().max(b.abs()),
+                        _ => false,
+                    }
                 };
+                // A body every face of which the cut's history traces to the body itself took no
+                // material from the tools: its volume is what it was, without measuring it.
                 let kept = |b: &ModelBody, old: &Body| {
-                    old.same(&b.body) || (!b.body.is_mesh() && !old.is_mesh() && !has_a_new_surface(old, &b.body) && same_volume(old, &b.body))
+                    old.same(&b.body)
+                        || (!b.body.is_mesh()
+                            && !old.is_mesh()
+                            && !has_a_new_surface(old, &b.body)
+                            && (no_face_from_tools(b) || same_volume(old, &b.body)))
                 };
                 if let Some(before) = &before
                     && !before.is_empty()
