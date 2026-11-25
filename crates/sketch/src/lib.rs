@@ -49,6 +49,7 @@ mod text;
 mod thin;
 mod union_find;
 mod wire;
+mod wire_fillet;
 mod wire_solve;
 
 pub use curves::MAX_SPLINE_POINTS;
@@ -263,6 +264,7 @@ pub use wire::arc_sweep;
 pub use wire::control_curve;
 pub use wire::control_polyline;
 pub use wire::fit_polyline;
+pub use wire_fillet::DrawnFillet;
 pub use wire_solve::Axis;
 pub use wire_solve::MAX_WIRE_LENGTH;
 pub use wire_solve::MAX_WIRE_ROWS;
