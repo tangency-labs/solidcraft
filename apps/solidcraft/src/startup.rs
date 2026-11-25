@@ -813,12 +813,14 @@ pub const WINDOWS_ORDER: [eframe::wgpu::Backends; 3] = [eframe::wgpu::Backends::
 /// screen flashes black on every repaint (#11357, #11834, #12994, #16453). Such an adapter
 /// does not count as hardware, so the automatic order falls through to the next backend and
 /// ends at the software renderer, which draws everything (`--safe-mode` showed the planes,
-/// axes and grid on the reporters' machines). An explicit `WGPU_BACKEND` or a `graphics.json`
-/// `backend` preference is never second-guessed; other backends and other systems are
-/// untouched.
-pub fn counts_as_hardware(windows: bool, backend: eframe::wgpu::Backend, name: &str) -> bool {
-    let amd = ["amd", "radeon", "ati"].iter().any(|k| name.to_ascii_lowercase().contains(k));
-    !(windows && backend == eframe::wgpu::Backend::Gl && amd)
+/// axes and grid on the reporters' machines). AMD is identified by its PCI vendor id, not by
+/// name: substrings like "ati" also appear in "Workstation" or "Generation". An explicit
+/// `WGPU_BACKEND` or a `graphics.json` `backend` preference is never second-guessed; other
+/// backends and other systems are untouched.
+pub fn counts_as_hardware(windows: bool, backend: eframe::wgpu::Backend, vendor: u32) -> bool {
+    // AMD's PCI vendor id; wgpu fills it in on GL too.
+    const AMD_VENDOR: u32 = 0x1002;
+    !(windows && backend == eframe::wgpu::Backend::Gl && vendor == AMD_VENDOR)
 }
 
 /// Whether `backends` (started on their own, nothing else) have a hardware adapter. The crash
@@ -835,7 +837,7 @@ pub fn has_hardware_adapter(backends: eframe::wgpu::Backends) -> bool {
     let windows = cfg!(target_os = "windows");
     adapters
         .iter()
-        .any(|a| a.get_info().device_type != eframe::wgpu::DeviceType::Cpu && counts_as_hardware(windows, a.get_info().backend, &a.get_info().name))
+        .any(|a| a.get_info().device_type != eframe::wgpu::DeviceType::Cpu && counts_as_hardware(windows, a.get_info().backend, a.get_info().vendor))
 }
 
 /// The environment variable that switches wgpu's indirect-call validation on or off.
@@ -2006,20 +2008,22 @@ mod tests {
         // The reporters' cards: the device starts, but the scene draws nothing (#11357,
         // #11834, #12994, #16453).
         for name in ["AMD Radeon HD 5450", "AMD Radeon HD 7500 Series", "AMD Radeon HD 5700 Series", "ATI Radeon HD 2600 XT"] {
-            assert!(!counts_as_hardware(true, Backend::Gl, name), "{name}");
+            assert!(!counts_as_hardware(true, Backend::Gl, 0x1002), "{name}");
         }
         // Other backends draw fine, and other systems never had the fault.
-        assert!(counts_as_hardware(true, Backend::Dx12, "AMD Radeon HD 5450"));
-        assert!(counts_as_hardware(true, Backend::Vulkan, "AMD Radeon HD 5450"));
-        assert!(counts_as_hardware(false, Backend::Gl, "AMD Radeon HD 5450"));
-        // Non-AMD OpenGL adapters are untouched.
-        assert!(counts_as_hardware(true, Backend::Gl, "Intel(R) HD Graphics 530"));
-        assert!(counts_as_hardware(true, Backend::Gl, "NVIDIA Quadro P2200"));
+        assert!(counts_as_hardware(true, Backend::Dx12, 0x1002));
+        assert!(counts_as_hardware(true, Backend::Vulkan, 0x1002));
+        assert!(counts_as_hardware(false, Backend::Gl, 0x1002));
+        // Non-AMD OpenGL adapters are untouched, by vendor id rather than name: a name like
+        // "Workstation" or "Virtualization" contains "ati" without being an AMD adapter.
+        assert!(counts_as_hardware(true, Backend::Gl, 0x8086));
+        assert!(counts_as_hardware(true, Backend::Gl, 0x10DE));
+        assert!(counts_as_hardware(true, Backend::Gl, 0x10DE), "NVIDIA RTX A5000 (Workstation)");
         // The automatic order on such a machine ends at the software renderer: the only
         // hardware adapter it could enumerate is the AMD one on GL, the filter passes it over,
         // and no backend with a usable GPU is left. The probe models that machine: GL alone
         // enumerates hardware, and the filter is applied to it, so GL is probed but not taken.
-        let probe = |b: Backends| b == Backends::GL && counts_as_hardware(true, Backend::Gl, "AMD Radeon HD 5450");
+        let probe = |b: Backends| b == Backends::GL && counts_as_hardware(true, Backend::Gl, 0x1002);
         assert_eq!(choose_backends(true, false, false, None, Backends::empty(), Backends::empty(), probe), Some(Backends::DX12));
         // Without the filter the same machine would have started on GL and drawn nothing.
         let unfiltered = |b: Backends| b == Backends::GL;
@@ -2030,8 +2034,8 @@ mod tests {
         // draws nothing. A modern AMD card's D3D12 or Vulkan wins first, so GL is never asked
         // for; the filter only changes anything on machines where GL was the broken last
         // resort. The old start is kept behind WGPU_BACKEND and the backend preference.
-        assert!(!counts_as_hardware(true, Backend::Gl, "AMD Radeon RX 6800"));
-        let amd_gl_only = |b: Backends| b == Backends::GL && counts_as_hardware(true, Backend::Gl, "AMD Radeon RX 6800");
+        assert!(!counts_as_hardware(true, Backend::Gl, 0x1002));
+        let amd_gl_only = |b: Backends| b == Backends::GL && counts_as_hardware(true, Backend::Gl, 0x1002);
         assert_eq!(choose_backends(true, false, false, None, Backends::empty(), Backends::empty(), amd_gl_only), Some(Backends::DX12));
     }
 
