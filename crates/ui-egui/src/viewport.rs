@@ -7993,7 +7993,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     };
     refresh_layout(app, ui.ctx());
     let resp = ui.interact(rect, ui.scope_id().with("viewport"), Sense::click_and_drag());
-    let design_dragged = crate::library::drop_on_view(app, &resp);
+    let design_dragged = egui::DragAndDrop::has_payload_of_type::<crate::parts_library::Dragged>(ui.ctx());
     let flat = crate::dialogs_sheet::flat_active(app);
     if !flat {
         app.flat_view.fitted = false;
@@ -8093,7 +8093,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
                 && !joint_handle_pointer
                 && !navigating
                 && !dragging_layer
-                // A design dragged in from the document browser lands in the design, not on a face.
+                // A part dragged in from the parts library lands in the design, not on a face.
                 && !design_dragged
         })
         .map(|p| {
@@ -8150,6 +8150,8 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
         && !manipulator_dragging
         && !design_dragged;
     app.viewport.quiet_motion = still.then(|| QuietMotion::record(app, ui, &resp, rect, axes, proj)).flatten();
+    // A part dragged in from the parts library: where it lands, and the insert on release.
+    let drop_at = crate::parts_library::view_drop(app, ui, rect, &proj);
     // The picture may run past the view's own rectangle (the focused view of a tiled window).
     let paint = app.viewport.bleed.take().unwrap_or(rect);
     let layer = ui.layer_id();
@@ -9034,6 +9036,9 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     let tracking_cursor = hover.filter(|_| inside && !navigating && !app.esc_handled && !ui.input(|i| i.key_pressed(egui::Key::Escape)));
     crate::inference::track_and_show(app, &painter, &proj, tracking_cursor);
     crate::inference::show(app, &painter, &proj);
+    if let Some(at) = drop_at {
+        crate::parts_library::paint_drop(&painter, at);
+    }
     crate::insert_handles::show(app, ui, &proj);
     crate::sketch_transform_ui::refresh(app);
     crate::sketch_transform_ui::show(app, ui, &proj);
@@ -10636,8 +10641,13 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         let hidden = (sk.view.hide_points && i != 0) || (sk.view.hide_projected && p.link.is_some());
         let Some(sp) = proj.to_screen(ss.plane.to_world(p.pos)).filter(|_| !hidden) else { continue };
         let det = ss.report.point_determined.get(i).copied().unwrap_or(false);
+        // Project's opt-in gives reference points their curves' colour. Off keeps main's
+        // determined/free point colours, including for saved projections.
+        let link = p.link.as_deref().and_then(|l| sk.link(l)).filter(|_| app.ui.project_link_tools);
         let c = if conflict.point(i) {
             t.sketch_conflict
+        } else if let Some(link) = link {
+            if link.lost { t.sketch_lost } else { t.sketch_projected }
         } else if p.link.is_none() && locked.get(i).copied().unwrap_or(false) {
             t.sketch_locked
         } else if det {
@@ -10671,7 +10681,8 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
             painter.rect_filled(Rect::from_center_size(sp, vec2(5.0, 5.0)), 0.0, c);
         }
     }
-    // The markers and the status line are drawn straight onto the view: its side's colours (#4146).
+    // The markers are drawn straight onto the view: its side's colours (#4146). The sketch status
+    // shows in the sketch panel and the status bar, not over the view.
     let v = Tokens::view();
     for selected in &app.session.selection {
         if let Sel::SketchMidpoint { id } = selected
@@ -10683,23 +10694,6 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         }
     }
     loose_end_markers(sk, &ss.ends, &ss.plane, painter, proj, &v);
-    // Sketch status, unless the status bar shows it (#7243). In the free corner of the view, not under the floating ribbon.
-    if let Some(r) = app.viewport.layout.as_ref().map(|l| l.drawable).filter(|r| r.is_finite() && r.is_positive() && !crate::status_bar::shown(app)) {
-        let status = if !ss.report.shown_ok() {
-            solidcraft_ui_text::tr("sketch.status_conflict").to_string()
-        } else if !crate::sketch_palette::has_geometry(sk) {
-            solidcraft_ui_text::tr("ui.no_geometry_yet").to_string()
-        } else if ss.report.shown_dof() == 0 {
-            solidcraft_ui_text::tr("sketch.status_fully_constrained").to_string()
-        } else if ss.report.shown_dof() == 1 {
-            solidcraft_ui_text::tr("ui.1_degree_of_freedom").to_string()
-        } else {
-            solidcraft_ui_text::format("sketch.degrees_of_freedom", &[("count", &ss.report.shown_dof().to_string())])
-        };
-        let msg = format!("{} — {status}", crate::i18n::tr_name(&ss.name));
-        let c = if ss.report.shown_ok() { v.sketch_accent } else { v.error };
-        painter.text(pos2(r.left() + 12.0, r.top() + 12.0), Align2::LEFT_TOP, msg, FontId::proportional(t.font_button), c);
-    }
 }
 
 /// The curves and points of a sketch that its failing constraints hold (the solve's `failing`:
@@ -10926,7 +10920,7 @@ pub(crate) fn show_host_controls(app: &mut SolveApp, ui: &mut egui::Ui, rect: Re
     }
     refresh_layout(app, ui.ctx());
     if crate::navigation_bar_view::canvas_caps(app).orbit {
-        axis_view(app, ui, rect);
+        axis_view(app, ui, rect, true);
         if !crate::render_workspace::active(app) {
             crate::view_angles::show(app, ui, rect);
         }
@@ -10938,7 +10932,7 @@ pub(crate) fn show_host_controls(app: &mut SolveApp, ui: &mut egui::Ui, rect: Re
 pub(crate) fn show_card_controls(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     refresh_layout(app, ui.ctx());
     if crate::navigation_bar_view::canvas_caps(app).orbit {
-        axis_view(app, ui, rect);
+        axis_view(app, ui, rect, false);
     }
     crate::navigation_bar_view::show(app, ui, rect);
 }
@@ -11067,7 +11061,7 @@ pub(crate) fn view_gizmo_at(app: &SolveApp, p: Pos2) -> bool {
     })
 }
 
-pub(crate) fn axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
+pub(crate) fn axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, focused_view: bool) {
     if !compass_enabled(app) {
         return;
     }
@@ -11075,11 +11069,11 @@ pub(crate) fn axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     let shown = crate::view_gizmo::shown(app);
     match shown.style {
         crate::prefs::NavigatorStyle::Custom if shown.shape.is_some() => body_gizmo::show(app, ui, rect, shown),
-        crate::prefs::NavigatorStyle::Axes | crate::prefs::NavigatorStyle::Custom => signed_axis_view(app, ui, rect),
+        crate::prefs::NavigatorStyle::Axes | crate::prefs::NavigatorStyle::Custom => signed_axis_view(app, ui, rect, focused_view),
     }
 }
 
-fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
+fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, focused_view: bool) {
     if !axis_rect(app, rect).is_positive() || !axis_rect(app, rect).is_finite() {
         app.viewport.axis_drag = None;
         crate::scenario::publish_count("axis_view_highlights", 0.0);
@@ -11095,8 +11089,9 @@ fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         orbiting,
         snap_hint: !app.preferences.free_orbit,
         home_label: solidcraft_ui_text::tr_label("Home view").to_owned(),
+        turn_around_label: (focused_view && app.preferences.navigator_turn_around).then(|| app.tr("ui.navigator_turn_around").to_owned()),
     };
-    // The compass returns a tip or Home; its drag came from `axis_view_orbit` above.
+    // The compass returns a view action; its drag came from `axis_view_orbit` above.
     match crate::view_compass::show(ui, &compass) {
         Some(crate::view_compass::ViewAction::Snap { direction, .. }) => {
             let d = Vec3::from(direction);
@@ -11109,6 +11104,10 @@ fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
             app.animate_turn(to);
         }
         Some(crate::view_compass::ViewAction::Home) => app.animate_view("home"),
+        Some(crate::view_compass::ViewAction::TurnAround) => {
+            let camera = app.cam_anim.as_ref().map_or(app.cam, |animation| animation.to);
+            let _ = app.run("view.navigate", json!({"camera":camera,"action":"turn_around","fit":app.preferences.navigator_fit}));
+        }
         None => {}
     }
 }

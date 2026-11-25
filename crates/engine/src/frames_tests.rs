@@ -502,6 +502,18 @@ fn an_object_form_axis_maps_into_a_moved_component() {
     }
 }
 
+#[test]
+fn a_coil_axis_vector_in_either_form_turns_into_the_component_frame() {
+    let mut s = moved_part();
+    run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "axis": [0, 0, 1], "angle": "90 deg", "origin": [50, 0, 0]}));
+    // The component's local X axis points along world Y after the quarter turn.
+    for axis in [json!([0, 2, 0]), json!({"x": 0, "y": 2, "z": 0})] {
+        let params = json!({"axis": axis});
+        let mapped = crate::frames::to_local(&s, "solid.coil", &params).unwrap().unwrap_or_else(|| panic!("did not map {params}"));
+        assert!(near(crate::params::vec3(&mapped["axis"]).unwrap(), Vec3::new(2.0, 0.0, 0.0)), "{params} mapped to {mapped}");
+    }
+}
+
 /// A hole whose position and direction are written `{x, y, z}` is drilled like one written
 /// `[x, y, z]`, in a turned component picked from the root: the direction turns with the body.
 #[test]
