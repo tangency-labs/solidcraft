@@ -1495,27 +1495,33 @@ fn directed_planar_sweep_preserves_record_coordinates() {
 }
 
 #[test]
-fn hatch_record_admission_bounds_conversion_before_geometry() {
-    use solidcore_ops::hatch::generate;
-    use solidcore_record::hatch::{Invalid, Pattern};
-    let pattern = Pattern::lines_45();
+fn line_family_record_admission_bounds_conversion_before_geometry() {
+    use solidcore_ops::profile::clip_line_family;
+    use solidcore_record::profile::line_family::{Invalid, LineFamily};
+    let families = [LineFamily {
+        angle: FRAC_PI_4,
+        origin: v(0.0, 0.0),
+        delta_x: 0.0,
+        delta_y: 1.0,
+        dashes: Vec::new(),
+    }];
     let line = Seg2::Line {
         a: v(0.0, 0.0),
         b: v(1.0, 0.0),
     };
     let mut region = Region2 {
         outer: Loop2 {
-            segs: vec![line; solidcore::hatch::MAX_INPUT_PIECES + 1],
+            segs: vec![line; solidcore::prism::profile::line_family::MAX_INPUT_PIECES + 1],
         },
         holes: Vec::new(),
     };
     assert_eq!(
-        generate(&pattern, &region),
+        clip_line_family(&families, &region),
         Err(Invalid("input piece budget exhausted"))
     );
     region.outer.segs.pop();
     assert_ne!(
-        generate(&pattern, &region),
+        clip_line_family(&families, &region),
         Err(Invalid("input piece budget exhausted")),
         "the exact ceiling remains inclusive"
     );
@@ -1525,17 +1531,20 @@ fn hatch_record_admission_bounds_conversion_before_geometry() {
         holes: vec![circle.clone(), circle],
     };
     assert_eq!(
-        generate(&pattern, &region),
+        clip_line_family(&families, &region),
         Err(Invalid("not supported yet: multiple circular hatch holes"))
     );
     region = Region2 {
         outer: Loop2 {
             segs: vec![line; 3],
         },
-        holes: vec![Loop2::default(); solidcore::hatch::MAX_INPUT_PIECES / 3 + 1],
+        holes: vec![
+            Loop2::default();
+            solidcore::prism::profile::line_family::MAX_INPUT_PIECES / 3 + 1
+        ],
     };
     assert_eq!(
-        generate(&pattern, &region),
+        clip_line_family(&families, &region),
         Err(Invalid("too many region holes"))
     );
 }
@@ -1960,4 +1969,50 @@ fn a_face_strays_across_a_direction_by_its_tilt_over_its_own_size() {
         .unwrap();
     let sin = 1e-3 / (1.0 + 1e-6_f64).sqrt();
     close(tilted, 2.0 * 10.0 * sin, "ruled, tilted");
+}
+
+/// An extruded rectangle on a sketch plane that is not axis-aligned reads its record back, also
+/// as saved before #21509 (tangency-labs/solidcraft#13737: two side walls' planes were written
+/// with `u·v` = -3.886e-16, 1.2 times past the reader's old squareness bound, and
+/// `from_record` refused them).
+#[test]
+fn an_extruded_rectangle_on_a_tilted_plane_reads_its_record_back() {
+    // x = (584.394, 0, 385.337) made unit, the slot of tangency-labs/solidcraft#12365
+    let x = Vec3::new(0.8348477614519991, 0.0, 0.5504808944900683);
+    let plane = Plane {
+        origin: Vec3::new(3.302884, 0.0, -5.009087),
+        x,
+        y: Vec3::Y,
+    };
+    let p =
+        [(159.2, -6.5), (168.2, -6.5), (168.2, 6.5), (159.2, 6.5)].map(|(a, b)| Vec2::new(a, b));
+    let r = Region2 {
+        outer: Loop2::polygon(&p),
+        holes: vec![],
+    };
+    let body = extrude_planar_regions(&plane, &[r], 0.0, 12.0).unwrap();
+    let (mut record, _) = body.to_record().unwrap();
+    assert_eq!(
+        (
+            record.faces.len(),
+            record.edges.len(),
+            record.vertices.len()
+        ),
+        (6, 12, 8)
+    );
+    let (back, _) = Body::from_record(&record, false).unwrap();
+    assert!(back.check(CheckLevel::All).unwrap().is_valid());
+    // the record as written before #21509: every plane's v leaning on its u past the reader's
+    // old bound (3e-16), as the -3.886e-16 measured there, by enough to stay past it rounded
+    for face in &mut record.faces {
+        if let solidcore_record::brep::Surface::Plane { u_axis, v_axis, .. } = &mut face.surface {
+            for i in 0..3 {
+                v_axis[i] -= 1e-15 * u_axis[i];
+            }
+        }
+    }
+    let (old, _) = Body::from_record(&record, false).unwrap();
+    assert!(old.check(CheckLevel::All).unwrap().is_valid());
+    let (v, w) = (body.volume(1e-9).unwrap(), old.volume(1e-9).unwrap());
+    assert!((v - w).abs() <= 1e-9 * v, "volume {w} vs {v}");
 }
