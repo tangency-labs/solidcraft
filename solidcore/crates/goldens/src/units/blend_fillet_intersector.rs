@@ -1434,11 +1434,13 @@ mod wr458_moved_rows {
             let n = v3(normal);
             let n = n * (1.0 / n.length());
             let gap = (p0 - p1).length();
-            let off_plane = (p0 - v3(origin)).dot(n).abs();
+            // both points within the tolerance of the plane, not one and the gap
+            let off_plane =
+                f64::max((p0 - v3(origin)).dot(n).abs(), (p1 - v3(origin)).dot(n).abs());
             let tol = i.solver.tol;
             eprintln!("{name}: {growths} extensions, gap {gap:e}, off the plane {off_plane:e}, tol {tol:e}");
             assert!(gap <= tol, "{name}: the offsets' points are {gap:e} apart");
-            assert!(off_plane <= tol, "{name}: the point is {off_plane:e} off the plane");
+            assert!(off_plane <= tol, "{name}: a point is {off_plane:e} off the plane");
         }
         assert_eq!(seen, MOVED.len());
     }

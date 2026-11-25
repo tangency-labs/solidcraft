@@ -170,11 +170,13 @@ fn check(row: &str) {
         assert_eq!(input.checkpoint, Checkpoint::Full, "{name}");
         let seen: Rc<RefCell<usize>> = Rc::default();
         let into = Rc::clone(&seen);
-        // the checks run on the recorded body itself, at the record's `observe` call
+        // the checks run at the record's `observe` call, on a copy that stands for the
+        // recorded body (its ids and geometry), so they leave the recorded body as it is
         let output = crate::trim_hook::with_hook(
             Box::new(move |body: &mut Brep| {
                 *into.borrow_mut() += 1;
-                certify(body, name, closed, after);
+                let mut copy = body.clone_standing_for_self().unwrap();
+                certify(&mut copy, name, closed, after);
             }),
             || rust(&input),
         );

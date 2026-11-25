@@ -523,6 +523,7 @@ mod round_definition_rows {
 /// Each row, on the body the record measures ([`chamfered`], as [`run`] takes it):
 /// - the chamfer succeeds and the vertex, edge and face counts are the golden's;
 /// - `check_brep` Level 2 reports nothing and the body is one closed manifold solid;
+/// - no blend face it made is a bare (approximated) face;
 /// - its chamfer faces are definitions whose nets re-certify;
 /// - the volume the integrator converges to lies in the body's certified volume
 ///   enclosure, widened by the definitions' spread, and every other mass value lies in
@@ -535,7 +536,9 @@ mod wr458_rows {
     use super::super::end_to_end::round_definition_proof::{
         certified_blends, mass_bands, volume_band,
     };
+    use super::super::end_to_end::round_definition_rows::no_bare_blend_face;
     use super::*;
+    use solidcore::blend::definition_check::BlendFaceLog;
     use solidcore::topology::brep::p2::is_manifold_solid;
     use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 
@@ -598,11 +601,15 @@ mod wr458_rows {
                 .unwrap()
                 .two_offset_chamfer
                 .expect("a two-offset chamfer");
-            let mut k = Kernel::default();
+            let mut k = Kernel {
+                blend_face_log: Some(BlendFaceLog::default()),
+                ..Kernel::default()
+            };
             let Ok(mut done) = chamfered(&mut k, &input).unwrap() else {
                 panic!("{name}: set-up stopped short");
             };
             assert!(done.result.is_ok(), "{name}: {:?}", done.result);
+            no_bare_blend_face(&k, &done.body, name);
             let counts = [
                 0,
                 p1::vertices(&done.body, None).unwrap().len() as i64,

@@ -2860,9 +2860,13 @@ mod wr458_moved_rows {
                         copies.mixed += t.mixed - base.mixed;
                     }
                 };
-                // (a step may fail as its record does: the extension it leaves is
-                // certified all the same)
-                let _ = run_step_seen(&k, &mut s, step, &mut o, &mut on_copy);
+                // (a step may be refused as its record is, a status pushed: the extension
+                // it leaves is certified all the same; a harness error or deferral fails)
+                match run_step_seen(&k, &mut s, step, &mut o, &mut on_copy) {
+                    Ok(()) => {}
+                    Err(Fail::Harness(e)) => panic!("{} step {si}: {e:?}", c.name),
+                    Err(Fail::Deferred(_)) => panic!("{} step {si}: deferred", c.name),
+                }
                 if let Some(e) = err {
                     panic!("{} step {si}: a copy's extension: {e}", c.name);
                 }
@@ -2990,6 +2994,20 @@ mod wr458_moved_rows {
                 );
                 assert!(off_radius <= 1e-12 * len, "{}: off the offset circle", c.name);
                 assert!(along <= 1e-12, "{}: not the closed form's normal", c.name);
+                // its direction: the side of the tube's outward radius it takes is the one
+                // the offset takes inside the base's domain, which no extension makes
+                let mid = dom.mid();
+                let pm = s.evaluate_point(&k, mid).unwrap();
+                let nm = s
+                    .evaluate_normal(&k, mid, side(*ul), side(*vl))
+                    .unwrap();
+                let qm = (pm.y * pm.y + pm.z * pm.z).sqrt();
+                let inside = nm.dot(pm - Vec3::new(ctr[0], rho * pm.y / qm, rho * pm.z / qm));
+                assert!(
+                    inside != 0.0 && (n.dot(radial) > 0.0) == (inside > 0.0),
+                    "{}: the normal is reversed",
+                    c.name
+                );
                 assert!((n.length() - 1.0).abs() <= 1e-12, "{}", c.name);
             }
             assert!(normals > 0, "{}: no wrapped normal", c.name);
