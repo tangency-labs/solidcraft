@@ -1853,6 +1853,344 @@ mod tests {
         println!("{}", serde_json::to_string(&v).unwrap());
     }
 
+    /// The `FindDegenParamForDirection` row of the generated case `name`.
+    fn degen_row(name: &str) -> Vec<f64> {
+        let case = crate::case::regression_case(&Runner, name);
+        let i: Inputs = case.parse().expect("inputs");
+        assert!(matches!(i.op, OpIn::Degen { .. }), "{name}: not a degen case");
+        let Ok(row) = rust_run(&Kernel::default(), &i) else {
+            panic!("{name}: rust");
+        };
+        row
+    }
+
+    /// WR-57 (#17856): the answer is the most aligned of the maxima found. `gen0415`'s
+    /// alignment has a maximum at each end of its interval: 0.1461 at the input's end
+    /// -1.9672, 0.1611 at -0.3636 (main does not converge, 1001, and returns the
+    /// latter). Within upstream's `f_tol` of each other, but two maxima are not two
+    /// guesses: the larger is kept. Fails with the near-best guess's maximum kept.
+    #[test]
+    fn wr57_degen_keeps_the_most_aligned_maximum() {
+        let row = degen_row("gen0415");
+        assert_eq!(row[0], 0.0, "{row:?}");
+        assert!((row[1] - -0.363_579_904_284_928_37).abs() < 1e-9, "{row:?}");
+    }
+
+    /// WR-57 (#17856): a peak narrower than the starts' spacing is found by bracketing.
+    /// `gen0971`'s alignment peaks at 0.8447 at s = -1.4389 (`A''` about -563), which
+    /// no start's solve reaches; main reports the end -1.9062 (0.5634, not a maximum)
+    /// found. `gen1849`'s maximum 0.6845 at 0.3477 is likewise found where main returns
+    /// the sample 0.4767 (0.6595) unconverged. The pass solves on each neighbouring
+    /// pair of starts, samples and knots whose one-sided slopes are `+` then `-`.
+    /// Fails without the bracket pass.
+    #[test]
+    fn wr57_degen_finds_a_narrow_peak_by_bracketing() {
+        let row = degen_row("gen0971");
+        assert_eq!(row[0], 0.0, "{row:?}");
+        assert!((row[2] - -1.438_899_161_364).abs() < 1e-6, "{row:?}");
+        let row = degen_row("gen1849");
+        assert_eq!(row[0], 0.0, "{row:?}");
+        assert!((row[1] - 0.347_690_232_833).abs() < 1e-6, "{row:?}");
+    }
+
+    /// The `FindDegenParamForDirection` rows WR-57's retirement moved (#17856): each case's
+    /// name, main's row (3740d2254) and the new row (`[status, u, v]`, status 0 for a
+    /// converged answer and 1001 for one that is not).
+    #[rustfmt::skip]
+    const WR57_MOVED: &[(&str, &[f64], &[f64])] = &[
+        ("gen0039", &[1001.0, 1.0, 0.4139075512791188], &[0.0, 1.0, 0.4139075512791188]),
+        ("gen0097", &[1001.0, 0.0, 1.5502567193135035], &[0.0, 0.0, 1.5502567193135035]),
+        ("gen0114", &[0.0, 1.1334521839603298, 2.0780190823361337], &[0.0, 1.1334521839603298, 1.5665666640091418]),
+        ("gen0193", &[1001.0, 0.0, 1.5667278101457573], &[0.0, 0.0, 1.5667278101457573]),
+        ("gen0257", &[0.0, 1.0, 0.7444015760840781], &[0.0, 1.0, 0.06957962499308079]),
+        ("gen0328", &[1001.0, 1.0, 1.0], &[0.0, 1.0, 1.0]),
+        ("gen0397", &[1001.0, 1.0, 1.0], &[0.0, 1.0, 1.0]),
+        ("gen0415", &[1001.0, -0.36357990428492837, 1.9227275705997569], &[0.0, -0.36357990428492837, 1.9227275705997569]),
+        ("gen0435", &[0.0, 1.8100854975491047, 2.7106658347953982], &[0.0, 1.7368716422907917, 2.7106658347953982]),
+        ("gen0469", &[0.0, 0.8794673375124886, 1.0], &[0.0, 1.0, 1.0]),
+        ("gen0547", &[1001.0, 1.0, 2.058530688984697], &[0.0, 1.0, 2.058530688984697]),
+        ("gen0591", &[1001.0, 0.0, 0.0], &[0.0, 0.0, 0.0]),
+        ("gen0599", &[0.0, 1.3327582995469855, 0.16760955922782844], &[0.0, 1.3327582995469855, 1.0]),
+        ("gen0664", &[1001.0, 1.6111458568168486, 1.007624170833962], &[0.0, 1.6111458568168486, 1.007624170833962]),
+        ("gen0701", &[1001.0, 1.182293349939774, 1.1622911437579049], &[0.0, 1.182293349939774, 1.1622911437579049]),
+        ("gen0771", &[1001.0, 1.0, 1.7267181568619319], &[0.0, 1.0, 1.7267181568619319]),
+        ("gen0822", &[1001.0, 3.2467180155819317, 0.0], &[0.0, 3.2467180155819317, 0.0]),
+        ("gen0851", &[1001.0, 2.098624521735972, 0.4981730659903305], &[0.0, 2.098624521735972, 0.4981730659903305]),
+        ("gen0873", &[1001.0, -0.582632817431498, 0.0], &[0.0, -0.582632817431498, 0.0]),
+        ("gen0887", &[1001.0, 0.0, 0.0], &[0.0, 0.0, 0.0]),
+        ("gen0895", &[0.0, 1.3202268808361248, 2.3267590783994643], &[0.0, 1.3202268808361248, 1.6155146085409768]),
+        ("gen0968", &[1001.0, 2.300936874771631, 1.0], &[0.0, 2.300936874771631, 1.0]),
+        ("gen0971", &[0.0, 1.1718734235298043, -1.906188619905042], &[0.0, 1.1718734235298043, -1.4388991613641415]),
+        ("gen1044", &[1001.0, 1.0, 0.2787816171738582], &[0.0, 1.0, 0.2787816171738582]),
+        ("gen1066", &[0.0, -0.476503019599675, 3.084234032008041], &[0.0, 0.07800433074466473, 3.084234032008041]),
+        ("gen1112", &[1001.0, -0.677947189759065, 0.0], &[0.0, -0.677947189759065, 0.0]),
+        ("gen1168", &[0.0, 2.8080556406238455, -0.570922898620593], &[0.0, 3.166065130586924, -0.570922898620593]),
+        ("gen1209", &[1001.0, 1.2859079785078893, 0.1111111111111111], &[0.0, 1.2859079785078893, 0.1084320451993164]),
+        ("gen1213", &[1001.0, 0.841851725605939, 0.0], &[0.0, 0.841851725605939, 0.0]),
+        ("gen1295", &[1001.0, 0.0, 0.0], &[0.0, 0.0, 0.0]),
+        ("gen1305", &[1001.0, -0.6225519990713999, 0.32278962852062465], &[0.0, -0.6225519990713999, 0.32278962852062465]),
+        ("gen1325", &[1001.0, 2.9323433330930433, -0.8777231470795726], &[0.0, 2.9323433330930433, -0.8777231470795726]),
+        ("gen1341", &[0.0, 1.0, 0.1825044901118578], &[0.0, 1.0, 0.0]),
+        ("gen1415", &[0.0, 0.4946269012170479, 3.7364247050577073], &[0.0, 0.8467403521341613, 3.7364247050577073]),
+        ("gen1416", &[0.0, 0.0, 0.6666666666666666], &[0.0, 0.0, 0.6450747233279532]),
+        ("gen1425", &[1001.0, 1.0, 1.0], &[0.0, 1.0, 1.0]),
+        ("gen1454", &[0.0, 1.1365742380509563, -0.1767243002663077], &[0.0, 1.1365742380509563, 0.2698513655156045]),
+        ("gen1505", &[1001.0, 1.0, 0.23332919192759682], &[0.0, 1.0, 0.23332919192759682]),
+        ("gen1557", &[1001.0, 0.8690545544002823, -0.5231511784976446], &[0.0, 0.8690545544002823, -0.5231511784976446]),
+        ("gen1693", &[1001.0, 0.0, 4.34133977120981], &[0.0, 0.0, 4.34133977120981]),
+        ("gen1849", &[1001.0, 0.4767081039891621, 0.8912012948181007], &[0.0, 0.34769023283303463, 0.8912012948181007]),
+        ("gen1862", &[1001.0, 1.6679772235268522, 0.0], &[0.0, 1.6679772235268522, 0.0]),
+        ("gen1925", &[0.0, 0.6534994007434488, 1.8004735119948383], &[0.0, 0.0, 1.8004735119948383]),
+        ("gen1950", &[1001.0, 1.0, 1.0], &[0.0, 1.0, 1.0]),
+        ("gen1970", &[1001.0, 0.0, 1.0], &[0.0, 0.0, 1.0]),
+        ("gen2007", &[1001.0, 1.0, 0.0], &[0.0, 1.0, 0.0]),
+        ("gen2031", &[0.0, 1.5325658371422331e-09, 0.0], &[0.0, 1.0, 0.0]),
+        ("gen2054", &[1001.0, 0.0, 1.0], &[0.0, 0.0, 1.0]),
+        ("gen2100", &[0.0, 0.27262060958688394, 0.8888888888888888], &[0.0, 0.27262060958688394, 0.9045105503155376]),
+        ("gen2129", &[1001.0, -1.408332790465563, 1.0], &[0.0, -1.385932094518435, 1.0]),
+        ("gen2168", &[1001.0, 0.7486806102408945, 1.0], &[0.0, 0.7486806102408945, 1.0]),
+        ("gen2237", &[1001.0, 1.0, 0.0], &[0.0, 1.0, 0.0]),
+        ("gen2249", &[1001.0, 0.0, 0.0], &[0.0, 0.0, 0.0]),
+        ("gen2289", &[1001.0, -1.9044776287280283, 1.0], &[0.0, -1.9044776287280283, 1.0]),
+        ("gen2532", &[0.0, 0.30721245371530664, 0.0], &[0.0, 0.30721244378658225, 0.0]),
+        ("gen2573", &[1001.0, 0.0, -0.7431879794538867], &[0.0, 0.0, -0.7431879794538867]),
+        ("gen2597", &[1001.0, 3.1677635589459467, 0.0], &[0.0, 3.1677635589459467, 0.0]),
+        ("gen2714", &[1001.0, 0.0, -1.708666031231957], &[0.0, 0.0, -1.708666031231957]),
+        ("gen2721", &[1001.0, 1.0, 1.0], &[0.0, 1.0, 1.0]),
+        ("gen2764", &[0.0, -0.33002165078585133, 1.7041963136955], &[0.0, -0.155139705680514, 1.7041963136955]),
+        ("gen2821", &[1001.0, 1.0, 1.067819011444675], &[0.0, 1.0, 1.067819011444675]),
+        ("gen2842", &[1001.0, 1.0, 1.0], &[0.0, 1.0, 1.0]),
+        ("gen2939", &[0.0, 1.6520317297095517, 1.69750644596655], &[0.0, 1.118586373579102, 1.69750644596655]),
+        ("gen2955", &[0.0, 0.8548967786376014, -1.9302366276332217], &[0.0, 0.8548968118086484, -1.9302366276332217]),
+        ("gen2973", &[0.0, 3.7618090048440345, 2.013883631429436], &[0.0, 3.7618090048440345, 1.4437042287932131]),
+        ("gen2997", &[1001.0, 1.0, 0.9984474015655054], &[0.0, 1.0, 0.9984474015655054]),
+    ];
+
+    /// The enclosed alignment at `uv` ([`crate::certify::alignment`]).
+    fn wr57_alignment(k: &Kernel, s: &Surface, uv: Point2, dir: Vec3, singular_u: bool) -> Option<(f64, f64)> {
+        crate::certify::alignment(k, s, uv, dir, singular_u)
+    }
+
+    /// WR-57 (#17856): every row of `FindDegenParamForDirection` that moved from main is
+    /// replayed (the row agrees with the golden: the code checked is the code that blessed)
+    /// and its answer is certified not less aligned than main's: the alignment of the unit
+    /// derivative across the singular direction with the (oriented) direction, enclosed
+    /// at both answers ([`wr57_alignment`]), is at the new answer at least main's less the
+    /// two roundings. Where the answer is main's own parameter and only the status moved
+    /// (main 1001, not converged, now 0), the answer is checked to be a local maximum of
+    /// the alignment `A(s)` with the certified slopes
+    /// ([`solidcore::surface::surface::p7::alignment_slopes`], each sign charged its
+    /// error bound):
+    /// - an end of the interval where `A` is proven to grow outward (`F = A'` proven
+    ///   negative at the start, positive at the end) on a surface not closed in the
+    ///   singular direction, or closed with `A` proven to grow outward at both ends (a
+    ///   crease at the seam): PROVEN a local maximum;
+    /// - an interior answer where `F' = A''` is proven negative: a strict local maximum
+    ///   within `|F| / |F'|` of the answer, the solve's accuracy (ARGUED only in that
+    ///   the maximum is beside the answer, not at it);
+    /// - otherwise (a plateau, where `F'` is not proven negative, or a kink at a knot)
+    ///   ARGUED: the search's own test, which accepts a curvature not proven positive so
+    ///   that a plateau keeps its input, or its one-sided signs at the knot. These rows
+    ///   are listed, and the list asserted.
+    #[test]
+    fn wr57_moved_degen_answers_are_not_less_aligned() {
+        use solidcore::surface::surface::p7::{alignment_slopes, certified_alignment_evaluator};
+        let k = Kernel::default();
+        let (mut more, mut same_param, mut undefined) = (0usize, 0usize, 0usize);
+        let (mut end_proven, mut stationary_proven) = (0usize, 0usize);
+        let mut argued: Vec<&str> = Vec::new();
+        for &(name, main, new) in WR57_MOVED {
+            let case = crate::case::regression_case(&Runner, name);
+            let i: Inputs = case.parse().expect("inputs");
+            let row = rust_run(&k, &i).unwrap_or_else(|_| panic!("{name}: rust"));
+            assert!(
+                row.len() == new.len()
+                    && row.iter().zip(new).all(|(a, b)| (a - b).abs() <= crate::REL_TOL * a.abs().max(b.abs())),
+                "{name}: the code gives {row:?}, not the new row"
+            );
+            let OpIn::Degen { uv, dir, from_pole, sdir, .. } = &i.op else {
+                panic!("{name}: not a degen case");
+            };
+            let s = surface_of(&i.surface).expect("surface");
+            let singular_u = param_of(*sdir).expect("sdir") == SurfParamType::U;
+            // (the search's orientation of the direction: toward or away from the pole)
+            let domain = s.natural_uv_domain_with_nurb(&k).expect("domain");
+            let (t, t_mid) = if singular_u {
+                (uv[1], 0.5 * (domain.min().y + domain.max().y))
+            } else {
+                (uv[0], 0.5 * (domain.min().x + domain.max().x))
+            };
+            let mut d = v3(*dir).unitize().expect("a direction");
+            if (t > t_mid && *from_pole) || (t <= t_mid && !*from_pole) {
+                d = -d;
+            }
+            let at = |r: &[f64]| wr57_alignment(&k, &s, Point2::new(r[1], r[2]), d, singular_u);
+            if main[1..] == new[1..] {
+                same_param += 1;
+                let sd = if singular_u { SurfParamType::U } else { SurfParamType::V };
+                let (lo, hi) = if singular_u {
+                    (domain.min().x, domain.max().x)
+                } else {
+                    (domain.min().y, domain.max().y)
+                };
+                let answer = Point2::new(new[1], new[2]);
+                let at_s = if singular_u { new[1] } else { new[2] };
+                let scale = 1.0 + solidcore::nurbs::math::gamma(16);
+                let eval = certified_alignment_evaluator(&k, &s).expect("the evaluator");
+                let slopes = |x: f64| eval.as_ref().and_then(|e| alignment_slopes(e, answer, d, sd, x));
+                // (`A` proven to grow outward at the end `x`)
+                let outward = |x: f64| {
+                    slopes(x).is_some_and(|e| {
+                        let err = e.f_error * scale;
+                        (x == lo && e.f < -err) || (x == hi && e.f > err)
+                    })
+                };
+                let closed = s.is_closed(&k, &domain, sd, None, true).expect("is_closed").0;
+                let kind = if at_s == lo || at_s == hi {
+                    let other = if at_s == lo { hi } else { lo };
+                    if outward(at_s) && (!closed || outward(other)) {
+                        end_proven += 1;
+                        "an end, proven"
+                    } else {
+                        argued.push(name);
+                        "an end, ARGUED"
+                    }
+                } else if s.knots_with_nurb(&k, sd, None).map_or(true, |(kv, _)| kv.contains(&at_s)) {
+                    // (at a knot `A'` may jump: a kink, not judged by one span's slopes)
+                    argued.push(name);
+                    "a knot, ARGUED"
+                } else if slopes(at_s).is_some_and(|e| e.f_prime + e.f_prime_error * scale < 0.0) {
+                    stationary_proven += 1;
+                    "interior, curvature proven negative"
+                } else {
+                    argued.push(name);
+                    "interior, ARGUED"
+                };
+                eprintln!("{name}: the same parameter, status {} -> {}: {kind} {:?}", main[0], new[0], slopes(at_s));
+                continue;
+            }
+            let (m, n) = (at(main), at(new));
+            let Some(n) = n else {
+                panic!("{name}: the new answer's alignment cannot be enclosed (main {m:?})");
+            };
+            let Some(m) = m else {
+                // (main's answer is where the derivative is not enclosed away from zero:
+                // its tangent, and so its alignment, is not defined to the rounding)
+                undefined += 1;
+                eprintln!("{name}: main {main:?} has no enclosed alignment, new {new:?} {n:?}");
+                continue;
+            };
+            assert!(n.0 >= m.0 - m.1 - n.1, "{name}: new {n:?} proven less aligned than main {m:?}");
+            if n.0 - n.1 > m.0 + m.1 {
+                more += 1;
+            }
+            eprintln!("{name}: main {main:?} {m:?}, new {new:?} {n:?}");
+        }
+        eprintln!(
+            "{more} answers proven more aligned than main's, {same_param} at main's parameter \
+             ({end_proven} ends proven, {stationary_proven} interior with curvature proven \
+             negative, ARGUED {argued:?}), {undefined} where main's alignment is not enclosed"
+        );
+        assert_eq!(
+            (more, same_param, end_proven, stationary_proven, undefined, argued.as_slice()),
+            WR57_COUNTS,
+            "the certified counts moved"
+        );
+    }
+
+    /// [`wr57_moved_degen_answers_are_not_less_aligned`]'s counts: proven more aligned,
+    /// at main's parameter, of those the ends proven and the interior answers with their
+    /// curvature proven negative, main's alignment not enclosed, and the ARGUED rows (none:
+    /// gen1950 and gen2597, curve-bounded surfaces, are ends proven with their basis's
+    /// certified evaluator).
+    const WR57_COUNTS: (usize, usize, usize, usize, usize, &[&str]) = (18, 42, 42, 0, 1, &[]);
+
+    /// The rows of `FindDegenParamForDirection` whose answer is at a corner collapsed to a
+    /// pole (#17856 r4): each case's name and main's row, which the search keeps.
+    #[rustfmt::skip]
+    const WR57_COLLAPSED_CORNERS: &[(&str, &[f64])] = &[
+        ("gen0169", &[0.0, 0.0, -1.2049964921589695]),
+        ("gen0548", &[0.0, 1.703464449656554e-17, 1.0]),
+        ("gen0952", &[0.0, 0.8875235301771784, 1.0]),
+        ("gen2767", &[0.0, -1.7376978109616448, -0.118736981594457]),
+    ];
+
+    /// WR-57 (#17856 r4): main's converged answers at a collapsed corner are kept. Each
+    /// row is replayed and must equal main's (r3 refused all four: 1001). At each answer the
+    /// derivative `w` across the singular direction is not enclosed away from zero by the
+    /// certified partials ([`solidcore::surface::surface::p7::tangent_not_enclosed`]), so
+    /// the alignment and its slopes have no bound there. Where the corner's row of control
+    /// points is exactly one point (a pole, knots clamped), the end is PROVEN a strict
+    /// local maximum of the alignment taken at its limit from inside: the certified limit
+    /// of `F = A'` there ([`solidcore::surface::surface::p7::collapsed_end_slope`]) is
+    /// negative at the interval's start beyond its error (gen0548 and gen0952; gen0548's
+    /// answer `1.7e-17` is the solve's, within that end's rounding). Where the row is a pole
+    /// only to the rounding (rational rows whose `x_j / w_j` differ in the last bits:
+    /// gen0169's curve-bounded basis, gen2767) the search keeps upstream's acceptance of the
+    /// solve's stationary answer (ARGUED). The reasons are asserted.
+    #[test]
+    fn wr57_collapsed_corner_answers_keep_main() {
+        use solidcore::surface::surface::p7::{
+            alignment_slopes, certified_alignment_evaluator, collapsed_end_slope, tangent_not_enclosed,
+        };
+        let k = Kernel::default();
+        let mut reasons: Vec<(&str, &str)> = Vec::new();
+        for &(name, main) in WR57_COLLAPSED_CORNERS {
+            let case = crate::case::regression_case(&Runner, name);
+            let i: Inputs = case.parse().expect("inputs");
+            let row = rust_run(&k, &i).unwrap_or_else(|_| panic!("{name}: rust"));
+            assert!(
+                row.len() == main.len()
+                    && row.iter().zip(main).all(|(a, b)| (a - b).abs() <= crate::REL_TOL * a.abs().max(b.abs())),
+                "{name}: the code gives {row:?}, not main's row {main:?}"
+            );
+            let OpIn::Degen { uv, dir, from_pole, sdir, .. } = &i.op else {
+                panic!("{name}: not a degen case");
+            };
+            let s = surface_of(&i.surface).expect("surface");
+            let singular_u = param_of(*sdir).expect("sdir") == SurfParamType::U;
+            let sd = if singular_u { SurfParamType::U } else { SurfParamType::V };
+            let domain = s.natural_uv_domain_with_nurb(&k).expect("domain");
+            let (t, t_mid, lo, hi) = if singular_u {
+                (uv[1], 0.5 * (domain.min().y + domain.max().y), domain.min().x, domain.max().x)
+            } else {
+                (uv[0], 0.5 * (domain.min().x + domain.max().x), domain.min().y, domain.max().y)
+            };
+            let mut d = v3(*dir).unitize().expect("a direction");
+            if (t > t_mid && *from_pole) || (t <= t_mid && !*from_pole) {
+                d = -d;
+            }
+            let answer = Point2::new(main[1], main[2]);
+            let at_s = if singular_u { main[1] } else { main[2] };
+            let eval = certified_alignment_evaluator(&k, &s).expect("the evaluator").expect("an evaluator");
+            assert!(tangent_not_enclosed(&eval, answer, sd, at_s), "{name}: the tangent is enclosed at main's answer");
+            assert!(alignment_slopes(&eval, answer, d, sd, at_s).is_none(), "{name}: the slopes are bounded");
+            // (the end the answer is at, to the rounding)
+            let at_min = (at_s - lo).abs() <= (at_s - hi).abs();
+            let end = if at_min { lo } else { hi };
+            assert!(tangent_not_enclosed(&eval, answer, sd, end), "{name}: the end is not collapsed");
+            let limit = collapsed_end_slope(&k, &s, answer, d, sd, end, at_min).expect("the limit slope");
+            let reason = match limit {
+                Some((f, e)) => {
+                    assert!(if at_min { f < -e } else { f > e }, "{name}: the limit slope {f} ± {e} is not proven outward");
+                    "a pole: the limit slope proven outward"
+                }
+                None => "a pole to the rounding only: upstream's acceptance (ARGUED)",
+            };
+            eprintln!("{name}: main {main:?} kept: {reason} {limit:?}");
+            reasons.push((name, reason));
+        }
+        assert_eq!(reasons.as_slice(), WR57_COLLAPSED_CORNER_REASONS, "the reasons moved");
+    }
+
+    /// [`wr57_collapsed_corner_answers_keep_main`]'s reasons.
+    const WR57_COLLAPSED_CORNER_REASONS: &[(&str, &str)] = &[
+        ("gen0169", "a pole to the rounding only: upstream's acceptance (ARGUED)"),
+        ("gen0548", "a pole: the limit slope proven outward"),
+        ("gen0952", "a pole: the limit slope proven outward"),
+        ("gen2767", "a pole to the rounding only: upstream's acceptance (ARGUED)"),
+    ];
+
     /// Generated cases cover every op, most of the comparable ones not deferred.
     #[test]
     fn generated_cases_are_diverse() {
@@ -1879,3 +2217,75 @@ mod tests {
     }
 }
 
+
+#[cfg(test)]
+mod flat_corner_bits_tests {
+    use super::*;
+
+    /// Rows that moved when `GetFlatCorners` stopped clearing the other corners' bits
+    /// while it fills the points (WR-384): each asks for the points.
+    const MOVED: [&str; 13] = [
+        "flat_mask_1_points_1", "flat_mask_2_points_1", "flat_mask_4_points_1",
+        "flat_mask_8_points_1", "flat_mask_all_points_1", "gen0191", "gen0796", "gen1186",
+        "gen1584", "gen2327", "gen2351", "gen2373", "gen2405",
+    ];
+
+    /// Replays every `flat` case that asks for the points: the corners reported with the
+    /// points are exactly those reported without them (the pass upstream gets right), and
+    /// each reported corner's point is the surface at that corner of its natural domain.
+    #[test]
+    fn flat_corners_with_points_keep_every_bit() {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: MIN_GENERATED,
+        };
+        let k = Kernel::default();
+        let mut checked = Vec::new();
+        let mut failed = Vec::new();
+        for c in Runner.cases(&ctx).unwrap() {
+            let i: Inputs = c.parse().unwrap();
+            let OpIn::Flat { angle, want: true } = i.op else {
+                continue;
+            };
+            let Ok(s) = surface_of(&i.surface) else {
+                continue;
+            };
+            let (Ok(without), Ok(with)) =
+                (s.flat_corners(&k, angle, false), s.flat_corners(&k, angle, true))
+            else {
+                continue;
+            };
+            assert_eq!(with.flags, without.flags, "{}", c.name);
+            let d = s.natural_uv_domain_with_nurb(&k).unwrap();
+            let corners = [
+                Point2::new(d.u_min(), d.v_min()),
+                Point2::new(d.u_min(), d.v_max()),
+                Point2::new(d.u_max(), d.v_min()),
+                Point2::new(d.u_max(), d.v_max()),
+            ];
+            let pts = with.points.unwrap();
+            for (bit, (uv, p)) in [1u32, 2, 4, 8].iter().zip(corners.iter().zip(pts)) {
+                if with.flags & bit != 0 {
+                    // `GetFlatCorners` ignores a failed evaluation: the point stays
+                    // undefined
+                    if let Ok(e) = s.evaluate_point(&k, *uv) {
+                        assert_eq!(p, e, "{} corner {bit}", c.name);
+                    } else {
+                        assert_eq!(p, Vec3::UNDEF, "{} corner {bit}", c.name);
+                        failed.push(c.name.clone());
+                    }
+                } else {
+                    assert_eq!(p, Vec3::UNDEF, "{} corner {bit}", c.name);
+                }
+            }
+            if with.flags != 0 {
+                checked.push(c.name.clone());
+            }
+        }
+        for m in MOVED {
+            assert!(checked.iter().any(|n| n == m), "{m} not among the checked cases");
+            // every flagged corner of a moved row evaluates
+            assert!(!failed.iter().any(|n| n == m), "{m} has a corner that fails to evaluate");
+        }
+    }
+}

@@ -1,0 +1,88 @@
+{
+  "area": "shell",
+  "bodies": {
+    "b1": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b1"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b2"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b4"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "thicken",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "symmetric": false,
+        "thickness": 250.0
+      }
+    }
+  ],
+  "case": "15513-thicken-three-span-loft-sheet-out-250",
+  "expected": {
+    "body_count": 1,
+    "edges": 28,
+    "faces": 14,
+    "method": "Steiner's formula over the record's exact bicubic-by-linear patches, V = sum of the integrals of (d - H d^2 + K d^3/3) |S_u x S_v| du dv (Gauss-Legendre per knot span, 16 and 24 nodes agree to 1e-15), plus the wedge where the two slabs open at each seam, the integral of d^2 tan(theta/2) along it (theta the bend between the faces' normals; 125692.69 mm^3). 3 + 3 faces, 8 side walls: 14 faces, 28 edges, 16 vertices",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#15513"
+    ],
+    "tolerance": {
+      "rel": 1e-07
+    },
+    "vertices": 16,
+    "volume_mm3": 281402860937.1345,
+    "what": "a surface loft between two fit-point splines (four points each, 40 m long, 28 m apart in mm) is three faces, one per span; the two seams between them are tangent at their ends but bend by up to 0.006 and 0.018 degrees in between. Thickened 250 along its normals it was refused as 'not a closed solid': each face kept its own offset of the seam, up to 0.08 mm apart"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "records": "15513-thicken-three-span-loft-sheet-out-250.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b5"
+    }
+  ],
+  "sources": [
+    "tangency-labs/solidcraft#15513"
+  ],
+  "ungraded": [],
+  "what": "a surface loft between two fit-point splines (four points each, 40 m long, 28 m apart in mm) is three faces, one per span; the two seams between them are tangent at their ends but bend by up to 0.006 and 0.018 degrees in between. Thickened 250 along its normals it was refused as 'not a closed solid': each face kept its own offset of the seam, up to 0.08 mm apart",
+  "why_not": []
+}

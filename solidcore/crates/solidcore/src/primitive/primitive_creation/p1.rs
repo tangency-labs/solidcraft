@@ -17,9 +17,8 @@
 //! Deviations: owned curves and typed arena ids replace pointers. The four maps
 //! use ordered maps; comparisons observe counts and lookups, never address hash order.
 //! `CopyEntityMaps` copies FROM the primitive TO the sweep, despite its name.
-//! Ignored statuses retain the previous output and propagate only Unported; with
-//! `Kernel::fixes.planar_path_profile_placement_statuses`, `position_profile_curves`
-//! returns the first failed box, normal, evaluation or placement status instead (WR-632, #483).
+//! `position_profile_curves` returns the first failed box, normal, evaluation or
+//! placement status, where upstream ignores them (WR-632, #483).
 //! Pivot selection and path extension return failed curve evaluations and extensions
 //! (#483), where upstream ignores them and goes on with the unextended curve or an
 //! undefined point. The `SetCanonical` of
@@ -39,7 +38,7 @@ use std::collections::BTreeMap;
 
 use crate::curve::curve::p2::Curve;
 use crate::curve::curve::p3::compute_crvs_normal;
-use crate::error::{checked_or_ignored, ignore_status, ignored, EntityRef, Result};
+use crate::error::{EntityRef, Result};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p2::ContinuityType;
@@ -49,6 +48,16 @@ use crate::nurbs::b_spline_curve::p1::BSplineCurve;
 use crate::nurbs::b_spline_curve::p2::BoundingBoxRequest;
 use crate::nurbs::crv_adv::p1::CurveEnd;
 use crate::topology::RegionId;
+
+/// Why the legacy profile placement finds no first curve on its path.
+const NO_PATH_CURVE: &str =
+    "the path has no first curve, though its normal was just computed from \
+                             its curves, and an empty path gives no normal";
+/// Why the path's start evaluation gives no point and tangent.
+const NO_PATH_TANGENT: &str =
+    "the path's first curve, evaluated at its start with one derivative, \
+                               gave fewer than two vectors, though an evaluation gives the point \
+                               and each derivative asked for";
 
 /// Four topology associations of a primitive or topology sweep.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -205,11 +214,11 @@ pub fn extend_path_curves(
 /// The tolerance is unused upstream. Copies are appended before transforming
 /// the entire output list, including any entries supplied by the caller.
 ///
-/// With `Kernel::fixes.planar_path_profile_placement_statuses` the first failing
-/// status of bounding boxes, profile normals, angles, path evaluations, the two
-/// `SetCanonical` calls, the three transforms or `MakeUnitOrthoVectors` is returned (WR-632, #483); the edits
-/// already made stay, and the partial axes are not used after a failed
-/// `MakeUnitOrthoVectors`. Off by default, the statuses are ignored as upstream does.
+/// The first failing status of bounding boxes, profile normals, angles, path
+/// evaluations, the two `SetCanonical` calls, the three transforms or
+/// `MakeUnitOrthoVectors` is returned (not upstream, WR-632, #483, which ignores them);
+/// the edits already made stay, and the partial axes are not used after a failed
+/// `MakeUnitOrthoVectors`.
 ///
 /// Paths with a plane outside
 /// XY place the profile in that plane's frame at the path's start and map it back
@@ -219,9 +228,9 @@ pub fn extend_path_curves(
 /// # Errors
 ///
 /// The path-frame opt-in propagates failed frame evaluations and transforms.
-/// Copy failures and unported callees propagate. With the placement-status opt-in,
-/// failures of the box, normal, angle, evaluation, placement and transform calls propagate,
-/// without rolling back earlier edits.
+/// Copy failures and unported callees propagate, and so do failures of the box,
+/// normal, angle, evaluation, placement and transform calls, without rolling back
+/// earlier edits.
 pub fn position_profile_curves(
     k: &Kernel,
     profiles: &[Curve],
@@ -229,15 +238,7 @@ pub fn position_profile_curves(
     path: &Curve,
     output: &mut Vec<Curve>,
 ) -> Result<()> {
-    position_profile_curves_impl(
-        k,
-        profiles,
-        tol,
-        path,
-        output,
-        k.fixes.planar_path_profile_placement_statuses,
-        std::slice::from_ref(path),
-    )
+    position_profile_curves_impl(k, profiles, tol, path, output, std::slice::from_ref(path))
 }
 
 pub(super) fn position_profile_curves_impl(
@@ -246,7 +247,6 @@ pub(super) fn position_profile_curves_impl(
     tol: f64,
     path: &Curve,
     output: &mut Vec<Curve>,
-    checked: bool,
     whole_path: &[Curve],
 ) -> Result<()> {
     // WR-660: perform the legacy placement in the whole path's own XY frame, one frame
@@ -257,16 +257,24 @@ pub(super) fn position_profile_curves_impl(
         // Preserve upstream arithmetic for paths in or parallel to XY,
         // regardless of the direction in which the path turns.
         if normal.x.abs() > crate::math::EFF_ZERO || normal.y.abs() > crate::math::EFF_ZERO {
-            let no_start = || {
-                crate::error::SolidError::primitive_failed(
-                    "primitive::position_profile_curves",
-                    "the path has no start point and tangent",
-                )
+            use crate::error::primitive::PrimitiveFailure;
+            const OP: &str = "primitive::position_profile_curves";
+            let Some(first) = whole_path.first() else {
+                let why = NO_PATH_CURVE;
+                return Err(crate::error::SolidError::primitive(
+                    OP,
+                    PrimitiveFailure::Defect { why },
+                ));
             };
-            let first = whole_path.first().ok_or_else(no_start)?;
             let start = first.evaluate(k, first.natural_interval().min(), 1, true, true)?;
-            let origin = start.first().copied().ok_or_else(no_start)?;
-            let tangent = start.get(1).copied().ok_or_else(no_start)?.unitize()?;
+            let [origin, tangent, ..] = start.as_slice() else {
+                let why = NO_PATH_TANGENT;
+                return Err(crate::error::SolidError::primitive(
+                    OP,
+                    PrimitiveFailure::Defect { why },
+                ));
+            };
+            let (origin, tangent) = (*origin, tangent.unitize()?);
             let x = tangent.cross(normal).unitize()?;
             let frame = Axis2Placement::new(origin, x, tangent);
             let inverse = frame.invert();
@@ -286,7 +294,6 @@ pub(super) fn position_profile_curves_impl(
                 tol,
                 &local_path,
                 &mut local_output,
-                checked,
             )?;
             for curve in &mut local_output {
                 curve.transform(k, &frame, None)?;
@@ -295,7 +302,7 @@ pub(super) fn position_profile_curves_impl(
             return Ok(());
         }
     }
-    position_profile_curves_legacy(k, profiles, tol, path, output, checked)
+    position_profile_curves_legacy(k, profiles, tol, path, output)
 }
 
 fn position_profile_curves_legacy(
@@ -304,26 +311,21 @@ fn position_profile_curves_legacy(
     _tol: f64,
     path: &Curve,
     output: &mut Vec<Curve>,
-    checked: bool,
 ) -> Result<()> {
     let mut total = Extent3d::new();
     let mut bounds = Extent3d::new();
     for profile in profiles {
-        if let Some(boxes) = checked_or_ignored(
-            profile.calculate_bounding_box(
-                k,
-                &profile.natural_interval(),
-                BoundingBoxRequest {
-                    normal: true,
-                    ..BoundingBoxRequest::default()
-                },
-                true,
-            ),
-            checked,
-        )? {
-            if let Some(normal) = boxes.normal {
-                bounds = normal;
-            }
+        let boxes = profile.calculate_bounding_box(
+            k,
+            &profile.natural_interval(),
+            BoundingBoxRequest {
+                normal: true,
+                ..BoundingBoxRequest::default()
+            },
+            true,
+        )?;
+        if let Some(normal) = boxes.normal {
+            bounds = normal;
         }
         total.add_point(bounds.min());
         total.add_point(bounds.max());
@@ -331,72 +333,31 @@ fn position_profile_curves_legacy(
         output.push(profile.copy(k)?);
     }
     let mut translation = Axis2Placement::IDENTITY;
-    if checked {
-        translation.set_canonical(-total.mid(), Vec3::X, Vec3::Y)?;
-    } else {
-        ignore_status(translation.set_canonical(-total.mid(), Vec3::X, Vec3::Y))?;
-    }
+    translation.set_canonical(-total.mid(), Vec3::X, Vec3::Y)?;
     for curve in output.iter_mut() {
-        let status = curve.transform(k, &translation, None);
-        if checked {
-            status?;
-        } else {
-            ignore_status(status)?;
-        }
+        curve.transform(k, &translation, None)?;
     }
-    let normal =
-        checked_or_ignored(compute_crvs_normal(k, profiles), checked)?.unwrap_or(Vec3::UNDEF);
+    let normal = compute_crvs_normal(k, profiles)?;
     let mut orientation = Axis2Placement::IDENTITY;
-    let angle = checked_or_ignored(Vec3::X.angle_between(normal), checked)?.unwrap_or(0.0);
+    let angle = Vec3::X.angle_between(normal)?;
     orientation.rotate_about_axis(-angle, Vec3::X.cross(normal));
     for curve in output.iter_mut() {
-        let status = curve.transform(k, &orientation, None);
-        if checked {
-            status?;
-        } else {
-            ignore_status(status)?;
-        }
+        curve.transform(k, &orientation, None)?;
     }
-    let mut start = [Vec3::UNDEF; 2];
-    if let Some(values) = checked_or_ignored(
-        path.evaluate(k, path.natural_interval().min(), 1, true, true),
-        checked,
-    )? {
-        for (target, value) in start.iter_mut().zip(values) {
-            *target = value;
-        }
-    }
+    let start = path.evaluate(k, path.natural_interval().min(), 1, true, true)?;
     let origin = start.first().copied().unwrap_or(Vec3::UNDEF);
     let tangent = start.get(1).copied().unwrap_or(Vec3::UNDEF);
     let mut y = Vec3::Z.cross(tangent);
     if tangent.z.abs() > tangent.x.abs() && tangent.z.abs() > tangent.y.abs() {
         y = Vec3::Y;
     }
-    // MakeUnitOrthoVectors writes/unitizes X before any later failure.
-    // Its caller ignores that status but still uses the partially written axes.
-    let mut x = tangent.unitize_or_z();
-    let ortho = tangent.make_unit_ortho_vectors(Some(y));
-    if checked {
-        let [next_x, next_y, _] = ortho?;
-        x = next_x;
-        y = next_y;
-    } else if let Some([next_x, next_y, _]) = ignored(ortho)? {
-        x = next_x;
-        y = next_y;
-    }
+    // Not upstream (WR-632): a failed MakeUnitOrthoVectors is returned; upstream
+    // ignores it and places the profiles with the partially written axes.
+    let [x, y, _] = tangent.make_unit_ortho_vectors(Some(y))?;
     let mut placement = Axis2Placement::IDENTITY;
-    if checked {
-        placement.set_canonical(origin, x, y)?;
-    } else {
-        ignore_status(placement.set_canonical(origin, x, y))?;
-    }
+    placement.set_canonical(origin, x, y)?;
     for curve in output.iter_mut() {
-        let status = curve.transform(k, &placement, None);
-        if checked {
-            status?;
-        } else {
-            ignore_status(status)?;
-        }
+        curve.transform(k, &placement, None)?;
     }
     Ok(())
 }
@@ -459,8 +420,7 @@ mod tests {
 
     #[test]
     fn audit_483_placement_read_failures_keep_the_successful_prefix() {
-        let mut k = Kernel::default();
-        k.fixes.planar_path_profile_placement_statuses = true;
+        let k = Kernel::default();
         let profile =
             Curve::from(BSplineCurve::create_line_segment(3, Vec3::ZERO, Vec3::X).unwrap());
         let path = Curve::from(BSplineCurve::create_line_segment(3, Vec3::ZERO, Vec3::Z).unwrap());
@@ -479,8 +439,7 @@ mod tests {
 
     #[test]
     fn audit_483_placement_rejects_failed_box_before_appending_copy() {
-        let mut k = Kernel::default();
-        k.fixes.planar_path_profile_placement_statuses = true;
+        let k = Kernel::default();
         let bad = Curve::from(BSplineCurve::default());
         let path = Curve::from(BSplineCurve::create_line_segment(3, Vec3::ZERO, Vec3::Z).unwrap());
         let expected = bad
@@ -613,28 +572,21 @@ mod tests {
             .collect()
     }
 
-    /// The pinned C++ ignores the placement statuses; the opt-in returns the first one
-    /// (`MakeUnitOrthoVectors`, after the two transforms that precede it) and leaves the
-    /// edits already made, including the caller's pre-existing output entries.
+    /// The pinned C++ ignores the placement statuses; the placement returns the first
+    /// one (`MakeUnitOrthoVectors`, after the two transforms that precede it) and leaves
+    /// the edits already made, including the caller's pre-existing output entries.
     #[test]
-    fn wr632_opt_in_returns_first_failed_placement_status_and_keeps_edits() {
+    fn wr632_returns_first_failed_placement_status_and_keeps_edits() {
         for (tol, start, end, centre, radius) in WR632_CASES {
             let path = path_curve(start, end);
             let profiles = [circle_profile(centre, radius)];
             let before = samples(&Kernel::default(), &profiles[0]);
             let marker_before = samples(&Kernel::default(), &marker());
 
-            // Default: pinned C++ behaviour, which carries on with the partial frame.
-            let mut pinned = vec![marker()];
-            position_profile_curves(&Kernel::default(), &profiles, tol, &path, &mut pinned)
-                .expect("pinned C++ ignores the failed placement");
-            assert_eq!(pinned.len(), 2);
-
-            let mut k = Kernel::default();
-            k.fixes.planar_path_profile_placement_statuses = true;
+            let k = Kernel::default();
             let mut output = vec![marker()];
             let error = position_profile_curves(&k, &profiles, tol, &path, &mut output)
-                .expect_err("opt-in reports the failed placement");
+                .expect_err("the failed placement is reported");
             assert_eq!(
                 (error.operation(), error.sm_status()),
                 (
@@ -668,35 +620,23 @@ mod tests {
         }
     }
 
-    /// A well-conditioned path and profile place identically with the opt-in: the flag
-    /// only changes what happens when one of the placement calls fails.
+    /// A well-conditioned path and profile still place: the circle of radius 0.5 about
+    /// (1, 2, 0) in z = 0 is moved to the path start (the origin) and stays in the plane
+    /// square to the path's tangent, z, so every point is 0.5 from the origin at z = 0.
     #[test]
-    fn wr632_opt_in_leaves_a_well_conditioned_placement_unchanged() {
+    fn wr632_well_conditioned_placement_succeeds() {
         let path = path_curve([0.0, 0.0, 0.0], [0.0, 0.0, 5.0]);
         let profiles = [circle_profile([1.0, 2.0, 0.0], 0.5)];
 
-        let mut pinned = Vec::new();
-        position_profile_curves(&Kernel::default(), &profiles, 1e-9, &path, &mut pinned)
-            .expect("pinned placement");
+        let k = Kernel::default();
+        let mut placed = Vec::new();
+        position_profile_curves(&k, &profiles, 1e-9, &path, &mut placed)
+            .expect("well-conditioned placement");
 
-        let mut k = Kernel::default();
-        k.fixes.planar_path_profile_placement_statuses = true;
-        let mut opt_in = Vec::new();
-        position_profile_curves(&k, &profiles, 1e-9, &path, &mut opt_in)
-            .expect("well-conditioned opt-in placement");
-
-        assert_eq!(pinned.len(), opt_in.len());
-        for (a, b) in pinned.iter().zip(&opt_in) {
-            assert_eq!(a.natural_interval(), b.natural_interval());
-            for sample in 0..=4 {
-                let fraction = f64::from(sample) / 4.0;
-                assert_eq!(
-                    a.evaluate(&k, a.natural_interval().evaluate(fraction), 1, true, true)
-                        .expect("pinned position and tangent"),
-                    b.evaluate(&k, b.natural_interval().evaluate(fraction), 1, true, true)
-                        .expect("opt-in position and tangent")
-                );
-            }
+        assert_eq!(placed.len(), 1);
+        for point in samples(&k, &placed[0]) {
+            assert!((point.length() - 0.5).abs() <= 1e-12, "{point:?}");
+            assert!(point.z.abs() <= 1e-12, "{point:?}");
         }
     }
 }

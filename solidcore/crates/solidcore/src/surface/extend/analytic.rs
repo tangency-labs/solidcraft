@@ -84,6 +84,7 @@
 use super::ball::{knot_box, reach, source_iso};
 use super::sides::{round_the_axis, ExtendedSides, SideExtension};
 use super::{below_resolution, keeps, Continuity, ExtendRefusal, Local};
+use crate::error::surface::SurfaceFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::Vec3;
@@ -178,7 +179,14 @@ pub(super) fn analytic_extended_sides(
     let support = AnalyticSupport::check(k, carrier)?;
     let implicit = support.implicit();
     let form = crate::blend::fillet_section::station::as_b_spline(k, carrier)?
-        .ok_or_else(|| SolidError::surface_failed(OP, "the carrier has no B-spline form"))?
+        .ok_or_else(|| {
+            SolidError::surface(
+                OP,
+                SurfaceFailure::Defect {
+                    why: "the carrier has no B-spline form, though `AnalyticSupport::check` just made the same form of it and proved it on its kind",
+                },
+            )
+        })?
         .into_owned();
     let step = carrier.step_uv_domain();
     let open = TURN - step.u_interval().length().to_radians();
@@ -201,9 +209,11 @@ pub(super) fn analytic_extended_sides(
         ),
         Implicit::Sphere { centre, radius } => {
             let AnalyticSupport::Sphere { placement, .. } = support else {
-                return Err(SolidError::surface_failed(
+                return Err(SolidError::surface(
                     OP,
-                    "the support is not the sphere its implicit form says",
+                    SurfaceFailure::Defect {
+                        why: "the support is not the sphere its implicit form says, though `implicit` gives a sphere's form only of a sphere's support",
+                    },
                 ));
             };
             (
@@ -248,9 +258,14 @@ pub(super) fn analytic_extended_sides(
         ),
     };
     // the size of the net's points from the origin, for the rounding of the closed forms
-    let net0 = form
-        .gw_nurb()
-        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
+    let net0 = form.gw_nurb().ok_or_else(|| {
+        SolidError::surface(
+            OP,
+            SurfaceFailure::Defect {
+                why: "the carrier's form has no NURB, though `AnalyticSupport::check` proved the same form on its kind by reading its NURB",
+            },
+        )
+    })?;
     let mut size = frame.size;
     for c in net0.cpts().iter().flatten() {
         let w = if c.w == NOW { 1.0 } else { c.w };
@@ -344,16 +359,18 @@ pub(super) fn analytic_extended_sides(
     }))
 }
 
-/// The unit vector along `v`, refused where it has no direction.
-fn unit(v: Vec3) -> Result<Vec3> {
+/// The unit vector along `v`; `None` where it has no direction (each caller says why).
+fn unit(v: Vec3) -> Option<Vec3> {
     let l = v.length();
     if l.is_nan() || l <= 0.0 {
-        return Err(SolidError::surface_failed(
-            OP,
-            "the vector has no direction",
-        ));
+        return None;
     }
-    Ok(v * (1.0 / l))
+    Some(v * (1.0 / l))
+}
+
+/// A point the circle's construction turns about the axis is on the axis.
+fn on_axis() -> SolidError {
+    SolidError::surface(OP, SurfaceFailure::PointOnAxis)
 }
 
 /// `x`'s part normal to the axis.
@@ -376,10 +393,14 @@ fn circle(f: &Frame, iso: Iso, x0: Vec3) -> Result<Option<(Vec3, Vec3, f64)>> {
             let centre = f.origin + f.axis * f.axis.dot(d);
             Some((centre, f.axis, (x0 - centre).length()))
         }
-        Iso::Meridian { radius } => Some((f.origin, unit(f.axis.cross(d))?, radius)),
+        // a point at a pole (on the axis) has no meridian plane
+        Iso::Meridian { radius } => {
+            Some((f.origin, unit(f.axis.cross(d)).ok_or_else(on_axis)?, radius))
+        }
+        // nor a point on the axis a tube's circle
         Iso::Tube { major, minor } => {
-            let centre = f.origin + unit(radial(f, x0))? * major;
-            Some((centre, unit(f.axis.cross(d))?, minor))
+            let centre = f.origin + unit(radial(f, x0)).ok_or_else(on_axis)? * major;
+            Some((centre, unit(f.axis.cross(d)).ok_or_else(on_axis)?, minor))
         }
         Iso::Ruling => None,
     })
@@ -407,6 +428,113 @@ fn length(f: &Frame, iso: Iso, (x_far, x_half): (Vec3, Vec3), x0: Vec3, x1: Vec3
     Ok(radius * phi)
 }
 
+/// The widened analytic path measures the distance in the side's own frame, from the
+/// STEP parameters the construction widened: the closed-form radius and arc keep the
+/// result the same at any position. The parameters come through the polar converters, so
+/// their own rounding is in the angle and radius bounds, and a conversion that could only
+/// be solved numerically is refused as not exact.
+pub(super) fn widened_across(
+    k: &Kernel,
+    (source, source_dom, source_side): (&Surface, &crate::geom::extent2d::Extent2d, BoxSide),
+    (s, dom, side): (&Surface, &crate::geom::extent2d::Extent2d, BoxSide),
+) -> Result<Across> {
+    let support = AnalyticSupport::check(k, s)?;
+    let form = crate::blend::fillet_section::station::as_b_spline(k, s)?.ok_or_else(|| {
+        SolidError::surface(
+            OP,
+            SurfaceFailure::Defect {
+                why: "the surface has no B-spline form, though `AnalyticSupport::check` just made the same form of it and proved it on its kind",
+            },
+        )
+    })?;
+    let middle = side.point(dom, 0.5);
+    let end = side.at(&knot_box(&form)?);
+    let to = if side.is_u() {
+        Point2::new(end, middle.y)
+    } else {
+        Point2::new(middle.x, end)
+    };
+    let from = source_side.point(source_dom, 0.5);
+    let parallel = round_the_axis(s, side) == Some(true);
+    // a straight iso (a cone's ruling, a plane) is its chord, on the form
+    let circular = match support.implicit() {
+        Implicit::Cone { .. } => parallel,
+        Implicit::Sphere { .. } | Implicit::Torus { .. } => true,
+        Implicit::Plane { .. } => false,
+    };
+    if !circular {
+        return Ok(super::measure::across(super::measure::chord(
+            &form, middle, to,
+        )?));
+    }
+    let (a, a_exact) = source.convert_uv_from_nurbs_to_step_exact(k, from)?;
+    let (b, b_exact) = s.convert_uv_from_nurbs_to_step_exact(k, to)?;
+    // A numerical inverse is no closed form: its angle is not bounded by the conversion's
+    // rounding, so the distance across cannot be certified here.
+    if !(a_exact && b_exact) {
+        return Err(super::not_exact(None));
+    }
+    // The polar converters' own rounding, in degrees: it scales with the angles converted
+    // (up to a turn), so it is taken from both ends rather than from the difference alone.
+    let conv_x = gamma(8) * (a.x.abs() + b.x.abs());
+    let conv_y = gamma(8) * (a.y.abs() + b.y.abs());
+    let (radius, radius_err, delta, conv) = match support.implicit() {
+        Implicit::Cone {
+            radius, tan_angle, ..
+        } => {
+            let term = tan_angle * a.y;
+            let r = radius + term;
+            (
+                r,
+                gamma(4) * (radius.abs() + term.abs()) + tan_angle.abs() * conv_y.to_radians(),
+                b.x - a.x,
+                conv_x,
+            )
+        }
+        Implicit::Sphere { radius, .. } => {
+            if parallel {
+                let latitude = a.y.to_radians();
+                let r = radius * latitude.cos();
+                (
+                    r,
+                    gamma(8) * radius * (1.0 + latitude.abs())
+                        + radius * latitude.sin().abs() * conv_y.to_radians(),
+                    b.x - a.x,
+                    conv_x,
+                )
+            } else {
+                (radius, 0.0, b.y - a.y, conv_y)
+            }
+        }
+        Implicit::Torus { major, minor, .. } => {
+            if parallel {
+                let latitude = a.y.to_radians();
+                let term = minor * latitude.cos();
+                (
+                    major + term,
+                    gamma(12) * (major.abs() + minor * (1.0 + latitude.abs()))
+                        + minor * latitude.sin().abs() * conv_y.to_radians(),
+                    b.x - a.x,
+                    conv_x,
+                )
+            } else {
+                (minor, 0.0, b.y - a.y, conv_y)
+            }
+        }
+        Implicit::Plane { .. } => {
+            return Ok(super::measure::across(super::measure::chord(
+                &form, middle, to,
+            )?));
+        }
+    };
+    let angle = delta.to_radians().abs();
+    let angle_err = gamma(4) * angle + conv.to_radians();
+    Ok(super::measure::across(super::measure::circle_from_angle(
+        (radius, radius_err),
+        (angle, angle_err),
+    )?))
+}
+
 /// `cur` continued Natural past `side` by `distance` across it, capped (module docs): the
 /// result, its across length, whether the cap stopped it, and its construction bound;
 /// `None` where the (capped) distance is below the side's resolution ([`below_resolution`]).
@@ -418,9 +546,14 @@ fn extend_side(
     implicit: &Implicit,
     distance: f64,
 ) -> Result<Option<(BSplineSurface, Across, bool, f64)>> {
-    let net = cur
-        .gw_nurb()
-        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
+    let net = cur.gw_nurb().ok_or_else(|| {
+        SolidError::surface(
+            OP,
+            SurfaceFailure::Defect {
+                why: "the net continued past the side has no NURB, though it is the carrier's form proved by reading its NURB or an extension built from a NURB",
+            },
+        )
+    })?;
     if matches!(iso, Iso::Ruling) && (if side.is_u() { net.p() } else { net.q() }) != 1 {
         return Err(SolidError::Unsupported {
             operation: OP,
@@ -530,9 +663,11 @@ fn extend_side(
     }
     let e = reach(&value, target, source.range()?, least)?;
     let (grown, bound) = made(e)?.ok_or_else(|| {
-        SolidError::surface_failed(
+        SolidError::surface(
             OP,
-            "the extension at the reached distance could not be made",
+            SurfaceFailure::Defect {
+                why: "the extension at the distance the solve reached could not be made, though the solve returns only an ask it made and measured, and making an ask is deterministic",
+            },
         )
     })?;
     let across = across_of(&grown, bound)?;
@@ -558,30 +693,38 @@ fn joint_removed(out: &Net, side: BoxSide, joint: f64) -> Result<Net> {
     } else {
         out.v_knots()
     };
-    let last = knots
-        .len()
-        .checked_sub(1)
-        .ok_or_else(|| SolidError::surface_failed(OP, "the side's knot vector is empty"))?;
+    let last = knots.len().checked_sub(1).ok_or_else(|| {
+        SolidError::surface(
+            OP,
+            SurfaceFailure::Defect {
+                why: "the extension's knot vector across the side is empty, though a NURB's knot vectors hold degree + 1 knots at each end",
+            },
+        )
+    })?;
     let at: Vec<usize> = (0..knots.len())
         .filter(|&i| knots.get(i) == Some(&joint))
         .collect();
     let &[i] = at.as_slice() else {
-        return Err(SolidError::surface_failed(
+        return Err(SolidError::surface(
             OP,
-            "the joint is not a single knot of the extension",
+            SurfaceFailure::Defect {
+                why: "the joint is not a single knot of the extension, though the degree 1 continuation keeps the source's clamped end knot once, as the joint, and adds its own end knots past it",
+            },
         ));
     };
     // degree 1, clamped: an interior knot has two knots on each side, and the control
     // point at knot index i is point i - 1
-    if i < 2 || i.checked_add(2).is_none_or(|j| j > last) {
-        return Err(SolidError::surface_failed(
-            OP,
-            "the joint is not an interior knot",
-        ));
-    }
-    let row = i
-        .checked_sub(1)
-        .ok_or_else(|| SolidError::surface_failed(OP, "the joint is not an interior knot"))?;
+    let row = match i.checked_sub(1) {
+        Some(row) if i >= 2 && i.checked_add(2).is_some_and(|j| j <= last) => row,
+        _ => {
+            return Err(SolidError::surface(
+                    OP,
+                    SurfaceFailure::Defect {
+                        why: "the joint is not an interior knot of the extension, though the source's two clamped start knots precede it and the continuation's two end knots follow it",
+                    },
+                ))
+        }
+    };
     let kept: Vec<f64> = knots
         .iter()
         .enumerate()
@@ -591,9 +734,11 @@ fn joint_removed(out: &Net, side: BoxSide, joint: f64) -> Result<Net> {
     let mut net = out.cpts();
     if side.is_u() {
         if row >= net.len() {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP,
-                "the joint's control row is outside the net",
+                SurfaceFailure::Defect {
+                    why: "the joint's control row is outside the net, though an interior knot i of a degree 1 net has its row i - 1 inside it",
+                },
             ));
         }
         net = net
@@ -606,9 +751,11 @@ fn joint_removed(out: &Net, side: BoxSide, joint: f64) -> Result<Net> {
     } else {
         for r in &mut net {
             if row >= r.len() {
-                return Err(SolidError::surface_failed(
+                return Err(SolidError::surface(
                     OP,
-                    "the joint's control row is outside the net",
+                    SurfaceFailure::Defect {
+                        why: "the joint's control row is outside a row of the net, though an interior knot i of a degree 1 net has its point i - 1 in every row",
+                    },
                 ));
             }
             *r = std::mem::take(r)
@@ -659,9 +806,14 @@ fn certify_iso(
     if matches!(iso, Iso::Ruling) {
         return Ok(());
     }
-    let net = s
-        .gw_nurb()
-        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
+    let net = s.gw_nurb().ok_or_else(|| {
+        SolidError::surface(
+            OP,
+            SurfaceFailure::Defect {
+                why: "the extension certified on its iso has no NURB, though the continuation built it from a NURB",
+            },
+        )
+    })?;
     let (t, dir) = if side.is_u() {
         (middle.y, Direction::U)
     } else {
@@ -682,15 +834,20 @@ fn certify_iso(
         })
         .collect();
     if points.len() != curve.cpts().len() {
-        return Err(SolidError::surface_failed(
+        return Err(SolidError::surface(
             OP,
-            "the iso and the net's stencils differ in count",
+            SurfaceFailure::Defect {
+                why: "the iso and the net's stencils differ in count, though both have one entry per row of the net across the side",
+            },
         ));
     }
     let Some(&(x0, w0, (h0, ww0))) = points.first() else {
-        return Err(SolidError::surface_failed(
+        return Err(SolidError::surface(
             OP,
-            "the iso has no control points",
+            SurfaceFailure::Defect {
+                why:
+                    "the iso has no control points, though an extracted iso has degree + 1 or more",
+            },
         ));
     };
     let levels = stencils.levels;
@@ -731,7 +888,10 @@ fn certify_iso(
             return Err(refused(ExtendRefusal::NotExact, None));
         }
         let turn = 2.0 * (g(8) * lift(hk, wwk) / dk / reach + gamma(12));
-        (unit(f.axis.cross(far))?, 0.0, 0.0, turn)
+        // (its radial part is normal to the axis and positive, but may be infinite: its
+        // distance from the axis is not finite)
+        let n = unit(f.axis.cross(far)).ok_or_else(on_axis)?;
+        (n, 0.0, 0.0, turn)
     };
     for &(x, w, (h, ww)) in &points {
         let off = n.dot(x) - height * w;
@@ -775,16 +935,29 @@ fn iso_stencils(net: &Net, along_u: bool, t: f64) -> Result<IsoStencils> {
     } else {
         (net.u_knots(), p)
     };
-    let no_span = || SolidError::surface_failed(OP, "the knots hold no span at the iso");
     // the last span whose start is at most t, within the clamped spans
-    let last = knots.len().checked_sub(deg + 2).ok_or_else(no_span)?;
+    let last = knots.len().checked_sub(deg + 2).ok_or_else(|| {
+        SolidError::surface(
+            OP,
+            SurfaceFailure::Defect {
+                why: "the knots across the side are fewer than degree + 2, though a NURB holds degree + 1 knots at each end",
+            },
+        )
+    })?;
     let span = (deg..=last)
         .rev()
         .find(|&i| knots.get(i).is_some_and(|&k| k <= t))
         .unwrap_or(deg);
     let mult = knots.iter().filter(|&&k| k == t).count();
     let levels = deg.saturating_sub(mult);
-    let first = span.checked_sub(deg).ok_or_else(no_span)?;
+    let first = span.checked_sub(deg).ok_or_else(|| {
+        SolidError::surface(
+            OP,
+            SurfaceFailure::Defect {
+                why: "the iso's span starts below the degree, though it is searched from the degree up",
+            },
+        )
+    })?;
     let cpts = net.cpts();
     let size = |c: &CPoint| {
         let w = if c.w == NOW { 1.0 } else { c.w };
@@ -860,7 +1033,12 @@ fn on_definition(
             deg.checked_sub(k)
         };
         i.filter(|&i| i < n_along).ok_or_else(|| {
-            SolidError::surface_failed(OP, "the control point index is outside the net")
+            SolidError::surface(
+                OP,
+                SurfaceFailure::Defect {
+                    why: "the k-th point past the joint is outside the net, though the continuation adds degree points past the joint and a net has degree + 1 or more",
+                },
+            )
         })
     };
     let is_u = side.is_u();
@@ -920,10 +1098,8 @@ fn on_definition(
                 let h = axis.dot(d);
                 let rho = at(h);
                 if !(rho.is_finite() && rho.abs() > 0.0) {
-                    return Err(SolidError::surface_failed(
-                        OP,
-                        "the iso's radius at a joint row is zero or undefined",
-                    ));
+                    // the joint row at the cone's apex, on its axis
+                    return Err(on_axis());
                 }
                 let template = (d - axis * h) * (1.0 / rho);
                 rebuilt.push(
@@ -954,9 +1130,11 @@ fn on_definition(
             let mut far = (0.0_f64, 0.0_f64, 1.0_f64);
             for (&(j, wj), row) in joint.iter().zip(&past) {
                 let &[_, (end, wn)] = row.as_slice() else {
-                    return Err(SolidError::surface_failed(
+                    return Err(SolidError::surface(
                         OP,
-                        "a row past the joint does not have two points",
+                        SurfaceFailure::Defect {
+                            why: "a row past the joint does not have two points, though each row takes the degree's points past it and the degree was just checked 2",
+                        },
                     ));
                 };
                 let centre = origin + axis * axis.dot(j - origin);
@@ -970,10 +1148,8 @@ fn on_definition(
                 }
             }
             if !(far.0.is_finite() && far.0 > 0.0) {
-                return Err(SolidError::surface_failed(
-                    OP,
-                    "the rows' spread along the axis is zero or undefined",
-                ));
+                // every joint row on the axis: none turns about it
+                return Err(on_axis());
             }
             let delta = far.1;
             let half = 0.5 * delta;
@@ -1027,18 +1203,18 @@ fn on_definition(
             let (Some(&(j, wj)), Some(&[_, (end, wn)])) =
                 (joint.get(r_ref), past.get(r_ref).map(Vec::as_slice))
             else {
-                return Err(SolidError::surface_failed(
+                return Err(SolidError::surface(
                     OP,
-                    "the reference row is outside the net",
+                    SurfaceFailure::Defect {
+                        why: "the reference row is outside the rows, though it is an index of the joints, one per row as the rows past them, of two points each at degree 2",
+                    },
                 ));
             };
             let radial = flat(j);
             let rho = radial.length();
             if !(rho.is_finite() && rho > 0.0) {
-                return Err(SolidError::surface_failed(
-                    OP,
-                    "the reference row's radius is zero or undefined",
-                ));
+                // the joint nearest the axis is on it (a pole)
+                return Err(on_axis());
             }
             let dir = radial * (1.0 / rho);
             // the profile plane's coordinates (along the radial direction, along the axis)
@@ -1076,9 +1252,11 @@ fn on_definition(
             }
         }
         (_, Iso::Ruling) => {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP,
-                "a ruling has no closed-form continuation",
+                SurfaceFailure::Defect {
+                    why: "a sphere's or torus's side was continued along a ruling, though a ruling is the iso only of a plane or cone, whose arms come first",
+                },
             ))
         }
     }
@@ -1095,7 +1273,14 @@ fn slot_mut(cp: &mut [Vec<CPoint>], is_u: bool, a: usize, r: usize) -> Result<&m
     let (i, j) = if is_u { (a, r) } else { (r, a) };
     cp.get_mut(i)
         .and_then(|x| x.get_mut(j))
-        .ok_or_else(|| SolidError::surface_failed(OP, "the control point is outside the net"))
+        .ok_or_else(|| {
+            SolidError::surface(
+                OP,
+                SurfaceFailure::Defect {
+                    why: "the control point is outside the net, though its index along the side is the continuation's own and its row one of the net's",
+                },
+            )
+        })
 }
 
 #[cfg(test)]

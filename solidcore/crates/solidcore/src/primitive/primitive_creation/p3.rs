@@ -31,6 +31,7 @@ mod sweeps;
 pub use super::p1::PrimitiveCreation;
 pub use access::PrimitiveAccess;
 pub use construct::BlendPrimitiveOptions;
+pub(super) use geometry::bspline_with_nurb;
 pub use geometry::{prepare_curve_sweep, PreparedCurveSweep};
 pub use ruled::{ruled_surface_from_offset, OffsetRuleOptions};
 pub use sweeps::RepeatedSweepOptions;

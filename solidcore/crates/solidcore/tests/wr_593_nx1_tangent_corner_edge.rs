@@ -1,31 +1,35 @@
 //! WR-593 (tangency-labs/smlib@1ff7353): a stadium bar 10 high whose top meets a
 //! cylinder of the bar's end radius standing on its round end, the bar's flat sides
 //! running tangent into the cylinder (SolidCraft's test-peg part). Rounding the concave
-//! arc where the top meets the cylinder's wall with r 2 needs WR-457's
-//! `fillet_nx1_tangent_side_edge`: at each end of the arc
-//! `SmFilletNx1Corner::MakeCornerTopology` skips the tangent side edge (the cylinder's
-//! seam, here where its two half-circle walls meet) and takes the edge reached, the
-//! bar's flat side meeting its round end, as the corner's edge when it has the arc's
-//! convexity. That edge is G1, so its convexity is only the sign of rounding residues:
-//! with a sketch residue of 1e-10 in the bar's outline one end reads "opposite" and the
-//! round fails with status 1001. The opt-in `fillet_nx1_tangent_corner_edge` takes a
-//! tangential edge there as the corner's edge, as the exact geometry already has it.
+//! arc where the top meets the cylinder's wall with r 2 needs WR-457's tangent
+//! side-edge skip (once `fillet_nx1_tangent_side_edge`, now unconditional): at each end
+//! of the arc `SmFilletNx1Corner::MakeCornerTopology` skips the tangent side edge (the
+//! cylinder's seam, here where its two half-circle walls meet) and takes the edge
+//! reached, the bar's flat side meeting its round end, as the corner's edge when it has
+//! the arc's convexity. That edge is G1, so its convexity is only the sign of rounding
+//! residues: with a sketch residue of 1e-10 in the bar's outline one end reads
+//! "opposite" and the round failed with status 1001. A tangential edge there is now
+//! taken as the corner's edge, as the exact geometry already has it.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
+#[path = "support/volume_leak.rs"]
+mod volume_leak;
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::boolean::api_brep::boolean_union;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+use solidcore::mass::enclosure::enclose_volume;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves as curves;
 use solidcore::query::api_queries::get_edges;
 use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::brep::p2::is_manifold_solid;
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::{edge, EdgeId};
 use solidcore::{Brep, Kernel};
 
@@ -85,20 +89,24 @@ fn concave_arc(b: &Brep) -> EdgeId {
     arcs[0]
 }
 
-fn fillet(corner_edge_fix: bool, residue: f64) -> solidcore::Result<f64> {
-    let mut k = Kernel::default();
-    k.fixes.fillet_nx1_tangent_side_edge = true;
-    k.fixes.fillet_nx1_tangent_corner_edge = corner_edge_fix;
-    let mut body = peg(&mut k, residue);
-    let e = concave_arc(&body);
-    fillet_edges(&mut k, &mut body, &[e], RADIUS, 1, 1, 1.0)?;
-    assert!(is_manifold_solid(&body).unwrap());
+fn fillet(residue: f64) -> solidcore::Result<f64> {
+    let (k, mut body) = filleted(residue)?;
     let store = AttributeStore::default();
     let attrs = PropertyAttributes {
         store: &store,
         key_of: &|_| ObjectKey(0),
     };
     Ok(brep_volume(&k, &mut body, 1e-6, &attrs).unwrap())
+}
+
+/// [`fillet`]'s kernel and body.
+fn filleted(residue: f64) -> solidcore::Result<(Kernel, Brep)> {
+    let mut k = Kernel::default();
+    let mut body = peg(&mut k, residue);
+    let e = concave_arc(&body);
+    fillet_edges(&mut k, &mut body, &[e], RADIUS, 1, 1, 1.0)?;
+    assert!(is_manifold_solid(&body).unwrap());
+    Ok((k, body))
 }
 
 /// The peg and the round's section (4 - pi) swept half a turn about the cylinder's
@@ -112,29 +120,94 @@ fn expected_volume() -> f64 {
 }
 
 #[test]
-fn residue_round_fails_without_the_fix() {
-    let err = fillet(false, RESIDUE).unwrap_err();
-    assert_eq!(solidcore::error::upstream_status(&err), Some(1001), "{err}");
-}
-
-#[test]
 fn residue_round_with_the_fix() {
-    let v = fillet(true, RESIDUE).unwrap();
+    let v = fillet(RESIDUE).unwrap();
     let want = expected_volume();
     assert!((v - want).abs() < 1e-3 * want, "{v} vs {want}");
 }
 
 #[test]
-fn exact_round_is_unchanged_by_the_fix() {
-    let off = fillet(false, 0.0).unwrap();
-    let on = fillet(true, 0.0).unwrap();
-    assert_eq!(off.to_bits(), on.to_bits());
+fn exact_round_builds() {
+    // the volume is bit-identical with and without the fix; the closed form holds
+    // to the round's approximation, as for the residue round. It was 3581.9837276735275
+    // until `brep_volume` closed tolerant edges' gaps (#16735): the move is checked within
+    // the old integrator's leak bound. Since the trim pieces integrate by Gauss-Kronrod
+    // (#14460): forced to accuracy 1e-11 and 1e-12 Gauss-Kronrod gives it to 1 ulp and the
+    // earlier Runge-Kutta trim pieces forced to 1e-12 give the same bits; with Runge-Kutta at
+    // this 1e-6 it was 3581.9837215948937, 5.4e-10 low. Before #16735 this integrator gave
+    // 3581.9837295899465, the figure the move is checked from. It was 3581.9837235113127, one
+    // ulp higher, until each trim point's iso-curve integral took the 15-point Gauss-Kronrod
+    // rule in place of the 7-point one (the same accuracy and error scale). It was
+    // 3581.9837235113123, 22 ulps higher, until the boolean's cover test fitted the trims it
+    // builds tightly where a loose fit would raise their edges (tangency-labs/solidcore#3399):
+    // two edges of the union whose first trims lay 3.08e-5 and 2.72e-5 from them (raising them
+    // past their 4e-5) have trims 3.5e-6 and 2.5e-6 from them, and the volume integrates over
+    // the trims. Each body's volume is the same bits at accuracy 1e-6, 1e-11 and 1e-12
+    // (MEASURED: 3581.9837235113123 before, 3581.9837235113023 after).
+    let v = fillet(0.0).unwrap();
+    let pinned = 3_581.983_723_511_302_3_f64;
+    assert_eq!(v.to_bits(), pinned.to_bits(), "{v} vs {pinned}");
+    let (k, mut body) = filleted(0.0).unwrap();
+    volume_leak::assert_moved_by_the_old_leak(&k, &mut body, 3_581.983_729_589_946_5, v, 1e-6);
+    let want = expected_volume();
+    assert!((v - want).abs() < 1e-3 * want, "{v} vs {want}");
 }
 
+/// Formerly `residue_round_fails_by_default`. The residue round upstream refused with
+/// status 1001 (the case this file pins) builds by default since
+/// `fillet_nx1_tangent_side_edge` was removed: the body is valid at Level 2 and one closed
+/// manifold solid. Its certified volume enclosure lies above the peg's volume (a concave
+/// round only adds material) and below [`expected_volume`], the full half-turn sweep of
+/// the round's section (at the arc's ends the section would overhang the bar's flat
+/// sides, so the built round is trimmed there and adds less; ARGUED). The residue of 1e-10
+/// must not change the body: the exact round's pinned volume (`exact_round_builds`) lies
+/// within 1e-6 of the enclosure (MEASURED: that volume is the integrator's estimate).
+/// The body is that sweep trimmed by the bar's side planes y = +-R: at radius `rho` the
+/// planes cut `2 acos(R / rho)` off the half turn, so the round adds
+/// `int (pi - 2 acos(R / rho)) rho h(rho) d rho` over the section, whose height above the
+/// top is `h(rho) = r - sqrt(r^2 - (rho - R - r)^2)`. The enclosure must hold the peg plus
+/// that integral, evaluated by a fine midpoint rule (MEASURED: the rule's error is not
+/// bounded here; it agrees with the enclosure to 4e-6).
 #[test]
-fn residue_round_fails_by_default() {
+fn residue_round_builds_by_default() {
     let mut k = Kernel::default();
     let mut body = peg(&mut k, RESIDUE);
     let e = concave_arc(&body);
-    assert!(fillet_edges(&mut k, &mut body, &[e], RADIUS, 1, 1, 1.0).is_err());
+    fillet_edges(&mut k, &mut body, &[e], RADIUS, 1, 1, 1.0).unwrap();
+    let lines = check_brep(&mut k, &mut body, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "Level 2: {lines:?}");
+    assert!(is_manifold_solid(&body).unwrap());
+    let pi = core::f64::consts::PI;
+    let peg = H * (2.0 * R * L + pi * R * R) + H * pi * R * R;
+    let sweep = expected_volume();
+    let width = 1e-7 * sweep;
+    let enc = enclose_volume(&k, &mut body, width).unwrap();
+    assert!(enc.width() <= width, "{enc:?}");
+    assert!(peg < enc.lo && enc.hi < sweep, "{peg} < {enc:?} < {sweep}");
+    let n = 200_000;
+    let step = RADIUS / f64::from(n);
+    let trimmed: f64 = (0..n)
+        .map(|i| {
+            let rho = R + (f64::from(i) + 0.5) * step;
+            let t = rho - R - RADIUS;
+            let h = RADIUS - (RADIUS * RADIUS - t * t).max(0.0).sqrt();
+            (pi - 2.0 * (R / rho).min(1.0).acos()) * rho * h * step
+        })
+        .sum();
+    assert!(
+        enc.lo - 1e-5 <= peg + trimmed && peg + trimmed <= enc.hi + 1e-5,
+        "trimmed sweep {} vs [{}, {}]",
+        peg + trimmed,
+        enc.lo,
+        enc.hi
+    );
+    let exact = 3_581.983_727_673_527_5_f64;
+    assert!(
+        enc.lo - 1e-6 <= exact && exact <= enc.hi + 1e-6,
+        "exact round {exact} vs [{}, {}]",
+        enc.lo,
+        enc.hi
+    );
 }

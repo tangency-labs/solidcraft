@@ -2,32 +2,38 @@
 
 use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
-use std::hash::{BuildHasher, RandomState};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock, Weak};
+use std::sync::{Arc, Weak};
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_sketch::CurveKind;
 
 use super::CommandSpec;
-use crate::params::{bad, bool_, str_, string_list};
-use crate::schema::inspect::{BodiesDetail, DocumentBodies, TimelineDetail, TimelineRow};
+use crate::params::{bad, bool_, str_, string_list, vec3};
 use crate::schema::inspect::{
-    BodyFailure, BodyFeaturesParams, BodyFigures, BodyListParams, BodyMeasurement, BodyName, BodyNames, BodyOutcome, BoundingBox, CommandEntry,
-    CommandsParams, CurveShape, DocumentBody, DocumentBodyDetail, DocumentInspectParams, DocumentInspectResult, DocumentParam, DocumentSketch,
+    BodiesDetail, ClassifiedPoint, ClassifyPointsParams, ClassifyPointsResult, DocumentBodies, GeometryDefect, TimelineDetail, TimelineRow,
+};
+use crate::schema::inspect::{
+    BodyFailure, BodyFeaturesParams, BodyFigures, BodyListParams, BodyMeasurement, BodyName, BodyNames, BodyOutcome, BoundingBox,
+    ColoredComponentsParams, ColoredComponentsResult, CommandEntry, CommandsParams, CurveShape, DiskStamp, DocInfoParams, DocInfoResult,
+    DocumentBody, DocumentBodyDetail, DocumentInspectParams, DocumentInspectResult, DocumentParam, DocumentRevisionParams, DocumentSketch,
     FaceCylinder, KernelCounts, ListedMaterial, MaterialAssignParams, MaterialAssignResult, MaterialListParams, MaterialListResult, MeasureParams,
     MeasureResult, MeasureTotal, Measured, MeasuredBodies, MeasuredBody, ModelBodyFeatures, ModelEdge, ModelEdges, ModelFace, ModelFaces,
-    ModelThread, ModelThreads, ModelThreadsParams, SketchConstraint, SketchCurve, SketchInspectParams, SketchInspected, SketchPoint, SketchProfile,
-    SketchWire, SplineTangentHandle, TimelineEntry, TimelineSummary, WireArcInfo,
+    ModelThread, ModelThreads, ModelThreadsParams, PointFixedBy, RevisionResult, SketchConstraint, SketchCurve, SketchInspectParams, SketchInspected,
+    SketchPoint, SketchProfile, SketchWire, SplineTangentHandle, TimelineEntry, TimelineSummary, WireArcInfo, WireControlInfo,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
+const CLASSIFY_POINTS_CONTRACT: TypedContract<ClassifyPointsParams> = TypedContract::new();
+const COLORED_COMPONENTS_CONTRACT: TypedContract<ColoredComponentsParams> = TypedContract::new();
 const BODY_LIST_CONTRACT: TypedContract<BodyListParams> = TypedContract::new();
 const THREADS_CONTRACT: TypedContract<ModelThreadsParams> = TypedContract::new();
 const BODY_FEATURES_CONTRACT: TypedContract<BodyFeaturesParams> = TypedContract::new();
 const MEASURE_CONTRACT: TypedContract<MeasureParams> = TypedContract::new();
 const DOCUMENT_INSPECT_CONTRACT: TypedContract<DocumentInspectParams> = TypedContract::new();
+const DOCUMENT_REVISION_CONTRACT: TypedContract<DocumentRevisionParams> = TypedContract::new();
+const DOC_INFO_CONTRACT: TypedContract<DocInfoParams> = TypedContract::new();
 const SKETCH_INSPECT_CONTRACT: TypedContract<SketchInspectParams> = TypedContract::new();
 const MATERIAL_ASSIGN_CONTRACT: TypedContract<MaterialAssignParams> = TypedContract::new();
 const MATERIAL_LIST_CONTRACT: TypedContract<MaterialListParams> = TypedContract::new();
@@ -43,8 +49,23 @@ pub(super) mod appearance_gestures;
 mod body_features;
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("inspect.colored_components", "Component Colors", colored_components)
-        .at("SOLID", "INSPECT").icon("colored_components").noundo()
+    CommandSpec::new("inspect.classify_points", "Classify Points", crate::checked!("inspect.classify_points", classify_points))
+        .icon("inspect")
+        .noundo().read_only()
+        .contract(&CLASSIFY_POINTS_CONTRACT)
+        .output(output_schema_for::<ClassifyPointsResult>)
+        .params(
+            "body: name; points: 1–256 world-space [x,y,z] in mm; face?: face name or point on a face → results in input order: \
+             {class: inside|outside|on}; on also gives face (persistent name) and normal (outward unit vector). Exact trimmed geometry at the body's \
+             modelling tolerance; mesh bodies refused. At shared edges/vertices, face selects the normal, otherwise the first containing face \
+             in model.faces order",
+        ),
+    CommandSpec::new("inspect.colored_components", "Component Colors", crate::checked!("inspect.colored_components", colored_components))
+        .at("SOLID", "INSPECT")
+        .icon("colored_components")
+        .noundo()
+        .contract(&COLORED_COMPONENTS_CONTRACT)
+        .output(output_schema_for::<ColoredComponentsResult>)
         .params("enabled?: bool (omitted: toggle); temporary component colours, without changing appearances"),
     CommandSpec::new("inspect.measure", "Measure", crate::checked!("inspect.measure", measure))
         .at("SOLID", "INSPECT")
@@ -53,7 +74,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo().read_only()
         .contract(&MEASURE_CONTRACT)
         .output(output_schema_for::<MeasureResult>)
-        .params("bodies?: [names] (default all); names_only?: bool (each world body's name and its definition's, nothing measured) → closed per body; volume_mm3, center_of_mass, density_g_cm3 and mass_g only for closed, consistently oriented bodies; area, bbox and counts for all; total.open_bodies_skipped counts bodies excluded from volume/mass totals; or items: [1-2 selections] (face/edge: type, body, and point on it or index from model.faces/model.edges, or both) → length/area/volume; a face's perimeter_mm, with outer_perimeter_mm and inner_perimeter_mm on a flat face with holes; diameter, radius, circumference or arc_length/angle_deg of circles, arcs and cylinders; slot sizes; min (distance_mm, from, to), max, center_distance (centre to centre, or from an axis) and angle"),
+        .params("bodies?: [names] (default all); within?: {min:[x,y,z], max:[x,y,z]} (world mm); mode?: intersects|inside (default intersects, includes touching); names_only?: bool (each world body's name and its definition's, nothing measured) → closed per body; volume_mm3, center_of_mass, density_g_cm3 and mass_g only for closed, consistently oriented bodies; area, bbox and counts for all; total.open_bodies_skipped counts bodies excluded from volume/mass totals; or items: [1-2 selections] (face/edge: type, body, and point on it or index from model.faces/model.edges, or both) → length/area/volume; a face's perimeter_mm, with outer_perimeter_mm and inner_perimeter_mm on a flat face with holes; diameter, radius, circumference or arc_length/angle_deg of circles, arcs and cylinders; slot sizes; min (distance_mm, from, to), max, center_distance (centre to centre, or from an axis) and angle"),
     CommandSpec::new("document.inspect", "Inspect Design", crate::checked!("document.inspect", inspect))
         .icon("inspect")
         .noundo().read_only()
@@ -64,11 +85,31 @@ pub static COMMANDS: &[CommandSpec] = &[
              timeline?: true (default) | \"summary\" (each feature as id, name, type, with error, warning, suppressed and rolled_back only when set) | false (left out); \
              bodies?: true (default) | \"names\" (only the body names, nothing measured) | false (left out)",
         ),
-    CommandSpec::new("document.revision", "Design Revision", revision).icon("inspect").noundo().params(
-        "→ document_id (this open design's id: kept while it stays open, another for each design started or opened), \
+    CommandSpec::new("document.revision", "Design Revision", crate::checked!("document.revision", revision))
+        .icon("inspect")
+        .noundo()
+        .contract(&DOCUMENT_REVISION_CONTRACT)
+        .output(output_schema_for::<RevisionResult>)
+        .params(
+        "→ document_id (the open design's identity, new on opening or starting a design), \
          revision (moves whenever the design, what is hidden or a component's uncaptured position changes, \
          never on a selection or a view; from one counter for the whole run, so it never repeats). Read-only",
     ),
+    CommandSpec::new("doc.info", "Design File Info", crate::checked!("doc.info", design_file_info))
+        .any_part()
+        .doc_only()
+        .icon("inspect")
+        .noundo()
+        .read_only()
+        .contract(&DOC_INFO_CONTRACT)
+        .output(output_schema_for::<DocInfoResult>)
+        .params(
+            "→ path (the design's file; null until it is first saved), read_only (a save to its own file is refused), \
+             unsaved (changes its file does not hold, as document.inspect's dirty), disk ({len, modified_ns}: size in bytes and \
+             modification time in nanoseconds since the Unix epoch as a decimal string, when it was opened or last saved; \
+             null without a file, in the browser, or when they could not be read), \
+             document_id (as document.revision). In a plugin run: the design the run started on, as it was before the run. Read-only",
+        ),
     CommandSpec::new("sketch.inspect", "Inspect Sketch", crate::checked!("sketch.inspect", sketch_inspect))
         .at("SKETCH", "INSPECT")
         .icon("inspect")
@@ -89,9 +130,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<ModelFaces>)
         .params(
         "body: name → per face: index, name (what face.delete, sheet.convert `face`, solid.shell … take in place of a point), exact, area, centroid (not always on the face), \
-         plane_normal, point (a point on the face that picks it), cylinder? ({origin, axis, radius} of a cylindrical face), \
-         sheet_face? (a folded sheet's face: `sheet:<body>:<panel>:<side>`, panel base or a flange's tag F<feature>.<k>, side top | bottom | rim.<edge> | bend.inner | bend.outer; \
-         taken wherever a face name is, and it holds while sizes change and flanges come and go)",
+         plane_normal, point (a point on the face that picks it), cylinder? ({origin, axis, radius} of a cylindrical face)",
     ),
     CommandSpec::new("model.threads", "List Threads", crate::checked!("model.threads", model_threads))
         .icon("inspect")
@@ -124,18 +163,30 @@ pub static COMMANDS: &[CommandSpec] = &[
              appearance?: library name or stable starter.* ID (appearance.library) | color: \"#rrggbb\" or [r, g, b] (0–255), opacity? (0–1, default 1); \
              name?: inert copied look label (requires color, mutually exclusive with appearance); pbr?: {metallic:0..1, roughness:0.045..1, dielectric_ior:1..3} (requires color/appearance and opacity 1); a starter ID or registered starter name resolves its recipe before color overrides; omitted pbr retains that response and pbr: null explicitly clears it. Unavailable glass recipes refuse through either selector. Other custom labels with an explicit color retain legacy scalar behavior. Neither appearance nor color (or color: null): clear, so the face follows its body, the body its component, the component its material",
     ),
-    CommandSpec::new("appearance.copy", "Copy Look", appearance_gestures::copy).icon("copy").noundo().key("Ctrl+Alt+C")
+    CommandSpec::new("appearance.copy", "Copy Look", crate::checked!("appearance.copy", appearance_gestures::copy)).icon("copy").noundo().key("Ctrl+Alt+C")
+        .contract(&COPY_CONTRACT).output(crate::schema::output_schema_for::<AppearanceCopyResult>)
         .params("target: appearance.chain target. Copies its resolved look to a transient session clipboard. No document change or dialogs."),
-    CommandSpec::new("appearance.paste", "Paste Look", appearance_gestures::paste).icon("paste").key("Ctrl+Alt+V")
-        .params("bodies/faces/components: appearance.assign targets. Applies the copied look atomically in one undo step; no dialogs."),
-    CommandSpec::new("appearance.favorite", "Favorite Look", appearance_gestures::favorite).icon("star").noundo().doc_only()
-        .params("look: appearance.assign look; favorite: bool → validated look and preference request; UI library preference only, no document change or dialogs."),
-    CommandSpec::new("appearance.chain", "Appearance Chain", appearance_chain::chain).icon("inspect").noundo().params(
-        "target: {body: name} | {body: name, face: zero-based model.faces index} | {component: name or id}; a placed copy's name (`KB (K:2)`, `K:2`) means the body or component it shows. Returns steps [{step: face|body|component|material, look: {name,color,opacity,pbr?} or null}] in precedence order and active (step or null). Component material is the common default look of its directly owned bodies, null if mixed/empty. Imported paint is a display fallback outside the four steps. Read-only; no dialogs",
-    ),
-    CommandSpec::new("appearance.replace", "Replace Appearance", appearance_chain::replace).icon("appearance").params(
-        "from: library name | saved look {name,color,opacity,pbr?} (copy appearance.list in_design); to: library name | assignment look {appearance? | color, name?, opacity?, pbr?} (appearance.assign rules; no clear). Matches the full look including name and PBR. scope?: {bodies?: [names], components?: [names or ids]} (a placed copy's name means the body or component it shows), at most 10000 targets; body scope includes face overrides, component scope selects only the component override. Omitted scope means all overrides, including hidden/suppressed ones; physical defaults are unchanged. Duplicate targets count once. Returns count of rewritten overrides; zero adds no history. One undo step, atomic; no dialogs. Designs above 100000 overrides refuse",
-    ),
+    CommandSpec::new("appearance.paste", "Paste Look", crate::checked!("appearance.paste", appearance_gestures::paste)).icon("paste").key("Ctrl+Alt+V")
+        .contract(&PASTE_CONTRACT).output(crate::schema::output_schema_for::<AppearanceAssignResult>)
+        .params(
+            "bodies/faces/components: appearance.assign targets, and no look keys: the look is the one appearance.copy put in the clipboard. \
+             Applies it atomically in one undo step; no dialogs.",
+        ),
+    CommandSpec::new("appearance.favorite", "Favorite Look", crate::checked!("appearance.favorite", appearance_gestures::favorite)).icon("star").noundo().doc_only()
+        .contract(&FAVORITE_CONTRACT).output(crate::schema::output_schema_for::<AppearanceFavoriteResult>)
+        .params("look: appearance.assign look keys (appearance, or color/name/opacity/pbr); favorite: true to mark, false to unmark → the validated look and the preference; UI library preference only, no document change or dialogs."),
+    CommandSpec::new("appearance.chain", "Appearance Chain", crate::checked!("appearance.chain", appearance_chain::chain)).icon("inspect").noundo()
+        .contract(&CHAIN_CONTRACT).output(crate::schema::output_schema_for::<AppearanceChainResult>)
+        .params(
+            "target: {body: name} | {body: name, face: zero-based model.faces index} | {component: name or id}; a placed copy's name (`KB (K:2)`, `K:2`) means the body or component it shows. Returns steps [{step: face|body|component|material, look: {name,color,opacity,pbr?} or null}] in precedence order and active (step or null). Component material is the common default look of its directly owned bodies, null if mixed/empty. Imported paint is a display fallback outside the four steps. Read-only; no dialogs",
+        ),
+    CommandSpec::new("appearance.replace", "Replace Appearance", crate::checked!("appearance.replace", appearance_chain::replace))
+        .icon("appearance")
+        .contract(&REPLACE_CONTRACT)
+        .output(crate::schema::output_schema_for::<AppearanceReplaceResult>)
+        .params(
+            "from: library name | saved look {name,color,opacity,pbr?} (copy appearance.list in_design); to: library name | assignment look {appearance? | color, name?, opacity?, pbr?} (appearance.assign rules; no clear). Matches the full look including name and PBR. scope?: {bodies?: [names], components?: [names or ids]} (a placed copy's name means the body or component it shows), at most 10000 targets; body scope includes face overrides, component scope selects only the component override. Omitted scope means all overrides, including hidden/suppressed ones; physical defaults are unchanged. Duplicate targets count once. Returns count of rewritten overrides; zero adds no history. One undo step, atomic; no dialogs. Designs above 100000 overrides refuse",
+        ),
     CommandSpec::new("appearance.library", "Appearance Library", crate::checked!("appearance.library", appearance_library))
         .icon("library")
         .noundo()
@@ -156,11 +207,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<MaterialListResult>)
         .params("→ built-in and design-owned materials (user: true, look, optional physical_card/physical_validation/density_comparison). Read-only; candidate engineering records do not certify sources or supply a solver"),
     CommandSpec::new("engine.commands", "List Commands", crate::checked!("engine.commands", commands))
+        .any_part()
         .icon("list")
         .noundo()
         .contract(&COMMANDS_CONTRACT)
         .output(output_schema_for::<Vec<CommandEntry>>),
-    CommandSpec::new("engine.describe", "Describe Command", crate::checked!("engine.describe", describe))
+    CommandSpec::new("engine.describe", "Describe Command", crate::checked!("engine.describe", describe)).any_part()
         .icon("list")
         .noundo()
         .doc_only()
@@ -187,8 +239,10 @@ pub(super) fn measure_body(
     definitions: Option<&solidcraft_doc::ModelState>,
 ) -> Result<solidcraft_kernel::BodyMeasure> {
     let mut measured = b.measure()?;
+    // A sheet's perforation fields (#732): their holes, which the body does not have, come off
+    // what it measures.
     if let Some(state) = definitions
-        && let Some(sheet) = state.sheets.iter().find(|sheet| sheet.body == b.definition_name() && !sheet.perforations.is_empty())
+        && let Some(sheet) = state.surface_sheets.iter().find(|sheet| sheet.body == b.definition_name() && !sheet.perforations.is_empty())
     {
         let definition = state.body(b.definition_name()).ok_or_else(|| EngineError::Other(format!("missing sheet body `{}`", sheet.body)))?;
         // A body transfer moves the geometry and sheet metadata together. Apply only
@@ -251,17 +305,55 @@ impl BodyMeasurement {
     }
 }
 
+/// Parse the region before any measurement; a malformed box must never become an unfiltered query.
+fn measure_region(p: &Value, cmd: &str) -> Result<Option<(solidcraft_geom::Aabb3, bool)>> {
+    let Some(region) = p.get("within") else {
+        if p.get("mode").is_some() {
+            return Err(bad(cmd, "`mode` requires `within`"));
+        }
+        return Ok(None);
+    };
+    let min = region.get("min").and_then(vec3).ok_or_else(|| bad(cmd, "`within.min` must be a point [x, y, z]"))?;
+    let max = region.get("max").and_then(vec3).ok_or_else(|| bad(cmd, "`within.max` must be a point [x, y, z]"))?;
+    let bounds = solidcraft_geom::Aabb3 { min, max };
+    if bounds.is_empty() {
+        return Err(bad(cmd, "`within.min` must not exceed `within.max`"));
+    }
+    let inside = match p.get("mode") {
+        None => false,
+        Some(Value::String(mode)) if mode == "intersects" => false,
+        Some(Value::String(mode)) if mode == "inside" => true,
+        _ => return Err(bad(cmd, "`mode` must be intersects or inside")),
+    };
+    Ok(Some((bounds, inside)))
+}
+
 fn measure(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "inspect.measure";
     if let Some(items) = p.get("items") {
+        if p.get("within").is_some() || p.get("mode").is_some() {
+            return Err(bad(cmd, "`within` and `mode` cannot be combined with `items`"));
+        }
         return super::measure_sel::measure_items(s, items);
     }
+    let region = measure_region(p, cmd)?;
     let want = string_list(cmd, p, "bodies")?;
     let definitions = s.model.state();
     let st = s.world_state()?;
-    let selected: Vec<_> = st.bodies.iter().filter(|b| want.is_empty() || want.contains(&b.name)).collect();
+    let mut selected: Vec<_> = st.bodies.iter().filter(|b| want.is_empty() || want.contains(&b.name)).collect();
     if !want.is_empty() && selected.len() != want.len() {
         return Err(bad(cmd, "unknown body name"));
+    }
+    if let Some((region, inside)) = region {
+        let mut matches = Vec::new();
+        for body in selected {
+            let bounds = body.body.exact_bounds().map_err(|e| bad(cmd, format!("could not bound `{}`: {e}", body.name)))?;
+            let matches_region = if inside { region.contains(bounds.min) && region.contains(bounds.max) } else { region.meets(&bounds) };
+            if !bounds.is_empty() && matches_region {
+                matches.push(body);
+            }
+        }
+        selected = matches;
     }
     if bool_(p, "names_only").unwrap_or(false) {
         let bodies: Vec<_> = selected.iter().map(|b| BodyName { name: b.name.clone(), definition: b.definition_name().to_string() }).collect();
@@ -285,17 +377,10 @@ fn measure(s: &mut Session, p: &Value) -> Result<Value> {
             b.density_g_cm3 = Some(rho);
             b.mass_g = Some(v * rho / 1000.0);
         }
-        // Only Measure exposes sheet boundary counts; document.inspect keeps kernel counts.
-        if let Some(sheet) = definitions.sheets.iter().find(|sheet| sheet.body == source) {
-            let (df, de, dv) = sheet.round_hole_correction();
-            match &mut b.measurement.outcome {
-                BodyOutcome::Measured(f) => {
-                    f.faces = count(f.kernel.faces) + df;
-                    f.edges = count(f.kernel.edges) + de;
-                    f.vertices = count(f.kernel.vertices) + dv;
-                }
-                BodyOutcome::Failed(x) => (x.faces, x.edges, x.vertices) = (Some(df), Some(de), Some(dv)),
-            }
+        // A sheet made from surfaces (#6748) is sheet metal: its perforation fields' holes are
+        // taken off its volume, area and centre where each body is measured (`measure_body`);
+        // its counts are its stored B-rep's, which has no such holes (see `BodyFigures::faces`).
+        if definitions.surface_sheets.iter().any(|sk| sk.body == source) {
             b.sheet_metal = Some(true);
         }
         bodies.push(b);
@@ -410,6 +495,7 @@ fn sketch_json(s: &Session, world: &solidcraft_doc::ModelState, id: u64) -> Opti
             world: plane.to_world(p.pos).into(),
             fixed: locked.get(i).copied().unwrap_or(false),
             link: p.link.clone(),
+            fixed_by: p.exprs.as_deref().map(|e| PointFixedBy { x: e.x.clone(), y: e.y.clone() }),
             fully_constrained: ss.report.point_determined.get(i).copied().unwrap_or(false),
         })
         .collect();
@@ -481,16 +567,40 @@ fn sketch_json(s: &Session, world: &solidcraft_doc::ModelState, id: u64) -> Opti
                 end: a.end.into(),
                 sweep_deg: solidcraft_sketch::arc_sweep(&a).to_degrees(),
             }),
+            control: w.control.map(|c| WireControlInfo { degree: c.degree, points: w.fit.iter().map(|&p| p.into()).collect() }),
         })
         .collect();
     Some(SketchInspected {
         id,
         name: ss.name.clone(),
-        plane: serde_json::to_value(ss.plane).unwrap_or_default(),
+        plane: ss.plane.into(),
+        world_plane: plane.into(),
         status: ss.report.status.into(),
-        dof: ss.report.dof,
-        fully_constrained: ss.report.fully_constrained(),
+        dof: ss.report.shown_dof(),
+        fully_constrained: ss.report.shown_dof() == 0,
+        planar_dof: ss.report.dof,
         failing: ss.report.failing.clone(),
+        // The 3D constraints' solve (#10608): its freedoms are in `dof`, its failures here.
+        wires_solve: serde_json::to_value(&ss.report.wires).unwrap_or_default(),
+        // As the planar constraints are listed: a dimension's parameter expression, and an angle in
+        // degrees beside the stored radians.
+        wire_constraints: Value::Array(
+            sk.wire_constraints
+                .iter()
+                .map(|c| {
+                    let mut v = serde_json::to_value(c).unwrap_or_default();
+                    if let Some(o) = v.as_object_mut() {
+                        if let Some(p) = &c.param {
+                            o.insert("expression".into(), json!(s.doc.param(p).map(|x| x.expr.clone())));
+                        }
+                        if let (true, Some(value)) = (c.kind.is_angle(), c.kind.value()) {
+                            o.insert("degrees".into(), json!(value.to_degrees()));
+                        }
+                    }
+                    v
+                })
+                .collect(),
+        ),
         curves,
         points,
         constraints,
@@ -510,10 +620,8 @@ fn sketch_inspect(s: &mut Session, p: &Value) -> Result<Value> {
     typed_reply("sketch.inspect", inspected)
 }
 
-/// Revisions of every design of this run (#6646).
-static NEXT_REVISION: AtomicU64 = AtomicU64::new(1);
-
 /// The design as `document.revision` last saw it, which its revision names.
+#[derive(Clone)]
 pub(crate) struct Followed {
     /// Held weakly: a design something holds weakly is never changed in place (`Arc::make_mut`
     /// moves it), and its address can't go to another design meanwhile.
@@ -521,20 +629,6 @@ pub(crate) struct Followed {
     visibility: crate::Visibility,
     pending_moves: BTreeMap<u64, solidcraft_doc::Mat>,
     revision: u64,
-}
-
-/// A new design's id: one for this run, then a number, so no two designs of one run, or of two
-/// runs, have the same.
-pub(crate) fn new_document_id() -> String {
-    static RUN: OnceLock<u64> = OnceLock::new();
-    static NEXT: AtomicU64 = AtomicU64::new(1);
-    let run = RUN.get_or_init(|| {
-        let started = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
-        // Hashed with this process's random keys (where the system has them), so two runs differ
-        // even with the clock set back.
-        RandomState::new().hash_one(started)
-    });
-    format!("{run:016x}-{}", NEXT.fetch_add(1, Ordering::Relaxed))
 }
 
 impl Session {
@@ -548,7 +642,7 @@ impl Session {
         match self.followed.as_ref().filter(|f| seen(f)) {
             Some(f) => f.revision,
             None => {
-                let revision = NEXT_REVISION.fetch_add(1, Ordering::Relaxed);
+                let revision = solidcraft_doc::ids::next_design_revision();
                 let (doc, visibility, pending_moves) = (Arc::downgrade(&self.doc), self.visibility.clone(), self.pending_moves.clone());
                 self.followed = Some(Followed { doc, visibility, pending_moves, revision });
                 revision
@@ -560,7 +654,58 @@ impl Session {
 /// `document.revision`: the design's id and [`Session::design_revision`].
 fn revision(s: &mut Session, _p: &Value) -> Result<Value> {
     let revision = s.design_revision();
-    Ok(json!({"document_id": s.document_id, "revision": revision}))
+    reply("document.revision", RevisionResult { document_id: s.document_id.clone(), revision, param_warnings: Vec::new() })
+}
+
+/// What imports found wrong with the bodies and components they made
+/// (`solidcraft_doc::import_defects`): each body's notes, then each component's parts that were
+/// not imported.
+fn geometry_defects(s: &Session) -> Vec<GeometryDefect> {
+    use solidcraft_doc::import_defects;
+    let kind = |k: solidcraft_doc::kernel::IssueKind| serde_json::to_value(k).ok().and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default();
+    let st = s.model.state();
+    let mut out: Vec<GeometryDefect> = st
+        .bodies
+        .iter()
+        .flat_map(|b| {
+            import_defects::body_import_issues(&s.model, b).into_iter().map(|i| GeometryDefect {
+                body: Some(b.name.clone()),
+                component: None,
+                kind: kind(i.kind),
+                detail: i.detail.clone(),
+            })
+        })
+        .collect();
+    for (component, issues) in import_defects::component_import_issues(&s.doc, &s.model) {
+        out.extend(issues.into_iter().map(|i| GeometryDefect {
+            body: None,
+            component: Some(component),
+            kind: kind(i.kind),
+            detail: i.detail.clone(),
+        }));
+    }
+    out
+}
+
+impl Session {
+    /// What `doc.info` says of this session's own design (a scratch copy names its source's file).
+    pub(crate) fn doc_info(&self) -> DocInfoResult {
+        DocInfoResult {
+            path: self.path.clone().or_else(|| self.source_path.clone()),
+            read_only: self.read_only,
+            unsaved: self.is_dirty(),
+            disk: self.disk.map(|d| DiskStamp { len: d.len, modified_ns: d.modified_ns.map(|ns| ns.to_string()) }),
+            document_id: self.document_id.clone(),
+            param_warnings: Vec::new(),
+        }
+    }
+}
+
+/// `doc.info`: in a plugin run, the design the run started on as it was before the run
+/// (`AppState::caller_design`); a design the run opened itself, or any other session, answers for itself.
+fn design_file_info(s: &mut Session, _p: &Value) -> Result<Value> {
+    let info = s.plugin_state.caller_design.clone().filter(|c| c.document_id == s.document_id).unwrap_or_else(|| s.doc_info());
+    reply("doc.info", info)
 }
 
 fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
@@ -591,12 +736,14 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             .map(|(i, f)| {
                 let r = s.model.result(f.id);
                 let (error, warning) = (r.and_then(|r| r.error.clone()), r.and_then(|r| r.warning.clone()));
+                let error_code = r.and_then(|r| r.error_code.as_ref()).map(Into::into);
                 if timeline_detail == TimelineDetail::Summary {
                     return TimelineRow::Summary(TimelineSummary {
                         id: f.id,
                         name: f.name.clone(),
                         kind: f.kind.type_name().to_string(),
                         error,
+                        error_code,
                         warning,
                         suppressed: f.suppressed.then_some(true),
                         rolled_back: (i >= marker).then_some(true),
@@ -609,6 +756,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
                     suppressed: f.suppressed,
                     rolled_back: i >= marker,
                     error,
+                    error_code,
                     warning,
                     ms: r.map(|r| r.ms),
                 })
@@ -649,8 +797,9 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             let mut v = DocumentSketch {
                 id: ss.feature,
                 name: ss.name.clone(),
-                dof: ss.report.dof,
+                dof: ss.report.shown_dof(),
                 status: ss.report.status.into(),
+                wires_ok: ss.report.wires_ok(),
                 curves: ss.sketch.curves.len(),
                 profiles: ss.profiles.len(),
                 visible: crate::view::sketch_shown(s, ss.feature),
@@ -682,6 +831,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             timeline,
             bodies,
             sketches,
+            defects: geometry_defects(s),
             selection: serde_json::to_value(&s.selection).unwrap_or_default(),
             undo: s.undo.len(),
             redo: s.redo.len(),
@@ -721,16 +871,55 @@ fn reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
     serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
+/// Read the existing exact classifier; face choice and normal evaluation also stay in the kernel.
+fn classify_points(s: &mut Session, p: &Value) -> Result<Value> {
+    use crate::schema::FaceRef;
+    use solidcraft_kernel::services::{ClassifiedPoint as KernelPoint, PointNormalFace};
+
+    let cmd = "inspect.classify_points";
+    let args: ClassifyPointsParams = serde_json::from_value(p.clone()).map_err(|e| bad(cmd, e.to_string()))?;
+    if args.body.is_empty() || args.body.len() > 512 {
+        return Err(bad(cmd, "`body` must be a name of 1 to 512 bytes"));
+    }
+    let st = s.world_state()?;
+    let b = st.body(&args.body).ok_or_else(|| bad(cmd, format!("no body `{}`", args.body)))?;
+    if b.body.is_mesh() {
+        return Err(bad(cmd, "point classification requires an exact body; mesh bodies are not supported"));
+    }
+    let names = solidcraft_doc::naming::face_names(b);
+    let selected = match args.face {
+        Some(FaceRef::Name(name)) => {
+            let index = names.iter().position(|n| *n == name).ok_or_else(|| bad(cmd, format!("no face `{name}` on `{}`", b.name)))?;
+            Some(PointNormalFace::Index(index))
+        }
+        Some(FaceRef::Point(point)) => Some(PointNormalFace::Point(point.into())),
+        None => None,
+    };
+    let points: Vec<Vec3> = args.points.iter().map(|p| p.0).collect();
+    let classes = b.body.classify_points_with_normals(&points, selected).map_err(|e| match e {
+        solidcraft_kernel::KernelError::Invalid(message) => bad(cmd, message),
+        e => e.into(),
+    })?;
+    let results = classes
+        .into_iter()
+        .map(|class| match class {
+            KernelPoint::Inside => Ok(ClassifiedPoint::Inside),
+            KernelPoint::Outside => Ok(ClassifiedPoint::Outside),
+            KernelPoint::On { face: index, normal } => {
+                let face = names.get(index).filter(|n| !n.is_empty()).cloned().ok_or_else(|| bad(cmd, "the boundary face has no persistent name"))?;
+                Ok(ClassifiedPoint::On { face, normal: normal.value })
+            }
+        })
+        .collect::<Result<Vec<_>>>()?;
+    reply(cmd, ClassifyPointsResult { body: b.name.clone(), results, param_warnings: Vec::new() })
+}
+
 fn model_faces(s: &mut Session, p: &Value) -> Result<Value> {
     let st = s.world_state()?;
     let b = body_of(&st, p, "model.faces")?;
     let names = solidcraft_doc::naming::face_names(b);
     let tol = (b.body.size() * 2e-3).max(1e-3);
     let spots = solidcraft_doc::naming::face_spots(b);
-    // A folded sheet's faces also have the readable names its sheet gives them, worked out in
-    // the body's own coordinates.
-    let model = s.model.state();
-    let sheet_names = model.body(&b.name).map(|own| solidcraft_doc::sheet::body_sheet_face_names(&model, own)).unwrap_or_default();
     let faces = b
         .body
         .faces(tol)?
@@ -752,7 +941,6 @@ fn model_faces(s: &mut Session, p: &Value) -> Result<Value> {
                 plane_normal: f.plane_normal.map(Into::into),
                 point: spot.map(|x| x.point.into()),
                 cylinder,
-                sheet_face: sheet_names.get(f.index).and_then(|n| n.as_ref().map(|n| n.to_string())),
             }
         })
         .collect();
@@ -844,14 +1032,20 @@ pub(crate) fn color_param(v: &Value) -> Option<[u8; 3]> {
 }
 
 use crate::schema::appearance::{
-    AppearanceAssignParams, AppearanceAssignResult, AppearanceLibraryParams, AppearanceLibraryResult, AppearanceListParams, AppearanceListResult,
-    BodyLooks, ComponentLookReply, FaceIndexLook, FaceLookReply, FaceSpot, LibraryAppearance, LookInDesign, LookReply, PbrReply, PlainAppearance,
-    StarterAppearance,
+    AppearanceAssignParams, AppearanceAssignResult, AppearanceChainParams, AppearanceChainResult, AppearanceCopyParams, AppearanceCopyResult,
+    AppearanceFavoriteParams, AppearanceFavoriteResult, AppearanceLibraryParams, AppearanceLibraryResult, AppearanceListParams, AppearanceListResult,
+    AppearancePasteParams, AppearanceReplaceParams, AppearanceReplaceResult, BodyLooks, ComponentLookReply, FaceIndexLook, FaceLookReply, FaceSpot,
+    LibraryAppearance, LookInDesign, LookReply, PbrReply, PlainAppearance, StarterAppearance,
 };
 
 const ASSIGN_CONTRACT: TypedContract<AppearanceAssignParams> = TypedContract::new();
 const LIBRARY_CONTRACT: TypedContract<AppearanceLibraryParams> = TypedContract::new();
 const LIST_CONTRACT: TypedContract<AppearanceListParams> = TypedContract::new();
+const COPY_CONTRACT: TypedContract<AppearanceCopyParams> = TypedContract::new();
+const CHAIN_CONTRACT: TypedContract<AppearanceChainParams> = TypedContract::new();
+const PASTE_CONTRACT: TypedContract<AppearancePasteParams> = TypedContract::new();
+const FAVORITE_CONTRACT: TypedContract<AppearanceFavoriteParams> = TypedContract::new();
+const REPLACE_CONTRACT: TypedContract<AppearanceReplaceParams> = TypedContract::new();
 
 /// An appearance command's reply, built from its schema's type so the two can't drift apart.
 fn appearance_reply(cmd: &str, r: impl serde::Serialize) -> Result<Value> {
@@ -880,7 +1074,7 @@ pub(super) fn appearance(s: &mut Session, p: &Value) -> Result<Value> {
                 Some(n) => st.body(n).filter(|b| on(b)).map(|b| b.name.clone()),
                 None => st.bodies.iter().filter(|b| on(b)).min_by(|a, b| dist_to(a, pt).total_cmp(&dist_to(b, pt))).map(|b| b.name.clone()),
             };
-            faces.push((body.ok_or_else(|| bad(cmd, format!("no face at {pt:?}")))?, pt));
+            faces.push((body.ok_or_else(|| bad(cmd, format!("no face at {pt}")))?, pt));
         }
     }
     let mut comps: Vec<u64> = Vec::new();
@@ -1027,7 +1221,7 @@ pub(super) fn appearance_look(cmd: &str, p: &Value) -> Result<Option<solidcraft_
 }
 
 fn dist_to(b: &solidcraft_doc::ModelBody, p: solidcore_record::Vec3) -> f64 {
-    let bb = b.mesh().bounds();
+    let bb = b.body.exact_bounds().unwrap_or_else(|_| b.outline_bounds());
     let c = solidcore_record::Vec3::new(p.x.clamp(bb.min.x, bb.max.x), p.y.clamp(bb.min.y, bb.max.y), p.z.clamp(bb.min.z, bb.max.z));
     c.dist(p)
 }
@@ -1196,5 +1390,5 @@ fn colored_components(s: &mut Session, p: &Value) -> Result<Value> {
     } else if !enabled {
         s.colored_components = None;
     }
-    Ok(json!({"enabled": enabled}))
+    typed_reply("inspect.colored_components", ColoredComponentsResult { enabled, param_warnings: Vec::new() })
 }

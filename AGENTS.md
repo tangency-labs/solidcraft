@@ -1,52 +1,61 @@
 # SolidCraft: instructions for agents
 
-SolidCraft is a clean-room, pure-Rust parametric 3D CAD app (sketch solver, feature timeline, B-rep kernel, an egui UI that agents drive). This file is a router: the hard rules, then the skill to read for your task. Humans: CONTRIBUTING.md.
+SolidCraft: clean-room Rust parametric CAD (sketch solver, timeline, B-rep, egui). Hard rules and skill router. Humans: CONTRIBUTING.md.
 
 ## Start here
-Work: ROADMAP.md, "Where help is wanted most" in CONTRIBUTING.md, issues labelled `help wanted`, `good first issue`, `needs-triage`; architecture in `docs/architecture.md`.
+Work: ROADMAP.md, CONTRIBUTING.md ("Where help is wanted most"), `help wanted`, `good first issue`, `needs-triage`. Architecture: `docs/architecture.md`.
 
 ## Hard rules (what enforces each)
-- Independent: never copy another product's code, icons, text or templates; never drive or take data from commercial CAD. `skills/solidcraft-ground-rules/SKILL.md`.
+- Platform integrations need maintainer approval: `.agents/skills/solidcraft-packaging/SKILL.md`.
+- Never copy other products' code, icons, text or templates; never drive or take data from commercial CAD. `.agents/skills/solidcraft-ground-rules/SKILL.md`.
 - No GPL/LGPL/AGPL code, not even reading it (OpenCASCADE, FreeCAD, SolveSpace, CadQuery, LibreCAD, QCAD): `cargo xtask licences --check`.
-- Every asset is original or openly licensed with a row in ATTRIBUTION.md; read `assets/AGENTS.md` before icon work: `cargo xtask assets`, `cargo xtask icons`.
-- Never crash: no unwrap/expect/panic/unsafe in non-test code, errors are `Result`, input is hostile: clippy `-D warnings`, `hostile_params_never_panic`.
-- Model decisions (what an operation does, which bodies it touches, which face or edge a point or name means, depths, nearness) use exact geometry; a mesh is for display, export, previews and mesh bodies (`xtask/mesh-decisions.txt` only shrinks): `cargo xtask mesh-decisions`.
-- Everything is a command and programmatic calls never open dialogs: `skills/solidcraft-commands/SKILL.md`.
-- Layering; only `crates/kernel` uses truck; solidcore only via `solidcore-ops`/`-tess`/`-record` (`xtask/solidcore-seam.txt`): `cargo xtask layers`; see `docs/layers.md`.
+- Original/openly licensed assets only, with ATTRIBUTION.md rows; read `assets/AGENTS.md` before icon work: `cargo xtask assets`, `cargo xtask icons`.
+- Never crash: no unwrap/expect/panic/unsafe outside tests; errors use `Result`; input is hostile: clippy `-D warnings`, `hostile_params_never_panic`.
+- Model decisions (operations, bodies, face/edge picks and names, depths, nearness) use exact geometry; meshes only for display, export, previews, mesh bodies (`xtask/mesh-decisions/` only shrinks): `cargo xtask mesh-decisions`.
+- Everything is a command; programmatic calls never open dialogs: `.agents/skills/solidcraft-commands/SKILL.md`.
+- Kernel ops and math go in `solidcore/`; features call its API: `.agents/skills/solidcraft-layers/SKILL.md`.
+- Only `crates/kernel` uses truck; solidcore only via `solidcore-ops`/`-tess`/`-record` (`xtask/solidcore-seam.txt`): `cargo xtask layers`/`app-geometry`, `docs/layers.md`.
 - One outer UI container, one camera path (`navigation::handle`), colours from theme tokens: `cargo xtask ui-containers`.
-- Application code is Rust only and builds for wasm: `cargo xtask wasm`, `cargo xtask web-offline-test`.
-- The product name is SolidCraft; the old name lives in `docs/compatibility.md`.
-- Sorted lists (message catalogs, `mod` lines, languages) stay sorted: `cargo xtask lists`. Never edit generated files (`docs/features.md`, `THIRD-PARTY-LICENSES.txt`) in a PR.
-- A design-format change is ONE new file in `crates/doc/src/format/pending/`: `scripts/test-format-pending.sh`.
-- A command has I/O schemas (soon required; `crates/engine/src/schema/unconverted.txt` only shrinks): `skills/solidcraft-commands/SKILL.md`.
+- Rust-only app code; builds for wasm: `cargo xtask wasm`, `cargo xtask web-offline-test`.
+- Name: SolidCraft; old name: `docs/compatibility.md`.
+- Sort message catalogs, `mod` lines and languages: `cargo xtask lists`. No generated-file edits (`docs/features.md`, `THIRD-PARTY-LICENSES.txt`).
+- One new file per design-format change in `crates/doc/src/format/pending/`: `scripts/test-format-pending.sh`.
+- Commands need I/O schemas (soon required; `crates/engine/src/schema/unconverted.txt` only shrinks): `.agents/skills/solidcraft-commands/SKILL.md`.
 - New UI strings go in `assets/locales/pending/<slug>.json`, ATTRIBUTION rows in `attribution/pending/<slug>.md`: `cargo xtask lists`.
-- A changed default (existing UI, not kernel results) keeps the old behaviour behind a preference; fill the PR's `Changes a default:` line.
-- A regression test goes in the area's existing test file, never a per-bug file (#3226).
-- Look at open PRs first, claim with a draft PR (lowest number wins), one topic per PR: `skills/solidcraft-contributing/SKILL.md`.
-- A PR's title and first sentence make sense to someone who never saw your chat or the issue: `skills/solidcraft-contributing/SKILL.md`.
-- Code, comments, commit messages and docs are in English; independent work runs in parallel, dependent work stays sequential: `skills/solidcraft-contributing/SKILL.md` ("Working as an agent").
-- Show observable changes with real screenshots or a recording, captured yourself.
-- Run `cargo xtask ci` before every commit. `cargo xtask skills` keeps this file and `skills/` honest.
+- Changed UX defaults (not kernel results): preserve old designs via a format legacy value; runtime choices in tool options; fill `Changes a default:`.
+- Regression tests in existing area files, never per-bug files (#3226).
+- Check open PRs, claim by draft (lowest number wins), one topic, English, newcomer-readable title, own screenshots for visible UI/model changes: `.agents/skills/solidcraft-contributing/SKILL.md`.
+- Before each commit: `cargo xtask fast`; CI runs full gate. `cargo xtask skills` checks router and both skill folders.
 
-## Working on X: read the skill first
-| Working on | Read |
+## Skills: read the one for your task
+Dev: `.agents/skills/` (`.claude/skills` symlink; Windows: Developer Mode, `git config core.symlinks true`). MCP: `skills/`.
+
+| Skill | When |
 |---|---|
-| A PR, a claim, review, CI or evidence | `skills/solidcraft-contributing/SKILL.md` |
-| Licences, assets, clean-room, the name | `skills/solidcraft-ground-rules/SKILL.md` |
-| Non-test Rust, hostile input, a crash report | `skills/solidcraft-crash-safety/SKILL.md` |
-| A command, a crate boundary | `skills/solidcraft-commands/SKILL.md` |
-| SolidCraft or solidcore, kernel, geometry | `skills/solidcraft-layers/SKILL.md` |
-| A dialog, panel, camera, icon, colour | `skills/solidcraft-ui/SKILL.md` |
-| Sheet metal | `skills/solidcraft-sheetmetal/SKILL.md` |
-| Labels, messages, translations | `skills/solidcraft-ui-text/SKILL.md` |
-| Saving something new in a design, import, export | `skills/solidcraft-file-formats/SKILL.md` |
-| Preferences, a changed default | `skills/solidcraft-preferences/SKILL.md` |
-| Writing or running tests | `skills/solidcraft-tests/SKILL.md` |
-| Slow work, the window thread, wasm | `skills/solidcraft-performance/SKILL.md` |
-| Releases, installers, packages | `skills/solidcraft-packaging/SKILL.md` |
-| Running the app, control channel, MCP tools | `skills/solidcraft-agent-tools/SKILL.md` |
-| Building a part over MCP | `skills/solidcraft-modeling/SKILL.md` |
-| Changing an existing design | `skills/solidcraft-editing/SKILL.md` |
-| A bug report, a crash, a wrong result | `skills/solidcraft-reporting/SKILL.md` |
-| Checking, porting, designs in git | `skills/solidcraft-checking/SKILL.md` |
-| Assemblies, joints, motion | `skills/solidcraft-mechanisms/SKILL.md` |
+| `.agents/skills/solidcraft-contributing/SKILL.md` | a feature, a fork, a claim, every PR's rules |
+| `.agents/skills/solidcraft-file-pr/SKILL.md` | opening a PR |
+| `.agents/skills/solidcraft-babysit-pr/SKILL.md` | after a push: CI, review |
+| `.agents/skills/solidcraft-full-stop/SKILL.md` | a change end to end |
+| `.agents/skills/solidcraft-takeover/SKILL.md` | finishing someone else's PR |
+| `.agents/skills/solidcraft-modernize/SKILL.md` | an old PR |
+| `.agents/skills/solidcraft-ground-rules/SKILL.md` | licences, assets, the name |
+| `.agents/skills/solidcraft-crash-safety/SKILL.md` | non-test Rust, crashes |
+| `.agents/skills/solidcraft-commands/SKILL.md` | a command, a crate boundary |
+| `.agents/skills/solidcraft-layers/SKILL.md` | SolidCraft or solidcore |
+| `.agents/skills/solidcraft-kernel-rules/SKILL.md` | geometry, test expectations |
+| `.agents/skills/solidcraft-ui/SKILL.md` | a dialog, panel, camera, icon, colour |
+| `.agents/skills/solidcraft-shared-controls/SKILL.md` | selection, keys, tool options |
+| `.agents/skills/solidcraft-repro-first/SKILL.md` | OS, graphics, updater fixes |
+| `skills/solidcraft-sheetmetal/SKILL.md` | sheet metal |
+| `.agents/skills/solidcraft-ui-text/SKILL.md` | labels, messages, translations |
+| `.agents/skills/solidcraft-file-formats/SKILL.md` | design saving, import, export |
+| `.agents/skills/solidcraft-preferences/SKILL.md` | a changed default, a new option |
+| `.agents/skills/solidcraft-tests/SKILL.md` | writing or running tests |
+| `.agents/skills/solidcraft-performance/SKILL.md` | slow work, the window thread, wasm |
+| `.agents/skills/solidcraft-packaging/SKILL.md` | releases, installers, packages |
+| `.agents/skills/solidcraft-agent-tools/SKILL.md` | running the app, MCP |
+| `skills/solidcraft-modeling/SKILL.md` | building a part over MCP |
+| `skills/solidcraft-editing/SKILL.md` | changing an existing design |
+| `skills/solidcraft-reporting/SKILL.md` | a bug report |
+| `skills/solidcraft-checking/SKILL.md` | checking, porting, designs in git |
+| `skills/solidcraft-mechanisms/SKILL.md` | assemblies, joints, motion |

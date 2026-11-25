@@ -23,7 +23,7 @@ pub fn panel_host_container(ctx: &egui::Context, floating: bool) -> Container {
 
 /// The same adaptive frame supplies both paint and the content's safe clip.
 pub fn panel_host_frame(ctx: &egui::Context, floating: bool) -> egui::Frame {
-    panel_host_container(ctx, floating).frame(ctx, Tokens::get().panel, crate::frame::Side::Left).inner_margin(0).outer_margin(0)
+    panel_host_container(ctx, floating).frame(ctx, Tokens::get().toolbar, crate::frame::Side::Left).inner_margin(0).outer_margin(0)
 }
 
 pub fn panel_host_surface<R>(
@@ -31,6 +31,20 @@ pub fn panel_host_surface<R>(
     id: egui::Id,
     bounds: egui::Rect,
     floating: bool,
+    fill: egui::Color32,
+    palette: Option<&Tokens>,
+    body: impl FnOnce(&mut egui::Ui, egui::Rect) -> R,
+) -> R {
+    panel_host_surface_reaching(ui, id, bounds, floating, 0.0, fill, palette, body)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn panel_host_surface_reaching<R>(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    bounds: egui::Rect,
+    floating: bool,
+    reach: f32,
     fill: egui::Color32,
     palette: Option<&Tokens>,
     body: impl FnOnce(&mut egui::Ui, egui::Rect) -> R,
@@ -66,16 +80,15 @@ pub fn panel_host_surface<R>(
     if floating {
         let layer = egui::LayerId::new(egui::Order::Background, id.with("area"));
         Container::bring_to_front(ui.ctx(), layer);
-        container
-            .area(id.with("area"))
-            .fixed_pos(bounds.min)
-            .movable(false)
-            .fade_in(false)
-            .show(ui.ctx(), |ui| {
-                ui.set_min_size(bounds.size());
-                paint(ui)
-            })
-            .inner
+        let mut area = container.area(id.with("area")).fixed_pos(bounds.min - egui::vec2(reach, reach)).movable(false).fade_in(false);
+        if reach > 0.0 {
+            area = area.constrain(false);
+        }
+        area.show(ui.ctx(), |ui| {
+            ui.set_min_size(bounds.size() + egui::vec2(2.0 * reach, 2.0 * reach));
+            paint(ui)
+        })
+        .inner
     } else {
         paint(ui)
     }
@@ -114,12 +127,19 @@ pub fn panel_host_control_label_opacity(
         t.form_ink
     };
     let painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(bounds));
-    let paint_bounds = bounds.shrink2(egui::vec2(t.space_4.min(bounds.width() / 2.0), t.space_4.min(bounds.height() / 2.0)));
+    let inset = if chrome.icon_only { t.space_2 } else { t.space_4 };
+    let paint_bounds = bounds.shrink2(egui::vec2(inset.min(bounds.width() / 2.0), inset.min(bounds.height() / 2.0)));
     if let Some(fill) = fill {
         if chrome.title {
             super::panel::panel_header_hover(&painter, paint_bounds);
         } else {
-            painter.rect_filled(paint_bounds, t.control_radius, fill);
+            let radius = if chrome.icon_only {
+                // The button inset and header margin share the panel corner's center.
+                t.radius_lg.saturating_sub(t.space_4.round() as u8)
+            } else {
+                t.control_radius
+            };
+            painter.rect_filled(paint_bounds, radius, fill);
         }
     }
     if response.has_focus() {
@@ -148,7 +168,7 @@ pub fn panel_host_control_label_opacity(
     let icon = chrome.icon.filter(|icon| !icon.is_empty());
     if let Some(icon) = icon {
         let extent = if chrome.icon_only {
-            (bounds.width().min(bounds.height()) - t.form_icon_inset * 2.0).max(0.0)
+            (bounds.width().min(bounds.height()).min(t.control_height) - t.form_icon_inset * 2.0).max(0.0)
         } else {
             t.form_icon_size.min(bounds.height()).min(text.width())
         };
@@ -162,6 +182,9 @@ pub fn panel_host_control_label_opacity(
             if let Some(transport) = icon.strip_prefix("timeline_").filter(|name| matches!(*name, "first" | "back" | "play" | "forward" | "last")) {
                 let glyph = if transport == "play" && chrome.selected { "pause" } else { transport };
                 crate::icons::glyphs::transport_glyph(&painter, icon_rect.center(), glyph, ink);
+            } else if matches!(icon, "timeline_1d" | "timeline_2d") {
+                // The timeline view switch keeps its blue chips, so it reads as timeline steps, not as the menu's dots.
+                crate::icons::paint_icon(&painter, icon_rect, icon, if chrome.enabled { 1.0 } else { 0.5 });
             } else {
                 crate::icons::paint_ink(&painter, icon_rect, icon, ink);
             }
@@ -243,7 +266,7 @@ pub fn panel_host_disclosure(
     ui.ctx().accesskit_node_builder(response.id, |node| node.set_expanded(!collapsed));
     let t = Tokens::get();
     let ink = if enabled { t.form_ink } else { t.form_dim };
-    let extent = (bounds.width().min(bounds.height()) - t.form_icon_inset * 2.0).max(0.0);
+    let extent = (bounds.width().min(bounds.height()).min(t.control_height) - t.form_icon_inset * 2.0).max(0.0);
     let icon = egui::Rect::from_center_size(bounds.center(), egui::vec2(extent, extent));
     let painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(bounds));
     // Only the two existing glyphs blend. The response, expanded state and
@@ -259,12 +282,34 @@ pub fn panel_host_disclosure(
     response
 }
 
+/// Which way a sash splits, and so which resize cursor it shows.
+/// `Horizontal` is a horizontal divider (it moves vertically).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SashAxis {
+    Horizontal,
+    Vertical,
+    NorthwestSoutheast,
+    NortheastSouthwest,
+}
+
 /// The owner supplies the controlled extent and axis; clipping or scrolling
-/// the sash must not change its accessible value or orientation.
-pub fn panel_host_sash(ui: &mut egui::Ui, id: egui::Id, bounds: egui::Rect, name: &str, horizontal: bool, extent: f32) -> egui::Response {
+/// the sash must not change its accessible value or orientation. `bounds` is
+/// the grab area; only `ink` is drawn. Without `keyboard` the handle takes
+/// pointer drags only: it is not a Tab stop.
+#[allow(clippy::too_many_arguments)]
+pub fn panel_host_sash(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    bounds: egui::Rect,
+    ink: egui::Rect,
+    name: &str,
+    axis: SashAxis,
+    extent: f32,
+    keyboard: bool,
+) -> egui::Response {
     let t = Tokens::get();
-    let response = ui.interact(bounds, id, egui::Sense::click_and_drag());
-    if response.has_focus() {
+    let response = ui.interact(bounds, id, if keyboard { egui::Sense::click_and_drag() } else { egui::Sense::DRAG });
+    if keyboard && response.has_focus() {
         ui.memory_mut(|memory| {
             memory.set_focus_lock_filter(
                 id,
@@ -279,16 +324,25 @@ pub fn panel_host_sash(ui: &mut egui::Ui, id: egui::Id, bounds: egui::Rect, name
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Unknown, ui.is_enabled(), name));
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::Splitter);
-        node.set_orientation(if horizontal { egui::accesskit::Orientation::Horizontal } else { egui::accesskit::Orientation::Vertical });
+        match axis {
+            SashAxis::Horizontal => node.set_orientation(egui::accesskit::Orientation::Horizontal),
+            SashAxis::Vertical => node.set_orientation(egui::accesskit::Orientation::Vertical),
+            SashAxis::NorthwestSoutheast | SashAxis::NortheastSouthwest => {}
+        }
         node.set_numeric_value(f64::from(extent));
     });
     if response.hovered() || response.has_focus() || response.dragged() {
-        ui.painter().rect_filled(bounds.intersect(ui.clip_rect()), t.radius_sm, t.form_primary);
+        ui.painter().rect_filled(ink.intersect(ui.clip_rect()), t.radius_sm, t.form_primary);
     }
     if response.hovered() {
-        ui.ctx().set_cursor_icon(if horizontal { egui::CursorIcon::ResizeVertical } else { egui::CursorIcon::ResizeHorizontal });
+        ui.ctx().set_cursor_icon(match axis {
+            SashAxis::Horizontal => egui::CursorIcon::ResizeVertical,
+            SashAxis::Vertical => egui::CursorIcon::ResizeHorizontal,
+            SashAxis::NorthwestSoutheast => egui::CursorIcon::ResizeNwSe,
+            SashAxis::NortheastSouthwest => egui::CursorIcon::ResizeNeSw,
+        });
     }
-    response.backing_on_hover_text(name)
+    if keyboard { response.backing_on_hover_text(name) } else { response }
 }
 
 /// A scrollbar owns only its narrow track. The surrounding canvas has no
@@ -427,6 +481,47 @@ pub fn panel_host_neighbour_preview(ui: &egui::Ui, bounds: egui::Rect, removed: 
     if removed {
         painter.line_segment([bounds.left_top(), bounds.right_bottom()], stroke);
     }
+}
+
+/// A panel tab uses the same chip and text treatment as a document tab.
+#[allow(clippy::too_many_arguments)]
+pub fn paint_panel_tab(ui: &egui::Ui, bounds: egui::Rect, label: &str, active: bool, lit: bool, incoming: bool, rtl: bool, label_opacity: f32) {
+    let t = Tokens::get();
+    let chip = bounds.shrink2(egui::vec2((t.space_2 / 2.0).min(bounds.width() / 2.0), t.space_4.min(bounds.height() / 2.0)));
+    let painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(chip));
+    crate::app_bar::tab_shape(&painter, &t, chip, active || incoming, lit);
+    if incoming {
+        painter.rect_stroke(chip, t.radius_md, t.control_border_stroke(t.form_primary), egui::StrokeKind::Inside);
+    }
+    let ink = t.app_bar_text.gamma_multiply(label_opacity * if active || lit || incoming { 1.0 } else { 0.7 });
+    let font = if active { crate::type_face::semibold(t.font_button) } else { egui::FontId::proportional(t.font_button) };
+    let mut text = chip.shrink2(egui::vec2(t.space_8.min(chip.width() / 2.0), 0.0));
+    if rtl {
+        let width = painter.layout_no_wrap(label.to_owned(), font.clone(), ink).size().x;
+        text.min.x = text.right() - width.min(text.width());
+    }
+    crate::paint_text(ui, text, label, font, ink, false);
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn panel_tab(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    bounds: egui::Rect,
+    label: &str,
+    active: bool,
+    enabled: bool,
+    rtl: bool,
+    label_opacity: f32,
+) -> egui::Response {
+    let enabled = enabled && ui.is_enabled();
+    let response = ui.interact(bounds, id, if enabled { egui::Sense::click_and_drag() } else { egui::Sense::hover() });
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, label));
+    if enabled && response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+    }
+    paint_panel_tab(ui, bounds, label, active, enabled && (response.hovered() || response.has_focus()), false, rtl, label_opacity);
+    response.backing_on_hover_text(label)
 }
 
 pub fn panel_host_tab_insertion(ui: &egui::Ui, bounds: egui::Rect, opacity: f32) {

@@ -1,6 +1,6 @@
 //! Menus share one popup surface and one row painter. Command dispatch stays with callers.
+use crate::{BackingTooltipExt as _, icons, type_face::RichTextExt as _};
 use crate::{Container, Icon, Surface};
-use crate::{icons, type_face::RichTextExt as _};
 use egui::{Color32, FontId, Rect, Response, Sense, Stroke, TextureId, Ui, pos2, vec2};
 use serde::Serialize;
 use serde_json::Value;
@@ -103,6 +103,19 @@ pub struct Item {
     pub tip: Option<String>,
 }
 
+/// Share of a menu row's width the note on the right may take before it is elided, so that a
+/// long file name cannot cover the label beside it (#17302).
+const KEY_ROOM: f32 = 0.5;
+
+/// Lays out the note on the right of a menu row, elided to `room` points.
+fn laid_out_key(painter: &egui::Painter, text: &str, room: f32, t: &Tokens) -> Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob::simple(solidcraft_ui_text::tr_label(text).to_string(), FontId::monospace(t.font_small), t.text_dim, room);
+    job.wrap.max_rows = 1;
+    job.wrap.break_anywhere = true;
+    job.wrap.overflow_character = Some('\u{2026}');
+    painter.layout_job(job)
+}
+
 impl Item {
     /// A view action (`ui.*`).
     pub fn action(id: &str, label: &str, icon: &str) -> Item {
@@ -185,8 +198,29 @@ pub struct Menu;
 pub const SUBMENU_CLOSE_DELAY: f64 = 0.3;
 
 impl Menu {
+    /// Below this contrast with `dialog_body`, a menu's rule all but vanishes on the menu surface
+    /// (#15806), as when a theme tunes `borders.tertiary` for `panel` rather than `dialog_body`.
+    pub const SEPARATOR_MIN_CONTRAST: f64 = 1.18;
+
+    /// Stroke for menu rules, preserving visible or explicitly hidden rules while rescuing
+    /// hairline rules whose contrast against `dialog_body` would otherwise vanish.
+    pub fn separator_stroke(t: &Tokens) -> Stroke {
+        let stroke = t.tertiary_border(t.dialog_rule);
+        let visible = |c: Color32| {
+            solidcraft_theme::contrast_ratio(solidcraft_theme::composite(c, t.dialog_body), t.dialog_body) >= Self::SEPARATOR_MIN_CONTRAST
+        };
+        if stroke.width <= 0.0 || stroke.color == Color32::TRANSPARENT || visible(stroke.color) {
+            return stroke;
+        }
+        let fallback = [t.dialog_rule, t.dialog_border, t.border, t.form_dim].into_iter().find(|&c| visible(c));
+        Stroke::new(stroke.width, fallback.unwrap_or(stroke.color))
+    }
+
     pub fn context<R>(response: &Response, add: impl FnOnce(&mut Ui) -> R) -> Option<egui::InnerResponse<R>> {
-        Container::new(&response.ctx, Surface::Popup).context_menu(response).frame(Self::frame()).show(add)
+        Container::new(&response.ctx, Surface::Popup).context_menu(response).frame(Self::frame()).show(|ui| {
+            ui.visuals_mut().widgets.noninteractive.bg_stroke = Self::separator_stroke(&Tokens::get());
+            add(ui)
+        })
     }
 
     pub fn button<R>(ui: &mut Ui, label: impl Into<egui::WidgetText>, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<Option<R>> {
@@ -247,6 +281,7 @@ impl Menu {
         });
         let content = |ui: &mut Ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
+            ui.visuals_mut().widgets.noninteractive.bg_stroke = Self::separator_stroke(&Tokens::get());
             // The opening gesture belongs to the parent even when a narrow popup overlaps it.
             ui.ctx().data_mut(|d| d.insert_temp(gate_id, first_click && !released));
             let result = ui.add_enabled_ui(!opening_press, add).inner;
@@ -361,7 +396,10 @@ impl Menu {
 
     pub fn show_frame<R>(ui: &mut Ui, frame: egui::Frame, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<R> {
         let bounds = ui.max_rect();
-        Container::new(ui.ctx(), Surface::Popup).show_frame(ui, frame, bounds, add)
+        Container::new(ui.ctx(), Surface::Popup).show_frame(ui, frame, bounds, |ui| {
+            ui.visuals_mut().widgets.noninteractive.bg_stroke = Self::separator_stroke(&Tokens::get());
+            add(ui)
+        })
     }
 
     pub fn show<R>(ui: &mut Ui, width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
@@ -376,7 +414,7 @@ impl Menu {
     pub fn separator(ui: &mut Ui) {
         let t = Tokens::get();
         let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), t.space_10 + 1.0), Sense::hover());
-        ui.painter().hline(r.x_range(), r.center().y, t.tertiary_border(t.dialog_rule));
+        ui.painter().hline(r.x_range(), r.center().y, Self::separator_stroke(&t));
     }
 
     pub fn heading(ui: &mut Ui, label: &str) {
@@ -495,8 +533,11 @@ impl<'a> MenuItem<'a> {
         // Areas first measure intrinsic content. Filling their provisional available
         // width would make a flipped submenu cover its parent and consume the opening click.
         let width = if ui.is_sizing_pass() {
-            let label =
-                ui.painter().layout_no_wrap(solidcraft_ui_text::tr_label(self.label).to_string(), FontId::proportional(t.font_label), t.form_ink);
+            let label = ui.painter().layout_no_wrap(
+                solidcraft_ui_text::tr_command(self.id, self.label).to_string(),
+                FontId::proportional(t.font_label),
+                t.form_ink,
+            );
             let shortcut = ui.painter().layout_no_wrap(self.shortcut.to_string(), FontId::monospace(t.font_small), t.form_dim);
             let trailing = if self.submenu { t.space_16 } else { 0.0 };
             let check = Self::trailing_check_width(self.icon, self.checked.is_some());
@@ -546,12 +587,13 @@ impl<'a> MenuItem<'a> {
             painter.rect(icon, t.radius_sm, color, t.control_border_stroke(t.control_border), egui::StrokeKind::Inside);
         } else if !self.icon.is_blank() {
             match self.icon {
+                Icon::Kit(name @ ("window_here" | "window_other")) => icons::paint_ink(&painter, icon, name, t.text_dim),
                 Icon::Kit(name) if self.danger => icons::paint_danger(&painter, icon, name, 1.0),
                 Icon::Kit(name) if hot => icons::paint_ink(&painter, icon, name, dim),
                 plain => plain.paint_plain(&painter, icon, 1.0),
             }
         }
-        let label = solidcraft_ui_text::tr_label(self.label);
+        let label = solidcraft_ui_text::tr_command(self.id, self.label);
         let mut right = r.right() - t.space_8 - trailing;
         if self.submenu {
             let c = pos2(right - t.space_4, r.center().y);
@@ -570,9 +612,23 @@ impl<'a> MenuItem<'a> {
             right -= check_width;
         }
         if !self.shortcut.is_empty() {
-            let key = painter.layout_no_wrap(solidcraft_ui_text::tr_label(self.shortcut).to_string(), FontId::monospace(t.font_small), dim);
+            // The note on the right is a file name for Insert Design's list, and it used to be
+            // laid out with no width at all: a long name grew leftwards over the row's label
+            // (#17302). Cap it to a share of the row and elide what does not fit.
+            let room = (r.width() * KEY_ROOM).max(0.0);
+            let whole = solidcraft_ui_text::tr_label(self.shortcut).to_string();
+            let untruncated = painter.layout_no_wrap(whole.clone(), FontId::monospace(t.font_small), dim);
+            let fits = untruncated.size().x <= room + 0.5;
+            let key = if fits { untruncated } else { laid_out_key(&painter, self.shortcut, room, &t) };
             painter.galley(pos2(right - key.size().x, r.center().y - key.size().y / 2.0), key.clone(), dim);
             right -= key.size().x + t.space_8;
+            // Cutting the note short can leave two rows that look the same: design names are free
+            // text, and two file names can differ only past the ellipsis. A row that had to cut its
+            // note says the whole name on hover, so the choice is not blind. `Item::tip` is not
+            // used for this: it is the reason a row is off, and a row can be off and elided at once.
+            if !fits && enabled {
+                response.clone().backing_on_hover_text(whole);
+            }
         }
         let left = r.left() + t.control_height + t.space_2;
         let mut job = egui::text::LayoutJob::simple_singleline(label.to_string(), FontId::proportional(t.font_label), ink);
@@ -788,7 +844,7 @@ pub fn workspace_menu(ui: &mut egui::Ui, menu: &WorkspaceMenu<'_>, key_row: Opti
                     icon.paint_plain(ui.painter(), tile.shrink(t.space_6 + 1.0), opacity);
                 }
                 let text = if item.enabled { t.text } else { t.text_dim };
-                let name = solidcraft_ui_text::tr_label(&item.label);
+                let name = solidcraft_ui_text::tr_command(&item.id, &item.label);
                 let x = r.left() + 74.0;
                 let y = r.top() + 17.0;
                 let galley =
@@ -799,21 +855,25 @@ pub fn workspace_menu(ui: &mut egui::Ui, menu: &WorkspaceMenu<'_>, key_row: Opti
                 let ppp = ui.ctx().pixels_per_point().max(0.5);
                 let origin = pos2((origin.x * ppp).round() / ppp, (origin.y * ppp).round() / ppp);
                 ui.painter().galley(origin, galley, text);
-                let badge = solidcraft_ui_text::tr(if planned {
-                    "ui.workspace_planned"
+                // Only what isn't plain gets a pill: the workspace you're in, and the ones still to come.
+                // One you can open just has its name, as any menu row.
+                let badge = if planned {
+                    Some("ui.workspace_planned")
                 } else if current {
-                    "ui.workspace_current"
+                    Some("ui.workspace_current")
                 } else {
-                    "ui.workspace_available"
-                });
-                let badge = ui.painter().layout_no_wrap(
-                    badge.to_string(),
-                    FontId::proportional(solidcraft_theme::Tokens::get().font_small),
-                    if current { t.on_accent } else { accent },
-                );
-                let badge_rect = Rect::from_min_size(pos2(badge_x, y - 8.0), badge.size() + vec2(t.space_12, t.space_3));
-                ui.painter().rect_filled(badge_rect, t.radius_lg, if current { accent } else { soft });
-                ui.painter().galley(badge_rect.min + vec2(t.space_6, t.space_3 / 2.0), badge, accent);
+                    None
+                };
+                if let Some(badge) = badge {
+                    let badge = ui.painter().layout_no_wrap(
+                        solidcraft_ui_text::tr(badge).to_string(),
+                        FontId::proportional(solidcraft_theme::Tokens::get().font_small),
+                        if current { t.on_accent } else { accent },
+                    );
+                    let badge_rect = Rect::from_min_size(pos2(badge_x, y - 8.0), badge.size() + vec2(t.space_12, t.space_3));
+                    ui.painter().rect_filled(badge_rect, t.radius_lg, if current { accent } else { soft });
+                    ui.painter().galley(badge_rect.min + vec2(t.space_6, t.space_3 / 2.0), badge, accent);
+                }
                 let line = |content: String, y: f32| {
                     let mut job =
                         egui::text::LayoutJob::simple_singleline(content, FontId::proportional(solidcraft_theme::Tokens::get().font_body), text);
@@ -839,9 +899,9 @@ pub fn workspace_menu(ui: &mut egui::Ui, menu: &WorkspaceMenu<'_>, key_row: Opti
                 }
             }
         });
-        ui.add_space(t.space_6);
-        ui.separator();
-        ui.add_space(t.space_6);
+        ui.add_space(t.space_2);
+        Menu::separator(ui);
+        ui.add_space(t.space_2);
         ui.add(egui::Label::new(egui::RichText::new(menu.footer).size(solidcraft_theme::Tokens::get().font_small).color(t.text_dim)).wrap());
         ui.add_space(t.space_4);
     });
@@ -926,6 +986,69 @@ mod tests {
     }
 
     #[test]
+    fn a_long_note_on_the_right_of_a_row_is_elided_and_leaves_the_label_its_share() {
+        const ROOM: f32 = 120.0;
+        let ctx = crate::test_support::context();
+        let mut medidas = None;
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let t = Tokens::get();
+            let painter = ui.painter().clone();
+            medidas =
+                Some((laid_out_key(&painter, "Topcraft_Messschieber_Unterteil_final_v3.sc", ROOM, &t), laid_out_key(&painter, "plate.sc", ROOM, &t)));
+        });
+        output.textures_delta.clear();
+        let (key, short) = medidas.expect("the row laid the note out");
+        assert!(key.elided, "a name wider than its room must be elided");
+        assert!(key.size().x <= ROOM + 0.5, "elided note is {} wide, room is {ROOM}", key.size().x);
+        assert!(!short.elided && short.size().x < ROOM, "a short note keeps its whole text");
+    }
+
+    /// A note that did not fit is cut short, so the row says the whole name on hover; a note that
+    /// fits is drawn whole and adds no hover. Two designs whose file names differ past the ellipsis
+    /// cannot be told apart by the row alone, which is what the hover is for.
+    #[test]
+    fn a_cut_short_note_says_its_whole_name_on_hover() {
+        let long = "Topcraft_Messschieber_Unterteil_final_v3.sc";
+        for (note, hovered) in [(long, true), ("plate.sc", false)] {
+            let ctx = crate::test_support::context();
+            ctx.global_style_mut(|style| style.interaction.tooltip_delay = 0.0);
+            let row = Rect::from_min_size(egui::Pos2::ZERO, vec2(240.0, 24.0));
+            let at = row.center();
+            let mut texts = Vec::new();
+            for frame in 0..4 {
+                let input = egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(260.0, 40.0))),
+                    events: if frame == 0 { vec![egui::Event::PointerMoved(at)] } else { Vec::new() },
+                    time: Some(f64::from(frame)),
+                    ..Default::default()
+                };
+                let mut output = ctx.run_ui(input, |ui| {
+                    ui.scope_builder(egui::UiBuilder::new().max_rect(row), |ui| {
+                        let mut item = MenuItem::new("id", "Design", "");
+                        item.shortcut = note;
+                        item.show(ui);
+                    });
+                });
+                output.textures_delta.clear();
+                let tips: Vec<Rect> = ctx.memory(|m| {
+                    m.areas()
+                        .visible_layer_ids()
+                        .into_iter()
+                        .filter(|layer| layer.order == egui::Order::Tooltip)
+                        .filter_map(|layer| m.area_rect(layer.id))
+                        .collect()
+                });
+                texts = crate::test_support::text_shapes(&output)
+                    .filter(|text| tips.iter().any(|tip| tip.contains(text.pos)))
+                    .map(|text| text.galley.job.text.to_owned())
+                    .collect();
+            }
+            let want: Vec<String> = if hovered { vec![note.to_owned()] } else { Vec::new() };
+            assert_eq!(texts, want, "the hover of a row noted {note}");
+        }
+    }
+
+    #[test]
     fn menu_navigation_skips_disabled_rows_and_wraps() {
         let ctx = crate::test_support::context();
         let mut selected = None;
@@ -942,6 +1065,61 @@ mod tests {
         assert_eq!(frame(key(egui::Key::ArrowDown)), (Some(0), false));
         assert_eq!(frame(key(egui::Key::ArrowUp)), (Some(2), false));
         assert_eq!(frame(key(egui::Key::Enter)), (Some(2), true));
+    }
+
+    #[test]
+    fn pop_out_window_menu_fits_small_screens_and_restores_focus() {
+        use crate::window_options_menu::{self, Action, CardHeaders, TopBar, WindowMenu};
+
+        let ctx = crate::test_support::context();
+        let screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(320.0, 220.0));
+        let anchor = Rect::from_min_size(pos2(276.0, 4.0), vec2(32.0, 26.0));
+        let id = egui::Id::unique("test-window-options");
+        let text = window_options_menu::WindowText { top_bar: "Top bar".into(), card_headers: "Card headers".into(), ..Default::default() };
+        let menu = WindowMenu {
+            text: &text,
+            title: "Window 2",
+            displays: &[],
+            card_headers: CardHeaders::Always,
+            keep_on_top: false,
+            interface_size: 100,
+            interface_sizes: &[90, 100, 125, 150, 200],
+            ribbon: true,
+            ribbon_auto_hide: true,
+            panels: false,
+            top_bar: TopBar::Always,
+        };
+        let frame = |events, open| {
+            let mut action = None;
+            let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), events, ..Default::default() }, |ui| {
+                let response = ui.interact(anchor, id, egui::Sense::click());
+                action = window_options_menu::show(ui, response, open, &menu);
+            });
+            output.textures_delta.clear();
+            action
+        };
+
+        frame(vec![], true);
+        frame(vec![], false);
+        let area = ctx.memory(|memory| memory.area_rect(id.with("window_options").with("popup"))).unwrap();
+        assert!(screen.contains_rect(area), "{area:?} exceeds {screen:?}");
+        frame(key(egui::Key::ArrowDown), false);
+        frame(key(egui::Key::ArrowDown), false);
+        assert_eq!(frame(key(egui::Key::ArrowRight), false), Some(Action::TopBar(TopBar::Edge)));
+        frame(key(egui::Key::ArrowDown), false);
+        frame(key(egui::Key::ArrowDown), false);
+        assert_eq!(frame(key(egui::Key::ArrowRight), false), Some(Action::CardHeaders(CardHeaders::Hover)));
+        frame(key(egui::Key::Escape), false);
+        assert!(ctx.memory(|memory| memory.has_focus(id)));
+        frame(vec![], true);
+        assert!(window_options_menu::is_open(&ctx, id));
+        let _ = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), focused: false, ..Default::default() }, |ui| {
+            let response = ui.interact(anchor, id, egui::Sense::click());
+            assert!(window_options_menu::show(ui, response, false, &menu).is_none());
+        });
+        assert!(!window_options_menu::is_open(&ctx, id), "losing the window focus dismisses its menu");
+        frame(vec![], false);
+        assert!(!window_options_menu::is_open(&ctx, id), "the menu stays closed when the window regains focus");
     }
 
     #[test]
@@ -987,6 +1165,53 @@ mod tests {
             super::super::test_support::frame(&ctx, pointer(at, true), &mut draw);
             super::super::test_support::frame(&ctx, pointer(at, false), &mut draw);
             assert_eq!(clicked.get(), enabled);
+        }
+    }
+
+    #[test]
+    fn separator_stroke_preserves_hidden_and_visible_rules_and_rescues_vanishing_ones() {
+        for base in [Tokens::light(), Tokens::dark()] {
+            let stroke = Menu::separator_stroke(&base);
+            assert_eq!(stroke, base.tertiary_border(base.dialog_rule));
+            assert!(solidcraft_theme::contrast_ratio(stroke.color, base.dialog_body) >= Menu::SEPARATOR_MIN_CONTRAST);
+        }
+
+        let mut hidden_zero = Tokens::dark();
+        hidden_zero.borders.tertiary = Some(Stroke::new(0.0, Color32::WHITE));
+        assert_eq!(Menu::separator_stroke(&hidden_zero).width, 0.0);
+
+        let mut hidden_alpha = Tokens::dark();
+        hidden_alpha.borders.tertiary = Some(Stroke::new(1.0, Color32::TRANSPARENT));
+        assert_eq!(Menu::separator_stroke(&hidden_alpha).color.a(), 0);
+
+        let mut blueprint_like = Tokens::dark();
+        blueprint_like.dialog_body = Color32::from_rgb(0x11, 0x2d, 0x4b);
+        blueprint_like.dialog_rule = Color32::from_rgb(0x25, 0x47, 0x64);
+        blueprint_like.dialog_border = Color32::from_rgb(0x31, 0x57, 0x77);
+        blueprint_like.borders.tertiary = Some(Stroke::new(1.5, Color32::from_rgb(0x10, 0x27, 0x48)));
+        assert_eq!(Menu::separator_stroke(&blueprint_like), Stroke::new(1.5, blueprint_like.dialog_rule));
+
+        let mut rule_vanishes = blueprint_like;
+        rule_vanishes.dialog_rule = blueprint_like.dialog_body;
+        assert_eq!(Menu::separator_stroke(&rule_vanishes), Stroke::new(1.5, rule_vanishes.dialog_border));
+
+        let mut border_vanishes = rule_vanishes;
+        border_vanishes.dialog_border = border_vanishes.dialog_body;
+        assert_eq!(Menu::separator_stroke(&border_vanishes), Stroke::new(1.5, border_vanishes.border));
+
+        let mut all_borders_vanish = border_vanishes;
+        all_borders_vanish.border = all_borders_vanish.dialog_body;
+        assert_eq!(Menu::separator_stroke(&all_borders_vanish), Stroke::new(1.5, all_borders_vanish.form_dim));
+
+        let mut transparent_fallback = Tokens::light();
+        transparent_fallback.borders.tertiary = Some(Stroke::new(1.0, transparent_fallback.dialog_body));
+        transparent_fallback.dialog_rule = Color32::TRANSPARENT;
+        assert_eq!(Menu::separator_stroke(&transparent_fallback), Stroke::new(1.0, transparent_fallback.dialog_border));
+
+        for base in [Tokens::light(), Tokens::dark()] {
+            let mut translucent = base;
+            translucent.borders.tertiary = Some(Stroke::new(1.0, Color32::from_white_alpha(8)));
+            assert_eq!(Menu::separator_stroke(&translucent), Stroke::new(1.0, base.dialog_rule));
         }
     }
 }

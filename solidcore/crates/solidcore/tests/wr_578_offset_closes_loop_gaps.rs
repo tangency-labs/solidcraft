@@ -13,8 +13,9 @@
 //!
 //! 34318f4: a 30 x 35 x 7.5 box notched 22.5 x 5 down to z = 2.5 at its far corner, shelled
 //! 1.5 inward open at the far side under the notch: the wall moves the strip's top corner
-//! past the end of its edge, `SM_ERR_OFFSET_EDGE_VANISHES` (1043). Open at the notch's
-//! floor it shells.
+//! past the end of its edge. The fork refused it as `SM_ERR_OFFSET_EDGE_VANISHES` (1043).
+//! Now that offset faces whose loops cross are always rebuilt (WR-345), it shells into the
+//! closed form's solid. Open at the notch's floor it shells too.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -25,15 +26,20 @@
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
 
+#[path = "support/volume_leak.rs"]
+mod volume_leak;
 use offset_fixture::{planar_faces_at, report, shell};
 use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::curve::curve::Curve;
 use solidcore::geom::axis2_placement::Axis2Placement;
+use solidcore::mass::integrator::properties::brep_area;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves::{create_arc, create_line_segment};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
+use solidcore::query::api_queries::brep_bounding_box;
 use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::brep::p5::transform;
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::proto_topology::p1::api_transform::{api_rotate, TransformObject};
 use solidcore::{Brep, Kernel};
 
@@ -154,16 +160,59 @@ fn notched(k: &mut Kernel) -> Brep {
     b
 }
 
+/// Open at the far side under the notch: the floor under the notch (2.5 thick) is thinner
+/// than the two walls' 2 x 1.5, so the cavity never reaches under it and the strip's top
+/// edge vanishes. The fork refused that (1043); with offset faces whose loops cross
+/// rebuilt (WR-345) the shell is built, `check_brep` Level 2 clean and a manifold solid.
+///
+/// Closed form: the notched block 30 x 35 x 7.5 - 22.5 x 5 x 5 = 7312.5 less the cavity,
+/// the block shrunk 1.5 except at the open side y = 35 (x 1.5..28.5, y 1.5..35,
+/// z 1.5..6: 27 x 33.5 x 4.5) less the notch grown 1.5 into it (x < 24, y > 28.5,
+/// z > 1: 22.5 x 6.5 x 4.5), so 7312.5 - (4070.25 - 658.125) = 3900.375.
+///
+/// The shape is pinned beyond its volume too: 16 faces (the block's 9, its y = 35 side
+/// now holed, and the cavity's 7: z 1.5 and 6, x 1.5, 28.5 and 24, y 1.5 and 28.5), the
+/// block's box, and the area. The notched block's surface is the box's 3075 (the notch
+/// moves its top, far and x = 0 pieces to the floor and walls it cuts), less the opening
+/// 4.5 x 4.5 (x 24..28.5, z 1.5..6). The cavity's is twice its L section (27 x 33.5 -
+/// 22.5 x 6.5 = 758.25) plus its sides (perimeter 121, 4.5 high) less the same opening:
+/// 3075 - 20.25 + 2 x 758.25 + 121 x 4.5 - 20.25 = 5095.5.
 #[test]
-fn wr_578_shell_thicker_than_a_step_is_edge_vanishes() {
+fn wr_578_shell_thicker_than_a_step_shells_where_its_edge_vanishes() {
     let mut k = Kernel::default();
     let b = notched(&mut k);
     let strip = planar_faces_at(&k, &b, 1, 35.0);
     assert_eq!(strip.len(), 1, "the far side under the notch");
-    match shell(&mut k, b, -1.5, &strip) {
-        Err(e) => assert_eq!(e.sm_status(), Some(1043)),
-        other => panic!("SM_ERR_OFFSET_EDGE_VANISHES expected: {other:?}"),
+    let mut result = shell(&mut k, b, -1.5, &strip).unwrap();
+    result.use_arena_naming().unwrap();
+    let lines = check_brep(&mut k, &mut result, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{lines:?}");
+    assert_eq!(result.face_list().len(), 16);
+    let bb = brep_bounding_box(&k, &result, true).unwrap();
+    for (i, hi) in [30.0, 35.0, 7.5].into_iter().enumerate() {
+        assert!(bb.min_at(i).abs() <= 1e-9, "box min {i}: {}", bb.min_at(i));
+        assert!(
+            (bb.max_at(i) - hi).abs() <= 1e-9 * hi,
+            "box max {i}: {}",
+            bb.max_at(i)
+        );
     }
+    let area = brep_area(&k, &mut result, 1e-9).unwrap();
+    let want_area = 3075.0 - 20.25 + 2.0 * 758.25 + 121.0 * 4.5 - 20.25;
+    assert!(
+        (area - want_area).abs() <= 1e-9 * want_area,
+        "area {area}, closed form {want_area}"
+    );
+    let want = 7312.5 - (27.0 * 33.5 * 4.5 - 22.5 * 6.5 * 4.5);
+    assert!(report(
+        &k,
+        "wr_578 notched open under the notch",
+        Ok(result),
+        Some(want),
+        1e-9
+    ));
 }
 
 #[test]
@@ -226,8 +275,10 @@ fn shell_1528() -> (Kernel, solidcore::Result<Brep>) {
 #[test]
 fn wr_578_issue_1528_plate_shells_on_a_clean_operand() {
     let (k, fixed) = shell_1528();
-    let fixed = fixed.unwrap();
+    let mut fixed = fixed.unwrap();
     assert_eq!(fixed.face_list().len(), 16, "the default shell's faces");
+    let (old, new) = (10400.212852557255, 10400.212432293585);
+    volume_leak::assert_moved_by_the_old_leak(&k, &mut fixed, old, new, 1e-6);
     assert_eq!(fixed.edge_list().len(), 36, "the default shell's edges");
     assert!(report(
         &k,
@@ -235,8 +286,9 @@ fn wr_578_issue_1528_plate_shells_on_a_clean_operand() {
         Ok(fixed),
         // since #2890 (precise properties integrate from the trims' base): +4.8e-4 from the
         // closed form 10400.212373846494 (issue_1950's), within the volume's accuracy
-        // (1e-6); it was 10400.21299138017, +6.2e-4
-        Some(10400.212852557255),
+        // (1e-6); it was 10400.21299138017, +6.2e-4. Since `brep_volume` closes tolerant
+        // edges' gaps (#16735), +5.6e-9 from it (MEASURED); it was 10400.212852557255
+        Some(new),
         1e-9
     ));
 }

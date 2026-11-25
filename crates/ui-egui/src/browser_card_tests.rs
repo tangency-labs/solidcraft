@@ -1,4 +1,5 @@
 use super::*;
+use crate::browser_links::LinkState;
 use crate::scenario::{Harness, handle_at, rect_of};
 use crate::semantic_content::{self, ContentOwner, ContentRequest};
 use crate::ui_kit::{LayoutMode, SHELL_GAP};
@@ -42,6 +43,21 @@ fn clicked_browser_folders_toggle_visibility_with_v() {
             h.step(&json!({"click":{"handle":format!("row:{label}")}})).unwrap();
         }
     }
+}
+
+/// #14554: V on the Origin row of the Browser shows or hides the whole Origin, as it does for a folder.
+#[test]
+fn v_on_the_clicked_origin_row_hides_the_origin() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"operation":"new_body","body_name":"One"})).unwrap();
+    h.settle();
+    assert!(h.app.origin_shown());
+    h.step(&json!({"click":{"handle":"row:Origin"}})).unwrap();
+    h.step(&json!({"key":"V"})).unwrap();
+    assert!(!h.app.origin_shown(), "V hides the Origin picked in the Browser");
+    h.step(&json!({"key":"V"})).unwrap();
+    assert!(h.app.origin_shown(), "V shows it again");
 }
 
 /// #10526: New Group from the root's context menu in a design with no bodies yet makes a group
@@ -110,7 +126,7 @@ fn f2_on_a_clicked_browser_group_renames_the_group() {
 }
 
 /// #10654: a refused inline rename keeps the editor open and says why, instead of closing
-/// silently and leaving the old name.
+/// silently and leaving the old name; the name can then be corrected without a click.
 #[test]
 fn a_refused_inline_rename_keeps_the_editor_and_shows_the_error() {
     let mut h = Harness::new();
@@ -131,6 +147,36 @@ fn a_refused_inline_rename_keeps_the_editor_and_shows_the_error() {
     let (text, _, error) = h.app.status.clone().expect("the refusal is shown");
     assert!(error && text.contains("another body is called"), "{text}");
     assert!(h.app.session.world_state().unwrap().body("B").is_some(), "the body keeps its name");
+    h.step(&json!({"text":"C"})).unwrap();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    h.frames(2);
+    assert!(h.app.session.world_state().unwrap().body("C").is_some(), "the name can be corrected at once; status {:?}", h.app.status);
+}
+
+/// A Browser group's inline editor keeps a refused name too, with the reason, and takes the
+/// corrected one.
+#[test]
+fn a_refused_inline_group_rename_keeps_the_editor() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"A"})).unwrap();
+    let group = h.app.run("browser.group", json!({"folder":"bodies","items":["A"],"name":"Held"})).unwrap()["group"].as_u64().unwrap();
+    h.app.preferences.browser_bodies_folders = crate::prefs::BodiesFolders::Always;
+    h.settle();
+    h.step(&json!({"click":{"handle":"row:Held (1)"}})).unwrap();
+    h.frames(30);
+    h.step(&json!({"click":{"handle":"row:Held (1)"}})).unwrap();
+    h.frames(30);
+    assert!(h.app.menu.rename.as_ref().is_some_and(|r| r.inline), "the group's row is being renamed");
+    h.step(&json!({"text":"x".repeat(200)})).unwrap();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    h.frames(2);
+    assert!(h.app.menu.rename.is_some(), "the editor stays open after a refused rename");
+    let (text, _, error) = h.app.status.clone().expect("the refusal is shown");
+    assert!(error && text.contains("1…128 characters"), "{text}");
+    h.step(&json!({"text":"Kept"})).unwrap();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.session.doc.browser_group(group).map(|g| g.name.as_str()), Some("Kept"));
 }
 
 /// Renaming a component to a name another component has takes the next free number; a name
@@ -151,6 +197,7 @@ fn a_component_renamed_to_a_taken_name_takes_the_next_number() {
             focused: false,
             inline: true,
             inline_id: None,
+            session: h.app.session.uid,
         };
         crate::context_menu::commit_rename(&mut h.app, &r).unwrap();
     };
@@ -436,6 +483,39 @@ fn browser_card_shrinks_and_scrolls_without_covering_history() {
     assert!(rect_of("browser:card").unwrap().height() < short.height());
 }
 
+/// In the compact layout, a Browser holding the History fills the window's height; the floating layout,
+/// a folded Browser and a Browser beside a bottom History still hug their rows (#14566).
+#[test]
+fn compact_browser_holding_the_history_fills_the_window_height() {
+    let mut h = Harness::new();
+    h.call("ui.resize", json!({"width":1400,"height":900}));
+    h.app.run("view.history_layout", json!({"dock":"browser"})).unwrap();
+    h.settle();
+    assert!(h.app.preferences.history_in_browser);
+    let floating = rect_of("browser:card").unwrap();
+    let viewport = h.app.viewport.rect.unwrap();
+    assert!(floating.bottom() < viewport.bottom() - 100.0, "the floating card still hugs its rows: {floating:?} in {viewport:?}");
+
+    h.call("ui.set", json!({"layout":"docked"}));
+    h.settle();
+    let compact = rect_of("browser:card").unwrap();
+    assert!(compact.height() > floating.height() + 100.0, "{compact:?} {floating:?}");
+    let foot = viewport.bottom() - compact.bottom();
+    assert!((-0.5..=SHELL_GAP + 0.5).contains(&foot), "{compact:?} reaches the window's foot {viewport:?}");
+
+    set_browser_collapsed(&mut h, true);
+    h.settle();
+    let folded = rect_of("browser:card").unwrap();
+    assert!(folded.height() < floating.height(), "a folded Browser keeps only its header: {folded:?}");
+    set_browser_collapsed(&mut h, false);
+    h.settle();
+    assert_eq!(rect_of("browser:card").unwrap(), compact, "unfolded, it fills the column again");
+
+    h.app.run("view.history_layout", json!({"dock":"bottom"})).unwrap();
+    h.settle();
+    assert!(rect_of("browser:card").unwrap().height() < compact.height() - 100.0, "History at the bottom: the Browser hugs its rows again");
+}
+
 #[test]
 fn selected_row_paints_tab_soft_fill_and_accent_text_in_both_layouts() {
     let previous = solidcraft_theme::is_dark();
@@ -452,7 +532,7 @@ fn selected_row_paints_tab_soft_fill_and_accent_text_in_both_layouts() {
                 let mut row_rect = Rect::NOTHING;
                 let out = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
                     let row = Row { selected: true, label: "Selected body", dim: true, color: Some(Tokens::get().error), ..Default::default() };
-                    row_rect = draw_row(ui, egui::Id::unique("selected-row"), &row).rect.unwrap();
+                    row_rect = crate::ui_kit::tree_row(ui, egui::Id::unique("selected-row"), &row).rect.unwrap();
                 });
                 assert_eq!(row_rect.height(), 26.0);
                 assert!(out.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.rect == row_rect && r.fill == accent.soft)));
@@ -1403,7 +1483,7 @@ fn disappearing_semantic_drag_owner_releases_only_its_payload_and_widget_capture
             egui::Modifiers::NONE,
         );
         semantic_frame(&mut h, &[owner], vec![egui::Event::PointerMoved(from + vec2(10.0, 0.0))], egui::Modifiers::NONE);
-        assert!(egui::DragAndDrop::has_payload_of_type::<Drag>(&h.ctx));
+        assert!(egui::DragAndDrop::has_payload_of_type::<Dragged>(&h.ctx));
         semantic_frame(&mut h, &[], Vec::new(), egui::Modifiers::NONE);
         assert!(!egui::DragAndDrop::has_any_payload(&h.ctx));
         assert!(h.ctx.dragged_id().is_none());
@@ -1489,16 +1569,12 @@ fn browser_editors_have_one_app_owned_host_when_both_presentations_are_hidden() 
     let (mut h, _, occurrence) = crate::test_support::component_box();
     h.app.ui.show_browser = false;
     h.app.ui.show_timeline = false;
-    h.app.tree.occurrence_move = Some(OccMove::new(occurrence));
+    h.app.run("occurrence.move", json!({"occurrence": occurrence, "translate": [10, 0, 0], "capture": false})).unwrap();
+    h.app.start("sketch.create");
     h.frames(4);
     assert!(drawn_rows().is_empty());
-    let fields = crate::scenario::handles("occurrence-move:distance:0");
-    assert_eq!(
-        fields.iter().filter(|(name, _)| name == "occurrence-move:distance:0").count(),
-        1,
-        "the editor is hosted once despite both panels being hidden"
-    );
-    assert!(h.app.tree.occurrence_move.as_ref().unwrap().baseline.is_some());
+    assert_eq!(h.app.tree.capture_prompt.as_deref(), Some("sketch.create"));
+    assert!(h.widget("Capture Position").is_some(), "the Capture Position question is hosted despite both panels being hidden");
 }
 
 #[test]
@@ -1559,8 +1635,8 @@ fn switching_documents_cancels_body_payloads_before_matching_incoming_groups_can
             let to = semantic_at(owner, "Destination (0)");
             semantic_drag_start(&mut h, &owners, from);
             let outgoing = h.app.session.uid;
-            let payload = egui::DragAndDrop::payload::<Drag>(&h.ctx).unwrap();
-            assert_eq!(payload.source.session, outgoing);
+            let payload = egui::DragAndDrop::payload::<Dragged>(&h.ctx).unwrap();
+            assert_eq!(payload.source.scope, outgoing);
             let stale_payload = (*payload).clone();
             if !after_begin {
                 crate::documents::switch(&mut h.app, tab);
@@ -1575,7 +1651,7 @@ fn switching_documents_cancels_body_payloads_before_matching_incoming_groups_can
             assert_ne!(h.app.session.uid, outgoing);
             assert_eq!(h.app.session.doc.to_json(), document);
             assert_eq!(h.app.session.undo.len(), undo);
-            assert!(!egui::DragAndDrop::has_payload_of_type::<Drag>(&h.ctx));
+            assert!(!egui::DragAndDrop::has_payload_of_type::<Dragged>(&h.ctx));
             assert!(h.ctx.dragged_id().is_none());
             // Even a delayed payload reintroduced after cancellation must fail provenance
             // validation; matching body/group names cannot make it belong to the new tab.
@@ -1612,7 +1688,7 @@ fn switching_documents_cancels_occurrence_payloads_with_matching_component_and_p
         let from = semantic_occurrence_at(ContentOwner::BROWSER, occurrence);
         let to = semantic_occurrence_at(ContentOwner::BROWSER, destination);
         semantic_drag_start(&mut h, &owners, from);
-        assert!(egui::DragAndDrop::has_payload_of_type::<OccurrenceDrag>(&h.ctx));
+        assert!(egui::DragAndDrop::has_payload_of_type::<Dragged>(&h.ctx));
         if !after_begin {
             crate::documents::switch(&mut h.app, tab);
         }
@@ -1625,7 +1701,7 @@ fn switching_documents_cancels_occurrence_payloads_with_matching_component_and_p
         );
         assert_eq!(h.app.session.doc.to_json(), document);
         assert_eq!(h.app.session.undo.len(), undo);
-        assert!(!egui::DragAndDrop::has_payload_of_type::<OccurrenceDrag>(&h.ctx));
+        assert!(!egui::DragAndDrop::has_payload_of_type::<Dragged>(&h.ctx));
         assert!(h.ctx.dragged_id().is_none());
     }
 }
@@ -1676,9 +1752,9 @@ fn document_switch_drops_shift_anchors_without_changing_the_incoming_document_or
         }
         let at = semantic_at(owner, "One");
         semantic_click(&mut h, &owners, at, egui::Modifiers::NONE);
-        assert!(h.app.tree.content.owner(owner).unwrap().anchor.is_some());
+        assert!(h.app.tree.content.owner(owner).unwrap().browser.anchor().is_some());
         semantic_frame_switch(&mut h, &owners, Vec::new(), egui::Modifiers::NONE, Some(tab));
-        assert!(h.app.tree.content.owner(owner).unwrap().anchor.is_none());
+        assert!(h.app.tree.content.owner(owner).unwrap().browser.anchor().is_none());
         let at = semantic_at(owner, "Two");
         semantic_click(&mut h, &owners, at, egui::Modifiers { shift: true, ..Default::default() });
         assert_eq!(h.app.session.selection, [Sel::Body { name: "Two".into() }], "A's One anchor cannot extend B's selection");
@@ -1758,7 +1834,7 @@ fn hidden_body_or_group_drag_source_cannot_drop_through_a_surviving_history_targ
             let document = h.app.session.doc.to_json();
             let undo = h.app.session.undo.len();
             semantic_drag_start(&mut h, &owners, from);
-            assert!(egui::DragAndDrop::has_payload_of_type::<Drag>(&h.ctx));
+            assert!(egui::DragAndDrop::has_payload_of_type::<Dragged>(&h.ctx));
             let presented = if keep_source { &owners[..] } else { &[ContentOwner::HISTORY][..] };
             semantic_frame(
                 &mut h,
@@ -1776,7 +1852,7 @@ fn hidden_body_or_group_drag_source_cannot_drop_through_a_surviving_history_targ
                 assert_eq!(h.app.session.doc.to_json(), document);
                 assert_eq!(h.app.session.undo.len(), undo);
             }
-            assert!(!egui::DragAndDrop::has_payload_of_type::<Drag>(&h.ctx));
+            assert!(!egui::DragAndDrop::has_payload_of_type::<Dragged>(&h.ctx));
             assert!(h.ctx.dragged_id().is_none());
         }
     }
@@ -1804,7 +1880,7 @@ fn hidden_occurrence_source_cannot_reparent_or_reorder_through_a_surviving_adapt
             let document = h.app.session.doc.to_json();
             let undo = h.app.session.undo.len();
             semantic_drag_start(&mut h, &owners, from);
-            assert!(egui::DragAndDrop::has_payload_of_type::<OccurrenceDrag>(&h.ctx));
+            assert!(egui::DragAndDrop::has_payload_of_type::<Dragged>(&h.ctx));
             let presented = if keep_source { &owners[..] } else { std::slice::from_ref(&adapter) };
             semantic_frame(
                 &mut h,
@@ -1819,7 +1895,7 @@ fn hidden_occurrence_source_cannot_reparent_or_reorder_through_a_surviving_adapt
                 assert_eq!(h.app.session.doc.to_json(), document);
                 assert_eq!(h.app.session.undo.len(), undo);
             }
-            assert!(!egui::DragAndDrop::has_payload_of_type::<OccurrenceDrag>(&h.ctx));
+            assert!(!egui::DragAndDrop::has_payload_of_type::<Dragged>(&h.ctx));
             assert!(h.ctx.dragged_id().is_none());
         }
     }
@@ -1868,7 +1944,7 @@ fn semantic_entrypoints_reject_replaced_sessions_even_without_a_documents_hook()
     semantic_click(&mut h, &owners, from, egui::Modifiers::NONE);
     let to = semantic_at(ContentOwner::BROWSER, "Destination (0)");
     semantic_drag_start(&mut h, &owners, from);
-    assert!(egui::DragAndDrop::has_payload_of_type::<Drag>(&h.ctx));
+    assert!(egui::DragAndDrop::has_payload_of_type::<Dragged>(&h.ctx));
     h.app.session.replace_design(incoming);
     semantic_frame(
         &mut h,
@@ -1878,8 +1954,8 @@ fn semantic_entrypoints_reject_replaced_sessions_even_without_a_documents_hook()
     );
     assert_eq!(h.app.session.doc.to_json(), document);
     assert_eq!(h.app.session.undo.len(), undo);
-    assert!(h.app.tree.content.owner(ContentOwner::BROWSER).unwrap().anchor.is_none());
-    assert!(!egui::DragAndDrop::has_payload_of_type::<Drag>(&h.ctx));
+    assert!(h.app.tree.content.owner(ContentOwner::BROWSER).unwrap().browser.anchor().is_none());
+    assert!(!egui::DragAndDrop::has_payload_of_type::<Dragged>(&h.ctx));
     assert!(h.ctx.dragged_id().is_none());
 }
 
@@ -2169,4 +2245,73 @@ fn the_browser_lists_one_body_per_placement() {
     let rows = drawn_rows();
     let body_rows = rows.iter().filter(|(label, ..)| label == "Body1").count();
     assert_eq!(body_rows, 2, "a body row per placement: {rows:?}");
+}
+
+/// #14024: a linked component's row says which file it comes from and how that file is, asked
+/// beside the window: once for a design, and again when the window comes back to the front.
+#[test]
+fn a_linked_components_row_shows_the_state_of_its_file() {
+    fn answer(h: &mut Harness) {
+        h.frames(1);
+        for _ in 0..2000 {
+            if !h.app.tree.links.busy() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            h.frames(1);
+        }
+        h.frames(1);
+        assert!(!h.app.tree.links.busy(), "the answer never came");
+    }
+    fn back_to_the_front(h: &mut Harness) {
+        h.app.synthetic.push(egui::Event::WindowFocused(true));
+        answer(h);
+    }
+    let mut h = Harness::new();
+    h.frames(2);
+    assert!(!h.app.tree.links.busy(), "nothing is asked without a link");
+    let part = h.dir.join("part.solidcraft");
+    let mut source = solidcraft_engine::Session::default();
+    source.execute("solid.box", &json!({"length": 10, "width": 20, "height": 30})).unwrap();
+    source.execute("file.save", &json!({"path": part})).unwrap();
+    let component = h.app.run("component.insert_design", json!({"path": part})).unwrap()["component"].as_u64().unwrap();
+    // The frame asks, whichever layout paints the Browser, or none.
+    let ctx = h.ctx.clone();
+    let _ = ctx.run_ui(egui::RawInput::default(), |ui| h.app.logic(ui.ctx()));
+    assert!(h.app.tree.links.busy(), "asked without painting the Browser");
+    answer(&mut h);
+
+    let link = h.app.tree.links.get(component).expect("the link's badge").clone();
+    assert_eq!((link.state, link.note), (LinkState::Linked, None));
+    assert!(link.tooltip().contains("part.solidcraft"), "{}", link.tooltip());
+    assert_eq!(link.icon_badge().glyph, "link");
+    h.frames(5);
+    assert!(!h.app.tree.links.busy(), "the files are not read again every frame");
+
+    source.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5})).unwrap();
+    source.execute("file.save", &json!({"path": part})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.tree.links.get(component).unwrap().note, None, "not looked at until the window returns");
+    back_to_the_front(&mut h);
+    let changed = h.app.tree.links.get(component).unwrap();
+    assert_eq!((changed.state, changed.note), (LinkState::Changed, Some("ui.link_changed")));
+
+    std::fs::remove_file(&part).unwrap();
+    back_to_the_front(&mut h);
+    let missing = h.app.tree.links.get(component).unwrap();
+    assert_eq!((missing.state, missing.note), (LinkState::Missing, Some("ui.link_missing")));
+    assert_eq!(missing.icon_badge().glyph, "link_broken", "a file that is not there breaks the chain");
+
+    // A file that was not looked at may be fine: an outlined badge, and the note says why.
+    let not_allowed = json!({"component": 7, "file": "//server/share/a.solidcraft", "found": null, "host": "server", "reason": "not allowed"});
+    let (id, network) = crate::browser_links::badge_of(&not_allowed).unwrap();
+    assert_eq!((id, network.state, network.note), (7, LinkState::Unchecked, Some("ui.link_not_checked_network")));
+    let device = json!({"component": 8, "file": "CON", "found": null, "reason": "names a device, not a file"});
+    let (_, device) = crate::browser_links::badge_of(&device).unwrap();
+    assert_eq!((device.state, device.note), (LinkState::Unchecked, Some("ui.link_not_checked")));
+    assert!(device.icon_badge().outlined, "an unchecked state says nothing, so it is only outlined");
+
+    h.app.run("component.break_link", json!({"component": component})).unwrap();
+    h.frames(2);
+    assert!(h.app.tree.links.get(component).is_none(), "a design with no links shows no badge");
 }

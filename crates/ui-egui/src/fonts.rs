@@ -1,18 +1,25 @@
 //! The host part of the interface type: SolidCraft's bundled IBM Plex faces (from its look,
 //! `solidcraft_look::fonts`), user overrides, and language-specific system fallbacks (CJK, Hangul,
-//! Thai, Hebrew), installed under the names the kit's type API gives (see [`crate::ui_kit::type_face`]).
+//! Thai, Hebrew, Arabic, Georgian), installed under the names the kit's type API gives (see [`crate::ui_kit::type_face`]).
 //! The same definitions are used on desktop and web; the web shell adds Japanese and Chinese
 //! faces on demand.
 
 use std::sync::Arc;
 
+#[cfg(not(target_arch = "wasm32"))]
+mod system_fallback;
+
 use egui::{FontDefinitions, FontFamily};
+#[cfg(not(target_arch = "wasm32"))]
+use solidcraft_engine::sketch::fallback;
 
 use crate::ui_kit::type_face::{CHINESE_FALLBACK, CJK_FALLBACK, HANGUL_FALLBACK, UI_FONT, fallback_order, needs_cjk_font, sans_families};
 use solidcraft_look::fonts::{self as look, with_symbol_fallback};
 // The Thai, Hebrew and Arabic faces come only from the desktop's system font search (and the tests).
+#[cfg(not(target_arch = "wasm32"))]
+use crate::ui_kit::type_face::SYMBOL_FALLBACK;
 #[cfg(any(test, not(target_arch = "wasm32")))]
-use crate::ui_kit::type_face::{ARABIC_FALLBACK, HEBREW_FALLBACK, THAI_FALLBACK};
+use crate::ui_kit::type_face::{ARABIC_FALLBACK, GEORGIAN_FALLBACK, HEBREW_FALLBACK, THAI_FALLBACK};
 
 fn all_families() -> impl Iterator<Item = FontFamily> {
     sans_families().into_iter().chain([FontFamily::Monospace])
@@ -171,6 +178,30 @@ fn with_fallback(mut fonts: egui::FontDefinitions, name: &str, bytes: Vec<u8>) -
     Some(fonts)
 }
 
+/// `fonts` with the Georgian fallback moved ahead of Hack in a Georgian interface. Hack (egui's
+/// built-in last resort, see [`with_symbol_fallback`]) has Mkhedruli in a monospace design, so a
+/// fallback after it would only ever draw the Asomtavruli and Mtavruli letters Hack lacks. Other
+/// interfaces keep Hack first: the system Georgian face can be a broad one (Sylfaen, Segoe UI,
+/// DejaVu Sans) that would otherwise take over every symbol Plex lacks. The monospace family keeps
+/// Hack's own design.
+#[cfg(not(target_arch = "wasm32"))]
+fn georgian_before_symbols(mut fonts: egui::FontDefinitions, language: &str) -> egui::FontDefinitions {
+    if language != "ka" {
+        return fonts;
+    }
+    for family in sans_families() {
+        let Some(list) = fonts.families.get_mut(&family) else { continue };
+        if let Some(georgian) = list.iter().position(|name| name == GEORGIAN_FALLBACK)
+            && let Some(hack) = list.iter().position(|name| name == SYMBOL_FALLBACK)
+            && georgian > hack
+        {
+            let item = list.remove(georgian);
+            list.insert(hack, item);
+        }
+    }
+    fonts
+}
+
 /// Use one primary CJK face for mixed-script labels in every sans weight family.
 /// An explicit interface font stays first; Plex and the other fallbacks remain available.
 fn promote_font_to_front(fonts: &mut FontDefinitions, name: &str) {
@@ -316,163 +347,6 @@ pub fn is_chinese_font_name(file_name: &str) -> bool {
     CHINESE_FONT_KEYWORDS.iter().any(|k| name.contains(k))
 }
 
-/// Candidate font paths to look for on different operating systems.
-#[cfg(not(target_arch = "wasm32"))]
-const FONT_CANDIDATES: &[&str] = &[
-    // Windows
-    "C:\\Windows\\Fonts\\meiryo.ttc",
-    "C:\\Windows\\Fonts\\YuGothM.ttc",
-    "C:\\Windows\\Fonts\\YuGothR.ttc",
-    "C:\\Windows\\Fonts\\msgothic.ttc",
-    "C:\\Windows\\Fonts\\BIZ-UDGothicR.ttc",
-    "C:\\Windows\\Fonts\\BIZ-UDMinchoM.ttc",
-    "C:\\Windows\\Fonts\\yumin.ttf",
-    // macOS
-    "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
-    "/System/Library/Fonts/Hiragino Sans W3.ttc",
-    "/System/Library/Fonts/Hiragino Sans W4.ttc",
-    "/System/Library/Fonts/Hiragino Sans W6.ttc",
-    "/System/Library/Fonts/Supplemental/Hiragino Sans W3.ttc",
-    "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
-    "/System/Library/Fonts/Supplemental/Songti.ttc",
-    "/System/Library/Fonts/PingFang.ttc",
-    "/System/Library/Fonts/Hiragino Sans GB.ttc",
-    "/System/Library/Fonts/AppleSDGothicNeo.ttc",
-    "/Library/Fonts/Arial Unicode.ttf",
-    "/Library/Fonts/Hiragino Sans W3.ttc",
-    // Linux
-    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/noto-cjk/NotoSansCJKjp-Regular.otf",
-    "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
-    "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf",
-    "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
-    "/usr/share/fonts/truetype/takao-gothic/TakaoPGothic.ttf",
-    "/usr/share/fonts/truetype/takao-gothic/TakaoGothic.ttf",
-    "/usr/share/fonts/truetype/vlgothic/VL-PGothic-Regular.ttf",
-    "/usr/share/fonts/truetype/ipafont/ipag.ttf",
-    "/usr/share/fonts/truetype/ipaexfont/ipaexg.ttf",
-    "/usr/share/fonts/opentype/ipafont/ipag.ttf",
-    "/usr/share/fonts/opentype/ipaexfont/ipaexg.ttf",
-    "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
-    "/usr/share/fonts/cjkuni-uming/uming.ttc",
-];
-
-/// Hangul fonts, appended after the CJK fallback so Korean renders even when the CJK font found
-/// is a Japanese one without Hangul (Meiryo, Hiragino).
-#[cfg(not(target_arch = "wasm32"))]
-const HANGUL_FONT_CANDIDATES: &[&str] = &[
-    // Windows: Malgun Gothic
-    "C:\\Windows\\Fonts\\malgun.ttf",
-    // macOS: Apple SD Gothic Neo
-    "/System/Library/Fonts/AppleSDGothicNeo.ttc",
-    "/System/Library/Fonts/Supplemental/AppleGothic.ttf",
-    // Linux: Nanum Gothic (Noto Sans CJK already covers Hangul)
-    "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
-    "/usr/share/fonts/nanum/NanumGothic.ttf",
-];
-
-/// Thai fonts, appended last: none of the Latin or CJK faces draw Thai, so without one Thai text
-/// shows as empty boxes (#1902).
-#[cfg(not(target_arch = "wasm32"))]
-const THAI_FONT_CANDIDATES: &[&str] = &[
-    // Windows: Leelawadee UI (Windows 8 and later), Leelawadee, Tahoma
-    "C:\\Windows\\Fonts\\LeelawUI.ttf",
-    "C:\\Windows\\Fonts\\leelawad.ttf",
-    "C:\\Windows\\Fonts\\tahoma.ttf",
-    // macOS: Thonburi, Ayuthaya
-    "/System/Library/Fonts/Thonburi.ttc",
-    "/System/Library/Fonts/Supplemental/Thonburi.ttc",
-    "/System/Library/Fonts/Supplemental/Ayuthaya.ttf",
-    "/Library/Fonts/Thonburi.ttf",
-    // Linux: Noto Sans Thai, TLWG Loma and Garuda
-    "/usr/share/fonts/noto/NotoSansThai-Regular.ttf",
-    "/usr/share/fonts/truetype/noto/NotoSansThai-Regular.ttf",
-    "/usr/share/fonts/google-noto/NotoSansThai-Regular.ttf",
-    "/usr/share/fonts/google-noto-vf/NotoSansThai[wght].ttf",
-    "/usr/share/fonts/opentype/noto/NotoSansThai-Regular.ttf",
-    "/usr/share/fonts/truetype/tlwg/Loma.ttf",
-    "/usr/share/fonts/opentype/tlwg/Loma.otf",
-    "/usr/share/fonts/truetype/tlwg/Garuda.ttf",
-    "/usr/share/fonts/opentype/tlwg/Garuda.otf",
-    "/usr/share/fonts/tlwg/Loma.otf",
-];
-
-/// Hebrew fonts, appended last: egui's built-in faces have no Hebrew, so without one the Hebrew
-/// interface and Hebrew names show as empty boxes (#3457).
-#[cfg(not(target_arch = "wasm32"))]
-const HEBREW_FONT_CANDIDATES: &[&str] = &[
-    // Windows: Segoe UI, Arial
-    "C:\\Windows\\Fonts\\segoeui.ttf",
-    "C:\\Windows\\Fonts\\arial.ttf",
-    // macOS: Arial Hebrew, SF Hebrew
-    "/System/Library/Fonts/ArialHB.ttc",
-    "/System/Library/Fonts/SFHebrew.ttf",
-    "/System/Library/Fonts/Supplemental/Arial.ttf",
-    // Linux: Noto Sans Hebrew, DejaVu Sans
-    "/usr/share/fonts/noto/NotoSansHebrew-Regular.ttf",
-    "/usr/share/fonts/truetype/noto/NotoSansHebrew-Regular.ttf",
-    "/usr/share/fonts/google-noto/NotoSansHebrew-Regular.ttf",
-    "/usr/share/fonts/google-noto-vf/NotoSansHebrew[wght].ttf",
-    "/usr/share/fonts/opentype/noto/NotoSansHebrew-Regular.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    "/usr/share/fonts/TTF/DejaVuSans.ttf",
-    "/usr/share/fonts/dejavu/DejaVuSans.ttf",
-];
-
-/// Arabic fonts with the joining forms the shaper uses. egui's built-in faces have no Arabic.
-#[cfg(not(target_arch = "wasm32"))]
-const ARABIC_FONT_CANDIDATES: &[&str] = &[
-    // Windows: Segoe UI, Tahoma, Arial
-    "C:\\Windows\\Fonts\\segoeui.ttf",
-    "C:\\Windows\\Fonts\\tahoma.ttf",
-    "C:\\Windows\\Fonts\\arial.ttf",
-    // macOS: SF Arabic (11 and later), Geeza Pro, Damascus, Tahoma
-    "/System/Library/Fonts/SFArabic.ttf",
-    "/System/Library/Fonts/GeezaPro.ttc",
-    "/System/Library/Fonts/Supplemental/GeezaPro.ttc",
-    "/System/Library/Fonts/Supplemental/Damascus.ttc",
-    "/System/Library/Fonts/Supplemental/Tahoma.ttf",
-    // Linux: Noto Sans Arabic, Noto Naskh Arabic, KACST One, DejaVu Sans
-    "/usr/share/fonts/noto/NotoSansArabic-Regular.ttf",
-    "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
-    "/usr/share/fonts/google-noto/NotoSansArabic-Regular.ttf",
-    "/usr/share/fonts/google-noto-vf/NotoSansArabic[wght].ttf",
-    "/usr/share/fonts/opentype/noto/NotoSansArabic-Regular.ttf",
-    "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf",
-    "/usr/share/fonts/noto/NotoNaskhArabic-Regular.ttf",
-    "/usr/share/fonts/truetype/kacst-one/KacstOne.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    "/usr/share/fonts/TTF/DejaVuSans.ttf",
-    "/usr/share/fonts/dejavu/DejaVuSans.ttf",
-];
-
-/// Fonts covering simplified Chinese, appended after the CJK fallback so Chinese renders even
-/// when the CJK font found is a Japanese one without simplified characters (Hiragino Gothic,
-/// Meiryo, Yu Gothic).
-#[cfg(not(target_arch = "wasm32"))]
-const CHINESE_FONT_CANDIDATES: &[&str] = &[
-    // Windows: Microsoft YaHei
-    "C:\\Windows\\Fonts\\msyh.ttc",
-    "C:\\Windows\\Fonts\\msyh.ttf",
-    // macOS: PingFang SC, Hiragino Sans GB, Songti SC, STHeiti, Arial Unicode MS
-    "/System/Library/Fonts/PingFang.ttc",
-    "/System/Library/Fonts/Hiragino Sans GB.ttc",
-    "/System/Library/Fonts/STHeiti Light.ttc",
-    "/System/Library/Fonts/STHeiti Medium.ttc",
-    "/System/Library/Fonts/Supplemental/Songti.ttc",
-    "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
-    "/Library/Fonts/Arial Unicode.ttf",
-    // Linux: Noto Sans CJK SC
-    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
-];
-
 /// Whether the first face in `bytes` draws `c`: some candidates (an older Arial, a trimmed
 /// DejaVu) may lack the script they are listed for.
 #[cfg(not(target_arch = "wasm32"))]
@@ -532,22 +406,17 @@ fn scan_dir_for_font_where(dir: &std::path::Path, depth_remaining: usize, matche
     None
 }
 
-/// The font folders named by `SOLIDCRAFT_FONT_DIRS` (a path list), or else by the single folder
-/// in `CRAFT_FONTS_DIR` (the craft-fonts pack).
+/// The first of `candidates`' known files that parses as a font.
 #[cfg(not(target_arch = "wasm32"))]
-fn font_override_dirs(dirs: Option<std::ffi::OsString>, pack: Option<std::ffi::OsString>) -> Vec<std::path::PathBuf> {
-    match (dirs, pack) {
-        (Some(dirs), _) => std::env::split_paths(&dirs).collect(),
-        (None, Some(pack)) => vec![std::path::PathBuf::from(pack)],
-        (None, None) => Vec::new(),
-    }
+fn first_candidate(candidates: fallback::Candidates) -> Option<Vec<u8>> {
+    fallback::candidate_files(candidates).find_map(|path| try_read_font(std::path::Path::new(path)))
 }
 
 /// Find a CJK fallback font on the local system or in SOLIDCRAFT_FONT_DIRS / CRAFT_FONTS_DIR.
 #[cfg(not(target_arch = "wasm32"))]
 fn find_system_cjk_font() -> Option<Vec<u8>> {
     // 1. Check the font folders the user named.
-    for dir in font_override_dirs(std::env::var_os("SOLIDCRAFT_FONT_DIRS"), std::env::var_os("CRAFT_FONTS_DIR")) {
+    for dir in solidcraft_engine::sketch::font_override_dirs() {
         let names = ["BIZUDPGothic-Regular.ttf", "BIZ-UDGothicR.ttc", "NotoSansCJK-Regular.ttc", "NotoSansJP-Regular.ttf"];
         for name in names {
             if let Some(bytes) = try_read_font(&dir.join(name)) {
@@ -557,10 +426,8 @@ fn find_system_cjk_font() -> Option<Vec<u8>> {
     }
 
     // 2. Check well-known candidate paths.
-    for path in FONT_CANDIDATES {
-        if let Some(bytes) = try_read_font(std::path::Path::new(path)) {
-            return Some(bytes);
-        }
+    if let Some(bytes) = first_candidate(fallback::JAPANESE) {
+        return Some(bytes);
     }
 
     // 3. Platform-specific dynamic directory search.
@@ -568,7 +435,7 @@ fn find_system_cjk_font() -> Option<Vec<u8>> {
     {
         if let Ok(windir) = std::env::var("WINDIR").or_else(|_| std::env::var("SystemRoot")) {
             let fonts_dir = std::path::PathBuf::from(windir).join("Fonts");
-            let names = ["meiryo.ttc", "YuGothM.ttc", "YuGothR.ttc", "msgothic.ttc", "BIZ-UDGothicR.ttc"];
+            let names = fallback::candidate_files(fallback::JAPANESE).filter_map(|path| path.strip_prefix("C:\\Windows\\Fonts\\"));
             for name in names {
                 if let Some(bytes) = try_read_font(&fonts_dir.join(name)) {
                     return Some(bytes);
@@ -643,6 +510,7 @@ struct SystemFonts {
     thai: Option<Vec<u8>>,
     hebrew: Option<Vec<u8>>,
     arabic: Option<Vec<u8>>,
+    georgian: Option<Vec<u8>>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -653,11 +521,14 @@ fn system_fallbacks() -> &'static SystemFonts {
     SYSTEM_FONTS.get_or_init(|| {
         let cjk = find_system_cjk_font();
         let chinese = find_system_chinese_font().filter(|bytes| cjk.as_ref() != Some(bytes));
-        let hangul = HANGUL_FONT_CANDIDATES.iter().find_map(|path| try_read_font(std::path::Path::new(path)));
-        let thai = THAI_FONT_CANDIDATES.iter().find_map(|path| try_read_font(std::path::Path::new(path)));
-        let hebrew = HEBREW_FONT_CANDIDATES.iter().find_map(|path| try_read_font(std::path::Path::new(path)).filter(|bytes| covers(bytes, 'א')));
+        let hangul = first_candidate(fallback::HANGUL);
+        let thai = first_candidate(fallback::THAI);
+        let hebrew =
+            fallback::candidate_files(fallback::HEBREW).find_map(|path| try_read_font(std::path::Path::new(path)).filter(|bytes| covers(bytes, 'א')));
         let arabic = arabic_font();
-        SystemFonts { cjk, chinese, hangul, thai, hebrew, arabic }
+        let georgian = fallback::candidate_files(fallback::GEORGIAN)
+            .find_map(|path| try_read_font(std::path::Path::new(path)).filter(|bytes| covers(bytes, 'ა')));
+        SystemFonts { cjk, chinese, hangul, thai, hebrew, arabic, georgian }
     })
 }
 
@@ -666,6 +537,16 @@ fn system_fallbacks() -> &'static SystemFonts {
 pub fn system_fonts_ready() -> bool {
     SYSTEM_FONTS.get().is_some()
 }
+
+/// Draws a character none of the faces has with an installed font that has it (#20005), the
+/// installed fonts listed on a thread of their own. Once per context.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn add_system_font_fallback(ctx: &egui::Context) {
+    system_fallback::install(ctx);
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn add_system_font_fallback(_ctx: &egui::Context) {}
 
 /// Search for the system fallback faces on a thread and repaint when they are found.
 #[cfg(not(target_arch = "wasm32"))]
@@ -698,9 +579,9 @@ pub fn setup_fonts_without_waiting(ctx: &egui::Context, language: &str, ui_font:
 
 #[cfg(not(target_arch = "wasm32"))]
 fn install_fonts(ctx: &egui::Context, language: &str, ui_font: &str, system: Option<&SystemFonts>) {
-    let (cjk, chinese, hangul, thai, hebrew, arabic) = match system {
-        Some(f) => (f.cjk.clone(), f.chinese.clone(), f.hangul.clone(), f.thai.clone(), f.hebrew.clone(), f.arabic.clone()),
-        None => (None, None, None, None, None, None),
+    let (cjk, chinese, hangul, thai, hebrew, arabic, georgian) = match system {
+        Some(f) => (f.cjk.clone(), f.chinese.clone(), f.hangul.clone(), f.thai.clone(), f.hebrew.clone(), f.arabic.clone(), f.georgian.clone()),
+        None => (None, None, None, None, None, None, None),
     };
     let mut fonts = look::definitions();
     if let Some(font) = self::ui_font(ui_font) {
@@ -714,7 +595,8 @@ fn install_fonts(ctx: &egui::Context, language: &str, ui_font: &str, system: Opt
             HANGUL_FALLBACK => hangul.clone(),
             THAI_FALLBACK => thai.clone(),
             HEBREW_FALLBACK => hebrew.clone(),
-            _ => arabic.clone(),
+            ARABIC_FALLBACK => arabic.clone(),
+            _ => georgian.clone(),
         };
         if let Some(bytes) = bytes
             && let Some(with_fallback) = with_fallback(fonts.clone(), name, bytes)
@@ -722,11 +604,13 @@ fn install_fonts(ctx: &egui::Context, language: &str, ui_font: &str, system: Opt
             fonts = with_fallback;
         }
     }
+    fonts = georgian_before_symbols(fonts, language);
     if needs_cjk_font(language) {
         // Select the first installed face in language order (a duplicate Chinese face may
         // already be installed as CJK_FALLBACK). Keep explicit interface choices ahead of it.
-        if let Some(primary) =
-            order.into_iter().find(|name| ![THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK].contains(name) && fonts.font_data.contains_key(*name))
+        if let Some(primary) = order
+            .into_iter()
+            .find(|name| ![THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK].contains(name) && fonts.font_data.contains_key(*name))
         {
             promote_font_to_front(&mut fonts, primary);
         }
@@ -746,10 +630,8 @@ pub fn setup_fonts(ctx: &egui::Context) {
 /// system font directories for [`CHINESE_FONT_KEYWORDS`] names.
 #[cfg(not(target_arch = "wasm32"))]
 fn find_system_chinese_font() -> Option<Vec<u8>> {
-    for path in CHINESE_FONT_CANDIDATES {
-        if let Some(bytes) = try_read_font(std::path::Path::new(path)) {
-            return Some(bytes);
-        }
+    if let Some(bytes) = first_candidate(fallback::SIMPLIFIED_CHINESE) {
+        return Some(bytes);
     }
     find_chinese_font_in(&chinese_font_dirs())
 }
@@ -818,7 +700,7 @@ fn find_chinese_font_in(dirs: &[std::path::PathBuf]) -> Option<Vec<u8>> {
 fn arabic_font() -> Option<Vec<u8>> {
     let pack = std::env::var("CRAFT_FONTS_DIR").ok().map(|dir| std::path::PathBuf::from(dir).join("NotoSansArabic-Regular.ttf"));
     pack.into_iter()
-        .chain(ARABIC_FONT_CANDIDATES.iter().map(std::path::PathBuf::from))
+        .chain(fallback::candidate_files(fallback::ARABIC).map(std::path::PathBuf::from))
         .find_map(|path| try_read_font(&path).filter(|bytes| covers(bytes, 'ب')))
 }
 
@@ -891,20 +773,12 @@ mod tests {
     use crate::ui_kit::type_face::{RichTextExt as _, SYMBOL_FALLBACK, bold, medium, semibold};
     use egui::{FontId, RichText};
 
-    /// `SOLIDCRAFT_FONT_DIRS` wins and may list several folders; `CRAFT_FONTS_DIR` is the fallback.
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(target_os = "linux")]
     #[test]
-    fn cjk_font_folders_from_the_environment() -> Result<(), std::env::JoinPathsError> {
-        use std::path::PathBuf;
-        let list = std::env::join_paths(["/a", "/b"])?;
-        assert_eq!(font_override_dirs(Some(list), Some("/pack".into())), vec![PathBuf::from("/a"), PathBuf::from("/b")]);
-        assert_eq!(font_override_dirs(None, Some("/pack".into())), vec![PathBuf::from("/pack")]);
-        assert!(font_override_dirs(None, None).is_empty());
-        #[cfg(target_os = "linux")]
+    fn chinese_font_folders_include_flatpak_host_fonts() {
         for dir in ["/run/host/fonts", "/run/host/user-fonts"] {
-            assert!(chinese_font_dirs().contains(&PathBuf::from(dir)), "missing {dir}");
+            assert!(chinese_font_dirs().contains(&std::path::PathBuf::from(dir)), "missing {dir}");
         }
-        Ok(())
     }
 
     /// The system faces are searched for on a thread; installing fonts before they are found does
@@ -1158,14 +1032,20 @@ mod tests {
 
     #[test]
     fn a_chinese_ui_puts_the_chinese_face_before_the_japanese_one() {
-        assert_eq!(fallback_order("zh"), [CHINESE_FALLBACK, CJK_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK]);
+        assert_eq!(
+            fallback_order("zh"),
+            [CHINESE_FALLBACK, CJK_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK]
+        );
         assert_eq!(fallback_order("zh-TW"), fallback_order("zh"));
-        assert_eq!(fallback_order("ko"), [HANGUL_FALLBACK, CJK_FALLBACK, CHINESE_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK]);
+        assert_eq!(
+            fallback_order("ko"),
+            [HANGUL_FALLBACK, CJK_FALLBACK, CHINESE_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK]
+        );
         assert_eq!(fallback_order("ar")[0], ARABIC_FALLBACK);
         for lang in ["en", "ja", "de", "he"] {
             assert_eq!(
                 fallback_order(lang),
-                [CJK_FALLBACK, CHINESE_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK],
+                [CJK_FALLBACK, CHINESE_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK],
                 "{lang} keeps the Japanese font first"
             );
         }
@@ -1177,7 +1057,10 @@ mod tests {
         for family in all_families() {
             let list = &fonts.families[&family];
             assert_eq!(list.first(), defaults.families[&family].first(), "the Latin UI font stays first");
-            assert_eq!(&list[list.len() - 6..], [CHINESE_FALLBACK, CJK_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK]);
+            assert_eq!(
+                &list[list.len() - 7..],
+                [CHINESE_FALLBACK, CJK_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK]
+            );
         }
     }
 
@@ -1185,7 +1068,7 @@ mod tests {
     /// machine has must parse and cover Thai, and the fonts set up must then draw it.
     #[test]
     fn a_thai_fallback_draws_thai() {
-        let found: Vec<Vec<u8>> = THAI_FONT_CANDIDATES.iter().filter_map(|path| try_read_font(std::path::Path::new(path))).collect();
+        let found: Vec<Vec<u8>> = fallback::candidate_files(fallback::THAI).filter_map(|path| try_read_font(std::path::Path::new(path))).collect();
         for bytes in &found {
             let face = ttf_parser::Face::parse(bytes, 0).unwrap();
             for c in "สวัสดี".chars() {
@@ -1203,12 +1086,27 @@ mod tests {
         assert!(thai(with_fallback(egui::FontDefinitions::default(), THAI_FALLBACK, bytes).unwrap()), "Thai draws with the fallback");
     }
 
+    /// The search reads each script's own list: what it found for Thai draws Thai, and what it found
+    /// for Hangul draws Hangul. A machine without one finds none, which says nothing.
+    #[test]
+    fn the_system_search_finds_each_script_in_its_own_list() {
+        let has = |bytes: &Vec<u8>, text: &str| {
+            let face = ttf_parser::Face::parse(bytes, 0).unwrap();
+            text.chars().all(|c| face.glyph_index(c).is_some())
+        };
+        let found = system_fallbacks();
+        assert!(found.thai.as_ref().is_none_or(|bytes| has(bytes, "สวัสดี")));
+        assert!(found.hangul.as_ref().is_none_or(|bytes| has(bytes, "안녕")));
+    }
+
     /// The Hebrew interface (#3457): every Hebrew candidate this machine has that passes the
     /// coverage check draws Hebrew, and the fonts set up must then draw it.
     #[test]
     fn a_hebrew_fallback_draws_hebrew() {
-        let found: Vec<Vec<u8>> =
-            HEBREW_FONT_CANDIDATES.iter().filter_map(|path| try_read_font(std::path::Path::new(path))).filter(|bytes| covers(bytes, 'א')).collect();
+        let found: Vec<Vec<u8>> = fallback::candidate_files(fallback::HEBREW)
+            .filter_map(|path| try_read_font(std::path::Path::new(path)))
+            .filter(|bytes| covers(bytes, 'א'))
+            .collect();
         for bytes in &found {
             let face = ttf_parser::Face::parse(bytes, 0).unwrap();
             for c in "שלום עולם".chars().filter(|c| !c.is_whitespace()) {
@@ -1226,12 +1124,51 @@ mod tests {
         assert!(hebrew(with_fallback(look::definitions(), HEBREW_FALLBACK, bytes).unwrap()), "Hebrew draws with the fallback");
     }
 
+    /// Georgian: every Georgian candidate this machine has that passes the coverage check draws
+    /// Mkhedruli, and the fonts set up must then draw it.
+    #[test]
+    fn a_georgian_fallback_draws_georgian() {
+        let found: Vec<Vec<u8>> = fallback::candidate_files(fallback::GEORGIAN)
+            .filter_map(|path| try_read_font(std::path::Path::new(path)))
+            .filter(|bytes| covers(bytes, 'ა'))
+            .collect();
+        for bytes in &found {
+            let face = ttf_parser::Face::parse(bytes, 0).unwrap();
+            for c in "გამარჯობა მსოფლიო".chars().filter(|c| !c.is_whitespace()) {
+                assert!(face.glyph_index(c).is_some(), "{c:?} is in the Georgian font");
+            }
+        }
+        let georgian = |fonts: egui::FontDefinitions| {
+            let ctx = egui::Context::default();
+            ctx.set_fonts(fonts);
+            ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
+            ctx.fonts_mut(|f| f.has_glyphs(&egui::FontId::proportional(14.0), "გამარჯობა"))
+        };
+        // Hack draws Mkhedruli too, so the system face must come before it to be the one used.
+        let Some(bytes) = found.into_iter().next() else { return };
+        let installed = with_fallback(look::definitions(), GEORGIAN_FALLBACK, bytes).unwrap();
+        let at = |fonts: &egui::FontDefinitions, family: &egui::FontFamily, name: &str| {
+            fonts.families[family].iter().position(|entry| entry == name).unwrap()
+        };
+        // Any other interface keeps Hack ahead of it, so symbols Plex lacks still come from Hack.
+        let english = georgian_before_symbols(installed.clone(), "en");
+        for family in sans_families() {
+            assert!(at(&english, &family, SYMBOL_FALLBACK) < at(&english, &family, GEORGIAN_FALLBACK), "an English interface keeps Hack's place");
+        }
+        let fonts = georgian_before_symbols(installed, "ka");
+        for family in sans_families() {
+            assert!(at(&fonts, &family, GEORGIAN_FALLBACK) < at(&fonts, &family, SYMBOL_FALLBACK), "the Georgian face comes before Hack");
+        }
+        assert!(georgian(fonts), "Georgian draws with the fallback");
+    }
+
     /// What a Hebrew interface shows depends on egui's own shaping as much as on `solidcraft_ui_text::bidi::visual`:
     /// lay messages out with a real Hebrew font and read the glyphs left to right, as they land on
     /// screen. They must come out in the order the line has on screen (#3457).
     #[test]
     fn hebrew_messages_land_on_screen_in_display_order() {
-        let Some(bytes) = HEBREW_FONT_CANDIDATES.iter().filter_map(|path| try_read_font(std::path::Path::new(path))).find(|bytes| covers(bytes, 'א'))
+        let Some(bytes) =
+            fallback::candidate_files(fallback::HEBREW).filter_map(|path| try_read_font(std::path::Path::new(path))).find(|bytes| covers(bytes, 'א'))
         else {
             return;
         };

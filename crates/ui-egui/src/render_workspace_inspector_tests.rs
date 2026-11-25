@@ -939,7 +939,13 @@ fn native_cpu_legacy_dimensions_remain_checkable_renderable_and_saveable_with_bo
     for (width, height, progressive, identity_output) in [(16384, 1, false, false), (1, 16384, true, true), (8192, 8192, true, false)] {
         let mut h = fixture();
         h.app.render_workspace.view.live_paused = true;
-        h.app.session.set_render_job_host(Some(CpuHost::for_platform().unwrap())).unwrap();
+        let host = CpuHost::for_platform().unwrap();
+        h.app.session.set_render_job_host(Some(host.clone())).unwrap();
+        h.app.render_workspace.image_host = Some(host);
+        if super::super::image_host(&h.app, ImageMethod::CpuRaytrace).is_err() {
+            eprintln!("legacy native dimension test requires raytrace-cpu");
+            return;
+        }
         let mut options = json!({"budget":"workstation","threads":1});
         if progressive {
             options["progressive"] = json!({"samples_per_pixel":32,"seed":81});
@@ -2219,13 +2225,13 @@ fn appearance_inspector_real_controls_switch_targets_inspect_chain_and_edit_fini
     assert_ne!(h.app.session.doc.appearances.bodies["Subject"].pbr.unwrap().roughness(), 0.32);
     let edited_undo = h.app.session.undo.len();
     h.step(&json!({"click":{"handle":format!("dialog::{}",h.app.tr("render.pick_body"))}})).unwrap();
-    assert!(h.app.ui.pick_bodies);
+    assert!(h.app.picks_bodies());
     assert_eq!(h.app.session.undo.len(), edited_undo);
     h.step(&json!({"click":{"handle":format!("dialog::{}",h.app.tr("render.pick_component"))}})).unwrap();
-    assert!(h.app.ui.pick_components);
+    assert!(h.app.picks_components());
     assert!(h.widget(h.app.tr("render.inspector_pick_target")).is_some(), "root bodies have no component override target");
     h.step(&json!({"click":{"handle":format!("dialog::{}",h.app.tr("render.pick_face"))}})).unwrap();
-    assert!(!h.app.ui.pick_components && !h.app.ui.pick_bodies);
+    assert!(!h.app.picks_components() && !h.app.picks_bodies());
     h.step(&json!({"click":{"handle":format!("dialog::{}",h.app.tr("render.pick_body"))}})).unwrap();
     assert_eq!(h.app.session.undo.len(), edited_undo);
     appearance_inspector_capture(&mut h, "body");
@@ -2772,7 +2778,7 @@ fn appearance_editor_e2_sections_are_ordered_collapsed_and_expand_for_each_metho
             super::super::selection_editor(&mut h.app, &selection);
         }
         if matches!(h.app.session.selection.first(), Some(Sel::Body { .. })) {
-            h.app.ui.pick_components = true;
+            h.app.ui.render_pick = "component".into();
         }
         h.frames(3);
         assert!(h.widget(h.app.tr("render.appearance_editor.body_reason")).is_some());

@@ -1,0 +1,9 @@
+Updates: WR-59
+
+#### WR-59 (update, 2026-11-13). `bend_volume_bbox_contains_wide_angle_and_inf_u` is removed
+
+The fix is the default and its flag is gone (tangency-labs/solidcraft#14246, batch A13b, which retires the two bend-volume flags). `BendVolume::evaluate_bounding_box_simple` (`surface/bend_volume.rs`) builds the mid-angle pseudo box from the exact cosine and sine extrema over the half angle, propagating `±SM_INFINITE_PARAMETER` along unbounded `u`, and takes the unbounded-`u` axis box's `y` maximum from the sines of the end angles. An inside-out parameter box, or a bend of neutral distance 0 or not finite, leaves the pseudo box as it was. `evaluate_bounding_box_simple_with_kernel` and `_with_fixes` are gone; `Volume::evaluate_bounding_box_simple` reaches the fix through the plain call.
+
+- **Tests:** `wr59_wide_angle_pseudo_box_contains_image` and `wr59_unbounded_u_downward_angles` (renamed from `wr59_unbounded_u_downward_angles_and_flag_lookup`) call the plain function; the halves that pinned upstream's boxes are gone.
+- **Results:** 276 rows of `surface.bend_volume` (the `b_box_*` cases and their random cases) and 211 rows of `surface.volume_p2` (the bounding boxes and mapped pseudo boxes of bend chains) move. In each of the 242 moved `surface.bend_volume` rows of a built bend that ask for a pseudo box of a valid parameter box, a 9 × 25 × 3 grid of the image lies in the new pseudo box; 6 rows that ask only for the axis box move by its unbounded-`u` `y` maximum. 11 rows of the default bend (neutral distance 0) lose their NaN pseudo box and 17 inside-out boxes keep the empty one. No status changes.
+- **Not changed:** the axis-aligned box still compares angles that are not reduced to one period. For parameter boxes outside the bend's domain (`u <= 0`, `v` beyond `±pi d`, or unbounded), it can miss part of the image, as upstream's does; no moved row inside the domain misses.

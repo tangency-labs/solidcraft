@@ -5,7 +5,7 @@
 //! along a 10 box's top edges meeting at (10, 10, 10) (the vertical edge there not
 //! rounded) had their rails meet at (10, 8, 8), radius 2, where the law gives 1.7, and
 //! the trace from there, its spans held to the law
-//! (`fillet_variable_span_follows_fillet`, 4438859), failed with 1001: the `SM_API` test
+//! (WR-646, 4438859, now the only path), failed with 1001: the `SM_API` test
 //! `TestSmVariableRadiusFillet`, which rounds four top edges. This is now the only path
 //! (the flag `fillet_retry_radius_as_first` is retired).
 //!
@@ -24,6 +24,8 @@
     clippy::indexing_slicing
 )]
 
+#[path = "support/volume_leak.rs"]
+mod volume_leak;
 use solidcore::blend::fillet_executive::api::variable_radius_fillet;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
@@ -57,18 +59,6 @@ fn edge_from_to(k: &Kernel, b: &Brep, p: Point3, q: Point3) -> EdgeId {
         .expect("edge")
 }
 
-fn kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.fillet_variable_span_follows_fillet = true;
-    k
-}
-
-/// The default kernel and [`kernel`] (`fillet_variable_span_follows_fillet` on): each case
-/// runs on both.
-fn kernels() -> [Kernel; 2] {
-    [Kernel::default(), kernel()]
-}
-
 /// The 10 box with its top edges x = 10 and y = 10 rounded 0.5 -> 2 towards their
 /// common vertex (10, 10, 10).
 fn two_rounds(k: &mut Kernel) -> solidcore::Result<Brep> {
@@ -84,31 +74,29 @@ fn two_rounds(k: &mut Kernel) -> solidcore::Result<Brep> {
 
 #[test]
 fn two_variable_rounds_meet_at_their_law_radii() {
-    for mut k in kernels() {
-        let mut b = two_rounds(&mut k).unwrap();
-        let removed = 1000.0 - volume(&k, &mut b);
-        let one = (1.0 - core::f64::consts::FRAC_PI_4) * 17.5;
-        assert!(
-            removed > one && removed < 6.8226,
-            "removed {removed}, one round alone {one}"
-        );
-    }
+    let mut k = Kernel::default();
+    let mut b = two_rounds(&mut k).unwrap();
+    let removed = 1000.0 - volume(&k, &mut b);
+    let one = (1.0 - core::f64::consts::FRAC_PI_4) * 17.5;
+    assert!(
+        removed > one && removed < 6.8226,
+        "removed {removed}, one round alone {one}"
+    );
 }
 
 /// The rails meet on the top face where both balls have the law's radius: the vertex
 /// at `(190 / 23, 190 / 23, 10)`, not upstream's `(8, 8, 10)` of the end radius 2.
 #[test]
 fn the_rails_meet_where_both_balls_have_the_law_radius() {
-    for mut k in kernels() {
-        let b = two_rounds(&mut k).unwrap();
-        let meet = Point3::new(190.0 / 23.0, 190.0 / 23.0, 10.0);
-        let nearest = b
-            .vertices()
-            .ids()
-            .map(|v| vertex::point(&b, v).unwrap().distance(meet))
-            .fold(f64::INFINITY, f64::min);
-        assert!(nearest < 1e-9, "nearest vertex {nearest} from {meet:?}");
-    }
+    let mut k = Kernel::default();
+    let b = two_rounds(&mut k).unwrap();
+    let meet = Point3::new(190.0 / 23.0, 190.0 / 23.0, 10.0);
+    let nearest = b
+        .vertices()
+        .ids()
+        .map(|v| vertex::point(&b, v).unwrap().distance(meet))
+        .fold(f64::INFINITY, f64::min);
+    assert!(nearest < 1e-9, "nearest vertex {nearest} from {meet:?}");
 }
 
 /// `TestSmVariableRadiusFillet`'s four top edges, each 0.5 -> 2 along its own direction:
@@ -116,15 +104,14 @@ fn the_rails_meet_where_both_balls_have_the_law_radius() {
 /// less than four.
 #[test]
 fn four_top_edges_round() {
-    for mut k in kernels() {
-        let mut b = four_top_edges(&mut k);
-        let removed = 1000.0 - volume(&k, &mut b);
-        let one = (1.0 - core::f64::consts::FRAC_PI_4) * 17.5;
-        assert!(
-            removed > 2.0 * one && removed < 4.0 * one,
-            "removed {removed}, one round alone {one}"
-        );
-    }
+    let mut k = Kernel::default();
+    let mut b = four_top_edges(&mut k);
+    let removed = 1000.0 - volume(&k, &mut b);
+    let one = (1.0 - core::f64::consts::FRAC_PI_4) * 17.5;
+    assert!(
+        removed > 2.0 * one && removed < 4.0 * one,
+        "removed {removed}, one round alone {one}"
+    );
 }
 
 /// One corner station of the four-edge case in closed form: a law ball of one round at
@@ -269,16 +256,6 @@ fn check_corner_balls(k: &Kernel, b: &Brep) {
     }
 }
 
-/// [`check_corner_balls`] with `fillet_variable_span_follows_fillet` on. (Upstream's hold
-/// refused this case with it too, with 1001: its corner points are not on the law's
-/// balls.)
-#[test]
-fn four_top_edges_meet_at_the_laws_closed_forms() {
-    let mut k = kernel();
-    let b = four_top_edges(&mut k);
-    check_corner_balls(&k, &b);
-}
-
 /// [`check_corner_balls`] on the default kernel. (The old code refused this case there
 /// too, with 1001: its corner points are not on the law's balls.)
 #[test]
@@ -340,9 +317,15 @@ fn the_sm_api_case_meets_at_the_laws_closed_forms_on_the_default_kernel() {
 /// corner round's arc (SolidCraft ladder 07-fillets/012). The result's volume and whether it
 /// is a manifold solid, or the executive's error code.
 fn round_into_a_rounded_corner(r0: f64, r1: f64, turned: bool) -> Result<(f64, bool), i32> {
+    use solidcore::topology::brep::p2::is_manifold_solid;
+    let (k, mut b) = rounded_corner(r0, r1, turned)?;
+    Ok((volume(&k, &mut b), is_manifold_solid(&b).unwrap()))
+}
+
+/// [`round_into_a_rounded_corner`]'s kernel and body.
+fn rounded_corner(r0: f64, r1: f64, turned: bool) -> Result<(Kernel, Brep), i32> {
     use solidcore::blend::fillet_executive::session::FilletSession;
     use solidcore::blend::fillet_standard_solver::p1::FilletLaw;
-    use solidcore::topology::brep::p2::is_manifold_solid;
     use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
     use solidcore::topology::proto_topology::p1::api_transform::{api_rotate, TransformObject};
     let mut k = Kernel::default();
@@ -403,7 +386,7 @@ fn round_into_a_rounded_corner(r0: f64, r1: f64, turned: bool) -> Result<(f64, b
     };
     result?;
     stitch_and_orient(&mut k, &mut b, &StitchAndOrientOptions::default()).unwrap();
-    Ok((volume(&k, &mut b), is_manifold_solid(&b).unwrap()))
+    Ok((k, b))
 }
 
 /// The retry rail search at a corner that is not calculated as constant radius (the corner
@@ -429,16 +412,23 @@ fn retry_rail_search_holds_the_radius_as_the_first_does() {
         turned.0,
         forward.0
     );
-    // the laws that do not reach the retry, against main's volumes
-    for (r0, r1, main) in [
-        (5.0, 1.0, 47_770.705_747_225_77),
-        (5.0, 2.0, 47_737.958_806_965_48),
+    // the laws that do not reach the retry, against main's volumes (`was`: before
+    // `brep_volume` closed tolerant edges' gaps, #16735). The new values are MEASURED: no
+    // closed form; each move is checked within the old integrator's leak bound, itself a
+    // sampled estimate (the gaps at the closure's grid), not an enclosure
+    for (r0, r1, main, was) in [
+        (5.0, 1.0, 47_770.705_655_919_395, 47_770.705_747_225_77),
+        (5.0, 2.0, 47_737.958_709_705_846, 47_737.958_806_965_48),
     ] {
         let (v, manifold) = round_into_a_rounded_corner(r0, r1, false).unwrap();
         assert!(
             manifold && (v - main).abs() < 1e-9 * main,
-            "{r0} -> {r1}: {v} against {main}"
+            "{r0} -> {r1}: {v:.17} against {main}"
         );
+        if was != main {
+            let (k, mut b) = rounded_corner(r0, r1, false).unwrap();
+            volume_leak::assert_moved_by_the_old_leak(&k, &mut b, was, main, 1e-8);
+        }
     }
 }
 
@@ -521,21 +511,20 @@ fn a_round_meets_a_slanted_side_edge_on_its_law_ball() {
             10.0 - 2.0 * (1.0 + sa),
         )
     };
-    for mut k in kernels() {
-        let b = slanted_corner(&mut k, alpha).unwrap();
-        let nearest = |p: Point3| {
-            b.vertices()
-                .ids()
-                .map(|v| vertex::point(&b, v).unwrap().distance(p))
-                .fold(f64::INFINITY, f64::min)
-        };
-        for p in [law, Point3::new(law.y, law.x, law.z)] {
-            assert!(
-                nearest(p) < 1e-9,
-                "no vertex at the law foot {p:?}: {}",
-                nearest(p)
-            );
-        }
-        assert!(nearest(held) > 0.1, "a vertex at the held foot {held:?}");
+    let mut k = Kernel::default();
+    let b = slanted_corner(&mut k, alpha).unwrap();
+    let nearest = |p: Point3| {
+        b.vertices()
+            .ids()
+            .map(|v| vertex::point(&b, v).unwrap().distance(p))
+            .fold(f64::INFINITY, f64::min)
+    };
+    for p in [law, Point3::new(law.y, law.x, law.z)] {
+        assert!(
+            nearest(p) < 1e-9,
+            "no vertex at the law foot {p:?}: {}",
+            nearest(p)
+        );
     }
+    assert!(nearest(held) > 0.1, "a vertex at the held foot {held:?}");
 }

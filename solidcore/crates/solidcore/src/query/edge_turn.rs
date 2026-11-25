@@ -9,15 +9,18 @@
 //! | [`leaving`], [`leaving_derivative`] | (none) |
 //! | [`turn_at`]   | (none)   |
 //! | [`convex_at`] | (none)   |
+//! | [`joint_turn`] | (none)  |
 //!
 //! Deviations: no upstream counterpart.
 
 use crate::blend::fillet_section::interval::Ivl;
 use crate::error::{Result, SolidError};
+use crate::geom::interval_vector::{cross as cross_ivl, dot as dot_ivl, norm as norm_ivl};
+use crate::geom::vector2d::Vec2;
 use crate::kernel::Kernel;
 use crate::math::Vec3;
 use crate::nurbs::math::UNIT;
-use crate::query::tangent_edge::{cross_ivl, dot_ivl, face_use_normal, norm_ivl};
+use crate::query::tangent_edge::face_use_normal;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::edgeuse::p3::{evaluate_binormal, BinormalOptions};
 use crate::topology::{edge, Brep, EdgeId, VertexId};
@@ -230,4 +233,17 @@ pub fn convex_at(
         return Ok(None);
     }
     Ok(Some(side.lo > 0.0))
+}
+
+/// The angle in radians, in `[0, PI]`, between the planar directions `before` (the first
+/// curve's end tangent) and `after` (the next curve's start tangent): 0 where a path runs
+/// straight on, `PI` where it doubles back. The directions need not be unit.
+///
+/// # Errors
+/// Invalid input for a direction that is not finite or is zero-length.
+pub fn joint_turn(before: [f64; 2], after: [f64; 2]) -> Result<f64> {
+    if !before.iter().chain(after.iter()).all(|c| c.is_finite()) {
+        return Err(invalid("direction is not finite"));
+    }
+    Vec2::from(before).angle_between(Vec2::from(after))
 }

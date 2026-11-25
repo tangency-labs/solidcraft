@@ -26,7 +26,7 @@ use crate::cmd::{RefForm, ref_form};
 use crate::params;
 
 /// What a reference to model geometry may look like, for the descriptions.
-const REF_FORMS: &str = "a reference: `{\"edge\": [x, y, z], \"body\"?}` (the edge through that point), `{\"face\": [x, y, z], \"body\"?}` (the edges of the face), `{\"vertex\": [x, y, z], \"body\"?}`, `{\"body\": name}` (its silhouette or outline), `{\"sketch\": id or name, \"curve\": id}` or `{\"sketch\": id or name, \"point\": id}` (a curve or point of another sketch), `\"origin\"` or `{\"origin\": …}`, `{\"axis\": \"X\"|\"Y\"|\"Z\"|a construction axis's name}`, `{\"plane\": \"XY\"|\"XZ\"|\"YZ\"|a plane's name}`; text alone is `origin`, X, Y, Z (any case) or a body's name";
+const REF_FORMS: &str = "a reference: `{\"edge\": [x, y, z], \"body\"?}` (the edge through that point), `{\"face\": [x, y, z], \"body\"?}` (the edges of the face), `{\"vertex\": [x, y, z], \"body\"?}`, `{\"body\": name}` (its silhouette or outline), `{\"sketch\": id or name, \"curve\": id}` or `{\"sketch\": id or name, \"point\": id}` (a curve or point of another sketch), `\"origin\"` or `{\"origin\": …}`, `{\"axis\": \"X\"|\"Y\"|\"Z\"|a construction axis's name|a component's origin axis, \"o:<ids>/origin/X\"}`, `{\"plane\": \"XY\"|\"XZ\"|\"YZ\"|a plane's name}`; text alone is `origin`, X, Y, Z (any case) or a body's name";
 
 /// The most references one `refs` takes into account: the handler reads no more.
 const MAX_REFS: usize = 1000;
@@ -176,6 +176,10 @@ fn refs_required(schema: &mut Schema) {
 #[derive(Debug, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = refs_required)]
 pub struct ProjectParams {
+    /// Require a path for repeated sketch sources and refuse another placement of the receiving
+    /// component or a part inside it. Default: false, keep main's ordinary link for these inputs.
+    #[serde(default)]
+    pub strict_occurrence_references: bool,
     /// What to project: one reference or a list.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "ProjectRefs")]
@@ -203,7 +207,12 @@ impl<'de> Deserialize<'de> for ProjectParams {
         let projection_link = read_link_flag(&o).map_err(|why| D::Error::custom(whole(why)))?;
         let (refs, reference) = read_refs(&o).map_err(|why| D::Error::custom(whole(why)))?;
         let construction = read_construction(&o).map_err(|why| D::Error::custom(whole(why)))?;
-        Ok(ProjectParams { refs, reference, projection_link, construction })
+        let strict_occurrence_references = match o.get("strict_occurrence_references") {
+            None => false,
+            Some(Value::Bool(value)) => *value,
+            Some(_) => return Err(D::Error::custom(whole("`strict_occurrence_references` must be a boolean"))),
+        };
+        Ok(ProjectParams { strict_occurrence_references, refs, reference, projection_link, construction })
     }
 }
 
@@ -213,6 +222,10 @@ impl<'de> Deserialize<'de> for ProjectParams {
 #[derive(Debug, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = refs_required)]
 pub struct IntersectParams {
+    /// Require a path for repeated sketch sources and refuse another placement of the receiving
+    /// component or a part inside it. Default: false, keep main's ordinary link for these inputs.
+    #[serde(default)]
+    pub strict_occurrence_references: bool,
     /// What to intersect with the sketch plane: one reference or a list (`{body}`, `{face}`,
     /// `{edge}` or `{sketch, curve}` are the forms that make sense here).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -240,7 +253,12 @@ impl<'de> Deserialize<'de> for IntersectParams {
         let projection_link = read_link_flag(&o).map_err(|why| D::Error::custom(whole(why)))?;
         let (refs, reference) = read_refs(&o).map_err(|why| D::Error::custom(whole(why)))?;
         let construction = read_construction(&o).map_err(|why| D::Error::custom(whole(why)))?;
-        Ok(IntersectParams { refs, reference, projection_link, construction })
+        let strict_occurrence_references = match o.get("strict_occurrence_references") {
+            None => false,
+            Some(Value::Bool(value)) => *value,
+            Some(_) => return Err(D::Error::custom(whole("`strict_occurrence_references` must be a boolean"))),
+        };
+        Ok(IntersectParams { strict_occurrence_references, refs, reference, projection_link, construction })
     }
 }
 
@@ -250,6 +268,10 @@ impl<'de> Deserialize<'de> for IntersectParams {
 #[derive(Debug, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = refs_required)]
 pub struct Include3dParams {
+    /// Require a path for repeated sketch sources and refuse another placement of the receiving
+    /// component or a part inside it. Default: false, keep main's ordinary link for these inputs.
+    #[serde(default)]
+    pub strict_occurrence_references: bool,
     /// What to include: one reference or a list.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "ProjectRefs")]
@@ -270,7 +292,12 @@ impl<'de> Deserialize<'de> for Include3dParams {
         let o = Map::<String, Value>::deserialize(d)?;
         let (refs, reference) = read_refs(&o).map_err(|why| D::Error::custom(whole(why)))?;
         let construction = read_construction(&o).map_err(|why| D::Error::custom(whole(why)))?;
-        Ok(Include3dParams { refs, reference, construction })
+        let strict_occurrence_references = match o.get("strict_occurrence_references") {
+            None => false,
+            Some(Value::Bool(value)) => *value,
+            Some(_) => return Err(D::Error::custom(whole("`strict_occurrence_references` must be a boolean"))),
+        };
+        Ok(Include3dParams { strict_occurrence_references, refs, reference, construction })
     }
 }
 
