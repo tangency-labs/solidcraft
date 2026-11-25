@@ -3,7 +3,7 @@
 use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 use sctk::reexports::client::protocol::wl_display::WlDisplay;
 use sctk::reexports::client::protocol::wl_surface::WlSurface;
@@ -42,6 +42,8 @@ pub use state::WindowState;
 pub struct Window {
     /// Reference to the underlying SCTK window.
     window: SctkWindow,
+    presenting: AtomicBool,
+    pending_owner: Option<Mutex<Option<Weak<crate::window::Window>>>>,
 
     /// Window id.
     window_id: WindowId,
@@ -106,6 +108,16 @@ impl Window {
 
         let window =
             state.xdg_shell.create_window(surface.clone(), default_decorations, &queue_handle);
+
+        let pending_owner = attributes.owned_by.as_ref().and_then(|owner| {
+            let crate::platform_impl::Window::Wayland(parent) = &owner.window else {
+                return None;
+            };
+            window.xdg_toplevel().set_parent(Some(parent.window.xdg_toplevel()));
+            // Compositors ignore the request if the parent is still waiting for its first buffer.
+            (!parent.presenting.load(Ordering::Relaxed))
+                .then(|| Mutex::new(Some(Arc::downgrade(owner))))
+        });
 
         let mut window_state = WindowState::new(
             event_loop_window_target.connection.clone(),
@@ -218,6 +230,8 @@ impl Window {
 
         Ok(Self {
             window,
+            presenting: AtomicBool::new(false),
+            pending_owner,
             display,
             monitors,
             window_id,
@@ -299,6 +313,22 @@ impl Window {
 
     #[inline]
     pub fn pre_present_notify(&self) {
+        self.presenting.store(true, Ordering::Relaxed);
+        if let Some(pending) = &self.pending_owner {
+            if let Ok(mut pending) = pending.lock() {
+                let owner = pending.as_ref().and_then(Weak::upgrade);
+                match owner.as_deref().map(|owner| &owner.window) {
+                    Some(crate::platform_impl::Window::Wayland(parent))
+                        if parent.presenting.load(Ordering::Relaxed) =>
+                    {
+                        self.window.xdg_toplevel().set_parent(Some(parent.window.xdg_toplevel()));
+                        *pending = None;
+                    },
+                    None => *pending = None,
+                    _ => (),
+                }
+            }
+        }
         self.window_state.lock().unwrap().request_frame_callback();
     }
 

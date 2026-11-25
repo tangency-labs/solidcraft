@@ -73,12 +73,6 @@ const ROWS: &str = include_str!("trim_tolerance_rows.jsonl");
 /// - `UNCOVERED`: the sampled gap of one of the edge's trims exceeds the new (and the old)
 ///   tolerance: an open defect, the tolerance does not cover that trim either way (the 27
 ///   there were before now keep upstream's tolerance or are raised to cover; left:
-///   `offset_geometry_creation`'s `gen0642`, the offset's successive bodies 2 to 6, whose
-///   edge 0 has a trim with an image up to 5.6e13 from the edge curve, sampled on body 2,
-///   and whose vertex 0 the old tolerance did not cover either: that trim, on face 0, runs at
-///   `u = 71.94`, `v` from 0 to 139.4, far outside the face's B-spline domain
-///   `[-0.05, 1.05]^2`, so its image is the surface's extrapolation; the trim is in another
-///   parameterisation than its face's, in both kernels, and no tolerance covers it; and
 ///   `topology.brep_p10`'s `gen0026` edges 20 and 33, [`DROP_MARGIN`] raises whose trim
 ///   on another face, edge use 78 on face 3 and 86 on face 4, is enclosed at 1.675e-5, past
 ///   both tolerances, on main's read as well: #20906);

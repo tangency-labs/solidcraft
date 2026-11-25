@@ -70,3 +70,41 @@ fn a_boundary_crossing_itself_is_found_and_refused() {
                 .all(|p| (*p - Point3::new(24.0, 20.0, 10.0)).length() < 1e-9)
     );
 }
+
+/// #21270: two edges that meet within their vertex's tolerance meet at that vertex, though
+/// the vertex lies farther from where they meet than the edges' own tolerances. The box
+/// top's front-left corner vertex moved 1e-3 along y: its tolerance 2e-3 covers the
+/// meeting of the front and left edges at the corner, so the face crosses itself nowhere;
+/// with its tolerance left at the box's (1e-3 short of the meeting) the meeting is a crossing.
+#[test]
+fn a_meeting_within_the_vertex_tolerance_is_the_joint() {
+    let mut k = Kernel::default();
+    let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 30.0, 20.0, 10.0).unwrap();
+    let front = edge_at(&k, &b, Point3::new(15.0, 0.0, 10.0));
+    let left = edge_at(&k, &b, Point3::new(0.0, 10.0, 10.0));
+    let f = top(&b, front);
+    let corner = Point3::new(0.0, 0.0, 10.0);
+    let (s, t) = edge::start_end_vertices(&b, front).unwrap();
+    let v = [s, t]
+        .into_iter()
+        .flatten()
+        .find(|&v| (b.vertex(v).unwrap().point - corner).length() < 1e-9)
+        .unwrap();
+    let (ls, lt) = edge::start_end_vertices(&b, left).unwrap();
+    assert!([ls, lt].contains(&Some(v)));
+    let edge_tol = b
+        .edge(front)
+        .unwrap()
+        .tolerance
+        .max(b.edge(left).unwrap().tolerance);
+    assert!(edge_tol < 1e-3, "{edge_tol}");
+    b.vertex_mut(v).unwrap().point = Point3::new(0.0, 1e-3, 10.0);
+    let at = boundary_crossings(&k, &b, f).unwrap();
+    assert!(
+        !at.is_empty() && at.iter().all(|p| (*p - corner).length() < 1e-9),
+        "{at:?}"
+    );
+    b.vertex_mut(v).unwrap().tolerance = 2e-3;
+    assert!(boundary_crossings(&k, &b, f).unwrap().is_empty());
+    rounds_cross(&k, &b, &[f]).unwrap();
+}

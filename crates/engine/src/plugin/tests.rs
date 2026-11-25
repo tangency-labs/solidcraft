@@ -3786,6 +3786,24 @@ mod install_zip {
     }
 
     #[test]
+    fn a_panel_shader_installs_and_is_reported_apart_from_backgrounds() {
+        let (mut s, root) = session("panels");
+        let manifest = json!({"id": "frost", "name": "Frost", "version": "1.0.0", "capabilities": ["shaders@0.2"], "shaders": [
+            {"id": "frost", "name": "Frost", "kind": "panel", "source": "frost.wgsl", "blur": 16}
+        ]});
+        let text = serde_json::to_vec(&manifest).unwrap();
+        let wgsl = b"fn panel(px: ScPanel) -> vec4<f32> {
+    return vec4<f32>(sc_blurred(px.position).rgb, 0.9);
+}
+";
+        let path = put(&root, "frost.zip", &zip(&[("plugin.json", &text[..]), ("frost.wgsl", &wgsl[..])]));
+        let reply = s.execute("plugin.install", &json!({"path": path})).unwrap();
+        assert_eq!(reply["panel_shaders"], json!(["frost/frost"]));
+        assert!(reply["shaders"].as_array().is_none_or(Vec::is_empty), "not a background: {reply}");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn a_shader_that_cannot_draw_is_refused_at_install() {
         let missing_texture = unpack(&sky(DUSK, &[])).unwrap_err();
         assert_eq!(missing_texture, InstallError::MissingModule("stars.png".into()));
@@ -4413,8 +4431,60 @@ fn the_documented_shader_examples_compile() {
             include_str!("../../../../docs/plugin-examples/panorama/plugin.json"),
             include_str!("../../../../docs/plugin-examples/panorama/panorama.wgsl"),
         ),
+        (
+            "trails",
+            include_str!("../../../../docs/plugin-examples/trails/plugin.json"),
+            include_str!("../../../../docs/plugin-examples/trails/trails.wgsl"),
+        ),
     ] {
         let manifest = craft_plugin::parse_manifest(manifest_text.as_bytes(), folder).unwrap();
         craft_plugin::shader::compile(&manifest.shaders[0], source).unwrap_or_else(|e| panic!("{folder}: {e}"));
     }
+}
+
+/// The tint example in docs/plugin-examples/accent-sweep parses with its two settings and compiles.
+#[test]
+fn the_documented_tint_example_compiles() {
+    let manifest =
+        craft_plugin::parse_manifest(include_str!("../../../../docs/plugin-examples/accent-sweep/plugin.json").as_bytes(), "accent-sweep").unwrap();
+    assert_eq!(manifest.shaders[0].settings.len(), 2);
+    craft_plugin::shader::compile(&manifest.shaders[0], include_str!("../../../../docs/plugin-examples/accent-sweep/accent-sweep.wgsl")).unwrap();
+}
+
+/// Shader plugins written before pictures could be chosen parse, validate and serialize as they
+/// did: no `choose`, the shipped `file` kept, nothing new in the manifest's JSON.
+#[test]
+fn legacy_shader_manifests_without_a_chosen_texture_are_unchanged() {
+    for (folder, text) in [
+        ("dusk", include_str!("../../../../docs/plugin-examples/dusk/plugin.json")),
+        ("panorama", include_str!("../../../../docs/plugin-examples/panorama/plugin.json")),
+    ] {
+        let plugin = craft_plugin::parse_manifest(text.as_bytes(), folder).unwrap();
+        craft_plugin::shader::validate(&plugin.shaders).unwrap();
+        let original: serde_json::Value = serde_json::from_str(text).unwrap();
+        let again = serde_json::to_value(&plugin).unwrap();
+        for (got, want) in again["shaders"].as_array().unwrap().iter().zip(original["shaders"].as_array().unwrap()) {
+            assert_eq!(got.get("textures"), want.get("textures"), "{folder}");
+        }
+        for texture in plugin.shaders.iter().flat_map(|shader| &shader.textures) {
+            assert!(texture.choose.is_none() && texture.file.is_some(), "{folder}");
+        }
+    }
+}
+
+/// A plugin written before `state` existed (the dusk example): no `state` key, so it parses,
+/// validates, serialises without one, and compiles to a module that declares none of the state
+/// bindings.
+#[test]
+fn a_plugin_without_a_state_grid_is_unchanged() {
+    let manifest_text = include_str!("../../../../docs/plugin-examples/dusk/plugin.json");
+    let manifest = craft_plugin::parse_manifest(manifest_text.as_bytes(), "dusk").unwrap();
+    let shader = &manifest.shaders[0];
+    assert_eq!(shader.state, None);
+    assert!(shader.animated);
+    assert!(!serde_json::to_string(shader).unwrap().contains("state"));
+    craft_plugin::shader::validate(&manifest.shaders).unwrap();
+    let compiled = craft_plugin::shader::compile(shader, include_str!("../../../../docs/plugin-examples/dusk/dusk.wgsl")).unwrap();
+    assert!(!compiled.wgsl.contains("sc_state"), "{}", compiled.wgsl);
+    assert!(!compiled.wgsl.contains("@binding(7)") && !compiled.wgsl.contains("@binding(8)"), "{}", compiled.wgsl);
 }

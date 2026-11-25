@@ -226,6 +226,7 @@ pub use body::CapSignature;
 pub use body::DISPLAY_ANGLE;
 pub use body::DisplayShare;
 pub use body::EdgeInfo;
+pub use body::EdgeLines;
 pub use body::FaceInfo;
 pub use body::FacePaint;
 pub use body::FaceSource;
