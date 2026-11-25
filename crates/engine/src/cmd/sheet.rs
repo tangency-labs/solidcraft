@@ -1898,7 +1898,7 @@ impl FlatDrawing {
         if let Some(height) = o.hardware_notes {
             for (c, r, text) in &self.hardware {
                 let layer = dxf_layer(&mut file, "HARDWARE", o.one_layer)?;
-                let at = solidcore_ops::prism::note_beside((*c, *r), height);
+                let at = solidcraft_kernel::services::prism::note_beside((*c, *r), height);
                 file.push(layer, DxfShape::Text { at, height, angle_deg: 0.0, text: text.clone() }, None)?;
             }
         }
