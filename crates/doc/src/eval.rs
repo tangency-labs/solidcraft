@@ -12124,7 +12124,20 @@ fn pattern_transforms(doc: &Document, vals: &BTreeMap<String, Value>, st: &Model
                 }
             }
         }
-        crate::PatternKind::Path { path_sketch, path, path_body, path_edges, count: c, spacing, extent, flip, orient, start, start_fraction, follow_frame } => {
+        crate::PatternKind::Path {
+            path_sketch,
+            path,
+            path_body,
+            path_edges,
+            count: c,
+            spacing,
+            extent,
+            flip,
+            orient,
+            start,
+            start_fraction,
+            follow_frame,
+        } => {
             let n = count(c)?;
             let d = val(vals, spacing, Kind::Length)?;
             // The path is a chain of a body's edges (#16084), from its end nearest the first
@@ -12316,6 +12329,11 @@ fn path_station(segs: &[kernel::PathSeg], d: f64, normal: Vec3) -> (Vec3, crate:
             r = crate::mat_mul(&rotation(Vec3::ZERO, axis.normalized().unwrap_or(Vec3::Z), turn), &r);
         }
         let (p, t) = seg_at(s, along);
+        // A span of an edge's curve (#16084) turns the frame from its start tangent to the
+        // tangent here, as an arc does.
+        if let kernel::PathSeg::Bezier(_) = s {
+            r = crate::mat_mul(&least_turn(t_in, t, normal), &r);
+        }
         if last {
             return (p, r);
         }
