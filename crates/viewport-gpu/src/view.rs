@@ -8483,9 +8483,12 @@ mod glass_tests {
             .collect()
     }
 
-    /// Desktop OpenGL draws the scene at the saved anti-aliasing count, and the startup check
-    /// keeps it where the OpenGL device draws the multisampled view: Mesa's llvmpipe OpenGL (CI's
-    /// software adapter) draws 4x in every window format.
+    /// Desktop OpenGL draws the scene at the saved anti-aliasing count where the startup check
+    /// shows it draws, and 1x where it doesn't; either way, what the check keeps keeps drawing.
+    /// Each format is drawn again five times at the count the check kept: a driver whose 4x passed
+    /// the check once and came out black afterwards would fail here. Mesa's llvmpipe OpenGL (CI's
+    /// software adapter) has given both answers at 4x: 4x on Mesa 26.0, and a black 4x resolve
+    /// that the check turned into 1x on Mesa 25.2 in CI.
     #[test]
     fn opengl_startup_msaa_check_decides_from_what_it_draws() {
         let Some((adapter, device, queue)) = opengl_window_device() else { return };
@@ -8493,16 +8496,23 @@ mod glass_tests {
         let windows = opengl_4x_windows(&adapter, depth);
         for window in &windows {
             let mut renderer = Renderer::with_window_target(&device, GpuTarget { depth: Some(depth), samples: 4, ..*window }, *window, None);
-            assert_eq!(
-                renderer.check_msaa(&device, &queue).unwrap(),
-                super::MsaaCheck::Passed,
-                "{} {:?} draws 4x",
-                adapter.get_info().name,
-                window.format
-            );
-            assert_eq!(renderer.target().samples, 4, "4x kept where it draws");
+            let decided = renderer.check_msaa(&device, &queue).unwrap();
+            let kept = renderer.target().samples;
+            match decided {
+                super::MsaaCheck::Passed => assert_eq!(kept, 4, "{:?}: 4x kept where it draws", window.format),
+                super::MsaaCheck::Fallback => assert_eq!(kept, 1, "{:?}: 1x where 4x came out blank", window.format),
+                super::MsaaCheck::FailedAtOne => panic!("{:?}: OpenGL drew nothing at 1x either", window.format),
+            }
+            for again in 0..5 {
+                assert_eq!(
+                    renderer.check_msaa(&device, &queue).unwrap(),
+                    super::MsaaCheck::Passed,
+                    "{:?}: the kept {kept}x stops drawing (draw {again})",
+                    window.format
+                );
+            }
+            eprintln!("OpenGL anti-aliasing check: {} {:?} at 4x: {decided:?}, keeps {kept}x", adapter.get_info().name, window.format);
         }
-        eprintln!("OpenGL anti-aliasing check: {:?}, {} formats at 4x", adapter.get_info(), windows.len());
         assert!(!windows.is_empty() || !cfg!(target_os = "linux"), "llvmpipe's OpenGL multisamples every window format");
     }
 
