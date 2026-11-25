@@ -1914,10 +1914,11 @@ fn a_sagitta_past_its_bound_is_refused_with_the_sagitta_that_fits() {
 }
 
 /// Between two planes the bead takes every sagitta the planar bead takes, and no other: at
-/// 90, 60 and 120 degrees with 4 mm legs, concave and convex, a bead too deep or too high is
-/// refused with the planar bead's own fit (`beads_apart`: the exact bead's frame, the float
-/// below its closed-form bound), to the bit; at that fit it builds, and at the next float
-/// up, the bound itself, it is refused. The part does not change.
+/// 90, 60 and 120 degrees, with 4 mm legs and with legs of 3 and 5 mm, the first along each
+/// face in turn, concave and convex, a bead too deep or too high is refused with the planar
+/// bead's own fit (`beads_apart`: the exact bead's frame, the float below its closed-form
+/// bound), to the bit; at that fit it builds, and at the next float up, the bound itself, it
+/// is refused. The part does not change.
 #[test]
 fn a_bead_between_planes_takes_the_planar_bead_s_sagittas() {
     use solidcore::error::FitMeasure;
@@ -1926,39 +1927,46 @@ fn a_bead_between_planes_takes_the_planar_bead_s_sagittas() {
         let (mut b, at) = corner(&mut k, alpha);
         let edge = pick(&k, &b, at);
         let before = smb(&k, &b);
-        let size = ChamferSize::Distances([4.0; 2]);
-        for sign in [-1.0, 1.0] {
-            let planar = beads_apart(&mut k, &mut b, &[edge], &[size], sign * 100.0, &[])
-                .unwrap_err()
-                .fit()
-                .unwrap();
-            assert_eq!(planar.measure, FitMeasure::Sagitta);
-            let mut bead =
-                |h: f64| weld_bead_body(&mut k, &mut b, &[edge], &[size], h, &[], &[], SQUARE);
-            let err = bead(sign * 100.0).err().unwrap();
-            let fit = err.fit().unwrap();
-            println!(
-                "{} degrees, side {sign}: the planar bead's fit {}, the weld's {}",
-                alpha.to_degrees(),
-                planar.size,
-                fit.size
-            );
-            assert_eq!(fit.measure, FitMeasure::Sagitta, "{err}");
-            assert!(
-                fit.size.to_bits() == planar.size.to_bits(),
-                "{} against the planar bead's {}",
-                fit.size,
-                planar.size
-            );
-            let built = bead(sign * planar.size);
-            assert!(
-                built.is_ok(),
-                "at the planar bead's fit {}: {:?}",
-                planar.size,
-                built.err()
-            );
-            let bound = f64::from_bits(planar.size.to_bits() + 1);
-            assert!(bead(sign * bound).is_err(), "built at the bound {bound}");
+        let mut cases = vec![([4.0; 2], None)];
+        for face in edge::faces(&b, edge, None).unwrap() {
+            cases.push(([3.0, 5.0], Some(face)));
+        }
+        for (legs, first) in cases {
+            let (size, along) = (ChamferSize::Distances(legs), [first]);
+            for sign in [-1.0, 1.0] {
+                let planar = beads_apart(&mut k, &mut b, &[edge], &[size], sign * 100.0, &along)
+                    .unwrap_err()
+                    .fit()
+                    .unwrap();
+                assert_eq!(planar.measure, FitMeasure::Sagitta);
+                let mut bead = |h: f64| {
+                    weld_bead_body(&mut k, &mut b, &[edge], &[size], h, &along, &[], SQUARE)
+                };
+                let err = bead(sign * 100.0).err().unwrap();
+                let fit = err.fit().unwrap();
+                println!(
+                    "{} degrees, legs {legs:?} along {first:?}, side {sign}: the planar bead's fit {}, the weld's {}",
+                    alpha.to_degrees(),
+                    planar.size,
+                    fit.size
+                );
+                assert_eq!(fit.measure, FitMeasure::Sagitta, "{err}");
+                assert!(
+                    fit.size.to_bits() == planar.size.to_bits(),
+                    "{} against the planar bead's {}",
+                    fit.size,
+                    planar.size
+                );
+                let built = bead(sign * planar.size);
+                assert!(
+                    built.is_ok(),
+                    "at the planar bead's fit {}: {:?}",
+                    planar.size,
+                    built.err()
+                );
+                let bound = f64::from_bits(planar.size.to_bits() + 1);
+                assert!(bead(sign * bound).is_err(), "built at the bound {bound}");
+            }
         }
         assert!(smb(&k, &b) == before, "the corner changed");
     }
@@ -2160,7 +2168,7 @@ fn the_bound_enclosed_over_a_joint_is_below_the_bound_at_every_parameter() {
         let (lo, hi) = (blend.interval.min(), blend.interval.max());
         for h in [-1.0, 1.0] {
             let started = std::time::Instant::now();
-            let enclosed = blend.bound_over(&k, legs, h, &[]).unwrap();
+            let enclosed = blend.bound_over(&k, legs, h, [lo, hi]).unwrap();
             let took = started.elapsed();
             let least = (0..=2000)
                 .filter_map(|i| {
