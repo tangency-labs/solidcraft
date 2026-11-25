@@ -1,22 +1,33 @@
-//! Bounded planar export geometry through the kernel, with record conversion only.
+//! Writing DXF: a path's pieces converted for the file, their bounds, the drawing's scale and
+//! translation, and the checks a written entity must pass, each through the kernel's
+//! `prism::{arc_conversion, bounds, transform}`, with record conversion and budgets only.
 //!
 //! The kernel keeps the original piece indices, admission rules and precision checks.
 //! Arc fitting remains the caller's existing workflow; this module computes no geometry.
 
-use solidcore::prism::path_export as kernel;
+use solidcore::prism::arc_conversion as kernel;
 use solidcore::prism::profile::Loop2 as KernelLoop;
 use solidcore_convert as convert;
 use solidcore_record::{Seg2, Vec2};
 
-pub use kernel::{DxfPathStyle, PathRefusal, PathShape, ScalarEncoding, Vertex, MAX_PATH_ITEMS};
+mod bounds;
+pub use bounds::{
+    axis_nonzero, bulged_bounds, ellipse_bounds, point_bounds, scaled_axis, supporting_circle,
+    transform_anchor, transformed_point, union_bounds, Bounds,
+};
+pub use kernel::{
+    arc_fields_finite, distinct_degrees, finite_degrees, finite_span, PathRefusal, PathShape,
+    PathStyle, ScalarEncoding, Vertex, MAX_PATH_ITEMS,
+};
+pub use solidcore::prism::transform::scaled_positive;
 /// Export geometry expressed in application record coordinates.
 pub type Shape = PathShape<Vec2>;
 /// One record-space vertex and its departing bulge.
 pub type PathVertex = Vertex<Vec2>;
 type Result<T> = std::result::Result<T, PathRefusal>;
 
-fn checked_style(segs: &[Seg2], style: DxfPathStyle) -> Result<()> {
-    if let DxfPathStyle::Arcs { tolerance_mm } = style {
+fn checked_style(segs: &[Seg2], style: PathStyle) -> Result<()> {
+    if let PathStyle::Arcs { tolerance_mm } = style {
         if !(tolerance_mm.is_finite() && tolerance_mm >= 1e-9) {
             return Err(PathRefusal {
                 piece: None,
@@ -34,7 +45,7 @@ fn checked_style(segs: &[Seg2], style: DxfPathStyle) -> Result<()> {
 }
 
 /// Check source geometry and budgets before allocating the kernel input records.
-pub fn admit_path(segs: &[Seg2], style: DxfPathStyle) -> Result<()> {
+pub fn admit_path(segs: &[Seg2], style: PathStyle) -> Result<()> {
     checked_style(segs, style)?;
     for (index, seg) in segs.iter().enumerate() {
         admit_piece(seg, index, segs.len())?;
@@ -47,7 +58,7 @@ pub fn admit_piece(seg: &Seg2, index: usize, total: usize) -> Result<()> {
     kernel::admit_piece(&convert::seg2(seg), index, total)
 }
 
-fn input(segs: &[Seg2], style: DxfPathStyle) -> Result<KernelLoop> {
+fn input(segs: &[Seg2], style: PathStyle) -> Result<KernelLoop> {
     admit_path(segs, style)?;
     let mut result = KernelLoop::default();
     for seg in segs {
@@ -64,14 +75,14 @@ fn input(segs: &[Seg2], style: DxfPathStyle) -> Result<KernelLoop> {
 pub fn recognized_path(
     segs: &[Seg2],
     closed: bool,
-    style: DxfPathStyle,
+    style: PathStyle,
     encoding: ScalarEncoding,
 ) -> Result<Option<Shape>> {
     if !closed {
         return Ok(None);
     }
     let lp = input(segs, style)?;
-    kernel::recognized_path(kernel::DxfPath::Closed(&lp), style, encoding)
+    kernel::recognized_path(kernel::PlanarPath::Closed(&lp), style, encoding)
         .map(|v| v.map(record_shape))
 }
 
@@ -79,14 +90,14 @@ pub fn recognized_path(
 pub fn path_shapes(
     segs: &[Seg2],
     closed: bool,
-    style: DxfPathStyle,
+    style: PathStyle,
     encoding: ScalarEncoding,
 ) -> Result<Vec<Shape>> {
     let lp = input(segs, style)?;
     let path = if closed {
-        kernel::DxfPath::Closed(&lp)
+        kernel::PlanarPath::Closed(&lp)
     } else {
-        kernel::DxfPath::Open(&lp.segs)
+        kernel::PlanarPath::Open(&lp.segs)
     };
     kernel::path_shapes(path, style, encoding).map(|v| v.into_iter().map(record_shape).collect())
 }
