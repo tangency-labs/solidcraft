@@ -608,3 +608,93 @@ fn measure_takes_a_sketch_lines_woken_middle() {
     let picked = &h.app.dialog.as_ref().unwrap().inputs[0].items;
     assert!(matches!(picked.as_slice(), [Sel::Vertex { point, .. }] if point.dist(middle) < 1e-9), "{picked:?}");
 }
+
+#[test]
+fn dual_measure_converts_original_lengths_and_area_without_changing_document_units() {
+    let mut h = Harness::new();
+    h.app.preferences.length_decimals = 2;
+    for (unit, primary, dual) in [
+        ("mm", "6.50 mm", "6.50 mm [0.2559 in]"),
+        ("in", "0.2559 in", "0.2559 in [6.50 mm]"),
+        ("cm", "0.65 cm", "0.65 cm [0.2559 in]"),
+        ("m", "0.01 m", "0.01 m [0.2559 in]"),
+        ("ft", "0.02 ft", "0.02 ft [6.50 mm]"),
+    ] {
+        h.app.run("document.units", json!({"units":unit})).unwrap();
+        assert_eq!(crate::prefs::show_measure(&h.app, 6.5, 1, false), primary);
+        assert_eq!(crate::prefs::show_measure(&h.app, 6.5, 1, true), dual);
+        assert_eq!(h.app.session.doc.units, unit);
+    }
+    h.app.run("document.units", json!({"units":"mm"})).unwrap();
+    assert_eq!(crate::prefs::show_measure(&h.app, 645.16, 2, true), "645.16 mm² [1.000 in²]");
+    assert_eq!(crate::prefs::show_measure(&h.app, 16387.064, 3, true), "16387.06 mm³ [1.000 in³]");
+    let lines = crate::quick_measure::item_lines_with_units(&h.app, &json!({"type":"face", "area_mm2":645.16, "perimeter_mm":101.6}), true);
+    assert!(lines.iter().any(|s| s.contains("645.16 mm² [1.000 in²]")), "{lines:?}");
+    assert!(lines.iter().any(|s| s.contains("101.60 mm [4.000 in]")), "{lines:?}");
+    let lines =
+        crate::quick_measure::item_lines_with_units(&h.app, &json!({"type":"edge", "diameter":6.5, "radius":3.25, "circumference":20.42}), true);
+    assert!(lines[0].contains("6.50 mm [0.2559 in]"), "{lines:?}");
+}
+
+#[test]
+fn dual_measure_toggle_updates_panel_and_viewport_and_can_be_turned_off() {
+    let mut h = vertex_measurement([0., 0., 0.], [3., 4., 12.]);
+    h.app.preferences.length_decimals = 2;
+    let units = h.app.session.doc.units.clone();
+    let before = result(&h).clone();
+    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Measure { dual_units: false, .. }));
+    h.step(&json!({"click":{"handle":"measure:dual_units"}})).unwrap();
+    h.frames(3);
+    let text = painted_text(&mut h);
+    assert!(text.iter().filter(|s| s.contains("13.00 mm [0.5118 in]")).count() >= 2, "panel and viewport: {text:?}");
+    assert_eq!(h.app.session.doc.units, units);
+    assert_eq!(*result(&h), before);
+    h.step(&json!({"click":{"handle":"measure:dual_units"}})).unwrap();
+    h.frames(3);
+    assert!(!painted_text(&mut h).iter().any(|s| s.contains("[0.5118 in]")));
+    h.step(&json!({"click":{"handle":"measure:dual_units"}})).unwrap();
+    h.frames(3);
+    dual_measure_evidence(&mut h, "dual-measure-distance.png");
+}
+
+/// Optional full-size UI evidence from the same rendered controls exercised by the test.
+fn dual_measure_evidence(h: &mut Harness, name: &str) {
+    let Ok(dir) = std::env::var("SOLIDCRAFT_DUAL_MEASURE_EVIDENCE") else { return };
+    h.ctx = egui::Context::default();
+    crate::fonts::setup_bundled_fonts(&h.ctx);
+    let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280., 720.));
+    let mut textures = std::collections::HashMap::new();
+    for frame in 0..6 {
+        let mut output =
+            h.ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), time: Some(frame as f64 / 60.), ..Default::default() }, |ui| h.app.ui(ui));
+        crate::ui_kit::test_textures_update(&mut textures, &output.textures_delta);
+        output.textures_delta.clear();
+        if frame == 5 {
+            let image = crate::ui_kit::test_raster(&h.ctx, output.shapes, output.pixels_per_point, bounds, &textures);
+            std::fs::create_dir_all(&dir).unwrap();
+            image.save(std::path::Path::new(&dir).join(name)).unwrap();
+        }
+    }
+}
+
+#[test]
+fn dual_measure_shows_a_selected_edges_length_in_both_units() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.length_decimals = 2;
+    h.app.run("solid.box", json!({"length":6.5,"width":10,"height":5,"body_name":"Box"})).unwrap();
+    let point = solidcore_record::Vec3::new(3.25, 0., 0.);
+    let index = {
+        let st = crate::open_meshing::session_world(&h.app.session);
+        let mesh = st.body("Box").unwrap().mesh();
+        mesh.edges.iter().position(|e| e.windows(2).any(|w| point.dist_to_segment(w[0], w[1]) < 1e-6)).unwrap()
+    };
+    h.app.session.selection = vec![Sel::Edge { body: "Box".into(), index, point }];
+    h.app.start("inspect.measure");
+    h.call("ui.view", json!({"view":"fit"}));
+    h.step(&json!({"click":{"handle":"measure:dual_units"}})).unwrap();
+    h.frames(3);
+    let text = painted_text(&mut h);
+    assert!(text.iter().any(|s| s.contains("Length  6.50 mm [0.2559 in]")), "{text:?}");
+    dual_measure_evidence(&mut h, "dual-measure-edge.png");
+}

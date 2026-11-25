@@ -2345,6 +2345,26 @@ pub fn show_mm(app: &SolveApp, v: f64, power: i32) -> String {
     format!("{:.*} {u}{sup}", length_precision(value, &app.session.doc.units, app.preferences.length_decimals), value)
 }
 
+/// Measure's optional second unit. Metric designs add inches; inch/foot designs add mm.
+/// Conversion uses the original value, including the appropriate power for area and volume.
+pub(crate) fn show_measure(app: &SolveApp, v: f64, power: i32, dual: bool) -> String {
+    let primary = show_mm(app, v, power);
+    if !dual {
+        return primary;
+    }
+    let (_, unit) = unit_scale(&app.session.doc.units);
+    let secondary = if matches!(unit, "in" | "inch" | "ft" | "foot") { "mm" } else { "in" };
+    let (scale, suffix) = unit_scale(secondary);
+    let value = v * scale.powi(power);
+    let precision = length_precision(value, secondary, app.preferences.length_decimals);
+    let sup = match power {
+        2 => "²",
+        3 => "³",
+        _ => "",
+    };
+    format!("{primary} [{value:.precision$} {suffix}{sup}]")
+}
+
 /// Numbers in millimetres, in the design's units without the unit name.
 pub fn show_mm_bare(app: &SolveApp, v: f64) -> String {
     length_number(v, &app.session.doc.units, app.preferences.length_decimals)

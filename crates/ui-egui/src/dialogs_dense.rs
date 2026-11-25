@@ -1504,7 +1504,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Gusset(k) => enter |= crate::dialogs_gusset::rows(app, ui, k),
         Kind::FramePlate(k) => enter |= crate::dialogs_frame_plate::rows(app, ui, k),
         Kind::Assembly(k) => enter |= crate::dialogs_assembly::rows(app, ui, k, &mut d.inputs, &mut d.active),
-        Kind::Measure { result, show, .. } => measure_rows(app, ui, result.as_ref(), show),
+        Kind::Measure { result, show, dual_units, .. } => measure_rows(app, ui, result.as_ref(), show, dual_units),
         Kind::Section { offset, flip, hatch, add, edit } => {
             enter |= expr_row(ui, "Distance", offset);
             ui_kit::options(ui, "feature_options", &mut [("Flip", flip), ("Hatch", hatch)]);
@@ -1529,12 +1529,6 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
     enter
 }
 
-fn fmt_mm(app: &SolveApp, v: &Value) -> String {
-    v.as_f64().map(|x| crate::prefs::show_mm(app, x, 1)).unwrap_or_default()
-}
-
-/// The measurement in the dialog: each item's size, then the distance (a pair of round items
-/// offers centre to centre, closest and farthest), its ΔX/Y/Z and the angle between two items.
 /// What the saved-sections list keeps between frames: the name being typed, the saved section
 /// being renamed, and what the last action said when it failed.
 #[derive(Clone, Default)]
@@ -1619,7 +1613,11 @@ fn saved_section_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) {
     ui.data_mut(|data| data.insert_temp(id, draft));
 }
 
-fn measure_rows(app: &SolveApp, ui: &mut egui::Ui, r: Option<&Value>, show: &mut Option<Shown>) {
+/// The measurement in the dialog: each item's size, then the distance (a pair of round items
+/// offers centre to centre, closest and farthest), its ΔX/Y/Z and the angle between two items.
+fn measure_rows(app: &SolveApp, ui: &mut egui::Ui, r: Option<&Value>, show: &mut Option<Shown>, dual: &mut bool) {
+    let toggle = ui_kit::checkbox(ui, tr("measure.dual_units"), dual);
+    crate::scenario::publish_handle("measure:dual_units", toggle.rect.center());
     let Some(r) = r else {
         ui_kit::text(ui, tr("pick one or two vertices, edges or faces"), ui_kit::Text::Hint("measure"));
         return;
@@ -1628,14 +1626,18 @@ fn measure_rows(app: &SolveApp, ui: &mut egui::Ui, r: Option<&Value>, show: &mut
         ui_kit::text(ui, e, ui_kit::Text::Report("measure_error", true));
         return;
     }
-    let mm = |v: &Value| fmt_mm(app, v);
+    let mm = |v: &Value| v.as_f64().map(|x| crate::prefs::show_measure(app, x, 1, *dual)).unwrap_or_default();
     let value = |ui: &mut egui::Ui, label: &str, text: &str| {
-        form_row(ui, label, |ui| {
-            ui_kit::text(ui, text, ui_kit::Text::Cell);
-        });
+        if *dual {
+            ui_kit::text(ui, &format!("{label}  {text}"), ui_kit::Text::Report(&format!("measure_value_{label}"), false));
+        } else {
+            form_row(ui, label, |ui| {
+                ui_kit::text(ui, text, ui_kit::Text::Cell);
+            });
+        }
     };
     for (i, it) in r["items"].as_array().into_iter().flatten().enumerate() {
-        let lines = crate::quick_measure::item_lines(app, it);
+        let lines = crate::quick_measure::item_lines_with_units(app, it, *dual);
         for (k, line) in lines.into_iter().enumerate() {
             let label = if k == 0 { solidcraft_ui_text::format("measure.item", &[("number", &(i + 1).to_string())]) } else { String::new() };
             // Coordinates need all three values; a fixed-height form cell elides the end.
@@ -1651,30 +1653,54 @@ fn measure_rows(app: &SolveApp, ui: &mut egui::Ui, r: Option<&Value>, show: &mut
                 [(Shown::Centre, centre_label, "center_distance"), (Shown::Min, tr("Min"), "distance_mm"), (Shown::Max, tr("Max"), "max")]
             {
                 let Some(v) = r.get(key).filter(|v| v.is_number()) else { continue };
-                if ui_kit::list_picker(ui, key, &format!("{}  {}", label, mm(v)), now == which).clicked() {
+                let text = if *dual { label.to_string() } else { format!("{}  {}", label, mm(v)) };
+                if ui_kit::list_picker(ui, key, &text, now == which).clicked() {
                     *show = Some(which);
+                }
+                if *dual {
+                    ui_kit::text(ui, &mm(v), ui_kit::Text::Report(&format!("measure_distance_{key}"), false));
                 }
             }
         } else {
-            let text = crate::prefs::show_mm(app, d, 1);
-            form_row(ui, solidcraft_ui_text::tr_label("Distance"), |ui| {
-                let size = solidcraft_theme::Tokens::get().form_close_size;
-                // The value keeps the room left of the button, so the button stays inside the row.
-                ui.scope(|ui| {
-                    ui.set_max_width((ui.available_width() - size).max(0.0));
-                    ui_kit::text(ui, &text, ui_kit::Text::Cell);
+            let text = crate::prefs::show_measure(app, d, 1, *dual);
+            if *dual {
+                ui.horizontal_top(|ui| {
+                    let size = solidcraft_theme::Tokens::get().form_close_size;
+                    let width = (ui.available_width() - size - ui.spacing().item_spacing.x).max(0.0);
+                    ui.allocate_ui_with_layout(egui::vec2(width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+                        ui_kit::text(
+                            ui,
+                            &format!("{}  {text}", solidcraft_ui_text::tr_label("Distance")),
+                            ui_kit::Text::Report("measure_distance", false),
+                        );
+                    });
+                    let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
+                    let copy = ui_kit::icon_button_at(ui, rect, "copy", solidcraft_ui_text::tr_label("Copy"));
+                    crate::scenario::publish_handle("measure:copy:distance", copy.rect.center());
+                    if copy.clicked() {
+                        ui.ctx().copy_text(text.clone());
+                    }
                 });
-                let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
-                let copy = ui_kit::icon_button_at(ui, rect, "copy", solidcraft_ui_text::tr_label("Copy"));
-                crate::scenario::publish_handle("measure:copy:distance", copy.rect.center());
-                if copy.clicked() {
-                    ui.ctx().copy_text(text.clone());
-                }
-            });
+            } else {
+                form_row(ui, solidcraft_ui_text::tr_label("Distance"), |ui| {
+                    let size = solidcraft_theme::Tokens::get().form_close_size;
+                    // The value keeps the room left of the button, so the button stays inside the row.
+                    ui.scope(|ui| {
+                        ui.set_max_width((ui.available_width() - size).max(0.0));
+                        ui_kit::text(ui, &text, ui_kit::Text::Cell);
+                    });
+                    let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
+                    let copy = ui_kit::icon_button_at(ui, rect, "copy", solidcraft_ui_text::tr_label("Copy"));
+                    crate::scenario::publish_handle("measure:copy:distance", copy.rect.center());
+                    if copy.clicked() {
+                        ui.ctx().copy_text(text.clone());
+                    }
+                });
+            }
         }
         let delta = b - a;
         for (l, v) in [("ΔX", delta.x), ("ΔY", delta.y), ("ΔZ", delta.z)] {
-            value(ui, l, &crate::prefs::show_mm(app, v.abs(), 1));
+            value(ui, l, &crate::prefs::show_measure(app, v.abs(), 1, *dual));
         }
     }
     if let Some(a) = r["angle_deg"].as_f64()
@@ -1695,6 +1721,60 @@ pub(crate) fn edge_on_origin_planes(cam: &solidcraft_viewport::Camera) -> Vec<&'
 mod tests {
     use super::*;
     use crate::scenario::{self, Harness};
+
+    #[test]
+    fn dual_measure_values_wrap_at_high_precision_in_a_narrow_panel() {
+        let mut h = Harness::new();
+        h.app.preferences.length_decimals = 8;
+        for width in [200.0, 264.0] {
+            for round_pair in [false, true] {
+                let mut r = json!({"items":[],"distance_mm":13.0,"from":[0,0,0],"to":[3,4,12]});
+                if round_pair {
+                    r["center_distance"] = json!(13.0);
+                    r["center_from"] = json!([0, 0, 0]);
+                    r["center_to"] = json!([3, 4, 12]);
+                    r["max"] = json!(25.4);
+                    r["max_from"] = json!([0, 0, 0]);
+                    r["max_to"] = json!([25.4, 0, 0]);
+                }
+                let ctx = egui::Context::default();
+                crate::fonts::setup_bundled_fonts(&ctx);
+                for frame in 0..3 {
+                    let output = ctx.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 700.0))),
+                            time: Some(frame as f64 / 60.0),
+                            ..Default::default()
+                        },
+                        |ui| measure_rows(&h.app, ui, Some(&r), &mut None, &mut true),
+                    );
+                    if frame != 2 {
+                        continue;
+                    }
+                    for text in [
+                        "13.00000000 mm [0.51181102 in]",
+                        "3.00000000 mm [0.11811024 in]",
+                        "4.00000000 mm [0.15748031 in]",
+                        "12.00000000 mm [0.47244094 in]",
+                    ] {
+                        let values: Vec<_> = output
+                            .shapes
+                            .iter()
+                            .filter_map(|shape| match &shape.shape {
+                                egui::Shape::Text(t) if t.galley.text().contains(text) => Some((shape.clip_rect, t)),
+                                _ => None,
+                            })
+                            .collect();
+                        assert!(!values.is_empty(), "{width}: {text}");
+                        for (clip, t) in values {
+                            assert!(!t.galley.elided, "{width}: {text}");
+                            assert!(clip.expand(1.0).contains_rect(t.visual_bounding_rect()), "{width}: {text}");
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     /// #17606: Create Sketch says how to pick a plane the view shows edge-on, and only then.
     #[test]

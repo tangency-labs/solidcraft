@@ -131,8 +131,14 @@ fn measure(session: &solidcraft_engine::Session, selection: &[Sel]) -> Option<Va
 /// circumference, or an arc's length and angle), a slot's sizes, a straight edge's length, a face's
 /// area and perimeter, a point's position. The Measure tool lists the same.
 pub(crate) fn item_lines(app: &SolveApp, it: &Value) -> Vec<String> {
+    item_lines_with_units(app, it, false)
+}
+
+/// Measure can add a second unit to each dimensional item value.
+pub(crate) fn item_lines_with_units(app: &SolveApp, it: &Value, dual: bool) -> Vec<String> {
     let tr = solidcraft_ui_text::tr;
-    let mm = |v: &Value| v.as_f64().map(|x| crate::prefs::show_mm(app, x, 1)).unwrap_or_default();
+    let mm = |v: &Value| v.as_f64().map(|x| crate::prefs::show_measure(app, x, 1, dual)).unwrap_or_default();
+    let component = |v: &Value| v.as_f64().map(|x| crate::prefs::show_mm(app, x, 1)).unwrap_or_default();
     let mut lines: Vec<String> = Vec::new();
     if it.get("diameter").is_some() {
         lines.push(format!("Ø  {}", mm(&it["diameter"])));
@@ -153,7 +159,7 @@ pub(crate) fn item_lines(app: &SolveApp, it: &Value) -> Vec<String> {
     match it["type"].as_str() {
         Some("edge" | "sketch_curve") if !round => lines.push(format!("{}  {}", tr("Length"), mm(&it["length_mm"]))),
         Some("face" | "profile") => {
-            lines.push(format!("{}  {}", tr("Area"), crate::prefs::show_mm(app, it["area_mm2"].as_f64().unwrap_or(0.0), 2)));
+            lines.push(format!("{}  {}", tr("Area"), crate::prefs::show_measure(app, it["area_mm2"].as_f64().unwrap_or(0.0), 2, dual)));
             for (id, key) in [
                 ("measure.perimeter", "perimeter_mm"),
                 ("measure.perimeter_outer", "outer_perimeter_mm"),
@@ -172,13 +178,13 @@ pub(crate) fn item_lines(app: &SolveApp, it: &Value) -> Vec<String> {
             let p = &it["point"];
             lines.push(format!("{}  {}, {}, {}", tr("measure.at"), mm(&p[0]), mm(&p[1]), mm(&p[2])));
             let n = &it["normal"];
-            lines.push(format!("Normal  {}, {}, {}", mm(&n[0]), mm(&n[1]), mm(&n[2])));
+            lines.push(format!("Normal  {}, {}, {}", component(&n[0]), component(&n[1]), component(&n[2])));
         }
         Some("axis") => {
             let p = &it["origin"];
             lines.push(format!("{}  {}, {}, {}", tr("measure.at"), mm(&p[0]), mm(&p[1]), mm(&p[2])));
             let d = &it["direction"];
-            lines.push(format!("Direction  {}, {}, {}", mm(&d[0]), mm(&d[1]), mm(&d[2])));
+            lines.push(format!("Direction  {}, {}, {}", component(&d[0]), component(&d[1]), component(&d[2])));
         }
         _ => {}
     }

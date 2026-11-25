@@ -396,6 +396,8 @@ crate::dialog_descriptor::dialog_descriptors! {
             /// Measure one or two picked items (vertices, edges, faces): the result of the last
             /// measurement and the items it was for.
             Measure {
+                /// Show an additional metric or inch readout without changing design units.
+                dual_units: bool,
                 result: Option<Value>,
                 of: Vec<Sel>,
                 /// The measure chosen in the panel (centre, min or max); `None` follows the result's
@@ -1176,7 +1178,7 @@ impl Dialog {
                 vec![SelInput::new("Plane", PLANES | PLANAR_FACES, false)],
             ),
             "inspect.measure" => Dialog::new(
-                Kind::Measure { result: None, of: Vec::new(), show: None, labels: Default::default() },
+                Kind::Measure { dual_units: false, result: None, of: Vec::new(), show: None, labels: Default::default() },
                 vec![SelInput::new(
                     "Items",
                     FACES
