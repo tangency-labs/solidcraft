@@ -1621,3 +1621,99 @@ fn a_loft_of_two_squares_has_planar_sides() {
     );
     assert!(rel(b.volume(1e-8).unwrap(), 7000.0 / 3.0) < 1e-9);
 }
+
+/// The profile of #22184 placed by `p`: a cubic Bézier from (-30, -20) to (30, 15) through
+/// the controls (-10, 20) and its last 0.05 mm from its end at 225 degrees (`leg`; the
+/// issue's ordinary profile has (18, 12)), then two lines back.
+fn bezier_profile(p: impl Fn(f64, f64) -> [f64; 3], leg: [f64; 2]) -> Vec<Curve> {
+    let ctrl = [[-30.0, -20.0], [-10.0, 20.0], leg, [30.0, 15.0]];
+    vec![
+        Curve::Nurbs {
+            degree: 3,
+            points: ctrl
+                .iter()
+                .map(|&[y, z]| {
+                    let q = p(y, z);
+                    [q[0], q[1], q[2], 1.0]
+                })
+                .collect(),
+            knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        },
+        Curve::Line {
+            start: p(30.0, 15.0),
+            end: p(30.0, -20.0),
+        },
+        Curve::Line {
+            start: p(30.0, -20.0),
+            end: p(-30.0, -20.0),
+        },
+    ]
+}
+
+/// The last control of #22184's Bézier: 0.05 mm from its end at 225 degrees, so its radius
+/// of curvature falls to 1.2e-4 mm there.
+fn sharp_leg() -> [f64; 2] {
+    let ang = 225.0_f64.to_radians();
+    [30.0 + 0.05 * ang.cos(), 15.0 + 0.05 * ang.sin()]
+}
+
+/// A profile whose cubic Bézier turns sharply at its end (#22184), extruded 10 mm: a closed
+/// solid of the profile's area times 10. By Green's theorem the area is 1559.6287689399
+/// mm^2 (the Bézier's part of the integral exactly, by five-point Gauss on its degree-5
+/// integrand), so 15596.287689399 mm^3.
+#[test]
+fn a_profile_bezier_that_turns_sharply_at_its_end_extrudes_to_a_solid() {
+    rig_fixes();
+    let profile = bezier_profile(|y, z| [2.0, y, z], sharp_leg());
+    let body = extrude(
+        &profile,
+        [1.0, 0.0, 0.0],
+        10.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .expect("the extrude is a solid");
+    assert!(body.check(CheckLevel::All).unwrap().is_valid());
+    let v = body.volume(1e-10).unwrap();
+    assert!((v - 15596.287689399).abs() <= 1e-6, "{v}");
+    // the Bézier's sharp end is its own wall
+    assert_eq!(body.counts().unwrap()[0], 6);
+}
+
+/// The same profile in the XZ plane, 40 mm out along X (x from 10 to 70), turned a whole
+/// turn about Z: by Pappus the volume is 2 pi times the region's moment about the axis, its
+/// integral of x, by Green's theorem the integral of x^2 / 2 dz round the loop: -85750 along
+/// the line x = 70, 0 along the line z = -20, and 13963.00720844239 along the Bézier
+/// (five-point Gauss, exact on its degree-8 integrand): 71786.9927915576 mm^3 in all, so
+/// 451050.978354522 mm^3.
+#[test]
+fn a_profile_bezier_that_turns_sharply_at_its_end_revolves_to_a_solid() {
+    rig_fixes();
+    let profile = bezier_profile(|y, z| [y + 40.0, 0.0, z], sharp_leg());
+    let body = revolve(&profile, [0.0; 3], Z, TAU, true).expect("the revolve is a solid");
+    assert!(body.check(CheckLevel::All).unwrap().is_valid());
+    let v = body.volume(1e-10).unwrap();
+    assert!(
+        (v - 451050.978354522).abs() <= 1e-9 * 451050.978354522,
+        "{v}"
+    );
+}
+
+/// The issue's ordinary profile (last control (18, 12)) is not cut: its extrusion has a wall
+/// per curve and two caps.
+#[test]
+fn a_profile_bezier_with_an_ordinary_end_extrudes_one_wall_per_curve() {
+    rig_fixes();
+    let profile = bezier_profile(|y, z| [2.0, y, z], [18.0, 12.0]);
+    let body = extrude(
+        &profile,
+        [1.0, 0.0, 0.0],
+        10.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .expect("the extrude is a solid");
+    assert_eq!(body.counts().unwrap()[0], 5);
+}
