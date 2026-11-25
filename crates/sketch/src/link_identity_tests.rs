@@ -696,6 +696,10 @@ fn edge_on_face_saved_as_a_line_pair_keeps_the_line_an_offset_follows() {
         auto_face: false,
         lost: false,
         name_dropped: false,
+        placement: None,
+        frozen: false,
+        hidden: false,
+        omit_edges: Vec::new(),
     });
     let ids: Vec<String> = sk.link_curves(&link).iter().map(|c| sk.curves[*c].id.clone()).collect();
     assert_eq!(ids.len(), 2, "the saved link holds the pair");
@@ -1150,6 +1154,87 @@ fn a_face_read_by_its_edge_names_keeps_its_curves_through_any_order() {
     assert_eq!(old.points, plain.points);
     assert_eq!(old.curves, plain.curves);
     assert_eq!(old.constraints, plain.constraints);
+}
+
+/// A square face with its corners cut (a chamfer added before the sketch's feature).
+fn chamfered(size: f64, cut: f64) -> Vec<LinkGeom> {
+    let (s, c) = (size, size - cut);
+    let pts = [
+        Vec2::new(-c, -s),
+        Vec2::new(c, -s),
+        Vec2::new(s, -c),
+        Vec2::new(s, c),
+        Vec2::new(c, s),
+        Vec2::new(-c, s),
+        Vec2::new(-s, c),
+        Vec2::new(-s, -c),
+    ];
+    (0..8).map(|i| LinkGeom::Line(pts[i], pts[(i + 1) % 8])).collect()
+}
+
+#[test]
+fn rebuilt_face_keeps_constraints_on_edges_that_survive_and_reports_the_rest() {
+    let mut sk = Sketch::new();
+    let link = sk.add_link(LinkKind::Project, face(), &square(10.0)).unwrap();
+    let top = sk
+        .link_curves(&link)
+        .into_iter()
+        .find(|c| sk.curve_link_geom(*c) == Some(LinkGeom::Line(Vec2::new(10.0, 10.0), Vec2::new(-10.0, 10.0))))
+        .unwrap();
+    let top_id = sk.curves[top].id.clone();
+    let corner = sk.link_points(&link).into_iter().find(|p| sk.points[*p].pos == Vec2::new(10.0, -10.0)).unwrap();
+    let on_edge = sk.add_point(Vec2::new(3.0, 10.0), None).unwrap();
+    let at_corner = sk.add_point(Vec2::new(10.0, -10.0), None).unwrap();
+    let on_edge_id = sk.points[on_edge].id.clone();
+    let kept = sk.add_constraint(ConstraintKind::PointOnCurve { p: on_edge, c: top }, None).unwrap();
+    let lost = sk.add_constraint(ConstraintKind::Coincident { p: at_corner, q: corner }, None).unwrap();
+
+    let update = sk.update_link_detail(&link, &chamfered(10.0, 2.0)).unwrap();
+    assert!(update.rebuilt);
+    assert_eq!(update.dropped, vec![lost], "only the constraint on the cut-away corner goes");
+    let top = sk.curve_index(&top_id).expect("the shortened top edge keeps its id");
+    assert_eq!(sk.curve_link_geom(top), Some(LinkGeom::Line(Vec2::new(8.0, 10.0), Vec2::new(-8.0, 10.0))));
+    let c = sk.constraints.iter().find(|c| c.id == kept).expect("point-on-edge survives the rebuild");
+    let on_edge = sk.point_index(&on_edge_id).unwrap();
+    assert!(matches!(c.kind, ConstraintKind::PointOnCurve { p, c } if p == on_edge && c == top));
+    assert!(solve(&mut sk).ok());
+}
+
+/// A 0.5 mm chamfer cut into a corner of a 1000 mm face leaves two new points, each 0.5 mm from
+/// the old corner: neither is clearly the nearer, so neither takes its id. The constraint on the
+/// corner is reported dropped, not kept on one of the chamfer's ends. The other corners keep
+/// their ids.
+#[test]
+fn a_small_chamfer_on_a_large_face_does_not_give_the_corner_id_to_either_end() {
+    let mut sk = Sketch::new();
+    let link = sk.add_link(LinkKind::Project, face(), &square(500.0)).unwrap();
+    let id_at =
+        |sk: &Sketch, at: Vec2| sk.link_points(&link).into_iter().find(|p| sk.points[*p].pos.dist(at) < 1e-9).map(|p| sk.points[p].id.clone());
+    let corner = Vec2::new(500.0, 500.0);
+    let corner_id = id_at(&sk, corner).unwrap();
+    let other_id = id_at(&sk, Vec2::new(-500.0, 500.0)).unwrap();
+    let free = sk.add_point(corner, None).unwrap();
+    let q = sk.point_index(&corner_id).unwrap();
+    let on_corner = sk.add_constraint(ConstraintKind::Coincident { p: free, q }, None).unwrap();
+    // The untouched corner is held too, so the rebuild carries its id over.
+    let other = sk.add_point(Vec2::new(-500.0, 500.0), None).unwrap();
+    let r = sk.point_index(&other_id).unwrap();
+    let on_other = sk.add_constraint(ConstraintKind::Coincident { p: other, q: r }, None).unwrap();
+    let (a, b) = (Vec2::new(500.0, 499.5), Vec2::new(499.5, 500.0));
+    let chamfered = [
+        LinkGeom::Line(Vec2::new(-500.0, -500.0), Vec2::new(500.0, -500.0)),
+        LinkGeom::Line(Vec2::new(500.0, -500.0), a),
+        LinkGeom::Line(a, b),
+        LinkGeom::Line(b, Vec2::new(-500.0, 500.0)),
+        LinkGeom::Line(Vec2::new(-500.0, 500.0), Vec2::new(-500.0, -500.0)),
+    ];
+    let update = sk.update_link_detail(&link, &chamfered).unwrap();
+    assert!(update.rebuilt);
+    assert_ne!(id_at(&sk, a).as_deref(), Some(corner_id.as_str()));
+    assert_ne!(id_at(&sk, b).as_deref(), Some(corner_id.as_str()));
+    assert!(update.dropped.contains(&on_corner), "{:?}", update.dropped);
+    assert_eq!(id_at(&sk, Vec2::new(-500.0, 500.0)), Some(other_id), "an untouched corner keeps its id");
+    assert!(!update.dropped.contains(&on_other) && sk.constraints.iter().any(|c| c.id == on_other));
 }
 
 /// #20280: a face's outer rim and a shelled wall's rim, concentric arcs saved on one centre point,
