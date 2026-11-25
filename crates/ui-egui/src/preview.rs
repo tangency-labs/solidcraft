@@ -979,7 +979,7 @@ fn lighten_preview(s: &Session, cmds: &[(String, Value)], c: Colors) -> Option<J
         Ok(states) => states,
         Err(e) => return Some(Err(e)),
     };
-    let mut b = build_as(&before, &after, c, None);
+    let mut b = build_as(&before, &after, c, None, &HashMap::new());
     b.bounds = state_bounds(&after);
     Some(Ok(b))
 }
