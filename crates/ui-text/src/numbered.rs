@@ -34,11 +34,9 @@ pub struct Msg {
     place: u32,
     /// The [`fingerprint`] of the ids the place was counted in.
     ids: u32,
-    /// The id, in a build with debug assertions (development and tests), where a message no
-    /// table has is still named when it was counted in another list of ids than the installed
-    /// English catalog's (a test's own catalogs). Empty in a release build, which is how the ids
-    /// stay out of it (see [`debug_id`](crate::debug_id)): there the id is found from the place
-    /// (`Locale::message`).
+    /// The id, which names a message no table has when nothing else can: when it was counted in
+    /// another list of ids than the installed English catalog's (a test's own catalogs), or when
+    /// no catalog is installed (a test that installs none). Empty for [`Msg::of`].
     id: &'static str,
 }
 
@@ -56,17 +54,6 @@ impl std::hash::Hash for Msg {
     }
 }
 
-/// `$id` in a build with debug assertions, empty otherwise: what `msg!` gives [`Msg::checked`]
-/// for the id. The choice is made where `msg!` is used, and a release build never refers to the
-/// literal, so it is not in the program.
-#[doc(hidden)]
-#[macro_export]
-macro_rules! debug_id {
-    ($id:literal) => {
-        if cfg!(debug_assertions) { $id } else { "" }
-    };
-}
-
 impl Msg {
     /// The message at `place` among the ids with the fingerprint `ids`. `msg!` writes this after
     /// finding the id in the English catalog; nothing else should.
@@ -75,8 +62,7 @@ impl Msg {
         Self { place, ids, id }
     }
 
-    /// What stands for the message when nothing can say which it is: its id where the build
-    /// kept it.
+    /// What stands for the message when nothing can say which it is: its id.
     pub(crate) const fn unread(self) -> &'static str {
         self.id
     }
@@ -192,6 +178,13 @@ mod tests {
 
     fn msg(id: &str) -> Msg {
         Msg::checked(IDS.iter().position(|i| *i == id).unwrap() as u32, fingerprint(IDS), "")
+    }
+
+    /// Counted among ids no catalog has (or before any is installed), a message reads as the id
+    /// it kept, in a release build too, and never as nothing.
+    #[test]
+    fn a_message_nothing_can_name_reads_as_the_id_it_kept() {
+        assert_eq!(Msg::checked(0, FINGERPRINT ^ 1, "ui.nowhere").tr(), "ui.nowhere");
     }
 
     #[test]

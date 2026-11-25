@@ -406,9 +406,8 @@ impl Locale {
     ///
     /// A catalog with a table is read from it. One without (`Catalog::new`, another host's) is
     /// read by the id, which the English catalog's ids give back from the place; so is a message
-    /// no table has, which reads as its id. Only a message numbered among other ids than the
-    /// installed English catalog's cannot be named that way: it reads as the id the build kept
-    /// (with debug assertions), or as nothing.
+    /// no table has, which reads as its id. A message numbered among other ids than the installed
+    /// English catalog's, or read before any is installed, reads as the id the macro kept.
     pub fn message(self, msg: Msg) -> &'static str {
         if let Some(text) = numbered::lookup(self.0.table(), msg).or_else(|| numbered::lookup(english().table(), msg)) {
             return text;

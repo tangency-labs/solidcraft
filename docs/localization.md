@@ -48,9 +48,9 @@ until it runs, so keep it for ids that cannot be written out.
 What the macros put in the program is not the id but its place among the English catalog's
 sorted ids (`solidcraft_ui_text::numbered`). The build packs each catalog as a table of its
 texts in that order, and every catalog but English is embedded as its table alone, without its
-JSON: the ids are in the program once, not once per language. A build with debug assertions
-keeps each id beside its place, so a message no catalog has still reads as its id in tests; a
-release build does not. The tests read every catalog's JSON, and one compares each table with
+JSON: an id is in the program at most twice (the English catalog's, and the macro's beside its
+place), not once per language. The macro's copy names a message no catalog has, before any
+catalog is installed too, so it never reads as nothing. The tests read every catalog's JSON, and one compares each table with
 it, message by message.
 
 The English-label adapter (`app.tr_label`) supports existing engine and UI tables. It maps

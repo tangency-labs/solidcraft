@@ -76,7 +76,7 @@ impl Parse for Input {
 fn message(input: &Input, unfilled: bool) -> syn::Result<proc_macro2::TokenStream> {
     let ((place, ids), values) = check(input, unfilled)?;
     let id = &input.id;
-    let msg = quote!(::solidcraft_ui_text::Msg::checked(#place, #ids, ::solidcraft_ui_text::debug_id!(#id)));
+    let msg = quote!(::solidcraft_ui_text::Msg::checked(#place, #ids, #id));
     Ok(match values {
         None => msg,
         Some(values) => {
