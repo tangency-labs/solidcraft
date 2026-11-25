@@ -92,6 +92,67 @@ fn a_click_on_the_bottom_edge_makes_an_edge_flange() {
     assert_eq!(c[0].1["type"], "edge", "{:?}", c[0].1);
 }
 
+#[test]
+fn contour_flange_options_round_trip_through_feature_editing() {
+    let mut app = plate(crate::ui_kit::LayoutMode::Docked);
+    app.run("sketch.create", json!({"plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, -1]}, "name": "Contour"})).unwrap();
+    app.run("sketch.line", json!({"points": [[0, 0], [40, 0], [40, -30]], "ids": ["l1", "l2"]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run(
+        "sheet.flange",
+        json!({
+            "type": "contour",
+            "sketch": "Contour",
+            "curves": ["l1", "l2"],
+            "distance": "20 mm",
+            "radius": "1.5 mm",
+            "orientation": "side2",
+            "symmetric": true
+        }),
+    )
+    .unwrap();
+
+    let feature = app.session.doc.features.last().unwrap().clone();
+    let edit = edit_dialog(&app, feature.id, None).unwrap();
+    assert!(matches!(
+        &edit.kind,
+        Kind::Sheet(Sm::Flange { ty: 2, radius, orientation: 2, symmetric: true, .. }) if radius == "1.5 mm"
+    ));
+    let commands = apply_commands(&app, &edit).unwrap();
+    assert_eq!(commands[0].0, "timeline.redefine");
+    assert_eq!(commands[0].1["params"]["orientation"], "side2");
+    assert_eq!(commands[0].1["params"]["symmetric"], true);
+    assert_eq!(commands[0].1["params"]["radius"], "1.5 mm");
+}
+
+/// A contour flange saved before it had an orientation, with Other side ticked: Edit Feature
+/// shows Other side ticked and Flip as saved, and applying the dialog unchanged leaves the
+/// flange where it was, its width still on the other side of the sketch plane.
+#[test]
+fn an_older_other_side_contour_flange_stays_put_through_editing() {
+    let mut app = plate(crate::ui_kit::LayoutMode::Docked);
+    app.run("sketch.create", json!({"plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, -1]}, "name": "Contour"})).unwrap();
+    app.run("sketch.line", json!({"points": [[0, 0], [40, 0], [40, -30]], "ids": ["l1", "l2"]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run("sheet.flange", json!({"type": "contour", "sketch": "Contour", "curves": ["l1", "l2"], "distance": "20 mm", "reverse": true})).unwrap();
+    let feature = app.session.doc.features.last().unwrap().clone();
+    assert!(matches!(&feature.kind, solidcraft_engine::doc::FeatureKind::SheetContour { orientation: None, reverse: true, flip: false, .. }));
+    let bounds = |app: &SolveApp| {
+        let body = app.session.model.state().bodies.last().map(|b| b.body.clone()).unwrap();
+        solidcraft_engine::kernel::measure(&body).unwrap().bbox
+    };
+    let before = bounds(&app);
+
+    let edit = edit_dialog(&app, feature.id, None).unwrap();
+    assert!(matches!(&edit.kind, Kind::Sheet(Sm::Flange { ty: 2, reverse: true, flip: false, orientation: 1, symmetric: false, .. })));
+    let commands = apply_commands(&app, &edit).unwrap();
+    assert_eq!(commands[0].1["params"]["reverse"], true);
+    assert_eq!(commands[0].1["params"]["flip"], false);
+    run_all(&mut app, commands);
+    let after = bounds(&app);
+    assert!(before.min.dist(after.min) < 1e-9 && before.max.dist(after.max) < 1e-9, "{before:?} became {after:?}");
+}
+
 /// Hem takes edges and an optional gap; rules make and pick a rule with its expressions.
 #[test]
 fn hem_and_rules() {
@@ -1091,6 +1152,68 @@ fn path_flange_dialog_follows_the_path() {
     }
 }
 
+/// The Tab dialog takes the profile of a sketch on the sheet's face: the profile joins the same
+/// body, and Edit Feature brings the profile back.
+#[test]
+fn tab_dialog_joins_the_profile_to_the_sheet() {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
+        let mut app = plate(mode);
+        app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+        app.run("sketch.create", json!({"plane": {"face": [50, 30, 2.5]}, "name": "Ear"})).unwrap();
+        // From (30, 50) to (70, 90) on the top face: over its y = 60 edge by 30 mm.
+        use solidcraft_engine::geom::prelude::*;
+        let plane = app.session.model.state().sketches.last().map(|ss| ss.plane).unwrap();
+        let (p0, p1) = (plane.to_local(solidcore_record::Vec3::new(30.0, 50.0, 2.5)), plane.to_local(solidcore_record::Vec3::new(70.0, 90.0, 2.5)));
+        app.run("sketch.rectangle.two_point", json!({"p0": [p0.x, p0.y], "p1": [p1.x, p1.y]})).unwrap();
+        app.run("sketch.finish", json!({})).unwrap();
+        let ear = app.session.model.state().sketches.last().map(|ss| ss.feature).unwrap();
+        // The face's projected outline parts the profile: the region past the y = 60 edge.
+        let past = plane.to_local(solidcore_record::Vec3::new(50.0, 80.0, 2.5));
+        let ss = crate::open_meshing::session_world(&app.session).sketch(ear).unwrap().clone();
+        let index = ss.profiles.iter().position(|p| p.region.contains(solidcore_record::Vec2::new(past.x, past.y))).unwrap();
+        app.start("sheet.tab");
+        let mut d = app.dialog.clone().unwrap();
+        assert!(matches!(&d.kind, Kind::Sheet(Sm::Tab {})));
+        assert!(apply_commands(&app, &d).is_err(), "no profile picked yet");
+        d.inputs[0].items = vec![Sel::Profile { sketch: ear, index }];
+        let c = apply_commands(&app, &d).unwrap();
+        assert_eq!(c, vec![("sheet.tab".to_string(), json!({"sketch": ear, "profiles": [index], "exact_regions": true}))]);
+        let features = app.session.doc.features.len();
+        run_all(&mut app, c);
+        assert!(app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", app.session.model.results);
+        assert_eq!(app.session.doc.features.len(), features + 1);
+        assert_eq!(app.session.model.state().bodies.len(), 1, "the tab is part of the sheet");
+        let f = app.session.doc.features.last().cloned().unwrap();
+        let e = edit_dialog(&app, f.id, None).unwrap();
+        assert!(matches!(&e.kind, Kind::Sheet(Sm::Tab {})));
+        assert_eq!(e.inputs[0].items, vec![Sel::Profile { sketch: ear, index }]);
+        assert!(apply_commands(&app, &e).is_ok());
+    }
+}
+
+/// A tab of every profile of its sketch (no `profiles`) edited with OK and the picks unchanged
+/// stays every profile, so a profile added to the sketch later joins it too.
+#[test]
+fn an_unchanged_tab_edit_keeps_every_profile() {
+    let mut app = plate(crate::ui_kit::LayoutMode::Floating);
+    app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    app.run("sketch.create", json!({"plane": {"face": [50, 30, 2.5]}, "name": "Ear"})).unwrap();
+    use solidcraft_engine::geom::prelude::*;
+    let plane = app.session.model.state().sketches.last().map(|ss| ss.plane).unwrap();
+    let (p0, p1) = (plane.to_local(solidcore_record::Vec3::new(30.0, 50.0, 2.5)), plane.to_local(solidcore_record::Vec3::new(70.0, 90.0, 2.5)));
+    app.run("sketch.rectangle.two_point", json!({"p0": [p0.x, p0.y], "p1": [p1.x, p1.y]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run("sheet.tab", json!({"sketch": "Ear"})).unwrap();
+    let f = app.session.doc.features.last().cloned().unwrap();
+    assert!(matches!(&f.kind, FeatureKind::SheetTab { profiles: ProfileSel::All, .. }), "{:?}", f.kind);
+    let e = edit_dialog(&app, f.id, None).unwrap();
+    assert!(!e.inputs[0].items.is_empty(), "the edit shows the profiles it takes");
+    let c = apply_commands(&app, &e).unwrap();
+    let [(cmd, p)] = <[(String, serde_json::Value); 1]>::try_from(c).unwrap();
+    assert_eq!(cmd, "timeline.redefine");
+    assert_eq!(p["params"]["profiles"], json!("all"), "{p}");
+}
+
 // ---- flat pattern navigation ----
 
 fn flat_app(preset: &str, mode: crate::ui_kit::LayoutMode) -> SolveApp {
@@ -1226,13 +1349,7 @@ trait IntoNav {
 }
 impl IntoNav for egui::PointerButton {
     fn into_nav(self) -> crate::prefs::NavButton {
-        match self {
-            egui::PointerButton::Middle => crate::prefs::NavButton::Middle,
-            egui::PointerButton::Secondary => crate::prefs::NavButton::Right,
-            egui::PointerButton::Extra1 => crate::prefs::NavButton::Extra1,
-            egui::PointerButton::Extra2 => crate::prefs::NavButton::Extra2,
-            egui::PointerButton::Primary => crate::prefs::NavButton::Left,
-        }
+        crate::prefs::NavButton::of_pointer(self)
     }
 }
 

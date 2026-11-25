@@ -4,12 +4,15 @@
 
 use solidcore::curve::spline_projection as kernel;
 use solidcore_convert as convert;
-use solidcore_record::brep::Curve;
+use solidcore_record::brep::{Curve, Surface};
 use solidcore_record::{Plane, Vec3};
 
 use crate::{Error, Result};
 
 pub use crate::prism::{PlanarPiece, PlanarSpline};
+
+/// The certificate work an edge's exact projection may take before it is not read.
+const EDGE_WORK: usize = 262_144;
 
 fn kernel_spline(s: &PlanarSpline) -> solidcore::prism::read::PlanarSpline {
     solidcore::prism::read::PlanarSpline {
@@ -27,6 +30,18 @@ fn record_spline(s: solidcore::prism::read::PlanarSpline) -> PlanarSpline {
         points: s.points.into_iter().map(convert::record_vec2).collect(),
         weights: s.weights,
     }
+}
+
+fn record_pieces(pieces: Vec<solidcore::prism::read::PlanarPiece>) -> Vec<PlanarPiece> {
+    pieces
+        .into_iter()
+        .map(|p| match p {
+            solidcore::prism::read::PlanarPiece::Seg(s) => {
+                PlanarPiece::Seg(convert::record_seg2(&s))
+            }
+            solidcore::prism::read::PlanarPiece::Spline(s) => PlanarPiece::Spline(record_spline(s)),
+        })
+        .collect()
 }
 
 /// Split one clamped spline at existing knots to meet the client's control budget.
@@ -60,19 +75,64 @@ pub fn project_curve(
         tol,
         work,
     )
-    .map(|pieces| {
-        pieces
-            .into_iter()
-            .map(|p| match p {
-                solidcore::prism::read::PlanarPiece::Seg(s) => {
-                    PlanarPiece::Seg(convert::record_seg2(&s))
-                }
-                solidcore::prism::read::PlanarPiece::Spline(s) => {
-                    PlanarPiece::Spline(record_spline(s))
-                }
-            })
-            .collect()
-    })
+    .map(record_pieces)
+}
+
+/// A boundary of an analytic cylinder, projected along its axis. The kernel
+/// certifies the complete native interval against that support's exact circle.
+/// Conflicting supporting circles are ambiguous and do not select an image.
+pub fn cylinder_edge_projection(
+    body: &solidcore_record::brep::Brep,
+    plane: &Plane,
+    index: usize,
+    tol: f64,
+) -> Option<Vec<PlanarPiece>> {
+    let edge = body.edges.get(index)?;
+    // An analytic curve keeps the general path's own reading.
+    if matches!(
+        &edge.curve,
+        Curve::Line { .. } | Curve::Circle { .. } | Curve::Ellipse { .. } | Curve::Polyline { .. }
+    ) {
+        return None;
+    }
+    if !edge.uses.iter().any(|usage| {
+        body.faces
+            .get(usage.face as usize)
+            .is_some_and(|face| matches!(face.surface, Surface::Cylinder { .. }))
+    }) {
+        return None;
+    }
+    let at = |i: u32| {
+        body.vertices
+            .get(i as usize)
+            .map(|v| convert::vec3(Vec3::from(v.point)))
+    };
+    let ends = [at(edge.vertices[0])?, at(edge.vertices[1])?];
+    let curve = convert::curve(edge.parameters()).ok()?;
+    let target = convert::plane(plane);
+    let mut found = None;
+    for usage in &edge.uses {
+        let Some(Surface::Cylinder { frame, radius }) =
+            body.faces.get(usage.face as usize).map(|f| &f.surface)
+        else {
+            continue;
+        };
+        let Some(pieces) = kernel::cylinder_projection(
+            &curve,
+            edge.interval,
+            ends,
+            (&convert::frame(frame), *radius),
+            &target,
+            tol,
+        ) else {
+            continue;
+        };
+        if found.as_ref().is_some_and(|previous| previous != &pieces) {
+            return None;
+        }
+        found = Some(pieces);
+    }
+    found.map(record_pieces)
 }
 
 /// Project the requested native record edges without building or changing their body.
@@ -93,6 +153,7 @@ pub fn project_edges(
                     .map(|v| Vec3::new(v.point[0], v.point[1], v.point[2]))
             };
             let ends = [at(edge.vertices[0])?, at(edge.vertices[1])?];
+            let mut work = EDGE_WORK;
             project_curve(
                 edge.parameters(),
                 edge.interval,
@@ -100,10 +161,33 @@ pub fn project_edges(
                 ends,
                 plane,
                 tol,
-                &mut 262_144,
+                &mut work,
             )
         })
         .collect()
+}
+
+/// The part of `curve` over the record's parameter `interval`, whose end points are `ends`,
+/// projected on `plane` exactly ([`project_curve`] within an edge's work budget) as sketch
+/// geometry ([`crate::conic_projection::classify_pieces`] within `limit` and `max_coord`).
+/// `None` when the projection is not certified within the budget.
+///
+/// # Errors
+/// Those of [`crate::conic_projection::classify_pieces`].
+pub fn projected_part(
+    curve: &Curve,
+    interval: [f64; 2],
+    ends: [Vec3; 2],
+    plane: &Plane,
+    tol: f64,
+    limit: usize,
+    max_coord: f64,
+) -> Result<Option<Vec<crate::conic_projection::Projection>>> {
+    let mut work = EDGE_WORK;
+    let Some(pieces) = project_curve(curve, interval, true, ends, plane, tol, &mut work) else {
+        return Ok(None);
+    };
+    crate::conic_projection::classify_pieces(plane, &pieces, limit, max_coord).map(Some)
 }
 
 /// Whether an edge can be read in a plane parallel to the target, before cylinder recognition.
@@ -128,13 +212,14 @@ pub fn has_parallel_projection(
     let Ok(curve) = convert::curve(edge.parameters()) else {
         return false;
     };
+    let mut work = EDGE_WORK;
     kernel::has_parallel_projection(
         &curve,
         edge.interval,
         [a, b],
         &convert::plane(plane),
         tol,
-        &mut 262_144,
+        &mut work,
     )
 }
 

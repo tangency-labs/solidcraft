@@ -235,8 +235,9 @@ fn hostile_rails_are_refused() {
         p.as_object_mut().unwrap().extend(bad.as_object().unwrap().clone());
         assert!(s.execute("surface.loft", &p).is_err(), "surface {bad}");
     }
-    // Rails on what the railed loft does not build yet.
-    let apex = json!({"sections": [{"sketch": "Base"}, {"sketch": "Rail", "point": "arc.start"}], "rails": rail});
+    // A loft to a point whose rail stops short of the apex (the arc's top end, 40 up).
+    let apex =
+        json!({"sections": [{"sketch": "Base"}, {"sketch": "Rail", "point": "arc.start"}], "rails": [{"sketch": "Rail", "curves": ["short"]}]});
     assert!(s.execute("solid.loft", &apex).is_err());
     // Rings (a circle with a hole) loft without rails, not with them yet.
     let ring = |name: &str| json!({"sketch": name, "profiles": [{"point": [7.5, 0]}]});
@@ -249,3 +250,154 @@ fn hostile_rails_are_refused() {
     assert!(refused.contains("not supported yet"), "{refused}");
     assert_eq!(s.doc.features.len(), before, "nothing was added");
 }
+
+/// To [`setup`]'s sketches, `Tip`: the point `apex` 40 above the circles' centre; and `Spine` on
+/// XZ: the line `side` from the circle at x = 10 straight to the apex, and the arc `bow` from the
+/// circle at x = −10 to the apex bulging out through (−9, 0, 20).
+fn apex_sketches(s: &mut Session) {
+    run(s, "sketch.create", json!({"name": "Tip", "plane": {"origin": [0, 0, 40], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    run(s, "sketch.point", json!({"point": [0, 0], "id": "apex"}));
+    run(s, "sketch.finish", json!({}));
+    run(s, "sketch.create", json!({"plane": "XZ", "name": "Spine"}));
+    // The XZ sketch's y runs down world Z.
+    run(s, "sketch.line", json!({"points": [[10, 0], [0, -40]], "ids": ["side"]}));
+    run(s, "sketch.arc.three_point", json!({"start": [-10, 0], "end": [0, -40], "through": [-9, -20], "id": "bow"}));
+    run(s, "sketch.finish", json!({}));
+}
+
+/// A circle lofted to a sketch point along a rail (#20985): a straight rail from the circle to the
+/// apex gives the cone, π · 10² · 40 / 3, named as the loft to the point without the rail, and the
+/// rail is saved with it; an arc rail bulging out makes a fuller solid that still ends at the apex.
+#[test]
+fn a_loft_to_a_point_follows_its_rail() {
+    let mut s = setup();
+    apex_sketches(&mut s);
+    let to_point = |rails: Value, body: &str| json!({"sections": [{"sketch": "Base"}, {"sketch": "Tip", "point": "apex"}], "operation": "new", "body_name": body, "rails": rails});
+    run(&mut s, "solid.loft", json!({"sections": [{"sketch": "Base"}, {"sketch": "Tip", "point": "apex"}], "operation": "new", "body_name": "Cone"}));
+    run(&mut s, "solid.loft", to_point(json!([{"sketch": "Spine", "curves": ["side"]}]), "Railed"));
+    let cone = PI * 100.0 * 40.0 / 3.0;
+    let m = measure(&s, "Railed");
+    assert!((m.volume - cone).abs() < 1e-4 * cone, "volume {} vs {cone}", m.volume);
+    assert!((m.bbox.max.z - 40.0).abs() < 1e-6, "{:?}", m.bbox);
+    assert_eq!(face_names(&mut s, "Cone"), face_names(&mut s, "Railed"));
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!((measure(&reopened, "Railed").volume - m.volume).abs() < 1e-9 * cone);
+
+    run(&mut s, "solid.loft", to_point(json!([{"sketch": "Spine", "curves": ["bow"]}]), "Bowed"));
+    let bowed = measure(&s, "Bowed");
+    assert!(bowed.volume > cone && bowed.volume < PI * 100.0 * 40.0, "volume {} between {cone} and the cylinder", bowed.volume);
+    assert!((bowed.bbox.max.z - 40.0).abs() < 1e-6 && bowed.bbox.min.x < -10.0 + 1e-3, "{:?}", bowed.bbox);
+}
+
+/// The railed loft to a point (#20985) given apex first is the same cone; as a cut it takes the
+/// cone out of a box round it (30 × 30 × 45 less π · 10² · 40 / 3); joined to a block under its
+/// base it adds the cone to it (30 × 30 × 5 plus the cone).
+#[test]
+fn a_railed_loft_to_a_point_cuts_joins_and_takes_its_sections_either_way_round() {
+    let cone = PI * 100.0 * 40.0 / 3.0;
+    let rails = json!([{"sketch": "Spine", "curves": ["side"]}]);
+    let apex_first = json!([{"sketch": "Tip", "point": "apex"}, {"sketch": "Base"}]);
+    let mut s = setup();
+    apex_sketches(&mut s);
+    run(&mut s, "solid.loft", json!({"sections": apex_first, "operation": "new", "body_name": "Flipped", "rails": rails}));
+    let v = measure(&s, "Flipped").volume;
+    assert!((v - cone).abs() < 1e-4 * cone, "apex first: volume {v} vs {cone}");
+
+    for (op, corner, height, want) in [("cut", 0.0, 45.0, 30.0 * 30.0 * 45.0 - cone), ("join", -5.0, 5.0, 30.0 * 30.0 * 5.0 + cone)] {
+        let mut s = setup();
+        apex_sketches(&mut s);
+        run(&mut s, "solid.box", json!({"corner": [-15, -15, corner], "length": 30, "width": 30, "height": height, "body_name": "Stock"}));
+        run(&mut s, "solid.loft", json!({"sections": [{"sketch": "Base"}, {"sketch": "Tip", "point": "apex"}], "operation": op, "rails": rails}));
+        let v = measure(&s, "Stock").volume;
+        assert!((v - want).abs() < 1e-4 * want, "{op}: volume {v} vs {want}");
+    }
+}
+
+/// Six 3D-sketch spline rails around the circles of `Base` and `Top`, each bulging out to
+/// radius 15 halfway up: solid.loft follows all six (the rails' solid of revolution, volume
+/// 4500π + 8000 to the splines' fit of the sine), and seventeen are refused.
+#[test]
+fn six_spline3d_rails_guide_a_solid_loft_and_seventeen_are_refused() {
+    let mut s = setup();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Rails3d"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    let rail_at = |s: &mut Session, a: f64| -> String {
+        let pts: Vec<[f64; 3]> = (0..=16)
+            .map(|i| {
+                let z = f64::from(i) * 2.5;
+                let r = 10.0 + 5.0 * (PI * z / 40.0).sin();
+                [r * a.cos(), r * a.sin(), z]
+            })
+            .collect();
+        run(s, "sketch.spline3d", json!({ "points": pts }))["curves"][0].as_str().unwrap().to_string()
+    };
+    let ids: Vec<String> = (0..17).map(|k| rail_at(&mut s, f64::from(k) * 2.0 * PI / 17.0)).collect();
+    let six: Vec<String> = (0..6).map(|k| rail_at(&mut s, f64::from(k) * PI / 3.0)).collect();
+    run(&mut s, "sketch.finish", json!({}));
+    let rails = |ids: &[String]| json!({"rails": ids.iter().map(|c| json!({"sketch": "Rails3d", "curves": [c]})).collect::<Vec<_>>()});
+    loft(&mut s, "Six", rails(&six)).unwrap();
+    let m = measure(&s, "Six");
+    let want = 4500.0 * PI + 8000.0;
+    assert!((m.volume - want).abs() < 2e-3 * want, "volume {} vs {want}", m.volume);
+    assert!((m.bbox.max.x - 15.0).abs() < 0.05 && (m.bbox.max.z - 40.0).abs() < 1e-6, "{:?}", m.bbox);
+    let e = loft(&mut s, "Many", rails(&ids)).unwrap_err();
+    assert!(e.contains("1…16"), "{e}");
+}
+
+/// A 10 mm square (x 500…510, y 0…10, z = 0) down to a 6 mm one 20 mm below, joined corner to
+/// corner by four straight rails: the frustum (h/3 · (A₁ + A₂ + √(A₁A₂))). Built with one rail
+/// and edited to all four through timeline.edit; seventeen are refused there too.
+#[test]
+fn four_corner_rails_make_a_frustum_and_are_an_edit() {
+    let mut s = Session::default();
+    for (name, z, lo, hi) in [("Big", 0, [500, 0], [510, 10]), ("Small", -20, [502, 2], [508, 8])] {
+        run(&mut s, "sketch.create", json!({"name": name, "plane": {"origin": [0, 0, z], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": lo, "p1": hi}));
+        run(&mut s, "sketch.finish", json!({}));
+    }
+    let made = run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Corners"}));
+    let corners_id = made["sketch"].as_u64().unwrap_or_else(|| panic!("{made}"));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    let corners = [([500.0, 0.0], [502.0, 2.0]), ([510.0, 0.0], [508.0, 2.0]), ([510.0, 10.0], [508.0, 8.0]), ([500.0, 10.0], [502.0, 8.0])];
+    let ids: Vec<String> = corners
+        .iter()
+        .map(|([x0, y0], [x1, y1])| {
+            let pts: Vec<[f64; 3]> = (0..=2).map(|i| f64::from(i) / 2.0).map(|f| [x0 + (x1 - x0) * f, y0 + (y1 - y0) * f, -20.0 * f]).collect();
+            run(&mut s, "sketch.spline3d", json!({ "points": pts }))["curves"][0].as_str().unwrap().to_string()
+        })
+        .collect();
+    run(&mut s, "sketch.finish", json!({}));
+    let rails = |ids: &[String]| json!(ids.iter().map(|c| json!({"sketch": "Corners", "curves": [c]})).collect::<Vec<_>>());
+    let p = json!({"sections": [{"sketch": "Big"}, {"sketch": "Small"}], "operation": "new", "body_name": "Frustum", "name": "Railed", "rails": rails(&ids[..1])});
+    run(&mut s, "solid.loft", p);
+    // timeline.edit takes the rails as they are stored: each sketch by its id.
+    let stored = |ids: &[String]| json!(ids.iter().map(|c| json!({"sketch": corners_id, "curves": [c]})).collect::<Vec<_>>());
+    run(&mut s, "timeline.edit", json!({"feature": "Railed", "set": {"rails": stored(&ids)}}));
+    let want = 20.0 / 3.0 * (100.0 + 36.0 + 60.0);
+    let m = measure(&s, "Frustum");
+    assert!((m.volume - want).abs() < 1e-3 * want, "volume {} vs {want}", m.volume);
+    assert!((m.bbox.min.x - 500.0).abs() < 1e-6 && (m.bbox.max.x - 510.0).abs() < 1e-6 && (m.bbox.min.z + 20.0).abs() < 1e-6, "{:?}", m.bbox);
+    let seventeen: Vec<String> = ids.iter().cycle().take(17).cloned().collect();
+    assert!(s.execute("timeline.edit", &json!({"feature": "Railed", "set": {"rails": stored(&seventeen)}})).is_err());
+}
+
+/// #12188: a fuselage lofted through three ellipses along four guide rails (a tester's script on
+/// the pull request) is shelled with no face removed, as the same loft without rails is: the
+/// rails' warp kept the sections tangent where their arcs meet, so the loft has no crease for
+/// the offset to open.
+#[test]
+fn a_fuselage_lofted_along_four_rails_can_be_shelled() {
+    let mut s = Session::default();
+    let script: Vec<Value> = serde_json::from_str(FUSELAGE).unwrap();
+    for c in &script {
+        run(&mut s, c["command"].as_str().unwrap(), c["params"].clone());
+    }
+    let solid = measure(&s, "Fuselage").volume;
+    run(&mut s, "solid.shell", json!({"faces": [], "thickness": 0.8, "body": "Fuselage", "name": "Hollow"}));
+    let hollow = measure(&s, "Fuselage").volume;
+    assert!(hollow > 0.0 && hollow < 0.1 * solid, "{hollow} of {solid}");
+}
+
+/// The fuselage: ellipses at x = 30, 150 and 380 and fit-point rails along its top, bottom and
+/// both sides.
+const FUSELAGE: &str = r#"[{"command":"sketch.create","params":{"name":"S0","plane":{"origin":[30,0,0],"x_dir":[0,1,0],"y_dir":[0,0,1]}}},{"command":"sketch.ellipse","params":{"center":[0,0.0],"major":[22,0.0],"minor_radius":20.0}},{"command":"sketch.finish","params":{}},{"command":"sketch.create","params":{"name":"S1","plane":{"origin":[150,0,0],"x_dir":[0,1,0],"y_dir":[0,0,1]}}},{"command":"sketch.ellipse","params":{"center":[0,5.0],"major":[40,5.0],"minor_radius":40.0}},{"command":"sketch.finish","params":{}},{"command":"sketch.create","params":{"name":"S2","plane":{"origin":[380,0,0],"x_dir":[0,1,0],"y_dir":[0,0,1]}}},{"command":"sketch.ellipse","params":{"center":[0,5.0],"major":[10,5.0],"minor_radius":10.0}},{"command":"sketch.finish","params":{}},{"command":"sketch.create","params":{"name":"RT","plane":{"origin":[0,0,0],"x_dir":[1,0,0],"y_dir":[0,0,1]}}},{"command":"sketch.spline.fit_point","params":{"points":[[30,20],[80,42],[150,45],[260,35],[380,15]],"ids":["r"]}},{"command":"sketch.finish","params":{}},{"command":"sketch.create","params":{"name":"RB","plane":{"origin":[0,0,0],"x_dir":[1,0,0],"y_dir":[0,0,1]}}},{"command":"sketch.spline.fit_point","params":{"points":[[30,-20],[90,-38],[150,-35],[270,-15],[380,-5]],"ids":["r"]}},{"command":"sketch.finish","params":{}},{"command":"sketch.create","params":{"name":"RS","plane":{"origin":[0,0,0],"x_dir":[1,0,0],"y_dir":[0,1,0]}}},{"command":"sketch.spline.fit_point","params":{"points":[[30,22.0],[90,40],[150,39.68626966596886],[260,26],[380,8.660254037844386]],"ids":["r"]}},{"command":"sketch.finish","params":{}},{"command":"sketch.create","params":{"name":"RS2","plane":{"origin":[0,0,0],"x_dir":[1,0,0],"y_dir":[0,1,0]}}},{"command":"sketch.spline.fit_point","params":{"points":[[30,-22.0],[90,-40],[150,-39.68626966596886],[260,-26],[380,-8.660254037844386]],"ids":["r"]}},{"command":"sketch.finish","params":{}},{"command":"solid.loft","params":{"sections":[{"sketch":"S0"},{"sketch":"S1"},{"sketch":"S2"}],"body_name":"Fuselage","rails":[{"sketch":"RT","curves":["s1"]},{"sketch":"RB","curves":["s1"]},{"sketch":"RS","curves":["s1"]},{"sketch":"RS2","curves":["s1"]}]}}]"#;

@@ -44,9 +44,9 @@
 //!   new [`Brep`] and return it;
 //!   `MergeBrep` copies from another [`Brep`] (a self-merge, `MergeBrep(*this)`, cannot
 //!   be expressed).
-//! - **Ignored statuses.** The copy constructor ignores `MergeBrep`'s status (`SE`):
-//!   only [`SolidError::Unported`] propagates. `MergeBrep` ignores the list inserts'
-//!   statuses (`SE(PostInsert(..))`) as upstream.
+//! - **Copy failures.** The copy constructor propagates every `MergeBrep` failure,
+//!   rather than returning a partial body as upstream's ignored status (`SE`) can.
+//!   `MergeBrep` ignores the list inserts' statuses (`SE(PostInsert(..))`) as upstream.
 //! - **Sliced curve copy.** `MakeWireEdge`/`MakeWireEdgeVertex` copy a curve that
 //!   already belongs to an edge with `new SmCurve(*pCurve)`, a base-class copy without
 //!   geometry; the port clones the curve with its geometry (`Curve`'s `Clone`, the
@@ -137,7 +137,7 @@ use crate::geom::context::{
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::object::{self, NotifyOperation, ObjectRef};
-use crate::geom::tol::{self, SmallTopoType};
+use crate::geom::tol;
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3};
 use crate::nurbs::b_spline_curve::BSplineCurve;
@@ -216,6 +216,7 @@ fn ignore_soft<T>(r: Result<T>) -> Result<()> {
         Err(
             e @ (SolidError::Unported { .. }
             | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }
             | SolidError::NotFound { .. }),
@@ -615,7 +616,8 @@ fn destroy_face(b: &mut Brep, env: &mut NotifyEnv<'_>, f: FaceId) -> Result<()> 
 
 /// `SmBrep(dThisModelSizeEstimate, dThisLargeSmallSizeRatio, pOptContextForStack)`: a
 /// new B-rep with the given size estimate and large/small ratio (upstream defaults
-/// [`tol::USE_DEFAULT`]), the context's zone tolerance, editing disabled, and an
+/// [`tol::USE_DEFAULT`], which leave it the kernel context's), the zone tolerance of
+/// that estimate ([`tol::brep_size_zone_tol_3d`]), editing disabled, and an
 /// infinite void region as its only region; the construction is reported to the
 /// context's callbacks (`SmObject::Notify`) under the new B-rep's own kernel identity
 /// (the caller holds no key for it yet: [`topology_ref`] with the serial the kernel
@@ -661,9 +663,11 @@ fn new_brep_in(
     b.set_naming(crate::topology::NamingScheme::Notify);
 
     // When asked (should be extremly rare) set SystemTolerance sizes
-    b.set_this_model_size_estimate(k, model_size_estimate);
-    b.set_this_large_small_size_ratio(k, large_small_size_ratio);
-    *b.tolerance = tol::context_zone_tol_3d(k, Some(&k.context), SmallTopoType::NormalSize);
+    // (on the new B-rep alone: the kernel context keeps what its caller configured,
+    // and is the tolerance of a B-rep made with the default)
+    b.set_this_model_size_estimate(model_size_estimate);
+    b.set_this_large_small_size_ratio(large_small_size_ratio);
+    *b.tolerance = tol::brep_size_zone_tol_3d(k, &b);
 
     // Create infinite region and put into brep's region list
     let r = b.add_region_record(Region::default())?;
@@ -707,8 +711,7 @@ fn new_brep_in(
 ///
 /// # Errors
 ///
-/// [`SolidError::Unported`] from [`merge_brep`] and [`p2::set_tolerance`] (other
-/// `MergeBrep` failures are ignored, as upstream); those of the notification;
+/// Those of [`merge_brep`], [`p2::set_tolerance`] and the notification;
 /// `InvalidInput` for a caller key in the kernel's reserved range.
 #[allow(clippy::too_many_arguments)]
 pub fn copy_brep(
@@ -752,8 +755,8 @@ pub fn copy_brep(
     *b.tolerance = *src.tolerance;
 
     with_caller_identities(k, &mut b, env, Some((src, source_key)), |k, b, env| {
-        // do the actual copying (SE: the status is not acted on)
-        if let Err(e) = merge_brep_in(
+        // A failed merge has only part of the source's topology: never return it as a copy.
+        merge_brep_in(
             k,
             env,
             b,
@@ -765,11 +768,7 @@ pub fn copy_brep(
             copy_map,
             reverse_map.as_deref_mut(),
             add_analytics,
-        ) {
-            if e.is_unported_or_cancelled() {
-                return Err(e);
-            }
-        }
+        )?;
 
         // inform the public about the construction and the copy
         ignore_soft(brep_notify(
@@ -1455,11 +1454,7 @@ pub(crate) fn with_lent_context<R>(
     k: &mut Kernel,
     run: impl FnOnce(&mut Kernel, &mut Context) -> R,
 ) -> Result<R> {
-    let mut ctx = Context::default();
-    ctx.install_lease(k.context.lend_notify()?);
-    let r = run(k, &mut ctx);
-    k.context.install_lease(ctx.take_lease());
-    Ok(r)
+    Context::with_lent_notifications(k, Context::default(), run)
 }
 
 /// Runs `edit` of `b` for a caller without identities of its own, notified through
@@ -3741,8 +3736,13 @@ pub fn collapse_zero_area_two_edge_faces_among(
         if ends != edge::start_end_vertices(b, gone)? || ends.0 == ends.1 || ends.0.is_none() {
             continue;
         }
-        // the loop has no area
-        let area = crate::topology::face::p3::compute_loop_orientation(k, b, f, l, None, false);
+        // the loop has no area; a test that could not answer reads as area, except that a
+        // cancellation (or an unported status) stops the collapse, never swallowed (#21915)
+        let area =
+            match crate::topology::face::p3::compute_loop_orientation(k, b, f, l, None, false) {
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                area => area,
+            };
         if !matches!(area, Ok(OrientType::Unknown)) {
             continue;
         }
@@ -3926,31 +3926,31 @@ pub fn split_disconnected_shells(k: &mut Kernel, b: &mut Brep) -> Result<()> {
 /// Not upstream: the shells of bounded region `r` after [`split_disconnected_shells`] split
 /// one of them, regrouped into regions as their nesting says. A region is bounded by one
 /// outer shell and the voids that lie directly inside it. A void is a face-use shell the
-/// region does not lie inside (its face uses face out of it, so
+/// region does not lie inside (closed, its face uses facing out of it, so
 /// [`crate::topology::Shell::is_inner_shell`], which is true for the shell holding its
 /// region, as [`shell::order_region_shells`] reads it, is false). A void lying directly
 /// inside another of `r`'s shells that is not one ([`shell::is_inner_shell_of`]) bounds
-/// that shell's region; every other shell is the outer shell of a solid of its own, as solids touching
-/// along a curve are, and as a shell is whose nesting the ray tests cannot decide. The
-/// region of the group holding `r`'s first shell stays `r`; each other group gets a new
-/// region with `r`'s void flag. Each group's outer shell is listed first, its voids after
-/// it in `r`'s order.
+/// that shell's region; every other shell is the outer shell of a solid of its own, as
+/// solids touching along a curve are. The region of the group holding `r`'s first shell
+/// stays `r`; each other group gets a new region with `r`'s void flag. Each group's outer
+/// shell is listed first, its voids after it in `r`'s order.
 ///
 /// # Errors
 ///
-/// Those of the ray tests (an [`SolidError::Unported`] or cancelled call), the list edits
-/// and dangling ids.
+/// Those of the ray tests: [`crate::topology::Shell::is_inner_shell`]'s (its `SM_ERR` for
+/// a shell its rays cannot classify, [`SolidError::Unported`], a cancelled call), and a
+/// [`TopologyFailure::VoidOwnerUndecided`] for a void that no outer shell holds where a
+/// nesting test was unsure (`SM_UNSURE`): which solid it bounds is not decided, so the
+/// region is not regrouped on a guess. Those of the list edits and dangling ids.
 fn regroup_split_region(k: &mut Kernel, b: &mut Brep, r: RegionId) -> Result<()> {
     let shells = region_shells(b, r)?;
-    // a void of the region: a face-use shell the region does not lie inside
+    // a void of the region: a closed face-use shell the region does not lie inside (an
+    // open shell encloses nothing, so it is no void)
     let mut void = Vec::new();
     for &s in &shells {
         let is_void = b.shell(s)?.is_faceuse_shell()
-            && match crate::topology::Shell::is_inner_shell(k, b, s) {
-                Ok(holds_the_region) => !holds_the_region,
-                Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                Err(_) => false,
-            };
+            && b.shell(s)?.is_closed(b, s)?
+            && !crate::topology::Shell::is_inner_shell(k, b, s)?;
         void.push(is_void);
     }
     // each shell's outer shell: itself, or the outer shell a void lies directly inside
@@ -3959,16 +3959,32 @@ fn regroup_split_region(k: &mut Kernel, b: &mut Brep, r: RegionId) -> Result<()>
         if !void.get(i).copied().unwrap_or(false) {
             continue;
         }
+        let mut held_by = None;
+        let mut unsure = false;
         for (j, &t) in shells.iter().enumerate() {
             if i == j || void.get(j).copied().unwrap_or(true) {
                 continue;
             }
-            if shell::is_inner_shell_of(k, b, s, Some(t))? == TRUE {
+            let nested = shell::is_inner_shell_of(k, b, s, Some(t))?;
+            if nested == TRUE {
+                held_by = Some(j);
+                break;
+            }
+            unsure |= nested == crate::error::SM_UNSURE;
+        }
+        match held_by {
+            Some(j) => {
                 if let Some(slot) = outer.get_mut(i) {
                     *slot = j;
                 }
-                break;
             }
+            None if unsure => {
+                return Err(SolidError::topology(
+                    OP,
+                    TopologyFailure::VoidOwnerUndecided,
+                ))
+            }
+            None => {}
         }
     }
     let keep = outer.first().copied().unwrap_or(0);
@@ -6086,6 +6102,84 @@ mod tests {
         notify_copy_with_context(&mut env, None, from, Some(to), None, None).unwrap();
         let copy = records[&to.key];
         assert_eq!(copy.all_flags(), 5);
+    }
+
+    /// A failed face copy must not return the faces copied before it as a successful
+    /// body. The same error reaches every copy entry point, including the constructor
+    /// that can add analytic surfaces, and the source keeps its topology and attributes.
+    #[test]
+    fn a_refused_surface_copy_never_returns_a_partial_body() {
+        use crate::geom::attribute::{ids, Attribute, Behavior};
+        use crate::surface::curve_bounded_surface::CurveBoundedSurface;
+
+        for refused_face in [0, 2, 5] {
+            for route in ["copy", "mapped", "api", "constructor", "analytics"] {
+                let mut k = Kernel::default();
+                let mut b = crate::primitive::api_primitives::create_box(
+                    &mut k,
+                    Point3::ZERO,
+                    10.0,
+                    20.0,
+                    30.0,
+                )
+                .unwrap();
+                let face = b.face_list()[refused_face];
+                let basis = b.face_mut(face).unwrap().surface.take().unwrap();
+                b.face_mut(face).unwrap().surface = Some(
+                    CurveBoundedSurface::new(basis, Vec::new(), Vec::new(), true)
+                        .unwrap()
+                        .into(),
+                );
+                b.add_attribute(
+                    EntityRef::Face(face),
+                    Attribute::long(ids::USER_1, 917, Behavior::Copy),
+                )
+                .unwrap();
+                let expected = b
+                    .face(face)
+                    .unwrap()
+                    .surface
+                    .as_ref()
+                    .unwrap()
+                    .copy(&k)
+                    .unwrap_err();
+                let before = format!("{b:?}");
+                let mut records = crate::topology::topology::NotifyRecords::new();
+                let mut attributes = crate::geom::attribute::AttributeStore::default();
+                let mut env = NotifyEnv {
+                    records: &mut records,
+                    attributes: &mut attributes,
+                    context: None,
+                    key_of: &dest_key,
+                };
+                let result = match route {
+                    "copy" => brep_copy(&mut k, &b),
+                    "mapped" => brep_copy_mapped(&mut k, &b).map(|(copy, _)| copy),
+                    "api" => api_brep_copy(&mut k, &mut env, Some(&b), &source_key),
+                    _ => copy_brep(
+                        &mut k,
+                        &mut env,
+                        &b,
+                        &source_key,
+                        None,
+                        None,
+                        true,
+                        route == "analytics",
+                    ),
+                };
+                let error = result.expect_err("a refused face must fail the whole body copy");
+                assert_eq!(error, expected, "face {refused_face}, {route}");
+                assert_eq!(format!("{b:?}"), before, "face {refused_face}, {route}");
+                assert_eq!(
+                    (
+                        b.face_list().len(),
+                        b.edge_list().len(),
+                        b.vertex_list().len()
+                    ),
+                    (6, 12, 8)
+                );
+            }
+        }
     }
 
     #[test]

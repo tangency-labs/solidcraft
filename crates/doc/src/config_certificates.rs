@@ -438,13 +438,15 @@ impl<'a> ExactSketchCurves<'a> {
     }
 
     /// The one free-form sketch curve (an ellipse, conic or spline) a generated segment is a
-    /// whole piece of, either way round: one of the exact segments the curve is made of. A
-    /// segment two curves share stays ambiguous.
+    /// whole piece of, or a trimmed part of a cubic span, either way round. A segment
+    /// two curves share stays ambiguous.
     pub(crate) fn find_free_form(&self, generated: &Seg2) -> Option<String> {
         let reversed = generated.reversed();
         let mut found: Option<Option<&str>> = None;
         for (id, originals) in &self.free_form {
-            if originals.iter().any(|original| *original == *generated || *original == reversed) {
+            if originals.iter().any(|original| {
+                *original == *generated || *original == reversed || solidcraft_kernel::services::prism::cubic_contains(original, generated)
+            }) {
                 found = Some(if found.is_some() { None } else { Some(*id) });
             }
         }
@@ -801,7 +803,7 @@ fn split_on_purpose(body: &ModelBody, plane: &solidcore_record::Plane) -> bool {
 }
 
 /// Whether two exact planes are one oriented plane (pieces of one face).
-fn same_oriented_plane(a: &solidcore_record::Plane, b: &solidcore_record::Plane, scale: f64) -> bool {
+pub(crate) fn same_oriented_plane(a: &solidcore_record::Plane, b: &solidcore_record::Plane, scale: f64) -> bool {
     a.normal().dot(b.normal()) >= 1. - 1e-8 && (b.origin - a.origin).dot(a.normal()).abs() <= 1e-7 * (1. + scale)
 }
 
@@ -858,12 +860,15 @@ impl Document {
     /// (a later join merged it into another face) the face that answers to it. Every one must
     /// follow exact history and lie on one oriented plane.
     pub(crate) fn lineage_face_indices(&self, body: &ModelBody, name: &str) -> Result<Vec<usize>> {
+        // Bodies are named in today's form; a design saved before format 52 holds the older one.
+        let name = &*crate::persistent_name::written_now(name);
         let names = crate::naming::names(body);
-        // `face` is `name` itself or a piece of it (a piece of a piece, …).
+        // `face` is `name` itself or a piece of it (a piece of a piece, …). Compare the
+        // identities in either saved spelling: 0.40 rc.3 wrote `blend:…`, now `blend(…)`.
         let piece_of = |face: &str| {
             let mut n = face;
             loop {
-                if n == name {
+                if crate::persistent_name::same_face(n, name) {
                     return true;
                 }
                 match crate::piece_names::parent_piece(n) {
@@ -878,7 +883,7 @@ impl Document {
                 .info
                 .iter()
                 .enumerate()
-                .filter(|(_, info)| info.synonyms.iter().chain(&info.aliases).any(|other| other == name))
+                .filter(|(_, info)| info.synonyms.iter().chain(&info.aliases).any(|other| crate::persistent_name::same_face(other, name)))
                 .map(|(index, _)| index)
                 .collect();
         }
@@ -887,8 +892,10 @@ impl Document {
         }
         self.coplanar_pieces(body, &indices, |index| names.verified(index))?;
         // A piece by its own name stands for itself, which a piece of a face split on purpose
-        // (Split Face) never does: that needs a fixed plane.
+        // (Split Face) told apart only by the faces around it never does: that needs a fixed
+        // plane. One by the name Split Face gave it (`F2:top#[F7:split:in]`) does.
         if crate::naming::strip_piece(name) != name
+            && !crate::history_names::names_split_piece(name)
             && let Some(plane) = indices.first().and_then(|index| body.body.planar_face(*index))
             && split_on_purpose(body, &plane)
         {
@@ -1019,6 +1026,32 @@ mod tests {
         ] {
             assert!(validate_certificate_json(&bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn a_cubic_cut_by_a_sketch_crossing_keeps_its_source() {
+        use solidcore_record::Vec2;
+        let span = Seg2::Cubic { p0: Vec2::ZERO, p1: Vec2::new(2., 4.), p2: Vec2::new(6., -1.), p3: Vec2::new(8., 2.) };
+        let trimmed = span.part(0.125, 0.875);
+        let mut sources = ExactSketchCurves { segments: vec![], free_form: vec![("s1", vec![span])] };
+        assert_eq!(sources.find_free_form(&trimmed).as_deref(), Some("s1"));
+        assert_eq!(sources.find_free_form(&trimmed.reversed()).as_deref(), Some("s1"));
+        let Seg2::Cubic { p0, p1, p2, p3 } = trimmed else { panic!("a trimmed cubic remains cubic") };
+        let different = Seg2::Cubic { p0, p1: p1 + Vec2::Y, p2, p3 };
+        assert_eq!(sources.find_free_form(&different), None);
+        sources.free_form.push(("s2", vec![trimmed]));
+        assert_eq!(sources.find_free_form(&trimmed), None);
+    }
+
+    #[test]
+    fn a_trim_starting_near_a_coordinate_turn_keeps_its_source_in_both_directions() {
+        use solidcore_record::Vec2;
+        // x(t) = 3t(1-t) rounds to 0.75 at the trim. y(t) = 0.375t still separates it from t = 0.5.
+        let span = Seg2::Cubic { p0: Vec2::ZERO, p1: Vec2::new(1., 0.125), p2: Vec2::new(1., 0.25), p3: Vec2::new(0., 0.375) };
+        let piece = span.part(0.5 + 2_f64.powi(-30), 0.875);
+        let sources = ExactSketchCurves { segments: vec![], free_form: vec![("s1", vec![span])] };
+        assert_eq!(sources.find_free_form(&piece).as_deref(), Some("s1"));
+        assert_eq!(sources.find_free_form(&piece.reversed()).as_deref(), Some("s1"));
     }
 
     #[test]

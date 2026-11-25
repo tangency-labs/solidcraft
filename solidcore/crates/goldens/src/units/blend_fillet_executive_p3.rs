@@ -30,8 +30,6 @@ mod attributed;
 mod contract;
 #[path = "blend_fillet_executive_p3/end_to_end.rs"]
 mod end_to_end;
-#[cfg(test)]
-pub(crate) use end_to_end::result_body_of;
 #[path = "blend_fillet_executive_p3/preview.rs"]
 mod preview;
 #[path = "blend_fillet_executive_p3/surface_bodies.rs"]
@@ -985,7 +983,7 @@ fn rust_with_fixes(
             .chain(error_out.comment.bytes())
             .map(f64::from),
     );
-    Ok(with_point_step(output(&values)?, rust_point_step(&k)))
+    output(&values)
 }
 
 impl UnitDiff for Runner {
@@ -1013,8 +1011,6 @@ impl UnitDiff for Runner {
         }
         Ok(v)
     }
-    // ND-3: every C++ case runs in a fresh child, which inherits this process's
-    // `sdStaticStep`; it must still be unlatched before the unit's cases and after them.
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         let input = case.parse::<Inputs>()?;
         if let Some(attributed) = &input.attributed {
@@ -1072,26 +1068,6 @@ impl UnitDiff for Runner {
     }
 }
 
-/// Compared key: the `sdStaticStep` latch (ND-3: `SmFilletSolver::ComputePointValues`'
-/// function static, fixed by the first call in a process) after the case.
-pub(super) const POINT_STEP: &str = "fillet_point_step";
-
-/// The Rust side's [`Kernel::fillet_point_step`] after a case run on a fresh kernel,
-/// read as the C++ probe reads `sdStaticStep`: the probe's finite-difference crossing
-/// point latches `1e-5` when nothing has.
-pub(super) fn rust_point_step(k: &Kernel) -> f64 {
-    k.fillet_point_step.get().unwrap_or(1.0e-5)
-}
-
-/// `out` with the case's latched step ([`POINT_STEP`]); a deferred or rejected output is
-/// returned unchanged.
-pub(super) fn with_point_step(mut out: Output, step: f64) -> Output {
-    if out.deferred.is_none() && out.rejected.is_none() {
-        out.values.insert(POINT_STEP.into(), vec![step]);
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1119,10 +1095,11 @@ mod tests {
         assert_eq!(on, off);
     }
 
-    /// WR-542/649: `BandsClearOtherRails` (`geometry_bands_clear_other_rails`).
+    /// WR-542/649: `BandsClearOtherRails` (`geometry_bands_clear_other_rails`), which runs
+    /// with every flag off: the record is not deferred and succeeds.
     #[test]
     fn bands_hook_answers_with_no_blend() {
-        reaches_hook_as_with_flags_off(|f| f.fillet_refuse_overlapping_bands = true);
+        reaches_hook_as_with_flags_off(|_| {});
     }
 
     /// WR-546: the stitch with `SmFilletPatchStitchCallback`
