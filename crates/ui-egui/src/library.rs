@@ -131,8 +131,17 @@ impl ViewMode {
 struct CardStatus {
     active: bool,
     highlight: Option<Highlight>,
+    /// The card can be dragged out of the panel.
+    draggable: bool,
 }
 
+impl CardStatus {
+    fn sense(&self) -> egui::Sense {
+        if self.draggable { egui::Sense::click_and_drag() } else { egui::Sense::click() }
+    }
+}
+
+/// One file or folder of the list. A design dragged out of it is the drag's payload.
 #[derive(Clone, Debug)]
 struct Entry {
     path: PathBuf,
@@ -174,6 +183,10 @@ pub struct LibraryState {
     listing_changed: bool,
     error: Option<String>,
     action_dialog: Option<actions::Dialog>,
+    /// A design dropped on the model view, inserted in the next frame.
+    dropped: Option<Entry>,
+    /// A design dragged this frame is over a place where it can be dropped.
+    drop_ready: bool,
     folders_expanded: bool,
     folder_menu: Option<(PathBuf, egui::Response, egui::Pos2)>,
     #[cfg(not(target_arch = "wasm32"))]
@@ -548,7 +561,7 @@ fn thumbnail_card(
     if view != ViewMode::Grid {
         return list_card(ui, view, width, height, name, detail, texture, icon, status);
     }
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::click());
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), status.sense());
     response.widget_info(|| {
         if status.active {
             egui::WidgetInfo::selected(egui::Role::Button, true, true, name)
@@ -600,7 +613,7 @@ fn list_card(
     icon: &str,
     status: CardStatus,
 ) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::click());
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), status.sense());
     response.widget_info(|| {
         if status.active {
             egui::WidgetInfo::selected(egui::Role::Button, true, true, name)
@@ -724,6 +737,8 @@ fn rows(app: &mut SolveApp, ui: &mut egui::Ui) -> Option<Entry> {
                     let detail = if view == ViewMode::ThumbnailList { modified_label(app, entry.modified) } else { None };
                     let active = !entry.folder && app.session.path.as_deref().map(Path::new) == Some(entry.path.as_path());
                     let highlight = if entry.folder { None } else { app.library.highlights.get(&entry.path).copied() };
+                    // On a touch screen a drag over the cards scrolls them.
+                    let draggable = !entry.folder && actions::can_insert(app, &entry) && !ui.input(|i| i.has_touch_screen());
                     let response = thumbnail_card(
                         ui,
                         view,
@@ -733,10 +748,13 @@ fn rows(app: &mut SolveApp, ui: &mut egui::Ui) -> Option<Entry> {
                         detail.as_deref(),
                         texture,
                         if entry.folder { "folder" } else { "new" },
-                        CardStatus { active, highlight },
+                        CardStatus { active, highlight, draggable },
                     );
                     crate::scenario::publish_handle(&format!("library:entry:{index}"), response.rect.center());
                     actions::context_menu(app, ui, &response, &entry);
+                    if draggable && response.drag_started_by(egui::PointerButton::Primary) {
+                        egui::DragAndDrop::set_payload(ui.ctx(), entry.clone());
+                    }
                     let tooltip =
                         if active { format!("{}\n{}", entry.path.display(), tr!(app, "home.open_now")) } else { entry.path.display().to_string() };
                     let tooltip = if let Some(highlight) = highlight {
@@ -752,6 +770,51 @@ fn rows(app: &mut SolveApp, ui: &mut egui::Ui) -> Option<Entry> {
         }
     });
     chosen
+}
+
+/// The model view `view` as a place to drop a design dragged from the list. The insert waits for
+/// the next frame: the view may be a card drawn with its own camera. Whether a design is dragged.
+pub(crate) fn drop_on_view(app: &mut SolveApp, view: &egui::Response) -> bool {
+    if !egui::DragAndDrop::has_payload_of_type::<Entry>(&view.ctx) {
+        return false;
+    }
+    let pointer = view.ctx.input(|i| i.pointer.latest_pos());
+    if view.contains_pointer() && pointer.is_some_and(|p| !crate::shell::covered(app, p)) {
+        app.library.drop_ready = true;
+        view.ctx.set_cursor_icon(egui::CursorIcon::Copy);
+        // Another button let go meanwhile ends the drag, as everywhere in egui.
+        if view.ctx.input(|i| i.pointer.primary_released())
+            && let Some(entry) = view.dnd_release_payload::<Entry>()
+        {
+            app.library.dropped = Some(entry.as_ref().clone());
+            view.ctx.request_repaint();
+        }
+    }
+    true
+}
+
+/// The pointer says that a dragged design can't be dropped where it is. Called last in the frame:
+/// what is drawn after the model view may have set a cursor of its own.
+pub(crate) fn drag_cursor(app: &mut SolveApp, ctx: &egui::Context) {
+    let ready = std::mem::take(&mut app.library.drop_ready);
+    if !ready && egui::DragAndDrop::has_payload_of_type::<Entry>(ctx) {
+        ctx.set_cursor_icon(egui::CursorIcon::NotAllowed);
+    }
+}
+
+/// The name of the design being dragged, beside the pointer.
+fn drag_label(ui: &egui::Ui) {
+    let Some(entry) = egui::DragAndDrop::payload::<Entry>(ui.ctx()) else { return };
+    let Some(pointer) = ui.input(|i| i.pointer.latest_pos()) else { return };
+    let t = solidcraft_theme::Tokens::get();
+    let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Tooltip, ui.scope_id().with("library_drag_label")));
+    let mut text = egui::text::LayoutJob::simple_singleline(entry.name.clone(), egui::FontId::proportional(t.font_body), t.text);
+    text.wrap = egui::text::TextWrapping::truncate_at_width(240.0);
+    let text = painter.layout_job(text);
+    let rect = egui::Rect::from_min_size(pointer + egui::vec2(14.0, 14.0), text.size() + egui::vec2(t.space_6, t.space_4) * 2.0);
+    painter.rect(rect, t.control_radius, t.field, egui::Stroke::new(1.0, t.accent), egui::StrokeKind::Inside);
+    painter.galley(rect.min + egui::vec2(t.space_6, t.space_4), text, t.text);
+    crate::scenario::publish_rect("library:drag_label", rect);
 }
 
 /// Keep import shortcuts fixed below the scrolling cards, level with the timeline.
@@ -1047,9 +1110,13 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         app.library.focus(input.focused);
     });
+    if let Some(entry) = app.library.dropped.take() {
+        actions::insert_dropped(app, &entry);
+    }
     // Home owns the full File view. Keep focus tracking, but defer folder work until Design returns.
     if app.home.open {
         actions::dialog(app, ui.ctx());
+        drag_cursor(app, ui.ctx());
         return;
     }
     app.library.poll(ui.ctx(), app.preferences.show_document_browser);
@@ -1077,6 +1144,7 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
             });
         });
+    drag_label(ui);
     if let Some(entry) = chosen {
         open_entry(app, entry);
     }

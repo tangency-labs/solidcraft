@@ -66,7 +66,7 @@ pub(super) fn candidate(s: &Session, h: &Hit) -> Option<Sel> {
 /// The tool's window, with the selection as its first picks.
 pub(super) fn start(app: &SolveApp, tool: &str) -> Option<Dialog> {
     let tool = solidcraft_engine::find_command(tool)?.id;
-    let picks: Vec<Sel> = app.session.selection.iter().filter(|sel| fits(PICKS, sel)).take(MAX).cloned().collect();
+    let picks: Vec<Sel> = app.session.selected_items().unwrap_or_default().into_iter().filter(|sel| fits(PICKS, sel)).take(MAX).collect();
     Some(choose(app, tool, picks, None))
 }
 

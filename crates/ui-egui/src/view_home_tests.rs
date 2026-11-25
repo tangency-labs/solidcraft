@@ -398,6 +398,70 @@ fn fit_json_frames_selection_while_home_frames_everything() {
     assert_eq!(h.app.session.undo.len(), undo);
 }
 
+/// #18507: End frames the selection as Fit (and F6) does, and Home goes to the home view. A focused
+/// text field keeps both keys for its caret. They are ordinary shortcuts, so they can be cleared.
+#[test]
+fn end_fits_the_selection_and_home_goes_home_except_in_a_text_field() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.look_at_anim = false;
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Near"})).unwrap();
+    h.app.run("solid.box", json!({"corner":[500,0,0],"length":10,"width":10,"height":10,"body_name":"Far"})).unwrap();
+    h.settle();
+    assert_eq!(crate::keymap::keys(&h.app, "view.fit"), ["End"]);
+    assert_eq!(crate::keymap::keys(&h.app, "view.home"), ["Home"]);
+    h.app.run("select.set", json!({"items":[{"type":"body","name":"Near"}]})).unwrap();
+    h.app.cam.set_view(StandardView::Front);
+    h.app.cam.pan(300.0, 200.0, 500.0);
+    let direction = (h.app.cam.yaw, h.app.cam.pitch);
+    h.step(&json!({"key":"End"})).unwrap();
+    h.settle();
+    assert!(h.app.cam.target.dist(Vec3::new(5.0, 5.0, 5.0)) < 5.0, "End frames the selected box: {:?}", h.app.cam.target);
+    assert_eq!((h.app.cam.yaw, h.app.cam.pitch), direction, "End keeps the orientation, as Fit does");
+    let fitted = h.app.cam;
+    h.app.cam.pan(60.0, 0.0, 500.0);
+    h.step(&json!({"key":"F6"})).unwrap();
+    h.settle();
+    assert!(same_cam(&h.app.cam, &fitted), "F6 still fits");
+    h.step(&json!({"key":"Home"})).unwrap();
+    h.settle();
+    assert!(same_cam(&h.app.cam, &home(&h)), "Home goes to the home view");
+
+    // The command search's field has the keyboard: Home and End move its caret, not the view.
+    h.call("ui.palette", json!({"text":"fit"}));
+    h.frames(3);
+    let field = egui::Id::unique("sc_sbox_text");
+    let caret = |h: &Harness| egui::TextEdit::load_state(&h.ctx, field).and_then(|s| s.cursor.char_range()).map(|r| r.primary);
+    h.app.cam.pan(60.0, 0.0, 500.0);
+    let moved = h.app.cam;
+    h.step(&json!({"key":"Home"})).unwrap();
+    h.frames(2);
+    assert_eq!(caret(&h), Some(egui::text::CCursor::new(0)), "Home moves the caret to the start");
+    h.step(&json!({"key":"End"})).unwrap();
+    h.frames(2);
+    assert_eq!(caret(&h), Some(egui::text::CCursor::new(3)), "End moves the caret to the end");
+    assert!(same_cam(&h.app.cam, &moved), "the view stays put while the field has the keys");
+    h.call("ui.palette", json!({"open":false}));
+    h.frames(2);
+    // Any other focused field too: the Preferences search.
+    h.call("ui.prefs", json!({"open":"General"}));
+    h.frames(3);
+    h.step(&json!({"text":"grid"})).unwrap();
+    for key in ["Home", "End"] {
+        h.step(&json!({"key":key})).unwrap();
+        h.frames(2);
+        assert!(same_cam(&h.app.cam, &moved), "{key} in the Preferences search leaves the view");
+    }
+    assert_eq!(h.app.prefs_window.shell.filter, "grid");
+    h.call("ui.prefs", json!({"button":"cancel"}));
+    h.frames(2);
+
+    crate::keymap::bind(&mut h.app, "view.home", "", false).unwrap();
+    h.step(&json!({"key":"Home"})).unwrap();
+    h.settle();
+    assert!(same_cam(&h.app.cam, &moved), "a cleared Home does nothing");
+}
+
 #[test]
 fn navigation_bar_display_menu_runs_grid_and_shadow_commands() {
     let mut h = Harness::new();

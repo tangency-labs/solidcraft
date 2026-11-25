@@ -1289,10 +1289,11 @@ fn browse_contents(app: &mut SolveApp, ui: &mut egui::Ui, stage_card: bool) {
                     if kind == "selene_appearances" && !drag {
                         let bodies: Vec<_> = app
                             .session
-                            .selection
-                            .iter()
+                            .selected_items()
+                            .unwrap_or_default()
+                            .into_iter()
                             .filter_map(|selection| match selection {
-                                solidcraft_engine::Sel::Body { name } => Some(name.clone()),
+                                solidcraft_engine::Sel::Body { name } => Some(name),
                                 _ => None,
                             })
                             .collect();
@@ -1308,7 +1309,7 @@ fn browse_contents(app: &mut SolveApp, ui: &mut egui::Ui, stage_card: bool) {
                                 },
                             );
                         }
-                        if !app.session.selection.is_empty() {
+                        if app.session.has_selection() {
                             return Err(tr!(app, "render.material_choose_body").to_string());
                         }
                     }

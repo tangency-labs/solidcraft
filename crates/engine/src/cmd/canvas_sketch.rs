@@ -81,7 +81,7 @@ fn to_sketch(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some([bl, br, _, tl]) = frame {
             // Pixel (0, h) is the image's bottom-left corner, (w, h) its bottom-right, (0, 0) its top-left.
             let xyz = |p: Vec2| [p.x, p.y, 0.0];
-            let [x, y, _] = solidcore_ops::affine::parallelogram_point(xyz(bl), xyz(br - bl), xyz(tl - bl), q.x / wf, 1.0 - q.y / hf);
+            let [x, y, _] = solidcraft_kernel::services::affine::parallelogram_point(xyz(bl), xyz(br - bl), xyz(tl - bl), q.x / wf, 1.0 - q.y / hf);
             return Vec2::new(x, y);
         }
         let mut u = q.x * sc - half_w;

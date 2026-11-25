@@ -1564,8 +1564,8 @@ pub struct TabStrip<'a> {
     pub shown_selected: Option<usize>,
     /// Only this design's view controls appear in a pop-out's strip.
     pub pop_out: bool,
-    /// The tabs are part of the window's title bar: dragging the only tab, or one mostly up or
-    /// down, moves the window, and a double click maximizes it (unless it renames).
+    /// The tabs are part of the window's title bar: a double click maximizes it (unless it
+    /// renames). Dragging a tab never moves the window; only empty bar space does.
     pub title_bar: bool,
     /// A double click on the selected tab renames it.
     pub double_click_renames: bool,
@@ -3568,21 +3568,19 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
         let hit = if plain { tr } else { Rect::from_min_size(tr.min, vec2((13.0 + dot + name_w + 10.0).min(tr.width()), tr.height())) };
         let active = strip.shown_selected == Some(i);
         let resp = ui.interact(hit, ui.scope_id().with(("doc_tab", i)), Sense::click_and_drag());
-        if (n > 1 || strip.title_bar) && !(active && strip.rename.is_some()) && resp.hovered() {
+        if n > 1 && !(active && strip.rename.is_some()) && resp.hovered() {
             ui.ctx().set_cursor_icon(drag_cursor(resp.is_pointer_button_down_on()));
         }
         solidcraft_ui_registry::publish_target(&format!("{}{i}", h.tab), hit);
-        // Dragging a tab along the strip moves it. The tabs are also part of the title bar:
-        // dragging the only tab, or one mostly up or down, moves the window. A double click
-        // renames the tab (the first click selected it), or maximizes the window as the bar's
-        // empty space does.
+        // Dragging a tab along the strip moves it. A double click renames the tab (the first
+        // click selected it), or maximizes the window as the bar's empty space does.
         if resp.drag_started_by(egui::PointerButton::Primary) {
             let origin = ui.input(|i| i.pointer.press_origin()).unwrap_or(tr.center());
             let moved = pointer.unwrap_or(origin) - origin;
+            // A drag that starts on a tab never moves the window (only empty bar space does,
+            // `window_chrome::drag_area`), whatever its direction and however many tabs there are.
             if n > 1 && (!strip.title_bar || moved.x.abs() >= moved.y.abs()) {
                 drag = Some(TabDrag { from: i, grab: origin.x - tr.left() });
-            } else if strip.title_bar {
-                crate::window_chrome::hand_press_to_os(ui.ctx(), egui::ViewportCommand::StartDrag);
             }
         } else if resp.double_clicked() {
             if strip.double_click_renames {

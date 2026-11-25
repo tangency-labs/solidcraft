@@ -476,6 +476,7 @@ pub(super) struct AddSheet {
 
 const SIZES: &[PaperSize] = &[PaperSize::A4, PaperSize::A3, PaperSize::A2, PaperSize::A1, PaperSize::A0, PaperSize::Letter, PaperSize::AnsiB];
 static STANDARD_TITLE_BLOCK: LazyLock<TitleBlock> = LazyLock::new(title_block::default_block);
+static COMPACT_TITLE_BLOCK: LazyLock<TitleBlock> = LazyLock::new(title_block::compact_block);
 
 pub(super) fn valid_sheet_name(name: &str) -> bool {
     name.is_empty() || (!name.trim().is_empty() && name.len() <= MAX_NAME_BYTES && !name.chars().any(char::is_control))
@@ -533,19 +534,25 @@ pub(super) fn add_window(app: &mut SolveApp, ctx: &egui::Context, mut form: AddS
             sheet_columns(ui, &mut form.paper, |fields, paper| {
                 let block = match form.title_block {
                     0 => after.title_block.is_some(),
-                    1 => true,
+                    1 | 3 => true,
                     _ => false,
                 };
                 paper_preview(fields, paper, after.border.is_some(), block);
                 ui_kit::text_row(fields, tr!("ui.drawing_panel.name"), &mut form.name, &default_name);
                 paper_border(fields, paper, after.border.as_ref());
-                let choices = [tr!("ui.drawing_panel.inherit"), tr!("ui.drawing_panel.built_in"), tr!("ui.drawing_panel.none")];
+                let choices = [
+                    tr!("ui.drawing_panel.inherit"),
+                    tr!("ui.drawing_panel.built_in"),
+                    tr!("ui.drawing_panel.none"),
+                    tr!("ui.drawing_panel.compact"),
+                ];
                 let inherited = match &after.title_block {
                     Some(block) if *block == *STANDARD_TITLE_BLOCK => choices[1],
+                    Some(block) if *block == *COMPACT_TITLE_BLOCK => choices[3],
                     Some(_) => choices[0],
                     None => choices[2],
                 };
-                let current = [inherited, choices[1], choices[2]].get(form.title_block).copied().unwrap_or(inherited);
+                let current = [inherited, choices[1], choices[2], choices[3]].get(form.title_block).copied().unwrap_or(inherited);
                 ui_kit::row(fields, tr!("ui.drawing_panel.title_block"), |ui| {
                     ui_kit::dropdown_menu(ui, "drawing_add_sheet_block", current, |ui| {
                         for (index, label) in choices.into_iter().enumerate() {
@@ -576,6 +583,7 @@ pub(super) fn add_window(app: &mut SolveApp, ctx: &egui::Context, mut form: AddS
         match form.title_block {
             1 => params["title_block"] = json!("built-in"),
             2 => params["title_block"] = Value::Null,
+            3 => params["title_block"] = json!("compact"),
             _ => {}
         }
         match app.run("drawing.sheet.add", params) {
@@ -918,15 +926,17 @@ fn sheet_fields(app: &mut SolveApp, ui: &mut egui::Ui, sheet: &Sheet) {
     paper_border(ui, Some(sheet.sheet), sheet.border.as_ref());
     let built_in = tr!("ui.drawing_panel.built_in");
     let none = tr!("ui.drawing_panel.none");
+    let compact = tr!("ui.drawing_panel.compact");
     let current = match sheet.title_block.as_ref() {
         Some(block) if *block == *STANDARD_TITLE_BLOCK => built_in,
+        Some(block) if *block == *COMPACT_TITLE_BLOCK => compact,
         Some(_) => tr!("ui.graphics_custom"),
         None => none,
     };
     let mut replacement = None;
     ui_kit::row(ui, tr!("ui.drawing_panel.title_block"), |ui| {
         ui_kit::dropdown_menu(ui, "drawing_sheet_title_block", current, |ui| {
-            for (label, value) in [(built_in, json!("built-in")), (none, Value::Null)] {
+            for (label, value) in [(built_in, json!("built-in")), (compact, json!("compact")), (none, Value::Null)] {
                 if ui_kit::list_picker(ui, label, label, current == label).clicked() {
                     if current != label {
                         replacement = Some(value);

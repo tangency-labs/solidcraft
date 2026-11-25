@@ -1,6 +1,8 @@
 //! Build information for Help › About: the git commit and the build date (UTC). Both fall back to
 //! "unknown" when git is missing (a source tarball). Also one test per UI scenario file
 //! (`tests/scenarios/*.json`), so adding a scenario needs no Rust edit.
+// A build script reports to cargo on stderr; nothing else reads it (see print_stderr in Cargo.toml).
+#![allow(clippy::print_stderr)]
 
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};

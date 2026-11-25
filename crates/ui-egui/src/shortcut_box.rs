@@ -176,7 +176,7 @@ fn keywords(id: &str) -> &'static str {
         "file.export_step" => "stp cad",
         "file.export_stl" | "file.export_3mf" => "mesh 3d print printing",
         "file.export_obj" => "mesh",
-        "file.export_urdf" => "robot ros simulation",
+        "file.export_urdf" | "file.export_urdf_options" => "robot ros simulation",
         "file.export_sdf" => "gazebo model simulation world texture",
         "sketch.constraint.tangent" => "g1 tangency continuity smooth",
         "sketch.constraint.curvature" => "g2 curvature continuity smooth",

@@ -83,6 +83,27 @@ pub(super) fn context_menu(app: &mut SolveApp, ui: &egui::Ui, response: &egui::R
     });
 }
 
+/// Whether a design can be dragged from the list now, as its menu offers Insert.
+pub(super) fn can_insert(app: &SolveApp, entry: &Entry) -> bool {
+    entry.path.to_str().is_some() && !app.file_picker_busy() && !app.file_load.busy()
+}
+
+/// Insert a design dropped on the model view as the Insert Design command does.
+pub(super) fn insert_dropped(app: &mut SolveApp, entry: &Entry) {
+    let Some(path) = entry.path.to_str() else {
+        app.set_status(tr!("library.utf8"), true);
+        return;
+    };
+    let Some(info) = solidcraft_engine::find_command("component.insert_design").map(|spec| spec.info(&app.session)) else { return };
+    if !info.enabled {
+        if let Some(reason) = info.disabled_reason {
+            app.set_status(reason, true);
+        }
+        return;
+    }
+    app.insert_design_async(path, None);
+}
+
 fn perform(app: &mut SolveApp, entry: Entry, action: Action) {
     let Some(path) = entry.path.to_str() else {
         app.set_status(tr!("library.utf8"), true);
@@ -570,6 +591,104 @@ mod tests {
         perform(&mut h.app, e.clone(), Action::Insert);
         assert!(!h.app.session.doc.links.is_empty());
         assert!(!h.app.home.open);
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(h.app.session.doc.to_json(), before);
+        assert_eq!(std::fs::read(&e.path).unwrap(), original);
+    }
+
+    #[test]
+    fn a_design_dragged_onto_the_view_is_inserted_and_a_drag_ended_elsewhere_is_not() {
+        let mut h = Harness::new();
+        h.app.preferences.show_document_browser = true;
+        h.app.home.open = false;
+        h.app.services.pick_folder = Some(Box::new(|_: &str| Box::pin(std::future::ready(None))));
+        let e = entry(&h);
+        let mut part = solidcraft_engine::Session::default();
+        part.execute("solid.box", &json!({"length":10,"width":12,"height":14})).unwrap();
+        part.execute("file.save", &json!({"path":e.path})).unwrap();
+        let original = std::fs::read(&e.path).unwrap();
+        let folder = h.dir.join("Parts");
+        std::fs::create_dir(&folder).unwrap();
+        h.app.library.set_root(h.dir.clone());
+        for _ in 0..200 {
+            h.app.library.poll(&h.ctx, h.app.preferences.show_document_browser);
+            if !h.app.library.loading() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        h.frames(3);
+        let row = |h: &Harness, path: &std::path::Path| {
+            let position = h.app.library.visible().iter().position(|entry| entry.path == path).unwrap();
+            crate::scenario::handle_at(&format!("library:entry:{position}")).unwrap()
+        };
+        let at = row(&h, &e.path);
+        let folder_at = row(&h, &folder);
+        let view = h.app.viewport.rect.unwrap().center();
+        let panel = crate::scenario::rect_of("library:import_card").unwrap().center();
+        let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+        let press_and_move = |h: &mut Harness, from: egui::Pos2, to: egui::Pos2| {
+            h.frame_with(vec![egui::Event::PointerMoved(from)]);
+            h.frame_with(vec![button(from, true)]);
+            for step in 1..=4 {
+                h.frame_with(vec![egui::Event::PointerMoved(from + (to - from) * (step as f32 / 4.0))]);
+            }
+            h.frame_with(vec![egui::Event::PointerMoved(to)]);
+        };
+        let until_idle = |h: &mut Harness| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            h.frames(3);
+            while !h.app.file_load.idle() && std::time::Instant::now() < deadline {
+                h.frames(1);
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+            assert!(h.app.file_load.idle());
+            h.frames(2);
+        };
+        let before = h.app.session.doc.to_json();
+
+        // Back on the panel, with Escape, another button, or a folder: nothing is inserted or opened.
+        press_and_move(&mut h, at, panel);
+        assert_eq!(h.output.cursor_icon, egui::CursorIcon::NotAllowed, "the document browser takes no drop");
+        h.frame_with(vec![button(panel, false)]);
+        until_idle(&mut h);
+        assert_ne!(h.output.cursor_icon, egui::CursorIcon::NotAllowed, "the drag is over");
+        press_and_move(&mut h, at, view);
+        h.step(&json!({"key":"Escape"})).unwrap();
+        assert_ne!(h.output.cursor_icon, egui::CursorIcon::NotAllowed, "Escape ended the drag");
+        h.frame_with(vec![button(view, false)]);
+        until_idle(&mut h);
+        // Another button let go over the view ends the drag.
+        press_and_move(&mut h, at, view);
+        for pressed in [true, false] {
+            h.frame_with(vec![egui::Event::PointerButton { pos: view, button: egui::PointerButton::Middle, pressed, modifiers: Default::default() }]);
+        }
+        h.frame_with(vec![button(view, false)]);
+        until_idle(&mut h);
+        assert_eq!(h.app.session.doc.to_json(), before, "only the left button drops the design");
+        press_and_move(&mut h, folder_at, view);
+        assert!(crate::scenario::rect_of("library:drag_label").is_none());
+        h.frame_with(vec![button(view, false)]);
+        until_idle(&mut h);
+        assert!(h.app.session.path.is_none());
+        assert_eq!(h.app.session.doc.to_json(), before);
+
+        press_and_move(&mut h, at, view);
+        assert!(crate::scenario::rect_of("library:drag_label").is_some(), "the dragged design's name follows the pointer");
+        assert_eq!(h.output.cursor_icon, egui::CursorIcon::Copy, "the model view takes the drop");
+        // Over the application bar and back: it is the place under the pointer that counts.
+        let bar = egui::pos2(view.x, 4.0);
+        for (to, cursor) in [(bar, egui::CursorIcon::NotAllowed), (view, egui::CursorIcon::Copy)] {
+            for _ in 0..2 {
+                h.frame_with(vec![egui::Event::PointerMoved(to)]);
+            }
+            assert_eq!(h.output.cursor_icon, cursor);
+        }
+        h.frame_with(vec![button(view, false)]);
+        until_idle(&mut h);
+        assert_eq!(h.app.session.doc.links.len(), 1, "the dropped design is a linked component");
+        assert!(h.app.session.path.is_none(), "the design shown stays");
+        assert!(crate::scenario::rect_of("library:drag_label").is_none());
         h.app.run("edit.undo", json!({})).unwrap();
         assert_eq!(h.app.session.doc.to_json(), before);
         assert_eq!(std::fs::read(&e.path).unwrap(), original);

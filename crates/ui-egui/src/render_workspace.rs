@@ -396,7 +396,7 @@ pub(crate) fn selection_editor(app: &mut SolveApp, selection: &RenderSelection) 
 }
 
 pub(crate) fn object_selection(app: &SolveApp) -> RenderSelection {
-    if app.session.selection.is_empty() { RenderSelection::Nothing } else { RenderSelection::Object(app.session.selection.clone()) }
+    if !app.session.has_selection() { RenderSelection::Nothing } else { RenderSelection::Object(app.session.selected_items().unwrap_or_default()) }
 }
 pub(crate) fn current_shot_selection(app: &SolveApp) -> RenderSelection {
     let name = &app.render_workspace.view.name;
@@ -3890,6 +3890,7 @@ fn paint_product_kind(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, c
         }
         let slot = app.render_workspace.slot.clone();
         let frame = Frame {
+            selection_all: app.session.all_bodies_selected(),
             product_lights: if feedback { None } else { Some(light::preview(app)?) },
             product: true,
             upload_error: Some(app.render_workspace.upload_error.clone()),
@@ -3919,6 +3920,7 @@ fn paint_product_kind(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, c
             // Product rendering has its own lighting; AO is a Design viewport setting.
             ao_radius: 0.0,
             ao_samples: solidcraft_viewport_gpu::view::AO_SAMPLES,
+            occlusion: false,
             edge_px: solidcraft_viewport_gpu::view::EDGE_PX,
             sky: [0.0; 4],
             eye: [eye.x as f32, eye.y as f32, eye.z as f32, if camera.fov > 0.0 { 1.0 } else { 0.0 }],

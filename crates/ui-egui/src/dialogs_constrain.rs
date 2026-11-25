@@ -12,6 +12,7 @@ use solidcraft_engine::doc::Document;
 use solidcraft_engine::doc::joints::{self, Constraint, RefShape};
 
 use crate::SolveApp;
+use crate::dialogs::{Dialog, Kind};
 use crate::dialogs_assembly::{Asm, Hover, SNAPS, SnapKind, SnapPt, picked_snap, side_pick};
 use crate::selection::SelInput;
 use crate::ui_kit::{StatusTone, choice_row, expr_row, status_line};
@@ -64,19 +65,48 @@ fn shape(s: &SnapPt) -> RefShape {
 }
 
 /// A rule's name in the user's language.
-fn label(c: Constraint) -> &'static str {
-    solidcraft_ui_text::tr_by_id(match c {
-        Constraint::Mate => "constrain.rule_mate",
-        Constraint::Flush => "constrain.rule_flush",
-        Constraint::Distance => "constrain.rule_distance",
-        Constraint::Concentric => "constrain.rule_concentric",
-        Constraint::Insert => "constrain.rule_insert",
-        Constraint::Parallel => "constrain.rule_parallel",
-        Constraint::Perpendicular => "constrain.rule_perpendicular",
-        Constraint::Angle => "constrain.rule_angle",
-        Constraint::Tangent => "constrain.rule_tangent",
-        Constraint::PointOnAxis => "constrain.rule_point_on_axis",
-    })
+pub(crate) fn label(c: Constraint) -> &'static str {
+    match c {
+        Constraint::Mate => tr!("constrain.rule_mate"),
+        Constraint::Flush => tr!("constrain.rule_flush"),
+        Constraint::Distance => tr!("constrain.rule_distance"),
+        Constraint::Concentric => tr!("constrain.rule_concentric"),
+        Constraint::Insert => tr!("constrain.rule_insert"),
+        Constraint::Parallel => tr!("constrain.rule_parallel"),
+        Constraint::Perpendicular => tr!("constrain.rule_perpendicular"),
+        Constraint::Angle => tr!("constrain.rule_angle"),
+        Constraint::Tangent => tr!("constrain.rule_tangent"),
+        Constraint::PointOnAxis => tr!("constrain.rule_point_on_axis"),
+    }
+}
+
+/// A rule's icon, where a constraint is listed (the browser's Joints folders).
+pub(crate) fn rule_icon(c: Constraint) -> &'static str {
+    match c {
+        Constraint::Mate => "constraint_mate",
+        Constraint::Flush => "constraint_flush",
+        Constraint::Distance => "constraint_distance",
+        Constraint::Concentric => "constraint_concentric",
+        Constraint::Insert => "constraint_insert",
+        Constraint::Parallel => "constraint_parallel",
+        Constraint::Perpendicular => "constraint_perpendicular",
+        Constraint::Angle => "constraint_angle",
+        Constraint::Tangent => "constraint_tangent",
+        Constraint::PointOnAxis => "constraint_point_on_axis",
+    }
+}
+
+/// Constrain, open on constraint `id` to change it (a double-click on its row, its menu's Edit):
+/// its references picked, its rule, gap and angle loaded, as the dialog's own list loads it.
+/// `None` for a joint made as a joint.
+pub fn edit_constraint(app: &SolveApp, id: u64) -> Option<Dialog> {
+    app.session.doc.assembly.joints.iter().find(|j| j.id == id)?.constraint?;
+    let (Asm::Constrain(mut f), mut inputs) = start(app)? else { return None };
+    let mut active = 0;
+    load(app, &mut f, &mut inputs, &mut active, id);
+    let mut d = Dialog::new(Kind::Assembly(Asm::Constrain(f)), inputs);
+    d.active = active;
+    Some(d)
 }
 
 /// The two picks and their snaps.

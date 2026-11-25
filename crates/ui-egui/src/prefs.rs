@@ -744,6 +744,17 @@ pub enum HistorySketches {
     UnderFeature,
 }
 
+/// How unsuppressing an upstream feature in the 2D Timeline affects downstream dependents.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Timeline2dUnsuppressMode {
+    /// Restore each downstream feature's original suppression state (features separately suppressed remain suppressed).
+    #[default]
+    RestoreState,
+    /// Unsuppress all downstream features that depend on the upstream feature.
+    UnsuppressAll,
+}
+
 /// How a section hatches the faces it cuts (Preferences: "Section hatch").
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -2372,7 +2383,11 @@ fn save_graphics(app: &SolveApp) {
         let path = std::path::Path::new(path);
         let result = (|| {
             let mut graphics = read_graphics_settings(path)?;
-            graphics["msaa"] = json!(app.preferences.msaa);
+            // A saved `msaa` is a level someone chose, which the software renderer draws instead
+            // of its 1x (#3321): saving the window system or adapter doesn't choose the default.
+            if graphics.get("msaa").is_some() || app.preferences.msaa != Prefs::default().msaa {
+                graphics["msaa"] = json!(app.preferences.msaa);
+            }
             graphics["window_system"] = json!(app.preferences.window_system);
             graphics["adapter"] = json!(app.preferences.graphics_adapter);
             solidcraft_engine::io::safe_write::write_atomic(path, graphics.to_string().as_bytes(), false).map_err(|error| error.to_string())
@@ -6640,6 +6655,7 @@ mod tests {
             ("feature_menus_act_on_selection", json!(false), PAGE_LAYOUT),
             ("history_group_joints", json!(true), PAGE_LAYOUT),
             ("history_bar_groups", json!(true), PAGE_LAYOUT),
+            ("timeline_2d", json!(true), PAGE_LAYOUT),
             ("color_vision", json!("protan"), PAGE_APPEARANCE),
             ("viewport_theme", json!("light"), PAGE_APPEARANCE),
             ("viewport_background", json!([255, 255, 255]), PAGE_APPEARANCE),
@@ -9429,6 +9445,17 @@ mod tests {
         let out = h.call("ui.prefs", json!({"button": "cancel"}));
         assert_eq!(out["result"]["window_system"], "wayland", "Cancel takes the change back");
         assert_eq!(saved()["window_system"], "wayland", "and the file with it");
+
+        // No anti-aliasing level saved: the window system doesn't save the default as a chosen
+        // one, which the software renderer would then draw (#3321). A chosen level is saved.
+        std::fs::write(&path, r#"{"backend":"vulkan"}"#).unwrap();
+        h.call("ui.prefs", json!({"window_system": "x11"}));
+        assert_eq!(saved()["window_system"], "x11");
+        assert!(saved().get("msaa").is_none(), "{}", saved());
+        h.call("ui.prefs", json!({"msaa": 2}));
+        assert_eq!(saved()["msaa"], 2);
+        h.call("ui.prefs", json!({"msaa": 4}));
+        assert_eq!(saved()["msaa"], 4, "a saved level follows the choice back to the default");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -11644,6 +11671,30 @@ mod tests {
         assert!(!app.preferences.selection_shift_add_only, "the merged Sketch & selection page resets both sets of modifiers");
         control(&mut app, &json!({"button": "cancel"})).unwrap();
         assert_eq!(app.preferences.suppress_sketch_snap, ModifierCombo::CTRL);
+    }
+
+    #[test]
+    fn preview_modifier_persists_and_follows_shortcut_dialog_buttons() {
+        use crate::tool_modifiers::PreviewModifier;
+        let old: Prefs = serde_json::from_value(json!({})).unwrap();
+        assert_eq!(old.preview_reselect_modifier, PreviewModifier::PrimaryAtLeast);
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        for (value, binding) in [("control", PreviewModifier::Control), ("alt", PreviewModifier::Alt), ("disabled", PreviewModifier::Disabled)] {
+            control(&mut app, &json!({"open":"Keyboard Shortcuts", "preview_reselect_modifier":value})).unwrap();
+            control(&mut app, &json!({"button":"apply"})).unwrap();
+            let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+            restored.load_prefs(&app.prefs());
+            assert_eq!(restored.preferences.preview_reselect_modifier, binding);
+            control(&mut app, &json!({"preview_reselect_modifier":"shift"})).unwrap();
+            control(&mut app, &json!({"button":"cancel"})).unwrap();
+            assert_eq!(app.preferences.preview_reselect_modifier, binding);
+            control(&mut app, &json!({"open":"Keyboard Shortcuts", "button":"defaults"})).unwrap();
+            assert_eq!(app.preferences.preview_reselect_modifier, PreviewModifier::PrimaryAtLeast);
+            control(&mut app, &json!({"button":"cancel"})).unwrap();
+            assert_eq!(app.preferences.preview_reselect_modifier, binding);
+        }
+        control(&mut app, &json!({"open":"Keyboard Shortcuts", "preview_reselect_modifier":"primary", "button":"ok"})).unwrap();
+        assert_eq!(app.preferences.preview_reselect_modifier, PreviewModifier::Primary);
     }
 
     #[test]
