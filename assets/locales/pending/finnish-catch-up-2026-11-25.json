@@ -738,7 +738,7 @@
     "joint.error.limit_order": "nivelen rajan minimi ei saa ylittää maksimia",
     "joint.unground_issue": "Nivelongelma kohteen {occurrence} maakiinnityksen vapauttamisen jälkeen: {joint}: {reason}",
     "kernel.blend.limiting_face": "rajoittaa pinta, joka sisältää pisteen ({x}, {y}, {z})",
-    "linked_files.other_folders_detail": "Tämä malli käyttää tiedostoja kansioista {folders}. Ladataanko ne?",
+    "linked_files.other_folders_detail": "Tämä malli käyttää tiedostoja näistä kansioista. Ladataanko ne?",
     "linked_files.other_folders_load": "Lataa",
     "linked_files.other_folders_not_now": "Ei nyt",
     "linked_files.other_folders_title": "Linkitettyjä tiedostoja muissa kansioissa",
