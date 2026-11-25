@@ -3367,14 +3367,26 @@ mod tests {
             (interval.min() + interval.max()) * 0.5,
         )
         .unwrap();
-        let new_edge = [first, second].into_iter().flatten().find(|&c| c != e).unwrap();
+        let new_edge = [first, second]
+            .into_iter()
+            .flatten()
+            .find(|&c| c != e)
+            .unwrap();
         let vertex = vertex.unwrap();
         assert_eq!(b.edge(new_edge).unwrap().tolerance, after);
 
         let raises = b.trim_cover_raises();
         assert_eq!(raises.edges.get(&e), Some(&(before, after)));
-        assert_eq!(raises.edges.get(&new_edge), Some(&(before, after)), "{raises:?}");
-        assert_eq!(raises.vertices.get(&vertex), Some(&(before, after)), "{raises:?}");
+        assert_eq!(
+            raises.edges.get(&new_edge),
+            Some(&(before, after)),
+            "{raises:?}"
+        );
+        assert_eq!(
+            raises.vertices.get(&vertex),
+            Some(&(before, after)),
+            "{raises:?}"
+        );
         assert_eq!(fit_tolerance(&k, &mut b, new_edge).unwrap(), fit);
     }
 
