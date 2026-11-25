@@ -424,6 +424,84 @@ pub fn component_bodies(app: &SolveApp, id: u64) -> Vec<String> {
     app.session.model.state().bodies.iter().filter(|b| doc.component_within(doc.model_body_component(b), id)).map(|b| b.name.clone()).collect()
 }
 
+/// An Isolate is in effect: one ran since the last Unisolate or Show All. Not kept in a saved
+/// design, so a reopened one offers Isolate again (the empty-space Unisolate still shows all).
+fn isolating(app: &SolveApp) -> bool {
+    app.session.visibility.before_isolate.is_some()
+}
+
+/// The one Exit Isolation entry every menu shares: it puts back what the Isolates hid (#8120), and
+/// shows `browser.unisolate`'s key (#3504).
+fn unisolate_item(app: &SolveApp) -> Item {
+    act("ui.unisolate", "Exit Isolation", "body").key(&crate::keymap::display_for(app, "browser.unisolate").unwrap_or_default())
+}
+
+/// `browser.isolate`'s key, for the menus' Isolate entries (#3504).
+fn isolate_key(app: &SolveApp) -> String {
+    crate::keymap::display_for(app, "browser.isolate").unwrap_or_default()
+}
+
+/// Isolate, as before: while isolating it narrows what stays on screen. [`items`] adds Exit Isolation
+/// beside it (#8120).
+pub fn isolate_bodies_item(app: &SolveApp, bodies: &[String]) -> Item {
+    act("ui.isolate", "Isolate", "body").with(json!({ "bodies": bodies })).key(&isolate_key(app)).on(!bodies.is_empty())
+}
+
+/// Isolate this placement. [`items`] adds Exit Isolation beside it (#8120).
+pub fn isolate_occurrence_item(app: &SolveApp, path: &[u64]) -> Item {
+    act("ui.isolateOccurrence", "Isolate", "body").with(json!({ "path": path })).key(&isolate_key(app))
+}
+
+/// While an Isolate is in effect, Exit Isolation follows the menu's Isolate entry (#8120), unless
+/// the menu offers it already, as the empty-space menu does. On what is already all that is on
+/// screen Isolate would change nothing, so Exit Isolation takes its place there.
+fn add_unisolate(app: &SolveApp, v: &mut Vec<Item>) {
+    if !isolating(app) || v.iter().any(|item| item.id == "ui.unisolate") {
+        return;
+    }
+    if let Some(at) = v.iter().position(|item| item.id == "ui.isolate" || item.id == "ui.isolateOccurrence") {
+        if isolates_nothing(app, &v[at]) {
+            v[at] = unisolate_item(app);
+        } else {
+            v.insert(at + 1, unisolate_item(app));
+        }
+    }
+}
+
+/// Whether Isolate entry `item` would change nothing: its bodies are exactly the ones shown.
+fn isolates_nothing(app: &SolveApp, item: &Item) -> bool {
+    let params = item.params.as_ref();
+    let bodies: Vec<String> = match item.id.as_str() {
+        "ui.isolate" => params
+            .and_then(|p| p.get("bodies"))
+            .and_then(Value::as_array)
+            .map(|names| names.iter().filter_map(Value::as_str).map(str::to_owned).collect())
+            .unwrap_or_default(),
+        "ui.isolateOccurrence" => {
+            let path: Vec<u64> = params
+                .and_then(|p| p.get("path"))
+                .and_then(Value::as_array)
+                .map(|ids| ids.iter().filter_map(Value::as_u64).collect())
+                .unwrap_or_default();
+            app.session.occurrence_bodies(&path, true).unwrap_or_default()
+        }
+        _ => return false,
+    };
+    let Ok(world) = app.session.world_state() else { return false };
+    let shown: std::collections::BTreeSet<&str> =
+        world.bodies.iter().map(|body| body.name.as_str()).filter(|name| app.session.body_visible(name)).collect();
+    !bodies.is_empty() && shown == bodies.iter().map(String::as_str).collect()
+}
+
+/// Returns an isolation menu item for a component. While an Isolate is in effect, the menu adds
+/// Exit Isolation after it.
+pub fn isolate_component_item(app: &SolveApp, id: u64, bodies: &[String]) -> Option<Item> {
+    if bodies.is_empty() || id == 0 {
+        return None;
+    }
+    Some(isolate_bodies_item(app, bodies))
+}
+
 /// The eight radial commands, clockwise from the top.
 pub fn radial_items(app: &SolveApp) -> Vec<Item> {
     let key = crate::keymap::display_for(app, "edit.repeat").unwrap_or_default();
@@ -464,7 +542,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
             cmd(app, "select.set", "Select").with(json!({"items":[Sel::Body {name:name.clone()}]})),
             cmd(app, "select.same_look", "Select Same Look").with(json!({"body":name})),
             Item::sep(),
-            act("ui.isolate", "Isolate", "body").with(json!({"bodies":[name]})),
+            isolate_bodies_item(app, std::slice::from_ref(name)),
             act(if app.session.visibility.hidden_bodies.contains(name) { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye")
                 .with(json!({"bodies":[name]})),
         ],
@@ -661,6 +739,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
     {
         v.push(crate::render_workspace::assign::menu(app, name));
     }
+    add_unisolate(app, &mut v);
     // Several items of the folder selected: they can be grouped.
     if let Some(p) = crate::browser::selection_group(app, target) {
         v.push(Item::sep());
@@ -942,6 +1021,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
             v.push(cmd(app, "solid.press_pull", "Press Pull"));
         }
         v.push(cmd(app, "solid.shell", "Shell"));
+        v.push(cmd(app, "solid.dome", "Dome"));
         if crate::joint_handles::selected_occurrence(app).is_some() {
             v.push(cmd(app, "occurrence.move", "Move"));
         }
@@ -998,6 +1078,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(act("ui.saveMesh", "Save As Mesh", "export").with(json!({ "bodies": [body] })));
         v.push(Item::sep());
         v.push(act("ui.tangentChain", "Select Tangent Chain", "chain"));
+        v.push(cmd(app, "select.edge_loop", "Select Edge Loop"));
         v.push(cmd(app, "inspect.measure", "Measure"));
     } else if has(|s| matches!(s, Sel::Body { .. })) {
         v.extend(body_items(app, &sel_bodies(app), false));
@@ -1007,7 +1088,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
     } else {
         // Empty space, or a plane: both lead with Create Sketch (#3032). On a plane it sketches
         // there, with Look At beside it; on empty space it is the toolbar's, which asks for the
-        // plane or face.
+        // plane or face. A plane resized by hand offers its size back.
         let sketch = cmd(app, "sketch.create", "Create Sketch");
         match &app.menu.plane {
             Some(plane) => {
@@ -1015,6 +1096,11 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
                 v.push(act("ui.lookAt", "Look At", "lookat").with(json!({ "plane": plane })));
             }
             None => v.push(sketch),
+        }
+        if let Some(plane) = &app.menu.plane
+            && let Some(f) = app.session.doc.find_feature(plane).filter(|f| app.session.doc.plane_extents.contains_key(&f.id))
+        {
+            v.push(reset_plane_size(app, f.id, plane));
         }
         v.push(Item::sep());
         v.push(act("ui.nav", "Pan", "pan").with(json!({ "mode": "pan" })));
@@ -1027,7 +1113,9 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         let anything_hidden =
             can_unisolate || !app.session.visibility.hidden_sketches.is_empty() || !app.session.visibility.hidden_folders.is_empty();
         v.push(act("ui.showAll", "Show All", "eye").on(anything_hidden));
-        v.push(act("ui.showAll", "Unisolate", "eye").on(can_unisolate));
+        // The same Unisolate as the toggled Isolate entry on the item menus (#8120).
+        let key = crate::keymap::display_for(app, "browser.unisolate").unwrap_or_default();
+        v.push(act("ui.unisolate", "Exit Isolation", "eye").key(&key).on(can_unisolate || isolating(app)));
         v.push(Item::sep());
         v.push(cmd(app, "solid.extrude", "Extrude"));
         v.push(cmd(app, "solid.fillet", "Fillet"));
@@ -1080,7 +1168,7 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
         Item::sep(),
         act(if all_hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": names })),
         act("ui.lock", if locked { "Unlock" } else { "Lock" }, "ground").with(json!({ "bodies": names })),
-        act("ui.isolate", "Isolate", "body").with(json!({ "bodies": names })),
+        isolate_bodies_item(app, bodies),
     ];
     if browser {
         let at = v.len() - 1;
@@ -1230,6 +1318,7 @@ fn plane_items(app: &SolveApp, id: u64) -> Vec<Item> {
         items.push(Item::sep());
     }
     items.push(act("ui.editFeature", "Edit Feature", crate::timeline::icon_of(&f.kind)).with(json!({ "feature": id })));
+    items.push(reset_plane_size(app, id, &f.name));
     items.push(Item::sep());
     items.extend([
         act("ui.delete", "Delete", "delete").key("Del").with(json!({ "items": [{"type": "feature", "id": id}] })),
@@ -1241,6 +1330,11 @@ fn plane_items(app: &SolveApp, id: u64) -> Vec<Item> {
         act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({ "feature": id })),
     ]);
     items
+}
+
+/// Back to a size that follows the zoom, for a construction plane dragged to a size of its own.
+fn reset_plane_size(app: &SolveApp, id: u64, name: &str) -> Item {
+    cmd(app, "view.plane_size", "Reset Size").with(json!({ "plane": name, "extent": null })).on(app.session.doc.plane_extents.contains_key(&id))
 }
 
 /// An origin plane's row in the browser: sketch on it, show or hide.
@@ -1354,10 +1448,8 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
             item.params = Some(json!({"visible": show_selected, "paths": selected_paths}));
             item.enabled = true;
         }
-        "ui.isolate" => {
-            item.id = "ui.isolateOccurrence".into();
-            item.params = Some(json!({"path": path}));
-        }
+        // This placement's own Isolate, whatever the component's first placement shows.
+        "ui.isolate" => *item = isolate_occurrence_item(app, path),
         "ui.export" | "ui.saveMesh" | "ui.sendToSlicer" => item.params = Some(json!({"bodies": bodies})),
         // Expand Below and Collapse Below fold this placement's branch; Collapse All keeps the
         // whole tree.
@@ -1482,6 +1574,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     }
     if doc.links.get(&id).is_some_and(|link| link.step_names.is_none()) {
         own.push(act("ui.relinkSource", "Relink Source (All Instances)…", "update").with(json!({"component": id})));
+        own.push(act("ui.relinkSourceNames", "Relink Source and Use Its Names…", "update").with(json!({"component": id})));
     } else if id != 0 && app.session.can_extract(id) {
         own.push(act("ui.extractComponent", "Extract to File…", "export").with(json!({"component": id})));
     }
@@ -1544,7 +1637,9 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     if bodies_hidden(app) {
         v.push(act("ui.showAll", "Show All Bodies", "eye"));
     }
-    v.push(act("ui.isolate", "Isolate", "body").with(json!({ "bodies": names })).on(!bodies.is_empty() && id != 0));
+    if let Some(item) = isolate_component_item(app, id, &bodies) {
+        v.push(item);
+    }
     v.push(zoom_item(bodies.iter().map(|name| Sel::Body { name: name.clone() }).collect(), !bodies.is_empty()));
     v.push(Item::sep());
     let mut organize = vec![act("ui.newGroup", "New Group", "folder").with(json!({ "component": id }))];
@@ -2101,6 +2196,11 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 crate::linked_source::start(app, component, id_of(&p, "occurrence"));
             }
         }
+        "ui.relinkSourceNames" => {
+            if let Some(component) = id_of(&p, "component") {
+                crate::linked_source::start_with(app, component, None, true);
+            }
+        }
         "ui.extractComponent" => {
             if let Some(component) = id_of(&p, "component") {
                 crate::linked_source::extract(app, component);
@@ -2151,6 +2251,11 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             if !bodies.is_empty() {
                 let _ = app.run("browser.visibility", json!({ "items": bodies, "visible": true, "isolate": true }));
             }
+        }
+        "ui.unisolate" => {
+            // What the Isolates hid comes back, or everything when none is in effect (#8120); one
+            // undo step, as Isolate is.
+            let _ = app.run("browser.visibility", json!({ "visible": true, "unisolate": true }));
         }
         "ui.lock" => {
             let locked = bodies.iter().all(|b| app.session.visibility.locked_bodies.contains(b));
@@ -2627,6 +2732,12 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 if calibrate {
                     app.set_status(solidcraft_ui_text::tr("browser.calibrate_click_a"), false);
                 }
+            }
+        }
+        "ui.traceCanvasRegion" => {
+            if let Some(c) = id_of(&p, "canvas") {
+                app.tree.canvas_panel = Some(crate::browser::CanvasPanel::trace(app, c));
+                app.set_status(solidcraft_ui_text::tr("browser.trace_click"), false);
             }
         }
         "ui.straightenCanvas" => {

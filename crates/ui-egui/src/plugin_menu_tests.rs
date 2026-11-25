@@ -539,6 +539,150 @@ fn each_schema_type_becomes_its_field_with_limits_labels_and_defaults() {
 }
 
 #[test]
+fn font_fields_send_full_names_and_keep_string_constraints() {
+    let schema = json!({"type":"object","required":["font"],"properties":{
+        "font":{"type":"string","title":"Font","x-solidcraft-font":true,"default":"Liberation Sans","minLength":3,"maxLength":100}
+    }});
+    let mut fields = form(&schema).expect("font field drawn");
+    assert!(fields[0].0.font);
+    assert_eq!(params(&fields), Ok(json!({"font":"Liberation Sans"})));
+    fields[0].1 = Input::Text("Unknown family".into());
+    assert_eq!(params(&fields), Ok(json!({"font":"Unknown family"})));
+    fields[0].1 = Input::Text("a".into());
+    assert!(params(&fields).is_err());
+    for property in [json!({"type":"number","x-solidcraft-font":true}), json!({"type":"string","x-solidcraft-font":false})] {
+        assert!(form(&json!({"properties":{"font":property}})).is_none());
+    }
+}
+
+#[test]
+fn font_fields_follow_conditions_and_keep_edited_full_names() {
+    let schema = json!({"type":"object","required":["font"],"properties":{
+        "show":{"type":"boolean","default":false},
+        "editable":{"type":"boolean","default":true},
+        "alternate":{"type":"boolean","default":false},
+        "font":{"type":"string","x-solidcraft-font":true,
+            "x-solidcraft-visible-when":{"field":"show","eq":true},
+            "x-solidcraft-enabled-when":{"field":"editable","eq":true},
+            "x-solidcraft-defaults":[
+                {"when":{"field":"alternate","eq":false},"value":"Liberation Sans"},
+                {"when":{"field":"alternate","eq":true},"value":"Unknown family"}]}
+    }});
+    let mut fields = form(&schema).expect("conditional font form");
+    assert!(!params(&fields).unwrap().as_object().unwrap().contains_key("font"));
+    set_input(&mut fields, "show", Input::Boolean(true));
+    assert_eq!(params(&fields).unwrap()["font"], "Liberation Sans");
+    set_input(&mut fields, "alternate", Input::Boolean(true));
+    assert_eq!(params(&fields).unwrap()["font"], "Unknown family");
+    let field = &fields.iter().find(|(f, _)| f.key == "font").unwrap().0;
+    assert!(field.font && field.visible && field.enabled);
+    set_input(&mut fields, "font", Input::Text("Custom full family".into()));
+    set_input(&mut fields, "editable", Input::Boolean(false));
+    set_input(&mut fields, "alternate", Input::Boolean(false));
+    let field = &fields.iter().find(|(f, _)| f.key == "font").unwrap().0;
+    assert!(field.font && field.visible && !field.enabled);
+    assert_eq!(params(&fields).unwrap()["font"], "Custom full family");
+    assert_eq!(craft_plugin::prepare_input(&schema, &params(&fields).unwrap()).unwrap(), params(&fields).unwrap());
+    set_input(&mut fields, "show", Input::Boolean(false));
+    assert!(!params(&fields).unwrap().as_object().unwrap().contains_key("font"));
+}
+
+/// Real plugin window meshes, rasterised using the same fixture as other dialog evidence.
+#[test]
+fn font_dialog_filters_picks_with_keyboard_and_click_and_renders() {
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let mut make = entry("make", "edit", json!([]));
+    make.input_schema = json!({"type":"object","required":["font"],"properties":{
+        "font":{"type":"string","title":"Font","x-solidcraft-font":true,"default":"Liberation Sans"}
+    }});
+    app.plugin_menu.listed = vec![listed("lettering", vec![make])];
+    app.plugin_menu.loaded = true;
+    open_entry(&mut app, 0, 0);
+    let ctx = crate::fonts::test_context();
+    let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0));
+    let screen = std::cell::Cell::new(bounds);
+    let mut textures = Default::default();
+    let mut draw = |app: &mut SolveApp, events: Vec<egui::Event>, shot: Option<&str>| {
+        crate::scenario::clear_handles();
+        let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(screen.get()), focused: true, events, ..Default::default() }, |ui| {
+            show(app, ui.ctx());
+        });
+        ui_kit::test_textures_update(&mut textures, &output.textures_delta);
+        output.textures_delta.clear();
+        if let Some(name) = shot {
+            let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/plugin-font-field");
+            std::fs::create_dir_all(&dir).unwrap();
+            let image = ui_kit::test_raster(&ctx, output.shapes, output.pixels_per_point, bounds, &textures);
+            assert_eq!(image.dimensions(), (1280, 720));
+            image.save(dir.join(name)).unwrap();
+        }
+    };
+    for _ in 0..16 {
+        draw(&mut app, vec![], None);
+    }
+    assert!(app.plugin_menu.dialog().unwrap().ready(&app).is_ok());
+    draw(&mut app, vec![], Some("closed.png"));
+    let click = |at, pressed| {
+        vec![
+            egui::Event::PointerMoved(at),
+            egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE },
+        ]
+    };
+    let at = crate::scenario::handle_at("plugin_dialog:field:font").unwrap();
+    for pressed in [true, false] {
+        draw(&mut app, click(at, pressed), None);
+    }
+    for _ in 0..3 {
+        draw(&mut app, vec![], None);
+    }
+    draw(&mut app, vec![egui::Event::Text("lIbErAtIoN".into())], None);
+    // Capture the settled popup, after its native fade and any content sizing pass.
+    for _ in 0..16 {
+        draw(&mut app, vec![], None);
+    }
+    draw(&mut app, vec![], Some("filtered.png"));
+    assert!(crate::scenario::handle_at("plugin_dialog:font:font:Liberation Sans").is_some(), "partial, case-insensitive match");
+    let key = |key| vec![egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE }];
+    draw(&mut app, key(egui::Key::ArrowDown), None);
+    draw(&mut app, key(egui::Key::Enter), None);
+    draw(&mut app, vec![], None);
+    assert_eq!(app.plugin_menu.dialog().unwrap().ready(&app), Ok(json!({"font":"Liberation Sans"})));
+    assert_eq!(app.plugin_menu.dialogs.len(), 1, "Enter chooses the font without running or closing the dialog");
+    assert!(app.control_held.is_empty() && app.plugin_menu.dialog().unwrap().running.is_none());
+    app.plugin_menu.dialogs.last_mut().unwrap().fields.as_mut().unwrap()[0].1 = Input::Text("Unknown family".into());
+    for pressed in [true, false] {
+        draw(&mut app, click(at, pressed), None);
+    }
+    for _ in 0..3 {
+        draw(&mut app, vec![], None);
+    }
+    let choice = crate::scenario::handle_at("plugin_dialog:font:font:Liberation Sans").unwrap();
+    for pressed in [true, false] {
+        draw(&mut app, click(choice, pressed), None);
+    }
+    assert_eq!(app.plugin_menu.dialog().unwrap().ready(&app), Ok(json!({"font":"Liberation Sans"})));
+    draw(&mut app, vec![], None);
+    for pressed in [true, false] {
+        draw(&mut app, click(at, pressed), None);
+    }
+    for _ in 0..3 {
+        draw(&mut app, vec![], None);
+    }
+    draw(&mut app, key(egui::Key::Escape), None);
+    draw(&mut app, vec![], None);
+    assert_eq!(app.plugin_menu.dialogs.len(), 1, "Escape closes the font list only");
+    draw(&mut app, key(egui::Key::Escape), None);
+    assert!(app.plugin_menu.dialogs.is_empty(), "the next Escape cancels the dialog");
+    let small = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(640.0, 480.0));
+    screen.set(small);
+    open_entry(&mut app, 0, 0);
+    for _ in 0..4 {
+        draw(&mut app, vec![], None);
+    }
+    assert!(small.contains_rect(crate::scenario::rect_of("dialog:control:Font *").unwrap()), "the font control fits a small window");
+}
+
+#[test]
 fn shared_field_definitions_are_drawn_like_inline_fields() {
     let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.1"],
         "$defs":{"angle":{"type":"string","title":"Angle","enum":["14.5","20","25"],"default":"20"}},
@@ -562,6 +706,8 @@ fn described_field_labels_and_values_show_the_same_tooltip() {
         json!({"type":"boolean"}),
         json!({"type":"string","enum":["one","two"]}),
         json!({"type":"string"}),
+        json!({"type":"string","format":"directory"}),
+        json!({"type":"string","x-solidcraft-font":true,"default":"Liberation Sans"}),
         json!({"type":"array","x-solidcraft-selection":{"version":1,"accept":["edge"]}}),
     ] {
         property["title"] = json!("Saw kerf");
@@ -707,6 +853,21 @@ fn swatch_annotations_preserve_partial_choices_and_const_values() {
     assert_eq!(params(&fields), Ok(json!({"finish":"walnut"})));
 }
 
+#[test]
+fn image_annotations_load_as_option_pictures_and_keep_const_values() {
+    let schema = json!({"type":"object","properties":{"part":{"type":"string","oneOf":[
+        {"const":"elbow","title":"Elbow","x-solidcraft-image":"parts/elbow.png"},
+        {"const":"tee","title":"Tee","x-solidcraft-image":7},
+        {"const":"plain","title":"Plain"}
+    ]}}});
+    let mut fields = form(&schema).expect("bad artwork does not disable the dialog");
+    assert_eq!(fields[0].0.pictures, [Some("parts/elbow.png".into()), None, None]);
+    assert_eq!(fields[0].0.swatches, [None, None, None]);
+    assert!(fields[0].0.pictured);
+    fields[0].1 = Input::Choice(Some(1));
+    assert_eq!(params(&fields), Ok(json!({"part":"tee"})));
+}
+
 /// Two full dialog captures, with synthetic artwork generated here, plus pointer selection.
 #[test]
 fn swatch_dialog_dropdown_and_filtered_grid_render_and_send_const_values() {
@@ -832,6 +993,58 @@ fn swatch_dialog_dropdown_and_filtered_grid_render_and_send_const_values() {
         );
         assert_eq!(params(fields), Ok(json!({"finish": if complete { "white" } else { "plain" }, "show_unavailable":false})));
     }
+}
+
+/// Synthetic artwork: a missing picture falls back to the option's valid swatch, and a file too
+/// large for a swatch is not drawn as one.
+#[test]
+fn option_swatch_is_the_fallback_for_a_missing_picture_and_oversized_swatches_are_omitted() {
+    let mut h = crate::scenario::Harness::new();
+    let dir = h.dir.join("fallback");
+    std::fs::create_dir_all(&dir).unwrap();
+    image::RgbImage::from_pixel(16, 16, image::Rgb([137, 61, 23])).save(dir.join("small.png")).unwrap();
+    image::RgbImage::from_pixel(300, 300, image::Rgb([20, 90, 160])).save(dir.join("big.png")).unwrap();
+    let mut command = entry("finish", "read", json!([]));
+    command.input_schema = json!({"type":"object","properties":{"part":{"type":"string","title":"Part","oneOf":[
+        {"const":"a","title":"A","x-solidcraft-image":"missing.png","x-solidcraft-swatch":"small.png"},
+        {"const":"b","title":"B","x-solidcraft-swatch":"big.png"},
+        {"const":"c","title":"C"}
+    ]}}});
+    let mut plugin = listed("fallback", vec![command]);
+    let artwork = crate::plugin_images::read_swatches(&dir, &plugin.entries);
+    assert_eq!(artwork.swatches.keys().collect::<Vec<_>>(), ["small.png"], "the oversized swatch is refused");
+    assert!(artwork.pictures.is_empty());
+    plugin.swatches = Arc::new(std::sync::OnceLock::from(artwork));
+    h.app.plugin_menu.listed = vec![plugin];
+    h.app.plugin_menu.loaded = true;
+    h.app.plugin_menu.dialogs.clear();
+    open_entry(&mut h.app, 0, 0);
+    let ctx = crate::fonts::test_context();
+    let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0));
+    let mut tick = 0;
+    let mut frame = |app: &mut SolveApp, events: Vec<egui::Event>| {
+        tick += 1;
+        solidcraft_ui_registry::clear_handles();
+        let _ = ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), time: Some(tick as f64 / 60.0), events, ..Default::default() }, |ui| {
+            ui_kit::scope(ui, |_ui| show(app, &ctx));
+        });
+    };
+    for _ in 0..6 {
+        frame(&mut h.app, vec![]);
+    }
+    let trigger = crate::scenario::handle_at("plugin_dialog:field:part").unwrap();
+    for pressed in [true, false] {
+        let events = vec![
+            egui::Event::PointerMoved(trigger),
+            egui::Event::PointerButton { pos: trigger, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE },
+        ];
+        frame(&mut h.app, events);
+    }
+    for _ in 0..3 {
+        frame(&mut h.app, vec![]);
+    }
+    assert!(crate::scenario::rect_of("swatch:plugin_field_part:tile:0").is_some(), "the swatch stands in for the missing picture");
+    assert!(crate::scenario::rect_of("swatch:plugin_field_part:tile:1").is_none(), "an oversized swatch is not drawn");
 }
 
 #[test]
@@ -1237,7 +1450,7 @@ fn dialog_hook_narrowing_preserves_an_edited_choice_until_the_user_selects_an_av
                 options[1]["x-solidcraft-swatch"] = json!("size.png");
             }
             plugin.swatches = Arc::new(std::sync::OnceLock::from(crate::plugin_images::read_swatches(&h.dir, &plugin.entries)));
-            assert_eq!(plugin.swatches.get().unwrap().len(), 1, "the swatch path must be exercised");
+            assert_eq!(plugin.swatches.get().unwrap().swatches.len(), 1, "the swatch path must be exercised");
         }
         h.app.plugin_menu.dialogs.clear();
         open_entry(&mut h.app, 0, 0);
@@ -1823,6 +2036,7 @@ pub(crate) fn listed(id: &str, entries: Vec<solidcraft_engine::plugin::Entry>) -
         approval: String::new(),
         groups: BTreeSet::new(),
         entries,
+        ribbon_groups: Vec::new(),
         images: Default::default(),
         declarations: Default::default(),
         swatches: Default::default(),
@@ -1834,6 +2048,124 @@ pub(crate) fn listed(id: &str, entries: Vec<solidcraft_engine::plugin::Entry>) -
         updates: None,
         themes: Vec::new(),
     }
+}
+
+fn grouped_gears() -> Listed {
+    let mut plugin = listed(
+        "gears",
+        vec![
+            entry("spur", "read", json!([{"kind":"menu","name":"Spur Gear"}])),
+            entry("bevel", "read", json!([{"kind":"menu","name":"Bevel Gear"}])),
+            entry("inspect", "read", json!([])),
+        ],
+    );
+    plugin.ribbon_groups = serde_json::from_value(json!([{"label":"Gears","entries":["bevel","spur"]}])).unwrap();
+    plugin
+}
+
+#[test]
+fn declared_ribbon_group_replaces_only_its_entries_and_lists_them_in_order() {
+    use crate::app_bar::FileRow;
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    app.plugin_menu.listed = vec![grouped_gears()];
+    let buttons = ribbon_buttons(&app);
+    assert_eq!(buttons.iter().map(|b| b.id.as_str()).collect::<Vec<_>>(), ["plugin_group:gears:0", "plugin_entry:gears:inspect"]);
+    assert_eq!((buttons[0].label.as_str(), buttons[0].icon.as_str()), ("Gears", "prefs_plugins"));
+    let menu = ribbon_group_rows(&app, &buttons[0].id);
+    let items: Vec<_> = menu.iter().filter_map(|r| if let FileRow::Item(i) = r { Some((i.id.as_str(), i.label.as_str())) } else { None }).collect();
+    assert_eq!(items, [("entry:0:1", "Bevel Gear"), ("entry:0:0", "Spur Gear")]);
+    assert_eq!(rows(&app).len(), 4, "the full Plugins menu still contains the plugin submenu");
+    assert!(app.plugin_menu.dialogs.is_empty(), "listing a group runs and opens nothing");
+    app.preferences.disabled_plugins.insert("gears".into());
+    assert!(ribbon_buttons(&app).is_empty());
+    assert!(ribbon_group_rows(&app, &buttons[0].id).is_empty());
+    choose_ribbon(&mut app, "plugin_entry:gears:spur");
+    assert!(app.plugin_menu.dialogs.is_empty(), "disabling applies to grouped entries too");
+}
+
+#[test]
+fn grouped_entries_with_saved_individual_ribbon_pins_keep_their_own_button() {
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    app.plugin_menu.listed = vec![grouped_gears()];
+    for pin in ["gears.spur", "plugin_entry:gears:spur"] {
+        app.toolbar_custom.load(&json!({"version":4,"panels":{"DESIGN/MODEL/CREATE":[pin]}}));
+        let buttons = ribbon_buttons(&app);
+        assert_eq!(
+            buttons.iter().map(|b| b.id.as_str()).collect::<Vec<_>>(),
+            ["plugin_group:gears:0", "plugin_entry:gears:spur", "plugin_entry:gears:inspect"],
+            "saved pin {pin} keeps its own button"
+        );
+        assert!(choose_ribbon(&mut app, &buttons[1].id));
+        assert_eq!(app.plugin_menu.dialogs.pop().unwrap().entry, "spur");
+    }
+    app.toolbar_custom.panels.clear();
+    assert_eq!(ribbon_buttons(&app).len(), 2, "removing the pin leaves the group and the ungrouped command");
+}
+
+#[test]
+fn multiple_entries_without_ribbon_groups_keep_the_original_buttons() {
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let mut plugin = grouped_gears();
+    plugin.ribbon_groups.clear();
+    app.plugin_menu.listed = vec![plugin];
+    let buttons = ribbon_buttons(&app);
+    assert_eq!(
+        buttons.iter().map(|b| b.id.as_str()).collect::<Vec<_>>(),
+        ["plugin_entry:gears:spur", "plugin_entry:gears:bevel", "plugin_entry:gears:inspect"]
+    );
+    assert_eq!(buttons.iter().map(|b| b.label.as_str()).collect::<Vec<_>>(), ["Spur Gear", "Bevel Gear", "inspect"]);
+    assert!(buttons.iter().all(|b| b.icon == "prefs_plugins"));
+    choose_ribbon(&mut app, &buttons[1].id);
+    assert_eq!(app.plugin_menu.dialog().unwrap().entry, "bevel", "the original button still opens its entry directly");
+}
+
+#[test]
+fn ribbon_group_button_and_arrow_open_the_dropdown_and_selection_opens_the_entry_dialog() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.resize", json!({"width":2400.0,"height":900.0}));
+    h.app.home.open = false;
+    h.app.preferences.ribbon_tabs_only = false;
+    h.app.ui.tab = "MODEL".into();
+    h.app.plugin_menu.listed = vec![grouped_gears()];
+    h.app.plugin_menu.loaded = true;
+    h.frames(3);
+    assert!(crate::scenario::handle_at("button:plugin_entry:gears:spur").is_none());
+    assert!(crate::scenario::handle_at("button:plugin_entry:gears:bevel").is_none());
+    for handle in ["button:plugin_group:gears:0", "family:plugin_group:gears:0"] {
+        h.step(&json!({"click":{"handle":handle}})).unwrap();
+        h.frames(3);
+        assert!(h.app.plugin_menu.open);
+        assert!(h.app.plugin_menu.dialogs.is_empty(), "opening the group opens no command dialog");
+        assert!(h.app.control_held.is_empty(), "opening the group queues no plugin execution");
+        assert!(crate::scenario::handle_at("menu:Bevel Gear").is_some());
+        assert!(crate::scenario::handle_at("menu:Spur Gear").is_some());
+        assert!(crate::scenario::handle_at("menu:inspect").is_none(), "only grouped entries appear");
+        h.step(&json!({"click":{"handle":handle}})).unwrap();
+        h.frames(2);
+        assert!(!h.app.plugin_menu.open, "clicking the same button or arrow closes its menu");
+        h.step(&json!({"click":{"handle":handle}})).unwrap();
+        h.frames(2);
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert!(!h.app.plugin_menu.open, "Escape dismisses the shared menu");
+    }
+    h.step(&json!({"click":{"handle":"button:plugin_group:gears:0"}})).unwrap();
+    h.frames(3);
+    h.step(&json!({"click":{"handle":"menu:Spur Gear"}})).unwrap();
+    assert!(!h.app.plugin_menu.open);
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().entry, "spur");
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().label, "Spur Gear");
+    h.step(&json!({"click":{"handle":"plugin_dialog:cancel"}})).unwrap();
+    h.step(&json!({"click":{"handle":"button:plugin_group:gears:0"}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"click":[100.0,600.0]})).unwrap();
+    assert!(!h.app.plugin_menu.open, "an outside click dismisses the shared menu");
+    h.step(&json!({"click":{"handle":"button:plugin_group:gears:0"}})).unwrap();
+    h.frames(2);
+    h.app.preferences.disabled_plugins.insert("gears".into());
+    h.frames(2);
+    assert!(!h.app.plugin_menu.open, "disabling closes the group's menu");
+    assert!(crate::scenario::handle_at("button:plugin_group:gears:0").is_none());
 }
 
 #[test]
@@ -2232,16 +2564,18 @@ fn ungranted_command_groups_keep_run_off_and_are_named() {
 /// A directory field gets Browse when the host has a folder picker, and no button otherwise.
 /// The picked folder is the value sent to the plugin. A plain string field stays a text box.
 /// Run refuses a folder outside the install grant, and the grant is unchanged. Paste still
-/// fills either field.
+/// fills either field. A font picker in the same dialog sends its full family name.
 #[test]
 fn a_directory_field_browses_a_folder_and_an_outside_folder_stays_ungranted() {
     let schema = json!({"type":"object","properties":{
         "folder":{"type":"string","title":"Folder","format":"directory"},
-        "note":{"type":"string","title":"Note"}
+        "note":{"type":"string","title":"Note"},
+        "typeface":{"type":"string","title":"Font","x-solidcraft-font":true,"default":"Liberation Sans"}
     }});
     let parsed = form(&schema).expect("drawn");
     assert!(matches!(parsed[0].0.kind, Kind::Text { directory: true, .. }), "format directory is remembered");
     assert!(matches!(parsed[1].0.kind, Kind::Text { directory: false, .. }));
+    assert!(parsed[2].0.font, "the font picker is drawn alongside the folder field");
 
     let mut h = crate::scenario::Harness::new();
     let granted = h.dir.join("granted");
@@ -2293,7 +2627,7 @@ fn a_directory_field_browses_a_folder_and_an_outside_folder_stays_ungranted() {
     assert_eq!(folder_text(&h), picked, "the picked folder is the field value");
     assert!(!h.widgets(&picked).is_empty(), "the text box shows the picked folder, so paste can replace it");
     let fields = h.app.plugin_menu.dialog().unwrap().fields.clone().unwrap();
-    assert_eq!(params(&fields), Ok(json!({"folder": picked})), "that path is the value sent to the plugin");
+    assert_eq!(params(&fields), Ok(json!({"folder": picked, "typeface": "Liberation Sans"})), "the folder path and full family name are sent");
     let err = run(&mut h.app).unwrap_err();
     assert!(err.contains("file path has no applicable folder grant"), "{err}");
     assert!(h.app.control_held.is_empty(), "Run does not go ahead with a folder outside the grant");
@@ -2305,7 +2639,7 @@ fn a_directory_field_browses_a_folder_and_an_outside_folder_stays_ungranted() {
         fields.iter_mut().find(|(field, _)| field.key == "folder").unwrap().1 = Input::Text(allowed.clone());
         fields.iter_mut().find(|(field, _)| field.key == "note").unwrap().1 = Input::Text("pasted".into());
     }
-    let sent = json!({"folder": allowed, "note": "pasted"});
+    let sent = json!({"folder": allowed, "note": "pasted", "typeface": "Liberation Sans"});
     assert_eq!(
         h.app.plugin_menu.dialog().unwrap().ready(&h.app).as_ref().unwrap(),
         &sent,
@@ -2359,6 +2693,175 @@ fn a_previewed_run_has_none_of_the_plugins_grants() {
     assert_eq!(grants.package_hash.as_deref(), Some("hash"), "still the approved package");
     assert!(session.plugin_state.file_grants.is_empty());
     assert!(session.plugin_state.grants["other"].command_groups.contains("doc"), "other plugins keep theirs");
+}
+
+fn importer_entry(name: &str) -> solidcraft_engine::plugin::Entry {
+    serde_json::from_value(json!({"name":name,"kind":"importer","extensions":["sample"],"input_schema":gear_schema()})).unwrap()
+}
+
+#[test]
+fn importer_options_are_remembered_per_entry_on_run_and_survive_preferences_reload() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.plugin_menu.listed =
+        vec![listed("gears", vec![importer_entry("open"), importer_entry("other")]), listed("other", vec![importer_entry("open")])];
+    h.app.plugin_menu.loaded = true;
+    let before = h.app.session.doc.to_json();
+    open_entry(&mut h.app, 0, 0);
+    h.frames(2);
+    assert!(!h.app.plugin_menu.dialogs[0].remember, "Remember these options starts off");
+    set_input(h.app.plugin_menu.dialogs[0].fields.as_mut().unwrap(), "teeth", Input::Integer(42));
+    h.step(&json!({"click":{"handle":"plugin_dialog:remember"}})).unwrap();
+    assert!(h.app.plugin_menu.dialogs[0].remember, "the checkbox has its own scenario handle");
+    // Cancel and a cancelled file picker both leave memory alone.
+    h.step(&json!({"click":{"handle":"plugin_dialog:cancel"}})).unwrap();
+    assert!(h.app.preferences.plugin_importer_options.is_empty());
+    open_entry(&mut h.app, 0, 0);
+    set_input(h.app.plugin_menu.dialogs[0].fields.as_mut().unwrap(), "teeth", Input::Integer(42));
+    h.app.plugin_menu.dialogs[0].remember = true;
+    h.app.services.pick_open = Some(Box::new(|_| Box::pin(std::future::ready(None))));
+    run(&mut h.app).unwrap();
+    h.frames(2);
+    assert!(h.app.preferences.plugin_importer_options.is_empty());
+
+    // A chosen file starts the import with the exact options on the form.
+    open_entry(&mut h.app, 0, 0);
+    set_input(h.app.plugin_menu.dialogs[0].fields.as_mut().unwrap(), "teeth", Input::Integer(42));
+    h.app.plugin_menu.dialogs[0].remember = true;
+    let path = h.dir.join("gear.sample").to_string_lossy().into_owned();
+    h.app.services.pick_open = Some(Box::new(move |_| Box::pin(std::future::ready(Some(path.clone())))));
+    run(&mut h.app).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.preferences.plugin_importer_options["gears"]["open"].values["teeth"], 42);
+    assert!(h.app.preferences.plugin_importer_options["gears"]["open"].remember);
+    assert_eq!(h.app.session.doc.to_json(), before, "options are user bookkeeping, outside the design");
+
+    let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    restored.load_prefs(&h.app.prefs());
+    restored.plugin_menu.listed = h.app.plugin_menu.listed.clone();
+    open_entry(&mut restored, 0, 0);
+    assert!(restored.plugin_menu.dialog().unwrap().remember);
+    assert_eq!(restored.plugin_menu.dialog().unwrap().ready(&restored).unwrap()["teeth"], 42);
+    open_entry(&mut restored, 0, 1);
+    assert!(!restored.plugin_menu.dialog().unwrap().remember, "each entry has its own checkbox");
+    assert_eq!(restored.plugin_menu.dialog().unwrap().ready(&restored).unwrap()["teeth"], 20);
+    open_entry(&mut restored, 1, 0);
+    assert_eq!(restored.plugin_menu.dialog().unwrap().ready(&restored).unwrap()["teeth"], 20);
+}
+
+#[test]
+fn running_with_the_checkbox_off_forgets_the_entry_and_leaves_the_others() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.plugin_menu.loaded = true;
+    h.app.plugin_menu.listed = vec![listed("gears", vec![importer_entry("open"), importer_entry("other")])];
+    remember_options(&mut h.app, "gears", "open", &json!({"teeth":42}), true);
+    remember_options(&mut h.app, "gears", "other", &json!({"teeth":30}), true);
+    open_entry(&mut h.app, 0, 0);
+    assert!(h.app.plugin_menu.dialog().unwrap().remember);
+    h.app.plugin_menu.dialogs[0].remember = false;
+    let path = h.dir.join("gear.sample").to_string_lossy().into_owned();
+    h.app.services.pick_open = Some(Box::new(move |_| Box::pin(std::future::ready(Some(path.clone())))));
+    run(&mut h.app).unwrap();
+    h.frames(2);
+    let saved = &h.app.preferences.plugin_importer_options["gears"];
+    assert!(!saved.contains_key("open"), "unticked: the entry keeps nothing");
+    assert_eq!(saved["other"].values["teeth"], 30);
+    remember_options(&mut h.app, "gears", "other", &json!({"teeth":30}), false);
+    assert!(h.app.preferences.plugin_importer_options.is_empty());
+}
+
+#[test]
+fn stale_importer_values_fall_back_individually_to_the_current_schema_defaults() {
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    app.plugin_menu.listed = vec![listed("gears", vec![importer_entry("open")])];
+    remember_options(
+        &mut app,
+        "gears",
+        "open",
+        &json!({"module":0,"teeth":42,"pressure_angle":"removed","hub":null,"name":"too long a name","gone":true}),
+        true,
+    );
+    app.load_prefs(&app.prefs());
+    open_entry(&mut app, 0, 0);
+    assert_eq!(app.plugin_menu.dialog().unwrap().ready(&app).unwrap(), json!({"module":2.0,"teeth":42,"pressure_angle":"20","hub":false}));
+    app.plugin_menu.dialogs.clear();
+    app.plugin_menu.listed[0].entries[0].input_schema["properties"]["teeth"]["maximum"] = json!(30);
+    open_entry(&mut app, 0, 0);
+    assert_eq!(app.plugin_menu.dialog().unwrap().ready(&app).unwrap()["teeth"], 20, "a tightened range invalidates old values");
+}
+
+#[test]
+fn remembered_importer_choices_validate_against_the_remembered_controller() {
+    let schema = json!({"type":"object","properties":{
+        "mode":{"type":"boolean","default":false},
+        "size":{"type":"string","default":"small","oneOf":[
+            {"const":"small"},{"const":"large","x-solidcraft-when":{"field":"mode","eq":true}}]}
+    }});
+    let mut fields = form(&schema).unwrap();
+    assert!(refresh_with_memory(&mut fields, Some(&json!({"mode":true,"size":"large"}))));
+    assert_eq!(params(&fields).unwrap(), json!({"mode":true,"size":"large"}));
+    let mut fields = form(&schema).unwrap();
+    assert!(refresh_with_memory(&mut fields, Some(&json!({"mode":false,"size":"large"}))));
+    assert_eq!(params(&fields).unwrap(), json!({"mode":false,"size":"small"}));
+}
+
+#[test]
+fn restore_importer_defaults_changes_the_form_keeps_the_checkbox_and_only_a_run_changes_memory() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.plugin_menu.loaded = true;
+    h.app.plugin_menu.listed = vec![listed("gears", vec![importer_entry("open")])];
+    remember_options(&mut h.app, "gears", "open", &json!({"teeth":42,"module":3,"hub":true,"pressure_angle":"25","name":"Gear","bore":4}), true);
+    let memory = h.app.preferences.plugin_importer_options.clone();
+    open_entry(&mut h.app, 0, 0);
+    h.frames(2);
+    h.step(&json!({"click":{"handle":"plugin_dialog:defaults"}})).unwrap();
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap(), json!({"module":2.0,"teeth":20,"pressure_angle":"20","hub":false}));
+    assert!(h.app.plugin_menu.dialog().unwrap().remember, "Restore defaults keeps the checkbox as it is");
+    assert_eq!(h.app.preferences.plugin_importer_options, memory);
+    h.step(&json!({"click":{"handle":"plugin_dialog:cancel"}})).unwrap();
+    open_entry(&mut h.app, 0, 0);
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap()["teeth"], 42);
+    restore_defaults(&mut h.app.plugin_menu.dialogs[0]);
+    let path = h.dir.join("gear.sample").to_string_lossy().into_owned();
+    h.app.services.pick_open = Some(Box::new(move |_| Box::pin(std::future::ready(Some(path.clone())))));
+    run(&mut h.app).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.preferences.plugin_importer_options["gears"]["open"].values["teeth"], 20);
+    assert!(h.app.preferences.plugin_importer_options["gears"]["open"].remember);
+}
+
+#[test]
+fn remembering_importer_options_is_a_per_entry_checkbox_off_by_default_not_a_preferences_row() {
+    let mut h = crate::scenario::Harness::new();
+    let defaults = serde_json::to_value(crate::prefs::Prefs::default()).unwrap();
+    assert!(defaults.get("plugin_remember_importer_options").is_none(), "the Preferences row is gone");
+    assert!(crate::prefs::lenient(&json!({"plugin_remember_importer_options":true})).plugin_importer_options.is_empty());
+    assert!(h.app.preferences.plugin_importer_options.is_empty(), "nothing is remembered by default");
+    h.app.plugin_menu.listed = vec![listed("gears", vec![importer_entry("open")])];
+
+    // The old stored shape, a plain option map, loads with remembering off: the dialog shows defaults.
+    let old = json!({"preferences":{"plugin_importer_options":{"gears":{"open":{"teeth":42}}}}});
+    let loaded = crate::prefs::lenient(&old["preferences"]);
+    let memory = &loaded.plugin_importer_options["gears"]["open"];
+    assert_eq!((memory.remember, &memory.values), (false, &json!({"teeth":42})));
+    h.app.load_prefs(&old.to_string());
+    open_entry(&mut h.app, 0, 0);
+    assert!(!h.app.plugin_menu.dialog().unwrap().remember);
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap()["teeth"], 20, "checkbox off: the entry's defaults");
+    h.app.plugin_menu.dialogs.clear();
+    assert!(!offer_import(&mut h.app, "gear.sample"), "checkbox off: File > Open imports directly");
+
+    // The new shape round-trips, and it is what gets saved.
+    h.app.preferences.plugin_importer_options.get_mut("gears").unwrap().get_mut("open").unwrap().remember = true;
+    let saved: serde_json::Value = serde_json::from_str(&h.app.prefs()).unwrap();
+    assert_eq!(saved["preferences"]["plugin_importer_options"]["gears"]["open"], json!({"remember":true,"values":{"teeth":42}}));
+    let again = crate::prefs::lenient(&saved["preferences"]);
+    assert_eq!(again.plugin_importer_options, h.app.preferences.plugin_importer_options);
+    open_entry(&mut h.app, 0, 0);
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap()["teeth"], 42);
+
+    // A page reset keeps last-run bookkeeping.
+    crate::prefs::control(&mut h.app, &json!({"open":"Plugins","button":"defaults"})).unwrap();
+    assert_eq!(h.app.preferences.plugin_importer_options["gears"]["open"].values["teeth"], 42);
 }
 
 #[cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64")))]

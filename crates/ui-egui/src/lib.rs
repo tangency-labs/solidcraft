@@ -70,6 +70,7 @@ pub mod dialogs_move;
 pub mod dialogs_part_size;
 pub mod dialogs_parts;
 pub mod dialogs_plastic;
+pub mod dialogs_pulley;
 pub mod dialogs_rotate_member;
 pub mod dialogs_save_mesh;
 pub mod dialogs_sheet;
@@ -90,6 +91,7 @@ pub mod easyprint_ui;
 pub mod edit_clipboard;
 pub mod edit_in_place;
 mod feature_edit;
+mod finish_field;
 #[cfg(test)]
 mod font_literals_tests;
 pub mod fonts;
@@ -270,6 +272,7 @@ pub mod pencil;
 pub mod personal_sheet_rules;
 pub(crate) mod pick_index;
 pub(crate) mod place_gizmo;
+mod plane_resize;
 mod plugin_events;
 mod plugin_images;
 pub mod plugin_install;
@@ -602,6 +605,8 @@ pub struct Services {
     pub open_bytes: Option<Box<dyn Fn(&str, &str, &[u8]) -> Result<(), String>>>,
     /// Open a file in the program the system opens its kind with (a PDF in its viewer, to print).
     pub open_path: Option<Box<dyn Fn(&str) -> Result<(), String>>>,
+    /// A browser persists prepared design bytes and acknowledges them after the write ends.
+    pub persist_design: Option<save_job::PersistDesign>,
     /// Open a dialog for one file of a kind (its name, its extensions): on macOS a dialog allows
     /// only the types it names, so the agent chat's files need a dialog of their own. `None`: the
     /// Open dialog.
@@ -755,6 +760,8 @@ pub struct SolveApp {
     pub(crate) import_report: Option<import_report::Shown>,
     /// A Save or Save As being written on a worker (see [`save_job`]).
     saving: Option<save_job::Saving>,
+    host_saves: Vec<save_job::HostSaving>,
+    host_save_left_dirty: std::collections::HashSet<u64>,
     /// A signature check running on a worker (see [`verify_job`]).
     verifying: Option<verify_job::Verifying>,
     /// A drawing view being drawn on a worker (see [`drawing_jobs`]).
@@ -1177,6 +1184,8 @@ impl SolveApp {
             plugin_updates: Default::default(),
             import_report: None,
             saving: None,
+            host_saves: Vec::new(),
+            host_save_left_dirty: Default::default(),
             verifying: None,
             drawing_job: None,
             viewport: viewport::ViewportState::default(),
@@ -1929,6 +1938,11 @@ impl SolveApp {
         // A grant taken back here that the shared store still holds is not taken back: say so.
         let r = match r {
             Ok(v) if matches!(id.to_ascii_lowercase().as_str(), "plugin.install" | "plugin.remove" | "plugin.revoke") => {
+                if id.eq_ignore_ascii_case("plugin.remove")
+                    && let Some(plugin) = v.get("id").and_then(Value::as_str)
+                {
+                    plugin_menu::forget_options(self, plugin);
+                }
                 self.plugin_themes.signature = None;
                 let saved = plugins::persist_grants(self);
                 plugin_slots::invalidate(self);
@@ -2157,6 +2171,14 @@ impl SolveApp {
             }
             if id == "view.origin_axes_across_view" {
                 self.preferences.origin_axes_across_view = v.get("enabled").and_then(Value::as_bool).unwrap_or(false);
+            }
+            if id == "view.isolate_others" {
+                if let Some(show) = v.get("show").and_then(|s| serde_json::from_value(s.clone()).ok()) {
+                    self.preferences.isolate_others = show;
+                }
+                if let Some(pick) = v.get("pick").and_then(Value::as_bool) {
+                    self.preferences.isolate_others_pick = pick;
+                }
             }
             if id == "view.scale_bar" {
                 self.preferences.scale_bar = v.get("enabled").and_then(Value::as_bool).unwrap_or(false);
@@ -3118,6 +3140,7 @@ impl SolveApp {
         }
         if let Some(mut t) = tools::Tool::for_command(id) {
             t.classic = self.preferences.construction_line_classic;
+            t.arc_modes = self.preferences.sketch_arc_tangent_snap;
             if t.classic && solidcraft_engine::cmd::construction_line_mode(id).is_some() {
                 // The classic switch starts at Construction, whatever the palette chose last.
                 t.line_type = 3;
@@ -4944,14 +4967,12 @@ impl SolveApp {
             dim_view::set_model_drawn(Vec::new());
             let id = self.docs.views.active().id;
             drawing_sheet_page::show_view(self, ui, id);
-            view_tiles::single_sketch_chrome(self, ui);
         } else if drawing_workspace::active(self) {
             if dialogs_sheet::flat_active(self) {
                 viewport::show(self, ui);
             } else {
                 dim_view::set_model_drawn(Vec::new());
                 drawing_workspace::show(self, ui);
-                view_tiles::single_sketch_chrome(self, ui);
             }
         } else if view_window_drag::unanchored(self, ui.ctx(), self.docs.views.active().id) {
             self.viewport.rect = Some(ui.max_rect());
@@ -5078,6 +5099,10 @@ impl SolveApp {
             ctx.request_repaint();
             return;
         };
+        if control::host_save(self, &req) {
+            ctx.request_repaint();
+            return;
+        }
         let reply = req.reply.clone();
         match control::handle(self, ctx, &req) {
             control::Outcome::Done(v) => {
