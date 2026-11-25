@@ -149,7 +149,7 @@ fn round_trip(k: &mut Kernel, b: &Brep) -> Brep {
         surface_key: &|_: FaceId| ObjectKey(0),
     };
     let mut all = Vec::new();
-    let bytes = BrepData::from_brep(b, &env, &mut all)
+    let bytes = BrepData::from_brep(k, b, &env, &mut all)
         .and_then(|mut data| data.write_to_file_with_nurbs(k, FileType::Ascii))
         .unwrap();
     read(k, bytes)
