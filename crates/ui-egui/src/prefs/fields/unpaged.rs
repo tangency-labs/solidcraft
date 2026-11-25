@@ -67,6 +67,13 @@ macro_rules! unpaged_preferences {
             save_mesh_quality: String = "standard".into();
             /// Send to Slicer: the last slicer used (an installed slicer's id or a program path).
             send_slicer: String = String::new();
+            /// The 3-Point Arc's third point snaps to the arc tangent to the line or arc it starts or ends, or to the arc
+            /// whose centre is on a sketch point, and the click adds the Tangent or Coincident constraint (#20719). A mode of the 3-Point Arc tool, set
+            /// in the Sketch Palette while it runs and kept for the next time; no Preferences page shows or
+            /// resets it. It also turns on that tool's Radius and Sweep boxes for the third point and the cross at
+            /// the arc's centre. Off (the default): the tool is as it always was, its point snaps on the curve and
+            /// shows only the pointer's coordinates.
+            sketch_arc_tangent_snap: bool = false;
             /// The variant last started in each split tool family (Rectangle, Circle, Arc, Slot, Polygon, Line,
             /// Spline): the family's button and shortcut start it again (`sketch_families`).
             sketch_variants: crate::sketch_families::Choices = crate::sketch_families::Choices::default();

@@ -849,3 +849,37 @@ fn a_plane_through_points_stays_importable_after_successive_rigid_turns() {
         assert_eq!(disc.faces[0].domain, [[-3., 3.], [-3., 3.]]);
     }
 }
+
+/// Aligning a coaxial cone or cylinder to another frame turns its x axis onto that frame's
+/// quarter grid (even when their axes are anti-parallel) while leaving the 3D surface and its
+/// natural normal unchanged; non-coaxial or planar surfaces return `None`.
+#[test]
+fn aligned_to_frame_turns_coaxial_surfaces_onto_one_quarter_grid() {
+    use solidcore_record::Vec3;
+    let ref_frame = Frame { origin: [0., 0., 0.], x_axis: [1., 0., 0.], y_axis: [0., 1., 0.] };
+    // Cone turned 100° about Z with anti-parallel axis (-Z) — as a cone roll's rim wall has.
+    let a = 100_f64.to_radians();
+    let (s, c) = a.sin_cos();
+    let x = [c, s, 0.];
+    let y = [s, -c, 0.]; // (-Z) × x
+    let rim = Surface::Cone { frame: Frame { origin: [0., 0., 40.], x_axis: x, y_axis: y }, radius_at_origin: 30., half_angle: 0.6 };
+    let aligned = form::aligned_to_frame(&rim, &ref_frame, 1e-6).expect("coaxial cone aligns");
+    let got_frame = form::frame_of(&aligned).unwrap();
+    assert!((Vec3::from(got_frame.x_axis) - Vec3::X).len() < 1e-12, "{:?}", got_frame.x_axis);
+    assert!((Vec3::from(got_frame.y_axis) - Vec3::new(0., -1., 0.)).len() < 1e-12, "{:?}", got_frame.y_axis);
+    // The 3D point and natural normal at the same physical azimuth match.
+    let e_old = eval::SurfaceEval::new(&rim).unwrap();
+    let e_new = eval::SurfaceEval::new(&aligned).unwrap();
+    let (p_old, su_old, sv_old) = e_old.derivs(0.3, 1.5).unwrap();
+    let (p_new, su_new, sv_new) = e_new.derivs(0.3 - a, 1.5).unwrap();
+    assert!(p_old.dist(p_new) < 1e-12, "{p_old:?} vs {p_new:?}");
+    let n_old = su_old.cross(sv_old).normalized().unwrap();
+    let n_new = su_new.cross(sv_new).normalized().unwrap();
+    assert!(n_old.dist(n_new) < 1e-12, "{n_old:?} vs {n_new:?}");
+
+    // Off-axis and planar surfaces are not aligned.
+    let shifted = Surface::Cylinder { frame: Frame { origin: [1., 0., 0.], x_axis: [1., 0., 0.], y_axis: [0., 1., 0.] }, radius: 5. };
+    assert!(form::aligned_to_frame(&shifted, &ref_frame, 1e-6).is_none());
+    let plane = Surface::Plane { origin: [0.; 3], u_axis: [1., 0., 0.], v_axis: [0., 1., 0.] };
+    assert!(form::aligned_to_frame(&plane, &ref_frame, 1e-6).is_none());
+}

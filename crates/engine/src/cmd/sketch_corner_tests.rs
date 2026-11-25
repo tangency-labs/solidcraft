@@ -5,6 +5,7 @@
 use serde_json::{Value, json};
 use solidcore_record::Vec2;
 use solidcraft_geom::prelude::*;
+use solidcraft_sketch::CurveKind;
 
 use crate::Session;
 
@@ -590,19 +591,86 @@ fn a_fillet_or_chamfer_brings_two_separate_lines_to_where_they_meet() {
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(sk(&s).curves.len(), 2, "undo brings back the two separate lines");
 
-    // Refused: parallel lines, an end joined to a third line, a dimensioned length.
+    // Refused: an end joined to a third line, a dimensioned length. (Two parallel lines are
+    // joined by a half circle instead, #16238: see `a_fillet_of_two_parallel_lines_is_a_half_circle`.)
     let mut s = new_sketch();
-    let (pa, pb) = lines(&mut s, [[0.0, 0.0], [10.0, 0.0]], [[0.0, 5.0], [10.0, 5.0]]);
     let (la, lb) = lines(&mut s, [[0.0, 20.0], [10.0, 20.0]], [[20.0, 25.0], [20.0, 40.0]]);
     run(&mut s, "sketch.line", json!({"points": [format!("{la}.end"), [10, 30]], "connect": false}));
     let (da, db) = lines(&mut s, [[0.0, 50.0], [10.0, 50.0]], [[20.0, 55.0], [20.0, 70.0]]);
     run(&mut s, "sketch.dimension", json!({"entities": [da], "value": 10}));
     let before = sk(&s);
-    for (a, b, why) in [(&pa, &pb, "parallel"), (&la, &lb, "held by other geometry"), (&da, &db, "length is held")] {
+    for (a, b, why) in [(&la, &lb, "held by other geometry"), (&da, &db, "length is held")] {
         let e = s.execute("sketch.fillet", &json!({"a": a, "b": b, "radius": 2})).unwrap_err().to_string();
         assert!(e.contains(why), "{a}, {b}: {e}");
     }
     assert_eq!(sk(&s), before, "refusals change nothing");
+}
+
+/// Two parallel lines are joined by a half circle at the chosen end, tangent to both, and each
+/// line is cut back to its ends (#16238). Lines that lie on each other, or that do not overlap,
+/// are refused, and an ordinary corner fillet is as before.
+#[test]
+fn a_fillet_of_two_parallel_lines_is_a_half_circle() {
+    use solidcraft_sketch::{ConstraintKind, Shape};
+    use std::f64::consts::PI;
+    let line = |s: &mut Session, a: [f64; 2], b: [f64; 2]| {
+        curves(&run(s, "sketch.line", json!({"points": [a, b], "infer": false, "connect": false})))[0].clone()
+    };
+    let ends = |s: &Session, id: &str| {
+        let k = sk(s);
+        let CurveKind::Line { a, b } = k.curves[k.curve_index(id).unwrap()].kind else { panic!("a line") };
+        (k.point(a).unwrap(), k.point(b).unwrap())
+    };
+    let at = |p: solidcore_record::Vec2, x: f64, y: f64| (p.x - x).abs() < 1e-6 && (p.y - y).abs() < 1e-6;
+    // Ten apart, the second line starting 5 in: the start end joins where both exist, at x = 5.
+    for (end, cx, bulge) in [("start", 5.0, -1.0), ("end", 20.0, 1.0)] {
+        let mut s = new_sketch();
+        let la = line(&mut s, [0.0, 0.0], [25.0, 0.0]);
+        let lb = line(&mut s, [5.0, 10.0], [20.0, 10.0]);
+        let r = run(&mut s, "sketch.fillet", json!({"a": la, "b": lb, "radius": 2, "end": end}));
+        assert!(solved(&s), "{end}: {r}");
+        let k = sk(&s);
+        assert_eq!(k.curves.len(), 3, "{end}: two lines and the arc");
+        let arc = k.curve_index(&curves(&r)[0]).unwrap();
+        let CurveKind::Arc { c, a, b } = k.curves[arc].kind else { panic!("an arc") };
+        let centre = k.point(c).unwrap();
+        assert!(at(centre, cx, 5.0), "{end}: {centre:?}");
+        for q in [a, b] {
+            assert!((k.point(q).unwrap().dist(centre) - 5.0).abs() < 1e-6, "{end}: radius 5");
+        }
+        // The arc's middle lies on the outer side.
+        let Some(Shape::Round { start, sweep, .. }) = k.shape(arc) else { panic!("a round") };
+        assert!((sweep.abs() - PI).abs() < 1e-6, "{end}: a half circle, sweep {sweep}");
+        let mid = start + sweep * 0.5;
+        assert!((mid.cos() * bulge - 1.0).abs() < 1e-6, "{end}: bulges to {bulge}");
+        let (a0, a1) = ends(&s, &la);
+        let (b0, b1) = ends(&s, &lb);
+        if end == "start" {
+            assert!(at(a0, 5.0, 0.0) && at(a1, 25.0, 0.0) && at(b0, 5.0, 10.0) && at(b1, 20.0, 10.0), "{a0:?} {a1:?} {b0:?} {b1:?}");
+        } else {
+            assert!(at(a0, 0.0, 0.0) && at(a1, 20.0, 0.0) && at(b0, 5.0, 10.0) && at(b1, 20.0, 10.0), "{a0:?} {a1:?} {b0:?} {b1:?}");
+        }
+        let tangents = k.constraints.iter().filter(|c| matches!(c.kind, ConstraintKind::Tangent { .. })).count();
+        assert_eq!(tangents, 2, "{end}: tangent to both lines");
+    }
+    // Lines lying on each other, lines that do not overlap, a bad `end`: refused, nothing changed.
+    let mut s = new_sketch();
+    let la = line(&mut s, [0.0, 0.0], [10.0, 0.0]);
+    let on = line(&mut s, [20.0, 0.0], [30.0, 0.0]);
+    let apart = line(&mut s, [20.0, 10.0], [30.0, 10.0]);
+    let side = line(&mut s, [2.0, 10.0], [8.0, 10.0]);
+    let before = sk(&s);
+    for (b, end, why) in [(&on, "start", "parallel"), (&apart, "start", "do not overlap"), (&side, "bogus", "`end` must be")] {
+        let e = s.execute("sketch.fillet", &json!({"a": la, "b": b, "radius": 2, "end": end})).unwrap_err().to_string();
+        assert!(e.contains(why), "{b} {end}: {e}");
+    }
+    assert_eq!(sk(&s), before, "refusals change nothing");
+    // An ordinary corner is rounded as before (the `end` key does not matter).
+    let mut s = new_sketch();
+    let la = line(&mut s, [0.0, 0.0], [10.0, 0.0]);
+    let lb = line(&mut s, [20.0, 5.0], [20.0, 20.0]);
+    let r = run(&mut s, "sketch.fillet", json!({"a": la, "b": lb, "radius": 3}));
+    assert!(solved(&s) && sk(&s).curves.len() == 3 && curves(&r).len() == 1, "{r}");
 }
 
 // ---------------------------------------------------------------------------------------------
