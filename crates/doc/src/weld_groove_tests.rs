@@ -157,22 +157,34 @@ fn joint(parts: &[(Body, Order); 2], faces: [&[usize]; 2]) -> Result<Plane> {
     joint_frame([&picks[0], &picks[1]], [&chains[0], &chains[1]])
 }
 
-/// How far a frame's unit axes may be off what the test expects: two frames whose axes differ by
-/// less than the zone tolerance over the plates' 120 mm place every point of the joint within the
-/// zone tolerance ([`sweep::zone_tolerance`], the kernel's own bound for two points being the
-/// same) of each other, which is all the weld reads them for.
+/// The farthest any point of a test's parts lies from its frame's origin, rounded up: 300 mm (the
+/// L-shaped plate's far corner is about 270 mm from its toe; the 40 by 120 plates' about 75 mm).
+const REACH: f64 = 300.0;
+
+/// How far a frame's unit axis may be off what the test expects, as a vector length: half the
+/// zone tolerance over [`REACH`]. With an origin within [`points`], a point of the parts read in
+/// the frame is off by at most `|Δaxis| L + |Δorigin| <= zone / 2 + zone / 2`, the zone tolerance
+/// ([`sweep::zone_tolerance`], the kernel's own bound for two points being the same), for every
+/// point within `L <= REACH` of the origin (brett19 on #22033).
 fn axes() -> f64 {
-    sweep::zone_tolerance().unwrap() / 120.0
+    sweep::zone_tolerance().unwrap() / (2.0 * REACH)
 }
 
-/// How far a point may be off: the zone tolerance.
+/// How far the frame's origin may be off, as a vector length: half the zone tolerance (the other
+/// half is the axes', [`axes`]).
 fn points() -> f64 {
-    sweep::zone_tolerance().unwrap()
+    sweep::zone_tolerance().unwrap() / 2.0
 }
 
+/// Whether `a` is within `tol` of `b`, as a vector length.
+fn within(a: Vec3, b: [f64; 3], tol: f64) -> bool {
+    let d = [a.x - b[0], a.y - b[1], a.z - b[2]];
+    (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt() <= tol
+}
+
+/// Whether the unit axis `a` is within [`axes`] of `b`.
 fn near(a: Vec3, b: [f64; 3]) -> bool {
-    let tol = axes();
-    (a.x - b[0]).abs() < tol && (a.y - b[1]).abs() < tol && (a.z - b[2]).abs() < tol
+    within(a, b, axes())
 }
 
 /// The plane's normal, x × y: the joint's direction.
@@ -190,8 +202,7 @@ fn a_y_groove_runs_along_z_its_frame_towards_the_toe() {
     assert!(near(Vec3::new(normal(&frame)[0], normal(&frame)[1], normal(&frame)[2]), [0.0, 0.0, 1.0]));
     // the origin: the middle of the left toe line
     let top = 0.5 + 7.0 * 30.0_f64.to_radians().tan();
-    let (o, tol) = (frame.origin, points());
-    assert!((o.x + top).abs() < tol && o.y.abs() < tol && (o.z - 60.0).abs() < tol, "{o:?}");
+    assert!(within(frame.origin, [-top, 0.0, 60.0], points()), "{:?}", frame.origin);
     // the same frame again, and the parts only read
     let before: Vec<_> = parts.iter().map(|(b, _)| b.to_record().unwrap().0).collect();
     assert_eq!(joint(&parts, [&faces[0], &faces[1]]).unwrap(), frame);
@@ -319,8 +330,7 @@ fn a_round_groove_runs_along_its_walls_axis() {
     assert!(near(frame.x, [1.0, 0.0, 0.0]) && near(frame.y, [0.0, 1.0, 0.0]), "{frame:?}");
     let n = normal(&frame);
     assert!(near(Vec3::new(n[0], n[1], n[2]), [0.0, 0.0, 1.0]), "{frame:?}");
-    let (o, tol) = (frame.origin, points());
-    assert!((o.x + 9.0).abs() < tol && o.y.abs() < tol && (o.z - 60.0).abs() < tol, "{o:?}");
+    assert!(within(frame.origin, [-9.0, 0.0, 60.0], points()), "{:?}", frame.origin);
 }
 
 #[test]
@@ -485,4 +495,20 @@ fn a_fill_refusal_says_what_is_wrong_in_weld_words_and_the_size_that_builds() {
     let text = got.to_string();
     assert!(text.starts_with("the groove cannot be filled as asked: a concave weld face 50.00 mm deep"), "{text}");
     assert!(text.ends_with("mm builds"), "{text}");
+}
+
+/// brett19 on #22033: the Y groove's frame tests cannot show which way the direction was found
+/// (the plane pair's is within a few ulps of every other), so the faces `joint_frame` reads are
+/// asked directly: the two plane normals furthest from parallel give it.
+#[test]
+fn a_y_groove_takes_its_direction_from_a_plane_pair() {
+    use solidcraft_kernel::services::measure::{StraightBy, straight_direction};
+    let (parts, faces) = y_groove();
+    let mut reads: Vec<(&Body, &Order, usize)> = Vec::new();
+    for (part, f) in parts.iter().zip(&faces) {
+        let outer = facing(part, UP)[0];
+        reads.extend(f.iter().chain([&outer]).map(|&face| (&part.0, &part.1, face)));
+    }
+    let got = straight_direction(&reads).unwrap();
+    assert!(matches!(got, Straight::Along { by: StraightBy::Planes(..), .. }), "{got:?}");
 }

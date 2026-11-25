@@ -95,6 +95,11 @@ pub enum GrooveRefusal {
     /// builds, where there is one.
     #[error("{}", fill_text(why, *fit))]
     Fill { why: FillFailure, fit: Option<f64> },
+    /// The search for a direction the faces all run straight along was not decided (ops
+    /// [`Straight::Undecided`]: too many faces for its budget, or bands it cannot reach): the
+    /// joint may run straight, but no direction is proved. Not a fault of the picks.
+    #[error("the joint's direction could not be decided for these faces")]
+    DirectionUndecided,
     /// An ops call failed.
     #[error(transparent)]
     Ops(#[from] solidcraft_kernel::services::Error),
@@ -225,7 +230,8 @@ fn picked(pick: &GroovePick<'_>, part: JointPart) -> Result<Vec<usize>> {
 ///
 /// # Errors
 /// [`GrooveRefusal::OuterFaceNotPlane`]; [`GrooveRefusal::ArrowFaceNotAtToe`] for a chain with no
-/// toe edge; [`GrooveRefusal::DirectionUndetermined`]; [`GrooveRefusal::GrooveFaceNotStraight`];
+/// toe edge; [`GrooveRefusal::DirectionUndetermined`]; [`GrooveRefusal::DirectionUndecided`];
+/// [`GrooveRefusal::GrooveFaceNotStraight`];
 /// [`GrooveRefusal::GrooveFaceNotProved`]; [`GrooveRefusal::Invalid`] for a chain with no face.
 /// The errors of the ops calls otherwise.
 pub fn joint_frame(picks: [&GroovePick<'_>; 2], chains: [&Chain; 2]) -> Result<Plane> {
@@ -275,14 +281,16 @@ fn straight(pick: &GroovePick<'_>, f: usize, d: [f64; 3], zone: f64) -> Result<b
 /// both parts' faces ([`straight_direction`]), its refusals named by part and face.
 ///
 /// # Errors
-/// [`GrooveRefusal::DirectionUndetermined`], [`GrooveRefusal::GrooveFaceNotStraight`],
-/// [`GrooveRefusal::GrooveFaceNotProved`]; the errors of the ops call.
+/// [`GrooveRefusal::DirectionUndetermined`], [`GrooveRefusal::DirectionUndecided`],
+/// [`GrooveRefusal::GrooveFaceNotStraight`], [`GrooveRefusal::GrooveFaceNotProved`]; the errors of
+/// the ops call.
 fn direction(faces: &[(JointPart, &GroovePick<'_>, usize)]) -> Result<[f64; 3]> {
     let reads: Vec<(&Body, &Order, usize)> = faces.iter().map(|&(_, pick, f)| (pick.part, pick.order, f)).collect();
     let at = |i: usize| faces.get(i).map(|&(part, _, f)| (part, f)).ok_or(GrooveRefusal::Invalid("a face index ops does not have"));
     match straight_direction(&reads)? {
         Straight::Along { direction, .. } => Ok(direction),
         Straight::Undetermined => Err(GrooveRefusal::DirectionUndetermined),
+        Straight::Undecided => Err(GrooveRefusal::DirectionUndecided),
         Straight::NotStraight { face } => {
             let (part, face) = at(face)?;
             Err(GrooveRefusal::GrooveFaceNotStraight { part, face })
@@ -354,8 +362,8 @@ pub struct Stretch {
 /// is not one stretch ([`groove_weld_over`] builds one of them); [`GrooveRefusal::Invalid`],
 /// [`GrooveRefusal::TJoint`], [`GrooveRefusal::OuterFaceNotPlane`];
 /// [`GrooveRefusal::ArrowFaceNotAtToe`] when no left groove face meets the left outer face;
-/// [`GrooveRefusal::DirectionUndetermined`]; [`GrooveRefusal::GrooveFaceNotStraight`] for a
-/// picked face not straight along the joint or a groove face with no length along it;
+/// [`GrooveRefusal::DirectionUndetermined`]; [`GrooveRefusal::DirectionUndecided`];
+/// [`GrooveRefusal::GrooveFaceNotStraight`] for a picked face not straight along the joint or a groove face with no length along it;
 /// [`GrooveRefusal::GrooveFaceNotProved`];
 /// [`GrooveRefusal::Fill`] with the size that builds. The errors of the ops calls otherwise, a
 /// fill's input the kernel refuses among them.

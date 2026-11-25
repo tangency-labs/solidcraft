@@ -17,7 +17,7 @@ use solidcore::mass::integrator::properties::{
     face_centroid, face_centroid_prepared, region_material, AreaAbout, EstimatedMassProperties,
     MassPropertyRequest, PropertyAttributes,
 };
-use solidcore::prism::measure::FaceRun;
+pub use solidcore::prism::measure::FaceRun;
 pub use solidcore::prism::measure::StraightBy;
 use solidcore::query::api_queries::{
     self as q, brep_bounding_box, brep_is_manifold_solid, brep_material_census,
@@ -1890,8 +1890,12 @@ impl Body {
 
     /// What record face `face` gives towards the direction a set of faces runs straight along
     /// ([`straight_direction`]), with its band for the zone tolerance `zone`: its plane's normal,
-    /// its cylinder's axis, or neither ([`solidcore::prism::measure::face_run`]).
-    pub(crate) fn face_run(&self, order: &Order, face: usize, zone: f64) -> Result<FaceRun> {
+    /// its cylinder's axis, or neither ([`solidcore::prism::measure::face_run`]). A unit `d`
+    /// inside the band is one along which [`Body::face_straying`] is within `zone`.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an index past the faces; the errors of the session.
+    pub fn face_run(&self, order: &Order, face: usize, zone: f64) -> Result<FaceRun> {
         let f = order::face(order, face)?;
         read_body("face_run", self, |k, b| {
             Ok(Ok::<FaceRun, Error>(solidcore::prism::measure::face_run(
@@ -2211,8 +2215,8 @@ pub enum Straight {
     Undetermined,
     /// Face `face` (an index into the faces passed) strays across the first direction tried by
     /// more than the zone tolerance, and no other candidate proves every face straight. When the
-    /// faces are planes and cylinders, no direction does (up to the kernel's octagon for a
-    /// cylinder's band, [`solidcore::prism::measure::straight_candidates`]).
+    /// faces are planes and cylinders, no direction is inside every band
+    /// ([`solidcore::prism::measure::straight_candidates`] proved it).
     NotStraight {
         /// The face, as an index into the faces passed.
         face: usize,
@@ -2224,6 +2228,11 @@ pub enum Straight {
         /// The face, as an index into the faces passed.
         face: usize,
     },
+    /// No candidate proves every face straight, and the search for a direction inside every
+    /// plane's and cylinder's band was not decided (past its budget of constraints, or a band
+    /// that may lie out of its reach): there may be a direction that does. Not a refusal of the
+    /// faces; the caller reports it as its own.
+    Undecided,
 }
 
 /// The direction a set of `faces` (record faces, each with its body and order: the faces may be
@@ -2239,7 +2248,9 @@ pub enum Straight {
 /// ([`crate::sweep::zone_tolerance`]) is the answer. Faces of other kinds give no candidate and
 /// no band but are proved along one when [`Body::face_straying`] covers them (a ruled spline net);
 /// an extruded surface gives none, so faces of extrusions and parallel planes alone are
-/// [`Straight::Undetermined`].
+/// [`Straight::Undetermined`]. When no candidate proves every face and the kernel's search for a
+/// direction inside every band was not decided, the answer is [`Straight::Undecided`], never
+/// [`Straight::NotStraight`].
 ///
 /// # Errors
 /// [`Error::Argument`] for an index past a body's faces; the errors of the session and the zone
@@ -2251,7 +2262,8 @@ pub fn straight_direction(faces: &[(&Body, &Order, usize)]) -> Result<Straight> 
         runs.push(body.face_run(order, face, zone)?);
     }
     let mut first = None;
-    for (d, by) in solidcore::prism::measure::straight_candidates(&runs) {
+    let candidates = solidcore::prism::measure::straight_candidates(&runs);
+    for (d, by) in candidates.directions {
         let d = array(d);
         let mut failed = None;
         for (i, &(body, order, face)) in faces.iter().enumerate() {
@@ -2270,6 +2282,9 @@ pub fn straight_direction(faces: &[(&Body, &Order, usize)]) -> Result<Straight> 
                 first.get_or_insert(f);
             }
         }
+    }
+    if !candidates.complete {
+        return Ok(Straight::Undecided);
     }
     Ok(first.unwrap_or(Straight::Undetermined))
 }

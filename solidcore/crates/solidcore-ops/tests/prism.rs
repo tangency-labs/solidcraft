@@ -2335,3 +2335,39 @@ fn a_channel_is_filled_in_the_records_types_and_a_refusal_comes_back_with_its_fi
         Err(Error::Refused { .. })
     ));
 }
+
+/// brett19 on #22066: a direction on the edge of a face's band is one the face runs straight
+/// along within the zone: a cylinder's side leaned off its axis by exactly its band, and its cap
+/// leaned off square to its normal by exactly its band.
+#[test]
+fn a_direction_on_the_edge_of_a_band_is_within_the_zone() {
+    use solidcore_ops::measure::FaceRun;
+    all_fixes();
+    let zone = solidcore_ops::sweep::zone_tolerance().unwrap();
+    let c = make_cylinder([0.0, 0.0, 0.0], 5.0, 20.0).unwrap();
+    let (_, co) = c.to_record().unwrap();
+    let round = (0..co.faces.len())
+        .find(|&f| c.face_plane_normal(&co, f).unwrap().is_none())
+        .unwrap();
+    let cap = faces_facing(&c, &co, [0.0, 0.0, 1.0])[0];
+    for face in [round, cap] {
+        let run = c.face_run(&co, face, zone).unwrap();
+        // the band's direction a, a unit p square to it, and how far d leans from a or from
+        // square to a
+        let (a, slope, along) = match run {
+            FaceRun::Axis { axis, slope } => ([axis.x, axis.y, axis.z], slope, true),
+            FaceRun::Plane { normal, slope } => ([normal.x, normal.y, normal.z], slope, false),
+            FaceRun::Other => panic!("{run:?}"),
+        };
+        assert!(slope > 0.0, "{run:?}");
+        let p = unit3(cross(a, [1.0, 0.0, 0.0]));
+        let (s, c2) = (slope, (1.0 - slope * slope).sqrt());
+        let d: [f64; 3] = if along {
+            [0, 1, 2].map(|i| a[i] * c2 + p[i] * s)
+        } else {
+            [0, 1, 2].map(|i| a[i] * s + p[i] * c2)
+        };
+        let e = c.face_straying(&co, face, d).unwrap().unwrap();
+        assert!(e <= zone, "{run:?}: {e} > {zone}");
+    }
+}

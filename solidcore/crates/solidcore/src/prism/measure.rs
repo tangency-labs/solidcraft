@@ -968,11 +968,20 @@ pub enum FaceRun {
 }
 
 /// [`FaceRun`] of face `f` of `b`, from its surface's label, with its band for the zone tolerance
-/// `zone`. The band is [`face_straying`]'s plane or cylinder term solved for the direction, made
-/// a little narrower so that it is enough: a plane strays by
-/// `(|n · d| + 1024ε (Σ|nᵢ dᵢ| + 1)) · 2 · size`, with `Σ|nᵢ dᵢ| <= |n| |d| < 2`, and a cylinder by
-/// `(|a × d| + 1024ε) · 4 · size`, each plus the definition's distance. A band of no width (a face
-/// too large for the zone) is kept: nothing is inside it.
+/// `zone`: [`face_straying`]'s plane or cylinder term solved for the direction, with a margin so
+/// that a unit `d` inside the band (measured against the unit normal or axis given here) is one
+/// along which [`face_straying`] is within the zone.
+///
+/// - A plane strays by `(|n · d| + 1024ε (Σ|nᵢ dᵢ| + 1)) · 2 · size` with the stored `n`, unit
+///   within 1e-12 (`plane_of`): `Σ|nᵢ dᵢ| <= |n| |d| < 2` takes 3072ε, the stored normal's
+///   length a factor `1 + 1e-12` on `|n · d|`, and the dot product and `d`'s length a few ulps
+///   more (8ε). So `slope = (room / (2 size) - 3080ε) / (1 + 1e-12)`.
+/// - A cylinder strays by `(|a × d| + 1024ε) · 4 · size` with the stored axis, unit within 1e-12
+///   (`cylinder_of`): `slope = (room / (4 size) - 1032ε) / (1 + 1e-12)`, the 8ε for the cross
+///   product's and `d`'s rounding.
+///
+/// `room` is the zone less the definition's distance. A band of no width (a face too large for
+/// the zone) is kept: nothing is inside it.
 #[must_use]
 pub fn face_run(k: &Kernel, b: &Brep, f: FaceId, zone: f64) -> FaceRun {
     let Some(surface) = b.face(f).ok().and_then(|face| face.surface.as_ref()) else {
@@ -983,11 +992,11 @@ pub fn face_run(k: &Kernel, b: &Brep, f: FaceId, zone: f64) -> FaceRun {
     };
     let room = zone - definition;
     if let Some((_, normal)) = plane_of(surface).and_then(|(_, n)| n.length_and_unit()) {
-        let slope = room / (2.0 * size) - 3072.0 * f64::EPSILON;
+        let slope = (room / (2.0 * size) - 3080.0 * f64::EPSILON) / (1.0 + 1e-12);
         return FaceRun::Plane { normal, slope };
     }
     if let Some((_, axis)) = cylinder_of(surface).and_then(|(_, a, _)| a.length_and_unit()) {
-        let slope = room / (4.0 * size) - 1024.0 * f64::EPSILON;
+        let slope = (room / (4.0 * size) - 1032.0 * f64::EPSILON) / (1.0 + 1e-12);
         return FaceRun::Axis { axis, slope };
     }
     FaceRun::Other
@@ -1013,8 +1022,22 @@ pub enum StraightBy {
 /// were rounded apart (each read from its own plane, or rotated), which nothing here bounds.
 const PARALLEL: f64 = 2.0 * 1e-12 + 8.0 * f64::EPSILON;
 
-/// The most rows [`lean`] solves over: 64 band rows and its 4 chart rows.
-const LEAN_ROWS: usize = 68;
+/// The most constraints [`lean`] takes (two for each plane, one for each cylinder, four for the
+/// chart): past it the search is not made and the candidates are not complete.
+const LEAN_ROWS: usize = 100;
+
+/// The directions faces with `runs` may run straight along ([`straight_candidates`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct StraightCandidates {
+    /// The candidates, best first, each a unit vector in a canonical sense, with where it comes
+    /// from.
+    pub directions: Vec<(Vec3, StraightBy)>,
+    /// Whether, when no direction in `directions` is inside every plane's and cylinder's band,
+    /// no direction at all is. `false` when the search for one was not decided: past
+    /// `LEAN_ROWS` constraints, a band that may lie outside the search's reach, or a margin
+    /// between what is enough and what is needed that the search could not close.
+    pub complete: bool,
+}
 
 /// The directions faces with `runs` may run straight along, best first, each a unit vector in a
 /// canonical sense (its largest component positive, the first of equal ones), with where it comes
@@ -1032,17 +1055,17 @@ const LEAN_ROWS: usize = 68;
 /// along a candidate; a caller checks each face with [`face_straying`]. Empty when no plane pair
 /// is proved apart and no face is a cylinder.
 #[must_use]
-pub fn straight_candidates(runs: &[FaceRun]) -> Vec<(Vec3, StraightBy)> {
-    let mut planes: Vec<(Vec3, usize)> = Vec::new();
-    let mut axes: Vec<(Vec3, usize)> = Vec::new();
+pub fn straight_candidates(runs: &[FaceRun]) -> StraightCandidates {
+    let mut planes: Vec<(Vec3, usize, f64)> = Vec::new();
+    let mut axes: Vec<(Vec3, usize, f64)> = Vec::new();
     for (i, run) in runs.iter().enumerate() {
         match *run {
-            FaceRun::Plane { normal, .. } => planes.push((canonical(normal), i)),
-            FaceRun::Axis { axis, .. } => axes.push((canonical(axis), i)),
+            FaceRun::Plane { normal, slope } => planes.push((canonical(normal), i, slope)),
+            FaceRun::Axis { axis, slope } => axes.push((canonical(axis), i, slope)),
             FaceRun::Other => {}
         }
     }
-    let by_value = |a: &(Vec3, usize), b: &(Vec3, usize)| {
+    let by_value = |a: &(Vec3, usize, f64), b: &(Vec3, usize, f64)| {
         let (p, q) = (a.0, b.0);
         p.x.total_cmp(&q.x)
             .then(p.y.total_cmp(&q.y))
@@ -1052,33 +1075,51 @@ pub fn straight_candidates(runs: &[FaceRun]) -> Vec<(Vec3, StraightBy)> {
     planes.sort_by(by_value);
     axes.sort_by(by_value);
     let mut out = Vec::new();
-    let mut best: Option<(f64, Vec3, StraightBy)> = None;
-    for (i, &(n, a)) in planes.iter().enumerate() {
-        for &(m, b) in planes.iter().skip(i + 1) {
+    // the best pair, and how far off its direction a direction inside both bands may lie (the
+    // sine of that angle)
+    let mut best: Option<(f64, Vec3, StraightBy, f64)> = None;
+    for (i, &(n, a, sn)) in planes.iter().enumerate() {
+        for &(m, b, sm) in planes.iter().skip(i + 1) {
             let Some((s, d)) = n.cross(m).length_and_unit() else {
                 continue;
             };
             if s > PARALLEL && best.is_none_or(|(t, ..)| s > t) {
-                best = Some((s, d, StraightBy::Planes(a, b)));
+                // a unit d off the pair's direction by α: |n · d|, |m · d| >= sin α sin(ψ/2), ψ
+                // the acute angle between the planes
+                let acute = s.atan2(n.dot(m).abs());
+                let reach = sn.max(sm) / (0.5 * acute).sin();
+                best = Some((s, d, StraightBy::Planes(a, b), reach));
             }
         }
     }
-    if let Some((_, d, by)) = best {
+    let mut reach = None;
+    if let Some((_, d, by, r)) = best {
         out.push((canonical(d), by));
+        reach = Some(r);
     }
-    for &(a, i) in &axes {
+    for &(a, i, t) in &axes {
         if !out.iter().any(|&(d, _)| d.cross(a).length() <= PARALLEL) {
             out.push((a, StraightBy::Axis(i)));
-        }
-    }
-    if let Some(&(first, _)) = out.first() {
-        if !inside(first, runs) {
-            if let Some(d) = lean(first, runs) {
-                out.insert(1, (canonical(d), StraightBy::Bands));
+            // with no pair, the first axis leads: a direction inside its band is within t of it
+            if reach.is_none() {
+                reach = Some(t);
             }
         }
     }
-    out
+    let mut complete = true;
+    if let (Some(&(first, _)), Some(reach)) = (out.first(), reach) {
+        if !inside(first, runs) {
+            match lean(first, runs, reach) {
+                Lean::Found(d) => out.insert(1, (canonical(d), StraightBy::Bands)),
+                Lean::Nowhere => {}
+                Lean::Undecided => complete = false,
+            }
+        }
+    }
+    StraightCandidates {
+        directions: out,
+        complete,
+    }
 }
 
 /// Whether the unit `d` is inside every plane's and cylinder's band of `runs`.
@@ -1090,41 +1131,48 @@ fn inside(d: Vec3, runs: &[FaceRun]) -> bool {
     })
 }
 
-/// A unit direction inside every plane's and cylinder's band of `runs`, near the unit `base`, or
-/// `None` when there is none in reach.
+/// What [`lean`] finds.
+enum Lean {
+    /// A unit direction inside every plane's and cylinder's band.
+    Found(Vec3),
+    /// Proved: no direction is inside every band.
+    Nowhere,
+    /// Neither found nor proved absent.
+    Undecided,
+}
+
+/// A unit direction inside every plane's and cylinder's band of `runs`, near the unit `base`;
+/// `reach` bounds the sine of the angle between `base` and any direction inside every band.
 ///
-/// It is a small linear programme in the plane square to `base`: `d = base + p u + q w`, with `u`
-/// and `w` unit, square to `base` and to each other, and `|p|, |q| <= 1`. A plane's band
-/// `|n · d| <= slope` is two rows linear in `p` and `q`. A cylinder's band `|a × d| <= slope` is a
-/// disc in the plane square to its axis; it takes the regular octagon inside it, four rows
-/// `|e · d| <= slope cos(π/8)` for `e` square to the axis at every eighth of a turn. Every row is
-/// enough for its band once `d` is made unit, as `|d| >= 1`. Of the points inside every row it
-/// takes the one furthest inside (the centre of the largest circle that fits), found at the
-/// corners of the rows taken three at a time; `None` when that circle has no radius, or past
-/// [`LEAN_ROWS`] rows. So for planes the answer is exact up to the rounding of the rows, for
-/// cylinders up to the octagon (a band `cos(π/8)` as wide); it reaches directions within 45° of
-/// `base` across each of `u` and `w`.
-fn lean(base: Vec3, runs: &[FaceRun]) -> Option<Vec3> {
-    let (u, w) = square_pair(base)?;
-    let mut rows: Vec<[f64; 3]> = vec![
-        [1.0, 0.0, 1.0],
-        [-1.0, 0.0, 1.0],
-        [0.0, 1.0, 1.0],
-        [0.0, -1.0, 1.0],
-    ];
-    let mut band = |n: Vec3, slope: f64| {
-        let (c, a, b) = (n.dot(base), n.dot(u), n.dot(w));
-        rows.push([a, b, slope - c]);
-        rows.push([-a, -b, slope + c]);
+/// It is the centre of the largest circle inside every constraint, in the plane square to
+/// `base`: `d = base + p u + q w`, with `u` and `w` unit, square to `base` and to each other.
+/// - A plane's band `|n · d| <= slope` is two lines in `(p, q)`.
+/// - A cylinder's band `|a × d| <= slope` holds on the disc `|x - x_a| <= slope` around the point
+///   `x_a = (a · u, a · w) / (a · base)` where the axis meets the plane: `a × d = a × (d - d_a)`
+///   with `d_a = a / (a · base)`, so `|a × d| <= |x - x_a|` (brett19 on #22066).
+/// - The chart: `|p|, |q| <= tan α`, `α` the angle `reach` gives, so it holds every direction
+///   inside every band.
+///
+/// Every constraint is enough once `d` is made unit (`|d| >= 1`), so a centre of radius above 0
+/// is inside every band: found. Where there is none, the same search with every constraint
+/// widened to what is needed (`|n · d| <= slope |d|`, `|d| <= g = sqrt(1 + 2 tan² α)`, and a
+/// disc of radius `slope g / (a · base)`, as `|a × v| >= (a · base) |v|` for `v` square to
+/// `base`) proves there is none when it has no centre either. Otherwise, or past
+/// [`LEAN_ROWS`] constraints, or with `α` past 45°, or a cylinder's axis 60° or more off `base`
+/// whose band could still reach the chart, it is undecided.
+fn lean(base: Vec3, runs: &[FaceRun], reach: f64) -> Lean {
+    let Some((u, w)) = square_pair(base) else {
+        return Lean::Undecided;
     };
-    // cos and sin of every eighth of a turn up to a half, and cos(π/8)
-    let eighths = [
-        (1.0, 0.0),
-        (FRAC_1_SQRT_2, FRAC_1_SQRT_2),
-        (0.0, 1.0),
-        (-FRAC_1_SQRT_2, FRAC_1_SQRT_2),
-    ];
-    let octagon = 0.923_879_532_511_286_7;
+    // the chart's half width: the tangent of the angle `reach` gives, at most 1 (45°)
+    let within = reach.is_finite() && reach < FRAC_1_SQRT_2;
+    let half = if within {
+        (reach.max(0.0) / (1.0 - reach * reach).sqrt()) * (1.0 + 1e-9)
+    } else {
+        1.0
+    };
+    let g = 2.0_f64.mul_add(half * half, 1.0).sqrt();
+    let (mut enough, mut needed) = (Rows::chart(half), Rows::chart(half));
     for run in runs {
         let (direction, slope, round) = match *run {
             FaceRun::Plane { normal, slope } => (normal, slope, false),
@@ -1135,57 +1183,231 @@ fn lean(base: Vec3, runs: &[FaceRun]) -> Option<Vec3> {
             continue;
         }
         if !slope.is_finite() {
-            return None;
+            return Lean::Undecided;
         }
-        if round {
-            let (e1, e2) = square_pair(direction)?;
-            for (c, s) in eighths {
-                band(e1 * c + e2 * s, slope * octagon);
-            }
+        if !round {
+            let (c, a, b) = (direction.dot(base), direction.dot(u), direction.dot(w));
+            enough.band(a, b, c, slope);
+            needed.band(a, b, c, slope * g);
+            continue;
+        }
+        let axis = if direction.dot(base) < 0.0 {
+            -direction
         } else {
-            band(direction, slope);
+            direction
+        };
+        let cos = axis.dot(base);
+        if cos < 0.5 {
+            // the band's directions lie 60° or more off base, less its width; the chart's
+            // within 45°
+            if within && slope < 0.25 {
+                return Lean::Nowhere;
+            }
+            return Lean::Undecided;
+        }
+        let at = (axis.dot(u) / cos, axis.dot(w) / cos);
+        enough.discs.push((at, slope));
+        needed.discs.push((at, slope * g / cos));
+    }
+    if enough.lines.len() + enough.discs.len() > LEAN_ROWS {
+        return Lean::Undecided;
+    }
+    if let Some(((p, q), r)) = enough.centre() {
+        if r > 0.0 {
+            return match (base + u * p + w * q).length_and_unit() {
+                Some((_, d)) => Lean::Found(d),
+                None => Lean::Undecided,
+            };
         }
     }
-    if rows.len() > LEAN_ROWS {
-        return None;
+    match needed.centre() {
+        Some((_, r)) if r < 0.0 && within => Lean::Nowhere,
+        _ => Lean::Undecided,
     }
-    let row = |r: [f64; 3]| {
-        let [a, b, h] = r;
-        (Vec3::new(a, b, a.hypot(b)), h)
-    };
-    let holds = |x: Vec3| {
-        rows.iter().all(|&r| {
-            let (m, h) = row(r);
-            let slack = 64.0
-                * f64::EPSILON
-                * ((m.x * x.x).abs() + (m.y * x.y).abs() + (m.z * x.z).abs() + h.abs());
-            m.dot(x) <= h + slack
-        })
-    };
-    let mut best: Option<Vec3> = None;
-    for (i, &r1) in rows.iter().enumerate() {
-        for (j, &r2) in rows.iter().enumerate().skip(i + 1) {
-            for &r3 in rows.iter().skip(j + 1) {
-                let ((m1, h1), (m2, h2), (m3, h3)) = (row(r1), row(r2), row(r3));
-                let (c23, c31, c12) = (m2.cross(m3), m3.cross(m1), m1.cross(m2));
-                let det = m1.dot(c23);
-                if det.abs() <= 1e-9 * m1.length() * m2.length() * m3.length() {
-                    continue;
+}
+
+/// A point of the chart.
+type P2 = (f64, f64);
+
+/// [`lean`]'s constraints in the chart: lines `m · x + r <= h` (`m` unit) and discs
+/// `|x - c| + r <= t`, `r` the radius of a circle around `x` inside them all.
+#[derive(Default)]
+struct Rows {
+    lines: Vec<(P2, f64)>,
+    discs: Vec<(P2, f64)>,
+    /// A band no direction near the chart is inside (a plane square to `base`).
+    never: bool,
+}
+
+impl Rows {
+    /// The chart `|p|, |q| <= half`.
+    fn chart(half: f64) -> Self {
+        let lines = [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)]
+            .into_iter()
+            .map(|m| (m, half))
+            .collect();
+        Self {
+            lines,
+            discs: Vec::new(),
+            never: false,
+        }
+    }
+
+    /// The band `|c + a p + b q| <= slope`.
+    fn band(&mut self, a: f64, b: f64, c: f64, slope: f64) {
+        let n = a.hypot(b);
+        if n == 0.0 {
+            self.never |= c.abs() > slope;
+            return;
+        }
+        self.lines.push(((a / n, b / n), (slope - c) / n));
+        self.lines.push(((-a / n, -b / n), (slope + c) / n));
+    }
+
+    /// Whether the circle of radius `r` around `x` is inside every constraint, within their
+    /// rounding.
+    fn holds(&self, x: P2, r: f64) -> bool {
+        let lines = self.lines.iter().all(|&(m, h)| {
+            let slack =
+                64.0 * f64::EPSILON * ((m.0 * x.0).abs() + (m.1 * x.1).abs() + r.abs() + h.abs());
+            m.0 * x.0 + m.1 * x.1 + r <= h + slack
+        });
+        lines
+            && self.discs.iter().all(|&(c, t)| {
+                let d = (x.0 - c.0).hypot(x.1 - c.1);
+                let slack = 64.0
+                    * f64::EPSILON
+                    * (d + r.abs() + t.abs() + c.0.abs() + c.1.abs() + x.0.abs() + x.1.abs());
+                d + r <= t + slack
+            })
+    }
+
+    /// The centre and radius of the largest circle inside every constraint (a negative radius
+    /// when they have no point in common), at the points where one to three of them are tight;
+    /// `None` when no such point holds.
+    fn centre(&self) -> Option<(P2, f64)> {
+        if self.never {
+            return Some(((0.0, 0.0), f64::NEG_INFINITY));
+        }
+        let mut best: Option<(P2, f64)> = None;
+        let mut consider = |x: P2, r: f64| {
+            let fine = x.0.is_finite() && x.1.is_finite() && r.is_finite();
+            if fine && best.is_none_or(|(_, b)| r > b) && self.holds(x, r) {
+                best = Some((x, r));
+            }
+        };
+        let (lines, discs) = (&self.lines, &self.discs);
+        // three lines
+        for (i, &(m1, h1)) in lines.iter().enumerate() {
+            for (j, &(m2, h2)) in lines.iter().enumerate().skip(i + 1) {
+                for &(m3, h3) in lines.iter().skip(j + 1) {
+                    let (r1, r2, r3) = (
+                        Vec3::new(m1.0, m1.1, 1.0),
+                        Vec3::new(m2.0, m2.1, 1.0),
+                        Vec3::new(m3.0, m3.1, 1.0),
+                    );
+                    let (c23, c31, c12) = (r2.cross(r3), r3.cross(r1), r1.cross(r2));
+                    let det = r1.dot(c23);
+                    if det.abs() <= 1e-9 * r1.length() * r2.length() * r3.length() {
+                        continue;
+                    }
+                    let x = (c23 * h1 + c31 * h2 + c12 * h3) / det;
+                    consider((x.x, x.y), x.z);
                 }
-                let x = (c23 * h1 + c31 * h2 + c12 * h3) / det;
-                if best.is_some_and(|b| b.z >= x.z) || !holds(x) {
-                    continue;
-                }
-                best = Some(x);
             }
         }
+        // two lines and a disc
+        for (i, &(m1, h1)) in lines.iter().enumerate() {
+            for &(m2, h2) in lines.iter().skip(i + 1) {
+                let (Some(x0), Some(v)) = (solve2(m1, m2, h1, h2), solve2(m1, m2, -1.0, -1.0))
+                else {
+                    continue;
+                };
+                for &(c, t) in discs {
+                    on_disc(x0, v, c, t, &mut consider);
+                }
+            }
+        }
+        // a line and two discs, three discs: subtracting two discs' equations is linear
+        for (k, &(ck, tk)) in discs.iter().enumerate() {
+            for (l, &(cl, tl)) in discs.iter().enumerate().skip(k + 1) {
+                let (a, ar, ka) = disc_pair(ck, tk, cl, tl);
+                for &(m, h) in lines {
+                    if let (Some(x0), Some(v)) = (solve2(a, m, ka, h), solve2(a, m, -ar, -1.0)) {
+                        on_disc(x0, v, ck, tk, &mut consider);
+                    }
+                }
+                for &(cq, tq) in discs.iter().skip(l + 1) {
+                    let (b, br, kb) = disc_pair(ck, tk, cq, tq);
+                    if let (Some(x0), Some(v)) = (solve2(a, b, ka, kb), solve2(a, b, -ar, -br)) {
+                        on_disc(x0, v, ck, tk, &mut consider);
+                    }
+                }
+                // the two discs alone: the circle in their lens, on the line of their centres
+                let (dx, dy) = (cl.0 - ck.0, cl.1 - ck.1);
+                let gap = dx.hypot(dy);
+                if gap > 0.0 {
+                    let r = 0.5 * (tk + tl - gap);
+                    let s = (tk - r) / gap;
+                    consider((ck.0 + s * dx, ck.1 + s * dy), r);
+                }
+            }
+        }
+        // a line and a disc: the circle on the line's normal through the disc's centre
+        for &(m, h) in lines {
+            for &(c, t) in discs {
+                let r = 0.5 * (h - m.0 * c.0 - m.1 * c.1 + t);
+                consider((c.0 - (t - r) * m.0, c.1 - (t - r) * m.1), r);
+            }
+        }
+        // a disc alone
+        for &(c, t) in discs {
+            consider(c, t);
+        }
+        best
     }
-    let x = best?;
-    if x.z <= 0.0 {
+}
+
+/// `x` with `a · x = ra` and `b · x = rb`, `None` for nearly parallel `a` and `b`.
+fn solve2(a: P2, b: P2, ra: f64, rb: f64) -> Option<P2> {
+    let det = a.0 * b.1 - a.1 * b.0;
+    if det.abs() <= 1e-12 * a.0.hypot(a.1) * b.0.hypot(b.1) {
         return None;
     }
-    let (_, d) = (base + u * x.x + w * x.y).length_and_unit()?;
-    Some(d)
+    Some(((ra * b.1 - a.1 * rb) / det, (a.0 * rb - ra * b.0) / det))
+}
+
+/// Two discs' equations `|x - c|² = (t - r)²` subtracted: `a · x + ar r = k`.
+fn disc_pair(ck: P2, tk: f64, cl: P2, tl: f64) -> (P2, f64, f64) {
+    let a = (2.0 * (cl.0 - ck.0), 2.0 * (cl.1 - ck.1));
+    let k = tk * tk - tl * tl - (ck.0 * ck.0 + ck.1 * ck.1) + (cl.0 * cl.0 + cl.1 * cl.1);
+    (a, 2.0 * (tk - tl), k)
+}
+
+/// The points `x = x0 + r v` where the disc around `c` of radius `t` is tight,
+/// `|x - c| = t - r` with `r <= t`, handed to `consider`.
+fn on_disc(x0: P2, v: P2, c: P2, t: f64, consider: &mut impl FnMut(P2, f64)) {
+    let e = (x0.0 - c.0, x0.1 - c.1);
+    let qa = v.0 * v.0 + v.1 * v.1 - 1.0;
+    let qb = 2.0 * (e.0 * v.0 + e.1 * v.1 + t);
+    let qc = e.0 * e.0 + e.1 * e.1 - t * t;
+    let mut roots = [f64::NAN; 2];
+    if qa.abs() <= 1e-12 * (qb.abs() + qc.abs()) {
+        if qb != 0.0 {
+            roots[0] = -qc / qb;
+        }
+    } else {
+        let disc = qb * qb - 4.0 * qa * qc;
+        if disc >= 0.0 {
+            let root = disc.sqrt();
+            roots = [(-qb + root) / (2.0 * qa), (-qb - root) / (2.0 * qa)];
+        }
+    }
+    for r in roots {
+        if r <= t {
+            consider((x0.0 + r * v.0, x0.1 + r * v.1), r);
+        }
+    }
 }
 
 /// Two unit vectors square to the unit `v` and to each other.
@@ -1536,6 +1758,13 @@ mod straight_tests {
         }
     }
 
+    /// The directions of `runs`' candidates, checking the search was decided.
+    fn found(runs: &[FaceRun]) -> Vec<(Vec3, StraightBy)> {
+        let got = straight_candidates(runs);
+        assert!(got.complete, "{got:?}");
+        got.directions
+    }
+
     /// Two planes that are not parallel give their cross product first, whatever the order and
     /// sense of the runs; a cylinder's axis comes after (once); parallel planes alone give nothing.
     #[test]
@@ -1546,7 +1775,7 @@ mod straight_tests {
             plane(0.0, 1.0, 0.0),
             axis(0.0, 0.0, -1.0),
         ];
-        let got = straight_candidates(&runs);
+        let got = found(&runs);
         // the axis is the pair's direction, so it is not listed again
         assert_eq!(
             got,
@@ -1558,7 +1787,7 @@ mod straight_tests {
             plane(0.0, -1.0, 0.0),
             plane(-1.0, 0.0, 0.0),
         ];
-        let got = straight_candidates(&flipped);
+        let got = found(&flipped);
         assert_eq!(got.first().map(|c| c.0), Some(v(0.0, 0.0, 1.0)), "{got:?}");
         // parallel planes and a cylinder: the cylinder's axis
         let round = [
@@ -1566,13 +1795,10 @@ mod straight_tests {
             axis(0.0, 0.0, -1.0),
             plane(0.0, -1.0, 0.0),
         ];
-        assert_eq!(
-            straight_candidates(&round),
-            vec![(v(0.0, 0.0, 1.0), StraightBy::Axis(1))]
-        );
+        assert_eq!(found(&round), vec![(v(0.0, 0.0, 1.0), StraightBy::Axis(1))]);
         // parallel planes only: nothing
         let flat = [plane(0.0, 1.0, 0.0), plane(0.0, 1.0, 1e-13)];
-        assert!(straight_candidates(&flat).is_empty());
+        assert!(found(&flat).is_empty());
     }
 
     /// brett19's runs (+x, +y, -x) on #22066: flipping the first and last senses changes neither
@@ -1589,8 +1815,8 @@ mod straight_tests {
             plane(0.0, 1.0, 0.0),
             plane(1.0, 0.0, 0.0),
         ];
-        let got = straight_candidates(&runs);
-        assert_eq!(straight_candidates(&flipped), got);
+        let got = found(&runs);
+        assert_eq!(found(&flipped), got);
         assert_eq!(got, vec![(v(0.0, 0.0, 1.0), StraightBy::Planes(1, 0))]);
     }
 
@@ -1611,13 +1837,13 @@ mod straight_tests {
             band(v(1.0, -alpha, 1.0)),
         ];
         assert!(inside(v(0.0, 1.0, 0.0), &runs));
-        let got = straight_candidates(&runs);
+        let got = found(&runs);
         assert_eq!(got.len(), 2, "{got:?}");
         assert!(!inside(got[0].0, &runs), "{got:?}");
         assert_eq!(got[1].1, StraightBy::Bands);
         assert!(inside(got[1].0, &runs), "{got:?}");
         assert!((got[1].0.length() - 1.0).abs() < 4.0 * f64::EPSILON);
-        // the same planes with bands too narrow to meet: no direction inside them all
+        // the same planes with bands too narrow to meet: proved that no direction is inside them
         let narrow: Vec<FaceRun> = runs
             .iter()
             .map(|r| match *r {
@@ -1628,7 +1854,7 @@ mod straight_tests {
                 other => other,
             })
             .collect();
-        assert_eq!(straight_candidates(&narrow).len(), 1);
+        assert_eq!(found(&narrow).len(), 1);
         // a cylinder whose axis leans off the planes' direction by half its band
         let lean = 0.5 * slope;
         let cylinder = [
@@ -1639,8 +1865,78 @@ mod straight_tests {
                 slope,
             },
         ];
-        let got = straight_candidates(&cylinder);
+        let got = found(&cylinder);
         let bands = got.iter().find(|c| c.1 == StraightBy::Bands);
         assert!(bands.is_some_and(|c| inside(c.0, &cylinder)), "{got:?}");
+    }
+
+    /// brett19's lens on #22066: planes square to x and y and a cylinder, bands 1e-6, the
+    /// cylinder's axis leaning off z towards the planes' corner so that its disc reaches the
+    /// corner at f of its band (f = 0.93, 0.96, 0.99), the whole turned about z through 64
+    /// angles. Every one has a direction inside every band, and the search finds one.
+    #[test]
+    fn a_cylinder_band_meeting_two_plane_bands_in_a_lens_is_found_at_every_turn() {
+        let (s, t) = (1e-6, 1e-6);
+        for f in [0.93, 0.96, 0.99] {
+            let reach = s + f * t * FRAC_1_SQRT_2;
+            for k in 0..64 {
+                let turn = TAU * f64::from(k) / 64.0;
+                let (sin, cos) = turn.sin_cos();
+                let at = |x: f64, y: f64, z: f64| v(cos * x - sin * y, sin * x + cos * y, z);
+                let runs = [
+                    FaceRun::Plane {
+                        normal: at(1.0, 0.0, 0.0),
+                        slope: s,
+                    },
+                    FaceRun::Plane {
+                        normal: at(0.0, 1.0, 0.0),
+                        slope: s,
+                    },
+                    FaceRun::Axis {
+                        axis: at(reach, reach, 1.0).unitize().unwrap(),
+                        slope: t,
+                    },
+                ];
+                let got = found(&runs);
+                let bands = got.iter().find(|c| c.1 == StraightBy::Bands);
+                assert!(
+                    bands.is_some_and(|c| inside(c.0, &runs)),
+                    "f {f}, turn {k}: {got:?}"
+                );
+            }
+        }
+    }
+
+    /// `n` planes, each tilted off square to y by 0.9 of its band, their normals spread round y.
+    fn tilted(n: u32) -> Vec<FaceRun> {
+        let slope = 1e-5 / (2.0 * 10.0 * 2.0_f64.sqrt());
+        (0..n)
+            .map(|k| {
+                let (sin, cos) = (TAU * f64::from(k) / f64::from(n)).sin_cos();
+                FaceRun::Plane {
+                    normal: v(cos, 0.9 * slope, sin).unitize().unwrap(),
+                    slope,
+                }
+            })
+            .collect()
+    }
+
+    /// brett19's 33 and 40 tilted planes on #22066 are searched and found; past the search's
+    /// constraints the candidates say the search was not decided, not that no direction is.
+    #[test]
+    fn many_tilted_planes_are_found_and_past_the_budget_undecided() {
+        for n in [3, 16, 33, 40] {
+            let runs = tilted(n);
+            let got = found(&runs);
+            let bands = got.iter().find(|c| c.1 == StraightBy::Bands);
+            assert!(bands.is_some_and(|c| inside(c.0, &runs)), "{n}: {got:?}");
+        }
+        let runs = tilted(60);
+        let got = straight_candidates(&runs);
+        assert!(!got.complete, "{got:?}");
+        assert!(
+            got.directions.iter().all(|c| c.1 != StraightBy::Bands),
+            "{got:?}"
+        );
     }
 }
