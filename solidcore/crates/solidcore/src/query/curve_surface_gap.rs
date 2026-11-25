@@ -4500,12 +4500,7 @@ struct ProvedPiece {
 /// knots all have the degree's multiplicity, with one tangent each side: their jumps are
 /// rounding, where the bisection's first-order term across a corner is the gap's whole slope.
 /// `None` when a term is not enclosed.
-fn proved_piece(
-    sides: &Sides<'_>,
-    s: &NetSurface,
-    a: f64,
-    b: f64,
-) -> Result<Option<ProvedPiece>> {
+fn proved_piece(sides: &Sides<'_>, s: &NetSurface, a: f64, b: f64) -> Result<Option<ProvedPiece>> {
     let Sides {
         curve: cn,
         trim: wn,
@@ -4551,7 +4546,11 @@ fn proved_piece(
         })
     };
     let mut jumps = Ivl::from(0.0);
-    for &x in sides.curve_kinks.iter().filter(|&&x| r0.lo < x && x < r0.hi) {
+    for &x in sides
+        .curve_kinks
+        .iter()
+        .filter(|&&x| r0.lo < x && x < r0.hi)
+    {
         let Some(dc) = sides_at(cn, x)? else {
             return Ok(None);
         };
@@ -4573,12 +4572,14 @@ fn proved_piece(
     }
     let corners = (h * jumps * Ivl::from(0.25)).hi;
     let term = term.hi;
-    Ok((term.is_finite() && corners.is_finite() && slack.is_finite()).then_some(ProvedPiece {
-        term,
-        second_order,
-        corners,
-        slack,
-    }))
+    Ok(
+        (term.is_finite() && corners.is_finite() && slack.is_finite()).then_some(ProvedPiece {
+            term,
+            second_order,
+            corners,
+            slack,
+        }),
+    )
 }
 
 /// Not upstream (#18166): the bound `first` of a curve against a surface (`None` where it is
