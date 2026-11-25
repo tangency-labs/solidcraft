@@ -880,6 +880,16 @@ fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
         zoom_item(vec![Sel::Feature { id }], exists),
         act("ui.findTimeline", "Find in Timeline", "rollback").with(find).on(exists),
     ]);
+    // With the history in the browser its rows put features in timeline folders, as the
+    // History's feature menu does (#7221).
+    if app.preferences.history_in_browser {
+        let parent = crate::timeline_folders::group_parent(&app.session.doc.timeline_groups, &targets);
+        items.push(
+            act("ui.groupFeatures", "Group Features", "feature_group")
+                .with(json!({ "features": targets, "parent": parent }))
+                .on(exists && app.session.group_refusal(&targets, parent).is_none()),
+        );
+    }
     items
 }
 
