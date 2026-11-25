@@ -4400,7 +4400,7 @@ pub(crate) fn trim_image_gap_within_proved(
     // (the gap without the curve's slack, rounded down: a gap at most it has a bound at most
     // `limit`)
     let target = (Ivl::from(limit) - Ivl::from(c_slack)).lo;
-    if !(target > 0.0) {
+    if target.is_nan() || target <= 0.0 {
         return Ok(false);
     }
     let at = |i: usize, n: usize| {
@@ -4433,7 +4433,7 @@ pub(crate) fn trim_image_gap_within_proved(
                 * Ivl::from(PART_ROUNDING)
         };
         let margin = target - ends - 2.0 * p.slack;
-        if !(margin > 0.0) {
+        if margin.is_nan() || margin <= 0.0 {
             return Ok(false);
         }
         // (the parts, a power of two so that `1 / n` is exact, at least twice as many as the
@@ -4459,7 +4459,7 @@ pub(crate) fn trim_image_gap_within_proved(
         #[allow(clippy::cast_precision_loss)] // small counts
         let terms = part(n as f64);
         let bound = (Ivl::from(ends) + terms + Ivl::from(2.0) * Ivl::from(p.slack)).hi;
-        if !(bound <= target) {
+        if bound.is_nan() || bound > target {
             return Ok(false);
         }
     }
@@ -4531,7 +4531,10 @@ fn proved_piece(sides: &Sides<'_>, s: &NetSurface, a: f64, b: f64) -> Result<Opt
     let sides_at = |n: &NurbsCurve, x: f64| -> Result<Option<V3<Ivl>>> {
         let right = span(&n.u, n.p, n.n, x);
         let mut left = right;
-        while left > n.p && !(knot(&n.u, left as isize) < x) {
+        while left > n.p && {
+            let at = knot(&n.u, left as isize);
+            at.is_nan() || at >= x
+        } {
             left -= 1;
         }
         if !(knot(&n.u, left as isize) < x && knot(&n.u, right as isize) <= x) || left == right {
