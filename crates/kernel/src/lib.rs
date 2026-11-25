@@ -407,6 +407,8 @@ pub use polybool::faceted_boolean;
 pub use polyhedron::HalfSpace;
 pub use polyhedron::convex_polyhedron;
 pub use polyhedron::draft;
+pub use polyhedron::offset_solid;
+pub use polyhedron::offset_tool;
 pub use prism::PLANAR_FIT_TOL;
 pub use prism::extrude_planar_regions;
 pub use prism::planar_regions_boolean;

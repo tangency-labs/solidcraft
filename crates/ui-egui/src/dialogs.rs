@@ -434,6 +434,14 @@ crate::dialog_descriptor::dialog_descriptors! {
             Combine {
                 operation: usize,
                 keep_tools: bool,
+                /// A cut's offset: how far the tools grow before they cut (an expression).
+                offset: String,
+                /// With an offset: round the grown tools' convex edges.
+                round_edges: bool,
+                /// Only the faces picked in the Offset Faces input move, not every face.
+                picked_faces: bool,
+                /// With round edges: the rounds' radius (an expression); empty: the offset's.
+                radius: String,
             },
             EditParam {
                 name: String,
@@ -1283,7 +1291,14 @@ impl Dialog {
                 vec![SelInput::new("Profile", PROFILES, false), SelInput::new("Axis", AXIS_PICKS, false)],
             ),
             "solid.combine" => Dialog::new(
-                Kind::Combine { operation: 1, keep_tools: false },
+                Kind::Combine {
+                    operation: 1,
+                    keep_tools: false,
+                    offset: "0 mm".into(),
+                    round_edges: false,
+                    picked_faces: false,
+                    radius: String::new(),
+                },
                 vec![SelInput::new("Target Body", BODIES, false), SelInput::new("Tool Bodies", BODIES, true)],
             ),
             _ => {
@@ -5701,6 +5716,35 @@ pub(crate) fn set_object_accepting(inputs: &mut Vec<SelInput>, active: &mut usiz
     }
 }
 
+/// Whether `text` is a plain zero, with or without a unit (`0`, `0 mm`, `0.0in`): no parameter
+/// or expression a later change could make non-zero.
+pub(crate) fn literal_zero(text: &str) -> bool {
+    let number = text.trim().trim_end_matches(|c: char| c.is_ascii_alphabetic()).trim();
+    number.trim_start_matches('(').trim_end_matches(')').trim().parse::<f64>().is_ok_and(|v| v == 0.0)
+}
+
+/// Combine's pick input for the tool faces a cut's offset moves.
+pub(crate) const COMBINE_OFFSET_FACES: &str = "ui.combine_offset_faces";
+
+/// Show Combine's Offset Faces input while a cut moves picked faces only, and remove it (with its
+/// picks) otherwise. Showing it makes it the active input: the next picks are faces.
+pub(crate) fn set_combine_offset_faces(inputs: &mut Vec<SelInput>, active: &mut usize, on: bool) {
+    let at = inputs.iter().position(|i| i.label == COMBINE_OFFSET_FACES);
+    match (at, on) {
+        (None, true) => {
+            inputs.push(SelInput::new(COMBINE_OFFSET_FACES, FACES, true));
+            *active = inputs.len() - 1;
+        }
+        (Some(at), false) => {
+            inputs.remove(at);
+            if *active >= at {
+                *active = (*active).saturating_sub(1).min(inputs.len().saturating_sub(1));
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Extrude's pick input for the bodies a Join joins or a Cut cuts.
 const EXTRUDE_TARGETS: &str = "Target Bodies";
 
@@ -7827,15 +7871,33 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 json!({"tools": sels(d, 0).body_names(), "planes": fill_plane_names(sels(d, 0)), "cells": picked, "operation": OPS.get(*operation).copied().unwrap_or("new")}),
             )
         }
-        Kind::Combine { operation, keep_tools } => {
+        Kind::Combine { operation, keep_tools, offset, round_edges, picked_faces, radius } => {
             need(0, "the target body")?;
             need(1, "tool bodies")?;
             let target = sels(d, 0).body_names().into_iter().next().unwrap_or_default();
             let tools: Vec<String> = sels(d, 1).body_names().into_iter().filter(|n| *n != target).collect();
-            (
-                "solid.combine",
-                json!({"target": target, "tools": tools, "operation": OPS.get(*operation).copied().unwrap_or("join"), "keep_tools": keep_tools}),
-            )
+            let op = OPS.get(*operation).copied().unwrap_or("join");
+            let mut p = json!({"target": target, "tools": tools, "operation": op, "keep_tools": keep_tools});
+            // Only a cut takes an offset. A literal zero is the same as none; an expression that
+            // is zero now (a parameter) is kept, so the cut follows it when it changes.
+            let offset = offset.trim();
+            if op == "cut" && !offset.is_empty() && !literal_zero(offset) {
+                p["offset"] = json!(offset);
+                if *round_edges {
+                    p["offset_edges"] = json!("round");
+                    if !radius.trim().is_empty() {
+                        p["offset_radius"] = json!(radius.trim());
+                    }
+                }
+                if *picked_faces {
+                    let faces = d.inputs.iter().find(|i| i.label == COMBINE_OFFSET_FACES).map(|i| i.items.face_points()).unwrap_or_default();
+                    if faces.is_empty() {
+                        return Err("select the tool faces to offset".into());
+                    }
+                    p["offset_faces"] = json!(faces.iter().map(|f| [f.x, f.y, f.z]).collect::<Vec<_>>());
+                }
+            }
+            ("solid.combine", p)
         }
         Kind::EditParam { name, expr } => ("parameters.change", json!({"name": name, "expression": expr})),
         Kind::Rename { feature, name } => ("timeline.rename", json!({"feature": feature, "name": name})),
@@ -9554,9 +9616,21 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Combine { target, tools, operation, keep_tools } => {
+        FeatureKind::Combine { target, tools, operation, keep_tools, offset, offset_edges, offset_faces, offset_radius } => {
             let mut d = start("solid.combine")?;
-            d.kind = Kind::Combine { operation: op_index(operation).max(1), keep_tools: *keep_tools };
+            d.kind = Kind::Combine {
+                operation: op_index(operation).max(1),
+                keep_tools: *keep_tools,
+                offset: offset.as_ref().map_or_else(|| "0 mm".to_string(), |e| e.as_str().to_string()),
+                round_edges: *offset_edges == solidcraft_engine::doc::OffsetEdges::Round,
+                picked_faces: !offset_faces.is_empty(),
+                radius: offset_radius.as_ref().map(|e| e.as_str().to_string()).unwrap_or_default(),
+            };
+            if !offset_faces.is_empty() {
+                let mut input = SelInput::new(COMBINE_OFFSET_FACES, FACES, true);
+                input.items = offset_faces.iter().filter_map(|p| face_sel(&app.session, p.0)).collect();
+                d.inputs.push(input);
+            }
             if let Some(inp) = d.inputs.get_mut(0) {
                 inp.items = vec![Sel::Body { name: target.to_string() }];
             }

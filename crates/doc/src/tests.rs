@@ -1917,8 +1917,20 @@ fn primitives_and_combine() {
         None,
     )
     .unwrap();
-    doc.add_feature(FeatureKind::Combine { target: "Body1".into(), tools: vec!["Body2".into()], operation: Operation::Cut, keep_tools: false }, None)
-        .unwrap();
+    doc.add_feature(
+        FeatureKind::Combine {
+            target: "Body1".into(),
+            tools: vec!["Body2".into()],
+            operation: Operation::Cut,
+            keep_tools: false,
+            offset: None,
+            offset_edges: OffsetEdges::Sharp,
+            offset_faces: Vec::new(),
+            offset_radius: None,
+        },
+        None,
+    )
+    .unwrap();
     let mut m = Model::new();
     m.evaluate(&doc);
     assert!(m.results.iter().all(|r| r.error.is_none()), "{:?}", m.results);
@@ -2527,6 +2539,10 @@ fn a_combine_leaves_out_a_tool_whose_feature_is_suppressed() {
                 tools: vec!["Body2".into(), "Body3".into()],
                 operation: Operation::Join,
                 keep_tools: false,
+                offset: None,
+                offset_edges: OffsetEdges::Sharp,
+                offset_faces: Vec::new(),
+                offset_radius: None,
             },
             None,
         )
@@ -2611,7 +2627,16 @@ fn a_split_of_a_body_of_two_pieces_gives_the_halves_of_both() {
     )
     .unwrap();
     doc.add_feature(
-        FeatureKind::Combine { target: "Body1".into(), tools: vec!["Body2".into()], operation: Operation::Join, keep_tools: false },
+        FeatureKind::Combine {
+            target: "Body1".into(),
+            tools: vec!["Body2".into()],
+            operation: Operation::Join,
+            keep_tools: false,
+            offset: None,
+            offset_edges: OffsetEdges::Sharp,
+            offset_faces: Vec::new(),
+            offset_radius: None,
+        },
         None,
     )
     .unwrap();
@@ -2662,6 +2687,10 @@ fn a_join_splits_off_only_what_touches_along_an_edge() {
                 tools: vec!["Body3".into(), "Body2".into()],
                 operation: Operation::Join,
                 keep_tools: false,
+                offset: None,
+                offset_edges: OffsetEdges::Sharp,
+                offset_faces: Vec::new(),
+                offset_radius: None,
             },
             None,
         )

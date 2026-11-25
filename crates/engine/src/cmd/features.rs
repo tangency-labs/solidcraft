@@ -4,8 +4,8 @@ use serde_json::{Value, json};
 use solidcore_record::Vec3;
 use solidcraft_doc::construct::DatumItem;
 use solidcraft_doc::{
-    AxisRef, Direction, Expr, Extent, FeatureKind, Operation, PointExpr, ProfileSel, RailFit, SweepOrientation, SweepRail, ThinSide, ThinWall,
-    Touching, expr::Kind, point_expr,
+    AxisRef, Direction, Expr, Extent, FeatureKind, OffsetEdges, Operation, PointExpr, ProfileSel, RailFit, SweepOrientation, SweepRail, ThinSide,
+    ThinWall, Touching, expr::Kind, point_expr,
 };
 use solidcraft_doc::{BodyName, FeatureName, SketchId, SplitSheet};
 use solidcraft_doc::{Dir, FacePick, Position};
@@ -226,6 +226,10 @@ pub static COMMANDS: &[CommandSpec] = &[
             "operation?: join|cut|intersect; ",
             "touching?: separate|one_body (what a join makes of pieces that share no face: separate, the default, makes each piece that touches another only along an edge or at a point a body of its own and keeps pieces that touch nothing in one body; one_body keeps every piece in one body); ",
             "keep_tools?: bool; ",
+            "offset?: expr (cut only: each tool is grown this far along its faces' outward normals before it cuts, so the cut leaves that clearance round it; negative: shrunk, for a press fit; the tool bodies themselves are not changed; default 0); ",
+            "offset_edges?: sharp|round (with offset: sharp, the default, extends the grown faces until they meet; round rounds each edge between two grown faces, convex for a positive offset and concave for a negative one, so with the offset as the radius the clearance is the same everywhere); ",
+            "offset_faces?: [[x,y,z] points on tool faces] (with offset: only these faces move, the faces round them extended or trimmed to meet them; the other faces, and tools with none of them, cut as they are; default: every face of every tool); ",
+            "offset_radius?: expr (with offset_edges: round: the radius of the rounds, default the offset's size; one too large for the faces round an edge is refused as a fillet's is, naming the largest that fits); ",
             "new_component?: bool (the result goes into a new component; component_name?)",
         )),
     CommandSpec::new("solid.pattern.rectangular", "Rectangular Pattern", crate::checked!("solid.pattern.rectangular", pattern_rect)).begins_edit()
@@ -2906,6 +2910,53 @@ fn combine(s: &mut Session, p: &Value) -> Result<Value> {
         None => Operation::Join,
         Some(o) => Operation::parse(o).filter(|o| *o != Operation::NewBody).ok_or_else(|| bad(cmd, "operation must be join, cut or intersect"))?,
     };
+    // A cut's clearance (#3774): each tool grown by it before it cuts. A value given that is no
+    // expression is refused, never read as none (`null` is none).
+    let given = |k: &str| p.get(k).is_some_and(|v| !v.is_null());
+    let offset = expr(p, "offset");
+    if given("offset") && offset.is_none() {
+        return Err(bad(cmd, format!("`offset` {}", expr_problem(p.get("offset")))));
+    }
+    if given("offset_edges") && str_(p, "offset_edges").is_none() {
+        return Err(bad(cmd, "`offset_edges` must be sharp or round"));
+    }
+    if let Some(d) = &offset {
+        if op != Operation::Cut {
+            return Err(bad(cmd, "`offset` is only for a cut"));
+        }
+        check_expr(s, d, Kind::Length, cmd, "offset")?;
+    }
+    let offset_edges = match str_(p, "offset_edges") {
+        None => OffsetEdges::Sharp,
+        Some(_) if offset.is_none() => return Err(bad(cmd, "`offset_edges` needs an `offset`")),
+        Some(e) => OffsetEdges::parse(e).ok_or_else(|| bad(cmd, "`offset_edges` must be sharp or round"))?,
+    };
+    // Only these tool faces move; none given: every face of every tool.
+    let offset_faces = match p.get("offset_faces").filter(|v| !v.is_null()) {
+        None => Vec::new(),
+        Some(_) if offset.is_none() => return Err(bad(cmd, "`offset_faces` needs an `offset`")),
+        Some(v) => {
+            let a = v
+                .as_array()
+                .filter(|a| !a.is_empty() && a.len() <= 1000)
+                .ok_or_else(|| bad(cmd, "`offset_faces` must list 1…1000 points on tool faces"))?;
+            a.iter().map(|f| super::face::face_ref(s, f, None, cmd).map(FacePick)).collect::<Result<Vec<_>>>()?
+        }
+    };
+    // The rounding radius; none given: the offset's size.
+    let offset_radius = expr(p, "offset_radius");
+    if given("offset_radius") && offset_radius.is_none() {
+        return Err(bad(cmd, format!("`offset_radius` {}", expr_problem(p.get("offset_radius")))));
+    }
+    if let Some(r) = &offset_radius {
+        if offset_edges != OffsetEdges::Round {
+            return Err(bad(cmd, "`offset_radius` needs `offset_edges: round`"));
+        }
+        check_expr(s, r, Kind::Length, cmd, "offset_radius")?;
+        if !s.doc.eval(r, Kind::Length).is_ok_and(|v| v > 0.0) {
+            return Err(bad(cmd, "`offset_radius` must be positive"));
+        }
+    }
     let mut out = add_feature(
         s,
         p,
@@ -2914,6 +2965,10 @@ fn combine(s: &mut Session, p: &Value) -> Result<Value> {
             tools: tools.into_iter().map(BodyName).collect(),
             operation: op,
             keep_tools: bool_(p, "keep_tools").unwrap_or(false),
+            offset,
+            offset_edges,
+            offset_faces,
+            offset_radius,
         },
     )?;
     // New Component: the result goes into a component of its own.
