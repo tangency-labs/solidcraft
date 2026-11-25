@@ -18,7 +18,18 @@ fn matches(schema: schemars::Schema, r: &Value) {
 fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<SelectionDeleteParams>(),
-        &["canvases", "components", "contents", "dry_run", "items", "joints", "occurrences", "point_clouds", "preserve_projection_link"],
+        &[
+            "all_bodies",
+            "canvases",
+            "components",
+            "contents",
+            "dry_run",
+            "items",
+            "joints",
+            "occurrences",
+            "point_clouds",
+            "preserve_projection_link",
+        ],
     );
 }
 

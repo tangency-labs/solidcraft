@@ -49,6 +49,7 @@ pub use design::file_kind;
 pub use design::has_design_provenance;
 pub use design::is_design_container;
 pub use design::large_file_text;
+pub use design::read_container_bytes;
 pub use design::read_design_file;
 pub use design::read_design_file_once;
 pub use design::read_design_geometry;
@@ -65,6 +66,7 @@ pub use design::read_design_with_model;
 pub use design::read_drawing;
 pub use design::read_drawing_file;
 pub use design::write_design_container;
+pub use design::write_design_container_reusing;
 pub use design::write_design_container_with_cache;
 pub use design::write_design_container_with_compression;
 pub use design::write_design_container_with_preview;
@@ -1900,7 +1902,7 @@ pub fn step_assembly(doc: &Document, local: &ModelState, name: &str) -> Result<V
         let Some(p) = index.get(&comp).and_then(|i| products.get_mut(*i)) else { continue };
         p.bodies.push(ExportBody { name: b.name.clone(), body: framed.as_ref().unwrap_or(&b.body), color: b.body.color() });
     }
-    for o in &doc.occurrences {
+    for o in doc.active_occurrences() {
         let (Some(&parent), Some(&child)) = (index.get(&o.parent), index.get(&o.component)) else { continue };
         if let Some(p) = products.get_mut(parent) {
             p.children.push((child, o.transform, o.name.clone()));
@@ -2770,8 +2772,11 @@ mod tests {
     fn notes_say_short_only_for_a_face_under_the_angle() {
         let spec = solidcraft_kernel::MeshSpec::chord(0.01);
         assert!(mesh_notes(&solidcraft_kernel::PlanStats::default(), &spec).is_empty());
-        let unshaped =
-            |face: usize, smallest_angle: f64| solidcore_tess::Unshaped { face, smallest_angle, limits: vec![solidcore_tess::ShapeLimit::Rounds] };
+        let unshaped = |face: usize, smallest_angle: f64| solidcraft_kernel::services::tess::Unshaped {
+            face,
+            smallest_angle,
+            limits: vec![solidcraft_kernel::services::tess::ShapeLimit::Rounds],
+        };
         let stats = solidcraft_kernel::PlanStats { unshaped: vec![unshaped(3, 18.5), unshaped(7, 27.25)], ..Default::default() };
         let notes = mesh_notes(&stats, &spec);
         assert_eq!(notes.len(), 2);
@@ -2838,7 +2843,7 @@ mod tests {
     }
 
     /// A 10 × 20 × 30 box exported as STL has no triangle sharper than the mesh export's smallest
-    /// angle: every face goes through the mesh path (`solidcore_tess::mesh`), planar ones too.
+    /// angle: every face goes through the mesh path (`solidcraft_kernel::services::tess::mesh`), planar ones too.
     /// On the display path (`Body::mesh`, before #15622) it was 12 triangles, two per face, 4 of
     /// them under 25° (the 10 × 30 faces' halves), the smallest 18.43° (atan(10/30)).
     #[test]

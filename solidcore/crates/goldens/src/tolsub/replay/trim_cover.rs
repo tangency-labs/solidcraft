@@ -13,6 +13,12 @@
 //! The `blend.fillet_executive_p3` hashes are of those lines without the
 //! `fillet_point_step` key, which recorded the retired step latch (#18916); every other
 //! value is the line's.
+//!
+//! The drop tracer's clamped-sliver rule (a span whose clamped UV image is one point within
+//! the drop's tolerances is left out) moves the six `sphere_diff_3cylinders` rows here
+//! (`e2-r0.1`, `e5-r0.1`, `e5-r0.5`, `sweep4` `e30` and `all`, `sweep5` `e29`) in their
+//! `mass_properties` only, so their hashes are of the put-back run with that rule;
+//! `tests/drop_clamped_sliver_moved_mass_rows.rs` classifies each moved entry against a certified enclosure.
 
 /// The moved rows: unit, case, main's row hash.
 pub(super) static TRIM_COVER: &[(&str, &str, u64)] = &[
@@ -44,32 +50,32 @@ pub(super) static TRIM_COVER: &[(&str, &str, u64)] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1",
-        0x519f703ce178594e,
+        0xa058e2b81484fdde,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1",
-        0x900b3d0679ffb2d3,
+        0x96a1c6ee8df74e77,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5",
-        0xc87fb128a0e9c4c7,
+        0xe603baa1465a7013,
     ),
     (
         "blend.fillet_executive_p3",
         "sweep4-native-crash-sphere_diff_3cylinders-e30-r0.1",
-        0x2551a1fdc689efef,
+        0x1f3a461f12a7ab77,
     ),
     (
         "blend.fillet_executive_p3",
         "sweep4-sphere_diff_3cylinders-all-r0.1",
-        0x46b24b2fc2c8dd3f,
+        0x5f0ec1d272b7bb2f,
     ),
     (
         "blend.fillet_executive_p3",
         "sweep5-sphere_diff_3cylinders-e29-r1.0",
-        0xd6e6eb94f0d8f6e6,
+        0x579757a8a8e473fa,
     ),
     (
         "blend.fillet_removal",

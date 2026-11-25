@@ -216,8 +216,9 @@ which suits scripts and agents checking a whole assembly:
 It returns `overlaps` (pairs sharing at least `min_volume`, 0.01 mm³ by default, with the shared
 volume, area, box and centre), `near` (pairs closer than `clearance`, with the distance and the
 two nearest points; a contact sharing less than `min_volume` is listed here at 0 with its
-`overlap_mm3`), `nearest` (each body's `nearest` closest bodies) and `unchecked` (pairs whose
-overlap could not be worked out, with the reason). `against` limits the check to pairs with one
+`overlap_mm3`), `nearest` (each body's `nearest` closest checked bodies, omitting pairs in
+`unchecked`) and `unchecked` (pairs whose overlap could not be worked out, with the reason).
+`against` limits the check to pairs with one
 body in `bodies` and the other in `against`, and `skip_within` leaves out pairs inside one
 occurrence (`"occurrence"`) or one placed component, its subcomponents included
 (`"component"`): the parts of a bought component that touch by design. Distances are measured on
@@ -525,11 +526,41 @@ automatic STEP refresh. Use **Break Link** on the
 component to keep an independent copy, or pass `link: false` to `file.insert_step`. Older designs keep their unlinked imports. The web app keeps independent
 copies because uploaded files have no disk source path.
 
+An assembly can be saved without the bodies of its linked parts:
+`file.save {linked_bodies: false}` (or `file.save_as`). The file then keeps each link, with its
+placements, joints and face names, and no copy of the part's bodies, so it stays small and a
+change to a part does not rewrite the assembly's file. This suits designs kept in git as `.json`.
+Opening such an assembly reads the bodies from the part files again, so the part files have to
+be there: a part that cannot be read has no bodies, its feature says so, and **Update Links**
+reads it once the file is back. The assembly keeps the choice: later saves, **Save As** included,
+leave the bodies out until a save with `linked_bodies: true` puts them back. A link whose part
+file cannot be read when the assembly is saved keeps its bodies in the file, and the save says
+which. So does a link whose part file changed since the assembly read it, and a link from an
+older SolidCraft that kept no record of the file it read: run **Update Links**, then save again. A `.sc` assembly saved this way has no saved model, so it is evaluated when it opens. A
+part that is a plain `.json` design is evaluated the first time it is read this way, and that
+evaluation is kept on this computer with the reused imports (**Clear Reused Imports** removes
+them), so later opens read an unchanged part without building it again. A linked STEP file
+(**Insert STEP**) is left out the same way and read again from the STEP file when the assembly
+opens; if the STEP file changed meanwhile, its new bodies come in and **List Links** shows it as
+changed. A STEP file inserted with `reader: "cadmpeg"` keeps its bodies in the file, because
+reading it again gives STEP text, not the records it was read into. Each save without linked
+bodies names it in its warnings. The mesh bodies a linked part brings (an STL or 3MF inserted in
+the part) are left out with its solids and read back with them. An STL, 3MF or OBJ inserted
+straight into the assembly is not linked, so it stays in the file. There is no button for this
+yet: run the command from a script, the command line or an agent.
+
 Linked files from other folders load after you allow them. When an assembly opens, the parts in
 its own folder, or below it, are read again by themselves as above. If a changed part is in
 another folder, SolidCraft asks once, naming the folders: **Load** reads those parts now and
 remembers the folders, so designs that link files from them load them as they open from then
 on; **Not now** leaves them out of date, and **Update Links** reads them whenever you choose.
+An assembly saved without the bodies of its linked parts follows the same rule: parts in another
+folder have no bodies until you answer **Load**. So does one you recover after a crash, for the
+parts it had not read when it was autosaved. A script or agent that opens it with `doc.open`
+reads every linked part it may read; `linked_bodies: "folder"` keeps to the assembly's own folder.
+A linked part that was itself saved without the bodies of its own linked parts follows the rule
+too: read by itself, it reads them only from the assembly's folder or its own. One that reaches
+further is not read in part; its feature says so, and **Update Links** reads all of it.
 The folders you allowed are kept in your own settings, never in a design, and are listed under
 Preferences › General › Files, where you can remove one or forget them all.
 A design opened by a program (the command line, an MCP client, the control channel or the
@@ -744,6 +775,36 @@ no geometry, such as grease, paint, a label or packaging: it is listed in every 
 quantity and weighs nothing. It holds nothing: it can't be the active component, and any command
 that would put a body, a sketch or a component into it is refused. An empty component can be
 made virtual with `component.metadata.set {component, virtual: true}`.
+
+## Hole stacks
+
+Parts held together by rivets, bolts or pins have holes that line up through two or more
+touching layers. **Find Hole Stacks** (`inspect.hole_stacks`) lists them:
+
+```json
+{"command": "inspect.hole_stacks", "params": {"diameters": [[4, 6.5]], "touching": 0.05}}
+```
+
+Each stack has its `axis` (a unit vector pointing from `start` into the stack: down for a
+vertical stack, so `start` is on the top face), its `start` and `end` points on that axis,
+`grip_mm` (the clamped thickness from `start` to `end`) and its `layers`, outermost first:
+the `body`, the hole's diameter `d_mm` and its extent `t: [t0, t1]` in mm from `start`. A
+layer through an obround slot carries `slot: {length_mm, along}`, the slot's overall length
+and the direction of its length. Holes in no stack are listed under `lone` with their body,
+diameter, entry point `at`, axis and `depth_mm`.
+
+A layer reaches from face to face of its body: a countersink or chamfer that opens out from a
+hole counts in its extent, so it adds to the grip and closes the gap it would leave against
+the next layer, while `d_mm` stays the narrowest opening. Holes are on one axis when their
+axes are at most `axis_tolerance` apart (default 0.1 mm), either way round; a round hole
+lines up with a slot when its axis passes through the slot's centre line. Slots that no round
+hole passes through line up when they share a centre line, and their stack's axis runs
+through the middle of the length they share. Layers belong to one stack when the gap between
+them is at most `touching` (default 0.05 mm). `bodies` limits the search to some bodies,
+`diameters` to holes and slot widths in the given ranges, and `slots: false` leaves slots
+out. Standard parts already placed (a washer's hole) are left out unless named in `bodies`.
+Walls that are not one cylinder or cone — a hole another feature has cut into, or a tapped
+hole with its threads modelled — are not found.
 
 ## Finding things in the browser
 

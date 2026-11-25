@@ -54,7 +54,7 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
         return apply(&mut t, p);
     }
     let r = apply(s, p)?;
-    s.selection.clear();
+    s.clear_selection();
     Ok(r)
 }
 
@@ -194,12 +194,32 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
     if p.get("preserve_projection_link").is_some_and(|value| !value.is_boolean()) {
         return Err(bad(cmd, "`preserve_projection_link` must be a boolean"));
     }
-    let items: Vec<Sel> = match p.get("items") {
-        None | Some(Value::Null) => Vec::new(),
-        Some(Value::Array(a)) if a.len() <= 10_000 => {
-            a.iter().map(|v| serde_json::from_value(v.clone()).map_err(|e| bad(cmd, format!("bad item {v}: {e}")))).collect::<Result<_>>()?
+    let items: Vec<Sel> = if p.get("all_bodies").and_then(Value::as_bool).unwrap_or(false) {
+        // A whole-body selection is a scope: resolve it once, here, into the bodies it covers,
+        // however many (the 10000-item cap is for lists a caller sends). A locked body stays, as
+        // it does when the selection names it (the app leaves it out).
+        // The scope itself, not whatever the session has selected now.
+        let locked: std::collections::HashSet<&str> = s.visibility.locked_bodies.iter().map(String::as_str).collect();
+        let mut items: Vec<Sel> =
+            s.shown_body_names()?.into_iter().filter(|name| !locked.contains(name.as_str())).map(|name| Sel::Body { name }).collect();
+        // Any items named beside the scope go too.
+        if let Some(Value::Array(a)) = p.get("items") {
+            for v in a.iter().take(10_000) {
+                let x: Sel = serde_json::from_value(v.clone()).map_err(|e| bad(cmd, format!("bad item {v}: {e}")))?;
+                if !items.contains(&x) {
+                    items.push(x);
+                }
+            }
         }
-        Some(_) => return Err(bad(cmd, "`items` must be a list of selection items")),
+        items
+    } else {
+        match p.get("items") {
+            None | Some(Value::Null) => Vec::new(),
+            Some(Value::Array(a)) if a.len() <= 10_000 => {
+                a.iter().map(|v| serde_json::from_value(v.clone()).map_err(|e| bad(cmd, format!("bad item {v}: {e}")))).collect::<Result<_>>()?
+            }
+            Some(_) => return Err(bad(cmd, "`items` must be a list of selection items")),
+        }
     };
     if items.iter().any(|x| matches!(x, Sel::Drawing { .. })) || s.sheet_sketching() {
         return delete_in_drawing(s, p, &items);
@@ -330,8 +350,9 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
     let st = s.model.state();
     bodies.retain(|b| st.body(b).is_some());
     bodies.dedup();
-    if !bodies.is_empty() {
-        sub(s, "solid.remove", json!({ "bodies": bodies }))?;
+    // A Remove takes at most 10000 names; a whole-body delete of more is several, in one step.
+    for chunk in bodies.chunks(crate::params::MAX_STRING_LIST) {
+        sub(s, "solid.remove", json!({ "bodies": chunk }))?;
         done = true;
     }
     // An occurrence goes alone while its component has others; the last one takes the component.
