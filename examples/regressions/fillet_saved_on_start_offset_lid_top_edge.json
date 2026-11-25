@@ -1,0 +1,566 @@
+{
+  "description": "Issue #22230: a lid extruded from a rounded outline with a start offset, both caps named `top` and told apart by #1/#2, and a fillet saved by 0.47.0 on the top edge as `F44:side:l1|F44:top#1`, its pick on that edge. The round stays on the top edge (0.47.0: rounds at z 22.21, centre of mass z 20.347).",
+  "about": {
+    "format": "solidcraft/65",
+    "version": "0.47.0"
+  },
+  "commands": [
+    {
+      "command": "parameters.add",
+      "params": {
+        "expression": "48.8 mm",
+        "name": "pcb_length",
+        "unit": "mm"
+      }
+    },
+    {
+      "command": "parameters.add",
+      "params": {
+        "expression": "28.7 mm",
+        "name": "pcb_width",
+        "unit": "mm"
+      }
+    },
+    {
+      "command": "parameters.add",
+      "params": {
+        "expression": "8.4 mm",
+        "name": "pcb_below",
+        "unit": "mm"
+      }
+    },
+    {
+      "command": "parameters.add",
+      "params": {
+        "expression": "4 mm",
+        "name": "pcb_above",
+        "unit": "mm"
+      }
+    },
+    {
+      "command": "parameters.add",
+      "params": {
+        "expression": "2 mm",
+        "name": "wall",
+        "unit": "mm"
+      }
+    },
+    {
+      "command": "parameters.add",
+      "params": {
+        "expression": "wall + pcb_below + pcb_above + 3 mm",
+        "name": "parting_z",
+        "unit": "mm"
+      }
+    },
+    {
+      "command": "parameters.add",
+      "params": {
+        "expression": "parting_z + pcb_above + 2 mm",
+        "name": "lid_top_z",
+        "unit": "mm"
+      }
+    },
+    {
+      "command": "parameters.add",
+      "params": {
+        "expression": "1.5 mm",
+        "name": "cradle_wall",
+        "unit": "mm"
+      }
+    },
+    {
+      "command": "parameters.add",
+      "params": {
+        "expression": "9.2 mm",
+        "name": "front_gap",
+        "unit": "mm"
+      }
+    },
+    {
+      "command": "parameters.add",
+      "params": {
+        "expression": "45 mm",
+        "name": "back_gap",
+        "unit": "mm"
+      }
+    },
+    {
+      "command": "parameters.add",
+      "params": {
+        "expression": "6 mm",
+        "name": "corner_r",
+        "unit": "mm"
+      }
+    },
+    {
+      "command": "parameters.add",
+      "params": {
+        "expression": "pcb_width + 2*wall",
+        "name": "in_w",
+        "unit": "mm"
+      }
+    },
+    {
+      "command": "parameters.add",
+      "params": {
+        "expression": "front_gap + 2*cradle_wall + pcb_length + back_gap",
+        "name": "in_l",
+        "unit": "mm"
+      }
+    },
+    {
+      "command": "parameters.add",
+      "params": {
+        "expression": "(back_gap - front_gap)/2",
+        "name": "box_cy",
+        "unit": "mm"
+      }
+    },
+    {
+      "command": "parameters.add",
+      "params": {
+        "expression": "3 mm",
+        "name": "lid_edge_r",
+        "unit": "mm"
+      }
+    },
+    {
+      "command": "timeline.add",
+      "params": {
+        "feature": {
+          "id": 1,
+          "name": "OuterOutline",
+          "plane": {
+            "name": "XY",
+            "type": "origin"
+          },
+          "sketch": {
+            "constraints": [
+              {
+                "id": "k1",
+                "l": 0,
+                "type": "horizontal"
+              },
+              {
+                "id": "k2",
+                "l": 2,
+                "type": "horizontal"
+              },
+              {
+                "id": "k3",
+                "l": 1,
+                "type": "vertical"
+              },
+              {
+                "id": "k4",
+                "l": 3,
+                "type": "vertical"
+              },
+              {
+                "c": 0,
+                "id": "k5",
+                "p": 1,
+                "type": "point_on_curve"
+              },
+              {
+                "c": 3,
+                "id": "k6",
+                "p": 1,
+                "type": "point_on_curve"
+              },
+              {
+                "a": 0,
+                "b": 4,
+                "id": "k7",
+                "type": "tangent"
+              },
+              {
+                "a": 3,
+                "b": 4,
+                "id": "k8",
+                "type": "tangent"
+              },
+              {
+                "c": 4,
+                "id": "k9",
+                "param": "d1",
+                "type": "radius",
+                "value": 6.0
+              },
+              {
+                "a": 0,
+                "b": 5,
+                "id": "k10",
+                "type": "tangent"
+              },
+              {
+                "a": 1,
+                "b": 5,
+                "id": "k11",
+                "type": "tangent"
+              },
+              {
+                "a": 4,
+                "b": 5,
+                "id": "k12",
+                "type": "equal"
+              },
+              {
+                "c": 1,
+                "id": "k13",
+                "p": 2,
+                "type": "point_on_curve"
+              },
+              {
+                "c": 2,
+                "id": "k14",
+                "p": 2,
+                "type": "point_on_curve"
+              },
+              {
+                "a": 1,
+                "b": 6,
+                "id": "k15",
+                "type": "tangent"
+              },
+              {
+                "a": 2,
+                "b": 6,
+                "id": "k16",
+                "type": "tangent"
+              },
+              {
+                "a": 4,
+                "b": 6,
+                "id": "k17",
+                "type": "equal"
+              },
+              {
+                "a": 2,
+                "b": 7,
+                "id": "k18",
+                "type": "tangent"
+              },
+              {
+                "a": 3,
+                "b": 7,
+                "id": "k19",
+                "type": "tangent"
+              },
+              {
+                "a": 4,
+                "b": 7,
+                "id": "k20",
+                "type": "equal"
+              },
+              {
+                "id": "k21",
+                "l": 8,
+                "p": 15,
+                "type": "midpoint"
+              }
+            ],
+            "counters": {
+              "a": 4,
+              "corner": 2,
+              "k": 21,
+              "l": 5,
+              "p": 13
+            },
+            "curves": [
+              {
+                "a": 3,
+                "b": 6,
+                "construction": false,
+                "id": "l1",
+                "type": "line"
+              },
+              {
+                "a": 7,
+                "b": 9,
+                "construction": false,
+                "id": "l2",
+                "type": "line"
+              },
+              {
+                "a": 10,
+                "b": 12,
+                "construction": false,
+                "id": "l3",
+                "type": "line"
+              },
+              {
+                "a": 13,
+                "b": 4,
+                "construction": false,
+                "id": "l4",
+                "type": "line"
+              },
+              {
+                "a": 4,
+                "b": 3,
+                "c": 5,
+                "construction": false,
+                "id": "a1",
+                "type": "arc"
+              },
+              {
+                "a": 6,
+                "b": 7,
+                "c": 8,
+                "construction": false,
+                "id": "a2",
+                "type": "arc"
+              },
+              {
+                "a": 9,
+                "b": 10,
+                "c": 11,
+                "construction": false,
+                "id": "a3",
+                "type": "arc"
+              },
+              {
+                "a": 12,
+                "b": 13,
+                "c": 14,
+                "construction": false,
+                "id": "a4",
+                "type": "arc"
+              },
+              {
+                "a": 5,
+                "b": 11,
+                "construction": true,
+                "id": "l5",
+                "type": "line"
+              }
+            ],
+            "points": [
+              {
+                "fixed": true,
+                "id": "origin",
+                "pos": [
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "exprs": {
+                  "x": "-in_w/2 - wall",
+                  "y": "box_cy - in_l/2 - wall"
+                },
+                "fixed": true,
+                "id": "corner1",
+                "pos": [
+                  -18.35,
+                  -37.1
+                ]
+              },
+              {
+                "exprs": {
+                  "x": "in_w/2 + wall",
+                  "y": "box_cy + in_l/2 + wall"
+                },
+                "fixed": true,
+                "id": "corner2",
+                "pos": [
+                  18.35,
+                  72.9
+                ]
+              },
+              {
+                "fixed": false,
+                "id": "p5",
+                "pos": [
+                  -12.350000000000001,
+                  -37.1
+                ]
+              },
+              {
+                "fixed": false,
+                "id": "p6",
+                "pos": [
+                  -18.35,
+                  -31.1
+                ]
+              },
+              {
+                "fixed": false,
+                "id": "a1.center",
+                "pos": [
+                  -12.350000000000001,
+                  -31.1
+                ]
+              },
+              {
+                "fixed": false,
+                "id": "p7",
+                "pos": [
+                  12.350000000000001,
+                  -37.1
+                ]
+              },
+              {
+                "fixed": false,
+                "id": "p8",
+                "pos": [
+                  18.35,
+                  -31.099999999999994
+                ]
+              },
+              {
+                "fixed": false,
+                "id": "a2.center",
+                "pos": [
+                  12.350000000000001,
+                  -31.1
+                ]
+              },
+              {
+                "fixed": false,
+                "id": "p9",
+                "pos": [
+                  18.35,
+                  66.9
+                ]
+              },
+              {
+                "fixed": false,
+                "id": "p10",
+                "pos": [
+                  12.350000000000001,
+                  72.9
+                ]
+              },
+              {
+                "fixed": false,
+                "id": "a3.center",
+                "pos": [
+                  12.350000000000001,
+                  66.9
+                ]
+              },
+              {
+                "fixed": false,
+                "id": "p11",
+                "pos": [
+                  -12.350000000000001,
+                  72.9
+                ]
+              },
+              {
+                "fixed": false,
+                "id": "p12",
+                "pos": [
+                  -18.35,
+                  66.9
+                ]
+              },
+              {
+                "fixed": false,
+                "id": "a4.center",
+                "pos": [
+                  -12.350000000000001,
+                  66.9
+                ]
+              },
+              {
+                "fixed": false,
+                "id": "p13",
+                "pos": [
+                  0.0,
+                  17.900000000000002
+                ]
+              }
+            ]
+          },
+          "suppressed": false,
+          "type": "sketch"
+        },
+        "params": [
+          {
+            "expression": "corner_r",
+            "name": "d1",
+            "unit": "mm"
+          }
+        ]
+      }
+    },
+    {
+      "command": "timeline.add",
+      "params": {
+        "feature": {
+          "body_names": [
+            "Lid"
+          ],
+          "extent": {
+            "convention": "total_distance",
+            "direction": "positive",
+            "distance": "lid_top_z - parting_z",
+            "start_offset": "parting_z"
+          },
+          "id": 44,
+          "name": "LidPlate",
+          "operation": "new_body",
+          "param_names": [
+            "d60",
+            "d61"
+          ],
+          "profiles": {
+            "type": "all"
+          },
+          "sketch": 1,
+          "suppressed": false,
+          "type": "extrude"
+        }
+      }
+    },
+    {
+      "command": "timeline.add",
+      "params": {
+        "feature": {
+          "body": "Lid",
+          "edge_names": [
+            "F44:side:l1|F44:top#1"
+          ],
+          "edge_refs": [
+            {
+              "dir": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "max": [
+                18.35,
+                72.9,
+                23.400000000000002
+              ],
+              "min": [
+                -18.35,
+                -37.1,
+                17.4
+              ]
+            }
+          ],
+          "edges": [
+            [
+              0.0,
+              -37.1,
+              23.4
+            ]
+          ],
+          "id": 45,
+          "name": "LidTopRound",
+          "param_names": [
+            "d62"
+          ],
+          "radius": "lid_edge_r",
+          "suppressed": false,
+          "type": "fillet"
+        }
+      }
+    }
+  ]
+}

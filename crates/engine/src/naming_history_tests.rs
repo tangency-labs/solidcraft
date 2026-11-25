@@ -957,6 +957,40 @@ fn a_design_saved_before_pieces_were_numbered_by_place_opens_marked_and_names_al
     assert_eq!(listed(&mut saved_with, "Disc"), kept);
 }
 
+/// #22230: an extrude with a start offset names both its caps `top`, told apart only by where
+/// they lie (`#1`, `#2`), and builds since #21762 number them the other way round from 0.47.0. A
+/// round 0.47.0 saved on the lid's top edge, `F44:side:l1|F44:top#1` with its pick on that edge,
+/// rounded the bottom edge: the number found the other cap, and the pick was not looked at. The
+/// pick decides between edges told apart only by that number. Expected values are 0.47.0's, from
+/// the issue: the rounds' cylinders centred at z 22.21, the lid's centre of mass at z 20.347.
+#[test]
+fn a_round_saved_on_a_start_offset_caps_edge_stays_on_the_edge_it_was_picked_on() {
+    let script: Value = serde_json::from_str(include_str!("../../../examples/regressions/fillet_saved_on_start_offset_lid_top_edge.json")).unwrap();
+    let mut s = Session::default();
+    s.run_script(&script).unwrap();
+    assert_eq!(error(&s, "LidTopRound"), None);
+    let st = s.model.state();
+    let lid = st.body("Lid").expect("Lid");
+    let m = solidcraft_kernel::measure(&lid.body).unwrap();
+    // 8 sides, 2 caps and 8 rounds along the top loop; 40 edges, 24 vertices.
+    assert_eq!((m.faces, m.edges, m.vertices, m.shells), (18, 40, 24, 1));
+    assert!((m.volume - 23497.934).abs() < 1e-2, "volume {}", m.volume);
+    assert!((m.centroid.z - 20.347).abs() < 1e-3, "centre of mass z {}", m.centroid.z);
+    let names = solidcraft_doc::naming::face_names(lid);
+    let faces = lid.body.faces(0.01).unwrap();
+    let rounds: Vec<_> = faces.iter().filter(|f| names.get(f.index).is_some_and(|n| n.starts_with("F45:"))).collect();
+    assert_eq!(rounds.len(), 8, "{names:?}");
+    // The four rounds along the outline's lines are cylinders; all eight lie above the lid's middle (z 20.4).
+    let cylinders: Vec<_> = rounds.iter().filter(|f| names[f.index].contains(":side:l")).collect();
+    assert_eq!(cylinders.len(), 4, "{names:?}");
+    for f in &cylinders {
+        assert!((f.centroid.z - 22.21).abs() < 5e-3, "{} at z {}", names[f.index], f.centroid.z);
+    }
+    for f in &rounds {
+        assert!(f.centroid.z > 20.4, "{} at z {}", names[f.index], f.centroid.z);
+    }
+}
+
 /// The volumes of the design's bodies, by name.
 fn volumes(s: &Session) -> Vec<(String, f64)> {
     let st = s.model.state();
