@@ -381,6 +381,17 @@ pub struct EmbossParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "EmbossFacePoint")]
     pub face: Option<EmbossFacePoint>,
+    /// A shift of the profiles along the sketch's x before they are laid on the face. The sketch
+    /// is not changed. Default: none.
+    #[serde(default)]
+    pub offset_x: Option<LengthExpr>,
+    /// A shift of the profiles along the sketch's y. Default: none.
+    #[serde(default)]
+    pub offset_y: Option<LengthExpr>,
+    /// A turn of the profiles, counter-clockwise in the sketch, about the middle of their bounds.
+    /// The offsets are not turned with them. Default: none.
+    #[serde(default)]
+    pub angle: Option<AngleExpr>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }

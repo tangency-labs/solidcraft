@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Mirror: half and plane to a symmetric part</title>
+  <path d="M2 38.95 L9.76 43.43 L9.76 38.95 L2 34.47 Z" fill="#b8c3cf" stroke="#34465b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M20.64 37.16 L9.76 43.43 L9.76 38.95 L20.64 32.67 Z" fill="#8e9faf" stroke="#34465b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M12.87 28.19 L20.64 32.67 L9.76 38.95 L2 34.47 Z" fill="#e2e8ef" stroke="#34465b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M4.72 32.9 L8.6 35.14 L8.6 21.69 L4.72 19.45 Z" fill="#b8c3cf" stroke="#34465b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M14.04 32 L8.6 35.14 L8.6 21.69 L14.04 18.55 Z" fill="#8e9faf" stroke="#34465b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M10.15 16.31 L14.04 18.55 L8.6 21.69 L4.72 19.45 Z" fill="#e2e8ef" stroke="#34465b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M22.96 37.16 L7.44 46.12 L7.44 25.05 L22.96 16.09 Z" fill="#b9ddf8" stroke="#236ead" stroke-width="1" stroke-linejoin="round" stroke-linecap="round" opacity="0.6"/>
+  <path d="M35.6 38.95 L43.36 43.43 L43.36 38.95 L35.6 34.47 Z" fill="#b8c3cf" stroke="#34465b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M54.24 37.16 L43.36 43.43 L43.36 38.95 L54.24 32.67 Z" fill="#8e9faf" stroke="#34465b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M46.47 28.19 L54.24 32.67 L43.36 38.95 L35.6 34.47 Z" fill="#e2e8ef" stroke="#34465b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M38.32 32.9 L42.2 35.14 L42.2 21.69 L38.32 19.45 Z" fill="#b8c3cf" stroke="#34465b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M47.64 32 L42.2 35.14 L42.2 21.69 L47.64 18.55 Z" fill="#8e9faf" stroke="#34465b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M43.75 16.31 L47.64 18.55 L42.2 21.69 L38.32 19.45 Z" fill="#e2e8ef" stroke="#34465b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M56.56 37.16 L41.04 46.12 L41.04 25.05 L56.56 16.09 Z" fill="none" stroke="#236ead" stroke-width="0.9" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="2 2"/>
+  <path d="M43.36 43.43 L51.13 47.91 L51.13 43.43 L43.36 38.95 Z" fill="#328bd3" stroke="#34465b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M62 41.64 L51.13 47.91 L51.13 43.43 L62 37.16 Z" fill="#236ead" stroke="#34465b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M54.24 32.67 L62 37.16 L51.13 43.43 L43.36 38.95 Z" fill="#b9ddf8" stroke="#34465b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M49.96 39.62 L53.85 41.86 L53.85 28.41 L49.96 26.17 Z" fill="#328bd3" stroke="#34465b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M59.28 38.72 L53.85 41.86 L53.85 28.41 L59.28 25.28 Z" fill="#236ead" stroke="#34465b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M55.4 23.03 L59.28 25.28 L53.85 28.41 L49.96 26.17 Z" fill="#b9ddf8" stroke="#34465b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M28.9 29.9 L31.8 29.9 L31.8 27.6 L35.4 32 L31.8 36.4 L31.8 34.1 L28.9 34.1 Z" fill="#236ead" stroke="#236ead" stroke-width="0.8" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

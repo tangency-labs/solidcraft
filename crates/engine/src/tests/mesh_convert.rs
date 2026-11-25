@@ -708,6 +708,58 @@ fn send_to_slicer_writes_3mf_and_starts_the_program_with_it() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+#[cfg(unix)]
+#[test]
+fn send_to_slicer_can_keep_the_file_in_a_folder_numbered_or_replaced() {
+    use std::os::unix::fs::PermissionsExt;
+    let _turn = CHOSEN_PROGRAMS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut s = imported_box();
+    let dir = std::env::temp_dir().join(format!("solidcraft-slicer-copy-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let script = dir.join("fake-slicer");
+    std::fs::write(&script, "#!/bin/sh\nexit 0\n").unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // Two folders deep and not there yet; and a folder whose name ends in a space is that folder.
+    let keep = dir.join("kept/inner");
+    let spaced = dir.join("spaced ");
+    run(&mut s, "select.set", json!({"items":[{"type":"body","name":"Mesh"}]}));
+    crate::slicers::set_chosen_programs(&[script.to_string_lossy().into_owned()]);
+    let send = |s: &mut Session, extra: Value| {
+        let mut p = json!({"slicer": script, "wait": "no", "format": "stl", "copy_to": keep});
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        s.execute("file.send_to_slicer", &p)
+    };
+    let (first, second) = (send(&mut s, json!({})), send(&mut s, json!({})));
+    let (replace_a, replace_b) = (send(&mut s, json!({"copy_overwrite": true})), send(&mut s, json!({"copy_overwrite": true})));
+    crate::slicers::set_chosen_programs(&[]);
+    let (first, second, replace_a, replace_b) = (first.unwrap(), second.unwrap(), replace_a.unwrap(), replace_b.unwrap());
+    let name = |r: &Value| std::path::Path::new(r["path"].as_str().unwrap()).file_name().unwrap().to_string_lossy().into_owned();
+    // Each send is a new version in the folder the user chose, and the file is really there.
+    let stem = name(&first).trim_end_matches("-v1.stl").to_string();
+    assert_eq!((name(&first), first["version"].as_u64(), first["copy"].as_bool()), (format!("{stem}-v1.stl"), Some(1), Some(true)));
+    assert_eq!((name(&second), second["version"].as_u64()), (format!("{stem}-v2.stl"), Some(2)));
+    assert!(first["path"].as_str().unwrap().starts_with(keep.to_str().unwrap()));
+    assert!(!std::fs::read(first["path"].as_str().unwrap()).unwrap().is_empty());
+    // Overwriting keeps one file named after the design, and no version number.
+    assert_eq!((name(&replace_a), replace_a["version"].is_null()), (format!("{stem}.stl"), true));
+    assert_eq!(replace_a["path"], replace_b["path"]);
+    let files = std::fs::read_dir(&keep).unwrap().count();
+    assert_eq!(files, 3, "v1, v2 and the replaced one");
+    crate::slicers::set_chosen_programs(&[script.to_string_lossy().into_owned()]);
+    let in_spaced = send(&mut s, json!({"copy_to": spaced}));
+    crate::slicers::set_chosen_programs(&[]);
+    assert!(in_spaced.unwrap()["path"].as_str().unwrap().starts_with(spaced.to_str().unwrap()), "the folder keeps its spelling");
+    // Without `copy_to` the file still goes to the slicer folder.
+    crate::slicers::set_chosen_programs(&[script.to_string_lossy().into_owned()]);
+    let plain = s.execute("file.send_to_slicer", &json!({"slicer": script, "wait": "no", "format": "stl"}));
+    crate::slicers::set_chosen_programs(&[]);
+    let plain = plain.unwrap();
+    assert!(plain["copy"].is_null() && !plain["path"].as_str().unwrap().starts_with(keep.to_str().unwrap()));
+    std::fs::remove_dir_all(std::path::Path::new(plain["path"].as_str().unwrap()).parent().unwrap()).unwrap();
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 type Uploads = std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
 
 /// A session whose "host" records what it is handed and answers `answer`.

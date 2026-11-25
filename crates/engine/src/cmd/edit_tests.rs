@@ -3319,3 +3319,27 @@ fn remove_history_keeps_what_a_sketch_on_the_body_needs() {
     same_body_shape(block, body_shape(&s, "Block"));
     same_body_shape(peg, body_shape(&s, "Peg"));
 }
+
+/// A design file holds at most `MAX_FEATURES` timeline folders, so `timeline.group` stops there
+/// instead of making a design that saves and does not open again.
+#[test]
+fn timeline_folders_stop_at_what_a_design_file_holds() {
+    let mut s = Session::default();
+    let cap = solidcraft_doc::MAX_FEATURES;
+    let folders = (0..cap as u64 - 1).map(|i| solidcraft_doc::TimelineGroup {
+        id: 1_000 + i,
+        name: format!("Folder{i}"),
+        parent: None,
+        features: Vec::new(),
+        joints: Vec::new(),
+    });
+    let doc = s.doc_mut();
+    doc.timeline_groups.extend(folders);
+    doc.next_id = 1_000 + cap as u64;
+    run(&mut s, "timeline.group", json!({"name": "Last"}));
+    assert_eq!(s.doc.timeline_groups.len(), cap);
+    let error = s.execute("timeline.group", &json!({"name": "One too many"})).unwrap_err().to_string();
+    assert!(error.contains("at most"), "{error}");
+    assert_eq!(s.doc.timeline_groups.len(), cap);
+    solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+}

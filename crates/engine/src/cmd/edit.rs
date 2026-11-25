@@ -484,7 +484,10 @@ fn go_to(s: &mut Session, snap: Snapshot, cmd: &str) -> Result<Snapshot> {
     }
     snap.doc = Session::refreshed_sheet_fill_history_document(&s.doc, &snap.doc, snap.part, cmd)?;
     let same = Arc::ptr_eq(&s.doc, &snap.doc);
-    let moved = s.active_sketch != snap.active_sketch || s.pending_moves != snap.pending_moves;
+    let moved = s.active_sketch != snap.active_sketch
+        || s.pending_moves != snap.pending_moves
+        || s.pending_move_records != snap.pending_move_records
+        || s.pending_joint_bases != snap.pending_joint_bases;
     // Undoing a hide (or a show) leaves the document alone: the model needs no evaluating, and
     // a section step needs nothing evaluated or drawn again.
     let display_only = same && !moved && s.visibility != snap.visibility;
@@ -497,6 +500,9 @@ fn go_to(s: &mut Session, snap: Snapshot, cmd: &str) -> Result<Snapshot> {
     s.active_sheet_sketch = snap.active_sheet_sketch;
     s.prune_sheet_sketch_edit();
     s.pending_moves = snap.pending_moves;
+    s.pending_move_records = snap.pending_move_records;
+    s.pending_joint_bases = snap.pending_joint_bases;
+    s.last_capture_state = snap.last_capture_state;
     s.visibility = snap.visibility;
     s.clear_selection();
     // A new document is evaluated by `execute`, and a drawing's change evaluates nothing.
@@ -574,6 +580,49 @@ pub(super) fn feature_id(s: &Session, v: Option<&Value>, cmd: &str) -> Result<u6
     }
 }
 
+fn cleanup_capture_position_bases(doc: &mut solidcraft_doc::Document, removed_joints: &std::collections::BTreeSet<u64>) -> Vec<u64> {
+    let mut used_occs = std::collections::BTreeSet::new();
+    let mut used_joints = std::collections::BTreeSet::new();
+    for f in &doc.features {
+        if let FeatureKind::CapturePosition { moves, joints } = &f.kind {
+            for m in moves {
+                used_occs.insert(m.occurrence);
+            }
+            for cj in joints {
+                used_joints.insert(cj.joint);
+            }
+        }
+    }
+    for o in &mut doc.occurrences {
+        if !used_occs.contains(&o.id)
+            && let Some(base) = o.base_transform.take()
+        {
+            o.transform = base;
+        }
+    }
+    let mut reset_joints = Vec::new();
+    for j in &mut doc.assembly.joints {
+        if !used_joints.contains(&j.id) && (removed_joints.contains(&j.id) || j.base_values.is_some()) {
+            reset_joints.push(j.id);
+            j.captured = None;
+            if let Some(base) = j.base_values.take() {
+                let dofs = j.kind.dofs().len();
+                let mut q = base;
+                q.resize(dofs, 0.0);
+                solidcraft_doc::joints::clamp(j, &mut q);
+                j.values = q;
+                let base_exprs = std::mem::take(&mut j.base_exprs);
+                for i in 0..dofs {
+                    j.exprs.set_value(i, base_exprs.get(i).and_then(|e| e.clone()));
+                }
+            } else {
+                j.base_exprs.clear();
+            }
+        }
+    }
+    reset_joints
+}
+
 fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.delete";
     // Resolve every key against the same timeline. A cascade or a repeated key must never
@@ -591,12 +640,25 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     // Features that work now; any of them failing after the delete is reported (a later
     // feature that names a deleted body, #267).
     let worked: std::collections::BTreeSet<u64> = s.model.results.iter().filter(|r| r.error.is_none() && !r.skipped).map(|r| r.id).collect();
+    let mut removed_capture_joints = std::collections::BTreeSet::new();
+    for &id in &ids {
+        if let Some(f) = s.doc.feature(id)
+            && let FeatureKind::CapturePosition { joints, .. } = &f.kind
+        {
+            for cj in joints {
+                removed_capture_joints.insert(cj.joint);
+            }
+        }
+    }
     super::joints::delete_joints(s.doc_mut(), &joints);
     let mut gone = Vec::new();
     for id in ids {
         if s.doc.feature(id).is_some() {
             gone.extend(s.doc_mut().delete_feature(id)?);
         }
+    }
+    for jid in cleanup_capture_position_bases(s.doc_mut(), &removed_capture_joints) {
+        s.pending_joint_bases.remove(&jid);
     }
     if !folders.is_empty() {
         s.doc_mut().timeline_groups.retain(|group| !folders.contains(&group.id));
@@ -875,6 +937,10 @@ impl Session {
 
 fn group(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.group";
+    // A design file holds at most this many folders: one more would save and not open again.
+    if s.doc.timeline_groups.len() >= solidcraft_doc::MAX_FEATURES {
+        return Err(bad(cmd, format!("a design holds at most {} timeline folders", solidcraft_doc::MAX_FEATURES)));
+    }
     let features = group_features(s, p, false, cmd)?;
     let joints = group_joints(s, p, cmd)?;
     let groups = group_ids(s, p, false, cmd)?;
@@ -1855,8 +1921,95 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     } else {
         std::collections::HashSet::new()
     };
+    let mut capture_removed_joints = std::collections::BTreeSet::new();
+    let mut capture_edited = false;
+    if let (FeatureKind::CapturePosition { joints: old_joints, .. }, FeatureKind::CapturePosition { moves, joints }) = (&f.kind, &nf.kind) {
+        capture_edited = true;
+        if moves.len() > solidcraft_doc::MAX_PLACEMENTS {
+            return Err(bad(cmd, format!("too many moves (at most {})", solidcraft_doc::MAX_PLACEMENTS)));
+        }
+        if joints.len() > 10_000 {
+            return Err(bad(cmd, "too many joints (at most 10000)"));
+        }
+        let (vals, _) = s.doc.param_values();
+        for m in moves {
+            if !s.doc.occurrences.iter().any(|o| o.id == m.occurrence) {
+                return Err(bad(cmd, format!("no occurrence `{}`", m.occurrence)));
+            }
+            if let Some(path) = &m.path {
+                if path.len() > solidcraft_doc::MAX_PLACEMENT_DEPTH + 1 || path.last() != Some(&m.occurrence) {
+                    return Err(bad(cmd, "invalid occurrence path"));
+                }
+                s.occurrence_placement(path).map_err(|e| bad(cmd, e.to_string()))?;
+            }
+            if let Some(rot) = &m.rotation
+                && (!solidcraft_doc::is_placement(rot) || rot[3][..3].iter().any(|v| v.abs() >= 1e-9))
+            {
+                return Err(bad(cmd, "invalid rotation matrix"));
+            }
+            if let Some(axis) = m.rotate_axis
+                && axis.iter().any(|v| !v.is_finite())
+            {
+                return Err(bad(cmd, "invalid rotation axis"));
+            }
+            m.eval_delta(&vals).map_err(|e| bad(cmd, e.to_string()))?;
+        }
+        for cj in joints {
+            let Some(dj) = s.doc.assembly.joints.iter().find(|dj| dj.id == cj.joint) else {
+                return Err(bad(cmd, format!("no joint `{}`", cj.joint)));
+            };
+            if dj.kind == solidcraft_doc::joints::JointKind::Rigid {
+                return Err(bad(cmd, format!("joint `{}` is rigid", dj.name)));
+            }
+            if cj.values.len() > 64 || cj.exprs.len() > 64 {
+                return Err(bad(cmd, "joint values exceed supported DOF count"));
+            }
+            if cj.values.iter().any(|v| !v.is_finite() || v.abs() >= 1e9) {
+                return Err(bad(cmd, "joint values must be finite and within range"));
+            }
+            if cj.exprs.iter().flatten().any(|e| e.trim().is_empty() || e.len() > 4096) {
+                return Err(bad(cmd, "joint expressions must be non-empty and at most 4096 characters"));
+            }
+            solidcraft_doc::eval_captured_joint(&s.doc, &vals, cj).map_err(|e| bad(cmd, e.to_string()))?;
+        }
+        let new_joints: std::collections::BTreeSet<u64> = joints.iter().map(|cj| cj.joint).collect();
+        for cj in old_joints {
+            if !new_joints.contains(&cj.joint) {
+                capture_removed_joints.insert(cj.joint);
+            }
+        }
+        let active = !nf.suppressed && s.doc.feature_index(id).is_some_and(|idx| s.doc.marker.is_none_or(|m| idx < m));
+        let occ_ids: std::collections::BTreeSet<u64> = moves.iter().map(|m| m.occurrence).collect();
+        let mut pending_bases = std::mem::take(&mut s.pending_joint_bases);
+        let doc = s.doc_mut();
+        for o in &mut doc.occurrences {
+            if occ_ids.contains(&o.id) {
+                o.base_transform.get_or_insert(o.transform);
+            }
+        }
+        for cj in joints {
+            if let Some(j) = doc.assembly.joints.iter_mut().find(|j| j.id == cj.joint) {
+                let dofs = j.kind.dofs().len();
+                if j.base_values.is_none() {
+                    let (base_vals, base_exprs) = if active { pending_bases.remove(&j.id) } else { pending_bases.get(&j.id).cloned() }
+                        .unwrap_or_else(|| (j.values.clone(), crate::normalize_joint_exprs(&j.exprs.values, dofs)));
+                    j.base_values = Some(base_vals);
+                    j.base_exprs = base_exprs;
+                } else if active {
+                    pending_bases.remove(&j.id);
+                }
+            }
+        }
+        s.pending_joint_bases = pending_bases;
+    }
     if let Some(slot) = s.doc_mut().feature_mut(id) {
         *slot = nf;
+    }
+    if capture_edited {
+        for jid in cleanup_capture_position_bases(s.doc_mut(), &capture_removed_joints) {
+            s.pending_joint_bases.remove(&jid);
+        }
+        s.doc_mut().name_feature_inputs(id);
     }
     s.refresh();
     if let Some(e) = s.model.result(id).and_then(|r| r.error.clone()) {
@@ -2727,6 +2880,19 @@ fn input_keys(kind: &FeatureKind, edge_names: &[String]) -> Vec<(String, solidcr
             }
         }
     }
+    if let FeatureKind::CapturePosition { moves, .. } = kind {
+        let mut occ_counts: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
+        let mut pos = 0;
+        for m in moves {
+            let count = occ_counts.entry(m.occurrence).or_insert(0);
+            let n = 3 + usize::from(m.angle.is_some());
+            for (key, _) in keys.iter_mut().skip(pos).take(n) {
+                *key = format!("capture_position.occ{}.{count}.{key}", m.occurrence);
+            }
+            *count += 1;
+            pos += n;
+        }
+    }
     keys
 }
 
@@ -2836,6 +3002,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 | "frame.member"
                 | "frame.trim"
                 | "frame.plate"
+                | "component.capture_position"
         );
     if !constructor {
         return Err(bad(cmd, format!("`{cid}` does not make a feature")));
@@ -2853,6 +3020,16 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
             solidcraft_doc::ExtrudeConvention::TotalDistance
         };
         parameters.entry("convention").or_insert_with(|| json!(convention));
+    }
+    // The Surface Extrude window has no start offset to show or send, so an edit that names
+    // none keeps the stored one instead of moving the walls back to the sketch plane. An edit
+    // that names one still replaces it.
+    if let FeatureKind::SurfaceExtrude { extent, .. } = &old.kind
+        && cid == "surface.extrude"
+        && let Some(start) = &extent.start_offset
+        && let Some(parameters) = params.as_object_mut()
+    {
+        parameters.entry("start_offset").or_insert_with(|| json!(start));
     }
     if let FeatureKind::Revolve { convention, .. } = &old.kind
         && cid == "solid.revolve"
@@ -3056,6 +3233,9 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     if let (FeatureKind::Hole { points: Some(before), .. }, FeatureKind::Hole { points: Some(after), .. }) = (&old.kind, &mut new.kind) {
         after.legacy_face_roles = before.legacy_face_roles && before.sketch == after.sketch && before.ids == after.ids;
     }
+    if matches!(new.kind, FeatureKind::CapturePosition { .. }) {
+        trial.last_capture_state = trial.doc.replay_occurrence_transforms().ok();
+    }
     if let (FeatureKind::Emboss { face: Some(before), .. }, FeatureKind::Emboss { face: Some(after), .. }) = (&old.kind, &mut new.kind)
         && before.body == after.body
         && before.path == after.path
@@ -3196,7 +3376,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         // An edge's own angle or height whose key missed is on an edge the old feature did not
         // have: it keeps the constructor's name, and a deleted edge's name never lands on it
         // (#5927, #5928).
-        if edge_of_key(key).is_some() {
+        if edge_of_key(key).is_some() || key.starts_with("capture_position.") {
             continue;
         }
         if key.starts_with("frame.member.rotation.") && !flat_rotation {
@@ -3210,6 +3390,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 && segment_span(old_key).is_none()
                 && edge_of_key(old_key).is_none()
                 && (flat_rotation || !old_key.starts_with("frame.member.rotation."))
+                && !old_key.starts_with("capture_position.")
         }) {
             param_names[i] = old_inputs.remove(k).3.clone();
         }
@@ -3274,6 +3455,15 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
             slot.participants = new.participants;
         }
     }
+    if let (FeatureKind::CapturePosition { joints: old_joints, .. }, Some(FeatureKind::CapturePosition { joints: new_joints, .. })) =
+        (&old.kind, trial.doc.feature(id).map(|f| &f.kind))
+    {
+        let keep: std::collections::BTreeSet<u64> = new_joints.iter().map(|cj| cj.joint).collect();
+        let removed_joints: std::collections::BTreeSet<u64> = old_joints.iter().map(|cj| cj.joint).filter(|j| !keep.contains(j)).collect();
+        for jid in cleanup_capture_position_bases(trial.doc_mut(), &removed_joints) {
+            trial.pending_joint_bases.remove(&jid);
+        }
+    }
     // New optional inputs need model parameter names, while existing dimensions keep theirs.
     trial.doc_mut().name_feature_inputs(id);
     trial.refresh();
@@ -3319,6 +3509,9 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     s.pending_moves = trial.pending_moves;
+    s.pending_move_records = trial.pending_move_records;
+    s.pending_joint_bases = trial.pending_joint_bases;
+    s.last_capture_state = trial.last_capture_state;
     s.doc = trial.doc;
     s.model.keep(Some(shared));
     s.refresh();
