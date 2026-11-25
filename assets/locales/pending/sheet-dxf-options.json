@@ -1,7 +1,9 @@
 {
   "en": {
     "sheet.dxf.bend_lines": "Include bend lines",
-    "sheet.dxf.markings": "Include markings"
+    "sheet.dxf.markings": "Include markings",
+    "sheet.dxf.unit_in": "in",
+    "sheet.dxf.unit_mm": "mm"
   },
   "ar": {
     "sheet.dxf.bend_lines": "تضمين خطوط الطي",
