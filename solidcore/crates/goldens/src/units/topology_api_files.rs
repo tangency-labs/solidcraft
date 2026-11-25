@@ -1288,15 +1288,15 @@ mod tests {
         // (case, edges written before their raise, vertices written before their raise)
         const MOVED: [(&str, usize, usize); 12] = [
             ("write_bytes0074", 2, 2),
-            ("write_bytes0085", 3, 3),
+            ("write_bytes0085", 4, 4),
             ("write_bytes0096", 2, 2),
-            ("write_bytes0115", 3, 3),
+            ("write_bytes0115", 4, 4),
             ("write_bytes0117", 2, 2),
             ("write_bytes0128", 2, 2),
             ("write_bytes0148", 2, 2),
-            ("write_bytes0179", 3, 3),
-            ("write_bytes_file_nurb_fillet_ascii", 3, 3),
-            ("write_bytes_file_nurb_fillet_binary", 3, 3),
+            ("write_bytes0179", 4, 4),
+            ("write_bytes_file_nurb_fillet_ascii", 4, 4),
+            ("write_bytes_file_nurb_fillet_binary", 4, 4),
             ("write_bytes_file_revolution_ascii", 2, 2),
             ("write_bytes_file_revolution_binary", 2, 2),
         ];
