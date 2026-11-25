@@ -1507,26 +1507,35 @@ fn curve_with_moved_end(
 /// certified distance ([`certified_end_distance`]). Whether a surf/surf/surf point lies on
 /// an edge's curve, as it does on an intersection edge whose curve is exact (a line or conic
 /// of two analytic surfaces), decides how [`carry_far_edge_ends`] moves the edge's end.
-fn point_on_curve(k: &Kernel, curve: &Curve, target: Point3, tol: f64) -> Option<f64> {
+///
+/// # Errors
+///
+/// The solve's [`SolidError::Cancelled`] or [`SolidError::OutOfFuel`]: the caller asked
+/// to stop, so the answer is not "off the curve". Any other failure of the solve is `None`.
+fn point_on_curve(k: &Kernel, curve: &Curve, target: Point3, tol: f64) -> Result<Option<f64>> {
     use crate::curve::curve::p1::GlobalPointSolveOptions;
     use crate::geom::global_solver::{SolutionRequested, SolverOperation};
     use crate::surface::surface::p4::NoObject;
     let natural = curve.natural_interval();
-    let sols = curve
-        .global_point_solve(
-            k,
-            &natural,
-            SolverOperation::Minimize,
-            target,
-            tol,
-            SolutionRequested::Single,
-            &GlobalPointSolveOptions::<NoObject>::default(),
-        )
-        .ok()?;
-    let t = sols.get(0)?.start.param(0).ok()?;
+    let sols = match curve.global_point_solve(
+        k,
+        &natural,
+        SolverOperation::Minimize,
+        target,
+        tol,
+        SolutionRequested::Single,
+        &GlobalPointSolveOptions::<NoObject>::default(),
+    ) {
+        Ok(sols) => sols,
+        Err(e) if e.is_cancelled() => return Err(e),
+        Err(_) => return Ok(None),
+    };
+    let Some(t) = sols.get(0).and_then(|s| s.start.param(0).ok()) else {
+        return Ok(None);
+    };
     let on = natural.contains_value(t, 0.0)
         && certified_end_distance(k, curve, t, target).is_some_and(|d| d <= 0.5 * tol);
-    on.then_some(t)
+    Ok(on.then_some(t))
 }
 
 /// Not upstream (#21511): the parameter of `t`'s point that the far end of an edge takes.
@@ -1675,8 +1684,10 @@ fn edge_end_edit_certified(
 /// # Errors
 ///
 /// [`SolidError::NotFound`] for a dangling id; those of
-/// [`crate::topology::edge::set_curve`] and [`crate::topology::edge::set_interval`]. A
-/// failed edit of a curve leaves its edge as it is.
+/// [`crate::topology::edge::set_curve`] and [`crate::topology::edge::set_interval`];
+/// [`SolidError::Cancelled`] or [`SolidError::OutOfFuel`] from [`point_on_curve`]'s solve
+/// (the edge it was solving for is not edited). Any other failed edit of a curve leaves
+/// its edge as it is.
 pub(crate) fn carry_far_edge_ends(
     k: &Kernel,
     b: &mut Brep,
@@ -1718,9 +1729,12 @@ pub(crate) fn carry_far_edge_ends(
         }
         let old = (&curve, &interval);
         let mut kept: Option<(Curve, Extent1d)> = None;
-        let retrim = (far[0] != far[1])
-            .then(|| point_on_curve(k, &curve, at, tol))
-            .flatten()
+        let on_curve = if far[0] != far[1] {
+            point_on_curve(k, &curve, at, tol)?
+        } else {
+            None
+        };
+        let retrim = on_curve
             .map(|t| seam_parameter(k, &curve, far, t, at, tol))
             .and_then(|t| retrimmed_interval(&curve, &interval, far, t));
         if let Some(iv) = retrim {
@@ -3211,6 +3225,55 @@ mod tests {
             rec.interval
         );
         assert_eq!(rec.interval.max(), iv.max());
+    }
+
+    /// #21511 review: a cancelled closest-point solve is not "off the curve". A wire cubic
+    /// B-spline edge (the solve runs the branch solver, which polls the kernel's token)
+    /// whose start vertex moved off it: with the token cancelled, the carry returns
+    /// `Cancelled` and leaves the B-spline as it was. Before, the solve's error read as
+    /// `None` and the wire branch edited the curve after the caller had asked to stop.
+    #[test]
+    fn issue_21511_cancelled_point_on_curve_solve_is_passed_on() {
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::nurbs::crv_basic::Curve as NurbCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+        let mut k = Kernel::default();
+        let (mut b, v, e) = chain(true, Vec3::X, Vec3::Y);
+        let cp = |x: f64, y: f64| CPoint::new(x, y, 0.0, NOW);
+        let pw = vec![cp(1.0, 0.0), cp(1.4, 0.3), cp(0.8, 0.7), cp(1.0, 1.0)];
+        let knots = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+        let c = Curve::from(BSplineCurve::from_nurb(
+            NurbCurve::new(pw, 3, knots).unwrap(),
+            3,
+            false,
+        ));
+        let (p0, p1) = (
+            c.evaluate_point(&k, 0.0).unwrap(),
+            c.evaluate_point(&k, 1.0).unwrap(),
+        );
+        b.edge_mut(e[1]).unwrap().curve = Some(c);
+        b.edge_mut(e[0]).unwrap().curve = Some(Curve::from(Line::from_points(Vec3::ZERO, p0, 3)));
+        b.vertex_mut(v[2]).unwrap().point = p1;
+        b.vertex_mut(v[1]).unwrap().point = Point3::new(1.5, 0.9, 0.3);
+        let token = crate::kernel::CancelToken::new();
+        k.set_cancel_token(token.clone());
+        token.cancel();
+        let mut records = crate::topology::topology::NotifyRecords::new();
+        let mut attributes = AttributeStore::default();
+        let mut env = crate::topology::edge::NotifyEnv {
+            records: &mut records,
+            attributes: &mut attributes,
+            context: None,
+            key_of: &crate::topology::loopuse::notify_ref,
+        };
+        let r = carry_far_edge_ends(&k, &mut b, v[1], &mut env);
+        assert!(
+            matches!(r, Err(crate::error::SolidError::Cancelled { .. })),
+            "{r:?}"
+        );
+        // the B-spline edge still starts at its old point
+        let c1 = b.edge(e[1]).unwrap().curve.as_ref().unwrap();
+        assert_eq!(c1.evaluate_point(&k, 0.0).unwrap(), p0);
     }
 
     /// #21511: a surf/surf/surf point at a closed curve's seam has two parameters. A wire
