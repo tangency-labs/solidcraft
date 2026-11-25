@@ -127,6 +127,43 @@ struct XsectPointClass {
     point_type: TsectCurveType,
 }
 
+/// Not upstream (#21621, #22030): `uv` moved toward the foot of `point` on `surface` by
+/// up to four drops of `point` to the tangent plane, each from where the last landed and
+/// kept in `domain`, stopping once a drop moves it no more than `eps`; a drop that fails
+/// keeps the last.
+fn foot_in(
+    k: &Kernel,
+    surface: &Surface,
+    domain: &Extent2d,
+    uv: Point2,
+    point: Point3,
+    eps: f64,
+) -> Point2 {
+    let mut uv = uv;
+    for _ in 0..4 {
+        let Ok(next) = super::p7::drop_points_to_tangent_plane(
+            k,
+            surface,
+            uv,
+            Side::Left,
+            Side::Left,
+            &[point],
+        ) else {
+            break;
+        };
+        let Some(&next) = next.first() else {
+            break;
+        };
+        let next = domain.clamp_point(next);
+        let moved = next.distance(uv);
+        uv = next;
+        if moved <= eps {
+            break;
+        }
+    }
+    uv
+}
+
 /// `sm_ClassifyCurveSurfaceXSectPoint` (`surface::surface::p4`); `edge_tolerance` is
 /// the tolerance of the curve's owning edge, when the caller resolves it.
 #[allow(clippy::too_many_arguments)]
@@ -623,6 +660,20 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
 
         // When the updated SurfaceGuessPoint is outside the leafNodeIntersectionDomain
         let uv_eps = EFF_ZERO * (1.0 + uv_domain.size().max_dimension());
+        // Not upstream (#21621). One drop to the tangent plane at the leaf's middle is
+        // linear in (u, v), so where the surface's parameter speed changes across the leaf
+        // it lands off the line point's foot: 0.036 in u at the end of a span of the
+        // radius-5 cylinder's rational quarter circle. From a guess off the root by s
+        // sideways, a line crossing a curved surface of radius r at a shallow slope e
+        // needs a step of about s^2 / 2re along itself; past the leaf's interval (its box
+        // grown by the tolerance) the clamped solve stops out of bounds. So a first drop
+        // in the leaf is dropped again from where it lands, kept in the leaf, until it
+        // moves no more than `uv_eps`, at most four times ([`foot_in`]): each drop is a
+        // Newton step toward the foot.
+        if uv_domain.contains_point(first_uv, uv_eps) {
+            let point = self.line_point + first_t * self.line_vector;
+            first_uv = foot_in(k, srf_eval, &uv_domain, first_uv, point, uv_eps);
+        }
         if !uv_domain.contains_point(first_uv, uv_eps) {
             // move guess to SurfaceMidPoint and near LineInterval beginPoint.
             first_t = ivl.evaluate(0.1);
@@ -685,41 +736,6 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
                 t_guess,
             )?
             else {
-                // Not upstream (#21621). The first guess drops the line point at the middle
-                // of its interval to the tangent plane at the middle of the leaf, linearly in
-                // (u, v). Where the surface's parameter speed changes across the leaf, the
-                // guess lands off the root sideways: on the radius-5 cylinder's rational
-                // quarter circles, 0.036 in u at a span's end (speed 0.96 at the middle of
-                // the end leaf, 0.90 at the end), 5e-6 at a span's middle. Off the root by s
-                // sideways, the surface lies off the line by about s^2 / 2r, which a line
-                // crossing it at a shallow slope e closes only by moving s^2 / 2re along
-                // itself: 1.05 at the end, past the interval the leaf gives the line (+-0.3
-                // there at slope 1e-4). The solve's step is clamped to that interval and
-                // scaled with it, so u moves 0.29 of its way, the next full steps leave the
-                // interval again, and the solve stops out of bounds after its 6 boundary
-                // hits, short of the root. So when the first guess finds nothing, it is
-                // dropped again from where it landed (a step nearer the line point's foot on the
-                // surface, near enough the root for the solve) and tried once more. A drop
-                // that fails is no retry.
-                if index == 0 && uv_guesses.len() < MAX_GUESSES {
-                    let point = self.line_point + t_guess * self.line_vector;
-                    if let Ok(again) = super::p7::drop_points_to_tangent_plane(
-                        k,
-                        leaf.eval,
-                        uv_guess,
-                        Side::Left,
-                        Side::Left,
-                        &[point],
-                    ) {
-                        if let Some(&again) = again.first() {
-                            let again = leaf.domain.clamp_point(again);
-                            if again.distance(uv_guess) > uv_eps {
-                                uv_guesses.push(again);
-                                t_guesses.push(t_guess);
-                            }
-                        }
-                    }
-                }
                 continue;
             };
 
@@ -787,6 +803,28 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
                     }
                     uv_guesses.push(new_uv);
                     t_guesses.push(new_t);
+                } else {
+                    // Not upstream (#22030). A line along a curved surface can cross it
+                    // twice in one leaf, far apart: a chord of the radius-500 cylinder at a
+                    // slope of 1e-5, turned 0.01 round it, crosses it 100 apart, both in
+                    // one leaf whose line interval is 1274 long. The solve from the first
+                    // guess converges on one crossing and the classification finds no
+                    // other near it, so the other was missed. When it finds none, the
+                    // middle of the interval on each side of the crossing found is a
+                    // guess too, at its point's foot on the surface; a solve that ends on
+                    // the crossing found again adds nothing.
+                    for t in [
+                        0.5 * (leaf.interval.min() + hit.t),
+                        0.5 * (hit.t + leaf.interval.max()),
+                    ] {
+                        let apart = (t - hit.t).abs() * self.line_vector.length();
+                        if apart <= self.base.tolerance_3d || uv_guesses.len() >= MAX_GUESSES {
+                            continue;
+                        }
+                        let point = self.line_point + t * self.line_vector;
+                        uv_guesses.push(foot_in(k, leaf.eval, &leaf.domain, hit.uv, point, uv_eps));
+                        t_guesses.push(t);
+                    }
                 }
             }
         }
