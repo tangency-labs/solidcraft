@@ -332,17 +332,31 @@ pub trait PluginHost {
     fn granted_command_groups(&self) -> BTreeSet<String> {
         BTreeSet::new()
     }
+    /// Whether names that start with a dot are reachable inside this granted folder: its grant
+    /// says `hidden` in the manifest. None by default.
+    fn shows_hidden(&self, folder: &Path) -> bool {
+        let _ = folder;
+        false
+    }
+    /// The files in the user's home folder the plugin may read (`permissions.home_files`): the
+    /// manifest's name for each and its full path, once the user allowed them. None by default.
+    fn home_files(&self) -> Vec<(String, PathBuf)> {
+        Vec::new()
+    }
     /// Apply the caller's scope to every complete file path, in addition to folder grants.
     /// Approved folder roots may have hidden ancestors. Hidden child names require
     /// a more specific folder grant or a host override applying explicit scope.
     fn authorize_file_path(&self, path: &Path, write: bool) -> Result<()> {
         let grants = self.granted_folders();
-        let relative = grants
+        let closest = grants
             .iter()
             .filter(|grant| if write { grant.write } else { grant.read })
-            .filter_map(|grant| path.strip_prefix(&grant.folder).ok())
-            .min_by_key(|relative| relative.components().count())
-            .unwrap_or(path);
+            .filter_map(|grant| path.strip_prefix(&grant.folder).ok().map(|relative| (grant, relative)))
+            .min_by_key(|(_, relative)| relative.components().count());
+        if closest.is_some_and(|(grant, _)| self.shows_hidden(&grant.folder)) {
+            return Ok(());
+        }
+        let relative = closest.map_or(path, |(_, relative)| relative);
         if relative.components().any(|component| matches!(component, Component::Normal(name) if name.to_string_lossy().starts_with('.'))) {
             return Err(HostError::PermissionDenied { permission: format!("hidden file: {}", path.display()) });
         }
@@ -477,6 +491,10 @@ pub struct Permissions {
     pub input_folder: bool,
     /// Reserved: refused in this API regardless of app grants.
     pub net: bool,
+    /// Files in the user's home folder the plugin may read, never write, such as `.gitconfig`:
+    /// plain relative paths, read with `files.read-file("~", path)`. Shown at install and allowed
+    /// or not as a whole.
+    pub home_files: Vec<String>,
 }
 impl Permissions {
     pub fn validate(&self) -> Result<()> {
@@ -495,8 +513,35 @@ impl Permissions {
                 return Err(invalid("runtime.permissions.files", "distinct named grants must request read or write"));
             }
         }
+        if self.home_files.len() > MAX_HOME_FILES || self.home_files.iter().any(|path| !valid_home_file(path)) {
+            return Err(invalid(
+                "runtime.permissions.home_files",
+                format!("at most {MAX_HOME_FILES} distinct plain paths inside the home folder, such as .gitconfig"),
+            ));
+        }
+        if self.home_files.iter().collect::<BTreeSet<_>>().len() != self.home_files.len() {
+            return Err(invalid("runtime.permissions.home_files", "each file once"));
+        }
         Ok(())
     }
+}
+
+/// The most files `permissions.home_files` may name.
+pub const MAX_HOME_FILES: usize = 16;
+/// The grant name `files` reads a home file through (`permissions.home_files`).
+pub const HOME_GRANT: &str = "~";
+/// The most folders the user may pick for one `picked` grant.
+pub const MAX_PICKED_FOLDERS: usize = 64;
+
+/// A file `permissions.home_files` may name: a relative path of plain names, `/` between them.
+pub fn valid_home_file(path: &str) -> bool {
+    !path.is_empty()
+        && path.len() <= 255
+        && !path.contains('\\')
+        // `C:/…` would name another drive on Windows, outside the home folder.
+        && !path.contains(':')
+        && !path.chars().any(char::is_control)
+        && path.split('/').all(|part| !part.is_empty() && part != "." && part != "..")
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
@@ -507,6 +552,15 @@ pub struct FilePermission {
     pub read: bool,
     #[serde(default)]
     pub write: bool,
+    /// The user picks this grant's folders while using the plugin, with Browse… on a form field
+    /// that names the grant (`format: directory`, `x-solidcraft-grant`), instead of one folder at
+    /// install. Each folder picked that way is approved for the grant; a typed path is not.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub picked: bool,
+    /// Names that start with a dot inside the folder are reachable too, such as a Git
+    /// repository's `.git`. Shown at install.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hidden: bool,
 }
 
 /// Apps decide which named slots exist. Plugins only declare placement preferences.
@@ -570,6 +624,10 @@ pub struct Entry {
     /// A long job: it runs for up to [`JOB_DEADLINE_SECONDS`] instead of the runtime's `deadline_ms`,
     /// and shows its progress in the app's operations.
     pub job: bool,
+    /// `false`: a form the plugin opens itself (`forms.open`), or a panel's action. The app lists it
+    /// in no menu, ribbon or command search; programs can still call it.
+    #[serde(skip_serializing_if = "is_true")]
+    pub listed: bool,
 }
 
 impl Entry {
@@ -622,6 +680,14 @@ struct DeclaredEntry {
     slots: Vec<UiSlot>,
     #[serde(default)]
     job: bool,
+    #[serde(default = "listed_by_default")]
+    listed: bool,
+}
+fn listed_by_default() -> bool {
+    true
+}
+fn is_true(value: &bool) -> bool {
+    *value
 }
 impl From<EntryDeclaration> for Entry {
     fn from(value: EntryDeclaration) -> Self {
@@ -638,6 +704,7 @@ impl From<EntryDeclaration> for Entry {
                 dialog_hook: false,
                 slots: Vec::new(),
                 job: false,
+                listed: true,
             },
             EntryDeclaration::Declared(value) => Self {
                 name: value.name,
@@ -656,6 +723,7 @@ impl From<EntryDeclaration> for Entry {
                 dialog_hook: value.dialog_hook,
                 slots: value.slots,
                 job: value.job,
+                listed: value.listed,
             },
         }
     }

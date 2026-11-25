@@ -957,13 +957,20 @@ pub(crate) fn approved_text(app: &SolveApp, plugin: &Plugin) -> String {
             (false, true) => "prefs.plugin_folder_write",
             _ => "prefs.plugin_folder_read",
         });
-        parts.push(format("prefs.plugin_folder", &[("name", &folder.name), ("access", access)]));
+        // A grant with several folders the user picked is named once.
+        let part = format("prefs.plugin_folder", &[("name", &folder.name), ("access", access)]);
+        if !parts.contains(&part) {
+            parts.push(part);
+        }
     }
     if let Some(fuel) = grants.fuel {
         parts.push(format("prefs.plugin_approved_fuel", &[("fuel", &fuel.to_string())]));
     }
     if let Some(memory) = grants.memory_mib {
         parts.push(format("prefs.plugin_approved_memory", &[("memory", &memory.to_string())]));
+    }
+    if grants.home_files {
+        parts.push(tr("prefs.plugin_approved_home_files").to_string());
     }
     if parts.is_empty() {
         return tr("prefs.plugin_approved_nothing").to_string();

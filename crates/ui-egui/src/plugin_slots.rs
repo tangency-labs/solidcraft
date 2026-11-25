@@ -121,7 +121,7 @@ pub(crate) fn menu_name(name: &str) -> Option<&'static str> {
 #[cfg(not(target_arch = "wasm32"))]
 fn declared(plugin: &plugins::Plugin) -> Vec<Item> {
     let mut items = Vec::new();
-    for entry in &plugin.entries {
+    for entry in plugin.entries.iter().filter(|entry| entry.listed) {
         for slot in &entry.slots {
             let slot = match slot {
                 UiSlot::Menu { name } => {

@@ -529,7 +529,7 @@ fn each_schema_type_becomes_its_field_with_limits_labels_and_defaults() {
     assert_eq!(fields[2].1, Input::Typed(String::new()), "a number without a default starts empty");
     assert_eq!((&fields[3].0.kind, &fields[3].1), (&Kind::Boolean, &Input::Boolean(false)));
     assert_eq!(fields[4].0.label, "name", "no title: the key");
-    assert_eq!(fields[4].0.kind, Kind::Text { min_length: None, max_length: Some(8), directory: false });
+    assert_eq!(fields[4].0.kind, Kind::Text { min_length: None, max_length: Some(8), directory: false, grant: None });
     let angles: Vec<String> = vec!["14.5".into(), "20".into(), "25".into()];
     assert_eq!(fields[5].0.kind, Kind::Choice { values: angles.clone(), titles: angles }, "enum: each value shown as it is");
     assert_eq!(fields[5].1, Input::Choice(Some(1)), "the default");
@@ -3291,4 +3291,86 @@ mod native {
         assert!(same_camera(&h.app.cam, &stayed), "a failed run does not move the camera: {:?} vs {stayed:?}", h.app.cam);
         let _ = std::fs::remove_dir_all(root);
     }
+}
+
+/// A form the plugin opens itself (`listed: false`) has no menu row and no ribbon button; the
+/// plugin's other commands keep theirs.
+#[test]
+fn a_form_only_entry_is_in_no_menu_or_ribbon() {
+    use crate::app_bar::FileRow;
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let mut identity = entry("identity", "edit", json!([]));
+    identity.listed = false;
+    app.plugin_menu.listed = vec![listed("cloud", vec![entry("save", "edit", json!([{"kind":"menu","name":"Save to cloud"}])), identity])];
+    let ids: Vec<String> = ribbon_buttons(&app).into_iter().map(|b| b.id).collect();
+    assert_eq!(ids, ["plugin_entry:cloud:save"]);
+    let menu = rows(&app);
+    assert!(matches!(&menu[3], FileRow::Item(i) if i.id == "entry:0:0" && i.label == "Save to cloud…"), "{:?}", menu[3]);
+    assert_eq!(menu.len(), 4, "no row for the form-only entry");
+    let mut alone = entry("identity", "edit", json!([]));
+    alone.listed = false;
+    app.plugin_menu.listed = vec![listed("hidden", vec![alone])];
+    assert!(ribbon_buttons(&app).is_empty());
+    assert_eq!(rows(&app).len(), 3, "a plugin with only form-only entries has no row");
+}
+
+/// A folder field naming a `picked` grant: the folder picked with Browse… is approved for that
+/// grant (once, by its resolved path) and Run reaches it. A typed folder is not approved.
+#[test]
+fn a_folder_picked_with_browse_for_a_picked_grant_is_approved_and_a_typed_one_is_not() {
+    let mut h = crate::scenario::Harness::new();
+    let package = h.dir.join("plugins/repos");
+    std::fs::create_dir_all(&package).unwrap();
+    let schema = json!({"type":"object","required":["folder"],"properties":{
+        "folder":{"type":"string","title":"Folder","format":"directory","x-solidcraft-grant":"repositories"}
+    }});
+    let manifest = json!({"id":"repos","name":"Repos","version":"1","capabilities":["commands@0.2"],"runtime":{
+        "module":"repos.wasm","commands":[],"entries":[{"name":"setup","input_schema":schema}],
+        "permissions":{"files":[{"name":"repositories","read":true,"write":true,"picked":true,"hidden":true}]}}});
+    std::fs::write(package.join("plugin.json"), manifest.to_string()).unwrap();
+    std::fs::write(package.join("repos.wasm"), b"\0asm").unwrap();
+    let path = package.to_string_lossy().into_owned();
+    let read = solidcraft_engine::plugin::read_package(&path).unwrap();
+    h.app.session.plugin_state.packages.insert("repos".into(), path.clone());
+    let grants = solidcraft_engine::plugin::Grants { package_hash: Some(read.approval.clone()), ..Default::default() };
+    h.app.session.plugin_state.grants.insert("repos".into(), grants.clone());
+    h.app.preferences.plugin_grants.insert("repos".into(), grants);
+    let mut setup = entry("setup", "edit", json!([]));
+    setup.input_schema = schema;
+    h.app.plugin_menu.listed = vec![Listed { path, approval: read.approval, ..listed("repos", vec![setup]) }];
+    let (designs, typed) = (h.dir.join("designs"), h.dir.join("typed"));
+    std::fs::create_dir_all(&designs).unwrap();
+    std::fs::create_dir_all(&typed).unwrap();
+    open_entry(&mut h.app, 0, 0);
+    h.frames(2);
+    let set_folder = |h: &mut crate::scenario::Harness, text: &str| {
+        let fields = h.app.plugin_menu.dialogs.last_mut().unwrap().fields.as_mut().unwrap();
+        fields.iter_mut().find(|(field, _)| field.key == "folder").unwrap().1 = Input::Text(text.into());
+    };
+    set_folder(&mut h, &typed.to_string_lossy());
+    assert!(run(&mut h.app).unwrap_err().contains("file path has no applicable folder grant"), "a typed folder is not approved");
+    // The whole disk is refused, saying why in plain words.
+    let disk = designs.ancestors().last().unwrap().to_string_lossy().into_owned();
+    h.app.services.pick_folder = Some(Box::new(move |_: &str| Box::pin(std::future::ready(Some(disk.clone())))));
+    h.frames(2);
+    let browse = h.app.tr("ui.plugin_dialog_browse").to_owned();
+    h.step(&json!({"widget": browse})).unwrap();
+    h.frames(2);
+    let refused = solidcraft_ui_text::format("ui.plugin_dialog_folder_refused", &[("error", "pick a folder of your work, not the whole disk")]);
+    assert_eq!(h.app.status.as_ref().map(|(text, _, error)| (text.as_str(), *error)), Some((refused.as_str(), true)));
+    assert!(h.app.preferences.plugin_grants["repos"].folders.is_empty(), "a refused folder is not approved");
+    let answer = designs.to_string_lossy().into_owned();
+    h.app.services.pick_folder = Some(Box::new(move |_: &str| Box::pin(std::future::ready(Some(answer.clone())))));
+    h.frames(2);
+    let browse = h.app.tr("ui.plugin_dialog_browse").to_owned();
+    h.step(&json!({"widget": browse})).unwrap();
+    h.frames(2);
+    let approved = std::fs::canonicalize(&designs).unwrap();
+    let folders = &h.app.preferences.plugin_grants["repos"].folders;
+    assert_eq!(folders, &h.app.session.plugin_state.grants["repos"].folders, "kept with the app's approvals");
+    assert_eq!(folders.len(), 1);
+    assert_eq!((folders[0].name.as_str(), &folders[0].folder, folders[0].read, folders[0].write), ("repositories", &approved, true, true));
+    run(&mut h.app).unwrap();
+    let request = h.app.control_held.back().expect("the picked folder is sent to the plugin");
+    assert_eq!(request.params["params"]["params"], json!({"folder": approved.to_string_lossy()}));
 }

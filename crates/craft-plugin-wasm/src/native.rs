@@ -55,6 +55,8 @@ const EPOCH_POLL: Duration = Duration::from_millis(10);
 /// The most components a path inside a granted or input folder may have.
 const MAX_PATH_COMPONENTS: usize = 64;
 static NEXT_FILE: AtomicU64 = AtomicU64::new(0);
+/// The most names `files.list-folder` gives for one folder.
+const MAX_LISTED_NAMES: usize = 100_000;
 
 fn limit(name: &str) -> HostError {
     HostError::LimitExceeded { limit: name.into() }
@@ -108,9 +110,15 @@ struct Folder {
     path: PathBuf,
     read: bool,
     write: bool,
+    /// Names starting with a dot are reachable (the grant says `hidden`).
+    hidden: bool,
+    /// The grant's name when the user picks its folders (`picked`): this one is kept under
+    /// `<grant>/<n>`, and calls name a file in it by its full path.
+    picked: Option<String>,
 }
 struct PendingWrite {
-    temporary: PathBuf,
+    /// The new file's bytes, waiting beside it; `None`: the file is removed.
+    temporary: Option<PathBuf>,
     order: usize,
 }
 struct State<H> {
@@ -172,6 +180,28 @@ impl<H: PluginHost> State<H> {
         }
         Ok(())
     }
+    /// The folder a call's `grant` and `path` name, as its key in `folders` and the path inside it.
+    /// A picked grant's file is named by its full path, inside the most specific of its folders.
+    fn resolve(&mut self, grant: String, path: String, write: bool) -> std::result::Result<(String, String), PluginError> {
+        let picked: Vec<(&String, &Folder)> = self.folders.iter().filter(|(_, folder)| folder.picked.as_deref() == Some(grant.as_str())).collect();
+        if picked.is_empty() {
+            return Ok((grant, path));
+        }
+        let full = Path::new(&path);
+        let found = picked
+            .into_iter()
+            .filter_map(|(key, folder)| full.strip_prefix(&folder.path).ok().map(|inside| (key, folder.path.components().count(), inside)))
+            .max_by_key(|(_, depth, _)| *depth)
+            .map(|(key, _, inside)| (key.clone(), inside.to_string_lossy().into_owned()));
+        match found {
+            Some(found) if full.is_absolute() => Ok(found),
+            _ => {
+                self.check()?;
+                let permission = format!("files.{}:{grant}: {path} is not in a folder you picked for it", if write { "write" } else { "read" });
+                Err(self.fail(HostError::PermissionDenied { permission }))
+            }
+        }
+    }
     fn file_path(&mut self, grant: &str, path: &str, write: bool) -> std::result::Result<(), PluginError> {
         self.check()?;
         let valid = !path.is_empty() && Path::new(path).components().all(|c| matches!(c, PathComponent::Normal(_)));
@@ -197,8 +227,8 @@ impl<H: PluginHost> State<H> {
     }
     fn discard_writes(&mut self) {
         for ((grant, _), pending) in std::mem::take(&mut self.staged) {
-            if let Some(folder) = self.folders.get(&grant) {
-                let _ = folder.dir.remove_file(pending.temporary);
+            if let (Some(folder), Some(temporary)) = (self.folders.get(&grant), pending.temporary) {
+                let _ = folder.dir.remove_file(temporary);
             }
         }
         // Newest first, so a folder's sub-folders go before it; a folder that now holds anything stays.
@@ -213,7 +243,16 @@ impl<H: PluginHost> State<H> {
         writes.sort_by_key(|(_, pending)| pending.order);
         for ((grant, path), pending) in writes {
             let folder = self.folders.get(grant).ok_or_else(|| trap("file grant disappeared before publication"))?;
-            folder.dir.rename(&pending.temporary, &folder.dir, path).map_err(|error| HostError::PermissionDenied {
+            let published = match &pending.temporary {
+                Some(temporary) => folder.dir.rename(temporary, &folder.dir, path),
+                None => match folder.dir.symlink_metadata(path) {
+                    Ok(metadata) if metadata.is_file() => folder.dir.remove_file(path),
+                    Ok(_) => Err(std::io::Error::other("not a file")),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                    Err(error) => Err(error),
+                },
+            };
+            published.map_err(|error| HostError::PermissionDenied {
                 permission: format!("files.write:{grant}: publication failed after app commit; files may have changed: {error}"),
             })?;
         }
@@ -362,32 +401,62 @@ impl<H: PluginHost> State<H> {
 }
 impl<H: PluginHost> files::Host for State<H> {
     fn read_file(&mut self, grant: String, path: String) -> std::result::Result<Vec<u8>, PluginError> {
-        self.file_path(&grant, &path, false)?;
-        // `None`: the path is allowed and nothing is there (and no write of this call is staged for it).
-        let read = (|| -> std::io::Result<Option<Vec<u8>>> {
-            let folder = self.folders.get(&grant).ok_or_else(|| std::io::Error::other("grant disappeared"))?;
-            let staged = self.staged.get(&(grant.clone(), Path::new(&path).components().collect()));
-            let file = match folder.dir.open(staged.map(|pending| pending.temporary.as_path()).unwrap_or(Path::new(&path))) {
-                Err(error) if staged.is_none() && error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-                opened => opened?,
-            };
-            if !file.metadata()?.is_file() {
-                return Err(std::io::Error::other("only regular files are supported"));
-            }
-            let mut bytes = Vec::new();
-            file.take(MAX_JSON_BYTES as u64 + 1).read_to_end(&mut bytes)?;
-            Ok(Some(bytes))
-        })();
-        let bytes = read.map_err(|e| self.fail(HostError::PermissionDenied { permission: format!("files.read:{grant}: {e}") }))?;
-        // A file that is not there yet is an answer, not a failed run (#17899): the entry gets the
-        // error and goes on, so a plugin can make its own file on its first run.
-        let Some(bytes) = bytes else {
-            return Err(wit_error(HostError::InvalidInput { field: "path".into(), reason: "no such file".into() }));
-        };
-        if bytes.len() > MAX_JSON_BYTES {
+        self.read_bytes(grant, path, 0, MAX_JSON_BYTES as u64 + 1, "read")
+    }
+    fn read_part(&mut self, grant: String, path: String, offset: u64, len: u32) -> std::result::Result<Vec<u8>, PluginError> {
+        if len as usize > MAX_JSON_BYTES {
+            self.check()?;
             return Err(self.fail(limit("file read size")));
         }
-        Ok(bytes)
+        self.read_bytes(grant, path, offset, u64::from(len), "read-part")
+    }
+    fn list_folder(&mut self, grant: String, path: String) -> std::result::Result<Vec<String>, PluginError> {
+        let (grant, path) = self.resolve(grant, path, false)?;
+        let inside = if path.is_empty() { "." } else { path.as_str() };
+        if path.is_empty() {
+            self.check()?;
+            if !self.folders.get(&grant).is_some_and(|folder| folder.read) {
+                return Err(self.fail(HostError::PermissionDenied { permission: format!("files.list:{grant}") }));
+            }
+        } else {
+            self.file_path(&grant, &path, false)?;
+        }
+        let listed = (|| -> std::io::Result<Vec<String>> {
+            let folder = self.folders.get(&grant).ok_or_else(|| std::io::Error::other("grant disappeared"))?;
+            let mut names = BTreeSet::new();
+            let entries = match folder.dir.read_dir(inside) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+                entries => entries?,
+            };
+            for entry in entries {
+                let entry = entry?;
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let kind = entry.file_type()?;
+                if (name.starts_with('.') && !folder.hidden) || name.starts_with(".craft-plugin-") || kind.is_symlink() {
+                    continue;
+                }
+                names.insert(if kind.is_dir() { format!("{name}/") } else { name });
+                if names.len() > MAX_LISTED_NAMES {
+                    return Err(std::io::Error::other(format!("more than {MAX_LISTED_NAMES} names")));
+                }
+            }
+            // What this run wrote or removed there, as the folder will be once the run is accepted.
+            let here: PathBuf = Path::new(&path).components().collect();
+            for ((key, staged), pending) in &self.staged {
+                let (Some(parent), Some(name)) = (staged.parent(), staged.file_name()) else { continue };
+                if key != &grant || parent != here {
+                    continue;
+                }
+                let name = name.to_string_lossy().into_owned();
+                if pending.temporary.is_some() {
+                    names.insert(name);
+                } else {
+                    names.remove(&name);
+                }
+            }
+            Ok(names.into_iter().collect())
+        })();
+        listed.map_err(|e| self.fail(HostError::PermissionDenied { permission: format!("files.list:{grant}: {e}") }))
     }
     fn write_file(&mut self, grant: String, path: String, data: Vec<u8>) -> std::result::Result<(), PluginError> {
         // A read entry stays read-only in every way: no file write, whatever folders are granted.
@@ -395,6 +464,7 @@ impl<H: PluginHost> files::Host for State<H> {
             self.check()?;
             return Err(self.fail(craft_plugin::read_entry_refusal("write-file")));
         }
+        let (grant, path) = self.resolve(grant, path, true)?;
         self.file_path(&grant, &path, true)?;
         let path: PathBuf = Path::new(&path).components().collect();
         if data.len() > MAX_JSON_BYTES {
@@ -442,13 +512,138 @@ impl<H: PluginHost> files::Host for State<H> {
                 HostError::InvalidInput { field: "path".into(), reason: format!("files.write:{grant}: {e}") }
             })
         })?;
-        if let Some(previous) = self.staged.insert((grant.clone(), path), PendingWrite { temporary, order: self.calls })
-            && let Some(folder) = self.folders.get(&grant)
-        {
-            let _ = folder.dir.remove_file(previous.temporary);
-        }
+        self.stage(grant, path, Some(temporary));
         Ok(())
     }
+    fn remove_file(&mut self, grant: String, path: String) -> std::result::Result<(), PluginError> {
+        if self.effect == Effect::Read {
+            self.check()?;
+            return Err(self.fail(craft_plugin::read_entry_refusal("remove-file")));
+        }
+        let (grant, path) = self.resolve(grant, path, true)?;
+        self.file_path(&grant, &path, true)?;
+        let path: PathBuf = Path::new(&path).components().collect();
+        let folder_kind = self.folders.get(&grant).map(|folder| folder.dir.symlink_metadata(&path).map(|m| m.is_dir()));
+        if let Some(Ok(true)) = folder_kind {
+            return Err(self.fail(HostError::InvalidInput { field: "path".into(), reason: format!("files.remove:{grant}: a folder, not a file") }));
+        }
+        self.stage(grant, path, None);
+        Ok(())
+    }
+}
+
+impl<H: PluginHost> State<H> {
+    /// Up to `len` bytes from `offset` of a file in a grant, or of a home file the manifest names
+    /// (`~`), as this run sees it: its own staged writes and removals included.
+    fn read_bytes(&mut self, grant: String, path: String, offset: u64, len: u64, call: &str) -> std::result::Result<Vec<u8>, PluginError> {
+        if grant == craft_plugin::HOME_GRANT {
+            return self.read_home(&path, offset, len, call);
+        }
+        let (grant, path) = self.resolve(grant, path, false)?;
+        self.file_path(&grant, &path, false)?;
+        // `None`: the path is allowed and nothing is there (and no write of this call is staged for it).
+        let read = (|| -> std::io::Result<Option<Vec<u8>>> {
+            let folder = self.folders.get(&grant).ok_or_else(|| std::io::Error::other("grant disappeared"))?;
+            let staged = self.staged.get(&(grant.clone(), Path::new(&path).components().collect()));
+            let name = match staged {
+                Some(PendingWrite { temporary: None, .. }) => return Ok(None),
+                Some(PendingWrite { temporary: Some(temporary), .. }) => temporary.as_path(),
+                None => Path::new(&path),
+            };
+            let mut file = match folder.dir.open(name) {
+                Err(error) if staged.is_none() && error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+                opened => opened?,
+            };
+            if !file.metadata()?.is_file() {
+                return Err(std::io::Error::other("only regular files are supported"));
+            }
+            Ok(Some(read_range(&mut file, offset, len)?))
+        })();
+        self.finish_read(read, &grant, call)
+    }
+    fn read_home(&mut self, path: &str, offset: u64, len: u64, call: &str) -> std::result::Result<Vec<u8>, PluginError> {
+        self.check()?;
+        let Some(full) = self.host.home_files().into_iter().find(|(name, _)| name == path).map(|(_, full)| full) else {
+            let permission = format!("files.{call}:~: {path} is not one of the home folder's files this plugin may read");
+            return Err(self.fail(HostError::PermissionDenied { permission }));
+        };
+        // The file the user allowed by name: a link there (a dotfile manager's) is followed.
+        let read = (|| -> std::io::Result<Option<Vec<u8>>> {
+            // Non-blocking, so a named pipe there cannot hold the run in `open`.
+            let mut options = std::fs::OpenOptions::new();
+            options.read(true);
+            #[cfg(unix)]
+            std::os::unix::fs::OpenOptionsExt::custom_flags(&mut options, O_NONBLOCK);
+            let mut file = match options.open(&full) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+                opened => opened?,
+            };
+            if !file.metadata()?.is_file() {
+                return Err(std::io::Error::other("only regular files are supported"));
+            }
+            Ok(Some(read_range(&mut file, offset, len)?))
+        })();
+        self.finish_read(read, "~", call)
+    }
+    fn finish_read(&mut self, read: std::io::Result<Option<Vec<u8>>>, grant: &str, call: &str) -> std::result::Result<Vec<u8>, PluginError> {
+        let bytes = read.map_err(|e| self.fail(HostError::PermissionDenied { permission: format!("files.{call}:{grant}: {e}") }))?;
+        // A file that is not there yet is an answer, not a failed run (#17899): the entry gets the
+        // error and goes on, so a plugin can make its own file on its first run.
+        let Some(bytes) = bytes else {
+            return Err(wit_error(HostError::InvalidInput { field: "path".into(), reason: "no such file".into() }));
+        };
+        if bytes.len() > MAX_JSON_BYTES {
+            return Err(self.fail(limit("file read size")));
+        }
+        Ok(bytes)
+    }
+    /// Keeps a write (`Some` new bytes) or a removal (`None`) for when the run is accepted; it
+    /// replaces what this run asked for that file before.
+    fn stage(&mut self, grant: String, path: PathBuf, temporary: Option<PathBuf>) {
+        if let Some(previous) = self.staged.insert((grant.clone(), path), PendingWrite { temporary, order: self.calls })
+            && let (Some(folder), Some(previous)) = (self.folders.get(&grant), previous.temporary)
+        {
+            let _ = folder.dir.remove_file(previous);
+        }
+    }
+}
+
+/// The run's granted folders by key: a grant's name, or `<grant>/<n>` for each folder of a grant
+/// whose folders the user picks. A picked folder that is gone is left out, not a failed run.
+fn open_folders<H: PluginHost>(host: &H, runtime: &craft_plugin::RuntimeManifest) -> Result<BTreeMap<String, Folder>> {
+    let mut folders = BTreeMap::new();
+    for granted in host.granted_folders() {
+        let Some(request) = runtime.permissions.files.iter().find(|r| r.name == granted.name) else { continue };
+        let dir = match Dir::open_ambient_dir(&granted.folder, cap_std::ambient_authority()) {
+            Ok(dir) => dir,
+            Err(_) if request.picked => continue,
+            Err(e) => return Err(HostError::PermissionDenied { permission: format!("files:{}: {e}", granted.name) }),
+        };
+        let key = if request.picked {
+            let count = folders.values().filter(|folder: &&Folder| folder.picked.as_deref() == Some(granted.name.as_str())).count();
+            format!("{}/{count}", granted.name)
+        } else {
+            granted.name.clone()
+        };
+        let folder = Folder {
+            dir,
+            path: granted.folder,
+            read: request.read && granted.read,
+            write: request.write && granted.write,
+            hidden: request.hidden,
+            picked: request.picked.then_some(granted.name),
+        };
+        folders.insert(key, folder);
+    }
+    Ok(folders)
+}
+
+/// Up to `len` bytes of `file` from `offset`: fewer at its end.
+fn read_range<R: Read + std::io::Seek>(file: &mut R, offset: u64, len: u64) -> std::io::Result<Vec<u8>> {
+    file.seek(std::io::SeekFrom::Start(offset))?;
+    let mut bytes = Vec::new();
+    file.by_ref().take(len).read_to_end(&mut bytes)?;
+    Ok(bytes)
 }
 
 impl<H: PluginHost> State<H> {
@@ -894,17 +1089,7 @@ fn run_mode<H: PluginHost + 'static>(
         check_dialog_export(manifest, &engine, &component)?;
         let commands = host.command_catalog().into_iter().filter(|s| runtime.commands.contains(&s.name)).map(|s| (s.name.clone(), s)).collect();
         let groups: BTreeSet<String> = host.granted_command_groups().intersection(&runtime.permissions.command_groups).cloned().collect();
-        let mut folders = BTreeMap::new();
-        for granted in host.granted_folders() {
-            if let Some(request) = runtime.permissions.files.iter().find(|r| r.name == granted.name) {
-                let dir = Dir::open_ambient_dir(&granted.folder, cap_std::ambient_authority())
-                    .map_err(|e| HostError::PermissionDenied { permission: format!("files:{}: {e}", granted.name) })?;
-                folders.insert(
-                    granted.name,
-                    Folder { dir, path: granted.folder, read: request.read && granted.read, write: request.write && granted.write },
-                );
-            }
-        }
+        let folders = open_folders(&host, runtime)?;
         if host.is_cancelled() {
             return Err(HostError::Cancelled);
         }

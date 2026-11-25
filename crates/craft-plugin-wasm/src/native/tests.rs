@@ -24,8 +24,18 @@ struct App {
     panel_visible: bool,
     interactive: bool,
     forms: Vec<(String, Value)>,
+    /// Granted folders where hidden names are reachable (their grant says `hidden`).
+    hidden: Vec<PathBuf>,
+    /// The home folder's files the plugin may read, by name and full path.
+    home: Vec<(String, PathBuf)>,
 }
 impl PluginHost for App {
+    fn shows_hidden(&self, folder: &Path) -> bool {
+        self.hidden.iter().any(|shown| shown == folder)
+    }
+    fn home_files(&self) -> Vec<(String, PathBuf)> {
+        self.home.clone()
+    }
     fn open_form(&mut self, entry: &str, params: &Value) -> Result<()> {
         if !self.interactive {
             return Err(HostError::InteractiveRequired { entry: entry.into() });
@@ -835,7 +845,14 @@ fn files_inside_grant_work_and_escape_is_refused() {
     let mut state = state(App::default());
     state.folders.insert(
         "data".into(),
-        Folder { dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(), path: root.clone(), read: true, write: true },
+        Folder {
+            dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(),
+            path: root.clone(),
+            read: true,
+            write: true,
+            hidden: false,
+            picked: None,
+        },
     );
     state.write_file("data".into(), "hello.txt".into(), b"hello".to_vec()).unwrap();
     assert_eq!(state.read_file("data".into(), "hello.txt".into()).unwrap(), b"hello");
@@ -848,6 +865,120 @@ fn files_inside_grant_work_and_escape_is_refused() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
+fn temp_folder(name: &str) -> PathBuf {
+    let root = std::env::temp_dir().join(format!("craft-plugin-{name}-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
+    std::fs::create_dir_all(&root).unwrap();
+    root
+}
+fn folder(root: &Path, hidden: bool, picked: Option<&str>) -> Folder {
+    let dir = Dir::open_ambient_dir(root, cap_std::ambient_authority()).unwrap();
+    Folder { dir, path: root.to_path_buf(), read: true, write: true, hidden, picked: picked.map(str::to_owned) }
+}
+
+#[test]
+fn a_picked_folder_is_named_by_its_full_path_and_only_inside_one_of_the_grants_folders() {
+    use files::Host;
+    let (first, second, elsewhere) = (temp_folder("picked-a"), temp_folder("picked-b"), temp_folder("picked-c"));
+    std::fs::write(second.join("lid.sc"), b"lid").unwrap();
+    let mut state = state(App::default());
+    state.folders.insert("repositories/0".into(), folder(&first, false, Some("repositories")));
+    state.folders.insert("repositories/1".into(), folder(&second, false, Some("repositories")));
+    let full = |root: &Path, name: &str| root.join(name).to_string_lossy().into_owned();
+    assert_eq!(state.read_file("repositories".into(), full(&second, "lid.sc")).unwrap(), b"lid");
+    state.write_file("repositories".into(), full(&first, "Robot/base.sc"), b"base".to_vec()).unwrap();
+    state.publish_writes().unwrap();
+    assert_eq!(std::fs::read(first.join("Robot/base.sc")).unwrap(), b"base");
+    // A relative path, a folder not picked, or a way out of one names nothing.
+    for path in ["lid.sc".to_string(), full(&elsewhere, "x.sc"), full(&first, "../escape.sc")] {
+        assert!(state.read_file("repositories".into(), path.clone()).is_err(), "{path}");
+    }
+    drop(state);
+    for root in [first, second, elsewhere] {
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
+fn hidden_names_are_reachable_only_in_a_folder_whose_grant_says_hidden() {
+    use files::Host;
+    let root = temp_folder("hidden");
+    std::fs::create_dir_all(root.join(".git")).unwrap();
+    std::fs::write(root.join(".git/HEAD"), b"ref: refs/heads/main\n").unwrap();
+    for shown in [false, true] {
+        let grants = vec![FileGrant { name: "repo".into(), folder: root.clone(), read: true, write: true }];
+        let app = App { grants, hidden: if shown { vec![root.clone()] } else { Vec::new() }, ..Default::default() };
+        let mut state = state(app);
+        state.folders.insert("repo".into(), folder(&root, shown, None));
+        // (A refused call fails the run, so the listing comes first.)
+        let listed = state.list_folder("repo".into(), String::new()).unwrap();
+        assert_eq!(listed.contains(&".git/".to_string()), shown, "{listed:?}");
+        let read = state.read_file("repo".into(), ".git/HEAD".into());
+        assert_eq!(read.is_ok(), shown, "{read:?}");
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn read_part_list_folder_and_remove_file_see_the_runs_own_changes_and_publish_with_it() {
+    use files::Host;
+    let root = temp_folder("parts");
+    std::fs::create_dir_all(root.join("sub")).unwrap();
+    std::fs::write(root.join("pack"), b"0123456789").unwrap();
+    std::fs::write(root.join("old.sc"), b"old").unwrap();
+    let mut state = state(App::default());
+    state.folders.insert("data".into(), folder(&root, false, None));
+    assert_eq!(state.read_part("data".into(), "pack".into(), 3, 4).unwrap(), b"3456");
+    assert_eq!(state.read_part("data".into(), "pack".into(), 8, 100).unwrap(), b"89", "fewer at the end");
+    state.write_file("data".into(), "new.sc".into(), b"new".to_vec()).unwrap();
+    state.remove_file("data".into(), "old.sc".into()).unwrap();
+    assert_eq!(state.list_folder("data".into(), String::new()).unwrap(), ["new.sc", "pack", "sub/"]);
+    assert!(state.read_file("data".into(), "old.sc".into()).is_err(), "removed for this run");
+    assert!(root.join("old.sc").exists(), "nothing changes before the run is accepted");
+    state.publish_writes().unwrap();
+    assert!(!root.join("old.sc").exists());
+    assert_eq!(std::fs::read(root.join("new.sc")).unwrap(), b"new");
+    for refused in [true, false] {
+        let mut state = self::state(App::default());
+        state.folders.insert("data".into(), folder(&root, false, None));
+        let failed = if refused {
+            state.read_part("data".into(), "pack".into(), 0, u32::MAX)
+        } else {
+            state.remove_file("data".into(), "sub".into()).map(|()| Vec::new())
+        };
+        assert!(failed.is_err(), "more than 1 MiB at once, or a folder removed");
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn a_home_file_is_read_only_when_the_manifest_names_it_and_never_written() {
+    use files::Host;
+    let home = temp_folder("home");
+    std::fs::write(home.join(".gitconfig"), b"[user]\n\tname = Ada\n").unwrap();
+    std::fs::write(home.join(".netrc"), b"secret").unwrap();
+    let app = App { home: vec![(".gitconfig".into(), home.join(".gitconfig"))], ..Default::default() };
+    let mut state = state(app);
+    assert_eq!(state.read_file("~".into(), ".gitconfig".into()).unwrap(), b"[user]\n\tname = Ada\n");
+    assert_eq!(state.read_part("~".into(), ".gitconfig".into(), 1, 4).unwrap(), b"user");
+    let refused = state.read_file("~".into(), ".netrc".into()).unwrap_err();
+    assert!(matches!(refused, PluginError::PermissionDenied(_)), "{refused:?}");
+    let mut state = self::state(App { home: vec![(".gitconfig".into(), home.join(".gitconfig"))], ..Default::default() });
+    assert!(state.write_file("~".into(), ".gitconfig".into(), b"x".to_vec()).is_err());
+    assert!(state.list_folder("~".into(), String::new()).is_err());
+    drop(state);
+    // A named pipe where the file should be is refused at once, never waited on for a writer.
+    #[cfg(unix)]
+    {
+        let pipe = home.join(".gitconfig-pipe");
+        assert!(std::process::Command::new("mkfifo").arg(&pipe).status().unwrap().success());
+        let mut state = self::state(App { home: vec![(".gitconfig".into(), pipe)], ..Default::default() });
+        let started = std::time::Instant::now();
+        assert!(state.read_file("~".into(), ".gitconfig".into()).is_err());
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    }
+    std::fs::remove_dir_all(home).unwrap();
+}
+
 #[test]
 fn staged_writes_publish_in_guest_order_across_grant_aliases_and_normalize_separators() {
     use files::Host;
@@ -857,7 +988,14 @@ fn staged_writes_publish_in_guest_order_across_grant_aliases_and_normalize_separ
     for name in ["a", "z"] {
         state.folders.insert(
             name.into(),
-            Folder { dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(), path: root.clone(), read: true, write: true },
+            Folder {
+                dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(),
+                path: root.clone(),
+                read: true,
+                write: true,
+                hidden: false,
+                picked: None,
+            },
         );
     }
     state.write_file("z".into(), "nested//target.txt".into(), b"first".to_vec()).unwrap();
@@ -997,7 +1135,13 @@ fn file_import_denial_rolls_back_even_when_guest_swallows_it_and_grants_enable_r
     std::fs::create_dir_all(&root).unwrap();
     std::fs::write(root.join("secret.txt"), b"{}").unwrap();
     let mut manifest = manifest();
-    manifest.runtime.as_mut().unwrap().permissions.files.push(FilePermission { name: "project".into(), read: true, write: false });
+    manifest.runtime.as_mut().unwrap().permissions.files.push(FilePermission {
+        name: "project".into(),
+        read: true,
+        write: false,
+        picked: false,
+        hidden: false,
+    });
     let failure = run(&mut app, &manifest, &files_component(false, false), "make", &json!({})).unwrap_err();
     assert_eq!(failure, HostError::PermissionDenied { permission: "files.read:project".into() });
     app.grants.push(FileGrant { name: "project".into(), folder: root.clone(), read: true, write: false });
@@ -1024,7 +1168,13 @@ fn dialog_hook_cannot_write_files_even_with_the_command_entries_approved_grants(
     );
     let root = import_folder(&[("secret.txt", b"original")]);
     let mut manifest = hook_manifest();
-    manifest.runtime.as_mut().unwrap().permissions.files.push(FilePermission { name: "project".into(), read: true, write: true });
+    manifest.runtime.as_mut().unwrap().permissions.files.push(FilePermission {
+        name: "project".into(),
+        read: true,
+        write: true,
+        picked: false,
+        hidden: false,
+    });
     let app = App { grants: vec![FileGrant { name: "project".into(), folder: root.clone(), read: true, write: true }], ..Default::default() };
     let (_, result) = crate::dialog_fields(app, &manifest, &wat::parse_str(source).unwrap(), "make", &json!({}), craft_plugin::HostLimits::default());
     assert_eq!(result.unwrap_err(), craft_plugin::read_entry_refusal("write-file"));
@@ -1037,7 +1187,13 @@ fn component_file_writes_are_denied_without_a_host_grant() {
     for declared in [false, true] {
         let mut manifest = manifest();
         if declared {
-            manifest.runtime.as_mut().unwrap().permissions.files.push(FilePermission { name: "project".into(), read: false, write: true });
+            manifest.runtime.as_mut().unwrap().permissions.files.push(FilePermission {
+                name: "project".into(),
+                read: false,
+                write: true,
+                picked: false,
+                hidden: false,
+            });
         }
         let mut app = App { value: 7, ..Default::default() };
         let failure = run(&mut app, &manifest, &files_component(true, true), "make", &json!({})).unwrap_err();
@@ -1055,7 +1211,7 @@ fn a_read_entry_is_refused_write_file_even_with_a_write_grant() {
     let mut manifest = manifest();
     let runtime = manifest.runtime.as_mut().unwrap();
     runtime.entries[0].effect = Effect::Read;
-    runtime.permissions.files.push(FilePermission { name: "project".into(), read: true, write: true });
+    runtime.permissions.files.push(FilePermission { name: "project".into(), read: true, write: true, picked: false, hidden: false });
     let mut app = App { grants: vec![FileGrant { name: "project".into(), folder: root.clone(), read: true, write: true }], ..Default::default() };
     // The guest ignores the refusal and returns normally: the call still fails, naming the import.
     let failure = run(&mut app, &manifest, &files_component(true, true), "make", &json!({})).unwrap_err();
@@ -1073,7 +1229,13 @@ fn staged_file_writes_publish_after_commit_and_disappear_after_traps_or_commit_f
     std::fs::create_dir_all(&root).unwrap();
     let target = root.join("secret.txt");
     let mut manifest = manifest();
-    manifest.runtime.as_mut().unwrap().permissions.files.push(FilePermission { name: "project".into(), read: false, write: true });
+    manifest.runtime.as_mut().unwrap().permissions.files.push(FilePermission {
+        name: "project".into(),
+        read: false,
+        write: true,
+        picked: false,
+        hidden: false,
+    });
     for (after, fail_commit) in [("unreachable", false), ("", true), ("", false)] {
         std::fs::write(&target, b"original").unwrap();
         let mut app = App {
@@ -1101,7 +1263,14 @@ fn reading_a_missing_file_is_an_answer_and_the_entry_can_then_write_it() {
     let mut state = state(App::default());
     state.folders.insert(
         "data".into(),
-        Folder { dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(), path: root.clone(), read: true, write: true },
+        Folder {
+            dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(),
+            path: root.clone(),
+            read: true,
+            write: true,
+            hidden: false,
+            picked: None,
+        },
     );
     for path in ["jobs.json", "none/jobs.json"] {
         let missing = state.read_file("data".into(), path.into()).unwrap_err();
@@ -1125,7 +1294,13 @@ fn reading_a_missing_file_is_an_answer_and_the_entry_can_then_write_it() {
     // A whole entry: it reads the file that is not there, writes it, and the run publishes it.
     let target = root.join("secret.txt");
     let mut manifest = manifest();
-    manifest.runtime.as_mut().unwrap().permissions.files.push(FilePermission { name: "project".into(), read: true, write: true });
+    manifest.runtime.as_mut().unwrap().permissions.files.push(FilePermission {
+        name: "project".into(),
+        read: true,
+        write: true,
+        picked: false,
+        hidden: false,
+    });
     let component = files_component_calls(&[false, true], true, "");
     let mut app = App { grants: vec![FileGrant { name: "project".into(), folder: root.clone(), read: true, write: true }], ..Default::default() };
     assert_eq!(run(&mut app, &manifest, &component, "make", &json!({})).unwrap(), json!({}));
@@ -1151,7 +1326,14 @@ fn a_write_into_a_missing_sub_folder_makes_it_and_a_discarded_run_removes_it_aga
     let granted = |host: &mut State<App>| {
         host.folders.insert(
             "projects".into(),
-            Folder { dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(), path: root.clone(), read: true, write: true },
+            Folder {
+                dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(),
+                path: root.clone(),
+                read: true,
+                write: true,
+                hidden: false,
+                picked: None,
+            },
         );
     };
 
@@ -1199,7 +1381,14 @@ fn a_link_in_the_middle_of_a_new_folder_path_is_refused_before_anything_is_made(
         let mut state = state(App::default());
         state.folders.insert(
             "data".into(),
-            Folder { dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(), path: root.clone(), read: true, write: true },
+            Folder {
+                dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(),
+                path: root.clone(),
+                read: true,
+                write: true,
+                hidden: false,
+                picked: None,
+            },
         );
         let refused = state.write_file("data".into(), path.into(), b"{}".to_vec()).unwrap_err();
         assert!(matches!(refused, PluginError::PermissionDenied(_)), "{path}: {refused:?}");
@@ -1218,7 +1407,14 @@ fn a_path_of_more_than_64_components_is_refused_before_any_folder_is_made() {
     let mut state = state(App::default());
     state.folders.insert(
         "data".into(),
-        Folder { dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(), path: root.clone(), read: true, write: true },
+        Folder {
+            dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(),
+            path: root.clone(),
+            read: true,
+            write: true,
+            hidden: false,
+            picked: None,
+        },
     );
     let deep = |folders: usize| format!("{}x.json", "d/".repeat(folders));
     // 63 folders and the file are 64 components: allowed.
@@ -1247,7 +1443,14 @@ fn every_file_operation_refuses_hidden_names_inside_a_granted_folder() {
             let mut state = state(App::default());
             state.folders.insert(
                 "data".into(),
-                Folder { dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(), path: root.clone(), read: true, write: true },
+                Folder {
+                    dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(),
+                    path: root.clone(),
+                    read: true,
+                    write: true,
+                    hidden: false,
+                    picked: None,
+                },
             );
             let result = if write {
                 state.write_file("data".into(), path.into(), b"changed".to_vec())
@@ -1271,7 +1474,14 @@ fn a_visible_link_to_a_hidden_folder_is_refused_for_reads_and_writes() {
     std::fs::write(root.join("plain.txt"), b"plain").unwrap();
     std::os::unix::fs::symlink(".hidden", root.join("public")).unwrap();
     std::os::unix::fs::symlink(".hidden/secret.txt", root.join("note.txt")).unwrap();
-    let folder = || Folder { dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(), path: root.clone(), read: true, write: true };
+    let folder = || Folder {
+        dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(),
+        path: root.clone(),
+        read: true,
+        write: true,
+        hidden: false,
+        picked: None,
+    };
     for path in ["public/secret.txt", "public/new.txt", "note.txt"] {
         for write in [false, true] {
             let mut state = state(App::default());
@@ -1300,7 +1510,13 @@ fn file_publication_failure_reports_possible_changes_and_cleans_staged_files() {
     std::fs::create_dir_all(root.join("secret.txt")).unwrap();
     let mut app = App { grants: vec![FileGrant { name: "project".into(), folder: root.clone(), read: false, write: true }], ..Default::default() };
     let mut manifest = manifest();
-    manifest.runtime.as_mut().unwrap().permissions.files.push(FilePermission { name: "project".into(), read: false, write: true });
+    manifest.runtime.as_mut().unwrap().permissions.files.push(FilePermission {
+        name: "project".into(),
+        read: false,
+        write: true,
+        picked: false,
+        hidden: false,
+    });
     let failure = run(&mut app, &manifest, &files_component(true, true), "make", &json!({})).unwrap_err();
     assert!(failure.to_string().contains("publication failed after app commit; files may have changed"), "{failure}");
     assert_eq!((app.commits, app.rollbacks), (1, 0));
@@ -1350,7 +1566,14 @@ fn file_access_authorizes_the_complete_path_for_reads_and_writes() {
         let mut state = state(ScopedHost { allowed: root.join("allowed.txt"), checks: Default::default() });
         state.folders.insert(
             "data".into(),
-            Folder { dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(), path: root.clone(), read: true, write: true },
+            Folder {
+                dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(),
+                path: root.clone(),
+                read: true,
+                write: true,
+                hidden: false,
+                picked: None,
+            },
         );
         for path in ["allowed.txt", "denied.txt"] {
             let result = if write {

@@ -538,7 +538,7 @@ fn every_built_command_is_reachable_and_sensitive_ones_need_their_group() {
 fn file_scopes_require_separate_read_and_write_approvals() {
     let folder = solidcraft_io::vfs::temp_dir().join("sc-readonly-grant-18793");
     let approved = vec![FileGrant { name: "data".into(), folder: folder.clone(), read: true, write: false }];
-    let manifest = vec![craft_plugin::FilePermission { name: "data".into(), read: true, write: false }];
+    let manifest = vec![craft_plugin::FilePermission { name: "data".into(), read: true, write: false, picked: false, hidden: false }];
     assert_eq!(approved_file_folders(&approved, &manifest, false), vec![folder.clone()]);
     assert!(approved_file_folders(&approved, &manifest, true).is_empty());
 
@@ -2154,6 +2154,7 @@ mod native {
                         fuel: None,
                         memory_mib: None,
                         input_folder: false,
+                        home_files: false,
                     },
                 );
                 let scope = solidcraft_io::vfs::PathScope::default().with_design_folder(&f.0);
@@ -2212,6 +2213,7 @@ mod native {
                     fuel: None,
                     memory_mib: None,
                     input_folder: false,
+                    home_files: false,
                 },
             );
             let saved = outbox.join("part.sc");
@@ -3388,6 +3390,69 @@ mod importers {
         }
     }
 
+    #[test]
+    fn a_folder_picked_in_a_plugins_form_is_approved_for_its_picked_grant_and_hidden_names_need_the_grant_to_say_so() {
+        let (mut s, root) = installed("picked", &[("smp", &["smp"], false)]);
+        let dir = root.join("plugins/smp");
+        // A command plugin: an importer reads only its own file.
+        let mut manifest = importer_manifest("smp", &["smp"], false);
+        manifest["capabilities"] = json!(["commands@0.2"]);
+        manifest["runtime"]["entries"] = json!([{"name": "save"}]);
+        manifest["runtime"]["permissions"]["files"] = json!([
+            {"name": "repositories", "read": true, "write": true, "picked": true, "hidden": true},
+            {"name": "exports", "write": true}
+        ]);
+        std::fs::write(dir.join("plugin.json"), manifest.to_string()).unwrap();
+        let package = read_package(&dir.to_string_lossy()).unwrap();
+        s.plugin_state.packages.insert("smp".into(), dir.to_string_lossy().into_owned());
+        // Outside the app's data folder (the plugins folder's parent, `root` here).
+        let work = solidcraft_io::vfs::temp_dir().join(format!("sc-plugin-picked-work-{}", std::process::id()));
+        let (designs, other) = (work.join("designs"), work.join("other"));
+        std::fs::create_dir_all(designs.join(".git")).unwrap();
+        std::fs::create_dir_all(&other).unwrap();
+        // Not approved yet: nothing to add a folder to.
+        assert!(approve_picked_folder(&mut s, "smp", "repositories", &designs).is_err());
+        s.plugin_state.grants.insert("smp".into(), Grants { package_hash: Some(package.approval.clone()), ..Default::default() });
+        // Only a grant the manifest marks `picked`.
+        assert!(approve_picked_folder(&mut s, "smp", "exports", &designs).is_err());
+        let approved = approve_picked_folder(&mut s, "smp", "repositories", &designs).unwrap();
+        approve_picked_folder(&mut s, "smp", "repositories", &designs).unwrap();
+        approve_picked_folder(&mut s, "smp", "repositories", &other).unwrap();
+        let grants = s.plugin_state.grants["smp"].clone();
+        assert_eq!(grants.folders.iter().filter(|g| g.name == "repositories").count(), 2, "each folder once");
+        validate_grants(&package.manifest, &grants).unwrap();
+        assert!(grant_store::valid_record(&grants));
+        // The app's own data is never one, also when the app reaches it through a link.
+        assert!(approve_picked_folder(&mut s, "smp", "repositories", &root.join("plugins")).is_err());
+        #[cfg(unix)]
+        {
+            let link = work.join("data-link");
+            std::os::unix::fs::symlink(&root, &link).unwrap();
+            let real = s.plugin_state.plugins_dir.replace(link.join("plugins"));
+            assert!(approve_picked_folder(&mut s, "smp", "repositories", &root.join("plugins/smp")).is_err());
+            s.plugin_state.plugins_dir = real;
+        }
+        // Hidden names inside: only where the grant says `hidden`.
+        let head = approved.join(".git/HEAD");
+        assert!(grant_covers_showing(&grants.folders, &[], &head, false).is_err());
+        grant_covers_showing(&grants.folders, std::slice::from_ref(&approved), &head, false).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+        std::fs::remove_dir_all(work).unwrap();
+    }
+
+    #[test]
+    fn a_picked_folder_is_never_the_disk_the_home_folder_a_hidden_folder_in_it_or_the_apps_data() {
+        let home = Path::new("/home/ada");
+        let plugins = Path::new("/home/ada/.local/share/solidcraft/plugins");
+        let refused = |folder: &str| picked_folder_refusal(Path::new(folder), Some(home), Some(plugins));
+        for folder in ["/", "/home", "/home/ada", "/home/ada/.ssh", "/home/ada/.local/share/solidcraft/plugin-data/x", "/home/ada/.local/share"] {
+            assert!(refused(folder).is_some(), "{folder}");
+        }
+        for folder in ["/home/ada/designs", "/home/ada/src/robot", "/srv/designs"] {
+            assert_eq!(refused(folder), None, "{folder}");
+        }
+    }
+
     /// A session that keeps its grants in the store of `plugins`, as the command line's do.
     fn stored_session(plugins: &Path) -> Session {
         let mut s = Session::default();
@@ -4438,6 +4503,20 @@ mod stored_grants {
         assert!(grant_store::write(&plugins, "bad", &approved(&["everything"])).is_err());
         assert!(!plugins.join("evil.json").exists() && !dir.join("bad.json").exists());
         grant_store::delete(&plugins, "absent").unwrap();
+        std::fs::remove_dir_all(plugins).unwrap();
+    }
+
+    #[test]
+    fn the_largest_record_the_store_accepts_is_read_back() {
+        let plugins = root("largest");
+        let long = "a".repeat(4000);
+        let folders = (0..32 + 2 * MAX_PICKED_FOLDERS)
+            .map(|i| FileGrant { name: "repositories".into(), folder: PathBuf::from(format!("/{long}/{i}")), read: true, write: true })
+            .collect();
+        let grants = Grants { folders, ..approved(&["file"]) };
+        assert!(grant_store::valid_record(&grants));
+        grant_store::write(&plugins, "many", &grants).unwrap();
+        assert_eq!(grant_store::read_all(&plugins)["many"].folders.len(), 32 + 2 * MAX_PICKED_FOLDERS, "kept after a restart");
         std::fs::remove_dir_all(plugins).unwrap();
     }
 

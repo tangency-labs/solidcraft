@@ -190,6 +190,12 @@ the folder error; choose a folder again. The plugin gets only the folders displa
 When the plugin asks for more memory than the ceiling in **Preferences > Plugins** (128 MiB unless
 changed), or more fuel than **Max plugin fuel** (100,000,000,000 unless changed), the screen says
 how much it asks for and what the default limit is.
+A folder grant marked `picked` asks for no folder at install: the screen says the user picks its
+folders with **Browse…** in the plugin's forms (see
+[Folders picked in a form](#folders-picked-in-a-form)). A grant marked `hidden` also reaches names
+starting with a dot inside its folders, such as a Git repository's `.git`, and the screen says so.
+Files in the home folder a plugin reads (`permissions.home_files`, such as `.gitconfig`) are listed
+by name and **Install** allows them as a whole; the plugin can read them, never write them.
 **Install** approves the displayed command groups, folders, fuel and memory, publishes the package and stores the
 approvals; **Cancel** changes nothing. Installation never runs plugin code. Approved fuel and memory apply to
 that exact package only: a replaced or changed request asks again, since the approval hash covers the
@@ -608,6 +614,41 @@ For example:
 These numeric defaults are plugin arguments: the plugin decides how to interpret the selected
 units. Every conditional default must satisfy the property's base schema. Defaults and option
 filters also participate in cycle detection.
+
+### Folders picked in a form
+
+A plugin that works in the user's own folders, such as Git repositories, marks a folder grant
+`"picked": true` (and `"hidden": true` when it needs names like `.git`):
+
+```json
+"permissions": {"files": [{"name": "repositories", "read": true, "write": true, "picked": true, "hidden": true}],
+                "home_files": [".gitconfig", ".git-credentials"]}
+```
+
+Install asks for no folder for it. A form field names the grant:
+
+```json
+"folder": {"type": "string", "title": "Folder", "format": "directory", "x-solidcraft-grant": "repositories"}
+```
+
+Picking a folder with that field's **Browse…** approves it for the grant: choosing it in the app's
+own folder picker is the user's approval. A typed or pasted path approves nothing; Run refuses it
+unless it is already approved. The app refuses a folder that would hand over more than a folder of
+work: a drive's root, the home folder or one above it, a hidden folder in the home folder, and the
+app's own data. A grant keeps up to 64 picked folders, stored with the plugin's other approvals;
+an update of the plugin keeps them while it asks for no more access.
+
+The plugin names a file in a picked folder by its full path, the one the form gave it:
+`files.read-file("repositories", "/home/ada/designs/Robot/base.sc")`. The `files` interface also
+reads part of a file (`read-part`), lists a folder (`list-folder`) and removes a file
+(`remove-file`); removals, like writes, happen when the run is accepted. The grant `"~"` reads the
+home files the manifest names, and nothing else there.
+
+### Forms the plugin opens itself
+
+An entry with `"listed": false` has no menu row, ribbon button or command search result: it is a
+form the plugin opens with `forms.open` (a wizard's next step), or a panel's action. Programs can
+still call it.
 
 ### Computed fields with an optional dialog hook
 

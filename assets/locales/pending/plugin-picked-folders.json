@@ -1,0 +1,74 @@
+{
+  "en": {
+    "plugin_install.folder_hidden": "{name} ({access}, hidden files too)",
+    "plugin_install.home_files": "Reading these files in your home folder, never changing them: {files}",
+    "plugin_install.picked_folders": "{name}: folders you pick with Browse… in its forms ({access})",
+    "plugin_install.picked_folders_hidden": "{name}: folders you pick with Browse… in its forms ({access}, hidden files too, such as .git)",
+    "prefs.plugin_approved_home_files": "reading the home folder's files it named",
+    "prefs.plugin_slot_step": "A step the plugin opens itself, in no menu",
+    "ui.plugin_dialog_folder_refused": "That folder can't be used: {error}"
+  },
+  "ar": {
+    "plugin_install.folder_hidden": "{name} ({access}، والملفات المخفية أيضًا)",
+    "plugin_install.home_files": "قراءة هذه الملفات في مجلدك الرئيسي دون تغييرها أبدًا: {files}",
+    "plugin_install.picked_folders": "{name}: مجلدات تختارها بزر «استعراض…» في نماذجها ({access})",
+    "plugin_install.picked_folders_hidden": "{name}: مجلدات تختارها بزر «استعراض…» في نماذجها ({access}، والملفات المخفية أيضًا مثل .git)",
+    "prefs.plugin_approved_home_files": "قراءة ملفات المجلد الرئيسي التي سمّتها",
+    "prefs.plugin_slot_step": "خطوة تفتحها الإضافة بنفسها، وليست في أي قائمة",
+    "ui.plugin_dialog_folder_refused": "لا يمكن استخدام هذا المجلد: {error}"
+  },
+  "de": {
+    "plugin_install.folder_hidden": "{name} ({access}, auch versteckte Dateien)",
+    "plugin_install.home_files": "Liest diese Dateien in Ihrem Benutzerordner, ohne sie je zu ändern: {files}",
+    "plugin_install.picked_folders": "{name}: Ordner, die Sie in seinen Formularen mit Durchsuchen… wählen ({access})",
+    "plugin_install.picked_folders_hidden": "{name}: Ordner, die Sie in seinen Formularen mit Durchsuchen… wählen ({access}, auch versteckte Dateien wie .git)",
+    "prefs.plugin_approved_home_files": "Lesen der genannten Dateien im Benutzerordner",
+    "prefs.plugin_slot_step": "Ein Schritt, den das Plugin selbst öffnet, in keinem Menü",
+    "ui.plugin_dialog_folder_refused": "Dieser Ordner kann nicht verwendet werden: {error}"
+  },
+  "he": {
+    "plugin_install.folder_hidden": "{name} ({access}, גם קבצים מוסתרים)",
+    "plugin_install.home_files": "קריאת הקבצים האלה בתיקיית הבית שלך, בלי לשנות אותם לעולם: {files}",
+    "plugin_install.picked_folders": "{name}: תיקיות שבוחרים בעזרת „עיון…” בטפסים שלו ({access})",
+    "plugin_install.picked_folders_hidden": "{name}: תיקיות שבוחרים בעזרת „עיון…” בטפסים שלו ({access}, גם קבצים מוסתרים כמו .git)",
+    "prefs.plugin_approved_home_files": "קריאת הקבצים בתיקיית הבית שהוא ציין",
+    "prefs.plugin_slot_step": "שלב שהתוסף פותח בעצמו, לא בשום תפריט",
+    "ui.plugin_dialog_folder_refused": "אי אפשר להשתמש בתיקייה הזו: {error}"
+  },
+  "ja": {
+    "plugin_install.folder_hidden": "{name}（{access}、隠しファイルも含む）",
+    "plugin_install.home_files": "ホームフォルダーの次のファイルを読み取ります（変更はしません）: {files}",
+    "plugin_install.picked_folders": "{name}: フォームの「参照…」で選んだフォルダー（{access}）",
+    "plugin_install.picked_folders_hidden": "{name}: フォームの「参照…」で選んだフォルダー（{access}、.git などの隠しファイルも含む）",
+    "prefs.plugin_approved_home_files": "指定したホームフォルダーのファイルの読み取り",
+    "prefs.plugin_slot_step": "プラグイン自身が開く手順（どのメニューにもありません）",
+    "ui.plugin_dialog_folder_refused": "このフォルダーは使用できません: {error}"
+  },
+  "ko": {
+    "plugin_install.folder_hidden": "{name}({access}, 숨김 파일 포함)",
+    "plugin_install.home_files": "홈 폴더의 다음 파일을 읽기만 하고 변경하지 않음: {files}",
+    "plugin_install.picked_folders": "{name}: 양식에서 찾아보기…로 고른 폴더({access})",
+    "plugin_install.picked_folders_hidden": "{name}: 양식에서 찾아보기…로 고른 폴더({access}, .git 같은 숨김 파일 포함)",
+    "prefs.plugin_approved_home_files": "지정한 홈 폴더 파일 읽기",
+    "prefs.plugin_slot_step": "플러그인이 직접 여는 단계 (메뉴에 없음)",
+    "ui.plugin_dialog_folder_refused": "이 폴더는 사용할 수 없습니다: {error}"
+  },
+  "vi": {
+    "plugin_install.folder_hidden": "{name} ({access}, cả tệp ẩn)",
+    "plugin_install.home_files": "Đọc các tệp này trong thư mục chính của bạn, không bao giờ thay đổi chúng: {files}",
+    "plugin_install.picked_folders": "{name}: các thư mục bạn chọn bằng Duyệt… trong biểu mẫu của nó ({access})",
+    "plugin_install.picked_folders_hidden": "{name}: các thư mục bạn chọn bằng Duyệt… trong biểu mẫu của nó ({access}, cả tệp ẩn như .git)",
+    "prefs.plugin_approved_home_files": "đọc các tệp trong thư mục chính mà nó đã nêu",
+    "prefs.plugin_slot_step": "Một bước do plugin tự mở, không có trong menu nào",
+    "ui.plugin_dialog_folder_refused": "Không thể dùng thư mục đó: {error}"
+  },
+  "zh": {
+    "plugin_install.folder_hidden": "{name}（{access}，包括隐藏文件）",
+    "plugin_install.home_files": "读取主文件夹中的这些文件，从不更改：{files}",
+    "plugin_install.picked_folders": "{name}：你在其表单中用“浏览…”选择的文件夹（{access}）",
+    "plugin_install.picked_folders_hidden": "{name}：你在其表单中用“浏览…”选择的文件夹（{access}，包括 .git 等隐藏文件）",
+    "prefs.plugin_approved_home_files": "读取它指定的主文件夹文件",
+    "prefs.plugin_slot_step": "由插件自行打开的步骤，不在任何菜单中",
+    "ui.plugin_dialog_folder_refused": "无法使用该文件夹：{error}"
+  }
+}

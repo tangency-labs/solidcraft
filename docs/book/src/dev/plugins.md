@@ -325,7 +325,12 @@ it at install:
 - `files`: named folders the plugin reads (`read`) or writes (`write`) through the `files`
   interface, by name and a relative path. The user picks each folder at install; the `files`
   interface never shows the plugin where it is, but a `file` or `doc` command's reply or error
-  can name the full path. Writes appear only when the run succeeds.
+  can name the full path. Writes appear only when the run succeeds. A grant marked `picked` holds
+  the folders the user picks with **Browse…** in the plugin's forms (a `format: directory` field
+  naming it in `x-solidcraft-grant`), named by their full path; `hidden` reaches names such as
+  `.git` there.
+- `home_files`: files in the home folder the plugin reads, never writes, such as `.gitconfig`,
+  through the grant `~`.
 - `clock`: the `clock` interface tells the time; without it, it says 0.
 - `input_folder` (importers only): read the other files in the folder of the file being opened,
   such as an assembly's parts.

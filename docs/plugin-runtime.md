@@ -94,7 +94,14 @@ Declaring a slot never supplies UI code. `plugin.list` and `engine.describe`
 expose the entry declarations. A read entry can call only commands marked read in the app catalog.
 
 `files.read-file` and `files.write-file` resolve paths only within matching app-approved folder
-grants with the requested access. The caller's file scope is checked against each complete
+grants with the requested access, up to 1 MiB a file (`read-part` reads a larger one in pieces).
+A grant marked `picked` holds the folders the user approved by picking them with **Browse…** in
+the plugin's forms (`x-solidcraft-grant`, `plugin::approve_picked_folder`); the plugin names a
+file there by its full path, inside one of them. `read-part`, `list-folder` and `remove-file` read
+part of a file, list a folder (no links; hidden names only when the grant says `hidden`, through
+`PluginHost::shows_hidden`) and remove a file when the run is accepted. The grant `~` reads only
+the home folder's files the manifest names in `permissions.home_files`, once allowed
+(`PluginHost::home_files`). The caller's file scope is checked against each complete
 path on every read and write; hidden paths require explicit authorization. Declaring a folder
 name does not itself grant access. Reading a file that does not exist returns `invalid-input`
 (field `path`, reason "no such file") without failing the run, so an entry can create its file

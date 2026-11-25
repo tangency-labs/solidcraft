@@ -1540,3 +1540,14 @@ fn a_manifest_without_themes_reads_and_writes_as_before() {
     assert_eq!(written["runtime"]["module"], "plugin.wasm");
     assert!(parse(&json!({"id":"sample","name":"Sample","version":"1","themes":[{"id":"a","source":"a.json"}]})).is_err());
 }
+
+#[test]
+fn a_home_file_is_a_plain_path_inside_the_home_folder() {
+    for good in [".gitconfig", ".config/git/config", ".git-credentials"] {
+        assert!(valid_home_file(good), "{good}");
+    }
+    // A drive (`C:/…`) would leave the home folder on Windows, as a root or `..` would anywhere.
+    for bad in ["", "/etc/passwd", "../.ssh/id_ed25519", ".ssh/../x", "C:/Windows/win.ini", "c:x", "a\\b"] {
+        assert!(!valid_home_file(bad), "{bad}");
+    }
+}
