@@ -9219,6 +9219,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     crate::insert_handles::show(app, ui, &proj);
     crate::sketch_transform_ui::refresh(app);
+    crate::sketch_modify_ui::refresh_move(app);
     crate::sketch_transform_ui::show(app, ui, &proj);
     hover_highlight(app, &painter, &proj);
     crate::drag_extrude::tick(app);
