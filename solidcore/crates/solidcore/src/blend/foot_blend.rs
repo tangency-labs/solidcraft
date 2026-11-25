@@ -1419,7 +1419,10 @@ impl FootBlend {
     /// [`crate::error::blend::WeldGap::StripNotProved`] where the strip's proof does not finish
     /// (at the point where it stopped); the strip's refusal the same as a toe's (at the
     /// point of the face's boundary found in it), each leg tried for the fit checked so too,
-    /// the smallest leg a body builds being that of the body the toe is off. Where the faces
+    /// the smallest leg a body builds being that of the body the toe is off. Where the proof
+    /// does not finish at a leg the search for the fit tries (the face's boundary at about
+    /// that leg's reach), the fit is the largest leg proved to hold before it; with none,
+    /// the strip is refused as not proved. Where the faces
     /// are of two bodies the refusal names no face (a face id does not say whose): its point
     /// is the toe's, or the boundary's, on the support refused.
     pub fn toes_on_bodies(
@@ -1507,19 +1510,20 @@ impl FootBlend {
         };
         let face = self.sides.get(i).and_then(|s| s.face);
         let z = legs.get(i).copied().unwrap_or(0.0);
-        // the largest leg on that side whose toes stay on the face, halved down from the leg
-        let holds = |leg: f64| -> Result<bool> {
+        // the largest leg on that side whose toes stay on the face, halved down from the leg;
+        // `Err(at)` where the strip's proof did not finish at that leg (at `at`)
+        let holds = |leg: f64| -> Result<std::result::Result<bool, Point3>> {
             let Some(face) = face else {
-                return Ok(true);
+                return Ok(Ok(true));
             };
             let mut near: Option<FootStation> = None;
             for &t in &ts {
                 let (root, tangent) = self.root_at(k, t)?;
                 let Ok((p, uv, r)) = self.foot(k, i, root, tangent, leg, near.as_ref())? else {
-                    return Ok(false);
+                    return Ok(Ok(false));
                 };
                 if !on_face(i, face, uv)? {
-                    return Ok(false);
+                    return Ok(Ok(false));
                 }
                 let mut s = near.unwrap_or(FootStation {
                     t,
@@ -1544,11 +1548,11 @@ impl FootBlend {
                     }
                     at
                 })? {
-                    Strip::Held => Ok(true),
-                    Strip::Off(_) => Ok(false),
-                    Strip::Unproved(at) => Err(self.strip_not_proved(i, at)),
+                    Strip::Held => Ok(Ok(true)),
+                    Strip::Off(_) => Ok(Ok(false)),
+                    Strip::Unproved(at) => Ok(Err(at)),
                 },
-                _ => Ok(true),
+                _ => Ok(Ok(true)),
             }
         };
         // of the leg found, not of the leg asked: a face far shorter than the leg asked still
@@ -1559,10 +1563,15 @@ impl FootBlend {
                 break;
             }
             let mid = 0.5 * (lo + hi);
-            if holds(mid)? {
-                lo = mid;
-            } else {
-                hi = mid;
+            match holds(mid)? {
+                Ok(true) => lo = mid,
+                Ok(false) => hi = mid,
+                // the strip's proof does not finish this near the leg where the strip leaves
+                // the face (an edge of the face at about the leg's reach, enclosed no tighter
+                // within the budget): the fit is the largest leg proved to hold, and with none
+                // the strip is refused as not proved
+                Err(_) if lo > 0.0 => break,
+                Err(at) => return Err(self.strip_not_proved(i, at)),
             }
         }
         // a toe holds up to the face's tolerance past its edge: the fit named is that much
@@ -1614,6 +1623,13 @@ fn strip_margin(z: f64) -> f64 {
 /// proved at 1e-3 (brett19's measurement on #22031), sooner on a larger radius; the bead
 /// body itself refuses those legs on the build path today.
 const STRIP_PAIRS: usize = 1 << 18;
+
+/// The most stations and pieces [`FootBlend::strip_cover`] makes and proves for one strip
+/// before it gives up on enclosing it (the strip is then not enclosed and no pair is cleared
+/// by it, as where a piece's chain is not proved). It bounds the cover's cost as
+/// [`STRIP_PAIRS`] bounds the pairs'; the cover is made again for each leg the search for one
+/// that fits tries.
+const STRIP_COVER_PIECES: usize = 1 << 14;
 
 /// The least `|v|` over an enclosure `v` (each component's least magnitude), rounded down.
 fn ivl_least(v: crate::blend::fillet_section::series::V3<Ivl>) -> f64 {
@@ -1700,14 +1716,17 @@ impl FootBlend {
     ///   point is nearer the root than `η`, farther than `z − η`, or (a plane support, whose
     ///   strip is the ray along the side) on the side away from the face's, `w·s (n × e′) <
     ///   0`, or (a curved support) outside every box of the strip's enclosure over the
-    ///   stations `t*` reaches ([`FootBlend::strip_cover`]: the chains' boxes, every point of
-    ///   the strip from the root to the toe in one of them); or `t*` is in an end's margin.
+    ///   stations `t*` reaches, the edge's points widened by the edge's and the face's
+    ///   tolerances, with at least one box over those stations ([`FootBlend::strip_cover`]: the
+    ///   chains' boxes, every point of the strip from the root to the toe in one of them); or
+    ///   `t*` is in an end's margin.
     ///
     /// The band's points on the strip are one connected piece (one point at each `t` and
     /// distance, [`FootBlend::prove_chain`]), on the face's surface: with no boundary in it and
     /// one point on the face, all of it is on the face. On a curved support whose strip is not
-    /// enclosed (a piece's chain not proved), an edge of the face in the band but off the strip
-    /// is refused too (a pair not cleared): conservative.
+    /// enclosed (a piece's chain not proved, the cover past its budget, or its making refused),
+    /// an edge of the face in the band but off the strip is refused too (a pair not cleared):
+    /// conservative.
     ///
     /// # Errors
     ///
@@ -1790,21 +1809,47 @@ impl FootBlend {
             }
         }
         // a curved support's strip enclosed over the whole joint, made the first time a pair
-        // needs it ([`FootBlend::strip_cover`])
+        // needs it ([`FootBlend::strip_cover`]); a cover refused for a reason not the kernel's
+        // fault is not made (no pair is then cleared by it), a defect is reported
+        let face_tolerance = crate::topology::face::p2::tolerance(target, face)?;
         let cover: std::cell::RefCell<Option<Option<StripCover>>> = std::cell::RefCell::new(None);
-        let outside_strip = |p: V3<Ivl>, ts: Ivl| -> Result<bool> {
+        // whether the edge's points `p`, each within `pad` of the edge's curve, lie outside
+        // every box of the strip's enclosure over the stations `ts`; not where no box is over
+        // them (a gap in the cover clears nothing)
+        let outside_strip = |p: V3<Ivl>, ts: Ivl, pad: f64| -> Result<bool> {
             let mut slot = cover.borrow_mut();
             if slot.is_none() {
-                *slot = Some(self.strip_cover(k, i, legs)?);
+                *slot = Some(match self.strip_cover(k, i, legs) {
+                    Ok(c) => c,
+                    Err(e) if !e.is_defect() => None,
+                    Err(e) => return Err(e),
+                });
             }
             let Some(Some(c)) = slot.as_ref() else {
                 return Ok(false);
             };
+            if !(pad.is_finite() && pad >= 0.0) {
+                return Ok(false);
+            }
+            let grow = Ivl::new(-pad, pad);
+            let p = V3 {
+                x: p.x + grow,
+                y: p.y + grow,
+                z: p.z + grow,
+            };
             let apart = |a: Ivl, b: Ivl| a.hi < b.lo || b.hi < a.lo;
-            Ok(c.boxes
+            let mut over = false;
+            for (_, b) in c
+                .boxes
                 .iter()
                 .filter(|([t0, t1], _)| *t0 <= ts.hi && ts.lo <= *t1)
-                .all(|(_, b)| apart(b.x, p.x) || apart(b.y, p.y) || apart(b.z, p.z)))
+            {
+                over = true;
+                if !(apart(b.x, p.x) || apart(b.y, p.y) || apart(b.z, p.z)) {
+                    return Ok(false);
+                }
+            }
+            Ok(over)
         };
         let mut pairs = 0_usize;
         for (e, uses) in edges {
@@ -1819,6 +1864,9 @@ impl FootBlend {
             let cn = NurbsCurve::of(&form)?;
             let (knots, _) = form.knots(None)?;
             let range = edge::interval(target, e)?;
+            // the edge is on the face's surface only to the edge's and the face's tolerances:
+            // its points are taken that far about its curve against the strip's enclosure
+            let pad = edge::tolerance(target, e)? + face_tolerance;
             // one pair of an edge's piece and a joint's piece
             let pair = |ep: [f64; 2], jp: [f64; 2]| -> Result<StripPair> {
                 let [ta, tb] = jp;
@@ -1894,7 +1942,7 @@ impl FootBlend {
                     // as at a closed joint's seam), the edge's points may still lie outside the
                     // strip's enclosure over every station they can have
                     if let (true, Some(ts)) = (across.is_none(), roots) {
-                        if outside_strip(v_add(c, at), ts)? {
+                        if outside_strip(v_add(c, at), ts, pad)? {
                             return Ok(StripPair::Clear);
                         }
                     }
@@ -1943,7 +1991,7 @@ impl FootBlend {
                 }
                 // a curved support: the edge's points outside the strip's enclosure at their
                 // stations are not on it (on the other side of the root, or another sheet)
-                if across.is_none() && outside_strip(v_add(c, at), ts)? {
+                if across.is_none() && outside_strip(v_add(c, at), ts, pad)? {
                     return Ok(StripPair::Clear);
                 }
                 let inside = margin <= 0.0 || (ts.lo > lo + margin && ts.hi < hi - margin);
@@ -2017,8 +2065,9 @@ impl FootBlend {
     /// as [`FootBlend::prove_feet`] cuts it, and over each piece the foot proved
     /// ([`FootBlend::prove_piece`]) and the chain from the root to it
     /// ([`FootBlend::prove_chain`]), its boxes kept. `None` where the support has no NURBS
-    /// form, a station is not made, or a piece stays unproved: the strip is then not enclosed
-    /// (and no point is cleared by it).
+    /// form, the leg is not positive and finite, a station is not made, a piece stays
+    /// unproved, or the pieces pass [`STRIP_COVER_PIECES`]: the strip is then not enclosed (and
+    /// no point is cleared by it).
     ///
     /// # Errors
     ///
@@ -2028,12 +2077,18 @@ impl FootBlend {
         let (Some(side), Some(&z)) = (self.sides.get(i), legs.get(i)) else {
             return Ok(None);
         };
+        if !(z.is_finite() && z > 0.0) {
+            return Ok(None);
+        }
         let Some(support) = ProofSupport::of(k, &side.surface)? else {
             return Ok(None);
         };
         let leader = NurbsCurve::of(&self.leader)?;
+        // the stations and pieces made, against the budget
+        let mut made = 0_usize;
         let mut solved: Vec<FootStation> = Vec::new();
         for t in self.check_stations(&[])? {
+            made += 1;
             match self.try_station(k, t, legs, solved.last())? {
                 Ok(s) => solved.push(s),
                 Err(_) => return Ok(None),
@@ -2048,6 +2103,10 @@ impl FootBlend {
                 .clamp(1.0, MAX_PIECES) as usize;
             let mut from = a;
             for j in 1..=count {
+                made += 1;
+                if made > STRIP_COVER_PIECES {
+                    return Ok(None);
+                }
                 let to = if j == count {
                     b
                 } else {
@@ -2065,6 +2124,10 @@ impl FootBlend {
         let mut cover = StripCover::default();
         let mut guess: Option<Point2> = None;
         while let Some((a, b, depth)) = work.pop() {
+            made += 1;
+            if made > STRIP_COVER_PIECES {
+                return Ok(None);
+            }
             let (Some(&fa), Some(&fb)) = (a.feet.get(i), b.feet.get(i)) else {
                 return Ok(None);
             };

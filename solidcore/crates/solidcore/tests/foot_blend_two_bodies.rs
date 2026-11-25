@@ -9,8 +9,8 @@
 //! corner, and both bodies are the same after, in their file bytes and in memory. Small legs
 //! on the tee are proved too, and so is a rod sunk into the plate, whose face's edge past the
 //! root is in the leg's reach but off the strip. A toe in a notch of the base, a hole in the
-//! base between the stations, and a web too low for the leg (a station with no toe) are
-//! refused with the leg that fits; two plates butted flush, and a face that leaves the joint
+//! base between the stations, a pocket in the rod's face on the strip, and a web too low for
+//! the leg (a station with no toe) are refused with the leg that fits; two plates butted flush, and a face that leaves the joint
 //! away from the corner, meet in no corner; a joint off one of the faces, or over a hole in
 //! it, the same face twice, and a face on a region the kernel is unsure of are refused.
 //!
@@ -537,7 +537,8 @@ fn a_face_on_a_region_the_kernel_is_unsure_of_is_refused() {
 /// A web only 3 high on the base, legs 6: up the web's face the foot runs off its surface at
 /// every station, so no toe is found there. Refused as the build refuses it (`toes_on_bodies`
 /// takes `body`'s refusal for a station with no toe), with the largest leg whose foot is
-/// found, 3 (the web's top), less the halving's bracket.
+/// found, 3 (the web's top), less the halving's bracket. Both faces are planes: no strip is
+/// enclosed here (`FootBlend::strip_cover`).
 #[test]
 fn a_station_with_no_toe_is_refused_with_the_leg_that_fits() {
     let mut k = kernel();
@@ -575,4 +576,46 @@ fn an_edge_of_a_curved_face_beyond_the_root_is_not_on_the_strip() {
     blend
         .toes_on_bodies(&k, [&rod, &plate], [LEG, LEG], &[])
         .unwrap();
+}
+
+/// A pocket cut into the rod's face on the strip (x from 48 to 52, y from 62 to 68, z from 11 to
+/// 14): its edges on the rod's face, fitted where the pocket's walls meet the cylinder, lie on the
+/// strip between 1 and 4 from the root. On a curved support the strip's enclosure clears only an
+/// edge outside it, so these stay on it and the strip is refused, naming no face (two bodies), with
+/// a leg that fits: at most 1 past the margins, to the pocket's lower edge, and at least 1 less the
+/// strip's margin (the fit tolerance), where the proof on that fitted edge, an arc beside the
+/// joint's arc, may stop deciding; that leg passes.
+#[test]
+fn a_pocket_in_a_curved_face_on_the_strip_is_refused_with_the_leg_that_fits() {
+    use solidcore::boolean::api_brep::boolean_difference;
+    let mut k = kernel();
+    let plate = block(&mut k, [0.0; 3], [100.0, 100.0, 10.0]);
+    let rod = create_cylinder(&mut k, Point3::new(50.0, 50.0, 10.0), 15.0, 50.0).unwrap();
+    let pocket = block(&mut k, [48.0, 62.0, 11.0], [4.0, 6.0, 3.0]);
+    let rod = boolean_difference(&mut k, rod, pocket).unwrap();
+    let side = face_at(&k, &rod, [35.0, 50.0, 10.0], [35.0, 50.0, 60.0]);
+    let top = face_at(&k, &plate, [50.0, 0.0, 10.0], [0.0, 50.0, 10.0]);
+    let joint = Curve::from(create_circle(Point3::new(50.0, 50.0, 10.0), 15.0).unwrap());
+    let before = state(&k, &rod, &plate);
+    let blend = FootBlend::of_faces(&k, &rod, side, &plate, top, &joint).unwrap();
+    let err = blend
+        .toes_on_bodies(&k, [&rod, &plate], [LEG, LEG], &[])
+        .unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::FilletTooLarge, "{err}");
+    let debug = format!("{err:?}");
+    assert!(
+        debug.contains("LegPastFace") && debug.contains("face: None"),
+        "{debug}"
+    );
+    let fit = err.fit().unwrap();
+    assert_eq!(fit.measure, FitMeasure::Leg, "{err}");
+    assert!(
+        fit.size >= 1.0 - SLACK - ZONE && fit.size <= 1.0 + ZONE + SLACK,
+        "{}",
+        fit.size
+    );
+    blend
+        .toes_on_bodies(&k, [&rod, &plate], [fit.size, LEG], &[])
+        .unwrap();
+    assert!(state(&k, &rod, &plate) == before, "a part changed");
 }
