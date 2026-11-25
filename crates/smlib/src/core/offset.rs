@@ -220,10 +220,11 @@ pub(crate) fn offset_sheet(body: &Body, distance: f64) -> Result<Body> {
     Ok(w)
 }
 
-/// A direction's coordinates, as `smlib_draft`'s `unit` checks them first: finite. Its length
-/// (longer than 1e-12) is solidcore-ops' check ([`solidcore_ops::offset::draft`]).
+/// A direction as `smlib_draft`'s `unit` checks it first, before any face is picked: finite and
+/// of some length (solidcore-ops' [`solidcore_ops::unit_direction`]); a length the draft still
+/// refuses (not longer than 1e-12) is solidcore-ops' check ([`solidcore_ops::offset::draft`]).
 fn finite_direction(v: [f64; 3]) -> bool {
-    v.iter().all(|x| x.is_finite())
+    solidcore_ops::unit_direction(v).is_some()
 }
 
 /// `smlib_draft`: the faces nearest `points` (each within `tolerance`) of a solid drafted by
