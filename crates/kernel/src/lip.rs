@@ -195,12 +195,9 @@ fn carriers_cross(p: &Piece, q: &Piece, n: Vec3, near: Vec3, reach: f64) -> Opti
                 let on = (b - a) * (reach / len);
                 Some(Seg2::Line { a: a - on, b: b + on })
             }
-            Some(arc) => Some(Seg2::Arc {
-                center: plane.to_local(arc.centre),
-                radius: s.a.dist(arc.centre),
-                start: 0.0,
-                sweep: std::f64::consts::TAU,
-            }),
+            Some(arc) => {
+                Some(Seg2::Arc { center: plane.to_local(arc.centre), radius: s.a.dist(arc.centre), start: 0.0, sweep: std::f64::consts::TAU })
+            }
         }
     };
     let (cp, cq) = (carrier(p)?, carrier(q)?);
