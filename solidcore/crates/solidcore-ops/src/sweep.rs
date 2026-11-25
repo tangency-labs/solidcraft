@@ -675,7 +675,7 @@ pub fn join_circle_runs(profile: &[Curve], tol: f64) -> Result<Vec<Curve>> {
                 _ => false,
             })
         };
-        let circle = |i: usize, j: usize| -> solidcore::Result<Option<arc::OnOneCircle>> {
+        let circle = |i: usize, j: usize| -> solidcore::Result<Option<OnOneCircle>> {
             match (
                 made.pieces.get(i).and_then(PathPiece::arc),
                 made.pieces.get(j).and_then(PathPiece::arc),
