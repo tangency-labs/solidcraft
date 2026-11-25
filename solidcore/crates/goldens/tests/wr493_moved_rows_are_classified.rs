@@ -37,8 +37,12 @@ type Row = (&'static str, [f64; 12]);
 include!("wr493_moved_rows/rows.rs");
 
 /// The entries whose enclosure leaves the farthest the true value can be above the rows'
-/// accuracy: (case, entry).
-static WIDE: [(&str, usize); 0] = [];
+/// accuracy: (case, entry), as measured: the inertia y and z of `box_w_slot` (farthest
+/// 2.1e-4 and 2.5e-4 of `V R^2`; its volume enclosure spends its cell budget).
+static WIDE: [(&str, usize); 2] = [
+    ("source-file-box_w_slot-all-edges", 7),
+    ("source-file-box_w_slot-all-edges", 8),
+];
 
 /// The unit whose rows moved.
 const UNIT: &str = "blend.fillet_executive_p3";

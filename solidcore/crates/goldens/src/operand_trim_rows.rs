@@ -916,10 +916,12 @@ mod local_operation {
 /// tolerances against the trims' certified bounds, edge and surface samples by enclosed
 /// distances, a moved surface domain as the samples it moves.
 ///
-/// #17739 raises one vertex tolerance of `fillet_group_fillet1019_rb23` to cover twice its
-/// vertex's gap, 4.7505e-4 in both bodies: at `feature0_geometry[171]` (the copy alone gives
-/// 4.4536e-4, main 5.657e-4) and at `base_geometry[267]` (main 4.4536e-4), which the row
-/// lists for it. Both are classed against main's values like any moved value.
+/// The two rows re-recorded on this kernel list every value that differs from main's row:
+/// `extended_surface_7_LShape_I` 16 (values a few ulps from main's in both bodies) and
+/// `fillet_group_fillet1019_rb23` 5: #17739 raises one vertex tolerance to cover twice its
+/// vertex's gap, 4.7505e-4 in both bodies (`base_geometry[267]`, `feature0_geometry[171]`,
+/// main 4.4536e-4), and three values of `feature0_geometry` move from main's 2.2107e-4 to
+/// 4.2002e-4. All are classed against main's values like any moved value.
 mod feature_executive {
     use super::{certify_body, plain_digest, Class, FALSE_POSITIVES};
     use crate::units::blend_feature_executive::{result_breps, Runner};
