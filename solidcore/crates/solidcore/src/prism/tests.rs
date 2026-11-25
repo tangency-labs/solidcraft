@@ -11,7 +11,10 @@
 
 use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, PI, TAU};
 
-use super::extrude::{extrude_region, symmetric_offset_intervals, symmetric_offset_probe_points};
+use super::extrude::{
+    extrude_region, level_on_plane, plane_rise, planes_cross_over, symmetric_offset_intervals,
+    symmetric_offset_probe_points,
+};
 use super::measure::{equivalent, section};
 use super::placement::LoopPlacement;
 use super::profile::rational_curve;
@@ -3007,6 +3010,160 @@ fn symmetric_offset_intervals_and_probes_are_symmetric_about_sketch_plane() {
     );
     let neg_start_probes = symmetric_offset_probe_points([0.0, 0.0, -3.0], n, -3.0, 10.0, 0.5);
     assert_eq!(neg_start_probes, pos_start_probes);
+}
+
+/// The plane `z = 1 + x / 2`: through `(0, 0, 1)`, its x axis `(2, 0, 1) / √5` and y axis +y, so
+/// its normal `x × y` is `(-1, 0, 2) / √5`. Its level above the xy frame at sketch point `(x, y)`
+/// is `1 + x / 2`.
+fn half_slope() -> Frame {
+    let s = 5.0_f64.sqrt();
+    Frame {
+        origin: [0.0, 0.0, 1.0],
+        x_axis: [2.0 / s, 0.0, 1.0 / s],
+        y_axis: [0.0, 1.0, 0.0],
+    }
+}
+
+/// The circular arc about `c` of radius `r` from angle `start` by `sweep`, closed by its chord.
+fn arc_and_chord(c: Point2, r: f64, start: f64, sweep: f64) -> Region2 {
+    let arc = Seg2::Arc {
+        center: c,
+        radius: r,
+        start,
+        sweep,
+    };
+    Region2 {
+        outer: Loop2 {
+            segs: vec![
+                arc,
+                Seg2::Line {
+                    a: arc.end(),
+                    b: arc.start(),
+                },
+            ],
+        },
+        holes: vec![],
+    }
+}
+
+fn outer(lp: Loop2) -> Region2 {
+    Region2 {
+        outer: lp,
+        holes: vec![],
+    }
+}
+
+fn close(a: f64, b: f64) -> bool {
+    (a - b).abs() <= 1e-12 * (1.0 + b.abs())
+}
+
+#[test]
+fn a_plane_meets_the_line_along_the_extrusion_at_its_closed_form_level() {
+    use crate::geom::vector3d::Vec3;
+    // At (4, 7, -3) the line along +z meets z = 1 + 4 / 2 = 3, whatever the point's own height.
+    let level = level_on_plane(&xy(), Vec3::new(4.0, 7.0, -3.0), &half_slope()).unwrap();
+    assert!(close(level, 3.0), "{level}");
+    // Measured from a frame two above the origin: 3 - 2.
+    let raised = Frame {
+        origin: [0.0, 0.0, 2.0],
+        ..xy()
+    };
+    let level = level_on_plane(&raised, Vec3::new(4.0, 7.0, 0.0), &half_slope()).unwrap();
+    assert!(close(level, 1.0), "{level}");
+    // A plane along the extrusion (x = 0) is never met.
+    let wall = Frame {
+        origin: [0.0; 3],
+        x_axis: [0.0, 1.0, 0.0],
+        y_axis: [0.0, 0.0, 1.0],
+    };
+    assert_eq!(level_on_plane(&xy(), Vec3::new(1.0, 0.0, 0.0), &wall), None);
+    assert_eq!(plane_rise(&xy(), &wall, &[rectangle(p(0.0, 0.0), p(1.0, 1.0))]), None);
+}
+
+#[test]
+fn a_slanted_planes_rise_over_a_profile_is_exact_at_lines_arcs_and_conics() {
+    let rise = |r: Region2| plane_rise(&xy(), &half_slope(), &[r]).unwrap();
+    let is = |(lo, hi): (f64, f64), want: (f64, f64)| close(lo, want.0) && close(hi, want.1);
+    // x over [-2, 4]: 1 + x / 2 over [0, 3].
+    let r = rise(rectangle(p(-2.0, 0.0), p(4.0, 1.0)));
+    assert!(is(r, (0.0, 3.0)), "{r:?}");
+    // A circle about (1, 0) of radius 2 spans x in [-1, 3], reached between the arc's ends.
+    let r = rise(outer(circle(p(1.0, 0.0), 2.0)));
+    assert!(is(r, (0.5, 2.5)), "{r:?}");
+    // The right half of the unit circle (from -90° by 180°) spans x in [0, 1]: its leftmost
+    // point on the full circle, x = -1, is not on the arc.
+    let r = rise(arc_and_chord(p(0.0, 0.0), 1.0, -FRAC_PI_2, PI));
+    assert!(is(r, (1.0, 1.5)), "{r:?}");
+    // The same arc running back (from 90° by -180°) and with a negative radius (the left half,
+    // its points at the opposite angles) give the same and the mirrored span.
+    let r = rise(arc_and_chord(p(0.0, 0.0), 1.0, FRAC_PI_2, -PI));
+    assert!(is(r, (1.0, 1.5)), "{r:?}");
+    let r = rise(arc_and_chord(p(0.0, 0.0), -1.0, -FRAC_PI_2, PI));
+    assert!(is(r, (0.5, 1.0)), "{r:?}");
+    // An ellipse of semi-axes 3 and 1 as four exact conics spans x in [-3, 3].
+    let r = rise(outer(ellipse(p(0.0, 0.0), 3.0, 1.0)));
+    assert!(is(r, (-0.5, 2.5)), "{r:?}");
+}
+
+#[test]
+fn a_free_form_pieces_extremes_are_values_it_takes() {
+    // The cubic from (0, 0) to (0, 1) with inner controls (-3, 0) and (-3, 1) runs along
+    // x = -9 t (1 - t), least at t = 1/2: x = -9/4, so the slanted plane's least level is
+    // 1 - 9/8 = -1/8; its controls alone would say 1 - 3/2 = -1/2.
+    let bulge = |c: f64| Region2 {
+        outer: Loop2 {
+            segs: vec![
+                Seg2::Cubic {
+                    p0: p(0.0, 0.0),
+                    p1: p(-c, 0.0),
+                    p2: p(-c, 1.0),
+                    p3: p(0.0, 1.0),
+                },
+                Seg2::Line {
+                    a: p(0.0, 1.0),
+                    b: p(0.0, 0.0),
+                },
+            ],
+        },
+        holes: vec![],
+    };
+    let (lo, hi) = plane_rise(&xy(), &half_slope(), &[bulge(3.0)]).unwrap();
+    assert!((lo - -0.125).abs() <= 1e-9, "{lo}");
+    assert!(lo >= -0.125 - 1e-15, "{lo}");
+    assert!(close(hi, 1.0), "{hi}");
+    // With inner controls at x = -8/3 the cubic reaches x = -2 exactly, where the gap from
+    // z = 0 to the slanted plane is 0: it touches, though its controls lie past it.
+    let touch = planes_cross_over(&xy(), &xy(), &half_slope(), &[bulge(8.0 / 3.0)], 1.0).unwrap();
+    assert!(!touch);
+    assert!(planes_cross_over(&xy(), &xy(), &half_slope(), &[bulge(3.0)], 1.0).unwrap());
+}
+
+#[test]
+fn two_planes_cross_over_a_profile_only_where_the_gap_turns_negative() {
+    let crosses = |r: Region2, way: f64| planes_cross_over(&xy(), &xy(), &half_slope(), &[r], way).unwrap();
+    // From z = 0 to z = 1 + x / 2, running up: the gap is 1 + x / 2.
+    // Over x in [-1, 1] it stays positive; running down it is negative everywhere.
+    assert!(!crosses(rectangle(p(-1.0, 0.0), p(1.0, 1.0)), 1.0));
+    assert!(crosses(rectangle(p(-1.0, 0.0), p(1.0, 1.0)), -1.0));
+    // Over x in [-4, 1] it falls to -1; over x in [-2, 1] it only touches 0 at the loop.
+    assert!(crosses(rectangle(p(-4.0, 0.0), p(1.0, 1.0)), 1.0));
+    assert!(!crosses(rectangle(p(-2.0, 0.0), p(1.0, 1.0)), 1.0));
+    // A circle about the origin: of radius 2 it touches at x = -2, between its ends; of radius
+    // 2.5 it reaches x = -2.5, a gap of -1/4.
+    assert!(!crosses(outer(circle(p(0.0, 0.0), 2.0)), 1.0));
+    assert!(crosses(outer(circle(p(0.0, 0.0), 2.5)), 1.0));
+    // The right half of a unit circle about (-1.5, 0) spans x in [-1.5, -0.5]: the gap stays at
+    // 1/4 or more, though the full circle's leftmost point (x = -2.5) would give -1/4.
+    assert!(!crosses(arc_and_chord(p(-1.5, 0.0), 1.0, -FRAC_PI_2, PI), 1.0));
+    // An ellipse of semi-axes 2 and 1 touches at x = -2; of semi-axes 2.2 and 1 it reaches -0.1.
+    assert!(!crosses(outer(ellipse(p(0.0, 0.0), 2.0, 1.0)), 1.0));
+    assert!(crosses(outer(ellipse(p(0.0, 0.0), 2.2, 1.0)), 1.0));
+    // No profile, or a way that is not a number, has no answer.
+    assert_eq!(planes_cross_over(&xy(), &xy(), &half_slope(), &[], 1.0), None);
+    assert_eq!(
+        planes_cross_over(&xy(), &xy(), &half_slope(), &[rectangle(p(0.0, 0.0), p(1.0, 1.0))], f64::NAN),
+        None
+    );
 }
 
 /// Straight members (`member`): closed forms for the middle line, the extrusion range, trims to
