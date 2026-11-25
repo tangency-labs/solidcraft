@@ -212,6 +212,46 @@ impl Piece {
         Self::line(start + d * from, start + d * to)
     }
 
+    /// A piece from its fields as given (an application's copy of a piece's data), checked as
+    /// the constructors check them: `segment` must be a line [`Piece::line`] accepts from `a` to
+    /// `b`, or an arc from `a` that [`Piece::arc`] accepts ending at `b`, and `t0` and `t1` the
+    /// unit tangents that constructor gives, to its unit tolerance (1e-9). The fields are kept
+    /// exactly as given, so every piece's own fields make that piece again, reversed or not.
+    ///
+    /// # Errors
+    /// [`Refusal::Line`] for a line, or [`Refusal::Arc`] for an arc, that the constructor
+    /// refuses or whose ends or tangents disagree with it.
+    pub fn from_parts(
+        a: Point3,
+        b: Point3,
+        t0: Vec3,
+        t1: Vec3,
+        segment: Segment,
+    ) -> Result<Self, Refusal> {
+        let (made, refusal) = match segment {
+            Segment::Line { start, end } => (Self::line(start, end), Refusal::Line),
+            Segment::Arc {
+                start,
+                centre,
+                axis,
+                angle,
+            } => (Self::arc(start, b, centre, axis, angle), Refusal::Arc),
+        };
+        let made = made?;
+        // NaN compares false, so a non-finite tangent is refused here.
+        let near = |u: Vec3, v: Vec3| (u - v).length() <= 1e-9;
+        if made.a != a || made.b != b || !near(made.t0, t0) || !near(made.t1, t1) {
+            return Err(refusal);
+        }
+        Ok(Self {
+            a,
+            b,
+            t0,
+            t1,
+            segment,
+        })
+    }
+
     /// Reverse the traversal while keeping the same exact geometric locus.
     pub fn reverse(&mut self) {
         self.segment = match self.segment {
@@ -511,6 +551,50 @@ mod tests {
         assert!(
             actual.distance(expected) < 1e-10,
             "{actual:?} vs {expected:?}"
+        );
+    }
+
+    #[test]
+    fn a_pieces_own_fields_make_it_again_and_others_are_refused() {
+        let mut pieces = compound_path();
+        let mut reversed = pieces.clone();
+        for p in &mut reversed {
+            p.reverse();
+        }
+        pieces.extend(reversed);
+        for p in pieces {
+            assert_eq!(Piece::from_parts(p.a, p.b, p.t0, p.t1, p.segment), Ok(p));
+        }
+        let line = Piece::line(Vec3::ZERO, Vec3::X).unwrap();
+        let parts = |a, b, t0, t1| Piece::from_parts(a, b, t0, t1, line.segment);
+        assert_eq!(parts(Vec3::X, line.b, line.t0, line.t1), Err(Refusal::Line));
+        assert_eq!(parts(line.a, Vec3::Y, line.t0, line.t1), Err(Refusal::Line));
+        assert_eq!(parts(line.a, line.b, Vec3::Y, line.t1), Err(Refusal::Line));
+        let nan = Vec3::new(f64::NAN, 0.0, 0.0);
+        assert_eq!(parts(line.a, line.b, line.t0, nan), Err(Refusal::Line));
+        let arc = compound_path()[1];
+        let Segment::Arc {
+            start,
+            centre,
+            axis,
+            ..
+        } = arc.segment
+        else {
+            panic!("an arc")
+        };
+        let turned = Segment::Arc {
+            start,
+            centre,
+            axis,
+            angle: 1.0,
+        };
+        assert_eq!(
+            Piece::from_parts(arc.a, arc.b, arc.t0, arc.t1, turned),
+            Err(Refusal::Arc)
+        );
+        assert_eq!(
+            Piece::from_parts(arc.a, arc.b, arc.t1, arc.t1, arc.segment),
+            Err(Refusal::Arc)
         );
     }
 

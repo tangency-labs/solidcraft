@@ -161,6 +161,35 @@ impl Member {
         })
     }
 
+    /// A member from its fields as given (an application's copy of a member's data), checked as
+    /// [`Member::along`] checks its own: `dir` a unit vector (to 1e-9), `length` above zero and
+    /// the box not empty. The fields are kept exactly as given, so every member's own fields make
+    /// that member again.
+    ///
+    /// # Errors
+    /// [`Refusal::Degenerate`] when `dir` is not a unit vector, the length is not above zero or
+    /// the box is empty.
+    pub fn from_parts(
+        frame: Frame,
+        dir: Vec3,
+        length: f64,
+        lo: Point2,
+        hi: Point2,
+    ) -> Result<Self, Refusal> {
+        // NaN compares false, so a non-finite direction is refused here.
+        let unit = (dir.length() - 1.0).abs() <= 1e-9;
+        if !(unit && length > 0.0 && lo.x <= hi.x && lo.y <= hi.y) {
+            return Err(Refusal::Degenerate);
+        }
+        Ok(Self {
+            frame,
+            dir,
+            length,
+            lo,
+            hi,
+        })
+    }
+
     /// The middle of the section box.
     fn middle(&self) -> Point2 {
         Vec2::new((self.lo.x + self.hi.x) * 0.5, (self.lo.y + self.hi.y) * 0.5)
