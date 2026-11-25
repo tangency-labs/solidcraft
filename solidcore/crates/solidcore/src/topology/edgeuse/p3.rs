@@ -1778,8 +1778,8 @@ pub fn get_or_create_uv_trim_curve(
             return Ok(out);
         }
     };
-    // Not upstream (tangency-labs/solidcore#3399): a trim that would raise its edge is fitted
-    // again, tighter ([`refit_raising_trim`]).
+    // Not upstream (tangency-labs/solidcore#3399): in a cover test that grows no tolerance, a
+    // trim that would raise its edge is fitted again, tighter ([`refit_raising_trim`]).
     let created = refit_raising_trim(k, b, eu, want_deviation, created)?;
 
     // Save max edge to projected TrimCurve distances. If one is Null and the other is
@@ -1831,8 +1831,9 @@ pub fn get_or_create_uv_trim_curve(
     Ok(out)
 }
 
-/// Not upstream (tangency-labs/solidcore#3399): `created`, the new trim of `eu`, or the same
-/// trim fitted again at [`REFIT_SHARE`] of the fit tolerance where that one lies within
+/// Not upstream (tangency-labs/solidcore#3399): while a boolean's cleanup tests two faces for
+/// a cover that grows no tolerance (`Caches::refit_raising_trims`), `created`, the new trim of
+/// `eu`, or the same trim fitted again at [`REFIT_SHARE`] of the fit tolerance where that one lies within
 /// [`REFIT_GAIN`] of `created`'s distance from the edge, when `created` lies far enough from
 /// the edge to raise its tolerance (`SetUVTrimCurve` raises a tolerance below twice the
 /// distance). The drop's fit error (up to the fit tolerance, the edge's own) is part of that
@@ -1854,7 +1855,7 @@ fn refit_raising_trim(
     want_deviation: bool,
     created: CreatedUvTrimCurve,
 ) -> Result<CreatedUvTrimCurve> {
-    if k.caches.hold_trim_raise || b.validate_only() {
+    if !k.caches.refit_raising_trims.get() || k.caches.hold_trim_raise || b.validate_only() {
         return Ok(created);
     }
     let Some(e) = edge(b, eu)? else {

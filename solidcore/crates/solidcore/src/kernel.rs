@@ -152,6 +152,14 @@ pub struct Caches {
     /// which so takes `bValidateOnly` as its argument instead of setting and restoring the
     /// flag on the body it checks. Crate-private: not a kernel option.
     pub(crate) hold_trim_raise: bool,
+    /// Not upstream (tangency-labs/solidcore#3399): whether a UV trim built now that would
+    /// raise its edge's tolerance is fitted again, tighter, before it does
+    /// (`topology::edgeuse::p3::refit_raising_trim`). Set only while a boolean's cleanup tests
+    /// whether two faces cover each other without growing a tolerance
+    /// (`topology::edge::is_topological_without_growth`), and builds their trims to measure
+    /// their domains. A [`Cell`] so that test can set it through the `&Kernel` it takes.
+    /// Crate-private: not a kernel option.
+    pub(crate) refit_raising_trims: Cell<bool>,
 }
 
 impl Default for Caches {
@@ -160,6 +168,7 @@ impl Default for Caches {
             curve_analysis: RefCell::default(),
             prove_lazy_trim_raise: true,
             hold_trim_raise: false,
+            refit_raising_trims: Cell::new(false),
         }
     }
 }
@@ -171,6 +180,7 @@ impl Caches {
         *self = Self {
             prove_lazy_trim_raise: self.prove_lazy_trim_raise,
             hold_trim_raise: self.hold_trim_raise,
+            refit_raising_trims: Cell::new(self.refit_raising_trims.get()),
             ..Self::default()
         };
     }
