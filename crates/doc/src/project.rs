@@ -2576,7 +2576,7 @@ fn closed_by_silhouettes(body: &crate::ModelBody, plane: &Plane, face: usize, ge
             continue;
         }
         let Some(pieces) = s.geometry.iter().map(LinkGeom::from_seg).collect::<Option<Vec<_>>>() else { continue };
-        let pieces = solidcore_ops::outline::tidy_silhouette(pieces.into_iter().map(outline_piece).collect());
+        let pieces = solidcraft_kernel::services::outline::tidy_silhouette(pieces.into_iter().map(outline_piece).collect());
         let pieces: Vec<LinkGeom> = pieces.into_iter().map(link_of_piece).collect();
         let (Some(first), Some(last)) = (pieces.first().and_then(piece_ends), pieces.last().and_then(piece_ends)) else { continue };
         if closes(first[0]) && closes(last[1]) {
@@ -2588,8 +2588,8 @@ fn closed_by_silhouettes(body: &crate::ModelBody, plane: &Plane, face: usize, ge
     }
     let mut out: Vec<_> = geom.into_iter().map(outline_piece).collect();
     out.extend(sides.into_iter().map(outline_piece));
-    let out = solidcore_ops::outline::meet_at_shared_ends(out, tol);
-    solidcore_ops::outline::drop_coincident(out, (size * 1e-9).max(1e-7)).into_iter().map(link_of_piece).collect()
+    let out = solidcraft_kernel::services::outline::meet_at_shared_ends(out, tol);
+    solidcraft_kernel::services::outline::drop_coincident(out, (size * 1e-9).max(1e-7)).into_iter().map(link_of_piece).collect()
 }
 
 /// The outline of a body seen along the sketch normal: mesh edges between triangles facing the
