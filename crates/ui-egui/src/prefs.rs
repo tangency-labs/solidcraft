@@ -3834,9 +3834,10 @@ pub fn migrate(mut p: Prefs) -> Prefs {
         log::warn!("preferences: the 3D mouse axis assignment {:?} doesn't drive each axis once; using the default", p.space_mouse_axis_source);
         p.space_mouse_axis_source = crate::space_mouse::SAME_AXES;
     }
-    // A template this version doesn't have for that kind (a newer one's, or a saved template since removed).
+    // A template this version doesn't have for that kind (a newer one's, or a built-in since removed).
+    // A template file is kept even while it can't be read: New Drawing names it when refused.
     for (chosen, assembly) in [(&mut p.part_drawing_template, false), (&mut p.assembly_drawing_template, true)] {
-        if !is_template_for(chosen, assembly) {
+        if !is_new_drawing_template(chosen, assembly) {
             let default = template::default_for(assembly);
             log::warn!("preferences: there is no drawing template `{chosen}` for this kind of design; using `{default}`");
             *chosen = default.into();
@@ -3929,6 +3930,22 @@ fn limit_toolbar_tabs(mut p: Prefs) -> Prefs {
 /// Whether `name` is one of the built-in templates of an assembly's drawings (`assembly`) or a part's.
 pub(crate) fn is_template_for(name: &str, assembly: bool) -> bool {
     template::BUILT_INS.contains(&name) && template::assembly(name) == Some(assembly)
+}
+
+/// Whether `name` is a drawing template file's path (`drawing.template.save`'s `.scdwg`, or an older
+/// `.json`), which `drawing.create` reads as its template (#22120). It may serve either kind.
+pub(crate) fn is_template_file(name: &str) -> bool {
+    const MAX_PATH_BYTES: usize = 4096;
+    let extension = std::path::Path::new(name.trim()).extension();
+    !name.trim().is_empty()
+        && name.len() <= MAX_PATH_BYTES
+        && extension.is_some_and(|e| e.eq_ignore_ascii_case("scdwg") || e.eq_ignore_ascii_case("json"))
+}
+
+/// Whether the template for new drawings of a part or an assembly may be `name`: one of that kind's
+/// built-ins, or a template file.
+pub(crate) fn is_new_drawing_template(name: &str, assembly: bool) -> bool {
+    is_template_for(name, assembly) || is_template_file(name)
 }
 
 /// Preferences create future windows; a missing ribbon value here uses the new default.
@@ -4075,9 +4092,9 @@ fn prepare_preferences(
     for (key, chosen, assembly) in
         [("part_drawing_template", &new.part_drawing_template, false), ("assembly_drawing_template", &new.assembly_drawing_template, true)]
     {
-        if !is_template_for(chosen, assembly) {
+        if !is_new_drawing_template(chosen, assembly) {
             let kind: Vec<&str> = template::BUILT_INS.iter().copied().filter(|name| is_template_for(name, assembly)).collect();
-            return Err(format!("`{key}` must be one of {}", kind.join(", ")));
+            return Err(format!("`{key}` must be one of {}, or a .scdwg or .json template file", kind.join(", ")));
         }
     }
     if !accepted::home_fit_size(&new) {
@@ -12233,6 +12250,40 @@ mod tests {
         let (first, third) = (drawn("first"), drawn("third"));
         assert_eq!((first.0, third.0), (Some(Projection::First), Some(Projection::Third)));
         assert_eq!(first.1, third.1, "the projection is no undo step of its own");
+    }
+
+    /// #22120: a template file saved from a drawing can be the template new drawings of a part or an
+    /// assembly start from, set or saved so; New Drawing starts from it, and refuses naming it once it
+    /// has gone. Any other file is refused when set.
+    #[test]
+    fn new_drawings_start_from_a_preferred_template_file() {
+        use solidcraft_engine::geom::drawing_sheet::{PaperSize, SheetSize};
+        let dir = std::env::temp_dir().join(format!("solidcraft-template-pref-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("Shop A1.scdwg").to_string_lossy().into_owned();
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        app.run("solid.box", json!({"length": 40, "width": 30, "height": 10})).unwrap();
+        app.run("drawing.create", json!({"template": "iso-a1-part"})).unwrap();
+        app.run("drawing.template.save", json!({"path": file})).unwrap();
+        app.run("drawing.close", json!({})).unwrap();
+        assert!(set(&mut app, &json!({"part_drawing_template": dir.join("shop.pdf").to_string_lossy()})).is_err());
+        set(&mut app, &json!({"part_drawing_template": file, "assembly_drawing_template": file})).unwrap();
+        let mut other = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        other.load_prefs(&app.prefs());
+        assert_eq!(
+            (other.preferences.part_drawing_template.as_str(), other.preferences.assembly_drawing_template.as_str()),
+            (file.as_str(), file.as_str())
+        );
+        app.run("drawing.create", json!({})).unwrap();
+        let d = app.session.drawing("test").unwrap().clone();
+        assert_eq!(d.sheets[0].sheet.size, SheetSize::Standard(PaperSize::A1), "from the file");
+        app.run("drawing.close", json!({})).unwrap();
+        let gone = dir.join("gone.scdwg").to_string_lossy().into_owned();
+        set(&mut app, &json!({"part_drawing_template": gone})).unwrap();
+        let refused = app.run("drawing.create", json!({})).unwrap_err();
+        assert!(refused.contains("gone.scdwg"), "{refused}");
+        assert_eq!(lenient(&json!({"part_drawing_template": gone})).part_drawing_template, gone, "kept while it can't be read");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A new drawing is set in the interface font when that is a family, and in the built-in font

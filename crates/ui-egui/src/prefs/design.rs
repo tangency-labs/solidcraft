@@ -133,20 +133,44 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                 });
                 // Each kind's built-ins, by size: the kind is the row's, so each shows its paper's title.
+                // A template file chosen (#22120) is the list's first entry, by its file name; Choose
+                // File… picks one.
+                let can_browse = app.services.pick_open.is_some();
+                let mut browse = None;
                 let p = &mut app.preferences;
                 for (label, id, chosen, assembly) in [
                     ("ui.template_for_new_part_drawings", "pref_part_drawing_template", &mut p.part_drawing_template, false),
                     ("ui.template_for_new_assembly_drawings", "pref_assembly_drawing_template", &mut p.assembly_drawing_template, true),
                 ] {
-                    let names: Vec<&str> = template::BUILT_INS.iter().copied().filter(|name| super::is_template_for(name, assembly)).collect();
-                    let titles: Vec<String> = names.iter().filter_map(|name| template::title(name)).collect();
+                    let file = super::is_template_file(chosen).then(|| chosen.clone());
+                    let mut names: Vec<String> =
+                        template::BUILT_INS.iter().copied().filter(|name| super::is_template_for(name, assembly)).map(str::to_string).collect();
+                    let mut titles: Vec<String> = names.iter().filter_map(|name| template::title(name)).collect();
+                    if let Some(file) = &file {
+                        let shown = std::path::Path::new(file).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| file.clone());
+                        names.insert(0, file.clone());
+                        titles.insert(0, solidcraft_ui_text::format("ui.template_file_entry", &[("name", &shown)]));
+                    }
                     let titles: Vec<&str> = titles.iter().map(String::as_str).collect();
                     ui_kit::row(ui, solidcraft_ui_text::tr(label), |ui| {
-                        let mut selected = names.iter().position(|name| *name == chosen.as_str()).unwrap_or(0);
-                        ui_kit::dropdown(ui, id, &mut selected, &titles);
-                        if let Some(name) = names.get(selected) {
-                            *chosen = (*name).to_string();
+                        let mut selected = names.iter().position(|name| name == chosen).unwrap_or(0);
+                        let response = ui_kit::dropdown(ui, id, &mut selected, &titles);
+                        if let Some(file) = &file {
+                            response.on_hover_text(file.as_str());
                         }
+                        if let Some(name) = names.get(selected) {
+                            chosen.clone_from(name);
+                        }
+                        if can_browse && ui_kit::button(ui, solidcraft_ui_text::tr("ui.template_file_choose"), ui_kit::Button::Small).clicked() {
+                            browse = Some(assembly);
+                        }
+                    });
+                }
+                if let Some(assembly) = browse {
+                    app.pick_open_for(&["scdwg", "json"], move |app, path| {
+                        let Some(path) = path.filter(|path| super::is_template_file(path)) else { return };
+                        let p = &mut app.preferences;
+                        *(if assembly { &mut p.assembly_drawing_template } else { &mut p.part_drawing_template }) = path;
                     });
                 }
                 let label = app.tr("ui.sheet_page.colour").to_owned();

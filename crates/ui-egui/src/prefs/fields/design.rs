@@ -10,7 +10,8 @@ macro_rules! design_preferences {
         $next! { $($rest),* ; $($fields)*
             angle_decimals: u8 = 1, PAGE_DESIGN;
             /// The template new drawings of an assembly start from: an assembly's built-in, by name (ISO A2
-            /// when not set, or set to one this version doesn't have for an assembly).
+            /// when not set, or set to one this version doesn't have for an assembly), or a template
+            /// file's path (#22120).
             assembly_drawing_template: String = template::default_for(true).into(), PAGE_DESIGN;
             /// Hovering an Origin plane, axis or point row in the Browser shows that item in the view,
             /// for the design's Origin and each part's, also while it is hidden (#15658): a hidden item
@@ -87,7 +88,7 @@ macro_rules! design_preferences {
             /// list light in a large design.
             parameter_list_rows: u16 = 50, PAGE_DESIGN;
             /// The template new drawings of a part start from: a part's built-in, by name (ISO A3 when not set,
-            /// or set to one this version doesn't have for a part).
+            /// or set to one this version doesn't have for a part), or a template file's path (#22120).
             part_drawing_template: String = template::default_for(false).into(), PAGE_DESIGN;
             /// Components pasted from another design (tab) go to the origin of the component they are
             /// pasted into, the first one's origin on it and the others kept where they are from it,

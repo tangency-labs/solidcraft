@@ -1,0 +1,26 @@
+{
+  "en": {
+    "ui.template_file_choose": "Choose File…",
+    "ui.template_file_entry": "File: {name}"
+  },
+  "de": {
+    "ui.template_file_choose": "Datei wählen…",
+    "ui.template_file_entry": "Datei: {name}"
+  },
+  "es": {
+    "ui.template_file_choose": "Elegir archivo…",
+    "ui.template_file_entry": "Archivo: {name}"
+  },
+  "fr": {
+    "ui.template_file_choose": "Choisir un fichier…",
+    "ui.template_file_entry": "Fichier : {name}"
+  },
+  "ja": {
+    "ui.template_file_choose": "ファイルを選択…",
+    "ui.template_file_entry": "ファイル: {name}"
+  },
+  "zh": {
+    "ui.template_file_choose": "选择文件…",
+    "ui.template_file_entry": "文件：{name}"
+  }
+}
