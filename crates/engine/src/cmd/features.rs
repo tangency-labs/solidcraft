@@ -2113,7 +2113,8 @@ fn dir_expr_now(s: &Session, d: solidcraft_doc::DirExpr, key: &str, cmd: &str) -
         // A parameter added as a plain number is a length, which a direction can't take as it is.
         let x = s.doc.eval(e, Kind::Unitless).map_err(|err| {
             let hint = if s.doc.eval(e, Kind::Length).is_ok() {
-                format!(" ({key} has no unit: divide a length by its unit, as in `n / 1 mm`)")
+                let noun = if key == "axis" { "an axis" } else { "a direction" };
+                format!(" ({noun} has no unit: divide a length by its unit, as in `n / 1 mm`)")
             } else {
                 String::new()
             };
