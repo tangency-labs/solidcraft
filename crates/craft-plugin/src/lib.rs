@@ -743,7 +743,14 @@ impl From<EntryDeclaration> for Entry {
                     (EntryKind::Command, None) => Effect::Edit,
                 },
                 input_schema: value.input_schema.value,
-                input_property_order: value.input_property_order.unwrap_or(value.input_schema.property_order),
+                // An object with no properties has no order to keep: an entry that declared no schema
+                // serializes without one and must read back the same.
+                input_property_order: value
+                    .input_property_order
+                    .unwrap_or(value.input_schema.property_order)
+                    .into_iter()
+                    .filter(|(_, names)| !names.is_empty())
+                    .collect(),
                 dialog_hook: value.dialog_hook,
                 slots: value.slots,
                 job: value.job,
@@ -1269,8 +1276,8 @@ pub fn parse_manifest_for_version(text: &[u8], folder: &str, app: &str, host_ver
     if let Some(value) = &parsed {
         if let Some(minimum) = value.get("min_host_version") {
             let minimum = minimum.as_str().ok_or_else(|| invalid("min_host_version", "must be a semantic version string, e.g. \"1.2.3\""))?;
-            let required = semver::Version::parse(minimum)
-                .map_err(|_| invalid("min_host_version", "must be a complete semantic version, e.g. \"1.2.3\""))?;
+            let required =
+                semver::Version::parse(minimum).map_err(|_| invalid("min_host_version", "must be a complete semantic version, e.g. \"1.2.3\""))?;
             let current = semver::Version::parse(host_version)
                 .map_err(|_| invalid("min_host_version", format!("{app} has an invalid host version `{host_version}`")))?;
             if current.cmp_precedence(&required).is_lt() {
