@@ -359,11 +359,16 @@ pub fn check(session: &Session, path: &str) -> CheckResult {
         }
     };
     for warning in package.swatch_warnings() {
+        let picture = warning.starts_with(craft_plugin::swatches::IMAGE_KEY);
         result.problems.push(problem(
             Severity::Warning,
-            craft_plugin::swatches::KEY,
+            if picture { craft_plugin::swatches::IMAGE_KEY } else { craft_plugin::swatches::KEY },
             warning,
-            "Use a package PNG or JPEG of at most 64 KiB and 256 × 256 pixels.",
+            if picture {
+                "Use a package PNG or JPEG of at most 512 KiB and 1024 × 1024 pixels."
+            } else {
+                "Use a package PNG or JPEG of at most 64 KiB and 256 × 256 pixels."
+            },
         ));
     }
     let manifest = &package.manifest;

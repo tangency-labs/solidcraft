@@ -186,8 +186,15 @@ unbuilt result was non-manifold.
 Q = X⁴ − d w² X H + d² w⁴ K, with X² = |A_u × A_v|² and H, K built from the first and second
 fundamental forms' homogeneous coefficients. Since A_u × A_v carries a factor w, the bracket
 X′⁴ − d X′ H′ + d² w² K′ of the same sign is what is bounded, four times deg w lower in each
-parameter. Each patch's bound is subdivided into quarters on an explicit stack, at most
-`MAX_REGULARITY_PATCHES` (20,000); a patch whose middle value is negative is a fold, and a
+parameter: q0 − X′ q1 with q0 = X′⁴ + d² w² K′, q1 = d H′ and x2 = X′². The forms are built with
+the patch moved to its own frame, which leaves them unchanged, and carry a running error bound
+through their construction and every quartering (`bernstein::Bounded`), so their rounding follows
+the patch's size, not its distance from the origin. The bound starts from each patch's net as the
+Bezier decomposition computed it; the decomposition's own rounding is not counted. A patch is
+certified when the coefficients' ranges, widened by that bound, keep it above 0, and a form that
+is not finite certifies nothing. Each patch's bound is subdivided into quarters on an explicit
+stack, at most `MAX_REGULARITY_PATCHES` (20,000); a patch whose middle value is negative is a fold
+once the face's own partials prove it in interval arithmetic (otherwise it is subdivided), and a
 budget run out is refused too, since a face not proved regular is not built. A pole (a normal that
 vanishes) never certifies, so it is refused the same way.
 
@@ -317,9 +324,13 @@ face's surface and intersects neighbouring offsets instead of filling convex edg
   certificate of the reach. A surface that refuses the longer ask keeps the first extension.
 - **The mitre** (`OffsetGeometryCreation::mate_edges`, `offset_geometry_creation.rs`) intersects
   the two extended offsets at a quarter of the body's tolerance and 20°, keeps the intersection
-  curve whose trimmed midpoint is nearest the original edge's, trims it and gives it to both offset
-  edge uses. A marched piece lying on an exact line or conic of the two surfaces is replaced by
-  that curve.
+  curve whose trimmed midpoint is nearest the original edge's among those the neighbours' offsets
+  bound at the most ends, trims it and gives it to both offset edge uses. An end no neighbour's
+  offset reaches is the base vertex dropped onto the curve; a curve dropped at an end where
+  another is cut there is no offset of the edge (a piece of the intersection that a periodic
+  face's chart seam split off past the neighbours' offsets, nearer the edge's middle than the
+  whole curve's). A marched piece lying on an exact line or conic of the two surfaces is replaced
+  by that curve.
 - **The merge** joins the offset faces into one body. When it leaves two or more finite regions,
   an inset solid offset keeps those `cavity::is_cavity_region` finds cavity: a region with a face
   that has the input's face one wall behind it and none with it one wall ahead (a point solve

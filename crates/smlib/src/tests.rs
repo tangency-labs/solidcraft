@@ -878,7 +878,7 @@ fn every_call_starts_clean_on_any_kernel() {
 #[test]
 fn status_sites_only_shrink() {
     const SITES: &[(&str, usize)] =
-        &[("core/blend.rs", 6), ("core/measure.rs", 1), ("core/offset.rs", 5), ("core/split.rs", 1), ("core/ssi.rs", 1), ("core/sweep.rs", 6)];
+        &[("core/blend.rs", 6), ("core/measure.rs", 1), ("core/offset.rs", 5), ("core/split.rs", 1), ("core/ssi.rs", 1), ("core/sweep.rs", 3)];
     /// The lines of `text` outside its top-level inline test modules (rustfmt closes one with a
     /// `}` alone at the start of a line).
     fn code_lines(text: &str) -> Vec<&str> {

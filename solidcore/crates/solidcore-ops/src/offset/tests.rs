@@ -312,6 +312,74 @@ fn an_inset_by_the_rounds_radius_mates_across_rounds_that_meet_at_a_corner() {
     );
 }
 
+/// The area two discs of radii `big` and `r`, centres `d` apart, share.
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn discs_overlap(big: f64, r: f64, d: f64) -> f64 {
+    if d >= big + r {
+        return 0.0;
+    }
+    if d <= (big - r).abs() {
+        return PI * big.min(r).powi(2);
+    }
+    let a = r * r * ((d * d + r * r - big * big) / (2.0 * d * r)).acos();
+    let b = big * big * ((d * d + big * big - r * r) / (2.0 * d * big)).acos();
+    let c = 0.5 * ((-d + r + big) * (d + r - big) * (d - r + big) * (d + r + big)).sqrt();
+    a + b - c
+}
+
+/// A frustum about +Z, r 100 at z = 0 to r 100 - 200 tan 18° at z = 200 (its side 18° off the
+/// axis), with a hole of r 5 from z = 150 up through the top, its axis 32 out at 85° from +X:
+/// it reaches r 37, past the rim's 35.02, so it breaks out through the side near the top. The
+/// hole's wall is one periodic face whose seam, at +X from its axis, is 85° round from the
+/// hole's outermost line. Shelled 2 in, open at the bottom.
+///
+/// The edge where the side meets the hole's wall is a U from the top down to z ~ 194 and back.
+/// Its offset, where the side's offset meets the wall's (r 7), runs from the top's offset
+/// (z = 198) at 83° either way round the hole from its outermost line, down to z ~ 181; on the
+/// extended surfaces it goes on up past the top's offset and crosses the wall's seam at 85°,
+/// z ~ 198.7. The seam cuts the intersection there into the whole U and a short piece beyond the
+/// seam, above the top's offset, whose middle lies nearer the edge's middle than the U's. No
+/// neighbour's offset cuts that piece: its ends are the edge's vertices dropped onto it. Taken
+/// for the edge, it left the loops of the side's and the wall's offsets open (`LoopGapUncertified`).
+///
+/// Every edge but the open bottom's moves with its faces, so the cavity is bounded by the
+/// faces' offsets alone: inside the side's offset, r 100 - z tan 18° - 2 / cos 18°, from the
+/// bottom up to z = 198, less, from z = 148, the r 7 disc 32 off the axis. The shell takes
+/// away the integral over z of that section's area.
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle and face picks, not ops geometry
+fn a_cones_side_broken_through_by_a_hole_past_its_seam_shells_to_its_closed_form() {
+    crate::test_corpus::rig_fixes();
+    let t18 = 18.0_f64.to_radians().tan();
+    let top = 100.0 - 200.0 * t18;
+    let (c, s) = (85.0_f64.to_radians().cos(), 85.0_f64.to_radians().sin());
+    let cone = crate::make_cone([0.0; 3], 100.0, top, 200.0).unwrap();
+    let hole = make_cylinder([32.0 * c, 32.0 * s, 150.0], 5.0, 51.0).unwrap();
+    let body = crate::boolean::boolean(cone, hole, crate::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let before = volume(&body);
+    let o = order(&body);
+    let bottom = face(&body, &o, |bx| {
+        bx.min().z.abs() < 1e-9 && bx.max().z.abs() < 1e-9
+    });
+    shell(&body, &o, &[bottom], -2.0).unwrap();
+    let report = body.check(crate::CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    let inside = |z: f64| 100.0 - z * t18 - 2.0 / 18.0_f64.to_radians().cos();
+    // the r 7 disc leaves the side's offset where 32 + 7 = inside(z), z ~ 181.3: split there
+    let out = (100.0 - 2.0 / 18.0_f64.to_radians().cos() - 39.0) / t18;
+    let section = |z: f64| PI * inside(z).powi(2);
+    let notch = |z: f64| discs_overlap(inside(z), 7.0, 32.0);
+    let cavity =
+        integral(0.0, 198.0, section) - integral(148.0, out, notch) - integral(out, 198.0, notch);
+    let removed = before - volume(&body);
+    assert!(
+        rel(removed, cavity) < 1e-9,
+        "the shell took {removed:.17} away, the cavity is {cavity:.17}"
+    );
+}
+
 /// A frustum on the z axis, r 10 at z = 0 to r 4 at z = 20 (its side falls 0.3 per mm), with
 /// everything at y > 6.8 cut away from below up to z = 10: a slot whose wall, the plane
 /// y = 6.8, runs along the frustum's side. The slot's ceiling, z = 10, is a lens of two edges
