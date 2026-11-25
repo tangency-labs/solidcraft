@@ -1516,6 +1516,22 @@ pub fn update_viewport_info(
 
     viewport_info.fullscreen = Some(window.fullscreen().is_some());
     viewport_info.focused = Some(window.has_focus());
+    viewport_info.native_window = native_window(window);
+}
+
+/// SolidCraft: the window's native handle for [`ViewportInfo::native_window`]: the `HWND` on
+/// Windows, `None` elsewhere.
+fn native_window(window: &Window) -> Option<u64> {
+    #[cfg(target_os = "windows")]
+    {
+        use raw_window_handle::{HasWindowHandle as _, RawWindowHandle};
+        if let Ok(RawWindowHandle::Win32(handle)) = window.window_handle().map(|h| h.as_raw()) {
+            return Some(handle.hwnd.get() as u64);
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = window;
+    None
 }
 
 fn open_url_in_browser(_url: &str) {

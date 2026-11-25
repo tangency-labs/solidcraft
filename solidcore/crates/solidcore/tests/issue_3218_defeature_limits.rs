@@ -1175,15 +1175,44 @@ fn model_supports(m: &Model) -> Vec<(&'static str, Sup)> {
     ]
 }
 
-/// Each face's support, its NURBS form proved on it ([`AnalyticSupport::check`]), matched to
-/// the nearest of `named`: the name and the certified distance bound.
+/// A face surface's support, its NURBS form proved on it: its analytic kind's
+/// ([`AnalyticSupport::check`]), or, for a B-spline face, the support of the analytic
+/// `CopyAndAddAnalytics` recognises in it ([`BSplineSurface::recognised_analytic`]) with
+/// the face's own form proved on that support's implicit surface by [`lies_on`]. (A face
+/// whose B-spline its recognised analytic does not give at the same parameters keeps the
+/// B-spline, an exact copy, WR-450 #18923: the support is the same point set.)
+///
+/// [`BSplineSurface::recognised_analytic`]: solidcore::nurbs::b_spline_surface::BSplineSurface::recognised_analytic
+fn proved_support(k: &Kernel, s: &solidcore::surface::surface::Surface) -> AnalyticSupport {
+    use solidcore::surface::implicit::lies_on;
+    use solidcore::surface::surface::SurfaceKind;
+    if AnalyticSupport::of(s).is_some() {
+        return AnalyticSupport::check(k, s).unwrap();
+    }
+    let SurfaceKind::BSpline(form) = s.kind() else {
+        panic!("a face of no analytic kind and no B-spline form");
+    };
+    let analytic = form
+        .recognised_analytic(k)
+        .unwrap()
+        .expect("an analytic recognised in the face's B-spline");
+    let support = AnalyticSupport::of(&analytic).expect("the analytic's support");
+    assert!(
+        lies_on(form, &support.implicit()).unwrap(),
+        "the face's B-spline off its recognised analytic {support:?}"
+    );
+    support
+}
+
+/// Each face's support, its NURBS form proved on it ([`proved_support`]), matched to the
+/// nearest of `named`: the name and the certified distance bound.
 fn match_supports(k: &Kernel, b: &Brep, named: &[(&'static str, Sup)]) -> Vec<(&'static str, f64)> {
     bp1::faces(b, None)
         .unwrap()
         .into_iter()
         .map(|f| {
             let s = b.face(f).unwrap().surface.as_ref().unwrap();
-            let sup = sup_of(&AnalyticSupport::check(k, s).unwrap());
+            let sup = sup_of(&proved_support(k, s));
             named
                 .iter()
                 .filter_map(|(name, m)| bound(m, &sup).map(|d| (*name, d)))
@@ -1275,9 +1304,9 @@ fn grow(x: I, delta: f64) -> I {
 /// `b`'s certified volume enclosure, asked to 0.2: it must hold `model` grown by `delta`.
 fn holds_volume(k: &Kernel, b: &mut Brep, model: I, delta: f64, what: &str) -> I {
     const WIDTH: f64 = 0.2;
-    let v = enclose_volume(k, b, WIDTH).unwrap();
-    let v = I::new(v.lo, v.hi);
-    assert!(v.width() <= WIDTH, "{what}: {v:?}");
+    let full = enclose_volume(k, b, WIDTH).unwrap();
+    let v = I::new(full.lo, full.hi);
+    assert!(v.width() <= WIDTH, "{what}: {full:?}");
     assert!(
         v.contains(grow(model, delta)),
         "{what}: model {model:?}, built {v:?}"

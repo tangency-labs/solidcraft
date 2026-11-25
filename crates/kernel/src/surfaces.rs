@@ -1206,6 +1206,11 @@ pub fn sweep_sheet_point_path_with(plane: &Plane, chains: &[Vec<Seg2>], path: &c
 /// sections are matched as the solid loft matches them; open ones are split to the same number of
 /// segments (longest first) and each turned to run the way the one before it does. Walls only, no
 /// caps; the history has no operands: every face is new.
+///
+/// The faces face the side [`extrude_sheet`]'s do at the first section: its curve's direction
+/// crossed with its plane's normal. A closed section's direction is counted counter-clockwise
+/// about the normal, so the walls face out of the region the sections bound, as a solid loft's
+/// faces do; an open one's is the way it runs.
 pub fn loft_sheet(sections: &[(Plane, Vec<Seg2>)]) -> Result<Body> {
     loft_sheet_with_rails(sections, &[], crate::RailFit::Scale)
 }
@@ -1217,6 +1222,16 @@ pub fn loft_sheet(sections: &[(Plane, Vec<Seg2>)]) -> Result<Body> {
 /// The k-th segments of every section make a column: one skin runs through every column, so the
 /// walls share their seams (#14048), each wall named by its column's segments.
 pub fn loft_sheet_with_rails(sections: &[(Plane, Vec<Seg2>)], rails: &[Vec<Vec3>], fit: crate::RailFit) -> Result<Body> {
+    lofted_sheet(sections, rails, fit, true)
+}
+
+/// [`loft_sheet_with_rails`] as designs saved before it faced its faces built it: each wall along
+/// the normal of the surface SMLib skins it with, whichever way the sections run.
+pub fn loft_sheet_with_rails_legacy_sides(sections: &[(Plane, Vec<Seg2>)], rails: &[Vec<Vec3>], fit: crate::RailFit) -> Result<Body> {
+    lofted_sheet(sections, rails, fit, false)
+}
+
+fn lofted_sheet(sections: &[(Plane, Vec<Seg2>)], rails: &[Vec<Vec3>], fit: crate::RailFit, faced: bool) -> Result<Body> {
     if sections.len() < 2 || sections.len() > 50 {
         return Err(invalid("a loft needs 2…50 sections"));
     }
@@ -1263,7 +1278,38 @@ pub fn loft_sheet_with_rails(sections: &[(Plane, Vec<Seg2>)], rails: &[Vec<Vec3>
         // a skin the kernel did not trace: its faces are named from their geometry
         None => vec![record::generated(Vec::new()); r.faces.len()],
     };
-    sheet_of(vec![(r, h)], false, &[])
+    let sheet = sheet_of(vec![(r, h)], false, &[])?;
+    match matched.first() {
+        Some(first) if faced => faced_at_section(sheet, first, all_closed),
+        _ => Ok(sheet),
+    }
+}
+
+/// The lofted sheet `sheet` with each face turned over where it faces away from the side its
+/// first section `first` gives it: each segment's direction crossed with the section plane's
+/// normal, that direction counted counter-clockwise about the normal when the section is
+/// `closed` (so out of the region it bounds). Each segment is sampled at its middle and
+/// solidcore judges the faces through it (`Query::faces_against`); a face no sample lies on
+/// keeps its side. The history is carried through the turn.
+fn faced_at_section(sheet: Body, first: &crate::loft_rails::Section, closed: bool) -> Result<Body> {
+    let backwards = closed && solidcore_record::Loop2 { segs: first.segs.clone() }.signed_area() < 0.0;
+    let samples: Vec<(Vec3, Vec3)> = first
+        .segs
+        .iter()
+        .map(|s| {
+            let d = first.plane.dir_to_world(s.derivative(0.5));
+            (first.plane.to_world(s.point_at(0.5)), if backwards { d * -1.0 } else { d })
+        })
+        .collect();
+    let r = sheet.record();
+    let accept = 4.0 * r.edges.iter().map(|e| e.tolerance).fold(r.tolerance, f64::max).max(1e-6);
+    let against = solidcore_ops::query::Query::new(r).faces_against(first.plane.normal(), &samples, accept);
+    if against.is_empty() {
+        return Ok(sheet);
+    }
+    let picked: Vec<(usize, bool)> = (0..r.faces.len()).map(|f| (f, against.contains(&f))).collect();
+    let turned = taken(&sheet, r, &picked)?;
+    Ok(record::after(turned, &sheet, &[]))
 }
 
 /// Closed sections matched as the solid loft matches them ([`crate::build::loft_numbered_loops`]),
@@ -2001,6 +2047,45 @@ mod tests {
         assert!(sweep_sheet_points(&Plane::XY, std::slice::from_ref(&line), &[Vec3::ZERO, Vec3::new(f64::NAN, 0.0, 0.0)]).is_err());
         let nan = crate::PointPath::polyline(vec![Vec3::ZERO, Vec3::new(0.0, 0.0, f64::NAN), Vec3::new(0.0, 0.0, 5.0), Vec3::new(0.0, 0.0, 10.0)]);
         assert!(sweep_sheet_point_path_with(&Plane::XY, std::slice::from_ref(&line), &nan, &crate::SweepControl::default()).is_err());
+    }
+
+    /// A lofted sheet's walls face the side Surface Extrude's would at the first section: a cone
+    /// between two circles faces out from its axis, in either section order and with a circle
+    /// drawn either way round, as a solid loft's faces do; a strip between two lines faces its
+    /// first line's direction crossed with the sketch normal. The legacy build faces the cone in.
+    #[test]
+    fn loft_sheet_faces_follow_the_first_section() {
+        use std::f64::consts::TAU;
+        let at = |z: f64| Plane::XY.offset(z);
+        let circle = |r: f64, sweep: f64| vec![Seg2::Arc { center: Vec2::ZERO, radius: r, start: 0.0, sweep }];
+        // The unit normal of the face of `body` whose surface passes through `p`.
+        let normal = |body: &Body, p: Vec3| {
+            let faces = crate::blend::Faces::of(body).unwrap();
+            let on = |f: usize| {
+                let surface = SurfaceEval::new(faces.rec.faces.get(f)?.parameters()).ok()?;
+                surface.point(surface.project(p, None, 1e-6)?).filter(|q| q.dist(p) < 1e-6)
+            };
+            let found: Vec<Vec3> = (0..faces.rec.faces.len()).filter(|f| on(*f).is_some()).filter_map(|f| faces.normal_at(f, p, 1e-6)).collect();
+            assert_eq!(found.len(), 1, "one face through {p:?}: {found:?}");
+            found[0]
+        };
+        // On the cone from radius 10 at z = 0 to radius 6 at z = 20, its outward normal.
+        let (p, out) = (Vec3::new(0.0, 7.6923, 11.5385), Vec3::new(0.0, 5.0, 1.0).normalized().unwrap());
+        let on_cone = Vec3::new(0.0, 10.0 - 4.0 * p.z / 20.0, p.z);
+        for (a, b) in [((0.0, 10.0, TAU), (20.0, 6.0, TAU)), ((20.0, 6.0, TAU), (0.0, 10.0, TAU)), ((0.0, 10.0, -TAU), (20.0, 6.0, -TAU))] {
+            let cone = loft_sheet(&[(at(a.0), circle(a.1, a.2)), (at(b.0), circle(b.1, b.2))]).unwrap();
+            let n = normal(&cone, on_cone);
+            assert!(n.dot(out) > 0.999, "{a:?} to {b:?}: {n:?}");
+        }
+        let legacy =
+            loft_sheet_with_rails_legacy_sides(&[(at(0.0), circle(10.0, TAU)), (at(20.0), circle(6.0, TAU))], &[], crate::RailFit::Scale).unwrap();
+        assert!(normal(&legacy, on_cone).dot(out) < -0.999);
+        let line = |a: f64, b: f64| Seg2::Line { a: Vec2::new(a, 0.0), b: Vec2::new(b, 0.0) };
+        for (first, side) in [(line(0.0, 10.0), -1.0), (line(10.0, 0.0), 1.0)] {
+            let strip = loft_sheet(&[(at(0.0), vec![first]), (at(5.0), vec![line(0.0, 10.0)])]).unwrap();
+            let n = normal(&strip, Vec3::new(5.0, 0.0, 2.5));
+            assert!((n.y - side).abs() < 1e-9, "{first:?}: {n:?}");
+        }
     }
 
     /// Sheets lofted between open lines and closed loops: a ruled strip (even when the second
