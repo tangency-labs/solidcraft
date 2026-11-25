@@ -256,7 +256,6 @@ crates/doc/src/joints_handles.rs:motion_axes cross,dot
 crates/doc/src/joints_reach.rs:Quat::to_zyz atan2,hypot
 crates/doc/src/joints_reach.rs:ball_turn_between atan2
 crates/doc/src/lineage.rs:order_legacy_family closest_on_triangle,triangles
-crates/doc/src/name_lookup.rs:FaceHit::along normalized,triangles
 crates/doc/src/name_lookup.rs:face_triangles triangles
 crates/doc/src/name_lookup.rs:incircle cross
 crates/doc/src/name_lookup.rs:nearest_on_face triangles
@@ -972,8 +971,8 @@ crates/kernel/src/draft_corners.rs:run atan2,cross,dot
 crates/kernel/src/draft_corners.rs:tangent cross,dot,normalized
 crates/kernel/src/emboss.rs:OnForm::of atan2,cross,dot,normalized
 crates/kernel/src/emboss.rs:OnForm::on atan2,dot
+crates/kernel/src/emboss.rs:Wrap::exact_piece cross,dot,normalized (emboss wrap: wrapped_loop's flat side wall moved out unchanged, moves to solidcore with the rest of the wrap)
 crates/kernel/src/emboss.rs:Wrap::fitted dot
-crates/kernel/src/emboss.rs:Wrap::wrapped_loop cross,dot,normalized
 crates/kernel/src/emboss.rs:angle atan2,dot
 crates/kernel/src/emboss.rs:complete_wall dot
 crates/kernel/src/emboss.rs:cylinder_emboss_anchor dot,normalized
@@ -990,6 +989,12 @@ crates/kernel/src/emboss.rs:span dot
 crates/kernel/src/emboss.rs:validate_profiles cross
 crates/kernel/src/emboss.rs:wall_angles cross,dot
 crates/kernel/src/emboss.rs:wall_sector dot
+crates/kernel/src/emboss/chain.rs:Chain::build cross,dot (emboss wrap: tangent flat beside the wall, moves to solidcore with the rest of the wrap)
+crates/kernel/src/emboss/chain.rs:Chain::coords dot (emboss wrap: tangent flat beside the wall, moves to solidcore with the rest of the wrap)
+crates/kernel/src/emboss/chain.rs:Chain::flat_piece cross,dot,normalized (emboss wrap: tangent flat beside the wall, moves to solidcore with the rest of the wrap)
+crates/kernel/src/emboss/chain.rs:Chain::outline dot (emboss wrap: tangent flat beside the wall, moves to solidcore with the rest of the wrap)
+crates/kernel/src/emboss/flat.rs:line_ends dot,normalized (emboss wrap: tangent flat beside the wall, moves to solidcore with the rest of the wrap)
+crates/kernel/src/emboss/flat.rs:tangent_flats dot,normalized (emboss wrap: tangent flat beside the wall, moves to solidcore with the rest of the wrap)
 crates/kernel/src/fair.rs:Net::fair solve
 crates/kernel/src/fill.rs:Beside::across cross,normalized
 crates/kernel/src/fill.rs:Projection::pcurve dot
