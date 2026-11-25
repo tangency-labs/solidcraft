@@ -1,4 +1,4 @@
-# Plugin shaders: view backgrounds (`shaders@0.1`)
+# Plugin shaders: view backgrounds and tints (`shaders@0.2`)
 
 A plugin can draw the background behind the model in the 3D view: a sky, a picture that turns with
 the camera, a pattern that moves. It ships a small WGSL fragment shader as text. SolidCraft checks the
@@ -108,16 +108,18 @@ most 8192 pixels on a side (or the graphics card's limit), and builds its mipmap
 
 ## The manifest
 
-`capabilities` must list `"shaders@0.1"`. Each entry of `shaders`:
+`capabilities` must list `"shaders@0.2"` (or `"shaders@0.1"`, for backgrounds with no settings,
+as before). Each entry of `shaders`:
 
 | Field | Required | Meaning |
 |---|---|---|
 | `id` | yes | Lowercase letters, digits and `-`, unique in the plugin. The preference names it `<plugin-id>/<id>`. |
 | `name` | yes | What people pick it by, 1 to 80 characters. |
-| `kind` | yes | `"background"`, the only kind in 0.1. |
+| `kind` | yes | `"background"`, or `"tint"` ([Tints](#tints), 0.2). |
 | `source` | yes | A `.wgsl` file name in the plugin's folder (lowercase, no folders). |
 | `textures` | no | Up to 4 pictures: `{"name": "<wgsl name>", "file": "<file>.png"}` or `.jpg`. |
 | `animated` | no | `true`: redrawn about 30 times a second while shown (10 behind another window), with `sc.time` running. `false` (the default): drawn again only when the view turns or resizes or the theme changes; `sc.time` is 0. |
+| `settings` | no | 0.2: up to 4 sliders on the plugin's card, `{"id", "name", "min", "max", "default"}`; the shader reads their values, in order, as `sc.settings.x` to `.w`. |
 
 A plugin declares at most 8 shaders. A plugin with shaders and no `runtime` is fine.
 
@@ -156,6 +158,7 @@ for the screen. To do maths on screen values, raise to `1.0 / 2.2` first and to 
 | `top`, `bottom` | `vec4<f32>` | The theme's view background at its top and bottom. |
 | `accent`, `text` | `vec4<f32>` | The theme's accent and text colours. |
 | `dark` | `f32` | 1 for a dark view background, 0 for a light one. |
+| `settings` | `vec4<f32>` | 0.2: the values of the shader's `settings` sliders, in order; 0 past the last. |
 
 Samplers: `sc_clamp` (clamps at the edges) and `sc_repeat` (wraps), both linear with mipmaps.
 Textures: each `textures` entry is a `texture_2d<f32>` by its `name`.
@@ -210,8 +213,53 @@ Nothing is drawn halfway.
   [`crates/craft-plugin/src/shader.rs`](../crates/craft-plugin/src/shader.rs) (`PRELUDE`) after
   your source.
 
+## Tints
+
+A shader of kind `tint` colours the ribbon's command icons, its button blocks and the panels each
+frame. The host draws nothing of its own: with no tint switched on (`tint_shader`, empty by
+default), they look as they always do and no shader runs. Each tint has a **Tint** switch on its
+plugin's card; one tint is on at a time, and only while its plugin is.
+
+```wgsl
+fn tint(r: ScRegion) -> vec4<f32>
+```
+
+The host asks about every region it draws and calls `tint` once for each, in a compute shader (so
+sample textures with `textureSampleLevel`):
+
+| `ScRegion` field | Type | Meaning |
+|---|---|---|
+| `kind` | `u32` | `SC_ICON`, `SC_BUTTON` or `SC_PANEL`. |
+| `rect` | `vec4<f32>` | Left, top, right, bottom, in points from the window's top left. |
+| `position` | `vec2<f32>` | The point asked about: an icon's or button's centre, or a point on a panel's grid (at most 48 points apart, its corners included). |
+| `base` | `vec4<f32>` | The region's own colour, linear: the theme's accent for an icon, the fill for a button or panel. |
+| `enabled` | `f32` | 1 for an enabled control, less for a disabled one. |
+
+`sc` is the same `ScHost`, with `size` the window's size in pixels and no camera (`right`, `up`
+and `forward` are 0).
+
+It returns a linear colour and how strongly it shows, alpha 0 to 1. Alpha 0 leaves the region as
+it is. An **icon**'s coloured parts take the colour at that strength, keeping their shading, and its
+whites and greys stay as they are; a **button** gets the colour filled over its block; a **panel**
+gets it laid over its fill, blended smoothly between the points asked about, inside its corners.
+
+The answers are read back for a later frame, so a tint follows a region a frame late; a region not
+answered yet (just opened or scrolled) takes the nearest answer of its kind. At most 8192 regions
+are asked about in a frame. An animated tint runs about 30 times a second; a still one runs when
+what it colours moves or changes.
+
+[`plugin-examples/accent-sweep`](plugin-examples/accent-sweep) sweeps a band of the theme's accent
+across the icons and buttons, with its width and speed as settings.
+
+## Panels
+
+`"kind": "panel"` (`shaders@0.2`) draws the background of every see-through panel from what is
+behind it: the 3D view and the panels under it, sharp and blurred. The app draws no look of its own
+there, and with none chosen the panels draw as before. See [plugin panels](plugin-panels.md).
+
 ## Versions
 
+`shaders@0.2` adds tints and settings; `shaders@0.1` plugins install and draw as before.
 `shaders@0.1` is version 0.1 of the capability. While it is 0.x, a later minor version may change
 it, and SolidCraft then asks you to update the plugin rather than drawing it wrongly. The amendment
 in RFC 0015 lists what is planned next (glass panel materials, a previous-frame texture for effects

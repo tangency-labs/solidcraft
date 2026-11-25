@@ -8,9 +8,10 @@
 //! `own_reader_sphere_plane_uv_trim_f*_rebuild` rows of `topology.face_p3`, the 12
 //! `own_reader_sphere_plane_create_*` rows of `topology.edgeuse_p3`, `write_bytes0153`
 //! and the four `stubs4-delete-edge-sphere_diff_3cylinders-e1/e4` rows (the last five
-//! recorded on Linux CI). tangency-labs/solidcraft#21421 (the round's end vertices kept on
-//! the seams they are on) moves those four `sphere_diff_3cylinders` rows again; their
-//! hashes are of the refit run with that change too.
+//! recorded on Linux CI). The retirement of `fillet_cleanup_keeps_target_faces` (WR-459)
+//! changes those four rows' topology (the clean-up keeps the target's own faces), so they
+//! are no longer the refit run of main's line and their entries are deleted; their rows
+//! are checked in `units::blend_fillet_executive_p3::end_to_end::wr459_sphere_rows`.
 //!
 //! The `blend.fillet_executive_p3` hashes are of those lines without the
 //! `fillet_point_step` key, which recorded the retired step latch (#18916); every other
@@ -19,7 +20,8 @@
 //! The drop tracer's clamped-sliver rule (a span whose clamped UV image is one point within
 //! the drop's tolerances is left out) moves the ten `sphere_diff_3cylinders` rows
 //! (`stubs4-delete-edge` `e1`, `e2`, `e4`, `e5`, `sweep4` `e30` and `all`, `sweep5` `e29`) in
-//! their `mass_properties` only, so their hashes are of the refit run with that rule;
+//! their `mass_properties` only, so the hashes of the six listed here (WR-459's retirement
+//! took out the `e1`/`e4` rows) are of the refit run with that rule;
 //! `tests/drop_clamped_sliver_moved_mass_rows.rs` classifies each moved entry against a certified enclosure.
 
 use super::Row;
@@ -1010,28 +1012,8 @@ pub(super) static DATA: &[Row] = &[
     ),
     (
         "blend.fillet_executive_p3",
-        "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
-        0xa881f015f4f2755c,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
-        0x1fa4f1544fce1305,
-    ),
-    (
-        "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1",
         0x042f4b954681d6de,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
-        0x0b6df5bf3726bda1,
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
-        0x0853bae5c4f73152,
     ),
     (
         "blend.fillet_executive_p3",
