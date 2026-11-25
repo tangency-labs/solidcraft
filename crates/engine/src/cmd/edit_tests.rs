@@ -3000,10 +3000,32 @@ fn select_edge_loop_takes_the_rim_of_a_pocket_from_one_edge() {
         out
     };
 
+    // The pocket's rim, read from the B-rep record without the command: the plate's top is the
+    // face with an inner loop (not its first, outer one) through the picked edge, and the rim is
+    // that loop's edges.
+    let (expected_top, mut expected_rim) = {
+        let state = s.world_state().unwrap();
+        let record = state.body("Plate").unwrap().body.record();
+        record
+            .faces
+            .iter()
+            .enumerate()
+            .find_map(|(f, face)| {
+                face.loops.iter().skip(1).find_map(|l| match l {
+                    solidcore_record::brep::Loop::Edges { edges } if edges.iter().any(|u| u.edge as usize == picked) => {
+                        Some((f, edges.iter().map(|u| u.edge as usize).collect::<Vec<usize>>()))
+                    }
+                    _ => None,
+                })
+            })
+            .expect("the picked edge is on the top face's inner loop")
+    };
+    expected_rim.sort_unstable();
     let r = run(&mut s, "select.edge_loop", json!({}));
     assert_eq!(r["selected"], 4, "{r}");
     let rim = sorted(&r);
-    assert_eq!(rim.len(), 4, "{r}");
+    assert_eq!(rim, expected_rim, "by default the loop is the pocket's rim on the top face: {r}");
+    assert_eq!(r["face"].as_u64(), Some(expected_top as u64), "{r}");
     assert!(rim.contains(&picked), "{r}");
     assert!(s.selection.iter().all(|x| matches!(x, Sel::Edge { body, .. } if body == "Plate")), "{:?}", s.selection);
     assert_eq!(selected_edges(&s), rim);
