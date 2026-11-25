@@ -45,7 +45,7 @@ const TEMPLATE_SAVE_CONTRACT: TypedContract<TemplateSaveParams> = TypedContract:
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("drawing.create", "Create Drawing", crate::checked!("drawing.create", create)).any_part().icon("new").doc_only().contract(&CREATE_CONTRACT).params(
-        "name?: the drawing's name (default: the design's); template?: a built-in's name (drawing.template.list; default iso-a3-part for a part, iso-a2-assembly for an assembly, a design that places components) or a .json template file (drawing.template.save); first_sheet_name?: override the first sheet's name; first_sheet_paper?: override its {size, orientation, dpi}; omit_first_sheet_title_block?: true to start the first sheet without its template title block; standard_views?: true to place the front, top, right and isometric views at a fitted scale on the first sheet; language?: the drawing's content language, a BCP 47 tag (default: the template's, en for the built-ins); units?: \"follow_model\" or one length unit such as \"mm\" (default: the template's); projection?: first or third (angle) (default: the template's, third for the built-ins); font?: the font family its text is set in, by name (default: the template's, the built-in font for the built-ins); line_group?: the ISO 128 line group its lines are drawn in, by its wide line, one of 0.25, 0.35, 0.5, 0.7, 1, 1.4 or 2 (default: the template's, 0.5 for the built-ins); source?: another design file to draw instead of this design, which may then be empty: a design file's path of at most 4096 bytes, kept relative to this design's folder when saved. Adds a drawing of this design (or of the file) made from the template, with ids of its own, and opens it (one undo step of the model) → as drawing.inspect",
+        "name?: the drawing's name (default: the design's); template?: a built-in's name (drawing.template.list; default iso-a3-part for a part, iso-a2-assembly for an assembly, a design that places components) or a .json or .scdwg template file (drawing.template.save); first_sheet_name?: override the first sheet's name; first_sheet_paper?: override its {size, orientation, dpi}; omit_first_sheet_title_block?: true to start the first sheet without its template title block; standard_views?: true to place the front, top, right and isometric views at a fitted scale on the first sheet; language?: the drawing's content language, a BCP 47 tag (default: the template's, en for the built-ins); units?: \"follow_model\" or one length unit such as \"mm\" (default: the template's); projection?: first or third (angle) (default: the template's, third for the built-ins); font?: the font family its text is set in, by name (default: the template's, the built-in font for the built-ins); line_group?: the ISO 128 line group its lines are drawn in, by its wide line, one of 0.25, 0.35, 0.5, 0.7, 1, 1.4 or 2 (default: the template's, 0.5 for the built-ins); source?: another design file to draw instead of this design, which may then be empty: a design file's path of at most 4096 bytes, kept relative to this design's folder when saved. Adds a drawing of this design (or of the file) made from the template, with ids of its own, and opens it (one undo step of the model) → as drawing.inspect",
     ),
     CommandSpec::new("drawing.template.apply", "Apply Drawing Template", crate::checked!("drawing.template.apply", template_apply))
         .in_drawing()
@@ -54,7 +54,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&TEMPLATE_APPLY_CONTRACT)
         .output(output_schema_for::<TemplateApplyResult>)
         .params(
-            "template: a built-in's name (drawing.template.list) or a .json template file (drawing.template.save); dry_run?: true to answer without changing anything. Each sheet takes the paper, drawing border and title block of the template's sheet in its place (its last for sheets past its own); text typed over a cell stays while the new block has a text cell of that name. Nothing moves → changed: [{sheet, paper, border, title_block, lost: [cells whose typed text is dropped]}] for each sheet that changes, outside: the views on a restyled sheet that fall outside its drawing space or over its title block (as drawing.sheet.set lists them), dry_run. One undo step, none when nothing changes.",
+            "template: a built-in's name (drawing.template.list) or a .json or .scdwg template file (drawing.template.save); dry_run?: true to answer without changing anything. Each sheet takes the paper, drawing border and title block of the template's sheet in its place (its last for sheets past its own); text typed over a cell stays while the new block has a text cell of that name. Nothing moves → changed: [{sheet, paper, border, title_block, lost: [cells whose typed text is dropped]}] for each sheet that changes, outside: the views on a restyled sheet that fall outside its drawing space or over its title block (as drawing.sheet.set lists them), dry_run. One undo step, none when nothing changes.",
         ),
     CommandSpec::new("drawing.template.save", "Save as Drawing Template", crate::checked!("drawing.template.save", template_save))
         .in_drawing()
@@ -64,7 +64,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&TEMPLATE_SAVE_CONTRACT)
         .output(output_schema_for::<TemplateSaveResult>)
         .params(
-            "path: a .json file → {path, bytes}. Writes the drawing open as a template: its sheets, borders, title blocks and the text typed over their cells, its projection, units, language and properties but its number, and nothing it draws or documents (its sources, views, dimensions, balloons, revision rows, and the component each sheet documents). drawing.create and drawing.template.apply take the file as their template; a drawing made from it keeps its own copy, so a later save changes no drawing.",
+            "path: a .scdwg file (a .json name gets the .scdwg file beside it, with the same name) → {path: the file written, bytes, renamed_from?: the .json path asked for}. Writes the drawing open as a template: its sheets, borders, title blocks and the text typed over their cells, its projection, units, language and properties but its number, and nothing it draws or documents (its sources, views, dimensions, balloons, revision rows, and the component each sheet documents). drawing.create and drawing.template.apply take the file as their template; a drawing made from it keeps its own copy, so a later save changes no drawing.",
         ),
     CommandSpec::new("drawing.template.list", "List Drawing Templates", crate::checked!("drawing.template.list", template_list))
         .any_part()
@@ -107,7 +107,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SET_CONTRACT)
         .params("name?, language?: a BCP 47 tag, units?: \"follow_model\" or one length unit such as \"mm\", projection?: first or third (angle), which every projected view follows, updates?: automatic, or deferred: its views follow a changed model only on drawing.update, font?: the font family its text is set in, by name, never a file (\"\": the built-in font). line_group?: the ISO 128 line group its lines are drawn in, by its wide line: 0.25, 0.35, 0.5, 0.7, 1, 1.4 or 2; a sheet or a view may choose another. revision_numbering?: {start: 0 or 1}, the number new revisions count from: rows already there stay as typed. view_letters_reuse?: whether a deleted view's letter is given again (true, the default) or never (false). One undo step."),
     CommandSpec::new("drawing.properties", "Drawing Properties", properties).in_drawing().icon("settings").noundo().doc_only().params(
-        "→ metadata: the drawing's properties as saved (other tools' keys too); properties: project, part_number, revision, author, organization, description and license, each its text or null. The design properties' rules (document.metadata).",
+        "→ metadata: the drawing's properties as saved (other tools' keys too); properties: project, part_number, revision, author, organization, description, material, finish and license, each its text or null. The design properties' rules (document.metadata).",
     ),
     CommandSpec::new("drawing.properties.set", "Change Drawing Properties", properties_set).in_drawing().icon("settings").doc_only().params(
         "key and value, or values: {key: value, …} (all or nothing, one undo step), as document.metadata.set takes them → metadata, changed: [keys]",
@@ -278,27 +278,48 @@ fn template_named(cmd: &str, from: &str) -> Result<Drawing> {
         return made.map_err(|e| bad(cmd, e.to_string()));
     }
     if !template_path(from) {
-        return Err(bad(cmd, format!("no template `{from}`: a built-in's name (drawing.template.list) or a .json template file")));
+        return Err(bad(cmd, format!("no template `{from}`: a built-in's name (drawing.template.list) or a .json or .scdwg template file")));
     }
-    let text = solidcraft_io::vfs::read_to_string(from, drawing::MAX_DRAWING_BYTES).map_err(|e| bad(cmd, format!("template `{from}`: {e}")))?;
-    template::read(&text).map_err(|e| bad(cmd, format!("template `{from}`: {e}")))
+    // A container holds its images beside the record, up to a design file's size.
+    let bytes = solidcraft_io::vfs::read(from, solidcraft_io::MAX_DESIGN_BYTES).map_err(|e| bad(cmd, format!("template `{from}`: {e}")))?;
+    // A container (a template with a logo keeps its image as a part), or JSON text.
+    let read = if solidcraft_io::is_design_container(&bytes) {
+        solidcraft_io::read_drawing(&bytes)
+            .map_err(|e| e.to_string())
+            .and_then(|made| template::check(&made).map(|()| made).map_err(|e| e.to_string()))
+    } else {
+        std::str::from_utf8(&bytes).map_err(|e| e.to_string()).and_then(|text| template::read(text).map_err(|e| e.to_string()))
+    };
+    read.map_err(|e| bad(cmd, format!("template `{from}`: {e}")))
 }
 
-/// Whether `path` can be a template file's: a .json file, at most [`MAX_PATH_BYTES`] long.
+/// Whether `path` can be a template file's: a .json or .scdwg file, at most [`MAX_PATH_BYTES`] long.
 fn template_path(path: &str) -> bool {
-    path.len() <= MAX_PATH_BYTES && Path::new(path).extension().is_some_and(|e| e.eq_ignore_ascii_case("json"))
+    path.len() <= MAX_PATH_BYTES && (json_path(path) || solidcraft_io::is_drawing_path(path))
+}
+
+fn json_path(path: &str) -> bool {
+    Path::new(path).extension().is_some_and(|e| e.eq_ignore_ascii_case("json"))
 }
 
 fn template_save(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "drawing.template.save";
-    let path = text(cmd, p, "path")?.filter(|path| template_path(path)).ok_or_else(|| bad(cmd, "`path` must be a .json file"))?;
-    solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(e.to_string()))?;
+    let asked = text(cmd, p, "path")?.filter(|path| template_path(path)).ok_or_else(|| bad(cmd, "`path` must be a .json or .scdwg file"))?;
+    // A template is one container file, its images (a logo) parts of it, never text. A .json name,
+    // as templates had, gets the container beside it with the same stem; the reply names it.
+    let path =
+        if json_path(asked) { Path::new(asked).with_extension(solidcraft_io::DRAWING_EXT).to_string_lossy().into_owned() } else { asked.to_string() };
+    solidcraft_io::vfs::check(&path).map_err(|e| EngineError::Other(e.to_string()))?;
     let made = template::from_drawing(s.drawing(cmd)?).map_err(|e| bad(cmd, e.to_string()))?;
-    let text = made.to_json().map_err(|e| bad(cmd, e.to_string()))?;
+    let bytes = solidcraft_io::write_drawing_container(&made).map_err(|e| bad(cmd, e.to_string()))?;
+    if bytes.len() > solidcraft_io::MAX_DESIGN_BYTES {
+        return Err(bad(cmd, format!("the template is over {} MiB, more than a template file may be", solidcraft_io::MAX_DESIGN_BYTES >> 20)));
+    }
     // Checked again just before writing, as the sheet export does.
-    solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(e.to_string()))?;
-    solidcraft_io::write_atomic(Path::new(path), text.as_bytes(), false).map_err(|e| EngineError::Other(e.to_string()))?;
-    let reply = TemplateSaveResult { path: path.into(), bytes: text.len(), param_warnings: Vec::new() };
+    solidcraft_io::vfs::check(&path).map_err(|e| EngineError::Other(e.to_string()))?;
+    solidcraft_io::write_atomic(Path::new(&path), &bytes, false).map_err(|e| EngineError::Other(e.to_string()))?;
+    let renamed_from = (path != asked).then(|| asked.to_string());
+    let reply = TemplateSaveResult { path, bytes: bytes.len(), renamed_from, param_warnings: Vec::new() };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
@@ -393,6 +414,11 @@ pub(super) fn view_label(d: &Drawing, view: &View) -> String {
             }
             ViewKind::Auxiliary { parent, .. } => {
                 label.push_str("Auxiliary of ");
+                let Some(next) = d.view(*parent) else { break };
+                at = next;
+            }
+            ViewKind::Detail { parent, .. } => {
+                label.push_str("Detail of ");
                 let Some(next) = d.view(*parent) else { break };
                 at = next;
             }

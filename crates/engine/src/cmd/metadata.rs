@@ -192,6 +192,38 @@ mod tests {
         assert_eq!(s.doc.metadata.part_number(), Some("ACME-1042"));
     }
 
+    /// A single-part design has no component to hold a material and a finish: the design carries
+    /// them, set and read by the commands that already take its properties, saved with it.
+    #[test]
+    fn a_design_carries_its_own_material_and_finish() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+        let undo = s.undo.len();
+        let r = run(&mut s, "document.metadata.set", json!({"values": {"material": "CRS, 16 ga", "finish": "Zinc plate, clear"}}));
+        assert_eq!(r["changed"], json!(["finish", "material"]));
+        assert_eq!(s.undo.len(), undo + 1, "one undo step");
+        let r = run(&mut s, "document.metadata", json!({}));
+        assert_eq!((&r["properties"]["material"], &r["properties"]["finish"]), (&json!("CRS, 16 ga"), &json!("Zinc plate, clear")));
+        let root = run(&mut s, "component.metadata", json!({"component": "root"}));
+        assert_eq!((&root["material"], &root["finish"]), (&json!("CRS, 16 ga"), &json!("Zinc plate, clear")), "{root}");
+        let refusal = s.execute("component.metadata.set", &json!({"component": "root", "finish": "x"})).unwrap_err().to_string();
+        assert!(refusal.contains("document.metadata.set"), "the root's own are document.metadata.set's: {refusal}");
+        let dir = scratch("material-finish");
+        let path = dir.join("part.solidcraft");
+        run(&mut s, "file.save_as", json!({"path": path, "format": "container"}));
+        let mut back = Session::default();
+        run(&mut back, "doc.open", json!({"path": path}));
+        assert_eq!((back.doc.metadata.text("material"), back.doc.metadata.text("finish")), (Some("CRS, 16 ga"), Some("Zinc plate, clear")));
+        for hostile in [json!("a\u{7}b"), json!("x".repeat(solidcraft_doc::metadata::MAX_TEXT_BYTES + 1)), json!(5), json!({"a": 1})] {
+            let before = s.doc.metadata.clone();
+            assert!(s.execute("document.metadata.set", &json!({"key": "finish", "value": hostile})).is_err(), "{hostile}");
+            assert_eq!(s.doc.metadata, before);
+        }
+        run(&mut s, "document.metadata.set", json!({"values": {"finish": "\u{7814}\u{78e8} #4 \u{1f527}", "material": null}}));
+        assert_eq!((s.doc.metadata.text("finish"), s.doc.metadata.text("material")), (Some("\u{7814}\u{78e8} #4 \u{1f527}"), None));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn a_refused_change_leaves_the_design_as_it_was() {
         let mut s = Session::default();
@@ -260,10 +292,10 @@ mod tests {
     fn a_design_without_properties_saves_as_before() {
         let mut s = Session::default();
         run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
-        let before = solidcraft_io::write_design(&s.doc);
+        let before = solidcraft_io::write_design(&s.doc).unwrap();
         run(&mut s, "document.metadata.set", json!({"key": "author", "value": "Jane"}));
         run(&mut s, "document.metadata.remove", json!({"key": "author"}));
-        assert_eq!(solidcraft_io::write_design(&s.doc), before, "byte for byte");
+        assert_eq!(solidcraft_io::write_design(&s.doc).unwrap(), before, "byte for byte");
         assert!(!String::from_utf8_lossy(&before).contains("\"metadata\""));
     }
 
@@ -375,7 +407,10 @@ mod tests {
         for k in keys {
             assert_eq!(properties[k], format!("{k} text"), "{k}");
         }
-        assert_eq!(properties.as_object().map(Map::len), Some(keys.len()), "{properties}");
+        // The design also takes material and finish now (#20114): they read as absent until set, so the
+        // seven keys it took before are all that hold text, and each still reads back.
+        assert_eq!(properties.as_object().map(Map::len), Some(keys.len() + 2), "{properties}");
+        assert_eq!((&properties["material"], &properties["finish"]), (&Value::Null, &Value::Null));
         let refused = s.execute("document.metadata.set", &json!({"key": "colour", "value": "red"})).unwrap_err().to_string();
         assert!(refused.contains("`colour` is not a design property: SolidCraft's are project, part_number,"), "{refused}");
     }

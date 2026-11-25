@@ -29,6 +29,7 @@ use solidcore::surface::procedural_blend::exact::ExactClass;
 use solidcore::surface::procedural_blend::record::SupportRecord;
 use solidcore::surface::procedural_blend::BlendNet;
 use solidcore::surface::surface::SurfaceKind;
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::face::p2 as face;
 use solidcore::topology::{edge, EdgeId};
 use solidcore::{Brep, Kernel};
@@ -325,26 +326,40 @@ fn assert_records_round_trip(k: &Kernel, b: &Brep) -> usize {
     n
 }
 
-/// `a` and `b` evaluate alike over a 9 x 9 grid of `a`'s natural domain, to the rounding of
-/// the part (64 ulps of its size, 25).
+/// `a` and `b` evaluate alike over a 9 x 9 grid of `a`'s natural domain, to 64 ulps of the
+/// larger point, and at least of a 25 mm part.
 fn assert_same_points(
     k: &Kernel,
     a: &solidcore::surface::surface::Surface,
     b: &solidcore::surface::surface::Surface,
     what: &str,
 ) {
+    assert_points_within(k, a, b, 0.0, what);
+}
+
+/// As [`assert_same_points`], and also within `allow` millimetres. A short sweep's
+/// trigonometric point can sit about `R ε / θ²` off the original, which is past 64 ulps.
+fn assert_points_within(
+    k: &Kernel,
+    a: &solidcore::surface::surface::Surface,
+    b: &solidcore::surface::surface::Surface,
+    allow: f64,
+    what: &str,
+) {
     let d = a.natural_uv_domain_with_nurb(k).unwrap();
-    let tol = 64.0 * f64::EPSILON * 25.0;
     for i in 0..=8 {
         for j in 0..=8 {
             let uv = solidcore::geom::vector2d::Point2::new(
                 d.min().x + (d.max().x - d.min().x) * f64::from(i) / 8.0,
                 d.min().y + (d.max().y - d.min().y) * f64::from(j) / 8.0,
             );
-            let off =
-                (a.evaluate_point(k, uv).unwrap() - b.evaluate_point(k, uv).unwrap()).length();
+            let pa = a.evaluate_point(k, uv).unwrap();
+            let pb = b.evaluate_point(k, uv).unwrap();
+            let size = pa.length().max(pb.length()).max(25.0);
+            let off = (pa - pb).length();
+            let bound = (64.0 * f64::EPSILON * size).max(allow);
             assert!(
-                off <= tol,
+                off <= bound,
                 "{what} rebuilt from its record is {off:e} off at {uv:?}"
             );
         }
@@ -615,4 +630,188 @@ fn the_offset_of_a_circle_round_is_its_round_of_r_plus_minus_d() {
         (radii[0] - 0.75).abs() <= 1e-14 && (radii[1] - 1.25).abs() <= 1e-14,
         "{radii:?}"
     );
+}
+
+/// The issue's frustum about x (radius 24 at x = 0, 36 at x = 48) with a rib of `sweep`
+/// degrees centred on its seam, the rib's side leaving the cone at (18, 28.5) 15 degrees off
+/// the cone's straight side; that edge (two edges, split by the seam) rounded 1 mm. The body,
+/// and its volume and its faces', edges' and vertices' counts before the round.
+fn short_rib_rounded(sweep: f64) -> (Kernel, Brep, f64, [usize; 3]) {
+    use solidcore::curve::curve::Curve;
+    use solidcore::geom::vector3d::Vec3;
+    use solidcore::primitive::api_curves::create_line_segment;
+    use solidcore::sweep::api_brep::create_rotational_sweep;
+    fn revolved(k: &mut Kernel, pts: &[Vec3], sweep: f64) -> Brep {
+        let cs: Vec<Curve> = pts
+            .iter()
+            .zip(pts.iter().cycle().skip(1))
+            .map(|(a, b)| Curve::from(create_line_segment(*a, *b).unwrap()))
+            .collect();
+        let refs: Vec<Option<&Curve>> = cs.iter().map(Some).collect();
+        create_rotational_sweep(
+            k,
+            &refs,
+            Point3::ZERO,
+            Vec3::new(1.0, 0.0, 0.0),
+            sweep,
+            true,
+        )
+        .unwrap()
+    }
+    let cone =
+        [[0.0, 0.0], [0.0, 24.0], [48.0, 36.0], [48.0, 0.0]].map(|p| Vec3::new(p[0], p[1], 0.0));
+    let turn = -sweep.to_radians() / 2.0;
+    let rib: Vec<Vec3> = SHORT_RIB
+        .iter()
+        .map(|p| Vec3::new(p[0], p[1] * turn.cos(), p[1] * turn.sin()))
+        .collect();
+    let mut k = Kernel {
+        fixes: solidcore::kernel::UpstreamFixes::all(),
+        ..Kernel::default()
+    };
+    let body = revolved(&mut k, &cone, 360.0);
+    let wedge = revolved(&mut k, &rib, sweep);
+    let mut b = boolean_union(&mut k, body, wedge).unwrap();
+    let before = volume_to(&k, &mut b, 1e-6);
+    let counts = topology_counts(&b);
+    let at = Point3::new(SHORT_RIB[0][0], SHORT_RIB[0][1], 0.0);
+    let root = b
+        .edges()
+        .ids()
+        .min_by(|&e, &f| {
+            let gap = |e| midpoint(&k, &b, e).distance(at);
+            gap(e).total_cmp(&gap(f))
+        })
+        .unwrap();
+    fillet_edges(&mut k, &mut b, &[root], 1.0, 1, 1, 1.0).unwrap();
+    (k, b, before, counts)
+}
+
+fn topology_counts(b: &Brep) -> [usize; 3] {
+    [
+        b.faces().ids().count(),
+        b.edges().ids().count(),
+        b.vertices().ids().count(),
+    ]
+}
+
+/// The rib's meridian section (x, rho): its root on the cone's side, its outer and its back
+/// corner.
+const SHORT_RIB: [[f64; 2]; 3] = [
+    [18.0, 28.5],
+    [26.743_129, 33.353_628],
+    [27.370_857, 30.842_714],
+];
+
+/// The 1 mm round in the 165 degree corner between the cone's side (slope 1/4, back towards
+/// x = 0) and the rib's side at the root, per radian turned: the kite of the corner, the two
+/// feet and the ball's centre, less the ball's sector between the feet, by Pappus.
+fn short_rib_round_per_radian() -> f64 {
+    let unit = |d: [f64; 2]| {
+        let l = d[0].hypot(d[1]);
+        [d[0] / l, d[1] / l]
+    };
+    let c = SHORT_RIB[0];
+    let back = unit([-1.0, -0.25]);
+    let up = unit([SHORT_RIB[1][0] - c[0], SHORT_RIB[1][1] - c[1]]);
+    let phi = (back[0] * up[0] + back[1] * up[1]).acos();
+    let t = 1.0 / (phi / 2.0).tan();
+    let b = unit([back[0] + up[0], back[1] + up[1]]);
+    let centre = c[1] + b[1] / (phi / 2.0).sin();
+    let foot = |d: [f64; 2]| c[1] + d[1] * t;
+    let kite = t;
+    let kite_rho = (2.0 * c[1] + foot(back) + foot(up) + 2.0 * centre) / 6.0;
+    let half = (PI - phi) / 2.0;
+    let sector = half;
+    let sector_rho = centre - b[1] * 2.0 * half.sin() / (3.0 * half);
+    kite * kite_rho - sector * sector_rho
+}
+
+/// #19724, on stabler's construction from #19859: a round between the frustum's cone and a
+/// rib's cone a few degrees wide. The rib is one short rational arc. Rebuilding its centre
+/// from that arc does not meet the evaluation bound, so the record keeps the cone the round
+/// was built on, and a reader uses it only where the form lies on it. Both supports stay
+/// cones, and both rounds read back as Circle rounds of radius 1. Placing the recognised
+/// sweep on that axis leaves the recognised angular zero, so a trigonometric point moves by
+/// about the radius times machine epsilon over the square of the sweep: about 8×10⁻¹² mm at
+/// 1° and radius 30 mm. The round trip is the record and the re-certification.
+#[test]
+fn a_round_on_a_short_rib_s_cone_reads_back_from_its_record() {
+    use solidcore::surface::procedural_blend::record::SupportKindRecord;
+    for sweep in [6.0_f64, 3.0, 1.0] {
+        let (mut k, mut b, before, counts) = short_rib_rounded(sweep);
+        // two round faces; the two root edges become four rails, with an arc on each of the
+        // rib's end planes and one across the seam; the three root vertices become six
+        let [f, e, v] = counts;
+        assert_eq!(
+            topology_counts(&b),
+            [f + 2, e + 5, v + 3],
+            "{sweep} degrees"
+        );
+        let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+        assert!(check.is_valid(), "{sweep} degrees: {:?}", check.lines());
+        // the round's closed form; a 0.8 mm round would add a third less
+        let added = volume_to(&k, &mut b, 1e-6) - before;
+        let want = short_rib_round_per_radian() * sweep.to_radians();
+        assert!(
+            (added - want).abs() <= 1e-3 * want,
+            "{sweep} degrees: the round adds {added}, its closed form {want}"
+        );
+        // the seam splits the root in two edges, so two rounds
+        assert_eq!(
+            assert_definitions(&k, &b),
+            vec![ExactClass::Circle; 2],
+            "{sweep} degrees"
+        );
+        let mut rounds = 0;
+        for (f, _) in exact_rounds(&b) {
+            let s = face::surface(&b, f).unwrap().unwrap();
+            let round = s.procedural_blend().unwrap().exact().unwrap();
+            assert!((round.radius() - 1.0).abs() <= 1e-12, "{}", round.radius());
+            let rec = exact_to_record(&k, s).unwrap();
+            let json = serde_json::to_string(&rec).unwrap();
+            let rebuilt = exact_rebuild(&k, &serde_json::from_str(&json).unwrap()).unwrap();
+            assert_eq!(
+                exact_to_record(&k, &rebuilt).unwrap(),
+                rec,
+                "{sweep} degrees"
+            );
+            // R ε / θ² at 1° and radius 30 mm is about 8×10⁻¹² mm. A hundred times that
+            // still rejects a centre a micrometre off.
+            let near = 1e-9;
+            let (round, again) = (
+                s.procedural_blend().unwrap(),
+                rebuilt.procedural_blend().unwrap(),
+            );
+            assert_points_within(&k, s, &rebuilt, near, "the round");
+            for i in 0..2 {
+                assert_points_within(
+                    &k,
+                    round.support(i).unwrap(),
+                    again.support(i).unwrap(),
+                    near,
+                    "a support",
+                );
+            }
+            rounds += 1;
+            for (i, support) in rec.supports.iter().enumerate() {
+                let SupportRecord::Nurbs {
+                    kind, revolution, ..
+                } = support
+                else {
+                    panic!("{sweep} degrees: support {i} is a blend");
+                };
+                assert_eq!(
+                    *kind,
+                    SupportKindRecord::Cone,
+                    "{sweep} degrees: support {i}"
+                );
+                assert!(
+                    revolution.is_some(),
+                    "{sweep} degrees: support {i} has no cone"
+                );
+            }
+        }
+        assert_eq!(rounds, 2, "{sweep} degrees");
+    }
 }

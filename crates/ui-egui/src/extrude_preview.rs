@@ -156,6 +156,7 @@ impl StraightPreview {
             }
         }
         Some(Ok(Built {
+            interaction: None,
             scene,
             sketches: Vec::new(),
             applied: None,
@@ -163,6 +164,7 @@ impl StraightPreview {
             mirror_meets: None,
             points: Vec::new(),
             placed: None,
+            centrelines: Vec::new(),
             tapered: Vec::new(),
             replaced: Vec::new(),
             outlines: Vec::new(),
@@ -170,6 +172,7 @@ impl StraightPreview {
             bounds,
             layer: None,
             joints: Vec::new(),
+            plugin_view: None,
         }))
     }
 }

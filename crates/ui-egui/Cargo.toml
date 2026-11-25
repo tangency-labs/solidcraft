@@ -8,14 +8,20 @@ license.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = ["usage-stats"]
+# Anonymous usage statistics (docs/privacy.md, src/usage_stats.rs). Without it none of the
+# counting, the notice, the network code or the endpoint is compiled in.
+usage-stats = ["dep:getrandom", "solidcraft-engine/usage-stats"]
+
 [dependencies]
+craft-plugin = { workspace = true }
 solidcraft-viewport-egui = { workspace = true }
 solidcraft-viewport-gpu = { workspace = true }
 solidcraft-viewport = { workspace = true }
 solidcraft-views = { workspace = true }
 solidcore-record = { workspace = true }
-solidcore-ops = { workspace = true }
-solidcore-tess = { workspace = true }
+solidcraft-kernel = { workspace = true }
 solidcraft-engine = { workspace = true }
 solidcraft-control = { workspace = true }
 solidcraft-control-egui = { workspace = true }
@@ -54,6 +60,9 @@ minisign-verify = "0.3"
 zip = { workspace = true }
 # Rasterises the icon SVGs (crates/look/icons/design/svg) at the size they are drawn.
 tiny-skia = { workspace = true }
+# The random installation id of usage statistics (MIT/Apache-2.0; already in the tree, `js` for
+# the browser's crypto).
+getrandom = { version = "0.2", features = ["js"], optional = true }
 
 [target.'cfg(unix)'.dependencies]
 # Ends an agent's process group with the system call (MIT; already in the tree through zip).
@@ -65,6 +74,8 @@ nix = { workspace = true }
 winreg = "0.56"
 
 [dev-dependencies]
+# Tests report a context locked inside its own lock (#21091).
+egui = { workspace = true, features = ["lock_nesting_report"] }
 # The kit's test fixtures for SolidCraft's tests of the kit with its data.
 solidcraft-ui-kit = { workspace = true, features = ["test-support"] }
 solidcraft-engine = { workspace = true, features = ["bundled-render-library", "profile"] }
@@ -73,17 +84,23 @@ syn = { workspace = true, features = ["visit"] }
 # The catalog guard reads every UI source file as Rust tokens; already in the tree through
 # crates/derive and the workspace lockfile.
 proc-macro2 = { workspace = true }
+# Prints the colour guard's parsed source without its test-only items; already in the tree
+# through syn and crates/derive.
+quote = { workspace = true }
 
 # Pictures pasted into the agent chat; already in the tree, with the same features, through
 # egui-winit's clipboard.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 arboard = { version = "3.6", default-features = false, features = ["image-data"] }
+fontdb = { workspace = true }
 lopdf = { version = "0.45", default-features = false }
+# Waits for wgpu error scopes when a plugin background effect is built.
+pollster = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 wat = "1"
-# The offscreen viewport render test opens a device without a window.
-pollster = { workspace = true }
 
 [build-dependencies]
 serde_json = { workspace = true }
+# Packs the message catalogs the app embeds (build.rs).
+flate2 = { workspace = true }

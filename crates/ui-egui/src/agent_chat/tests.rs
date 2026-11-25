@@ -585,6 +585,8 @@ fn merging_finds_the_turns_start_when_the_history_was_trimmed() {
         label: String::new(),
         doc: d.clone(),
         active_sketch: None,
+        sketching_view: None,
+        sketch_restore_marker: None,
         active_sheet_sketch: None,
         pending_moves: Default::default(),
         part: None,
@@ -760,12 +762,15 @@ fn the_chat_pops_out_into_its_own_window_and_docks_back() {
 fn the_window_place_is_given_once_when_it_opens() {
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
     app.preferences.agent_chat_window = Some([1967.0, 160.0, 569.0, 686.0]);
-    let first = panel::window_builder(&app.session.doc.name, app.agent_chat.window_placed, &panel::AgentPanelPrefs::read(&app.preferences));
+    let owner = egui::ViewportId::from_hash_of("chat owner");
+    let first = panel::window_builder(&app.session.doc.name, app.agent_chat.window_placed, &panel::AgentPanelPrefs::read(&app.preferences), owner);
+    assert_eq!(first.native_owner, Some(owner));
     assert_eq!(first.position, Some(egui::pos2(1967.0, 160.0)));
     assert_eq!(first.inner_size, Some(egui::vec2(569.0, 686.0)));
     app.agent_chat.window_placed = true;
     app.preferences.agent_chat_window = Some([1967.0, 160.0, 569.0, 687.0]);
-    let later = panel::window_builder(&app.session.doc.name, app.agent_chat.window_placed, &panel::AgentPanelPrefs::read(&app.preferences));
+    let later = panel::window_builder(&app.session.doc.name, app.agent_chat.window_placed, &panel::AgentPanelPrefs::read(&app.preferences), owner);
+    assert_eq!(later.native_owner, Some(owner));
     assert_eq!((later.position, later.inner_size), (None, None), "nothing to move or resize once it is open");
     assert!(later.title.is_some());
     // Docked or closed, the next pop-out opens at the saved place again.
@@ -974,6 +979,7 @@ struct Script {
     events: Arc<Mutex<Vec<Event>>>,
     /// Every prompt in full (its text and pictures).
     prompts: Arc<Mutex<Vec<Vec<PromptPart>>>>,
+    allow_paths: Arc<Mutex<Vec<Vec<std::path::PathBuf>>>>,
 }
 
 impl Script {
@@ -982,6 +988,9 @@ impl Script {
     }
     fn prompts(&self) -> Vec<Vec<PromptPart>> {
         self.prompts.lock().unwrap().clone()
+    }
+    fn allow_paths(&self) -> Vec<Vec<std::path::PathBuf>> {
+        self.allow_paths.lock().unwrap().clone()
     }
     fn report(&self, e: Event) {
         self.events.lock().unwrap().push(e);
@@ -1002,6 +1011,9 @@ impl ChatBackend for Script {
     }
     fn new_session(&mut self) {
         self.calls.lock().unwrap().push("new_session".into());
+    }
+    fn set_allow_paths(&mut self, paths: &[std::path::PathBuf]) {
+        self.allow_paths.lock().unwrap().push(paths.to_vec());
     }
     fn set_model(&mut self, model: &str) {
         self.calls.lock().unwrap().push(format!("set_model: {model}"));
@@ -1258,6 +1270,204 @@ fn an_agents_opened_design_keeps_its_conversation_and_undo_ownership() {
             assert!(app.agent_chat.backend.is_some());
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+/// Opting into `agent_shared_session` (#16282) preserves one Assistant conversation and backend
+/// across tab creation, tab switching, and tab closing, and informs the agent on its next turn
+/// when the active design changed.
+#[test]
+fn shared_session_keeps_conversation_and_backend_across_tab_switches() {
+    let (mut app, script, ctx) = app_with_script();
+    app.preferences.agent_shared_session = true;
+    app.session.doc_mut().name = "MasterAssembly".into();
+    send(&mut app, &ctx, "inspect master".into());
+    assert!(app.agent_chat.state() == State::Busy);
+    script.report(Event::Text { thought: false, text: "Master inspected.".into() });
+    ended(&script, "");
+    poll(&mut app, &ctx);
+    assert_eq!(app.agent_chat.state(), State::Ready);
+
+    let mut sub = solidcraft_engine::Session::default();
+    sub.doc_mut().name = "SubAssembly".into();
+    sub.path = Some("sub_assembly.sc".into());
+    crate::documents::open_tab(&mut app, sub).unwrap();
+    assert!(app.agent_chat.backend.is_some());
+    assert!(app.agent_chat.items.iter().any(|i| matches!(i, Item::User { text, .. } if text == "inspect master")));
+    assert!(app.agent_chat.items.iter().any(|i| matches!(i, Item::Agent { text, .. } if text == "Master inspected.")));
+
+    crate::documents::switch(&mut app, 0);
+    assert!(app.agent_chat.backend.is_some());
+    crate::documents::switch(&mut app, 1);
+    assert!(app.agent_chat.backend.is_some());
+
+    send(&mut app, &ctx, "inspect sub".into());
+    let prompt = script.calls().pop().unwrap_or_default();
+    assert!(prompt.contains("The active design tab changed from \"MasterAssembly\" to \"SubAssembly\""), "{prompt}");
+    assert!(prompt.contains("(sub_assembly.sc)"), "{prompt}");
+    script.report(Event::Text { thought: false, text: "Sub inspected.".into() });
+    ended(&script, "");
+    poll(&mut app, &ctx);
+
+    crate::documents::close(&mut app, 0, true);
+    assert!(app.agent_chat.backend.is_some());
+    assert!(!script.calls().iter().any(|call| matches!(call.as_str(), "cancel" | "new_session")));
+}
+
+/// With `agent_shared_session` enabled (#16282), `doc.open` on a design already open in another
+/// tab switches cleanly to that tab in the same conversation while each tab keeps its own undo.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn shared_session_allows_doc_open_to_switch_to_already_open_tab() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-shared-chat-open-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let next_path = dir.join("next.solidcraft");
+    let first_path = dir.join("first.solidcraft");
+    let mut next = solidcraft_engine::Session::default();
+    next.execute("solid.box", &boxed(100.0)["params"]).unwrap();
+    next.execute("file.save_as", &json!({"path": next_path})).unwrap();
+
+    let (mut app, script, ctx) = app_with_script();
+    let (tx, rx) = channel();
+    app.agent_chat.tools_rx = Some(rx);
+    app.preferences.ai_permissions = agents::Mode::All;
+    app.preferences.agent_shared_session = true;
+    app.run("solid.box", boxed(0.0)["params"].clone()).unwrap();
+    app.run("file.save_as", json!({"path": first_path})).unwrap();
+
+    send(&mut app, &ctx, "work across both tabs".into());
+    assert_eq!(chat_tool(&mut app, &tx, &ctx, "engine.execute", boxed(20.0))["ok"], true);
+    let r = chat_tool(&mut app, &tx, &ctx, "engine.execute", json!({"command": "doc.open", "params": {"path": next_path}, "allow_paths": [&dir]}));
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(app.docs.count(), 2);
+    assert_eq!(app.docs.active, 1);
+    assert_eq!(chat_tool(&mut app, &tx, &ctx, "engine.execute", boxed(130.0))["ok"], true);
+
+    // Switching back to the already-open first tab via `doc.open` succeeds in shared-session mode.
+    let r = chat_tool(&mut app, &tx, &ctx, "engine.execute", json!({"command": "doc.open", "params": {"path": first_path}, "allow_paths": [&dir]}));
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(app.docs.active, 0);
+    assert!(app.agent_chat.backend.is_some());
+    assert_eq!(chat_tool(&mut app, &tx, &ctx, "engine.execute", boxed(40.0))["ok"], true);
+    ended(&script, "");
+    poll(&mut app, &ctx);
+    assert!(!script.calls().iter().any(|call| matches!(call.as_str(), "cancel" | "new_session")));
+
+    assert_eq!(app.session.doc.features.len(), 3);
+    crate::documents::switch(&mut app, 1);
+    assert_eq!(app.session.doc.features.len(), 2);
+    app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(app.session.doc.features.len(), 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Toggling Preferences -> Assistant -> Keep one chat across design tabs (`agent_shared_session`)
+/// flips the preference and stops any parked background tab conversations.
+#[test]
+fn shared_session_preference_checkbox_toggles_and_disconnects_background_chats() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.ai_features = true;
+    h.app.agent_chat.detection = Some(Default::default());
+    let bg_script = Script::default();
+    h.app.agent_chat.backend = Some(Box::new(bg_script.clone()));
+    h.app.agent_chat.state = Some(State::Ready);
+
+    crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
+    assert!(!h.app.preferences.agent_shared_session);
+    assert!(h.app.agent_chat.backend.is_none());
+
+    h.call("ui.resize", json!({"width": 1280, "height": 800}));
+    h.call("ui.prefs", json!({"open": "AI"}));
+    h.frames(3);
+    crate::prefs::reveal_preference(&mut h, "prefs:agent_shared_session");
+    h.step(&json!({"click": {"handle": "prefs:agent_shared_session"}})).unwrap();
+    h.frames(2);
+    assert!(h.app.preferences.agent_shared_session);
+    assert!(bg_script.calls().iter().any(|c| c == "cancel"), "parked tab backend must disconnect when enabling shared chat");
+
+    h.app.preferences.agent_shared_session = false;
+    crate::documents::switch(&mut h.app, 0);
+    assert!(h.app.agent_chat.backend.is_none());
+    assert_eq!(h.app.agent_chat.state(), State::Off);
+}
+
+/// Switching tabs while `agent_shared_session` is enabled must never transfer a parked tab's
+/// transcript or draft into another tab's slot once sharing is turned off again.
+#[test]
+fn shared_session_keeps_parked_conversations_with_their_owning_tabs() {
+    let (mut app, script_a, ctx) = app_with_script();
+    app.session.doc_mut().name = "TabA".into();
+    send(&mut app, &ctx, "message in A".into());
+    script_a.report(Event::Text { thought: false, text: "reply in A".into() });
+    ended(&script_a, "");
+    poll(&mut app, &ctx);
+    app.agent_chat.input = "draft in A".into();
+
+    // Open Tab B while sharing is off, giving Tab B its own conversation and draft.
+    let mut sess_b = solidcraft_engine::Session::default();
+    sess_b.doc_mut().name = "TabB".into();
+    crate::documents::open_tab(&mut app, sess_b).unwrap();
+    let script_b = Script::default();
+    app.agent_chat.backend = Some(Box::new(script_b.clone()));
+    app.agent_chat.state = Some(State::Ready);
+    send(&mut app, &ctx, "message in B".into());
+    script_b.report(Event::Text { thought: false, text: "reply in B".into() });
+    ended(&script_b, "");
+    poll(&mut app, &ctx);
+    app.agent_chat.input = "draft in B".into();
+
+    // Return to Tab A, enable sharing, run A -> B -> A, then turn sharing off.
+    crate::documents::switch(&mut app, 0);
+    app.preferences.agent_shared_session = true;
+    crate::documents::disconnect_background_chats(&mut app, false);
+    crate::documents::switch(&mut app, 1);
+    crate::documents::switch(&mut app, 0);
+    app.preferences.agent_shared_session = false;
+
+    // Tab A still owns its transcript and draft.
+    assert!(app.agent_chat.items.iter().any(|i| matches!(i, Item::User { text, .. } if text == "message in A")));
+    assert!(!app.agent_chat.items.iter().any(|i| matches!(i, Item::User { text, .. } if text == "message in B")));
+    assert_eq!(app.agent_chat.input, "draft in A");
+
+    // Switching back to Tab B restores Tab B's own transcript and draft, never Tab A's.
+    crate::documents::switch(&mut app, 1);
+    assert!(app.agent_chat.items.iter().any(|i| matches!(i, Item::User { text, .. } if text == "message in B")));
+    assert!(!app.agent_chat.items.iter().any(|i| matches!(i, Item::User { text, .. } if text == "message in A")));
+    assert_eq!(app.agent_chat.input, "draft in B");
+}
+
+/// With `agent_shared_session` enabled, a prompt queued while the agent is still Starting or
+/// waiting for sign-in must be held when switching tabs so a late Ready event cannot run it on
+/// the newly active design.
+#[test]
+fn shared_session_holds_queued_startup_prompt_on_tab_switch() {
+    for state in [State::Starting, State::NeedsAuth] {
+        let (mut app, script, ctx) = app_with_script();
+        app.preferences.agent_shared_session = true;
+        app.session.doc_mut().name = "TabA".into();
+        let mut sess_b = solidcraft_engine::Session::default();
+        sess_b.doc_mut().name = "TabB".into();
+        crate::documents::open_tab(&mut app, sess_b).unwrap();
+        crate::documents::switch(&mut app, 0);
+
+        app.agent_chat.state = Some(state);
+        send(&mut app, &ctx, "change tab A".into());
+        assert!(app.agent_chat.queued.is_some(), "prompt must queue in {state:?}");
+
+        crate::documents::switch(&mut app, 1);
+        assert!(app.agent_chat.queued.is_none(), "tab switch must hold queued prompt in {state:?}");
+        assert_eq!(app.agent_chat.pending.len(), 1, "queued prompt moves to pending in {state:?}");
+        assert!(app.agent_chat.stopped, "pending queue must stay paused after tab switch in {state:?}");
+
+        script.report(Event::Ready { agent: "fake".into(), images: false });
+        poll(&mut app, &ctx);
+        assert!(
+            !script.calls().iter().any(|c| c.starts_with("prompt:")),
+            "late Ready on Tab B must not auto-send Tab A's prompt in {state:?}: {:?}",
+            script.calls()
+        );
     }
 }
 
@@ -1665,7 +1875,7 @@ fn a_change_by_hand_between_messages_is_told_to_the_agent() {
     let (mut app, script, ctx) = app_with_script();
     let (tx, rx) = channel();
     app.agent_chat.tools_rx = Some(rx);
-    app.agent_chat.attach_selection = false;
+    *app.agent_chat.attach_selection = false;
     let expr = |app: &SolveApp| app.session.doc.params.iter().find(|p| p.name == "w").map(|p| p.expr.clone()).unwrap();
 
     send(&mut app, &ctx, "a box and a parameter w".into());
@@ -1829,10 +2039,37 @@ fn new_chat_clears_everything_and_keeps_the_agent_and_mode() {
     assert!(!new_chat_needs_confirm(&app));
 }
 
-/// With a real ACP agent, New chat sends `session/new` on the same process (no restart).
+#[test]
+fn a_failed_new_chat_does_not_hide_completion_notices_after_reconnecting() {
+    for (reason, message) in [("max_tokens", "ui.agent_chat_reply_cut_off"), ("refusal", "ui.agent_chat_reply_declined")] {
+        let (mut app, old, ctx) = app_with_script();
+        send(&mut app, &ctx, "first".into());
+        new_chat(&mut app);
+        old.report(Event::Exited { tail: vec!["replacement could not start".into()] });
+        poll(&mut app, &ctx);
+        assert_eq!(app.agent_chat.state(), State::Failed);
+        assert!(app.agent_chat.backend.is_none());
+        new_chat(&mut app);
+
+        let replacement = Script::default();
+        app.agent_chat.backend = Some(Box::new(replacement.clone()));
+        replacement.report(Event::Ready { agent: "replacement".into(), images: false });
+        poll(&mut app, &ctx);
+        send(&mut app, &ctx, "second".into());
+        ended(&replacement, reason);
+        poll(&mut app, &ctx);
+        assert_eq!(app.agent_chat.state(), State::Ready);
+        assert!(
+            app.agent_chat.items.iter().any(|item| matches!(item, Item::Notice { text, .. } if text == tr(message))),
+            "{reason} must remain visible"
+        );
+    }
+}
+
+/// New chat releases an ACP adapter's sessions by ending it before starting its replacement.
 #[cfg(unix)]
 #[test]
-fn new_chat_with_an_acp_agent_opens_a_new_session_on_the_same_process() {
+fn new_chat_with_an_acp_agent_restarts_the_process() {
     let dir = std::env::temp_dir().join(format!("sc-agent-chat-new-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let log = dir.join("received.log");
@@ -1844,7 +2081,7 @@ while IFS= read -r line; do
   case "$line" in
     *'"method":"initialize"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"agentInfo":{"name":"fake","version":"1"}}}\n' "$id" ;;
     *'"method":"session/new"'*) n=$((n+1)); printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"s%s"}}\n' "$id" "$n" ;;
-    *'"method":"session/prompt"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id" ;;
+    *'"method":"session/prompt"'*) case "$line" in *stalled*) ;; *) printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id" ;; esac ;;
   esac
 done
 "#;
@@ -1870,14 +2107,23 @@ done
     new_chat(&mut app);
     assert!(app.agent_chat.items.is_empty());
     until(&mut app, &|a| a.agent_chat.state() == State::Ready);
-    assert_eq!(app.agent_chat.backend.as_ref().and_then(|b| b.pid()), pid, "same process");
+    assert_ne!(app.agent_chat.backend.as_ref().and_then(|b| b.pid()), pid, "a fresh process owns the new chat");
     send(&mut app, &ctx, "again".into());
     until(&mut app, &|a| a.agent_chat.state() == State::Ready);
     let log_text = std::fs::read_to_string(&log).unwrap();
     let methods: Vec<String> =
         log_text.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).filter_map(|v| v["method"].as_str().map(String::from)).collect();
-    assert_eq!(methods, ["initialize", "session/new", "session/prompt", "session/new", "session/prompt"]);
-    assert!(log_text.lines().last().is_some_and(|l| l.contains("\"s2\"")), "the prompt goes to the new session: {log_text}");
+    assert_eq!(methods, ["initialize", "session/new", "session/prompt", "session/cancel", "initialize", "session/new", "session/prompt"]);
+    assert!(log_text.lines().last().is_some_and(|l| l.contains("\"s1\"")), "the prompt goes to the replacement's session: {log_text}");
+    send(&mut app, &ctx, "stalled".into());
+    assert_eq!(app.agent_chat.state(), State::Busy);
+    new_chat(&mut app);
+    new_chat(&mut app);
+    until(&mut app, &|a| a.agent_chat.state() == State::Ready);
+    assert!(!app.agent_chat.discard_end, "even repeated New chat retires the cancelled turn");
+    assert!(app.agent_chat.items.is_empty(), "the cancelled conversation contributes no late notices");
+    send(&mut app, &ctx, "after cancellation".into());
+    until(&mut app, &|a| a.agent_chat.state() == State::Ready);
     disconnect(&mut app);
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -1902,7 +2148,8 @@ while IFS= read -r line; do
 done
 "#;
     let argv = vec!["sh".to_string(), "-c".to_string(), script.to_string(), "fake-agent".to_string(), log.to_string_lossy().into_owned()];
-    let start = backend::StartContext { cwd: dir.clone(), bridge: None, tools: None, wake: Box::new(|| {}) };
+    let bridge = acp::McpBridge { cli: dir.join("solidcraft-cli"), port: 7878, allow_paths: Vec::new() };
+    let start = backend::StartContext { cwd: dir.clone(), bridge: Some(bridge.clone()), tools: None, wake: Box::new(|| {}) };
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
     app.agent_chat.backend = Some(Box::new(acp_client::AcpBackend::start(&argv, start).unwrap()));
     app.agent_chat.state = Some(State::Starting);
@@ -1929,6 +2176,8 @@ done
     let notes = [acp::SYSTEM_NOTE.to_string(), acp::system_note("Print flat side down.")];
     for (session, note) in sessions.iter().zip(&notes) {
         assert_eq!(session.pointer("/params/systemPrompt/content/0/text").and_then(Value::as_str), Some(note.as_str()));
+        assert_eq!(session["params"]["cwd"], dir.to_string_lossy().as_ref());
+        assert_eq!(session["params"]["mcpServers"], json!([bridge.to_json()]));
     }
     disconnect(&mut app);
     let _ = std::fs::remove_dir_all(&dir);
@@ -3869,13 +4118,14 @@ fn box_selection(app: &mut SolveApp) -> Vec<solidcraft_engine::Sel> {
 fn an_attached_selection_goes_as_text_for_the_agent_and_as_chips_in_the_conversation() {
     let (mut app, script, ctx) = app_with_script();
     app.session.selection = box_selection(&mut app);
-    // Off: the message is just the message.
+    // Off (the box starts ticked, so a person has to untick it): the message is just the message.
+    *app.agent_chat.attach_selection = false;
     send(&mut app, &ctx, "plain".into());
     assert_eq!(script.calls(), ["prompt: plain"]);
     ended(&script, "");
     poll(&mut app, &ctx);
 
-    app.agent_chat.attach_selection = true;
+    *app.agent_chat.attach_selection = true;
     send(&mut app, &ctx, "round this".into());
     let prompt = script.calls().pop().expect("a prompt");
     assert!(prompt.starts_with("prompt: round this\n\n[Selected in SolidCraft"), "{prompt}");
@@ -3895,13 +4145,25 @@ fn an_attached_selection_goes_as_text_for_the_agent_and_as_chips_in_the_conversa
     assert_eq!(script.calls().pop().as_deref(), Some("prompt: nothing"));
 }
 
+/// The owner made Attach selection on by default (2026-11-24): a new chat sends what is selected
+/// with the first message, with no box ticked.
+#[test]
+fn attach_selection_starts_on() {
+    assert!(*AgentChat::default().attach_selection);
+    let (mut app, script, ctx) = app_with_script();
+    app.session.selection = box_selection(&mut app);
+    send(&mut app, &ctx, "round this".into());
+    let prompt = script.calls().pop().expect("a prompt");
+    assert!(prompt.starts_with("prompt: round this\n\n[Selected in SolidCraft"), "{prompt}");
+}
+
 /// A queued message keeps the selection of the moment it was typed; queued messages go as one
 /// prompt with all their items.
 #[test]
 fn queued_messages_keep_the_selection_they_were_typed_with() {
     use solidcraft_engine::Sel;
     let (mut app, script, ctx) = app_with_script();
-    app.agent_chat.attach_selection = true;
+    *app.agent_chat.attach_selection = true;
     send(&mut app, &ctx, "first".into());
     app.session.selection = vec![Sel::Body { name: "Alpha".into() }];
     send(&mut app, &ctx, "second".into());
@@ -4466,7 +4728,7 @@ fn picks_reach_the_agent_at_the_place_they_were_made() {
     pick_pill(&mut app, 5, &sels[..1]);
     assert_eq!(app.agent_chat.pills.len(), 2);
     app.session.selection = vec![sels[1].clone()];
-    app.agent_chat.attach_selection = true;
+    *app.agent_chat.attach_selection = true;
     let text = std::mem::take(&mut app.agent_chat.input);
     send(&mut app, &ctx, text);
     let prompt = script.calls().pop().expect("a prompt");
@@ -4486,7 +4748,7 @@ fn picks_reach_the_agent_at_the_place_they_were_made() {
     // The next message carries nothing of it.
     ended(&script, "");
     poll(&mut app, &ctx);
-    app.agent_chat.attach_selection = false;
+    *app.agent_chat.attach_selection = false;
     send(&mut app, &ctx, "and now?".into());
     assert_eq!(script.calls().pop().as_deref(), Some("prompt: and now?"));
 }
@@ -4614,7 +4876,7 @@ fn a_picked_thing_that_is_also_selected_is_listed_once() {
     let sels = box_selection(&mut app);
     pick_pill(&mut app, 0, &sels[3..]);
     app.session.selection = vec![sels[3].clone(), sels[1].clone()];
-    app.agent_chat.attach_selection = true;
+    *app.agent_chat.attach_selection = true;
     let text = std::mem::take(&mut app.agent_chat.input);
     send(&mut app, &ctx, text);
     let prompt = script.calls().pop().expect("a prompt");
@@ -4635,7 +4897,7 @@ fn a_face_picked_and_selected_at_another_point_is_listed_once() {
     app.agent_chat.input = "see ".into();
     pick_pill(&mut app, 4, &sels[..1]);
     app.session.selection = vec![elsewhere];
-    app.agent_chat.attach_selection = true;
+    *app.agent_chat.attach_selection = true;
     let text = std::mem::take(&mut app.agent_chat.input);
     send(&mut app, &ctx, text);
     let queued = app.agent_chat.pending.last().expect("queued");
@@ -4653,7 +4915,7 @@ fn a_pick_that_was_also_attached_stays_once_when_its_pill_is_taken_out() {
     app.agent_chat.input = "see ".into();
     pick_pill(&mut app, 4, &sels[3..]);
     app.session.selection = vec![sels[3].clone()];
-    app.agent_chat.attach_selection = true;
+    *app.agent_chat.attach_selection = true;
     let text = std::mem::take(&mut app.agent_chat.input);
     send(&mut app, &ctx, text);
     let bodies = |p: &Pending| p.context.items.iter().filter(|i| i.kind == context::Kind::Body).map(|i| i.group).collect::<Vec<_>>();
@@ -4795,7 +5057,7 @@ fn a_rim_clicked_once_is_one_item_not_its_pieces() {
     assert_eq!(app.session.selection.len(), 2, "two clicks selected the two rims");
     assert_eq!(selected_count(&mut app), 2, "the checkbox counts the two clicks");
 
-    app.agent_chat.attach_selection = true;
+    *app.agent_chat.attach_selection = true;
     send(&mut app, &ctx, "these two rims".into());
     let prompt = script.calls().pop().expect("a prompt");
     assert!(prompt.contains("2 item(s)"), "{prompt}");
@@ -4828,9 +5090,9 @@ fn a_split_wall_clicked_once_is_one_item() {
         false,
         false,
     );
-    assert!(!app.session.selection.is_empty());
+    assert!(app.session.has_selection());
     assert_eq!(selected_count(&mut app), 1, "one click, however many patches it selected: {:?}", app.session.selection);
-    app.agent_chat.attach_selection = true;
+    *app.agent_chat.attach_selection = true;
     send(&mut app, &ctx, "this wall".into());
     let prompt = script.calls().pop().expect("a prompt");
     assert!(prompt.contains("1 item(s)") && prompt.contains("Round face r10"), "{prompt}");
@@ -5453,6 +5715,71 @@ fn a_tool_card_shows_its_summary_and_keeps_the_json_behind_details() {
     assert!(h.widget("Result").is_some() && h.widget(output).is_some(), "and what it returned");
 }
 
+#[test]
+fn tool_details_copy_complete_arguments_and_results() {
+    use solidcraft_ui_registry::handle_at;
+    for status in [ToolStatus::Completed, ToolStatus::Failed] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width": 1280, "height": 1100}));
+        h.call("ui.agent_chat", json!({"features": true, "open": true, "picker": false, "width": 400}));
+        h.app.run("solid.box", json!({"length": 2, "width": 2, "height": 2, "body_name": "Cube"})).unwrap();
+        h.app.run("select.set", json!({"items": [{"type": "body", "name": "Cube"}]})).unwrap();
+        let input = json!({"notes": format!("{}ARGUMENT_END", "日本語 dimensions\n".repeat(700))});
+        let pretty = serde_json::to_string_pretty(&input).unwrap();
+        let output = format!("{}RESULT_END", "Measured: 20 mm³\n".repeat(700));
+        h.app.agent_chat.items = vec![Item::Tool {
+            id: "copy-details".into(),
+            title: "inspect_design".into(),
+            kind: String::new(),
+            status: Some(status),
+            input: Some(input),
+            output: Some(output.clone()),
+        }];
+        h.frames(4);
+        assert!(handle_at("agent_chat:tool:0:copy:arguments").is_none(), "collapsed details have no Copy action");
+        let card = handle_at("agent_chat:tool:0").expect("tool card");
+        click_at(&mut h, card, egui::PointerButton::Primary);
+        h.frames(4);
+        let undo = h.app.session.undo.len();
+        for (field, expected) in [("arguments", &pretty), ("result", &output)] {
+            let at = handle_at(&format!("agent_chat:tool:0:copy:{field}")).expect("each tool field has a Copy action");
+            assert!(solidcraft_ui_registry::rect_of("agent_chat:conversation").unwrap().contains(at), "Copy remains visible");
+            click_at(&mut h, at, egui::PointerButton::Primary);
+            assert_eq!(copied_text(&h).as_ref(), Some(expected), "copy the full field, including its undisplayed Unicode tail");
+        }
+        assert!(h.app.copied_bodies.is_empty(), "copying tool text does not copy the selected CAD body");
+        assert_eq!(h.app.session.model.state().bodies.len(), 1);
+        assert_eq!(h.app.session.undo.len(), undo);
+    }
+}
+
+#[test]
+fn tool_details_copy_only_present_fields_including_an_empty_result() {
+    use solidcraft_ui_registry::handle_at;
+    for (input, output, field, expected) in [(Some(json!(null)), None, "arguments", "null"), (None, Some(String::new()), "result", "")] {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.agent_chat", json!({"features": true, "open": true}));
+        h.app.agent_chat.items = vec![Item::Tool {
+            id: "optional-details".into(),
+            title: "inspect_design".into(),
+            kind: String::new(),
+            status: Some(ToolStatus::InProgress),
+            input,
+            output,
+        }];
+        h.frames(4);
+        let card = handle_at("agent_chat:tool:0").expect("tool card");
+        click_at(&mut h, card, egui::PointerButton::Primary);
+        h.frames(4);
+        let absent = if field == "arguments" { "result" } else { "arguments" };
+        assert!(handle_at(&format!("agent_chat:tool:0:copy:{absent}")).is_none(), "an absent field has no Copy action");
+        let at = handle_at(&format!("agent_chat:tool:0:copy:{field}")).expect("a present field has a Copy action");
+        click_at(&mut h, at, egui::PointerButton::Primary);
+        assert_eq!(copied_text(&h).as_deref(), Some(expected));
+    }
+}
+
 /// The card says "Screenshot"; the full temp path is only under Details.
 #[test]
 fn a_screenshot_card_hides_the_path_until_details() {
@@ -5610,6 +5937,20 @@ fn a_prompt_at_the_top_of_the_conversation_is_as_tall_as_its_content() {
     let row = solidcraft_theme::Tokens::get().control_height;
     assert!(prompt.bottom() - button.y < row, "the bubble ends {} below its button", prompt.bottom() - button.y);
     assert!(reply.top() - button.y < 2.0 * row, "the reply starts {} below the prompt's button", reply.top() - button.y);
+}
+
+/// A short prompt's bubble is as wide as its lines and its Copy message button, at the right
+/// edge of the conversation, instead of spanning most of the panel (#14738).
+#[test]
+fn a_short_prompt_has_a_bubble_as_wide_as_its_content() {
+    // Kept to the end: the published handles and rects are its last frame's.
+    let _h = chat_with_copiable_messages();
+    let bubble = solidcraft_ui_registry::rect_of("agent_chat:bubble:0").expect("the prompt's bubble");
+    let button = solidcraft_ui_registry::handle_at("agent_chat:copy:0").expect("the prompt's Copy message button");
+    let reply = solidcraft_ui_registry::rect_of("agent_chat:msg:1").expect("the reply's message area");
+    assert!(bubble.width() < 0.5 * reply.width(), "the bubble is {} wide in a conversation {} wide", bubble.width(), reply.width());
+    assert!((bubble.right() - reply.right()).abs() < 1.0, "the bubble ends at {}, the conversation at {}", bubble.right(), reply.right());
+    assert!(bubble.contains(button), "the Copy message button {button:?} is in the bubble {bubble:?}");
 }
 
 /// The visible button on a reply copies its original Markdown: heading, paragraphs, list and
@@ -6274,6 +6615,50 @@ fn lengths_of_time_read_in_seconds_minutes_and_hours() {
     assert_eq!(times::took(&times::Stamp { at: 1.0, took: Some((61_000.0, true)) }).as_deref(), Some("Answered in 1 min"));
 }
 
+/// A task the agent could not finish (the provider's usage limit, or any other error) is kept,
+/// so the user can continue it when the agent can work again (#16318).
+#[test]
+fn a_task_interrupted_by_the_providers_usage_limit_can_be_continued() {
+    let (mut app, script, ctx) = app_with_script();
+    send(&mut app, &ctx, "make a gearbox".into());
+    script.report(Event::Error("usage limit reached, try again later".into()));
+    script.report(Event::TurnEnded { reason: "error".into() });
+    poll(&mut app, &ctx);
+    assert_eq!(app.agent_chat.state(), State::Ready);
+    assert!(app.agent_chat.unfinished.is_some(), "the task waits to be continued");
+    // The user continues it: the task goes again, with a note that says it was cut short.
+    continue_task(&mut app);
+    assert_eq!(script.calls(), ["prompt: make a gearbox".to_string(), format!("prompt: {CONTINUE_NOTE}\n\nmake a gearbox")]);
+    assert!(app.agent_chat.unfinished.is_none(), "the task is under way again");
+    assert_eq!(app.agent_chat.state(), State::Busy);
+    let users = app.agent_chat.items.iter().filter(|i| matches!(i, Item::User { .. })).count();
+    assert_eq!(users, 1, "the conversation does not repeat the task");
+}
+
+/// A turn that ends badly leaves the task to be continued; a turn that ends well leaves nothing
+/// to continue, and a task the user sends in between replaces the one that waits.
+#[test]
+fn only_a_failed_turn_leaves_a_task_to_continue() {
+    let (mut app, script, ctx) = app_with_script();
+    send(&mut app, &ctx, "make a gearbox".into());
+    ended(&script, "");
+    poll(&mut app, &ctx);
+    assert!(app.agent_chat.unfinished.is_none(), "a turn that ended well has nothing to continue");
+    send(&mut app, &ctx, "make a gearbox".into());
+    script.report(Event::TurnEnded { reason: "error".into() });
+    poll(&mut app, &ctx);
+    assert!(app.agent_chat.unfinished.is_some());
+    // Another task replaces the one that waits.
+    send(&mut app, &ctx, "make a lid".into());
+    assert!(app.agent_chat.unfinished.is_none(), "the new task replaces the one that waited");
+    // New chat throws it away.
+    script.report(Event::TurnEnded { reason: "error".into() });
+    poll(&mut app, &ctx);
+    assert!(app.agent_chat.unfinished.is_some());
+    new_chat(&mut app);
+    assert!(app.agent_chat.unfinished.is_none(), "a new chat keeps nothing to continue");
+}
+
 #[test]
 fn plugin_runs_always_keep_per_run_consent() {
     for mode in [agents::Mode::All, agents::Mode::Edits, agents::Mode::Ask] {
@@ -6327,7 +6712,8 @@ fn plugin_tools_go_through_the_chats_approval_and_never_skip_it() {
 
 /// An importer plugin's code runs only after the user's answer, in every mode and after "always
 /// allow": a plugin importer tool (`file.import`), and `doc.open` of a file an installed importer
-/// opens, alone or in a batch. A file SolidCraft reads itself keeps the mode's answer.
+/// opens, and `file.export` through an exporter, alone or in a batch. A file SolidCraft reads or
+/// writes itself keeps the mode's answer.
 #[test]
 fn importer_plugins_always_ask_like_plugin_runs() {
     let dir = std::env::temp_dir().join(format!("sc-agent-chat-importer-tool-{}", std::process::id()));
@@ -6336,25 +6722,160 @@ fn importer_plugins_always_ask_like_plugin_runs() {
     let manifest = json!({"id":"smp","name":"Sample importer","version":"1","capabilities":["formats@0.1"],
         "runtime":{"module":"plugin.wasm","commands":[],"entries":[{"name":"convert","kind":"importer","extensions":["smp"]}]}});
     std::fs::write(folder.join("plugin.json"), manifest.to_string()).unwrap();
+    let exporter = dir.join("plugins").join("out");
+    std::fs::create_dir_all(&exporter).unwrap();
+    let manifest = json!({"id":"out","name":"Sample exporter","version":"1","capabilities":["formats@0.1"],
+        "runtime":{"module":"plugin.wasm","commands":[],"entries":[{"name":"convert","kind":"exporter","extensions":["smp"]}]}});
+    std::fs::write(exporter.join("plugin.json"), manifest.to_string()).unwrap();
     let file = dir.join("part.smp").to_string_lossy().into_owned();
     let (mut app, tx) = app_in_a_turn();
     app.session.plugin_state.plugins_dir = Some(dir.join("plugins"));
     app.agent_chat.running_id = "claude".into();
     app.preferences.ai_permissions = agents::Mode::All;
-    for command in ["file.import", "doc.open", "batch"] {
+    for command in ["file.import", "doc.open", "file.export", "batch"] {
         agents::remember(&mut app.preferences, "claude", command);
     }
     let calls = [
         ask(&tx, "engine.execute", json!({"command":"file.import","params":{"path":file,"format":"smp.convert","options":{}}})),
         ask(&tx, "engine.execute", json!({"command":"doc.open","params":{"path":file}})),
         ask(&tx, "engine.batch", json!({"commands":[{"command":"solid.box","params":{}},{"command":"file.import","params":{"path":file}}]})),
+        ask(&tx, "engine.execute", json!({"command":"file.export","params":{"path":file}})),
+        ask(&tx, "engine.execute", json!({"command":"file.export","params":{"path":"/tmp/part.step","format":"out.convert"}})),
+        ask(&tx, "engine.batch", json!({"commands":[{"command":"file.export","params":{"path":file}}]})),
     ];
     pump_tools(&mut app);
-    assert_eq!(app.agent_chat.waiting(), 3, "each plugin import waits for an answer");
+    assert_eq!(app.agent_chat.waiting(), 6, "each plugin import or export waits for an answer");
     assert!(calls.iter().all(|c| c.try_recv().is_err()), "nothing runs before the answer");
     let session = &app.session;
     assert!(crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"doc.open","params":{"path":file}})));
     assert!(!crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"doc.open","params":{"path":"/tmp/part.step"}})));
+    assert!(crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"file.export","params":{"path":file}})));
+    assert!(crate::plugins::runs_plugin_code(
+        session,
+        "engine.execute",
+        &json!({"command":"file.export","params":{"path":"/tmp/part.step","format":"out.convert"}})
+    ));
+    assert!(!crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"file.export","params":{"path":"/tmp/part.step"}})));
+    assert!(!crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"file.export","params":{"path":file,"format":"step"}})));
     assert!(!crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"solid.box","params":{}})));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #20326: folders configured under Assistant preferences (`agent_allowed_paths`) appear as chips
+/// that can be added, removed and cleared, and are appended to `allow_paths` on chat tool requests.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn allowed_folders_preference_manages_chips_and_extends_chat_scope() {
+    let dir = solidcraft_engine::io::vfs::temp_dir().join(format!("solidcraft-chat-allow-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let sub_a = dir.join("proj_a");
+    let sub_b = dir.join("proj_b");
+    std::fs::create_dir_all(&sub_a).unwrap();
+    std::fs::create_dir_all(&sub_b).unwrap();
+    let a_str = sub_a.to_string_lossy().into_owned();
+    let b_str = sub_b.to_string_lossy().into_owned();
+
+    // UI flow: pick folder, verify chip, add second folder, remove first chip, then clear all.
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    let picked = std::sync::Arc::new(std::sync::Mutex::new(Some(a_str.clone())));
+    let p_clone = std::sync::Arc::clone(&picked);
+    h.app.services.pick_folder = Some(Box::new(move |_| {
+        let v = p_clone.lock().ok().and_then(|g| g.clone());
+        Box::pin(std::future::ready(v))
+    }));
+    crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_ASSISTANT);
+    h.frames(4);
+    crate::prefs::reveal_preference(&mut h, "prefs:agent_allowed_folders:add");
+    h.step(&json!({"click": {"handle": "prefs:agent_allowed_folders:add"}})).unwrap();
+    crate::file_picker::tick(&mut h.app, &h.ctx);
+    h.frames(3);
+    assert_eq!(h.app.preferences.agent_allowed_paths, vec![a_str.clone()]);
+    *picked.lock().unwrap() = Some(b_str.clone());
+    crate::prefs::reveal_preference(&mut h, "prefs:agent_allowed_folders:add");
+    h.step(&json!({"click": {"handle": "prefs:agent_allowed_folders:add"}})).unwrap();
+    crate::file_picker::tick(&mut h.app, &h.ctx);
+    h.frames(3);
+    assert_eq!(h.app.preferences.agent_allowed_paths, vec![a_str.clone(), b_str.clone()]);
+    crate::prefs::reveal_preference(&mut h, "prefs:agent_allowed_folder:0:remove");
+    h.step(&json!({"click": {"handle": "prefs:agent_allowed_folder:0:remove"}})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.preferences.agent_allowed_paths, vec![b_str.clone()]);
+    crate::prefs::reveal_preference(&mut h, "prefs:agent_allowed_folders:clear");
+    h.step(&json!({"click": {"handle": "prefs:agent_allowed_folders:clear"}})).unwrap();
+    h.frames(2);
+    assert!(h.app.preferences.agent_allowed_paths.is_empty());
+
+    // Runtime scope: `pump_tools` appends `agent_allowed_paths` to requests that carry `allow_paths`
+    // (bridged MCP) as well as requests without one (API backend), letting `doc.open` reach them.
+    let design = sub_a.join("part.sc");
+    let mut s = solidcraft_engine::Session::default();
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+    s.execute("file.save", &json!({"path": design.to_string_lossy()})).unwrap();
+    let design_str = design.to_string_lossy().into_owned();
+
+    let (mut app, _script, ctx) = app_with_script();
+    let (tx, rx) = channel();
+    app.agent_chat.tools_rx = Some(rx);
+    app.preferences.ai_permissions = agents::Mode::All;
+    send(&mut app, &ctx, "open a design in an allowed folder".into());
+
+    // Without `sub_a` in `agent_allowed_paths`, a request confined to `sub_b` refuses `sub_a`.
+    let denied_reply =
+        chat_tool(&mut app, &tx, &ctx, "engine.execute", json!({"command": "doc.open", "params": {"path": design_str}, "allow_paths": [b_str]}));
+    assert_eq!(denied_reply["ok"], false, "unconfigured folder stays refused: {denied_reply}");
+
+    // With `sub_a` configured, the same bridged request succeeds.
+    app.preferences.agent_allowed_paths = vec![a_str.clone()];
+    let allowed_reply = chat_tool(
+        &mut app,
+        &tx,
+        &ctx,
+        "engine.execute",
+        json!({"command": "doc.open", "params": {"path": design_str}, "allow_paths": [b_str.clone()]}),
+    );
+    assert_eq!(allowed_reply["ok"], true, "configured allowed folder succeeds: {allowed_reply}");
+
+    // New chat refreshes the backend's bridge allow_paths before starting the next session,
+    // dropping any folder removed in Preferences.
+    let (mut app2, script2, _ctx2) = app_with_script();
+    app2.preferences.agent_allowed_paths = vec![a_str.clone(), b_str.clone()];
+    new_chat(&mut app2);
+    app2.agent_chat.state = Some(State::Ready);
+    app2.preferences.agent_allowed_paths = vec![b_str.clone()];
+    new_chat(&mut app2);
+    assert_eq!(script2.calls(), vec!["new_session".to_string(), "new_session".to_string()]);
+    assert_eq!(
+        script2.allow_paths(),
+        vec![vec![std::path::PathBuf::from(&a_str), std::path::PathBuf::from(&b_str)], vec![std::path::PathBuf::from(&b_str)]]
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Denying a held call tells the agent plainly that nothing ran.
+#[test]
+fn a_denied_call_says_it_was_not_run() {
+    let (mut app, tx) = app_in_a_turn();
+    let denied = ask(&tx, "engine.execute", json!({"command": "file.save", "params": {"path": "/tmp/never.solidcraft"}, "allow_paths": ["/tmp"]}));
+    frame(&mut app);
+    let id = app.agent_chat.held[0].id;
+    approve(&mut app, id, false);
+    let r = denied.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+    assert_eq!(r["error"], "not run: the user declined this call", "{r}");
+    assert!(!r["error"].as_str().unwrap().contains("may have run"), "{r}");
+}
+
+/// The header offers Stop only while a turn (or the start) can be stopped, and the agent's own
+/// sign-in label only while it needs a login.
+#[test]
+fn the_header_shows_stop_and_login_only_when_they_apply() {
+    for state in [State::Off, State::Ready, State::NeedsAuth, State::Exited, State::Failed] {
+        assert!(!state.shows_stop(), "{state:?} has nothing to stop");
+    }
+    assert!(State::Busy.shows_stop() && State::Starting.shows_stop());
+    for state in [State::Off, State::Starting, State::Ready, State::Busy, State::Exited, State::Failed] {
+        assert!(!state.shows_auth_status(), "{state:?} is not asking for a login");
+    }
+    assert!(State::NeedsAuth.shows_auth_status());
 }

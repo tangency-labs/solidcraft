@@ -1,4 +1,5 @@
-//! The drawing's Export panel (Drawing Review › Output › Export): the file format, and for a PDF
+//! The drawing's Export panel (Drawing Review › Output › Export): the file format (PDF, SVG, PNG or
+//! DXF), and for a PDF
 //! whether it holds the sheet shown or every sheet, one page each, then a file dialog. The file is
 //! written by `drawing.export` off the window thread, as an agent's export is
 //! ([`crate::file_load::Kind::ExportSheet`]), so a large sheet doesn't stop the window.
@@ -11,8 +12,12 @@ use crate::drawing_sheet_page::active_sheet;
 use crate::ui_kit::{self, Button};
 
 /// The formats offered, first the default: (label id, `format`, extension).
-const FORMATS: [(&str, &str, &str); 3] =
-    [("ui.drawing_export.pdf", "pdf", "pdf"), ("ui.drawing_export.svg", "svg", "svg"), ("ui.drawing_export.png", "png", "png")];
+const FORMATS: [(&str, &str, &str); 4] = [
+    ("ui.drawing_export.pdf", "pdf", "pdf"),
+    ("ui.drawing_export.svg", "svg", "svg"),
+    ("ui.drawing_export.png", "png", "png"),
+    ("ui.drawing_export.dxf", "dxf", "dxf"),
+];
 
 /// The panel's choices, kept while it is open.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -21,6 +26,8 @@ pub(crate) struct ExportForm {
     pub(crate) format: usize,
     /// A PDF of every sheet rather than the sheet shown.
     pub(crate) all_sheets: bool,
+    /// A PDF whose text is glyph outlines, not real text.
+    pub(crate) text_outlines: bool,
 }
 
 fn tr(id: &'static str) -> &'static str {
@@ -30,11 +37,15 @@ fn tr(id: &'static str) -> &'static str {
 /// The `drawing.export` parameters for `form` on the sheet `sheet`, without the path.
 pub(crate) fn params(form: ExportForm, sheet: Option<u64>) -> Value {
     let (_, format, _) = FORMATS[form.format.min(FORMATS.len() - 1)];
-    match (format, form.all_sheets, sheet) {
+    let mut params = match (format, form.all_sheets, sheet) {
         // A PDF naming no sheet holds every sheet, in the drawing's order.
         ("pdf", true, _) | (_, _, None) => json!({"format": format}),
         (_, _, Some(sheet)) => json!({"format": format, "sheet": ids::encode(sheet)}),
+    };
+    if format == "pdf" && form.text_outlines {
+        params["text"] = json!("outlines");
     }
+    params
 }
 
 /// The file name offered: the drawing's name, and the sheet's when only one sheet is written.
@@ -81,10 +92,17 @@ pub(super) fn panel(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
             let r = ui_kit::choice_row(ui, tr("ui.drawing_export.sheets"), "drawing:export:sheets", &mut pages, &options);
             crate::scenario::publish_handle("drawing:export:sheets", r.rect.center());
             form.all_sheets = pages == 1;
+            let mut text = usize::from(form.text_outlines);
+            let options = [tr("ui.drawing_export.text_real"), tr("ui.drawing_export.text_outlines")];
+            let r = ui_kit::choice_row(ui, tr("ui.drawing_export.text"), "drawing:export:text", &mut text, &options);
+            crate::scenario::publish_handle("drawing:export:text", r.rect.center());
+            form.text_outlines = text == 1;
             let note = if form.all_sheets && sheets > 1 { "ui.drawing_export.pdf_pages" } else { "ui.drawing_export.pdf_note" };
             ui_kit::text(ui, tr(note), ui_kit::Text::Note(note));
         } else {
-            ui_kit::text(ui, tr("ui.drawing_export.one_sheet"), ui_kit::Text::Note("ui.drawing_export.one_sheet"));
+            let note =
+                if FORMATS[form.format.min(FORMATS.len() - 1)].1 == "dxf" { "ui.drawing_export.dxf_note" } else { "ui.drawing_export.one_sheet" };
+            ui_kit::text(ui, tr(note), ui_kit::Text::Note(note));
         }
         ui.separator();
         ui.horizontal(|ui| {
@@ -139,7 +157,7 @@ mod tests {
         h.step(&json!({"click":{"handle":"button:drawing.export"}})).unwrap();
         h.frames(4);
         assert_eq!(h.app.drawing_workspace.options, Some(super::super::Tool::Export));
-        h.app.drawing_workspace.export = Some(ExportForm { format: 0, all_sheets: true });
+        h.app.drawing_workspace.export = Some(ExportForm { format: 0, all_sheets: true, ..Default::default() });
         h.frames(2);
         let dir = h.dir.clone();
         h.app.services.pick_save = Some(Box::new(move |name, extensions| {
@@ -160,9 +178,21 @@ mod tests {
     fn each_choice_names_its_sheets_and_format() {
         let sheet = Some(7);
         let id = ids::encode(7);
-        assert_eq!(params(ExportForm { format: 0, all_sheets: true }, sheet), json!({"format": "pdf"}));
-        assert_eq!(params(ExportForm { format: 0, all_sheets: false }, sheet), json!({"format": "pdf", "sheet": id}));
-        assert_eq!(params(ExportForm { format: 1, all_sheets: true }, sheet), json!({"format": "svg", "sheet": id}), "svg is one sheet");
-        assert_eq!(params(ExportForm { format: 2, all_sheets: false }, sheet), json!({"format": "png", "sheet": id}));
+        assert_eq!(params(ExportForm { format: 0, all_sheets: true, text_outlines: false }, sheet), json!({"format": "pdf"}));
+        assert_eq!(params(ExportForm { format: 0, all_sheets: false, text_outlines: false }, sheet), json!({"format": "pdf", "sheet": id}));
+        assert_eq!(
+            params(ExportForm { format: 1, all_sheets: true, text_outlines: false }, sheet),
+            json!({"format": "svg", "sheet": id}),
+            "svg is one sheet"
+        );
+        assert_eq!(params(ExportForm { format: 2, all_sheets: false, text_outlines: false }, sheet), json!({"format": "png", "sheet": id}));
+        assert_eq!(
+            params(ExportForm { format: 3, all_sheets: true, text_outlines: false }, sheet),
+            json!({"format": "dxf", "sheet": id}),
+            "dxf is one sheet"
+        );
+        let outlines = ExportForm { format: 0, all_sheets: true, text_outlines: true };
+        assert_eq!(params(outlines, sheet), json!({"format": "pdf", "text": "outlines"}), "the old outline text, asked for");
+        assert_eq!(params(ExportForm { format: 1, ..outlines }, sheet), json!({"format": "svg", "sheet": id}), "text is for pdf");
     }
 }

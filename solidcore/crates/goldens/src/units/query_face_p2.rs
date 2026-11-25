@@ -589,7 +589,7 @@ fn pc_block(pc: &PointClassification<EntityRef>) -> Vec<f64> {
         f64::from(pc.point_class().code()),
         kind,
         index,
-        pc.gap_3d(&Kernel::default(), &NoGeometry, None)
+        pc.gap_3d(&crate::runner_kernel(), &NoGeometry, None)
             .unwrap_or(f64::NAN),
         pc.src_zone_tol_3d(),
         pc.pre_snap_param(),
@@ -798,7 +798,7 @@ pub fn scene(case: &Case) -> Result<Option<(Brep, FaceId, EdgeuseId)>, HarnessEr
     if at.mode != "trim" {
         return Ok(None);
     }
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let Ok(m) = rust_model(&mut k, &i)? else {
         return Ok(None);
     };
@@ -814,7 +814,7 @@ pub fn scene(case: &Case) -> Result<Option<(Brep, FaceId, EdgeuseId)>, HarnessEr
 }
 
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     if let OpIn::ProtoVertex {
         approx,
         capture,
@@ -941,6 +941,8 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                     trace.extend(cache_state(b, f).map_err(|e| harness(e.to_string()))?);
                 }
             }
+            #[cfg(test)]
+            crate::certify::written(b);
             Ok(if traced {
                 Output::new().values("cached_pc", trace)
             } else {

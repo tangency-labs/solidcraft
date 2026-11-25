@@ -43,7 +43,8 @@
 
 use super::sides::{ExtendedSides, SideExtension};
 use super::{below_resolution, keeps, Continuity, ExtendRefusal, Local};
-use crate::error::{Result, SolidError};
+use crate::error::surface::SurfaceFailure;
+use crate::error::{Failure, Result, SolidError, SM_ERR};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::Vec3;
@@ -131,6 +132,13 @@ pub(super) fn ball_extended_sides(
             OP,
             "the distance is not finite and positive",
         ));
+    }
+    // the caller's patch: `BallPatch::create` reads its net's control net, but the public
+    // `net_mut` can replace the net with one that has no NURB
+    if patch.net().gw_nurb().is_none() {
+        return Err(Failure::new(OP, SurfaceFailure::NoNurb)
+            .with_status(SM_ERR)
+            .into_error());
     }
     // the net's knot box: the extension is past the net's ends, whatever box the patch keeps
     let dom = knot_box(patch.net())?;
@@ -222,15 +230,22 @@ pub(super) fn ball_extended_sides(
 
 /// The box of `s`'s knots (its B-spline form's ends).
 pub(super) fn knot_box(s: &BSplineSurface) -> Result<Extent2d> {
-    let net = s
-        .gw_nurb()
-        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
+    let net = s.gw_nurb().ok_or_else(|| {
+        SolidError::surface(
+            OP,
+            SurfaceFailure::Defect {
+                why: "the knot box was asked of a net with no NURB, though every caller passes a ball patch's net (whose NURB the entry checked), an analytic's form `AnalyticSupport::check` proved on its NURB, or an extension built from a NURB",
+            },
+        )
+    })?;
     let (u, v) = (net.u_knots(), net.v_knots());
     match (u.first(), u.last(), v.first(), v.last()) {
         (Some(&u0), Some(&u1), Some(&v0), Some(&v1)) => Ok(Extent2d::from_bounds(u0, v0, u1, v1)),
-        _ => Err(SolidError::surface_failed(
+        _ => Err(SolidError::surface(
             OP,
-            "the B-spline surface has an empty knot vector",
+            SurfaceFailure::Defect {
+                why: "the net's NURB has an empty knot vector, though a NURB's knot vectors hold degree + 1 knots at each end",
+            },
         )),
     }
 }
@@ -313,9 +328,14 @@ fn extend_side_world(
     cap: Cap,
     distance: f64,
 ) -> Result<Option<(BSplineSurface, Across, bool, f64)>> {
-    let net = cur
-        .gw_nurb()
-        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
+    let net = cur.gw_nurb().ok_or_else(|| {
+        SolidError::surface(
+            OP,
+            SurfaceFailure::Defect {
+                why: "the net continued past the side has no NURB, though it is the ball patch's net (whose NURB the entry checked) or an extension built from a NURB",
+            },
+        )
+    })?;
     let source = Local::of(net, side)?;
     let dom = knot_box(cur)?;
     let middle = side.point(&dom, 0.5);
@@ -356,10 +376,7 @@ fn extend_side_world(
         let n = (x_half - x_far).cross(x_side - x_half);
         let len = n.length();
         if len.is_nan() || len <= 0.0 {
-            return Err(SolidError::surface_failed(
-                OP,
-                "the side's normal has no direction",
-            ));
+            return Err(SolidError::surface(OP, SurfaceFailure::IsoCircleUndefined));
         }
         n * (1.0 / len)
     };
@@ -435,9 +452,11 @@ fn extend_side_world(
                 Reach::At(e_turn) => Some((
                     e_turn,
                     value(e_turn, false)?.ok_or_else(|| {
-                        SolidError::surface_failed(
+                        SolidError::surface(
                             OP,
-                            "the extension at the turn could not be made",
+                            SurfaceFailure::Defect {
+                                why: "the extension at the turn the solve reached could not be made, though the solve returns only an ask it made and measured, and making an ask is deterministic",
+                            },
                         )
                     })?,
                 )),
@@ -455,9 +474,11 @@ fn extend_side_world(
         }
     };
     let (grown, bound) = made(e)?.ok_or_else(|| {
-        SolidError::surface_failed(
+        SolidError::surface(
             OP,
-            "the extension at the reached distance could not be made",
+            SurfaceFailure::Defect {
+                why: "the extension at the distance the solve reached could not be made, though the solve returns only an ask it made and measured, and making an ask is deterministic",
+            },
         )
     })?;
     let across = across_of(&grown, bound)?;
@@ -481,9 +502,14 @@ fn extend_side_local(
     cap: Cap,
     distance: f64,
 ) -> Result<Option<(BSplineSurface, Across, bool, f64)>> {
-    let net = cur
-        .gw_nurb()
-        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
+    let net = cur.gw_nurb().ok_or_else(|| {
+        SolidError::surface(
+            OP,
+            SurfaceFailure::Defect {
+                why: "the net continued past the side has no NURB, though it is the ball patch's net (whose NURB the entry checked) or an extension built from a NURB",
+            },
+        )
+    })?;
     let source = Local::of(net, side)?;
     let dom = knot_box(cur)?;
     let middle = side.point(&dom, 0.5);
@@ -629,9 +655,11 @@ fn extend_side_local(
                 Reach::At(e_turn) => Some((
                     e_turn,
                     value(e_turn, false)?.ok_or_else(|| {
-                        SolidError::surface_failed(
+                        SolidError::surface(
                             OP,
-                            "the extension at the turn could not be made",
+                            SurfaceFailure::Defect {
+                                why: "the extension at the turn the solve reached could not be made, though the solve returns only an ask it made and measured, and making an ask is deterministic",
+                            },
                         )
                     })?,
                 )),
@@ -649,9 +677,11 @@ fn extend_side_local(
         }
     };
     let g = made(e)?.ok_or_else(|| {
-        SolidError::surface_failed(
+        SolidError::surface(
             OP,
-            "the extension at the reached distance could not be made",
+            SurfaceFailure::Defect {
+                why: "the extension at the distance the solve reached could not be made, though the solve returns only an ask it made and measured, and making an ask is deterministic",
+            },
         )
     })?;
     let across = across_of(&g)?;
@@ -789,9 +819,8 @@ fn bisect(
         if !(m > lo && m < hi) {
             break;
         }
-        let v = f(m)?.ok_or_else(|| {
-            SolidError::surface_failed(OP, "the extension could not be measured inside the bracket")
-        })?;
+        let v = f(m)?
+            .ok_or_else(|| SolidError::surface(OP, SurfaceFailure::ExtensionNotMadeInBracket))?;
         if (v - target).abs() <= MEET * target {
             return Ok(m);
         }
@@ -815,9 +844,14 @@ fn certify_circle(
     c: Vec3,
     size: f64,
 ) -> Result<()> {
-    let net = s
-        .gw_nurb()
-        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
+    let net = s.gw_nurb().ok_or_else(|| {
+        SolidError::surface(
+            OP,
+            SurfaceFailure::Defect {
+                why: "the extension certified on its circle has no NURB, though the extension built it from a NURB",
+            },
+        )
+    })?;
     // the iso along the side's across direction: a u-curve across a u side
     let (t, dir) = if side.is_u() {
         (middle.y, Direction::U)
@@ -834,10 +868,20 @@ fn certify_circle(
     }
     let n = rows.len();
     let (Some(&r0), Some(&rm), Some(&rl)) = (rows.first(), rows.get(n / 2), rows.last()) else {
-        return Err(SolidError::surface_failed(OP, "the iso has no rows"));
+        return Err(SolidError::surface(
+            OP,
+            SurfaceFailure::Defect {
+                why: "the iso across the side has no control points, though an extracted iso has degree + 1 or more",
+            },
+        ));
     };
     let (Some(&m0), Some(&mm), Some(&ml)) = (mags.first(), mags.get(n / 2), mags.last()) else {
-        return Err(SolidError::surface_failed(OP, "the iso has no rows"));
+        return Err(SolidError::surface(
+            OP,
+            SurfaceFailure::Defect {
+                why: "the iso's magnitudes are fewer than its rows, though one is pushed with each row",
+            },
+        ));
     };
     let g = |row: [f64; 4], x: usize| row.get(x).copied().unwrap_or(0.0);
     // the 3 x 3 minor of the three spread rows on columns i, j, l
@@ -875,9 +919,14 @@ fn certify_circle(
 /// separate from the local determinant's arithmetic, so a far-away, perfectly spread
 /// plane is not read as rank-deficient.
 fn certify_circle_local(s: &BSplineSurface, side: BoxSide, middle: Point2, c: Vec3) -> Result<()> {
-    let net = s
-        .gw_nurb()
-        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
+    let net = s.gw_nurb().ok_or_else(|| {
+        SolidError::surface(
+            OP,
+            SurfaceFailure::Defect {
+                why: "the extension certified on its circle has no NURB, though the extension built it from a NURB",
+            },
+        )
+    })?;
     // the iso along the side's across direction: a u-curve across a u side
     let (t, dir) = if side.is_u() {
         (middle.y, Direction::U)
@@ -918,10 +967,20 @@ fn certify_circle_local(s: &BSplineSurface, side: BoxSide, middle: Point2, c: Ve
     }
     let n = rows.len();
     let (Some(&r0), Some(&rm), Some(&rl)) = (rows.first(), rows.get(n / 2), rows.last()) else {
-        return Err(SolidError::surface_failed(OP, "the iso has no rows"));
+        return Err(SolidError::surface(
+            OP,
+            SurfaceFailure::Defect {
+                why: "the iso across the side has no control points, though an extracted iso has degree + 1 or more",
+            },
+        ));
     };
     let (Some(&m0), Some(&mm), Some(&ml)) = (mags.first(), mags.get(n / 2), mags.last()) else {
-        return Err(SolidError::surface_failed(OP, "the iso has no rows"));
+        return Err(SolidError::surface(
+            OP,
+            SurfaceFailure::Defect {
+                why: "the iso's magnitudes are fewer than its rows, though one is pushed with each row",
+            },
+        ));
     };
     let g = |row: [f64; 4], x: usize| row.get(x).copied().unwrap_or(0.0);
     // the 3 x 3 minor of the three spread rows on columns i, j, l

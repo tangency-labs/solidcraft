@@ -130,7 +130,7 @@ use crate::error::nurbs::BSplineFailure;
 use core::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 
-use crate::error::{Result, SolidError};
+use crate::error::{Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -929,30 +929,6 @@ impl BSplineSurface {
         self.nurb.as_ref()
     }
 
-    /// Certified boxes covering the whole surface, one per knot span
-    /// ([`crate::nurbs::nurbs_srf::srf_span_boxes`]); `None`, meaning no certified
-    /// cover, without a NURB, when the weights or knots cannot be read as a cover, or
-    /// while evaluation beyond the natural domain is enabled (the extension leaves the
-    /// convex hull). Not upstream.
-    #[must_use]
-    pub fn span_boxes(&self) -> Option<Vec<Extent3d>> {
-        if self.is_out_of_bounds_enabled() {
-            return None;
-        }
-        crate::nurbs::nurbs_srf::srf_span_boxes(self.gw_nurb()?)
-    }
-
-    /// The refinable certified cover ([`crate::nurbs::nurbs_srf::SurfaceCover`]), refined
-    /// `depth` times; `None` under the conditions of [`BSplineSurface::span_boxes`].
-    /// Not upstream.
-    #[must_use]
-    pub fn cover(&self, depth: usize) -> Option<crate::nurbs::nurbs_srf::SurfaceCover> {
-        if self.is_out_of_bounds_enabled() {
-            return None;
-        }
-        crate::nurbs::nurbs_srf::SurfaceCover::new(self.gw_nurb()?, depth)
-    }
-
     /// A box that holds the surface over `uv_domain` alone: that of the control points of
     /// the piece over it ([`crate::nurbs::nurbs_srf::srf_piece_box`]). `None` without a
     /// NURB or when no such piece is certain (a weight not positive, knots not clamped,
@@ -1235,7 +1211,11 @@ impl BSplineSurface {
     /// `SM_ERR_NULL_POINTER` without NURB.
     pub fn canonical(&self) -> Result<SurfaceCanonical> {
         let sur = self.nurb_ref().ok_or_else(|| {
-            SolidError::b_spline(OP_GET_CANON, BSplineFailure::Missing("the NURBS form"))
+            SolidError::b_spline_with_status(
+                OP_GET_CANON,
+                BSplineFailure::NoNurbsForm,
+                SM_ERR_NULL_POINTER,
+            )
         })?;
         let (knu, knv) = sur.knot_vectors()?;
         let (u_knots, u_multiplicities) = get_knots(&knu, None);
@@ -2217,7 +2197,7 @@ impl BSplineSurface {
         let Some(&uv) = solutions.first() else {
             return Err(SolidError::b_spline(
                 OP_STEP_INV,
-                BSplineFailure::Failed("the point is not close enough to the surface"),
+                BSplineFailure::NoFootWithinTolerance { tolerance: tol_3d },
             ));
         };
 
@@ -2569,6 +2549,33 @@ fn polar_guess_basis(g: &PolarBox) -> Vec3 {
     }
 }
 
+/// Not upstream: the content digest ([`crate::geom::content`]). The NURB is written when
+/// present. Whether it is borrowed decides no evaluation, and the two out-of-bounds flags
+/// are a solve's scope on a shared surface, not the surface: they are left out.
+impl crate::geom::content::Content for BSplineSurface {
+    fn content(&self, d: &mut crate::geom::content::Digest) -> Option<()> {
+        let Self {
+            nurb,
+            nurb_is_borrowed: _,
+            out_of_bounds_enabled: _,
+            continues_past_domain: _,
+            knot_type,
+            form,
+        } = self;
+        d.tag(0xB55);
+        match nurb.as_ref() {
+            Some(n) => {
+                d.bool(true);
+                n.content(d)?;
+            }
+            None => d.bool(false),
+        }
+        d.hashed(knot_type);
+        d.hashed(form);
+        Some(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2587,6 +2594,28 @@ mod tests {
             Point3::new(10.0, 10.0, 0.0),
         )
         .unwrap()
+    }
+
+    /// A point 10 off the plane has no foot within the tolerance: the inversion names
+    /// the tolerance it searched within, class not within tolerance, status `SM_ERR`.
+    #[test]
+    fn step_inversion_of_a_point_off_the_surface_names_its_tolerance() {
+        let k = Kernel::default();
+        let s = bilinear();
+        let dom = s.natural_uv_domain();
+        let e = s
+            .step_inversion(&k, &dom, Point3::new(5.0, 5.0, 10.0), 1e-6, None)
+            .unwrap_err();
+        assert_eq!(
+            e.nurbs_failure(),
+            Some(&NurbsFailure::BSpline(
+                BSplineFailure::NoFootWithinTolerance { tolerance: 1e-6 }
+            )),
+            "{e:?}"
+        );
+        assert_eq!(e.kind(), crate::error::ErrorKind::NotWithinTolerance);
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert!(!e.is_defect() && !e.is_refusal(), "{e:?}");
     }
 
     #[test]
@@ -2621,7 +2650,7 @@ mod tests {
             s.canonical(),
             Err(e) if e.sm_status() == Some(1006)
                 && e.nurbs_failure()
-                    == Some(&NurbsFailure::BSpline(BSplineFailure::Missing("the NURBS form")))
+                    == Some(&NurbsFailure::BSpline(BSplineFailure::NoNurbsForm))
         ));
         assert!(s.copy().gw_nurb().is_none());
         assert!(s.approx_eq(&BSplineSurface::new()));

@@ -86,6 +86,8 @@ fn a_new_table_has_its_defaults_and_saves() {
     assert_eq!(record["place"], json!({"anchor": {"corner": "top_right", "offset_mm": [0.0, 0.0]}}), "{record}");
     assert_eq!((&record["table"]["heading"], &record["table"]["row_height_mm"]), (&json!("top"), &json!(7.0)));
     assert_eq!(record["table"]["columns"][1]["heading"], json!("QTY"));
+    let names: Vec<_> = record["table"]["columns"].as_array().unwrap().iter().map(|c| c["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["item", "quantity", "name", "description", "material", "mass", "ballooned"], "a new list has no finish column");
     assert_eq!((&record["table"]["columns"][6]["name"], &record["table"]["columns"][6]["printed"]), (&json!("ballooned"), &json!(false)));
     // Never on paper: the sheet draws the list, but never this column.
     let svg = s.execute("drawing.export", &json!({"sheet": sheet, "format": "svg"})).unwrap();
@@ -146,6 +148,68 @@ fn a_table_draws_where_its_record_says() {
     let exported = s.execute("drawing.export", &json!({"sheet": sheet, "format": "svg"})).unwrap();
     assert_eq!(words(&exported), words(&scene), "{exported}");
     assert_eq!(exported["svg"], s.execute("drawing.export", &json!({"sheet": sheet, "format": "svg"})).unwrap()["svg"], "the same bytes");
+}
+
+/// A design of one part, with no component placed, lists that part (#19883): a row for it, item 1,
+/// one of it, its heading and that row drawn.
+#[test]
+fn a_design_of_one_part_lists_the_part() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"})).unwrap();
+    s.execute("drawing.create", &json!({})).unwrap();
+    let sheet = sheet_of(&s);
+    let list = id_of(&run(&mut s, ADD, json!({"sheet": sheet, "kind": "parts_list"})));
+    let reply = inspected(&mut s, list);
+    assert_eq!((reply["status"].as_str(), reply["listed"].as_u64()), (Some("ok"), Some(1)), "{reply}");
+    let rows = reply["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 1, "{reply}");
+    let bounds = on_sheet(&s, list).1.unwrap();
+    assert!((bounds.size().y - 2.0 * 7.0).abs() < 1e-9, "a heading and one row: {bounds:?}");
+}
+
+/// A new parts list has no FINISH column, so its width and columns are what they were; a column named
+/// `finish` added through the table's columns shows each part's finish property, or its free `finish`
+/// property when it has none, and nothing for a part with neither.
+#[test]
+fn a_parts_list_starts_without_a_finish_column_and_prints_the_finish_once_added() {
+    let mut s = assembly();
+    // The model changes only with the drawing closed.
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    s.execute("drawing.close", &json!({})).unwrap();
+    s.execute("component.metadata.set", &json!({"component": "Plate", "finish": "Powder coat, RAL 9005, matt"})).unwrap();
+    s.execute("component.metadata.set", &json!({"component": "Bolt", "properties": {"finish": "Zinc plate"}})).unwrap();
+    s.execute("drawing.open", &json!({"drawing": drawing})).unwrap();
+    let sheet = sheet_of(&s);
+    let list = id_of(&run(&mut s, ADD, json!({"sheet": sheet, "kind": "parts_list"})));
+    let words = |s: &Session| {
+        let d = s.drawing("test").unwrap().clone();
+        let table = d.tables.by_id(list).unwrap();
+        let lettering = PaperFonts::new(&d.font, &d.language, true);
+        let placed = place(s, &d, table, drawing_space(&d.sheets[0]), &lettering).ok().unwrap();
+        std::iter::once(&placed.layout.heading)
+            .chain(&placed.layout.rows)
+            .flat_map(|row| &row.cells)
+            .flat_map(|cell| &cell.lines)
+            .map(|line| line.text.clone())
+            .collect::<Vec<String>>()
+    };
+    let before = words(&s);
+    assert!(!before.iter().any(|w| w == "FINISH" || w == "Zinc plate" || w == "Powder coat, RAL 9005, matt"), "{before:?}");
+    assert!(!s.drawing("test").unwrap().tables.by_id(list).unwrap().table.columns.iter().any(|c| c.name == "finish"));
+    // The existing add-column workflow: the material's column, named for the finish.
+    let columns = s.drawing("test").unwrap().tables.by_id(list).unwrap().table.columns.clone();
+    let material = columns.iter().position(|c| c.name == "material").unwrap();
+    let mut finish: Value = serde_json::to_value(&columns[material]).unwrap();
+    finish["name"] = json!("finish");
+    finish["heading"] = json!("FINISH");
+    finish["content"] = serde_json::from_str(&finish["content"].to_string().replace("material", "finish")).unwrap();
+    let mut all = serde_json::to_value(&columns).unwrap();
+    all.as_array_mut().unwrap().insert(material + 1, finish);
+    run(&mut s, EDIT, json!({"table": ids::encode(list), "set": {"columns": all}}));
+    let after = words(&s);
+    for word in ["FINISH", "Powder coat, RAL 9005, matt", "Zinc plate"] {
+        assert!(after.iter().any(|w| w == word), "{word} in {after:?}");
+    }
 }
 
 /// An offset moves an anchored table; a heading at the bottom keeps the same corner of the outline;

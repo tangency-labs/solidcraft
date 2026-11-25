@@ -21,6 +21,8 @@
 //! | [`create_end_cap_patch`]          | `SmBlendCorner::CreateEndPatchOfEnd`'s `SM_BEND_AT_SMOOTH` branch |
 //! | [`end_awaits_rollover`], [`end_can_await_rollover`], [`end_past_tangent_edge`], `end_rolls_over`, `ends_in_tangent_edge` (private) | none (#2406: the End's rail rolls over a tangent edge first) |
 //! | [`side_edgeuse_across_rolled_edge`] | none (solidcore-native tangent rollover: a rail rolled over a tangent edge the whole length ends on the next side edge) |
+//! | `rail_rolls_on_past_side_edge` (private) | none (#15767: a rail past a side edge's end that rolls on over a smooth edge there) |
+//! | `end_section_rolls_over` (private) | none (#15767: the roll-over lies wholly before the end face) |
 //! | [`place_rolled_rail_end`]         | none (#2406: a rail end not reached on the End's plane before the rollover) |
 //! | `side_edge_in_cap` (private)      | none (#2406: a cap edge along a side edge in the cap's plane) |
 //! | [`EndEdges`], `end_face_runs_on_past_side_edge`, `rail_face` (private) | none: an end face running on tangentially past the side edge is the global merge's, not refused |
@@ -38,6 +40,11 @@
 //! it the same (the fork's recursion there has no bound). No recursion (WR-697).
 
 use super::swept::SweptSolvers;
+use super::{
+    bad_input, bad_input_with, bad_setup, edge_use_without_edge, edge_use_without_face,
+    edge_without_curve, face_without_surface, missing_defect, solver_input, unbuildable,
+    unbuildable_with,
+};
 use crate::blend::fillet_cliff_overflow::distance_to_surface;
 use crate::blend::fillet_corner::p3::CornerPatchEnv;
 use crate::blend::fillet_corner::p3::FilletCorner;
@@ -45,11 +52,19 @@ use crate::blend::fillet_corner::topology::same_convexity_edges_round_vertex;
 use crate::blend::fillet_corner::topology::{
     check_tangential_edgeuse_at_vertex, find_side_edgeuse, same_convexity_edges,
 };
-use crate::blend::fillet_geom::p1::{FilStatus, FilletBrep, FilletEdgeType, FilletVertexType};
+use crate::blend::fillet_geom::p1::{
+    FilStatus, FilletBrep, FilletEdgeType, FilletSolverId, FilletVertexType,
+};
 use crate::blend::fillet_geom::p2::{srf_srf_intersection, SrfSrfOptions};
 use crate::blend::fillet_geom::p4::set_edge_curve;
+use crate::blend::fillet_solver::p1::{FilletSolver, OffsetSurfaceSlot};
 use crate::blend::fillet_solver::p5::is_concave_edge;
-use crate::error::{EntityRef, Result, SolidError};
+use crate::curve::curve::Curve;
+use crate::error::blend::{
+    BlendFailure, CornerInput, CornerShape, CornerStep, FilletSetUp, SolverFailure,
+};
+use crate::error::topology::TopologyFailure;
+use crate::error::{EntityRef, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::assert_array::c_general;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::tol::zone_tol3d;
@@ -122,16 +137,131 @@ pub struct EndRefusal {
     pub edge: Option<EdgeId>,
 }
 
-fn nul() -> SolidError {
-    SolidError::blend_missing(OP, "topology, a solver or geometry the End reads")
-}
-
+/// The face of `eu`; [`edge_use_without_face`] without one.
 fn face_of(target: &Brep, eu: EdgeuseId) -> Result<FaceId> {
-    eu1::face(target, eu)?.ok_or_else(nul)
+    eu1::face(target, eu)?.ok_or_else(|| edge_use_without_face(OP, eu))
 }
 
+/// The radial edge use of `eu`; [`FilletSetUp::RadialEdgeUse`] at `eu` without one.
+fn radial_of(target: &Brep, eu: EdgeuseId) -> Result<EdgeuseId> {
+    eu1::radial(target, eu)?
+        .ok_or_else(|| bad_setup(OP, FilletSetUp::RadialEdgeUse, Some(EntityRef::Edgeuse(eu))))
+}
+
+/// The face of the radial edge use of `eu`.
 fn radial_face(target: &Brep, eu: EdgeuseId) -> Result<FaceId> {
-    face_of(target, eu1::radial(target, eu)?.ok_or_else(nul)?)
+    face_of(target, radial_of(target, eu)?)
+}
+
+/// The edge of `eu`; [`edge_use_without_edge`] without one.
+fn edge_of(b: &Brep, eu: EdgeuseId) -> Result<EdgeId> {
+    eu1::edge(b, eu)?.ok_or_else(|| edge_use_without_edge(OP, eu))
+}
+
+/// The curve of `e`; [`edge_without_curve`] without one.
+fn curve_of(b: &Brep, e: EdgeId) -> Result<&Curve> {
+    edge::curve(b, e)?.ok_or_else(|| edge_without_curve(OP, e))
+}
+
+/// The solver's edge use `index` (0 or 1); [`SolverFailure::SolverEdgeUseMissing`] without
+/// it.
+fn solver_edgeuse(fs: &FilletSolver, index: usize) -> Result<EdgeuseId> {
+    fs.edgeuse(index)?
+        .ok_or_else(|| solver_input(OP, SolverFailure::SolverEdgeUseMissing { index }, None))
+}
+
+/// The solver's offset surface `index` (0 or 1); [`FilletSetUp::SolverOffsetSurface`]
+/// without it.
+fn solver_surface(fs: &FilletSolver, index: usize) -> Result<&OffsetSurfaceSlot> {
+    fs.surface(index)?
+        .ok_or_else(|| bad_setup(OP, FilletSetUp::SolverOffsetSurface, None))
+}
+
+/// The corner's vertex, the caller's ([`BlendFailure::NoVertexGiven`] without one).
+fn corner_vertex(corner: &FilletCorner) -> Result<VertexId> {
+    corner
+        .vertex
+        .ok_or_else(|| SolidError::blend(OP, BlendFailure::NoVertexGiven))
+}
+
+/// The corner has no filleted (blended) edge use: the caller's input,
+/// [`CornerInput::FilletedEdgeUsesNotGiven`].
+fn filleted_eus_not_given(corner: &FilletCorner) -> SolidError {
+    bad_input(
+        OP,
+        CornerInput::FilletedEdgeUsesNotGiven { kind: corner.kind },
+        None,
+    )
+}
+
+/// The fillet vertex `fv`, classified to an edge use, names no edge use:
+/// [`FilletSetUp::PointClassEdgeUse`] at `fv`.
+fn not_on_side_edge_use(fv: VertexId) -> SolidError {
+    bad_setup(
+        OP,
+        FilletSetUp::PointClassEdgeUse,
+        Some(EntityRef::Vertex(fv)),
+    )
+}
+
+/// The caller's side edge `side_edge` has no vertex at its far end from the corner's vertex:
+/// [`CornerInput::EdgeWithoutVertex`] at the edge.
+fn edge_without_vertex(side_edge: EdgeId) -> SolidError {
+    bad_input(
+        OP,
+        CornerInput::EdgeWithoutVertex,
+        Some(EntityRef::Edge(side_edge)),
+    )
+}
+
+/// The two vertices of the pseudo-B-rep's fillet edge `fe`; [`FilletSetUp::EdgeVertices`]
+/// at `fe` without them.
+fn edge_ends(pseudo: &FilletBrep, fe: EdgeId) -> Result<(VertexId, VertexId)> {
+    let no_ends = || bad_setup(OP, FilletSetUp::EdgeVertices, Some(EntityRef::Edge(fe)));
+    let start = edge::vertex(pseudo.brep(), fe)?.ok_or_else(no_ends)?;
+    let end = edge::other_vertex(pseudo.brep(), fe, Some(start))?.ok_or_else(no_ends)?;
+    Ok((start, end))
+}
+
+/// The End's first edge, its end rib; [`CornerInput::TopologyMismatch`] (status
+/// `SM_ERR_NULL_POINTER`) without one.
+fn first_edge(corner: &FilletCorner) -> Result<EdgeId> {
+    corner
+        .edges
+        .first()
+        .copied()
+        .ok_or_else(|| bad_input_with(OP, CornerInput::TopologyMismatch, None, SM_ERR_NULL_POINTER))
+}
+
+/// The solver of the pseudo-B-rep's rib `rib`: of its primary edge use's fillet geometry
+/// ([`FilletSetUp::PrimaryEdgeUse`], [`CornerInput::EdgeUseWithoutFilletGeometry`],
+/// [`SolverFailure::FilletGeomWithoutSolver`] where a link is not there).
+fn rib_solver(pseudo: &FilletBrep, rib: EdgeId) -> Result<FilletSolverId> {
+    let eu = eu1::primary_edgeuse(pseudo.brep(), rib)?
+        .ok_or_else(|| bad_setup(OP, FilletSetUp::PrimaryEdgeUse, Some(EntityRef::Edge(rib))))?;
+    let geom = pseudo.fillet_edgeuse(eu)?.fillet_geom().ok_or_else(|| {
+        bad_input(
+            OP,
+            CornerInput::EdgeUseWithoutFilletGeometry,
+            Some(EntityRef::Edgeuse(eu)),
+        )
+    })?;
+    pseudo.geom(geom)?.fillet_solver().ok_or_else(|| {
+        solver_input(
+            OP,
+            SolverFailure::FilletGeomWithoutSolver { fillet_geom: geom },
+            None,
+        )
+    })
+}
+
+/// The original face of the pseudo-B-rep's fillet edge `fe`; [`FilletSetUp::OriginalFace`]
+/// at `fe` without one.
+fn original_face(pseudo: &FilletBrep, fe: EdgeId) -> Result<FaceId> {
+    pseudo
+        .fillet_edge(fe)?
+        .original_face()
+        .ok_or_else(|| bad_setup(OP, FilletSetUp::OriginalFace, Some(EntityRef::Edge(fe))))
 }
 
 /// The fork's `SmBlendCorner::EndAtSmoothVertex` (41a39ec): whether the blended edge (of
@@ -201,10 +331,10 @@ pub fn continuing_edges(
     run_out: bool,
 ) -> Result<Vec<EdgeId>> {
     let mut found = Vec::new();
-    let fil_edge = eu1::edge(target, fil_eu)?.ok_or_else(nul)?;
+    let fil_edge = edge_of(target, fil_eu)?;
     let fil_faces = [face_of(target, fil_eu)?, radial_face(target, fil_eu)?];
     for &eu in all_eus {
-        let other = eu1::edge(target, eu)?.ok_or_else(nul)?;
+        let other = edge_of(target, eu)?;
         if other == fil_edge || found.contains(&other) {
             continue;
         }
@@ -325,8 +455,8 @@ fn run_on_leaves_the_part(
     use crate::curve::curve::CurveKind;
     use crate::topology::edgeuse::p3::{evaluate_binormal, BinormalOptions};
     k.check_cancelled(OP)?;
-    let fil_radial = eu1::radial(target, fil_eu)?.ok_or_else(nul)?;
-    let other_radial = eu1::radial(target, other_eu)?.ok_or_else(nul)?;
+    let fil_radial = radial_of(target, fil_eu)?;
+    let other_radial = radial_of(target, other_eu)?;
     let fil_faces = [face_of(target, fil_eu)?, face_of(target, fil_radial)?];
     let other_faces = [face_of(target, other_eu)?, face_of(target, other_radial)?];
     // one face round the vertex: the blend run on would follow the edge
@@ -341,8 +471,8 @@ fn run_on_leaves_the_part(
     } else {
         return Ok(false);
     };
-    let fil_edge = eu1::edge(target, fil_eu)?.ok_or_else(nul)?;
-    let other_edge = eu1::edge(target, other_eu)?.ok_or_else(nul)?;
+    let fil_edge = edge_of(target, fil_eu)?;
+    let other_edge = edge_of(target, other_eu)?;
     let at_start = |target: &Brep, e: EdgeId| -> Result<bool> {
         Ok(edge::start_vertex(target, e)? == Some(vertex))
     };
@@ -361,7 +491,7 @@ fn run_on_leaves_the_part(
     // which evaluates only through its segments (`Curve::evaluate`'s SM_ERR). Every other
     // failure of the evaluations below (a cancel, an unported call) is the caller's.
     for e in [fil_edge, other_edge] {
-        let c = edge::curve(target, e)?.ok_or_else(nul)?;
+        let c = curve_of(target, e)?;
         if matches!(
             c.kind(),
             CurveKind::TangentField(_) | CurveKind::Composite(_)
@@ -382,7 +512,7 @@ fn run_on_leaves_the_part(
     // by x
     let heights = |target: &Brep, e: EdgeId| -> Result<Option<(f64, f64, f64)>> {
         let start = at_start(target, e)?;
-        let c = edge::curve(target, e)?.ok_or_else(nul)?;
+        let c = curve_of(target, e)?;
         let ds = c.evaluate(k, param_at(target, e)?, 3, !start, true)?;
         // a kind that returns fewer derivatives than asked: undecided, the cap stays
         let (Some(&d1), Some(&d2), Some(&d3)) = (ds.get(1), ds.get(2), ds.get(3)) else {
@@ -501,7 +631,7 @@ fn ball_touching_at(
 pub(crate) fn ball_touching_with(
     k: &Kernel,
     target: &Brep,
-    fs: &crate::blend::fillet_solver::p1::FilletSolver,
+    fs: &FilletSolver,
     side_eu: EdgeuseId,
     other_face: FaceId,
     p: Point3,
@@ -510,17 +640,14 @@ pub(crate) fn ball_touching_with(
     let side_faces = [face_of(target, side_eu)?, radial_face(target, side_eu)?];
     let mut f_index = 2;
     for ii in 0..2 {
-        let eu = fs.edgeuse(ii)?.ok_or_else(nul)?;
+        let eu = solver_edgeuse(fs, ii)?;
         let face = face_of(target, eu)?;
         if face != other_face && side_faces.contains(&face) {
             f_index = ii;
         }
     }
     if f_index > 1 {
-        return Err(SolidError::blend_failed(
-            OP,
-            "no fillet surface lies on the side face",
-        ));
+        return Err(unbuildable(OP, CornerStep::SideEdgeOffSolverFaces));
     }
     ball_touching_on(k, target, fs, f_index, other_face, p, cap)
 }
@@ -533,13 +660,13 @@ pub(crate) fn ball_touching_with(
 pub(crate) fn ball_touching_on(
     k: &Kernel,
     target: &Brep,
-    fs: &crate::blend::fillet_solver::p1::FilletSolver,
+    fs: &FilletSolver,
     f_index: usize,
     other_face: FaceId,
     p: Point3,
     cap: Option<f64>,
 ) -> Result<(bool, bool, f64)> {
-    let offset_f = &fs.surface(f_index)?.ok_or_else(nul)?.surface;
+    let offset_f = &solver_surface(fs, f_index)?.surface;
     let f = offset_f.base_surface();
     let radius = cap.unwrap_or_else(|| offset_f.offset_distance().abs());
     let sign = if offset_f.offset_distance() < 0.0 {
@@ -554,20 +681,14 @@ pub(crate) fn ball_touching_on(
         &DropPointOptions::default(),
     )?;
     if !dropped.success {
-        return Err(SolidError::blend_failed(
-            OP,
-            "the point does not drop onto the fillet's base surface",
-        ));
+        return Err(unbuildable(OP, CornerStep::EndPointOffBaseSurface));
     }
     let normal = f.evaluate_normal(k, dropped.result_uv, Side::Left, Side::Left)?;
     let distance = |rho: f64| -> Result<f64> {
         let centre = p + normal * (sign * rho);
         let gap = distance_to_surface(k, target, other_face, centre)?;
         if gap >= BIG_DOUBLE {
-            return Err(SolidError::blend_failed(
-                OP,
-                "a centre does not drop onto the other face",
-            ));
+            return Err(unbuildable(OP, CornerStep::EndCentreOffOtherFace));
         }
         Ok(gap - rho)
     };
@@ -611,13 +732,13 @@ fn radius_reaching_side_edge_end(
     side_eu: EdgeuseId,
     other_face: FaceId,
 ) -> Result<(bool, f64)> {
-    let side_edge = eu1::edge(target, side_eu)?.ok_or_else(nul)?;
+    let side_edge = edge_of(target, side_eu)?;
     let far = if edge::start_vertex(target, side_edge)? == corner.vertex {
         edge::end_vertex(target, side_edge)?
     } else {
         edge::start_vertex(target, side_edge)?
     }
-    .ok_or_else(nul)?;
+    .ok_or_else(|| edge_without_vertex(side_edge))?;
     let (on, within, fit) = ball_touching_at(
         k,
         target,
@@ -652,7 +773,7 @@ fn end_face_runs_on_past_side_edge(
     side_eu: EdgeuseId,
     rail_face: FaceId,
 ) -> Result<bool> {
-    let side_edge = eu1::edge(target, side_eu)?.ok_or_else(nul)?;
+    let side_edge = edge_of(target, side_eu)?;
     let side_faces = [face_of(target, side_eu)?, radial_face(target, side_eu)?];
     if !side_faces.contains(&rail_face) {
         return Ok(false);
@@ -670,7 +791,7 @@ fn end_face_runs_on_past_side_edge(
     } else {
         edge::start_vertex(target, side_edge)?
     }
-    .ok_or_else(nul)?;
+    .ok_or_else(|| edge_without_vertex(side_edge))?;
     let edges = vertex::edges(target, far, None)?;
     if edges.len() != 3 || !edges.contains(&side_edge) {
         return Ok(false);
@@ -698,8 +819,204 @@ fn end_face_runs_on_past_side_edge(
     if h != h3 || h == end_face || h == rail_face {
         return Ok(false);
     }
-    let eu = eu1::primary_edgeuse(target, e3)?.ok_or_else(nul)?;
+    let eu = eu1::primary_edgeuse(target, e3)?
+        .ok_or_else(|| SolidError::topology(OP, TopologyFailure::EdgeWithoutEdgeuses))?;
     check_tangential_edgeuse_at_vertex(k, target, eu, far, rad_to_deg(corner.tangency_tol_radians))
+}
+
+/// Not the fork's (#15767): whether the rail's face F (`rail_face`) runs on tangentially past
+/// the side edge's far end P onto a face X, so that a rail past P rolls over that tangent
+/// edge onto X (the solver's `ProcessRollOver`, after the corners' edges) and ends on the
+/// edge between X and the end face ([`side_edgeuse_across_rolled_edge`]), not past the side
+/// edge. The rail continued on F's surface past P is what the corner sees before the roll-over.
+/// `false` where the walk fails: the End is then refused as on main ([`proven_or_main`]).
+///
+/// # Errors
+/// Those `SolidError::is_unported_or_cancelled` passes on (cancellation, unported callees,
+/// unavailable face trims, a spent certificate budget) only.
+fn rail_rolls_on_past_side_edge(
+    k: &Kernel,
+    target: &mut Brep,
+    corner: &FilletCorner,
+    side_eu: EdgeuseId,
+    rail_face: FaceId,
+) -> Result<bool> {
+    proven_or_main(rail_rolls_on_past_side_edge_walk(
+        k, target, corner, side_eu, rail_face,
+    ))
+}
+
+/// Not the fork's (#15767): an unproven roll-over test as main's path. Each of
+/// [`rail_rolls_on_past_side_edge`] and [`end_section_rolls_over`] gates a branch main did
+/// not have, taken in place of main's refusal of an End whose rail runs past its side edge;
+/// a failure inside the test proves no roll-over, so it is `false` and the End is refused as
+/// on main, not ended in a bare error main never reached. Errors that
+/// `SolidError::is_unported_or_cancelled` passes on still propagate.
+///
+/// # Errors
+/// `r`'s error where `SolidError::is_unported_or_cancelled` passes it on.
+fn proven_or_main(r: Result<bool>) -> Result<bool> {
+    match r {
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
+        Err(_) => Ok(false),
+        ok => ok,
+    }
+}
+
+/// The walk of [`rail_rolls_on_past_side_edge`].
+///
+/// # Errors
+/// `SM_ERR_NULL_POINTER` without side edge or far vertex; those of the continuation.
+fn rail_rolls_on_past_side_edge_walk(
+    k: &Kernel,
+    target: &mut Brep,
+    corner: &FilletCorner,
+    side_eu: EdgeuseId,
+    rail_face: FaceId,
+) -> Result<bool> {
+    let side_edge = edge_of(target, side_eu)?;
+    let far = if edge::start_vertex(target, side_edge)? == corner.vertex {
+        edge::end_vertex(target, side_edge)?
+    } else {
+        edge::start_vertex(target, side_edge)?
+    }
+    .ok_or_else(|| edge_without_vertex(side_edge))?;
+    let Some(beyond) = side_edgeuse_across_rolled_edge(
+        k,
+        target,
+        side_eu,
+        far,
+        None,
+        corner.tangency_tol_radians,
+    )?
+    else {
+        return Ok(false);
+    };
+    // the continuation lies on the end face: the face rolled over is F's neighbour
+    Ok(eu1::face(target, beyond)? != Some(rail_face))
+}
+
+/// Not the fork's (#15767): whether the cross-section of the round at its other rail's end
+/// (`g_end`, the rail end on the fillet's other face G at the end face) has already rolled
+/// over the tangent edge the rail on F (`rail_face`) runs on past: the ball of the round's
+/// radius touching G at that point (its centre offset along G's normal as the solver offsets
+/// G) touches F's surface off the face F. Only then does the whole roll-over lie before the
+/// end face, so the rolled rail ends on the edge beyond (`rail_rolls_on_past_side_edge`) and
+/// the fillet's pieces each keep four sides. Where that ball still touches F inside the
+/// face, the section through the roll-over point square to the edge meets G past the end
+/// face, the seam between the round's pieces crosses the end face and the piece rolled over
+/// is three-sided, which the corner's pieces do not represent: the End is then refused as
+/// one whose rail runs past its side edge.
+///
+/// `true` only where the roll-over is proven: G's rail end is solved, the solver's two
+/// surfaces are G's and F's, both drops succeed and the foot lies off F. Anything that
+/// proves nothing (an unsolved rail end, a solver whose faces are not G and F, a drop that
+/// fails, or a failure of the test itself, [`proven_or_main`]) is `false`, and the End is
+/// refused as on main, naming the radius at which the rail reaches the side edge's end.
+///
+/// `g_end` is `None` where G's rail end missed its own side edge too (a second miss on a
+/// non-cliff End: its rail end was found on the side edge's line continued past the edge's
+/// end, or not at all). That rail end is not a point of the round at the end face, so the
+/// section through it proves nothing, and nothing proves the second miss rolls over either:
+/// `false`, before any lookup, and the End is refused as before #20757.
+///
+/// # Errors
+/// Those `SolidError::is_unported_or_cancelled` passes on (cancellation, unported callees,
+/// unavailable face trims, a spent certificate budget) only.
+#[allow(clippy::too_many_arguments)]
+fn end_section_rolls_over(
+    k: &Kernel,
+    target: &mut Brep,
+    pseudo: &FilletBrep,
+    solvers: &dyn SweptSolvers,
+    fil_eu: EdgeuseId,
+    other_face: FaceId,
+    rail_face: FaceId,
+    g_end: Option<VertexId>,
+) -> Result<bool> {
+    let Some(g_end) = g_end else {
+        return Ok(false);
+    };
+    proven_or_main(end_section_rolled_over_at(
+        k, target, pseudo, solvers, fil_eu, other_face, rail_face, g_end,
+    ))
+}
+
+/// The test of [`end_section_rolls_over`], `false` where it proves nothing.
+///
+/// # Errors
+/// `SM_ERR_NULL_POINTER` without solver surface; those of the drops and the classification.
+#[allow(clippy::too_many_arguments)]
+fn end_section_rolled_over_at(
+    k: &Kernel,
+    target: &mut Brep,
+    pseudo: &FilletBrep,
+    solvers: &dyn SweptSolvers,
+    fil_eu: EdgeuseId,
+    other_face: FaceId,
+    rail_face: FaceId,
+    g_end: VertexId,
+) -> Result<bool> {
+    if !pseudo.fillet_vertex(g_end)?.is_processed() {
+        return Ok(false);
+    }
+    let fs = solvers.solver_of_edgeuse(fil_eu)?;
+    let mut g_index = 2;
+    let mut f_index = 2;
+    for ii in 0..2 {
+        let face = face_of(target, solver_edgeuse(fs, ii)?)?;
+        if face == other_face {
+            g_index = ii;
+        } else if face == rail_face {
+            f_index = ii;
+        }
+    }
+    if g_index > 1 || f_index > 1 {
+        return Ok(false);
+    }
+    let offset_g = &solver_surface(fs, g_index)?.surface;
+    let g = offset_g.base_surface();
+    let sign = if offset_g.offset_distance() < 0.0 {
+        -1.0
+    } else {
+        1.0
+    };
+    let p = pseudo.vertex_point(g_end)?;
+    let on_g = g.drop_point::<NoObject>(
+        k,
+        p,
+        &g.natural_uv_domain_with_nurb(k)?,
+        &DropPointOptions::default(),
+    )?;
+    if !on_g.success {
+        return Ok(false);
+    }
+    let normal = g.evaluate_normal(k, on_g.result_uv, Side::Left, Side::Left)?;
+    let centre = p + normal * (sign * offset_g.offset_distance().abs());
+    let f = solver_surface(fs, f_index)?.surface.base_surface();
+    let on_f = f.drop_point::<NoObject>(
+        k,
+        centre,
+        &f.natural_uv_domain_with_nurb(k)?,
+        &DropPointOptions::default(),
+    )?;
+    if !on_f.success {
+        return Ok(false);
+    }
+    let foot = f.evaluate_point(k, on_f.result_uv)?;
+    let zone = zone_tol3d(k, target.face(rail_face)?.tolerance);
+    let mut class = PointClassification::new(zone);
+    point_3d_classify(
+        k,
+        target,
+        rail_face,
+        foot,
+        zone,
+        true,
+        &mut class,
+        Point3dClassifyOptions::default(),
+    )?;
+    Ok(class.point_class() != PointClassType::Face)
 }
 
 /// Not the fork's (SolidCraft's `smooth_edges_and_unfinished_tangent_chains_are_refused_saying_why`,
@@ -717,14 +1034,17 @@ fn blend_runs_out_past_vertex(
     target: &mut Brep,
     corner: &FilletCorner,
 ) -> Result<bool> {
-    let (Some(eus), Some(all), Some(vertex)) = (
-        corner.solver_eus.as_ref(),
-        corner.all_eus.as_ref(),
-        corner.vertex,
-    ) else {
-        return Err(nul());
-    };
-    let &fil_eu = eus.first().ok_or_else(nul)?;
+    let fil_eu = corner
+        .solver_eus
+        .as_deref()
+        .and_then(<[EdgeuseId]>::first)
+        .copied()
+        .ok_or_else(|| filleted_eus_not_given(corner))?;
+    let all = corner
+        .all_eus
+        .as_ref()
+        .ok_or_else(|| bad_input(OP, CornerInput::RingNotSet, None))?;
+    let vertex = corner_vertex(corner)?;
     let tol = rad_to_deg(corner.tangency_tol_radians);
     let continues = continuing_edges(k, target, vertex, fil_eu, all, tol, &[], true, false)?;
     if continues.is_empty() {
@@ -871,7 +1191,16 @@ pub fn side_edgeuse_across_rolled_edge(
         return Ok(None);
     }
     let others: Vec<EdgeId> = edges.iter().copied().filter(|&x| x != e).collect();
-    let [a, b] = <[EdgeId; 2]>::try_from(others).map_err(|_| nul())?;
+    // the vertex's three edges hold E, so two others are left unless the body's vertex
+    // does not list E among its edges
+    let &[a, b] = others.as_slice() else {
+        return Err(bad_input_with(
+            OP,
+            CornerInput::TopologyMismatch,
+            Some(EntityRef::Vertex(at)),
+            SM_ERR_NULL_POINTER,
+        ));
+    };
     for (t, n) in [(a, b), (b, a)] {
         let t_faces = edge::faces(target, t, None)?;
         let n_faces = edge::faces(target, n, None)?;
@@ -930,7 +1259,7 @@ pub fn side_edge_chain_to(
     let mut back = vec![last];
     let mut curr = last;
     for _ in 0..SIDE_EDGE_CHAIN_STEPS {
-        let e = eu1::edge(target, curr)?.ok_or_else(nul)?;
+        let e = edge_of(target, curr)?;
         let ends = [edge::start_vertex(target, e)?, edge::end_vertex(target, e)?];
         if ends.contains(&corner.vertex) {
             back.reverse();
@@ -957,17 +1286,16 @@ pub fn side_edge_chain_to(
             }
         }
         let Some(prev) = prev else {
-            return Err(SolidError::blend_failed(
-                OP,
-                "the side edge chain has no continuation",
-            ));
+            return Err(unbuildable(OP, CornerStep::EndSideEdgeChainBroken));
         };
         back.push(prev);
         curr = prev;
     }
-    Err(SolidError::blend_failed(
+    Err(SolidError::blend(
         OP,
-        "the side edge chain does not reach the vertex within its step bound",
+        BlendFailure::SideEdgeChainPastBound {
+            steps: SIDE_EDGE_CHAIN_STEPS,
+        },
     ))
 }
 
@@ -1003,8 +1331,8 @@ fn refuse_end_overflowing_side_edge(
 ) -> Result<EndRefusal> {
     let mut most: f64 = 0.0;
     for &side_eu in side_eus {
-        let side_edge = eu1::edge(target, side_eu)?.ok_or_else(nul)?;
-        let curve = edge::curve(target, side_edge)?.ok_or_else(nul)?;
+        let side_edge = edge_of(target, side_eu)?;
+        let curve = curve_of(target, side_edge)?;
         let ivl = edge::interval(target, side_edge)?;
         let rho = |t: f64| -> Result<f64> {
             let p = curve.evaluate_point(k, t)?;
@@ -1057,6 +1385,19 @@ pub fn describe_end_passing_over_end_face(fit: f64) -> String {
     )
 }
 
+/// The ball touching the rail's face at a point of an end face's crossing with it, and the
+/// round's other face, as [`largest_ball_ending_on_end_face`] judges it.
+enum CrossingBall {
+    /// Its radius, below the round's and the margin.
+    Radius(f64),
+    /// As large as the round and the margin, or larger: the round's rail reaches the crossing.
+    Reaches,
+    /// The point lies on the other face: the crossing is back on the blended edge.
+    OnOtherFace,
+    /// Not solved.
+    Unknown,
+}
+
 /// The most steps [`largest_ball_ending_on_end_face`] walks along the end face's surface on
 /// a rail's face: a forty-eighth of the blended edge's length each, so twice that length.
 const END_FACE_WALK_STEPS: usize = 96;
@@ -1080,15 +1421,27 @@ const END_FACE_SOLVE_STEPS: usize = 60;
 /// passes over E whole, and no section of E ends it.
 ///
 /// C is walked from the vertex in steps of a forty-eighth of the blended edge's length, at
-/// most [`END_FACE_WALK_STEPS`], each point solved on both surfaces, until it leaves F (that
-/// point found by bisection), the ball there is the round's (its rail does end on E: nothing
-/// is judged), or a solve fails. An inner largest ball is refined by golden section.
+/// most [`END_FACE_WALK_STEPS`], each point solved on both surfaces. A rail is judged only
+/// where the walk comes to C's end on F: C leaves F across F's rim (the last point on F found
+/// by bisection, and classified on the rim) or comes back onto the blended edge. Where the
+/// ball at a point is the round's (its rail does end on E), the steps run out, or a solve
+/// fails inside F, the walk has not seen all of C and its largest ball so far is no bound:
+/// nothing is judged of that rail. The largest ball walked is refined by golden section over
+/// the two steps about it, on points of F only. Between the points walked the ball is not
+/// enclosed: a larger ball between two of them, away from the largest walked, is not seen,
+/// which can only make the size named smaller than the largest that ends on E.
+///
+/// With `missed`, only a rail is judged for which the corner's vertices' own search, run
+/// again here (the rail curve's crossings with that surface, `rail_crossing_nearest`), finds
+/// no end on E's surface: that the round's rail misses E is then that search's finding, not
+/// this walk's, and not a status another failure may have left.
 ///
 /// `Some(largest)` of a constant round where a rail's largest ball is smaller than the round
 /// and `margin` together (a round within `margin` of that ball ends on E only where its rail
 /// does, so it is judged with the larger ones): the least over the rails judged. `None` where
 /// nothing is judged: not an End on its end face, capped at a smooth vertex, a solver whose
-/// offsets change along the blend or differ, or no rail whose balls all stay below that.
+/// offsets change along the blend or differ, or no rail judged whose balls all stay below
+/// that.
 ///
 /// Since it is asked only on the failure path, an End that builds is never refused by it.
 ///
@@ -1105,6 +1458,7 @@ pub fn largest_ball_ending_on_end_face(
     solvers: &dyn SweptSolvers,
     extended_surfaces: &std::collections::BTreeMap<FaceId, crate::surface::surface::Surface>,
     margin: f64,
+    missed: bool,
 ) -> Result<Option<f64>> {
     if !corner
         .blend
@@ -1153,13 +1507,15 @@ pub fn largest_ball_ending_on_end_face(
         {
             continue;
         }
-        // the end rib at this rail end, its geometry and solver
+        // the end rib at this rail end and its rail, its geometry and solver
         let mut rib = None;
+        let mut rail = None;
         for e in vertex::edges(pseudo.brep(), fv, None)? {
-            if pseudo.fillet_edge(e)?.fillet_edge_type() == FilletEdgeType::FilletXSideFace
-                && rib.is_none()
-            {
+            let edge_type = pseudo.fillet_edge(e)?.fillet_edge_type();
+            if edge_type == FilletEdgeType::FilletXSideFace && rib.is_none() {
                 rib = Some(e);
+            } else if edge_type == FilletEdgeType::Rail && rail.is_none() {
+                rail = Some(e);
             }
         }
         let Some(rib) = rib else {
@@ -1181,23 +1537,23 @@ pub fn largest_ball_ending_on_end_face(
         };
         let side = pseudo.rail_index_of_vertex(geom, Some(fv))?;
         let other = usize::from(side == 0);
-        let radius = offsets.get(side).copied().ok_or_else(nul)?.abs();
-        let other_radius = offsets.get(other).copied().ok_or_else(nul)?.abs();
+        // the rail index is 0 or 1
+        let [o0, o1] = offsets;
+        let (radius, other_radius) = if side == 0 { (o0, o1) } else { (o1, o0) };
+        let (radius, other_radius) = (radius.abs(), other_radius.abs());
         if radius <= 0.0 || (radius - other_radius).abs() > EFF_ZERO * (1.0 + radius) {
             continue;
         }
         let fs = solvers.solver(solver)?;
-        let f_face = face_of(target, fs.edgeuse(side)?.ok_or_else(nul)?)?;
-        let g_face = face_of(target, fs.edgeuse(other)?.ok_or_else(nul)?)?;
+        let f_face = face_of(target, solver_edgeuse(fs, side)?)?;
+        let g_face = face_of(target, solver_edgeuse(fs, other)?)?;
         let Some(end_face) = pseudo.fillet_edge(rib)?.original_face() else {
             continue;
         };
         if end_face == f_face || end_face == g_face {
             continue;
         }
-        let f = fs
-            .surface(side)?
-            .ok_or_else(nul)?
+        let f = solver_surface(fs, side)?
             .surface
             .base_surface()
             .clone_for_evaluation()?;
@@ -1208,9 +1564,28 @@ pub fn largest_ball_ending_on_end_face(
                 .face(end_face)?
                 .surface
                 .as_ref()
-                .ok_or_else(nul)?
+                .ok_or_else(|| face_without_surface(OP, end_face))?
                 .clone_for_evaluation()?,
         };
+        if missed {
+            // the corner's vertices' own search, run again: the rail curve's crossings with
+            // E's surface. A rail it finds an end for on E is not judged, nor one without a
+            // curve to search
+            let Some(rail_curve) = rail.and_then(|e| pseudo.brep().edge(e).ok()?.curve.clone())
+            else {
+                continue;
+            };
+            let found = crate::blend::fillet_geom::p4::rail_crossing_nearest(
+                k,
+                &rail_curve,
+                &end_surface,
+                start,
+                fs.this_approx_tol_3d(),
+            )?;
+            if found.is_some() {
+                continue;
+            }
+        }
         let f_domain = f.natural_uv_domain_with_nurb(k)?;
         let e_domain = end_surface.natural_uv_domain_with_nurb(k)?;
         let zone = zone_tol3d(k, target.face(f_face)?.tolerance);
@@ -1250,8 +1625,9 @@ pub fn largest_ball_ending_on_end_face(
             }
             Ok(None)
         };
-        // whether a point of F's surface lies on the face F
-        let on_f_face = |target: &mut Brep, p: Point3| -> Result<bool> {
+        // where a point of F's surface lies on the face F: `None` off it, `Some(true)` on
+        // its rim (an edge or a vertex of it), `Some(false)` inside it
+        let on_f_face = |target: &mut Brep, p: Point3| -> Result<Option<bool>> {
             let mut class = PointClassification::new(zone);
             point_3d_classify(
                 k,
@@ -1263,24 +1639,23 @@ pub fn largest_ball_ending_on_end_face(
                 &mut class,
                 Point3dClassifyOptions::default(),
             )?;
-            Ok(matches!(
-                class.point_class(),
-                PointClassType::Face
-                    | PointClassType::Edge
-                    | PointClassType::Edgeuse
-                    | PointClassType::Vertex
-            ))
+            Ok(match class.point_class() {
+                PointClassType::Face => Some(false),
+                PointClassType::Edge | PointClassType::Edgeuse | PointClassType::Vertex => {
+                    Some(true)
+                }
+                _ => None,
+            })
         };
-        // the ball touching F at a point of C and G: `None` where it is the round's and the
-        // margin, or larger (the round's rail reaches C), `Some(None)` where there is none
-        // to judge
+        // the ball touching F at a point of C and G, judged up to the round's and the margin
         let most_judged = radius + margin;
-        let ball = |target: &Brep, p: Point3| -> Result<Option<Option<f64>>> {
+        let ball = |target: &Brep, p: Point3| -> Result<CrossingBall> {
             match ball_touching_on(k, target, fs, side, g_face, p, Some(most_judged)) {
-                Ok((false, false, _)) => Ok(None),
-                Ok((false, true, rho)) => Ok(Some(Some(rho))),
+                Ok((true, _, _)) => Ok(CrossingBall::OnOtherFace),
+                Ok((false, false, _)) => Ok(CrossingBall::Reaches),
+                Ok((false, true, rho)) => Ok(CrossingBall::Radius(rho)),
                 Err(e) if e.is_unported_or_cancelled() => Err(e),
-                Ok((true, _, _)) | Err(_) => Ok(Some(None)),
+                Err(_) => Ok(CrossingBall::Unknown),
             }
         };
 
@@ -1294,8 +1669,10 @@ pub fn largest_ball_ending_on_end_face(
             d *= -1.0;
         }
         let mut walked = vec![(p, 0.0_f64)];
+        // how the walk stopped: the round's rail reaches C; or C came to its end on F
         let mut reached = false;
-        // the step that left F, or that no point of C was solved at (past a surface's end)
+        let mut ended = false;
+        // the step that left F, or that no point of C was solved at
         let mut left: Option<Point3> = None;
         for _ in 0..END_FACE_WALK_STEPS {
             let ahead = p + d * step;
@@ -1303,17 +1680,21 @@ pub fn largest_ball_ending_on_end_face(
                 left = Some(ahead);
                 break;
             };
-            if !on_f_face(target, q)? {
+            if on_f_face(target, q)?.is_none() {
                 left = Some(q);
                 break;
             }
             match ball(target, q)? {
-                None => {
+                CrossingBall::Reaches => {
                     reached = true;
                     break;
                 }
-                Some(None) => break,
-                Some(Some(rho)) => walked.push((q, rho)),
+                CrossingBall::OnOtherFace => {
+                    ended = true;
+                    break;
+                }
+                CrossingBall::Unknown => break,
+                CrossingBall::Radius(rho) => walked.push((q, rho)),
             }
             let Some((_, mut u)) = along.length_and_unit() else {
                 break;
@@ -1327,32 +1708,41 @@ pub fn largest_ball_ending_on_end_face(
         if reached {
             continue;
         }
-        // where C leaves F, or ends: between the last point on F and the step past it
+        // the last point of C on F before the step past it. C ends there only where that
+        // point lies on F's rim: a step that no point was solved at inside F shows nothing
         if let Some(off) = left {
             let (mut lo, mut hi) = (0.0_f64, 1.0_f64);
             let mut last = None;
             for _ in 0..END_FACE_SOLVE_STEPS {
                 let mid = 0.5 * (lo + hi);
                 let on = match on_both(p + (off - p) * mid)? {
-                    Some((q, _)) if on_f_face(target, q)? => Some(q),
-                    _ => None,
+                    Some((q, _)) => on_f_face(target, q)?.map(|rim| (q, rim)),
+                    None => None,
                 };
-                if let Some(q) = on {
+                if on.is_some() {
                     lo = mid;
-                    last = Some(q);
+                    last = on;
                 } else {
                     hi = mid;
                 }
             }
-            if let Some(q) = last {
-                match ball(target, q)? {
-                    None => continue,
-                    Some(None) => {}
-                    Some(Some(rho)) => walked.push((q, rho)),
-                }
+            match last {
+                Some((q, rim)) => match ball(target, q)? {
+                    CrossingBall::Reaches => continue,
+                    CrossingBall::Radius(rho) => {
+                        walked.push((q, rho));
+                        ended = rim;
+                    }
+                    CrossingBall::OnOtherFace => ended = true,
+                    CrossingBall::Unknown => {}
+                },
+                // no point of C past the last one walked: it is C's end where it is on the rim
+                None => ended = on_f_face(target, p)? == Some(true),
             }
         }
-        if walked.len() < 2 {
+        // a walk that ran out of steps, or stopped inside F, has not seen all of C: its
+        // largest ball so far bounds nothing
+        if !ended || walked.len() < 2 {
             continue;
         }
         let mut at = 0;
@@ -1369,7 +1759,10 @@ pub fn largest_ball_ending_on_end_face(
             walked.get(at),
             walked.get(at + 1),
         ) {
-            let rho_at = |target: &Brep, x: f64| -> Result<Option<f64>> {
+            // (a probe off F, or with no ball solved, ends the search and adds nothing; a
+            // probe whose ball is the round's is kept whatever the other probe gives)
+            let probe_reaches = std::cell::Cell::new(false);
+            let rho_at = |target: &mut Brep, x: f64| -> Result<Option<f64>> {
                 let guess = if x < 0.0 {
                     here + (before - here) * -x
                 } else {
@@ -1378,9 +1771,16 @@ pub fn largest_ball_ending_on_end_face(
                 let Some((q, _)) = on_both(guess)? else {
                     return Ok(None);
                 };
+                if on_f_face(target, q)?.is_none() {
+                    return Ok(None);
+                }
                 Ok(match ball(target, q)? {
-                    None => Some(most_judged),
-                    Some(found) => found,
+                    CrossingBall::Reaches => {
+                        probe_reaches.set(true);
+                        Some(most_judged)
+                    }
+                    CrossingBall::Radius(rho) => Some(rho),
+                    CrossingBall::OnOtherFace | CrossingBall::Unknown => None,
                 })
             };
             let gold = 0.5 * (5.0_f64.sqrt() - 1.0);
@@ -1406,6 +1806,10 @@ pub fn largest_ball_ending_on_end_face(
                     e = a + gold * (b - a);
                     at_e = rho_at(target, e)?;
                 }
+            }
+            // the round's rail reaches C at a probe: nothing is judged of this rail
+            if probe_reaches.get() {
+                continue;
             }
         }
         if most >= most_judged {
@@ -1434,10 +1838,7 @@ fn refuse_end_past_side_edge(
     let (past, fit) =
         radius_reaching_side_edge_end(k, target, corner, solvers, fil_eu, side_eu, other_face)?;
     if !past {
-        return Err(SolidError::blend_failed(
-            OP,
-            "the rail does not run past the side edge's end",
-        ));
+        return Err(unbuildable(OP, CornerStep::EndRailNotPastSideEdge));
     }
     Ok(EndRefusal {
         comment: describe_end_past_side_edge(fit),
@@ -1471,29 +1872,27 @@ pub fn fit_of_end_past_side_edges(
     else {
         return Ok(None);
     };
-    if !on_end_face || solver_eus.len() != 1 {
+    let (true, &[fil_eu]) = (on_end_face, solver_eus) else {
         return Ok(None);
-    }
-    let fil_eu = *solver_eus.first().ok_or_else(nul)?;
+    };
     solvers.solver_of_edgeuse(fil_eu)?;
     if !const_radius()? {
         return Ok(None);
     }
-    let total = all_eus.len();
     let Some(fil) = all_eus.iter().position(|&eu| eu == fil_eu) else {
         return Ok(None);
     };
-    if total < 3 {
+    // the ring from the blended edge use: its neighbours, of at least three
+    let mut ring = all_eus.to_vec();
+    ring.rotate_left(fil);
+    let &[_, next, .., prev] = ring.as_slice() else {
         return Ok(None);
-    }
-    let eus = [
-        *all_eus.get((fil + total - 1) % total).ok_or_else(nul)?,
-        *all_eus.get((fil + 1) % total).ok_or_else(nul)?,
-    ];
+    };
+    let eus = [prev, next];
     if eus[0] == eus[1] {
         return Ok(None);
     }
-    let vertex = corner.vertex.ok_or_else(nul)?;
+    let vertex = corner_vertex(corner)?;
     let tan_tol_deg = rad_to_deg(corner.tangency_tol_radians);
     for &eu in &eus {
         if !same_convexity_edges(k, target, fil_eu, eu, vertex)?
@@ -1504,7 +1903,12 @@ pub fn fit_of_end_past_side_edges(
     }
     let mut found: Option<(f64, EdgeId)> = None;
     for &eu in &eus {
-        let side_eu = find_side_edgeuse(target, fil_eu, eu)?.ok_or_else(nul)?;
+        let side_eu = find_side_edgeuse(target, fil_eu, eu)?.ok_or_else(|| {
+            SolidError::blend(
+                OP,
+                BlendFailure::CornerShapeNotBuilt(CornerShape::RingEdgesShareNoFace),
+            )
+        })?;
         let side_faces = [face_of(target, side_eu)?, radial_face(target, side_eu)?];
         let mut other_face = face_of(target, fil_eu)?;
         if side_faces.contains(&other_face) {
@@ -1520,8 +1924,13 @@ pub fn fit_of_end_past_side_edges(
         if past && end_face_runs_on_past_side_edge(k, target, corner, side_eu, rail)? {
             continue;
         }
+        // Not the fork's (#15767): past a tangent edge of the rail's face the rail rolls on
+        // onto the face beyond (`rail_rolls_on_past_side_edge`)
+        if past && rail_rolls_on_past_side_edge(k, target, corner, side_eu, rail)? {
+            continue;
+        }
         if past && found.is_none_or(|(least, _)| fit < least) {
-            found = Some((fit, eu1::edge(target, fil_eu)?.ok_or_else(nul)?));
+            found = Some((fit, edge_of(target, fil_eu)?));
         }
     }
     Ok(found)
@@ -1547,11 +1956,11 @@ fn side_edge_in_cap(
     let side = match (on.point_class(), on.object()) {
         (PointClassType::Edge, Some(EntityRef::Edge(e))) => e,
         (PointClassType::Edge | PointClassType::Edgeuse, Some(EntityRef::Edgeuse(eu))) => {
-            eu1::edge(target, eu)?.ok_or_else(nul)?
+            edge_of(target, eu)?
         }
         _ => return Ok(None),
     };
-    let vertex = corner.vertex.ok_or_else(nul)?;
+    let vertex = corner_vertex(corner)?;
     let at_start = edge::start_vertex(target, side)? == Some(vertex);
     if !at_start && edge::end_vertex(target, side)? != Some(vertex) {
         return Ok(None);
@@ -1559,7 +1968,7 @@ fn side_edge_in_cap(
     if !edge::faces(target, side, None)?.contains(&face) {
         return Ok(None);
     }
-    let curve = edge::curve(target, side)?.ok_or_else(nul)?;
+    let curve = curve_of(target, side)?;
     let interval = edge::interval(target, side)?;
     let dropped = curve.drop_point(
         k,
@@ -1763,14 +2172,17 @@ fn classify_rail_end(
     if on.point_class() != PointClassType::Unknown {
         return Ok(on);
     }
-    // the corner's data the solve reads. A missing piece is a defect of the corner, and its
-    // error propagates as `calc_end_cap_edges`' does; a corner without a constant-radius
+    // the corner's data the solve reads. A missing piece is the caller's corner input, and
+    // its error propagates as `calc_end_cap_edges`' does; a corner without a constant-radius
     // solver has nothing to solve with
-    let cap = corner.end_cap.as_ref().ok_or_else(nul)?;
+    let cap = corner
+        .end_cap
+        .as_ref()
+        .ok_or_else(|| bad_input(OP, CornerInput::EventNotSet, None))?;
     let crate::surface::surface::p2::SurfaceKind::Plane(plane) = cap.kind() else {
         return Ok(on);
     };
-    let rib = *corner.edges.first().ok_or_else(nul)?;
+    let rib = first_edge(corner)?;
     let geom = match eu1::primary_edgeuse(pseudo.brep(), rib)? {
         Some(eu) => pseudo.fillet_edgeuse(eu)?.fillet_geom(),
         None => None,
@@ -1790,15 +2202,17 @@ fn classify_rail_end(
     // the rail end's rail is the solver's side on F; the other side is G
     let side = pseudo.rail_index_of_vertex(geom, Some(rail_end))?;
     let other = usize::from(side == 0);
-    let f_distance = offsets.get(side).copied().ok_or_else(nul)?.abs();
-    let g_offset = offsets.get(other).copied().ok_or_else(nul)?;
+    // the rail index is 0 or 1
+    let [o0, o1] = offsets;
+    let (f_distance, g_offset) = if side == 0 { (o0, o1) } else { (o1, o0) };
+    let f_distance = f_distance.abs();
     let fs = solvers.solver(solver)?;
-    let g = fs.surface(other)?.ok_or_else(nul)?.surface.base_surface();
+    let g = solver_surface(fs, other)?.surface.base_surface();
     // F is solved on the face's own surface (after a rollover the rail lies on the face
     // rolled onto, which need not be one of the solver's faces), offset by the solver's
     // distance on its side, towards the centre that lies the solver's signed offset from G
     let f = crate::topology::face::p2::surface(target, face)?
-        .ok_or_else(nul)?
+        .ok_or_else(|| face_without_surface(OP, face))?
         .clone_for_evaluation()?;
     // the solve's own evaluations and drops: one that fails proves nothing about the
     // point, so the rail end keeps its class (unknown, the conservative side)
@@ -1877,22 +2291,25 @@ fn calc_end_cap_edges(
     corner: &FilletCorner,
     solvers: &dyn SweptSolvers,
 ) -> Result<Option<EndRefusal>> {
-    let cap = corner.end_cap.as_ref().ok_or_else(nul)?;
+    let cap = corner
+        .end_cap
+        .as_ref()
+        .ok_or_else(|| bad_input(OP, CornerInput::EventNotSet, None))?;
     for &fe in corner.edges.iter().skip(1) {
         if pseudo.fillet_edge(fe)?.fillet_edge_type() != FilletEdgeType::Precomputed
             || edge::curve(pseudo.brep(), fe)?.is_some()
         {
             continue;
         }
-        let face = pseudo.fillet_edge(fe)?.original_face().ok_or_else(nul)?;
-        let start = edge::vertex(pseudo.brep(), fe)?.ok_or_else(nul)?;
-        let end = edge::other_vertex(pseudo.brep(), fe, Some(start))?.ok_or_else(nul)?;
+        let face = original_face(pseudo, fe)?;
+        let (start, end) = edge_ends(pseudo, fe)?;
         if !pseudo.fillet_vertex(start)?.is_processed()
             || !pseudo.fillet_vertex(end)?.is_processed()
         {
-            return Err(SolidError::blend_failed(
+            return Err(bad_input(
                 OP,
-                "a vertex of the cap edge is not processed",
+                CornerInput::VertexNotProcessed,
+                Some(EntityRef::Edge(fe)),
             ));
         }
         // The rail's end must lie on the side face (a side face ending tangentially at the
@@ -1911,19 +2328,9 @@ fn calc_end_cap_edges(
             // vertex, on the cap's plane, so the ball touching the side face on it at the
             // plane is the vertex itself: no radius keeps the rail on its face up to the
             // plane.
-            let rib = *corner.edges.first().ok_or_else(nul)?;
-            let rib_eu = eu1::primary_edgeuse(pseudo.brep(), rib)?;
-            let geom = match rib_eu {
-                Some(eu) => pseudo.fillet_edgeuse(eu)?.fillet_geom(),
-                None => None,
-            };
-            let solver = match geom {
-                Some(g) => pseudo.geom(g)?.fillet_solver(),
-                None => None,
-            }
-            .ok_or_else(nul)?;
-            let fs = solvers.solver(solver)?;
-            let blended = fs.edgeuse(0)?.ok_or_else(nul)?;
+            let rib = first_edge(corner)?;
+            let fs = solvers.solver(rib_solver(pseudo, rib)?)?;
+            let blended = solver_edgeuse(fs, 0)?;
             return Ok(Some(EndRefusal {
                 comment: ROLLS_INTO_SMOOTH_END.to_string(),
                 fit: 0.0,
@@ -1953,7 +2360,7 @@ fn calc_end_cap_edges(
         let end_pt = pseudo.vertex_point(end)?;
         let mut dir = end_pt - start_pt;
         let surface = crate::topology::face::p2::surface(target, face)?
-            .ok_or_else(nul)?
+            .ok_or_else(|| face_without_surface(OP, face))?
             .clone_for_evaluation()?;
         let curves = srf_srf_intersection(
             k,
@@ -1967,7 +2374,9 @@ fn calc_end_cap_edges(
             corner.tangency_tol_radians,
             SrfSrfOptions::default(),
         )?;
-        let curve = curves.curve_3d.ok_or_else(nul)?;
+        let curve = curves.curve_3d.ok_or_else(|| {
+            unbuildable_with(OP, CornerStep::EndSideFaceMissesCap, SM_ERR_NULL_POINTER)
+        })?;
         set_edge_curve(pseudo.brep_mut(), fe, Some(curve))?;
     }
     Ok(None)
@@ -1988,7 +2397,7 @@ fn ends_in_tangent_edge(
     vertex: VertexId,
     tangency_tol_rad: f64,
 ) -> Result<bool> {
-    let fil_edge = eu1::edge(target, fil_eu)?.ok_or_else(nul)?;
+    let fil_edge = edge_of(target, fil_eu)?;
     if face_of(target, fil_eu)? != face && radial_face(target, fil_eu)? != face {
         return Ok(false);
     }
@@ -2076,14 +2485,14 @@ pub fn end_past_tangent_edge(
     if corner.blend.map(|b| b.end).unwrap_or_default() != super::BlendEnd::AtSmooth {
         return Ok(false);
     }
-    let vertex = corner.vertex.ok_or_else(nul)?;
+    let vertex = corner_vertex(corner)?;
     for &fe in corner.edges.iter().skip(1) {
         if pseudo.fillet_edge(fe)?.fillet_edge_type() != FilletEdgeType::Precomputed
             || edge::curve(pseudo.brep(), fe)?.is_some()
         {
             continue;
         }
-        let face = pseudo.fillet_edge(fe)?.original_face().ok_or_else(nul)?;
+        let face = original_face(pseudo, fe)?;
         if ends_in_tangent_edge(k, target, fil_eu, face, vertex, tangency_tol_rad)? {
             return Ok(true);
         }
@@ -2127,7 +2536,7 @@ pub fn place_rolled_rail_end(
     let Some(curve) = edge::curve(pseudo.brep(), rail)?.cloned() else {
         return Ok(false);
     };
-    let at = vertex::point(target, corner.filleted_vertex().ok_or_else(nul)?)?;
+    let at = vertex::point(target, corner_vertex(corner)?)?;
     let interval = curve.natural_interval();
     let first = curve.evaluate_point(k, interval.min())?;
     let last = curve.evaluate_point(k, interval.max())?;
@@ -2155,16 +2564,15 @@ fn end_rolls_over(
     if !rolls_over || corner.blend.map(|b| b.end).unwrap_or_default() != super::BlendEnd::AtSmooth {
         return Ok(false);
     }
-    let vertex = corner.vertex.ok_or_else(nul)?;
+    let vertex = corner_vertex(corner)?;
     for &fe in corner.edges.iter().skip(1) {
         if pseudo.fillet_edge(fe)?.fillet_edge_type() != FilletEdgeType::Precomputed
             || edge::curve(pseudo.brep(), fe)?.is_some()
         {
             continue;
         }
-        let face = pseudo.fillet_edge(fe)?.original_face().ok_or_else(nul)?;
-        let start = edge::vertex(pseudo.brep(), fe)?.ok_or_else(nul)?;
-        let end = edge::other_vertex(pseudo.brep(), fe, Some(start))?.ok_or_else(nul)?;
+        let face = original_face(pseudo, fe)?;
+        let (start, end) = edge_ends(pseudo, fe)?;
         let rail_end =
             if pseudo.fillet_vertex(start)?.fillet_vertex_type() == FilletVertexType::OnVertex {
                 end
@@ -2180,18 +2588,9 @@ fn end_rolls_over(
                 continue;
             }
         }
-        let rib = *corner.edges.first().ok_or_else(nul)?;
-        let geom = match eu1::primary_edgeuse(pseudo.brep(), rib)? {
-            Some(eu) => pseudo.fillet_edgeuse(eu)?.fillet_geom(),
-            None => None,
-        };
-        let solver = match geom {
-            Some(g) => pseudo.geom(g)?.fillet_solver(),
-            None => None,
-        }
-        .ok_or_else(nul)?;
-        let fs = solvers.solver(solver)?;
-        let fil_eu = fs.edgeuse(0)?.ok_or_else(nul)?;
+        let rib = first_edge(corner)?;
+        let fs = solvers.solver(rib_solver(pseudo, rib)?)?;
+        let fil_eu = solver_edgeuse(fs, 0)?;
         if ends_in_tangent_edge(k, target, fil_eu, face, vertex, fs.tangency_tolerance)? {
             return Ok(true);
         }
@@ -2220,8 +2619,8 @@ fn runs_on_across_seam(
         .solver_eus
         .as_ref()
         .and_then(|eus| eus.first().copied())
-        .ok_or_else(nul)?;
-    let vertex = corner.vertex.ok_or_else(nul)?;
+        .ok_or_else(|| filleted_eus_not_given(corner))?;
+    let vertex = corner_vertex(corner)?;
     let tol_deg = rad_to_deg(corner.tangency_tol_radians);
     if side_edgeuse_across_seam_vertex(k, target, fil_eu, vertex, tol_deg)?.is_none() {
         return Ok(None);
@@ -2287,10 +2686,10 @@ pub fn calc_end_edge_geom(
             .solver_eus
             .as_ref()
             .and_then(|eus| eus.first().copied())
-            .ok_or_else(nul)?;
-        let fil_edge = eu1::edge(target, fil_eu)?.ok_or_else(nul)?;
+            .ok_or_else(|| filleted_eus_not_given(corner))?;
+        let fil_edge = edge_of(target, fil_eu)?;
         let concave = is_concave_edge(k, target, fil_edge)?;
-        let vertex = corner.vertex.ok_or_else(nul)?;
+        let vertex = corner_vertex(corner)?;
         for kk in 0..2 {
             if !concave {
                 break;
@@ -2305,12 +2704,17 @@ pub fn calc_end_edge_geom(
                 continue;
             }
             let Some(EntityRef::Edgeuse(side_eu)) = record.point_class_object() else {
-                return Err(nul());
+                return Err(not_on_side_edge_use(fv));
             };
             // the side edge from the vertex, continued across seams' vertices up to where
             // the rail's end was last looked for (CalcRailIntEdgeuse; 63c7962)
             let chain = side_edge_chain_to(k, target, corner, side_eu)?;
-            let side_eu = *chain.first().ok_or_else(nul)?;
+            let side_eu = *chain.first().ok_or_else(|| {
+                missing_defect(
+                    OP,
+                    "the side edge's chain, which holds at least the edge use it is walked back from, is empty",
+                )
+            })?;
             if same_convexity_edges(k, target, fil_eu, side_eu, vertex)? {
                 continue;
             }
@@ -2340,21 +2744,18 @@ pub fn calc_end_edge_geom(
         Some(rib) => pseudo.fillet_edge(rib)?.fillet_edge_type() == FilletEdgeType::FilletXSideFace,
         None => false,
     };
-    if !(on_end_faces || rib_is_side) {
-        return Ok(EndEdges::Built);
-    }
-    let start_fv = if on_end_faces {
-        corner.vertices.first().copied()
-    } else {
-        edge::vertex(pseudo.brep(), end_rib.ok_or_else(nul)?)?
-    }
-    .ok_or_else(nul)?;
-    let end_fv = if on_end_faces {
-        corner.vertices.get(1).copied()
-    } else {
-        edge::other_vertex(pseudo.brep(), end_rib.ok_or_else(nul)?, Some(start_fv))?
-    }
-    .ok_or_else(nul)?;
+    // on end faces, the two rail ends; else the end rib's ends, a side edge's rib
+    let (start_fv, end_fv) = match (on_end_faces, corner.vertices.as_slice(), end_rib) {
+        (true, &[start, end], _) => (start, end),
+        (false, _, Some(rib)) if rib_is_side => edge_ends(pseudo, rib)?,
+        _ => return Ok(EndEdges::Built),
+    };
+    // on end faces there is no end rib, which the open end and the merge delete
+    let rib_of = |end_rib: Option<EdgeId>| {
+        end_rib.ok_or_else(|| {
+            bad_input_with(OP, CornerInput::TopologyMismatch, None, SM_ERR_NULL_POINTER)
+        })
+    };
     let missed = |miss: VertexId, other: VertexId| -> Result<bool> {
         Ok(
             pseudo.fillet_vertex(miss)?.status() == FilStatus::NoIntRailEu
@@ -2378,18 +2779,34 @@ pub fn calc_end_edge_geom(
     // side edge with the intersection clamped to the side edge's far vertex, off the
     // fillet; and both rails can miss there.
     let fillet_surface = if cliff_overflow {
-        let rib = end_rib.ok_or_else(nul)?;
-        let rib_eu = eu1::primary_edgeuse(pseudo.brep(), rib)?;
-        let rib_geom = match rib_eu {
-            Some(eu) => pseudo.fillet_edgeuse(eu)?.fillet_geom(),
-            None => None,
-        };
+        let rib = rib_of(end_rib)?;
+        let rib_eu = eu1::primary_edgeuse(pseudo.brep(), rib)?.ok_or_else(|| {
+            bad_setup(OP, FilletSetUp::PrimaryEdgeUse, Some(EntityRef::Edge(rib)))
+        })?;
+        let rib_geom = pseudo
+            .fillet_edgeuse(rib_eu)?
+            .fillet_geom()
+            .ok_or_else(|| {
+                bad_input(
+                    OP,
+                    CornerInput::EdgeUseWithoutFilletGeometry,
+                    Some(EntityRef::Edgeuse(rib_eu)),
+                )
+            })?;
         Some(
-            match rib_geom {
-                Some(g) => pseudo.geom(g)?.fillet_surface(None)?.cloned(),
-                None => None,
-            }
-            .ok_or_else(nul)?,
+            pseudo
+                .geom(rib_geom)?
+                .fillet_surface(None)?
+                .cloned()
+                .ok_or_else(|| {
+                    solver_input(
+                        OP,
+                        SolverFailure::FilletGeomWithoutSurface {
+                            fillet_geom: rib_geom,
+                        },
+                        None,
+                    )
+                })?,
         )
     } else {
         None
@@ -2411,16 +2828,11 @@ pub fn calc_end_edge_geom(
         }
         let record = pseudo.fillet_vertex(fv)?;
         if !off && record.point_class() == PointClassType::Edgeuse {
-            let side_eu = match record.point_class_object() {
-                Some(EntityRef::Edgeuse(eu)) => Some(eu),
-                _ => None,
+            let Some(EntityRef::Edgeuse(side_eu)) = record.point_class_object() else {
+                return Err(not_on_side_edge_use(fv));
             };
-            let side_edge = match side_eu {
-                Some(eu) => eu1::edge(target, eu)?,
-                None => None,
-            }
-            .ok_or_else(nul)?;
-            let curve = edge::curve(target, side_edge)?.ok_or_else(nul)?;
+            let side_edge = edge_of(target, side_eu)?;
+            let curve = curve_of(target, side_edge)?;
             let on_side = curve.drop_point(
                 k,
                 &edge::interval(target, side_edge)?,
@@ -2449,19 +2861,20 @@ pub fn calc_end_edge_geom(
     let Some(miss_fv) = miss_fv else {
         return Ok(EndEdges::Built);
     };
+    let other_end = other_rail_end(miss_fv, start_fv, end_fv, misses);
     let record = pseudo.fillet_vertex(miss_fv)?;
     if record.point_class() != PointClassType::Edgeuse {
         return Ok(EndEdges::Built);
     }
     // The side edge the rail missed, and the fillet's side face it does not bound.
     let Some(EntityRef::Edgeuse(side_eu)) = record.point_class_object() else {
-        return Err(nul());
+        return Err(not_on_side_edge_use(miss_fv));
     };
     let fil_eu = corner
         .solver_eus
         .as_ref()
         .and_then(|eus| eus.first().copied())
-        .ok_or_else(nul)?;
+        .ok_or_else(|| filleted_eus_not_given(corner))?;
     let side_faces = [face_of(target, side_eu)?, radial_face(target, side_eu)?];
     let fil_faces = [face_of(target, fil_eu)?, radial_face(target, fil_eu)?];
     let mut other_face = fil_faces[0];
@@ -2469,12 +2882,10 @@ pub fn calc_end_edge_geom(
         other_face = fil_faces[1];
     }
     let surface = crate::topology::face::p2::surface(target, other_face)?
-        .ok_or_else(nul)?
+        .ok_or_else(|| face_without_surface(OP, other_face))?
         .clone_for_evaluation()?;
-    let side_edge = eu1::edge(target, side_eu)?.ok_or_else(nul)?;
-    let curve = edge::curve(target, side_edge)?
-        .ok_or_else(nul)?
-        .clone_for_evaluation()?;
+    let side_edge = edge_of(target, side_eu)?;
+    let curve = curve_of(target, side_edge)?.clone_for_evaluation()?;
     let interval = edge::interval(target, side_edge)?;
     // the face's own surface: its trimmed-surface services come from the B-rep
     let mut services = BrepFaceServices::with_caches(target, FaceCaches::new());
@@ -2503,15 +2914,15 @@ pub fn calc_end_edge_geom(
             first
         };
         if fil_faces.contains(&end_face) {
-            return Err(SolidError::blend_failed(
+            return Err(SolidError::blend(
                 OP,
-                "the rail ends on one of the fillet's own faces",
+                BlendFailure::CornerShapeNotBuilt(CornerShape::EndFaceIsBlendFace),
             ));
         }
         solvers.solver_of_edgeuse(fil_eu)?;
-        let vertex = corner.vertex.ok_or_else(nul)?;
+        let vertex = corner_vertex(corner)?;
         note_open_end(fil_eu, vertex, end_face, false)?;
-        let rib = end_rib.ok_or_else(nul)?;
+        let rib = rib_of(end_rib)?;
         pseudo.delete_wire_fillet_edge(k, rib)?;
         corner.edges.clear();
     } else if !runs_on
@@ -2528,10 +2939,35 @@ pub fn calc_end_edge_geom(
         // Not the fork's: the end face runs on tangentially past the side edge's far end
         // (`end_face_runs_on_past_side_edge`): the end rib is deleted and the global merge
         // cuts the round where it meets the end face and its continuation, as WR-303's did.
-        let rib = end_rib.ok_or_else(nul)?;
+        let rib = rib_of(end_rib)?;
         pseudo.delete_wire_fillet_edge(k, rib)?;
         corner.edges.clear();
         return Ok(EndEdges::GlobalMerge);
+    } else if !runs_on
+        && !both_miss
+        && rail_rolls_on_past_side_edge(
+            k,
+            target,
+            corner,
+            side_eu,
+            rail_face(fil_faces, side_faces),
+        )?
+        && end_section_rolls_over(
+            k,
+            target,
+            pseudo,
+            solvers,
+            fil_eu,
+            other_face,
+            rail_face(fil_faces, side_faces),
+            other_end,
+        )?
+    {
+        // Not the fork's (#15767): the rail runs past P because the rail's face runs on
+        // tangentially there; it rolls over that edge onto the face beyond and ends on its
+        // edge with the end face, which `ProcessRollOver` solves after the corners' edges
+        // (the TangentRollover corner vertex, recomputed there)
+        return Ok(EndEdges::Built);
     } else if !runs_on && !both_miss {
         // The rail runs past its side edge's far end P onto the faces beyond. Refused,
         // naming the radius at which the rail reaches P: the ball touching the rail's face
@@ -2542,6 +2978,24 @@ pub fn calc_end_edge_geom(
             .map(EndEdges::Refused);
     }
     Ok(EndEdges::Built)
+}
+
+/// The other rail's end for `calc_end_edge_geom`'s roll-over test: of the End's rail ends
+/// `start_fv` and `end_fv` (`misses[0]` and `misses[1]` say whether each missed its side
+/// edge), the one that is not `miss_fv`, or `None` where it missed its side edge too (a
+/// second miss, which only a cliff overflow's `both_miss` handles): the roll-over is proven
+/// for `miss_fv`'s rail only.
+fn other_rail_end(
+    miss_fv: VertexId,
+    start_fv: VertexId,
+    end_fv: VertexId,
+    misses: [bool; 2],
+) -> Option<VertexId> {
+    if miss_fv == start_fv {
+        (!misses[1]).then_some(end_fv)
+    } else {
+        (!misses[0]).then_some(start_fv)
+    }
 }
 
 /// The fork's `SmBlendCorner::CreateEndPatchOfEnd`'s branch for an End at a smooth vertex
@@ -2559,7 +3013,7 @@ pub fn create_end_cap_patch(
     let cap = corner
         .end_cap
         .as_ref()
-        .ok_or_else(nul)?
+        .ok_or_else(|| bad_input(OP, CornerInput::EventNotSet, None))?
         .copy_and_add_analytics(env.k)?;
     corner.surfaces.push(cap);
     match corner.make_face_brep_with(env) {
@@ -2713,5 +3167,128 @@ mod tests {
         };
         assert!(depth(b * (1.0 - 1e-6)) < tol);
         assert!(depth(b * (1.0 + 1e-6)) > tol);
+    }
+
+    /// Solvers that every lookup fails on with `err`: the roll-over tests below must decide
+    /// without them, or fall back to main's refusal when a lookup fails.
+    struct FailingSolvers(fn() -> SolidError);
+
+    impl SweptSolvers for FailingSolvers {
+        fn solver_of_edgeuse(&self, _: EdgeuseId) -> Result<&FilletSolver> {
+            Err((self.0)())
+        }
+        fn offset_radii_can_change(&self, _: EdgeuseId) -> Result<bool> {
+            Err((self.0)())
+        }
+        fn solver(&self, _: FilletSolverId) -> Result<&FilletSolver> {
+            Err((self.0)())
+        }
+        fn constant_offsets(&self, _: FilletSolverId) -> Result<Option<[f64; 2]>> {
+            Err((self.0)())
+        }
+    }
+
+    /// `end_section_rolls_over` for the other rail's end `g_end` of `pseudo`, on an empty
+    /// target with ids the test never reaches.
+    fn rolls_over(
+        pseudo: &FilletBrep,
+        g_end: Option<VertexId>,
+        solvers: &FailingSolvers,
+    ) -> Result<bool> {
+        let k = Kernel::default();
+        let mut target = Brep::new();
+        end_section_rolls_over(
+            &k,
+            &mut target,
+            pseudo,
+            solvers,
+            EdgeuseId::from_index(0),
+            FaceId::from_index(0),
+            FaceId::from_index(1),
+            g_end,
+        )
+    }
+
+    /// A pseudo-B-rep with one fillet vertex of status `status`.
+    fn pseudo_with_vertex(status: FilStatus) -> (FilletBrep, VertexId) {
+        let k = Kernel::default();
+        let mut pseudo = FilletBrep::new();
+        let v = pseudo
+            .brep_mut()
+            .add_vertex_record(crate::topology::Vertex::default())
+            .unwrap();
+        let mut fv = crate::blend::fillet_geom::p1::FilletVertex::new(&k, None);
+        fv.set_status(status);
+        pseudo.insert_fillet_vertex(v, fv);
+        (pseudo, v)
+    }
+
+    fn lookup_failed() -> SolidError {
+        SolidError::blend(
+            OP,
+            BlendFailure::FilletSetUpInvalid(FilletSetUp::SolverExecutive),
+        )
+    }
+
+    fn cancelled() -> SolidError {
+        SolidError::Cancelled { operation: OP }
+    }
+
+    /// #20757's review: a rail end on G the solver has not solved yet proves no roll-over
+    /// past the end face. `end_section_rolls_over` is then `false`, so `calc_end_edges`
+    /// takes main's branch, `refuse_end_past_side_edge` (the refusal naming the radius at
+    /// which the rail reaches its side edge's end), not `EndEdges::Built`. It decides before
+    /// any solver lookup (every lookup here fails).
+    #[test]
+    fn an_unsolved_other_rail_end_proves_no_roll_over_and_keeps_main_s_refusal() {
+        let (pseudo, g_end) = pseudo_with_vertex(FilStatus::Unprocessed);
+        assert!(!rolls_over(&pseudo, Some(g_end), &FailingSolvers(lookup_failed)).unwrap());
+    }
+
+    /// #21099: a failure inside the roll-over test (here the solver lookup of a solved rail
+    /// end, or a vertex the pseudo-B-rep does not know) proves nothing; the End is refused as
+    /// on main, not ended in an error main never reached. Cancellation still propagates.
+    #[test]
+    fn a_failed_roll_over_test_keeps_main_s_refusal_but_passes_cancellation_on() {
+        let (pseudo, g_end) = pseudo_with_vertex(FilStatus::Processed);
+        assert!(!rolls_over(&pseudo, Some(g_end), &FailingSolvers(lookup_failed)).unwrap());
+        assert!(!rolls_over(
+            &pseudo,
+            Some(VertexId::from_index(7)),
+            &FailingSolvers(lookup_failed)
+        )
+        .unwrap());
+        assert!(matches!(
+            rolls_over(&pseudo, Some(g_end), &FailingSolvers(cancelled)),
+            Err(SolidError::Cancelled { .. })
+        ));
+    }
+
+    /// #20757's review (CodeRabbit): on a non-cliff End both rails can miss their side
+    /// edges. The roll-over is proven for one miss only; the other rail's end lies past its
+    /// own side edge, so the section through it proves nothing. `end_section_rolls_over` is
+    /// then `false` before any lookup, and `calc_end_edges` refuses the End as before #20757
+    /// (`refuse_end_past_side_edge`), not `EndEdges::Built`. The same solved rail end, not
+    /// missed, does reach the section test (its cancelled lookup propagates).
+    #[test]
+    fn a_second_side_edge_miss_proves_no_roll_over_and_keeps_main_s_refusal() {
+        let (pseudo, g_end) = pseudo_with_vertex(FilStatus::Processed);
+        assert!(!rolls_over(&pseudo, None, &FailingSolvers(cancelled)).unwrap());
+        assert!(matches!(
+            rolls_over(&pseudo, Some(g_end), &FailingSolvers(cancelled)),
+            Err(SolidError::Cancelled { .. })
+        ));
+    }
+
+    /// The other rail's end `calc_end_edge_geom` hands `end_section_rolls_over`: the rail end
+    /// that is not the miss, or `None` where it missed its side edge too, from either end.
+    #[test]
+    fn the_other_rail_end_is_none_where_it_missed_its_side_edge_too() {
+        let start = VertexId::from_index(3);
+        let end = VertexId::from_index(5);
+        assert_eq!(other_rail_end(start, start, end, [true, true]), None);
+        assert_eq!(other_rail_end(start, start, end, [true, false]), Some(end));
+        assert_eq!(other_rail_end(end, start, end, [true, true]), None);
+        assert_eq!(other_rail_end(end, start, end, [false, true]), Some(start));
     }
 }

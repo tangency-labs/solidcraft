@@ -1,0 +1,18 @@
+[
+    {
+        "note": "#11134: a line and a point off it keep making the plane through both (Plane Through Axis And Point); the new square-to-line method only takes over when the point sits on the line."
+    },
+    {
+        "call": "engine.execute",
+        "params": {
+            "command": "solid.box",
+            "params": {"length": 40, "width": 30, "height": 20, "body_name": "Base"}
+        }
+    },
+    {"start": "construct.plane"},
+    {"click": {"world": [20, 0, 0]}},
+    {"click": {"world": [40, 30, 20]}},
+    {"expect": {"dialog": "axis_point"}},
+    {"widget": "OK"},
+    {"expect": {"errors": 0, "features": 2}}
+]

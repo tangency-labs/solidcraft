@@ -9,20 +9,26 @@
 //!
 //! The booleans keep free-form curves exact: every boundary of a result is a piece of an
 //! operand's boundary, cut where it crosses the other, never refitted.
+//!
+//! [`fill_channel`] is the kernel's channel fill (`solidcore::prism::fill`) in the record's
+//! types, its typed refusal with the size that builds returned as a value.
 
 // The range tests refuse NaN by negation (`!(x > y)`), kept as written.
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
 
 use solidcore::boolean::api_brep::{boolean_2d, Boolean2dOutcome};
+use solidcore::error::Reason;
 use solidcore::eval::Frame;
 use solidcore::kernel::{Kernel, Tolerances};
 use solidcore::primitive::api_trim_ops::create_planar_faces;
 use solidcore::primitive::primitive_creation::Boolean2d;
-use solidcore::prism::{extrude, measure, profile as kp, read, sheet};
+use solidcore::prism::{extrude, fill, measure, profile as kp, read, sheet};
 use solidcore::Brep;
 use solidcore_convert as convert;
-use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 
+pub use solidcore::error::fill::{FillFailure, FillSide};
+pub use solidcore::prism::fill::{Contour, FillNote, FillOptions};
 pub use solidcore::prism::measure::Interval;
 pub use solidcore::prism::placement::LoopPlacement;
 pub use solidcore::prism::profile::{tapered_flange_ends, ProfileRefusal};
@@ -33,6 +39,13 @@ use crate::boolean::{union_all_with, BooleanOp};
 use crate::order::{self, Order};
 use crate::session::{read_body, run, run_on, Answer};
 use crate::{Error, Result};
+
+/// Whether a generated cubic matches a trimmed interval of a source cubic, in either direction.
+/// Other segment kinds give false.
+#[must_use]
+pub fn cubic_contains(source: &Seg2, piece: &Seg2) -> bool {
+    convert::seg2(source).cubic_contains(&convert::seg2(piece))
+}
 
 /// The tolerance (mm) the planar booleans take: at least this.
 pub const MIN_TOLERANCE: f64 = 1e-9;
@@ -524,4 +537,97 @@ pub fn certified_round_wall_turn(points: &[Vec2], center: Vec2) -> Option<f64> {
 #[must_use]
 pub fn loop_placement(lp: &Loop2, other: &Loop2, tol: f64) -> Option<LoopPlacement> {
     convert::loop2(lp).placement(&convert::loop2(other), tol)
+}
+
+/// Positive and negative wing `(start, end)` intervals for a symmetric-offset extrude.
+#[must_use]
+pub fn symmetric_offset_intervals(gap: f64, half: f64) -> [(f64, f64); 2] {
+    extrude::symmetric_offset_intervals(gap, half)
+}
+
+/// Probe points along both wings of a symmetric-offset extrude for auto-operation detection.
+#[must_use]
+pub fn symmetric_offset_probe_points(
+    base: Vec3,
+    n: Vec3,
+    start: f64,
+    d: f64,
+    near_limit: f64,
+) -> [Vec3; 4] {
+    extrude::symmetric_offset_probe_points(
+        [base.x, base.y, base.z],
+        [n.x, n.y, n.z],
+        start,
+        d,
+        near_limit,
+    )
+    .map(|[x, y, z]| Vec3::new(x, y, z))
+}
+
+/// A channel filled by [`fill_channel`] ([`fill::Filled`] in the record's types).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ChannelFill {
+    /// The filled section: one counter-clockwise loop, no holes.
+    pub region: Region2,
+    /// How deep the channel reaches, measured as the depth is.
+    pub channel_depth: f64,
+    /// How deep it is filled.
+    pub filled_depth: f64,
+    /// Whether the channel is open on the far side.
+    pub through: bool,
+    /// What a caller may report.
+    pub notes: Vec<FillNote>,
+}
+
+/// Why [`fill_channel`] refuses a fill, and the size that builds where there is one (the
+/// kernel's [`FillFailure`] and its fit).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FillRefusal {
+    /// Why.
+    pub why: FillFailure,
+    /// The nearest size that builds (a face's height or depth), where there is one.
+    pub fit: Option<f64>,
+}
+
+/// [`fill_channel`]'s answer inside [`run`]: a fill or its refusal, neither an error.
+struct Filling(std::result::Result<ChannelFill, FillRefusal>);
+
+impl Answer for Filling {}
+
+/// The channel between the walls `left` and `right` filled with `options`
+/// ([`fill::fill`]): the depth measured along `depth_normal` from the deeper toe where it is
+/// given, else from the chord. A refusal the kernel types ([`FillFailure`]) comes back as
+/// `Ok(Err(..))` with its fit.
+///
+/// # Errors
+/// [`Error::Refused`] for walls, a normal, contours or a depth the kernel refuses as input;
+/// the kernel's other errors.
+pub fn fill_channel(
+    left: &[Seg2],
+    right: &[Seg2],
+    depth_normal: Option<Vec2>,
+    options: &FillOptions,
+) -> Result<std::result::Result<ChannelFill, FillRefusal>> {
+    let channel = fill::Channel {
+        left: left.iter().map(convert::seg2).collect(),
+        right: right.iter().map(convert::seg2).collect(),
+        depth_normal: depth_normal.map(convert::vec2),
+    };
+    let out = run("fill_channel", |k| match fill::fill(k, &channel, options) {
+        Ok(f) => Ok(Filling(Ok(ChannelFill {
+            region: convert::record_region2(&f.region),
+            channel_depth: f.channel_depth,
+            filled_depth: f.filled_depth,
+            through: f.through,
+            notes: f.notes,
+        }))),
+        Err(e) => match e.failure().map(|f| &f.reason) {
+            Some(&Reason::Fill(why)) => Ok(Filling(Err(FillRefusal {
+                why,
+                fit: e.fit().map(|f| f.size),
+            }))),
+            _ => Err(e),
+        },
+    })?;
+    Ok(out.0)
 }
