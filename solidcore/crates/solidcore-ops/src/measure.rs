@@ -32,6 +32,7 @@ use solidcore::topology::brep::p3::{
 };
 use solidcore::topology::edgeuse::p1 as eu1;
 use solidcore::topology::face::p2::{self as face_p2, face_side_regions};
+use solidcore::topology::loopuse::loop_edges;
 use solidcore::topology::proto_topology::p1::CopyBrepMap;
 use solidcore::topology::{edge, face, vertex};
 use solidcore::topology::{Brep, BrepId, EdgeId, FaceId, FaceuseId, RegionId, VertexId};
@@ -1499,6 +1500,33 @@ impl Body {
             let indices = (0..order.edges.len())
                 .filter(|&i| order.edges.get(i).is_some_and(|e| rims.contains(e)));
             Ok(Ok(indices.collect()))
+        })?
+    }
+
+    /// The loops of record face `face`, each as the record edges it runs along (through `order`),
+    /// in the order the loop runs: the loops as the kernel lists them on the face's primary use,
+    /// the outer loop first and then the holes. A loop of a lone vertex has no edges. An
+    /// application that names a hole by a pick reads the hole's edges here, and measures them
+    /// with [`Body::edge_closest_point`].
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an index past the faces, or an edge of the face that `order` does
+    /// not hold; any other kernel error.
+    pub fn face_loops(&self, order: &Order, face: usize) -> Result<Vec<Vec<usize>>> {
+        let f = order::face(order, face)?;
+        read_body("face_loops", self, |_, b| {
+            let mut loops = Vec::new();
+            for l in face_p2::loops(b, f, false, None)? {
+                let mut edges = Vec::new();
+                for e in loop_edges(b, l)?.into_iter().flatten() {
+                    let Some(i) = order.edges.iter().position(|&x| x == e) else {
+                        return Ok(Err(Error::Argument));
+                    };
+                    edges.push(i);
+                }
+                loops.push(edges);
+            }
+            Ok(Ok(loops))
         })?
     }
 
@@ -3704,6 +3732,40 @@ pub(crate) mod tests {
         assert!(b
             .outline_cuts(&o, &[0], &line, [0.0, 1.0], [0.0; 3], [0.0; 3])
             .is_err());
+    }
+
+    #[test]
+    fn face_loops_are_the_outer_loop_then_the_holes() {
+        // the corpus's block 20 x 20 x 10 with a round hole through it: record face 0 (the top)
+        // has an outer loop of edges 0-3 and a hole of edge 4; a box's top face has its four
+        // edges and no hole
+        let (b, o) =
+            crate::test_corpus::operand("surfaces/cov-untrim-solid-top-face-copied-out", "b12");
+        let loops = b.face_loops(&o, 0).unwrap();
+        assert_eq!(loops.len(), 2, "{loops:?}");
+        let mut outer = loops[0].clone();
+        outer.sort_unstable();
+        assert_eq!(outer, vec![0, 1, 2, 3]);
+        assert_eq!(loops[1], vec![4]);
+        assert_eq!(b.face_loops(&o, o.faces.len()), Err(Error::Argument));
+        all_fixes();
+        let bx = make_box([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap();
+        let bo = kernel_order(&bx);
+        let top = faces_at(&bx, &bo, |c| (c[2] - 1.0).abs() <= 1e-9);
+        let [top] = top.as_slice() else {
+            panic!("{top:?}")
+        };
+        let loops = bx.face_loops(&bo, *top).unwrap();
+        assert_eq!(loops.len(), 1, "{loops:?}");
+        let mut edges = loops[0].clone();
+        edges.sort_unstable();
+        assert_eq!(edges, bx.rim_edges(&bo, &[*top]).unwrap());
+        // an order that does not hold the face's edges
+        let short = Order {
+            edges: Vec::new(),
+            ..bo.clone()
+        };
+        assert_eq!(bx.face_loops(&short, *top), Err(Error::Argument));
     }
 
     #[test]

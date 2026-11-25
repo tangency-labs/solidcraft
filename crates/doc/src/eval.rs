@@ -14897,6 +14897,22 @@ fn eval_feature_kind(
             }
             Ok(())
         }
+        FeatureKind::Dome { face, height, shape, reverse, body } => {
+            let h = val(vals, height, Kind::Length)?;
+            let i = body_at(st, body, &[face.0])?;
+            let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
+            let index =
+                crate::appearance::face_index_at(&mb, face.0).ok_or_else(|| DocError::Invalid("the dome's face is not on the body".into()))?;
+            let shape = match shape {
+                crate::DomeShape::Elliptical => kernel::DomeShape::Elliptical,
+                crate::DomeShape::Spherical => kernel::DomeShape::Spherical,
+            };
+            let nb = Traced::step(kernel::dome(&mb.body, index, h, shape, *reverse)?, &[&mb.traced()]);
+            if let Some(slot) = st.bodies.get_mut(i) {
+                *slot = mb.remade(nb);
+            }
+            Ok(())
+        }
         FeatureKind::Draft { faces, angle, neutral, pull, body } => {
             let a = val(vals, angle, Kind::Angle)?;
             let pl = doc.resolve_plane_in(vals, neutral, 0, f.component, Some(st))?;

@@ -36,7 +36,10 @@
 //! bound past twice upstream's distance) must cover the same way, and the old one must not have: for an edge
 //! one of its trims' `B` exceeds `o` (the raise was needed for the enclosure; `B` is an upper
 //! bound, so this argues rather than proves that `o` was short), for a vertex `o` does not
-//! cover an edge end that `n` does.
+//! cover an edge end that `n` does. One raise is upstream's margin instead, in the units and
+//! numbers [`VERTEX_MARGIN`] pins: a vertex at twice its gap to its edge uses' starts, to the
+//! bit (`topology::face::p3`'s UV trim gaps, which the stitch reaches while it edits since
+//! WR-732's retirement, #18934), still covering every end ([`vertex_is_twice_its_end_gap`]).
 
 use solidcore::curve::curve::p2::CurveKind;
 use solidcore::curve::curve::Curve;
@@ -1028,6 +1031,50 @@ fn vertex_covers_its_ends(k: &Kernel, b: &Brep, v: VertexId, n: f64) -> bool {
     true
 }
 
+/// The units whose vertices the stitch raises to upstream's margin while it edits
+/// (#18934), with how many raised vertices each row set holds there; a raise of that kind
+/// anywhere else, or another count, fails.
+const VERTEX_MARGIN: &[(&str, usize)] = &[("heal.stitch_p1", 24), ("heal.stitch_p2", 14)];
+
+/// Whether `n` is upstream's margin on the gap of `v`, bit for bit as the kernel computes
+/// it: `topology::face::p3`'s UV trim gaps with `adjust_tolerances` raise a vertex below
+/// `2 gap` to `2 gap`, `gap` the distance from its point to the 3D point of an edge use
+/// that starts there, at the use's start (`NormalizedEvaluate(0)`). So `n` is twice the
+/// largest such gap of `v`'s edge uses, to the bit (doubling is exact), and every gap is
+/// finite (a NaN fails). The stitch reaches those gaps while it edits since WR-732's
+/// retirement (#18934), where main kept the gap plus the zone tolerance.
+fn vertex_is_twice_its_end_gap(k: &Kernel, b: &Brep, v: VertexId, n: f64) -> bool {
+    let Ok(mut b) = b.clone_standing_for_self() else {
+        return false;
+    };
+    let at = b.vertex(v).expect("vertex").point;
+    let starts: Vec<EdgeuseId> = b
+        .edgeuses()
+        .iter()
+        .filter(|(_, u)| {
+            u.vertexuse
+                .and_then(|vu| b.vertexuse(vu).ok())
+                .and_then(|vu| vu.vertex)
+                == Some(v)
+        })
+        .map(|(eu, _)| eu)
+        .collect();
+    let mut gap = None::<f64>;
+    for eu in starts {
+        let Ok(e) = solidcore::topology::edgeuse::p3::normalized_evaluate(
+            k, &mut b, eu, 0.0, false, false, true,
+        ) else {
+            return false;
+        };
+        let d = at.distance(e.point);
+        if !d.is_finite() {
+            return false;
+        }
+        gap = Some(gap.map_or(d, |g| if d > g { d } else { g }));
+    }
+    gap.is_some_and(|g| g > 0.0 && (2.0 * g).to_bits() == n.to_bits())
+}
+
 /// What one unit's moved values were certified by.
 #[derive(Debug, Default)]
 struct Tally {
@@ -1038,6 +1085,10 @@ struct Tally {
     edges: usize,
     /// Moved vertices within their tolerance of their edges' ends.
     vertices: usize,
+    /// Raised vertices at upstream's margin, twice their gap to their edge uses' starts
+    /// ([`vertex_is_twice_its_end_gap`]), still covering every end; as many as
+    /// [`VERTEX_MARGIN`] pins.
+    vertex_margin: usize,
     /// Trims bounded (or faces, for an edge without trims).
     trims: usize,
     /// Faces of moved edges on which the edge holds no UV trim, bounded against the face's
@@ -1424,7 +1475,17 @@ fn certify(unit: &str) -> Tally {
                             "{at}: certified, remove it from OPEN"
                         );
                     } else if raised && !follows && vertex_covers_its_ends(&k, b, v, old) {
-                        failures.push(format!("{at}: raised {old:e} -> {new:e}: old covered"));
+                        // (upstream's margin: a vertex the UV trim gaps raise to twice its gap
+                        // to an end of its edges, which the old tolerance covered already; the
+                        // new one must still cover every end)
+                        if VERTEX_MARGIN.iter().any(|m| m.0 == unit)
+                            && vertex_is_twice_its_end_gap(&k, b, v, new)
+                            && vertex_covers_its_ends(&k, b, v, new)
+                        {
+                            tally.vertex_margin += 1;
+                        } else {
+                            failures.push(format!("{at}: raised {old:e} -> {new:e}: old covered"));
+                        }
                     } else if vertex_covers_its_ends(&k, b, v, new) {
                         tally.vertices += 1;
                         assert!(
@@ -1458,6 +1519,16 @@ fn certify(unit: &str) -> Tally {
         }
     }
     println!("{unit}: {tally:?}");
+    let margin = VERTEX_MARGIN
+        .iter()
+        .find(|m| m.0 == unit)
+        .map_or(0, |m| m.1);
+    if tally.vertex_margin != margin {
+        failures.push(format!(
+            "{unit}: {} vertices at upstream's margin, VERTEX_MARGIN pins {margin}",
+            tally.vertex_margin
+        ));
+    }
     let open_keys: std::collections::BTreeSet<_> = open.keys().cloned().collect();
     if open_seen != open_keys {
         failures.push(format!(

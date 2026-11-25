@@ -155,18 +155,6 @@ pub struct SplitEdgeOutput {
     pub vertex: Option<VertexId>,
 }
 
-impl SplitEdgeOutput {
-    /// The upstream status; dependency errors use the enclosing `Result`.
-    #[must_use]
-    pub const fn status(self) -> i32 {
-        if self.split {
-            0
-        } else {
-            SM_ERR
-        }
-    }
-}
-
 /// `FindInfiniteRegion`, including its optional shell and bounding box arguments.
 ///
 /// The first call, `GetRegions`, requires the B-rep's native owning-list order.
@@ -1019,9 +1007,9 @@ fn split_uv_trim(k: &Kernel, b: &mut Brep, input: SplitUvInput) -> Result<()> {
 ///
 /// The editing state is the B-rep's `m_bEditingEnabled` ([`Brep::editing_enabled`]):
 /// false from the constructor, set by editing scopes. Ordinary no-split results are
-/// successful Rust returns whose
-/// [`SplitEdgeOutput::status`] is `SM_ERR`; this preserves outputs that C++ callers
-/// consume despite that status. Dependency/invalid-graph errors remain `Err`.
+/// successful Rust returns whose [`SplitEdgeOutput::split`] is false (upstream's
+/// `SM_ERR`); this preserves outputs that C++ callers consume despite that status.
+/// Dependency/invalid-graph errors remain `Err`.
 ///
 /// # Errors
 /// Invalid graph; evaluator errors; face notifications or the
@@ -3835,7 +3823,6 @@ mod tests {
                     )
                     .unwrap();
                     assert!(!output.split);
-                    assert_eq!(output.status(), SM_ERR);
                     assert_eq!(k.context.doing_boolean(), previous);
                 }
                 b.set_editing_enabled(false);
@@ -4057,8 +4044,8 @@ mod tests {
             })
             .unwrap();
             assert_eq!(
-                (result.status(), result.edges, result.vertex),
-                (SM_ERR, None, vertex)
+                (result.split, result.edges, result.vertex),
+                (false, None, vertex)
             );
             b.set_editing_enabled(false);
             let disabled = make_vertex_split_edge(&mut k, &mut b, e, p, &mut env, &|_, kind| {
@@ -4068,7 +4055,7 @@ mod tests {
                 }
             })
             .unwrap();
-            assert_eq!(disabled.status(), SM_ERR);
+            assert!(!disabled.split);
             assert_eq!((disabled.edges, disabled.vertex), (None, None));
         }
         assert!(!k.context.doing_boolean());
@@ -4083,8 +4070,8 @@ mod tests {
             })
             .unwrap();
             assert_eq!(
-                (outside.status(), outside.edges, outside.vertex),
-                (SM_ERR, None, None)
+                (outside.split, outside.edges, outside.vertex),
+                (false, None, None)
             );
             assert!(k.context.doing_boolean());
         }
@@ -4104,7 +4091,7 @@ mod tests {
         // With parts 1 and 2 wired, a wire split completes, its final B-rep ADD
         // notification included.
         let out = result.unwrap();
-        assert_eq!(out.status(), 0);
+        assert!(out.split);
         let edges = out.edges.unwrap();
         assert!(edges.contains(&e));
         assert!(out.vertex.is_some());

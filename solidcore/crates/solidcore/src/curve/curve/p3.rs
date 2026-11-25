@@ -150,9 +150,6 @@ const OP_LINE_FIT: &str = "curve::curve::p3::BestLineFitEnfo::evaluate";
 /// component is below about `1e154`, and then needs at most 152 more divisions.
 pub const MAX_PC_SCALE_STEPS: u64 = 400;
 
-// `SM_ERR_NOT_CONVERGING`.
-use crate::error::SM_ERR_NOT_CONVERGING;
-
 /// `EvaluatePoint` whose status upstream ignores, or `None` when the point cannot be
 /// evaluated (the fork's curve-list helpers then skip the gap, tangency-labs/smlib
 /// 8311f8e); [`SolidError::Unported`] is propagated.
@@ -786,18 +783,6 @@ pub struct ArcLengthParameter {
     /// False when the Newton iteration stopped moving (upstream returns
     /// `SM_ERR_NOT_CONVERGING` with the last parameter).
     pub converged: bool,
-}
-
-impl ArcLengthParameter {
-    /// The upstream status: `0` (`SM_SUCCESS`) or `SM_ERR_NOT_CONVERGING`.
-    #[must_use]
-    pub const fn status(&self) -> i32 {
-        if self.converged {
-            0
-        } else {
-            SM_ERR_NOT_CONVERGING
-        }
-    }
 }
 
 impl Curve {
