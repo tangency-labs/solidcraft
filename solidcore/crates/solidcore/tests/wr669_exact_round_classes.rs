@@ -795,3 +795,35 @@ fn a_round_on_a_short_rib_s_cone_reads_back_from_its_record() {
         assert_eq!(rounds, 2, "{sweep} degrees");
     }
 }
+
+/// A negative-radius preview of box edges (the goldens' `preview0006`: the offsets on the
+/// faces' other side) is the line class's cylinder of radius `|r|`: the class's round
+/// keeps the ball's radius as the distance it is, where a signed `r` reached
+/// `create_cone_patch` as a negative radius and the preview failed 1001.
+#[test]
+fn a_negative_radius_preview_is_the_cylinder_of_its_magnitude() {
+    use solidcore::blend::fillet_executive::api::fillet_preview;
+    use solidcore::topology::brep::p1;
+    let r = -2.2690769714339276;
+    let mut k = Kernel::default();
+    let mut b = create_box(
+        &mut k,
+        Point3::new(0.0, 0.0, 0.0),
+        32.075664333395515,
+        14.557948535168304,
+        35.445177795673864,
+    )
+    .unwrap();
+    let all = p1::edges(&b, None).unwrap();
+    let sel: Vec<EdgeId> = [0, 8, 3, 1].iter().map(|&i| all[i]).collect();
+    let preview = fillet_preview(&mut k, &mut b, &sel, r).unwrap();
+    assert_eq!(preview.len(), sel.len());
+    for s in &preview {
+        let s = s.as_ref().expect("a preview surface");
+        let SurfaceKind::Cone(c) = s.kind() else {
+            panic!("the preview is a {:?}", s.kind());
+        };
+        assert!(c.is_cylinder());
+        assert_eq!(c.base_radius(), r.abs(), "the cylinder's radius");
+    }
+}

@@ -1098,6 +1098,12 @@ impl FilletSolver {
             start_pnt1 = foot(face1, 1, center0)?;
             end_pnt0 = foot(face0, 0, center1)?;
             end_pnt1 = foot(face1, 1, center1)?;
+            // Not the fork (#18913): the class's round has the ball's radius, a distance:
+            // `|r|`, the exact value of upstream's `center0.distance(start_pnt0)` (the centre
+            // sits on the faces' offsets by `r`). A negative `r` (the other side's offsets,
+            // `preview0006`) would otherwise reach `create_cone_patch` below as a negative
+            // radius; for `r > 0` this is `r` bit for bit.
+            radius0 = radius0.abs();
         }
 
         // get extension vectors along each rail curve and the center curve
