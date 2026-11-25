@@ -450,6 +450,13 @@ fn the_section_view_shows_where_the_member_goes_and_its_anchors() {
     p["locate"] = json!(v.locate_of(top_right));
     let again = super::member_section_view(&s, &p).unwrap();
     assert!((again.at.x - top_right.x).abs() < 1e-9 && (again.at.y - top_right.y).abs() < 1e-9, "{again:?}");
+    // And back: the section point a `locate` puts on the line, mirrored or not.
+    for view in [&v, &again] {
+        let back = view.locate_point(view.locate_of(top_right));
+        assert!((back.x - top_right.x).abs() < 1e-9 && (back.y - top_right.y).abs() < 1e-9, "{back:?}");
+    }
+    let back = again.locate_point(v.locate_of(top_right));
+    assert!((back.x - again.at.x).abs() < 1e-9 && (back.y - again.at.y).abs() < 1e-9, "{back:?}");
     run(&mut s, "frame.member", p);
     let b = bodies(&mut s).remove(0);
     assert!(near3(b.2, [0.0, -60.0, -40.0]) && near3(b.3, [1000.0, 0.0, 0.0]), "{b:?}");
@@ -1123,6 +1130,64 @@ fn coped_fits_a_tee_to_the_through_tubes_shape() {
     let (butt, coped) = (&fitted[0], &fitted[1]);
     assert!((butt.2[1] - 20.0).abs() < 1e-6 && (coped.2[1] - 14.0).abs() < 1e-3, "{butt:?} {coped:?}");
     assert!(coped.1 > butt.1 + 1.0, "{butt:?} {coped:?}");
+}
+
+#[test]
+fn a_tee_on_an_open_section_reaches_across_its_open_side_to_the_far_face() {
+    // v ends on h's middle at (200, 0), in 50 x 50 x 6 angle and in 60 x 45 channel (web 5). Fitted to h, as Butt
+    // and Coped frames fit a T, v's end reaches across h's open side to the face beyond h's line: the angle's far
+    // leg (its inner face at y = -19; Coped follows the leg's rounded toe, to -22) and the channel's web (its inner
+    // face at y = -17.5), not stopping at h's line (y = 0). Neither overlaps h, its root fillet included.
+    let sections = [
+        (json!({"kind": "angle", "width": 50, "height": 50, "thickness": 6}), [-19.0, -22.0]),
+        (json!({"kind": "channel", "height": 60, "width": 45, "web": 5, "flange": 6}), [-17.5, -17.5]),
+    ];
+    // v square to h, and at 45° to it: its line leaves the box round h's section 1 / sin 45° further along v.
+    for ((profile, lowest), top) in sections.iter().flat_map(|s| [(s, 200), (s, 300)]) {
+        for (coped, want) in [false, true].into_iter().zip(*lowest) {
+            let mut s = Session::default();
+            run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Plus"}));
+            run(&mut s, "sketch.line", json!({"points": [[0, 0], [400, 0]], "ids": ["h"]}));
+            run(&mut s, "sketch.line", json!({"points": [[200, 0], [top, 100]], "ids": ["v"]}));
+            run(&mut s, "sketch.finish", json!({}));
+            let p = json!({"sketch": "Plus", "profile": profile, "corner": "butt", "coped": coped, "names": {"h": "H", "v": "V"}});
+            run(&mut s, "frame.member", p);
+            let v = measured(&mut s, "V");
+            let o = overlap_all(&mut s);
+            assert!(
+                (v.2[1] - want).abs() < 1e-3 && o < 1e-3,
+                "{} to x {top} coped {coped}: v from y = {}, not {want}; overlap {o} mm³",
+                profile["kind"],
+                v.2[1]
+            );
+        }
+    }
+}
+
+#[test]
+fn a_member_fitted_after_an_open_sections_tee_is_cut_to_the_tees_whole_reach() {
+    // v ends on h's middle at (200, 0) and d ends there too, at 45° up to the left, in 50 x 50 x 6 angle and in
+    // 60 x 45 channel. v is fitted first and reaches across h's open side to its far face; d, fitted after it, is cut
+    // by v's tool, which must reach as far as v does. Stopping at v's line left d overlapping v there by 2364 mm³ in
+    // angle and 1878 mm³ in channel.
+    let sections = [
+        json!({"kind": "angle", "width": 50, "height": 50, "thickness": 6}),
+        json!({"kind": "channel", "height": 60, "width": 45, "web": 5, "flange": 6}),
+    ];
+    for profile in sections {
+        for coped in [false, true] {
+            let mut s = Session::default();
+            run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Plus"}));
+            run(&mut s, "sketch.line", json!({"points": [[0, 0], [400, 0]], "ids": ["h"]}));
+            run(&mut s, "sketch.line", json!({"points": [[200, 0], [200, 150]], "ids": ["v"]}));
+            run(&mut s, "sketch.line", json!({"points": [[200, 0], [80, 120]], "ids": ["d"]}));
+            run(&mut s, "sketch.finish", json!({}));
+            let p = json!({"sketch": "Plus", "profile": profile, "corner": "butt", "coped": coped});
+            run(&mut s, "frame.member", p);
+            let o = overlap_all(&mut s);
+            assert!(o < 1e-3, "{} coped {coped}: the members overlap by {o} mm³", profile["kind"]);
+        }
+    }
 }
 
 #[test]
