@@ -559,107 +559,99 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                 });
             });
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(t.space_16, t.space_6);
-                layout_check(
-                    ui,
-                    tr!(app, "prefs.layout_page.play_history"),
-                    tr!(app, "prefs.history_play_button_note"),
-                    &mut app.preferences.history_play_button,
-                    "history_play_button",
-                );
-                // A design's joints as one button in the History, from the second joint (#8884).
-                layout_check(
-                    ui,
-                    tr!(app, "prefs.history_group_joints"),
-                    tr!(app, "prefs.history_group_joints_note"),
-                    &mut app.preferences.history_group_joints,
-                    "history_group_joints",
-                );
-                // Folds in the History bar, and a folder for a STEP insert's items (#8885).
-                layout_check(
-                    ui,
-                    tr!(app, "prefs.history_bar_groups"),
-                    tr!(app, "prefs.history_bar_groups_note"),
-                    &mut app.preferences.history_bar_groups,
-                    "history_bar_groups",
-                );
-                layout_check(
-                    ui,
-                    tr!(app, "prefs.layout_page.origin_bodies"),
-                    tr!(app, "prefs.history_origin_bodies_note"),
-                    &mut app.preferences.timeline_origin_bodies,
-                    "history_origin_bodies",
-                );
-                layout_check(
-                    ui,
-                    tr!(app, "prefs.browser_components_open"),
-                    tr!(app, "prefs.browser_components_open_note"),
-                    &mut app.preferences.browser_components_open,
-                    "browser_components_open",
-                );
-                // Folders and placements start closed and open only on request (#8768).
-                layout_check(
-                    ui,
-                    tr!(app, "prefs.browser_rows_start_closed"),
-                    tr!(app, "prefs.browser_rows_start_closed_note"),
-                    &mut app.preferences.browser_rows_start_closed,
-                    "browser_rows_start_closed",
-                );
-                layout_check(
-                    ui,
-                    tr!(app, "prefs.browser_eye_left"),
-                    tr!(app, "prefs.browser_eye_left_note"),
-                    &mut app.preferences.browser_eye_left,
-                    "browser_eye_left",
-                );
-                layout_check(
-                    ui,
-                    tr!(app, "prefs.browser_body_features"),
-                    tr!(app, "prefs.browser_body_features_note"),
-                    &mut app.preferences.browser_body_features,
-                    "browser_body_features",
-                );
-            });
-            // A folder's icon from its features (#12514) and the History controls' steps (#11430), in
-            // a row of their own: one more box in the row above widens it past the page at narrow
-            // windows.
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(t.space_16, t.space_6);
-                layout_check(
-                    ui,
-                    tr!(app, "prefs.history_folder_kind_icon"),
-                    tr!(app, "prefs.history_folder_kind_icon_note"),
-                    &mut app.preferences.history_folder_kind_icon,
-                    "history_folder_kind_icon",
-                );
-                layout_check(
-                    ui,
-                    tr!(app, "prefs.history_steps_component"),
-                    tr!(app, "prefs.history_steps_component_note"),
-                    &mut app.preferences.history_steps_component,
-                    "history_steps_component",
-                );
-                layout_check(
-                    ui,
-                    tr!(app, "prefs.history_last_stops_at_component"),
-                    tr!(app, "prefs.history_last_stops_at_component_note"),
-                    &mut app.preferences.history_last_stops_at_component,
-                    "history_last_stops_at_component",
-                );
-            });
-            // What a feature's menu does with several selected features, in a row of its own for
-            // the same reason.
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(t.space_16, t.space_6);
-                layout_check(
-                    ui,
-                    tr!(app, "prefs.feature_menus_act_on_selection"),
-                    tr!(app, "prefs.feature_menus_act_on_selection_note"),
-                    &mut app.preferences.feature_menus_act_on_selection,
-                    "feature_menus_act_on_selection",
-                );
-            });
+            // The History's and the Browser's checkboxes, each group in even columns (#16542).
+            check_columns(
+                ui,
+                app,
+                Some(msg!("ui.history_title")),
+                &[
+                    Check {
+                        label: msg!("prefs.layout_page.play_history"),
+                        help: msg!("prefs.history_play_button_note"),
+                        key: "history_play_button",
+                        value: |p| &mut p.history_play_button,
+                    },
+                    // A design's joints as one button in the History, from the second joint (#8884).
+                    Check {
+                        label: msg!("prefs.history_group_joints"),
+                        help: msg!("prefs.history_group_joints_note"),
+                        key: "history_group_joints",
+                        value: |p| &mut p.history_group_joints,
+                    },
+                    // Folds in the History bar, and a folder for a STEP insert's items (#8885).
+                    Check {
+                        label: msg!("prefs.history_bar_groups"),
+                        help: msg!("prefs.history_bar_groups_note"),
+                        key: "history_bar_groups",
+                        value: |p| &mut p.history_bar_groups,
+                    },
+                    Check {
+                        label: msg!("prefs.layout_page.origin_bodies"),
+                        help: msg!("prefs.history_origin_bodies_note"),
+                        key: "history_origin_bodies",
+                        value: |p| &mut p.timeline_origin_bodies,
+                    },
+                    // A folder's icon from its features (#12514).
+                    Check {
+                        label: msg!("prefs.history_folder_kind_icon"),
+                        help: msg!("prefs.history_folder_kind_icon_note"),
+                        key: "history_folder_kind_icon",
+                        value: |p| &mut p.history_folder_kind_icon,
+                    },
+                    // The History controls' steps (#11430).
+                    Check {
+                        label: msg!("prefs.history_steps_component"),
+                        help: msg!("prefs.history_steps_component_note"),
+                        key: "history_steps_component",
+                        value: |p| &mut p.history_steps_component,
+                    },
+                    Check {
+                        label: msg!("prefs.history_last_stops_at_component"),
+                        help: msg!("prefs.history_last_stops_at_component_note"),
+                        key: "history_last_stops_at_component",
+                        value: |p| &mut p.history_last_stops_at_component,
+                    },
+                    // What a feature's menu does with several selected features.
+                    Check {
+                        label: msg!("prefs.feature_menus_act_on_selection"),
+                        help: msg!("prefs.feature_menus_act_on_selection_note"),
+                        key: "feature_menus_act_on_selection",
+                        value: |p| &mut p.feature_menus_act_on_selection,
+                    },
+                ],
+            );
+            check_columns(
+                ui,
+                app,
+                Some(msg!("ui.browser_title")),
+                &[
+                    Check {
+                        label: msg!("prefs.browser_components_open"),
+                        help: msg!("prefs.browser_components_open_note"),
+                        key: "browser_components_open",
+                        value: |p| &mut p.browser_components_open,
+                    },
+                    // Folders and placements start closed and open only on request (#8768).
+                    Check {
+                        label: msg!("prefs.browser_rows_start_closed"),
+                        help: msg!("prefs.browser_rows_start_closed_note"),
+                        key: "browser_rows_start_closed",
+                        value: |p| &mut p.browser_rows_start_closed,
+                    },
+                    Check {
+                        label: msg!("prefs.browser_eye_left"),
+                        help: msg!("prefs.browser_eye_left_note"),
+                        key: "browser_eye_left",
+                        value: |p| &mut p.browser_eye_left,
+                    },
+                    Check {
+                        label: msg!("prefs.browser_body_features"),
+                        help: msg!("prefs.browser_body_features_note"),
+                        key: "browser_body_features",
+                        value: |p| &mut p.browser_body_features,
+                    },
+                ],
+            );
         });
         ui_kit::settings_section(ui, "dialogs", tr!(app, "prefs.dialogs"), |ui| {
             ui_kit::settings_form(ui, t.form_label_width + t.space_24, |ui| {
@@ -703,102 +695,101 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                 }
             });
-            let labels = [
-                tr!(app, "prefs.sketch_tab_always"),
-                tr!(app, "prefs.layout_page.active_commands"),
-                tr!(app, "prefs.ribbon_reveal"),
-                tr!(app, "prefs.ribbon_tabs_only"),
-                tr!(app, "prefs.layout_page.pinned_menus"),
-                tr!(app, "prefs.layout_page.hover_panel_menus"),
-                tr!(app, "prefs.pinned_constraints_in_grid"),
-            ];
-            let widest =
-                labels.iter().map(|label| ui_kit::ContentWidth::label(ui, label)).fold(0.0, f32::max) + t.space_14 + t.space_6 * 2.0 + t.space_16;
-            let columns = if ui.available_width() >= widest * 2.0 + t.space_16 { 2 } else { 1 };
-            let width = (ui.available_width() - t.space_16 * (columns - 1) as f32) / columns as f32;
-            ui.scope(|ui| {
-                ui.spacing_mut().item_spacing.y = t.space_6;
-                for row in (0..labels.len()).step_by(columns) {
-                    ui.horizontal_top(|ui| {
-                        ui.spacing_mut().item_spacing.x = t.space_16;
-                        for index in row..(row + columns).min(labels.len()) {
-                            ui.allocate_ui_with_layout(
-                                egui::vec2(width.max(0.0), t.control_height),
-                                egui::Layout::top_down(egui::Align::Min),
-                                |ui| match index {
-                                    0 => {
-                                        layout_check(
-                                            ui,
-                                            tr!(app, "prefs.sketch_tab_always"),
-                                            tr!(app, "prefs.sketch_tab_always_note"),
-                                            &mut app.preferences.sketch_tab_always,
-                                            "sketch_tab_always",
-                                        );
-                                    }
-                                    1 => {
-                                        layout_check(
-                                            ui,
-                                            tr!(app, "prefs.layout_page.active_commands"),
-                                            tr!(app, "prefs.persistent_ribbon_pressed_help"),
-                                            &mut app.preferences.persistent_ribbon_pressed,
-                                            "persistent_ribbon_pressed",
-                                        );
-                                    }
-                                    2 => {
-                                        layout_check(
-                                            ui,
-                                            tr!(app, "prefs.ribbon_reveal"),
-                                            tr!(app, "prefs.ribbon_reveal_note"),
-                                            &mut app.preferences.ribbon_reveal,
-                                            "ribbon_reveal",
-                                        );
-                                    }
-                                    3 => {
-                                        layout_check(
-                                            ui,
-                                            tr!(app, "prefs.ribbon_tabs_only"),
-                                            tr!(app, "prefs.ribbon_tabs_only_note"),
-                                            &mut app.preferences.ribbon_tabs_only,
-                                            "ribbon_tabs_only",
-                                        );
-                                    }
-                                    4 => {
-                                        layout_check(
-                                            ui,
-                                            tr!(app, "prefs.layout_page.pinned_menus"),
-                                            tr!(app, "ui.ribbon_menus_skip_pinned"),
-                                            &mut app.preferences.ribbon_menus_skip_pinned,
-                                            "ribbon_menus_skip_pinned",
-                                        );
-                                    }
-                                    5 => {
-                                        layout_check(
-                                            ui,
-                                            tr!(app, "prefs.layout_page.hover_panel_menus"),
-                                            tr!(app, "prefs.layout_page.hover_panel_menus_help"),
-                                            &mut app.preferences.ribbon_menus_follow_hover,
-                                            "ribbon_menus_follow_hover",
-                                        );
-                                    }
-                                    // Pinned constraints as small cells in the Constrain grid.
-                                    6 => {
-                                        layout_check(
-                                            ui,
-                                            tr!(app, "prefs.pinned_constraints_in_grid"),
-                                            tr!(app, "prefs.pinned_constraints_in_grid_note"),
-                                            &mut app.preferences.pinned_constraints_in_grid,
-                                            "pinned_constraints_in_grid",
-                                        );
-                                    }
-                                    _ => {}
-                                },
-                            );
-                        }
+            check_columns(
+                ui,
+                app,
+                None,
+                &[
+                    Check {
+                        label: msg!("prefs.sketch_tab_always"),
+                        help: msg!("prefs.sketch_tab_always_note"),
+                        key: "sketch_tab_always",
+                        value: |p| &mut p.sketch_tab_always,
+                    },
+                    Check {
+                        label: msg!("prefs.layout_page.active_commands"),
+                        help: msg!("prefs.persistent_ribbon_pressed_help"),
+                        key: "persistent_ribbon_pressed",
+                        value: |p| &mut p.persistent_ribbon_pressed,
+                    },
+                    Check {
+                        label: msg!("prefs.ribbon_reveal"),
+                        help: msg!("prefs.ribbon_reveal_note"),
+                        key: "ribbon_reveal",
+                        value: |p| &mut p.ribbon_reveal,
+                    },
+                    Check {
+                        label: msg!("prefs.ribbon_tabs_only"),
+                        help: msg!("prefs.ribbon_tabs_only_note"),
+                        key: "ribbon_tabs_only",
+                        value: |p| &mut p.ribbon_tabs_only,
+                    },
+                    Check {
+                        label: msg!("prefs.layout_page.pinned_menus"),
+                        help: msg!("ui.ribbon_menus_skip_pinned"),
+                        key: "ribbon_menus_skip_pinned",
+                        value: |p| &mut p.ribbon_menus_skip_pinned,
+                    },
+                    Check {
+                        label: msg!("prefs.layout_page.hover_panel_menus"),
+                        help: msg!("prefs.layout_page.hover_panel_menus_help"),
+                        key: "ribbon_menus_follow_hover",
+                        value: |p| &mut p.ribbon_menus_follow_hover,
+                    },
+                    // Pinned constraints as small cells in the Constrain grid.
+                    Check {
+                        label: msg!("prefs.pinned_constraints_in_grid"),
+                        help: msg!("prefs.pinned_constraints_in_grid_note"),
+                        key: "pinned_constraints_in_grid",
+                        value: |p| &mut p.pinned_constraints_in_grid,
+                    },
+                ],
+            );
+        });
+        super::navbar::show(app, ui);
+    });
+}
+
+/// One box of a [`check_columns`] group: its label and hover help as messages, its handle
+/// (`prefs:<key>`), and the preference it turns on and off.
+struct Check {
+    label: solidcraft_ui_text::Msg,
+    help: solidcraft_ui_text::Msg,
+    key: &'static str,
+    value: fn(&mut Prefs) -> &mut bool,
+}
+
+/// Checkboxes in even columns, so they line up instead of wrapping like words (#16542): two
+/// columns when the widest label fits twice, one in a narrow window, every cell as wide as its
+/// column. A dim caption names the group.
+fn check_columns(ui: &mut egui::Ui, app: &mut SolveApp, caption: Option<solidcraft_ui_text::Msg>, checks: &[Check]) {
+    let t = Tokens::get();
+    if let Some(caption) = caption {
+        ui_kit::settings_inline_note(ui, app.tr(caption));
+    }
+    let widest = checks.iter().map(|check| ui_kit::ContentWidth::label(ui, app.tr(check.label))).fold(0.0, f32::max)
+        + t.space_14
+        + t.space_6 * 2.0
+        + t.space_16;
+    let columns: usize = if ui.available_width() >= widest * 2.0 + t.space_16 { 2 } else { 1 };
+    let width = ((ui.available_width() - t.space_16 * (columns - 1) as f32) / columns as f32).max(0.0);
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.y = t.space_6;
+        for row in checks.chunks(columns) {
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = t.space_16;
+                for check in row {
+                    ui.allocate_ui_with_layout(egui::vec2(width, t.control_height), egui::Layout::top_down(egui::Align::Min), |ui| {
+                        // A cell shrinks to its box unless told otherwise; the full width keeps the columns even.
+                        ui.set_min_width(width);
+                        let (label, help) = (app.tr(check.label), app.tr(check.help));
+                        // The box gets the whole cell: sized to its label alone, a label a fraction wider
+                        // at a fractional display scale would end in an ellipsis.
+                        check_row(ui, label, help, (check.value)(&mut app.preferences), check.key);
                     });
                 }
             });
-        });
-        super::navbar::show(app, ui);
+        }
     });
 }
 
@@ -846,15 +837,21 @@ fn layout_check(ui: &mut egui::Ui, label: &str, help: &str, value: &mut bool, ke
     let t = Tokens::get();
     let width = (ui_kit::ContentWidth::label(ui, label) + t.space_14 + t.space_6 * 2.0 + t.space_16).min(ui.max_rect().width());
     ui.allocate_ui_with_layout(egui::vec2(width.max(0.0), t.control_height), egui::Layout::top_down(egui::Align::Min), |ui| {
-        ui_kit::settings_form(ui, 0.0, |ui| {
-            ui_kit::row(ui, "", |ui| {
-                ui.spacing_mut().item_spacing.x = t.space_6;
-                let check_width = (ui.available_width() - t.space_16 - t.space_6).max(0.0);
-                let response = ui_kit::settings_control_width(ui, check_width, |ui| ui_kit::checkbox(ui, label, value).backing_on_hover_text(help));
-                crate::scenario::publish_target(&format!("prefs:{key}"), response.rect);
-                ui_kit::help_icon(ui, help);
-            })
-        });
+        check_row(ui, label, help, value, key);
+    });
+}
+
+/// The box, its label and its help icon, in the width `ui` gives them.
+fn check_row(ui: &mut egui::Ui, label: &str, help: &str, value: &mut bool, key: &str) {
+    let t = Tokens::get();
+    ui_kit::settings_form(ui, 0.0, |ui| {
+        ui_kit::row(ui, "", |ui| {
+            ui.spacing_mut().item_spacing.x = t.space_6;
+            let check_width = (ui.available_width() - t.space_16 - t.space_6).max(0.0);
+            let response = ui_kit::settings_control_width(ui, check_width, |ui| ui_kit::checkbox(ui, label, value).backing_on_hover_text(help));
+            crate::scenario::publish_target(&format!("prefs:{key}"), response.rect);
+            ui_kit::help_icon(ui, help);
+        })
     });
 }
 

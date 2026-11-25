@@ -234,7 +234,9 @@ impl Net {
         };
         let cn = match Nurbs::of(&form) {
             Ok(cn) => cn,
-            Err(e @ SolidError::Cancelled { .. }) => return Err(e),
+            Err(e @ (SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })) => {
+                return Err(e)
+            }
             Err(_) => return Ok(None),
         };
         // the box's sides are the end knots and its boundary rows the end control rows only
@@ -343,7 +345,9 @@ impl Net {
         };
         let ders = match curve_derivs_over(&lines.curve, v, 1, None) {
             Ok(d) => d,
-            Err(e @ SolidError::Cancelled { .. }) => return Err(e),
+            Err(e @ (SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })) => {
+                return Err(e)
+            }
             Err(_) => return Ok(None),
         };
         let (Some(d0), Some(d1)) = (ders.first(), ders.get(1)) else {
@@ -507,7 +511,9 @@ impl Net {
                     };
                     let p = match found {
                         Ok(p) => p,
-                        Err(e @ SolidError::Cancelled { .. }) => return Err(e),
+                        Err(e @ (SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })) => {
+                            return Err(e)
+                        }
                         Err(_) => return Ok(None),
                     };
                     out = Some(match out {
@@ -520,7 +526,7 @@ impl Net {
         };
         match found {
             Ok(p) => Ok(Some(p)),
-            Err(e @ SolidError::Cancelled { .. }) => Err(e),
+            Err(e @ (SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })) => Err(e),
             Err(_) => Ok(None),
         }
     }

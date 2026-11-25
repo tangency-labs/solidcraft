@@ -430,6 +430,44 @@ pub(super) fn choose_preset(s: &mut AddState, protocol: Protocol, index: usize) 
     s.confirm_insecure_http = None;
 }
 
+/// The host and port of an address a user typed (scheme, path and credentials left out).
+fn host_and_port(url: &str) -> (String, Option<u16>) {
+    let rest = url.trim().split_once("://").map_or(url.trim(), |(_, r)| r);
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let authority = authority.rsplit_once('@').map_or(authority, |(_, a)| a);
+    match authority.rsplit_once(':') {
+        Some((host, port)) if !host.ends_with(']') || host.starts_with('[') => match port.parse() {
+            Ok(port) => (host.to_string(), Some(port)),
+            Err(_) => (authority.to_string(), None),
+        },
+        _ => (authority.to_string(), None),
+    }
+}
+
+/// The address no longer says what the chosen preset does (the user edited it): the preset becomes
+/// Custom, and a name that was still the preset's own goes (the host is suggested), so "Ollama"
+/// does not stay on another endpoint. A name the user typed is never touched, and the Ollama
+/// preset stays for an address on Ollama's own port (another computer's Ollama, which `ollama`
+/// records).
+pub(super) fn follow_url_edit(s: &mut AddState) {
+    let presets = agents::presets(s.protocol);
+    let Some(preset) = presets.get(s.preset) else { return };
+    let same = |a: &str, b: &str| match (agents::normalize_url(a), agents::normalize_url(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a.trim().trim_end_matches('/') == b.trim().trim_end_matches('/'),
+    };
+    if same(&s.base_url, preset.base_url) {
+        return;
+    }
+    if s.protocol == Protocol::OpenAi && s.preset == 0 && host_and_port(&s.base_url).1 == host_and_port(preset.base_url).1 {
+        return;
+    }
+    s.preset = presets.len();
+    if s.name == preset.name {
+        s.name = host_and_port(&s.base_url).0;
+    }
+}
+
 /// Run a connection test in the background (it starts the agent briefly, or asks the endpoint
 /// for its models).
 #[cfg(not(target_arch = "wasm32"))]
@@ -1290,6 +1328,7 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                         let r = ui_kit::cell_editor(ui, egui::Id::unique("sc_ai_add_url"), &mut s.base_url, tr!("ui.ai_url_hint"), false);
                         s.list_again |= r.lost_focus();
                         if r.changed() {
+                            follow_url_edit(s);
                             s.insecure_http_url = None;
                             s.confirm_insecure_http = None;
                             s.listing = None;
@@ -2662,5 +2701,34 @@ mod card_tests {
         assert_eq!(model(&h).as_deref(), Some("vendor/own"));
         assert_eq!(h.app.preferences.agent_models.get("api-1").map(String::as_str), Some("vendor/own"));
         assert_eq!(seen.lock().unwrap().len(), 1, "listed once");
+    }
+
+    /// Editing the Base URL away from a preset's address makes the preset Custom, and a name that
+    /// was still the preset's own gives way to the host; a name the user typed stays.
+    #[test]
+    fn editing_the_url_away_from_a_preset_follows_it() {
+        let ollama =
+            |url: &str, name: &str| AddState { kind: AddKind::Api, preset: 0, name: name.into(), base_url: url.into(), ..Default::default() };
+        let custom = agents::presets(Protocol::OpenAi).len();
+        let mut s = ollama("http://localhost:11434/v1", "Ollama");
+        follow_url_edit(&mut s);
+        assert_eq!((s.preset, s.name.as_str()), (0, "Ollama"), "an unchanged address keeps the preset");
+        s.base_url = "http://localhost:11434/v1/".into();
+        follow_url_edit(&mut s);
+        assert_eq!(s.preset, 0, "a trailing slash is the same address");
+        s.base_url = "https://api.example.com/v1".into();
+        follow_url_edit(&mut s);
+        assert_eq!((s.preset, s.name.as_str()), (custom, "api.example.com"), "another endpoint is Custom, named by its host");
+        let mut s = ollama("https://api.example.com/v1", "My server");
+        follow_url_edit(&mut s);
+        assert_eq!((s.preset, s.name.as_str()), (custom, "My server"), "a typed name is never overwritten");
+        let mut s = ollama("http://192.168.1.20:11434/v1", "Ollama");
+        follow_url_edit(&mut s);
+        assert_eq!((s.preset, s.name.as_str()), (0, "Ollama"), "another computer's Ollama is still Ollama");
+        let mut s = ollama("", "Ollama");
+        follow_url_edit(&mut s);
+        assert_eq!((s.preset, s.name.as_str()), (custom, ""), "an emptied address leaves no stale name");
+        follow_url_edit(&mut s);
+        assert_eq!(s.preset, custom, "Custom stays Custom");
     }
 }
