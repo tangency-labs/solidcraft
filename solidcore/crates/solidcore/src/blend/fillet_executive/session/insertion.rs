@@ -476,7 +476,10 @@ mod tests {
                         target.face_mut(first)?.tolerance = 0.125;
                         match status {
                             0 => Ok(()),
-                            1 => Err(SolidError::sm_err("actual scope body")),
+                            1 => Err(SolidError::failed_routine(
+                                "actual scope body",
+                                crate::error::SM_ERR,
+                            )),
                             _ => Err(SolidError::unported(
                                 "actual scope dependency",
                                 "boolean.topology_intersector_p3",
@@ -584,7 +587,10 @@ mod tests {
         assert!(session.executive.intersector.topology_deleted);
         let result: Result<()> = session.with_insertion_geometry(&mut k, |_, ti, _| {
             ti.ignore_tangency = true;
-            Err(SolidError::sm_err("actual component failure"))
+            Err(SolidError::failed_routine(
+                "actual component failure",
+                crate::error::SM_ERR,
+            ))
         });
         assert!(result.is_err());
         assert!(session.executive.intersector.ignore_tangency);

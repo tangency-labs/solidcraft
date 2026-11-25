@@ -793,7 +793,7 @@ fn ix<I: Copy>(o: Option<I>, f: impl Fn(I) -> u32) -> f64 {
 fn status_of(r: &Result<(), SolidError>) -> Result<Option<f64>, SolidError> {
     match r {
         Ok(()) => Ok(Some(0.0)),
-        Err(up_err) if solidcore::error::upstream_status(up_err).is_some() => Ok(Some(f64::from(solidcore::error::upstream_status(up_err).unwrap_or(-1)))),
+        Err(up_err) if crate::output::recorded_status(up_err).is_some() => Ok(Some(f64::from(crate::output::recorded_status(up_err).unwrap_or(-1)))),
         Err(SolidError::InvalidInput { .. }) => Ok(None),
         Err(e) => Err(e.clone()),
     }
@@ -1101,7 +1101,7 @@ fn ellipse_wire(k: &mut Kernel, b: &mut Brep, src: &BrepIn) -> Result<(), SolidE
         Ellipse::new(k, center, x, y, domain, *rx, *ry, &opts)?
     };
     if curve.base().gw_nurb().is_none() {
-        return Err(SolidError::sm_err("topology_edge::ellipse_wire"));
+        return Err(crate::output::routine_failure("topology_edge::ellipse_wire"));
     }
     curve.edit_parameterization(k, &Extent1d::from_min_max(*n0, *n1), true, None)?;
     curve.set_out_of_bounds_enabled(*oob);
@@ -1429,7 +1429,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
                     ix(r.radial_edgeuse, EdgeuseId::index),
                     ix(r.coincident_faceuse, FaceuseId::index),
                 ]),
-                Err(up_err) if solidcore::error::upstream_status(&up_err).is_some() => out.extend([f64::from(solidcore::error::upstream_status(&up_err).unwrap_or(-1)), -1.0, -1.0]),
+                Err(up_err) if crate::output::recorded_status(&up_err).is_some() => out.extend([f64::from(crate::output::recorded_status(&up_err).unwrap_or(-1)), -1.0, -1.0]),
                 Err(SolidError::InvalidInput { .. }) => out.push(NULL_DEREF),
                 Err(err) => return Err(err.into()),
             }

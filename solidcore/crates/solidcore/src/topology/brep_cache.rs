@@ -883,10 +883,9 @@ mod tests {
     #[test]
     fn initialization_contract_and_atomic_build_failure() {
         let k = Kernel::default();
-        assert!(
-            BrepCache::<CacheObject>::new(0).is_err_and(|e| e.upstream_status() == Some(1001)
-                && e.topology_failure() == Some(&TopologyFailure::CacheTargetNotBrep))
-        );
+        assert!(BrepCache::<CacheObject>::new(0)
+            .is_err_and(|e| e.failed_routine_status() == Some(1001)
+                && e.topology_failure() == Some(&TopologyFailure::CacheTargetNotBrep)));
         let mut cache = BrepCache::new(BREP_TYPE).unwrap();
         assert!(cache.vertex_tree().is_none());
         let b = Brep::new();
@@ -903,7 +902,7 @@ mod tests {
         open.add_edge(v0, v1).unwrap();
         assert!(cache
             .build_trees(&k, CacheSource::Brep(&open), |o| o, &arena_identity)
-            .is_err_and(|e| e.upstream_status() == Some(1006)
+            .is_err_and(|e| e.failed_routine_status() == Some(1006)
                 && e.topology_failure() == Some(&TopologyFailure::EdgeWithoutCurve)));
         assert!(
             cache.vertex_tree().is_none()

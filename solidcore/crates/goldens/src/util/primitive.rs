@@ -17,8 +17,8 @@ fn sample(out: &mut Vec<f64>, value: Result<Vec3>) -> Result<()> {
             point(out, p);
         }
         Err(e) if e.is_unported() => return Err(e),
-        Err(up_err) if solidcore::error::upstream_status(&up_err).is_some() => out.push(f64::from(
-            solidcore::error::upstream_status(&up_err).unwrap_or(-1),
+        Err(up_err) if crate::output::recorded_status(&up_err).is_some() => out.push(f64::from(
+            crate::output::recorded_status(&up_err).unwrap_or(-1),
         )),
         Err(_) => out.push(-1.0),
     }
@@ -147,8 +147,8 @@ pub fn append_pyramid_rays(k: &mut Kernel, brep: &mut Brep, out: &mut Vec<f64>) 
         let status = match attempt.status {
             Ok(()) => 0.0,
             Err(e) if e.is_unported() => return Err(e),
-            Err(up_err) if solidcore::error::upstream_status(&up_err).is_some() => {
-                f64::from(solidcore::error::upstream_status(&up_err).unwrap_or(-1))
+            Err(up_err) if crate::output::recorded_status(&up_err).is_some() => {
+                f64::from(crate::output::recorded_status(&up_err).unwrap_or(-1))
             }
             Err(e) => return Err(e),
         };

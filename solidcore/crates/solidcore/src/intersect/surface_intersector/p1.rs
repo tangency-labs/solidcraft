@@ -3044,7 +3044,7 @@ mod tests {
             Some(&IntersectFailure::NoCurveToReverse)
         );
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
-        assert_eq!(e.upstream_status(), Some(1006));
+        assert_eq!(e.failed_routine_status(), Some(1006));
         assert!(!e.is_defect());
         // the basic intersector's unimplemented delta step answers SM_ERR, unsupported
         let e = si.compute_point_values_delta().unwrap_err();
@@ -3052,14 +3052,14 @@ mod tests {
             e.intersect_failure(),
             Some(&IntersectFailure::DeltaStepUnsupported)
         );
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert!(!e.is_defect());
         // a singular or tangent point is refused by name, keeping SM_ERR
         let e = si
             .compute_singularity_point([Point2::new(0.0, 0.0); 2], TsectId(0), None)
             .unwrap_err();
         assert_eq!(e.intersect_failure(), Some(&IntersectFailure::Tangent));
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert!(!e.is_defect());
     }
 

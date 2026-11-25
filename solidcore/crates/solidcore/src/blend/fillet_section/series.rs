@@ -880,7 +880,7 @@ mod tests {
         let why = BlendFailure::SectionDegenerate(SectionDegeneracy::VectorVanishes);
         let error = Ser::constant(0.0).inv_sqrt(tr).unwrap_err();
         assert_eq!(error, SolidError::blend(op, why));
-        assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(error.failed_routine_status(), Some(crate::error::SM_ERR));
         let mut pows = InvSqrtSeries::<f64>::default();
         let error = pows.update(&Ser::constant(-1.0), tr).unwrap_err();
         assert_eq!(error, SolidError::blend(op, why));

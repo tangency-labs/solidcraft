@@ -683,7 +683,7 @@ fn build_surface(s: &SurfIn) -> Result<Surface, HarnessError> {
 
 /// The `SmStatus` of a Rust error; `-1` for one upstream cannot return.
 pub(super) fn status(e: &SolidError) -> f64 {
-    solidcore::error::nurbs::upstream_status(e).map_or(-1.0, f64::from)
+    crate::output::recorded_status(e).map_or(-1.0, f64::from)
 }
 
 /// A Rust failure: deferred for `Unported`, a harness error otherwise.
@@ -2997,25 +2997,26 @@ fn run_proto(
                 max_uv_loop_gap: 0.0,
                 second_max_uv_loop_gap: 0.0,
             };
-            let result = st(
-                solidcore::topology::face::p1::calculate_uv_domain_from_uv_trim_curves_into(
-                    &k,
-                    body,
-                    owned.face,
-                    true,
-                    false,
-                    false,
-                    &mut output,
-                )
-                .map_err(|error| match error {
-                    SolidError::InvalidInput { operation, .. } | SolidError::PortInvariant { operation, .. } => SolidError::Upstream {
-                        operation,
-                        code: solidcore::error::SM_ERR_INVALID_INPUT,
-                        entity: None,
-                    },
-                    other => other,
-                }),
-            )?;
+            let call = solidcore::topology::face::p1::calculate_uv_domain_from_uv_trim_curves_into(
+                &k,
+                body,
+                owned.face,
+                true,
+                false,
+                false,
+                &mut output,
+            );
+            let result = match call {
+                // the shim's `SM_ERR_INVALID_INPUT`, recorded as `st` records a status
+                Err(e @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => {
+                    #[cfg(test)]
+                    witness::error(&e);
+                    #[cfg(not(test))]
+                    let _ = e;
+                    Err(f64::from(solidcore::error::SM_ERR_INVALID_INPUT))
+                }
+                other => st(other)?,
+            };
             owned.trim_probe = Some((result.err().unwrap_or(0.0), output.domain));
         }
     }

@@ -601,7 +601,7 @@ fn a_solidcore_error_in_a_pick_is_an_error() {
     use solidcore::SolidError;
     let all = [0usize, 1];
     let points = [[0.0; 3]];
-    let status = pick(&all, &points, 1.0, 1e-6, |i, _| answer(if i == 0 { Err(SolidError::sm_err("q")) } else { Ok(0.5) }));
+    let status = pick(&all, &points, 1.0, 1e-6, |i, _| answer(if i == 0 { Err(super::boolean_tests::routine_failure("q")) } else { Ok(0.5) }));
     assert_eq!(status.unwrap().unwrap().0, vec![1], "a status skips the entity");
     let other = pick(&all, &points, 1.0, 1e-6, |i, _| answer(if i == 0 { Err(SolidError::invalid_input("q", "owner")) } else { Ok(0.5) }));
     assert!(matches!(other, Err(SolidError::InvalidInput { .. })), "{other:?}");

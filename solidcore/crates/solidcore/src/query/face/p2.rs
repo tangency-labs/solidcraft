@@ -103,7 +103,7 @@
 //!   the initialized [`Point2::UNDEF`]; unported errors still propagate.
 //! - **Null dereferences** upstream (a face, loop, edge use or vertex use without the
 //!   object it points to) are [`SolidError::InvalidInput`]; a face without surface is
-//!   `NER` ([`SolidError::null_pointer`]).
+//!   `NER` (a failure with status `SM_ERR_NULL_POINTER`).
 //! - **`sm_ClassifyParamOnFaces`** takes the faces' tolerances for
 //!   `SmTol::GetZoneTol3d_ForXSectResult(pFace1, pFace2)` (`SM_USE_OLDTOL`:
 //!   `SmFace::GetTolerance`).
@@ -2882,7 +2882,7 @@ pub(crate) mod tests {
         let face = EntityRef::Face(FaceId::from_index(3));
         let e = no_loop_classifies(face);
         assert_eq!(e.operation(), OP_CLASSIFY);
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
         assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
         assert_eq!(e.entity(), Some(face));
         assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
@@ -3170,7 +3170,7 @@ pub(crate) mod tests {
         b.face_mut(f).unwrap().surface = None;
         let (r, _) = classify(&mut b, f, Point2::new(0.5, 0.5));
         assert!(
-            matches!(&r, Err(e) if e.upstream_status() == Some(crate::error::SM_ERR_NULL_POINTER)),
+            matches!(&r, Err(e) if e.failed_routine_status() == Some(crate::error::SM_ERR_NULL_POINTER)),
             "{r:?}"
         );
         assert_eq!(

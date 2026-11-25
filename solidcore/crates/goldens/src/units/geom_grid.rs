@@ -157,7 +157,7 @@ fn put_ext(o: &mut Vec<f64>, e: &Extent3d) {
 fn status_of(e: &SolidError) -> i64 {
     match e {
         SolidError::InvalidInput { .. } => 1007,
-        err if solidcore::error::upstream_status(err).is_some() => i64::from(solidcore::error::upstream_status(err).unwrap_or(-1)),
+        err if crate::output::recorded_status(err).is_some() => i64::from(crate::output::recorded_status(err).unwrap_or(-1)),
         _ => 1001,
     }
 }

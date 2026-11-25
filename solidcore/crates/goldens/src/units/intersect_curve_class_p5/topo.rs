@@ -642,11 +642,10 @@ fn op_args(k: &Kernel, r: &Resolved, op: &TopoOpIn) -> Result<Op, HarnessError> 
 
 // ---- the Rust side ----------------------------------------------------------------------
 
-fn status(e: &SolidError) -> f64 {
-    match e {
-        SolidError::Upstream { code, .. } => f64::from(*code),
-        _ => -9.0,
-    }
+/// The status recorded for a Rust error: `-9`, a status the C++ side never returns (no
+/// error these calls return was recorded with its status).
+fn status(_: &SolidError) -> f64 {
+    -9.0
 }
 
 fn put_object(o: &mut Vec<f64>, h: Option<T>) {

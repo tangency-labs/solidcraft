@@ -2212,7 +2212,7 @@ mod tests {
                 assert_eq!(request.approx_tol_3d, Some(0.0123));
                 assert_eq!(request.ang_tol_rad, Some(0.456));
                 assert!(matches!(request.other, IntersectTarget::Surface(s) if core::ptr::eq(s, &raw const torus)));
-                Err(SolidError::sm_err("test::general_dispatch"))
+                Err(SolidError::failed_routine("test::general_dispatch", crate::error::SM_ERR))
             }).unwrap_err();
         assert_eq!(error.operation(), "test::general_dispatch");
     }
@@ -2235,7 +2235,12 @@ mod tests {
                 [true, true],
                 None,
                 None,
-                |_| Err(SolidError::sm_err("test::general_dispatch")),
+                |_| {
+                    Err(SolidError::failed_routine(
+                        "test::general_dispatch",
+                        crate::error::SM_ERR,
+                    ))
+                },
             )
             .unwrap_err();
         assert_ne!(error.operation(), "test::general_dispatch");
@@ -2291,7 +2296,7 @@ mod tests {
                         append_boundary_intersections(&k, &mut out, second, 1e-7).unwrap_err();
                     assert!(
                         error.operation() == OP
-                            && error.upstream_status() == Some(crate::error::SM_ERR),
+                            && error.failed_routine_status() == Some(crate::error::SM_ERR),
                         "first={first} field={field} count={count}: {error}"
                     );
                     // No removals occurred before the contract failure.

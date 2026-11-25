@@ -727,7 +727,10 @@ mod tests {
         let result: Result<()> = session.with_filleting_context(&mut k, |session, k| {
             assert!(k.context.doing_boolean());
             assert!(session.executive.intersector.doing_fillets);
-            Err(SolidError::sm_err("actual component control"))
+            Err(SolidError::failed_routine(
+                "actual component control",
+                crate::error::SM_ERR,
+            ))
         });
         assert!(result.is_err());
         assert!(!k.context.doing_boolean());
@@ -800,7 +803,10 @@ mod tests {
                         caller,
                         &|vu| key_of(EntityRef::Vertexuse(vu)),
                     )?;
-                    Err(SolidError::sm_err("ordinary failure after actual edit"))
+                    Err(SolidError::failed_routine(
+                        "ordinary failure after actual edit",
+                        crate::error::SM_ERR,
+                    ))
                 })
             })
         });

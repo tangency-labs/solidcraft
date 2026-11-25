@@ -342,7 +342,7 @@ mod tests {
 
     fn code(r: &Result<impl Sized>) -> Option<i32> {
         match r {
-            Err(e) => e.upstream_status(),
+            Err(e) => e.failed_routine_status(),
             Ok(_) => None,
         }
     }

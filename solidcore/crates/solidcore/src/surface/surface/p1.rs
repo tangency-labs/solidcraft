@@ -1001,7 +1001,7 @@ fn cache_options(tol: CacheTolerances) -> SurfaceCacheOptions {
 ///
 /// # Errors
 ///
-/// `SM_ERR` ([`SolidError::Upstream`]) for another cache type.
+/// `SM_ERR` (a failure's status) for another cache type.
 pub fn validate_surface_cache(
     cache_type: ObjectCacheType,
     old: Option<CacheId>,
@@ -5089,7 +5089,10 @@ mod tests {
     fn cancellation_status_trim_cache_failure_does_not_select_an_untrimmed_cache() {
         assert_eq!(ignored_trim_cache_result(Ok(7)), Ok(Some(7)));
         assert_eq!(
-            ignored_trim_cache_result::<()>(Err(SolidError::sm_err("ordinary-cache-error"))),
+            ignored_trim_cache_result::<()>(Err(SolidError::failed_routine(
+                "ordinary-cache-error",
+                crate::error::SM_ERR
+            ))),
             Ok(None)
         );
         for error in [
@@ -5116,7 +5119,10 @@ mod tests {
     fn cancellation_status_ignored_surface_result_preserves_control_errors() {
         assert_eq!(ignored_surface_result(Ok(7)), Ok(Some(7)));
         assert_eq!(
-            ignored_surface_result::<()>(Err(SolidError::sm_err("ordinary-surface-error"))),
+            ignored_surface_result::<()>(Err(SolidError::failed_routine(
+                "ordinary-surface-error",
+                crate::error::SM_ERR
+            ))),
             Ok(None)
         );
         for error in [

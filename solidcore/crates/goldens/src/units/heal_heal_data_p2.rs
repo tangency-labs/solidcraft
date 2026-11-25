@@ -37,6 +37,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use solidcore::error::topology::TopologyFailure;
+use solidcore::error::Failure;
 use solidcore::geom::context::{MarkLock, ALL_MARKS};
 use solidcore::heal::face_props::{
     FaceProps, HealerOpType, LoopObject, MixedLinkType, Tri, TriedLinkType,
@@ -1199,7 +1201,7 @@ fn classify(e: SolidError) -> Fail {
     }
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => Fail::NullDeref,
-        err if solidcore::error::upstream_status(&err).is_some() => Fail::Status(solidcore::error::upstream_status(&err).unwrap_or(-1)),
+        err if crate::output::recorded_status(&err).is_some() => Fail::Status(crate::output::recorded_status(&err).unwrap_or(-1)),
         e => Fail::Other(e.to_string()),
     }
 }
@@ -1735,7 +1737,7 @@ fn single_vertex_sphere_brep(
         let tol = b.tolerance();
         let inf = b
             .infinite_region()
-            .ok_or_else(|| SolidError::sm_err(OP_SVS))?;
+            .ok_or_else(|| Failure::new(OP_SVS, TopologyFailure::NoInfiniteRegion).into_error())?;
         // StartRegion
         let region = b.add_region_record(Region {
             in_brep: true,
@@ -1790,7 +1792,7 @@ fn single_vertex_sphere_brep(
         b.sync_face_surface_tolerance(face)?;
         // StartAndEndSingleVertexLoop: StartLoop(SM_OT_SAME), the first (outer) loop
         let lp = LoopId::from_index(
-            u32::try_from(b.loops().len()).map_err(|_| SolidError::sm_err(OP_SVS))?,
+            u32::try_from(b.loops().len()).map_err(|_| crate::output::routine_failure(OP_SVS))?,
         );
         let lu1 = b.add_loopuse_record(Loopuse {
             faceuse: Some(fu1),
@@ -1814,7 +1816,7 @@ fn single_vertex_sphere_brep(
             loopuse: Some(lu1),
         })?;
         if l != lp {
-            return Err(SolidError::sm_err(OP_SVS));
+            return Err(crate::output::routine_failure(OP_SVS));
         }
         b.face_mut(face)?.loops.push(l);
         let vu1 = b.add_vertexuse_record(Vertexuse {
@@ -1843,7 +1845,7 @@ fn single_vertex_sphere_brep(
             let f = b
                 .faceuse(fu)?
                 .face
-                .ok_or_else(|| SolidError::sm_err(OP_SVS))?;
+                .ok_or_else(|| crate::output::routine_failure(OP_SVS))?;
             edges.extend(face_p4::edges(b, f, None, false, None)?);
             vertices.extend(face_p4::vertices(b, f, None, false, None)?);
         }

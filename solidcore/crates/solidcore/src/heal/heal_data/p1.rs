@@ -80,7 +80,7 @@ const OP: &str = "heal::heal_data::p1";
 fn ignore_status(r: Result<()>) -> Result<()> {
     match r {
         Ok(()) => Ok(()),
-        Err(e) if e.upstream_status().is_some() || e.is_nurbs_failure() => Ok(()),
+        Err(e) if e.failed_routine_status().is_some() || e.is_nurbs_failure() => Ok(()),
         Err(e) => Err(e),
     }
 }

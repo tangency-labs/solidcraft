@@ -2785,7 +2785,7 @@ mod tests {
         assert!(edge_end_tangent(&k, &b, e[1], true).is_err());
         assert!(matches!(
             is_topological_vertex(&k, &mut b, v[1]),
-            Err(e) if crate::error::upstream_status(&e) == Some(SM_ERR)
+            Err(e) if SolidError::failed_routine_status(&e) == Some(SM_ERR)
         ));
 
         // The callers: `GetTopologicalVertices` and the boolean cleanup return the error;
@@ -2793,7 +2793,7 @@ mod tests {
         let mut k_mut = Kernel::default();
         assert!(matches!(
             crate::topology::brep::p1::topological_vertices(&k, &mut b),
-            Err(e) if crate::error::upstream_status(&e) == Some(SM_ERR)
+            Err(e) if SolidError::failed_routine_status(&e) == Some(SM_ERR)
         ));
         // the cleanup visits an intersection vertex with a mate
         let mut relations = crate::boolean::merge::p1::CleanupRelations {
@@ -2803,7 +2803,7 @@ mod tests {
         relations.mates.vertices.record(v[1], v[3]).unwrap();
         assert!(matches!(
             crate::boolean::merge::p1::boolean_post_process(&mut k_mut, &mut b, &relations, false),
-            Err(e) if crate::error::upstream_status(&e) == Some(SM_ERR)
+            Err(e) if SolidError::failed_routine_status(&e) == Some(SM_ERR)
         ));
         crate::topology::brep::p5::remove_topological_edges_and_vertices(
             &mut k_mut, &mut b, None, None,
@@ -2823,7 +2823,7 @@ mod tests {
         assert!(edge_end_tangent(&k, &b, e[0], true).is_err());
         assert!(matches!(
             is_topological_vertex(&k, &mut b, v[1]),
-            Err(e) if crate::error::upstream_status(&e) == Some(SM_ERR)
+            Err(e) if SolidError::failed_routine_status(&e) == Some(SM_ERR)
         ));
 
         // 3. When GetEndTangent(false) fails (WR-256): -Vec3::UNDEF still fails

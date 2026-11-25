@@ -1982,7 +1982,7 @@ mod tests {
             "{e:?}"
         );
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
         assert!(BSplineSurface::create_coons_patch(1e-6, true, &mut sides(), &mut []).is_ok());
     }
 

@@ -1504,7 +1504,7 @@ impl<O: ClassObject> PointClassification<O> {
                 SolverOperation::Minimize,
             )?;
 
-            // If we fail then for now we'll error out (an empty search, rule 7)
+            // If we fail then for now we'll error out (an empty search)
             if !dropped.success {
                 return Err(SolidError::intersect(OP_COMPUTE, IntersectFailure::NoFoot));
             }
@@ -1546,7 +1546,7 @@ impl<O: ClassObject> PointClassification<O> {
                     self.src_zone_tol_3d,
                 )?;
 
-                // still no solutions - return an error (none or several: rule 7)
+                // still no solutions - return an error (none or several)
                 if solutions.len() != 1 {
                     return Err(SolidError::intersect(
                         OP_COMPUTE,
@@ -1567,7 +1567,7 @@ impl<O: ClassObject> PointClassification<O> {
         else if let Some(volume) = obj_volume {
             let param_domain = volume.natural_param_domain()?;
             let Some(solution) = volume_global_point_solve(k, volume, point, &param_domain)? else {
-                // the volume's point solve found no answer (rule 7)
+                // the volume's point solve found no answer
                 return Err(SolidError::intersect(OP_COMPUTE, IntersectFailure::NoFoot));
             };
 
@@ -1595,7 +1595,7 @@ impl<O: ClassObject> PointClassification<O> {
         geometry: &impl ClassGeometry<O>,
     ) -> Result<Point3> {
         if !self.are_parameters_set() {
-            // the caller's classification (rule 9)
+            // the caller's classification
             return Err(SolidError::intersect(
                 OP_FIND,
                 IntersectFailure::ParametersNotSet,
@@ -1650,7 +1650,7 @@ impl<O: ClassObject> PointClassification<O> {
                 let surface = face::p2::surface(b, f)?.ok_or_else(|| no_surface(OP_FIND))?;
                 surface.evaluate_point(k, self.uv_param)
             }
-            // a classification with no object point (rule 8)
+            // a classification with no object point
             PointClassType::Unknown | PointClassType::Nothing | PointClassType::Region => Err(
                 SolidError::intersect(OP_FIND, IntersectFailure::UnsupportedObjectKind),
             ),
@@ -1712,7 +1712,7 @@ impl<O: ClassObject> PointClassification<O> {
             | ClassObjectKind::Faceuse
             | ClassObjectKind::Loopuse
             | ClassObjectKind::Other => {
-                // an object a vertex cannot be merged into (rule 8)
+                // an object a vertex cannot be merged into
                 return Err(SolidError::intersect(
                     OP_MERGE,
                     IntersectFailure::UnsupportedObjectKind,
@@ -1839,7 +1839,7 @@ impl<O: ClassObject> PointClassification<O> {
                     curve_identity,
                 )?;
                 // no vertex: editing is off, or the parameter is off the edge (the caller's
-                // B-rep and classification, rule 9)
+                // B-rep and classification)
                 let v = split.vertex.ok_or_else(|| {
                     SolidError::intersect(OP_MERGE, IntersectFailure::EdgeNotSplit)
                 })?;
@@ -1863,7 +1863,7 @@ impl<O: ClassObject> PointClassification<O> {
                 resolves(ClassObjectKind::Vertex)?;
                 v
             }
-            // a target a vertex cannot be merged into (rule 8)
+            // a target a vertex cannot be merged into
             _ => {
                 return Err(SolidError::intersect(
                     OP_MERGE,
@@ -1991,7 +1991,7 @@ impl<O: ClassObject> PointClassification<O> {
             | ClassObjectKind::Faceuse
             | ClassObjectKind::Loopuse
             | ClassObjectKind::Other => {
-                // a solution on an object the classification does not take (rule 8)
+                // a solution on an object the classification does not take
                 return Err(SolidError::intersect(
                     OP_LOAD,
                     IntersectFailure::UnsupportedObjectKind,
@@ -2856,18 +2856,18 @@ fn unresolved(op: &'static str) -> SolidError {
 }
 
 /// The classification has no object, or none of its class's kind (upstream's `NER` on
-/// `m_pObject` or its cast): the caller's classification (rule 9), `SM_ERR_NULL_POINTER`.
+/// `m_pObject` or its cast): the caller's classification, `SM_ERR_NULL_POINTER`.
 fn no_object(op: &'static str) -> SolidError {
     SolidError::intersect(op, IntersectFailure::NoClassObject)
 }
 
-/// A face of the caller's body with no surface (rule 9; upstream's `NER`,
+/// A face of the caller's body with no surface (upstream's `NER`,
 /// `SM_ERR_NULL_POINTER`).
 fn no_surface(op: &'static str) -> SolidError {
     SolidError::intersect(op, IntersectFailure::FaceWithoutSurface)
 }
 
-/// An edge of the caller's body with no curve (rule 9; upstream's `NER`,
+/// An edge of the caller's body with no curve (upstream's `NER`,
 /// `SM_ERR_NULL_POINTER`).
 fn no_curve(op: &'static str) -> SolidError {
     SolidError::intersect(op, IntersectFailure::EdgeWithoutCurve)

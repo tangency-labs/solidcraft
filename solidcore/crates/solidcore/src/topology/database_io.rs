@@ -1372,7 +1372,7 @@ mod tests {
         let named = |r: Result<()>| {
             r.is_err_and(|e| {
                 e.topology_failure() == Some(&TopologyFailure::NoInputStream)
-                    && e.upstream_status() == Some(SM_ERR_NULL_POINTER)
+                    && e.failed_routine_status() == Some(SM_ERR_NULL_POINTER)
             })
         };
         let mut db = DatabaseReader::new();
@@ -1527,7 +1527,7 @@ mod tests {
         let mut r = DatabaseReader::new();
         assert!(r
             .read_long()
-            .is_err_and(|e| e.upstream_status() == Some(1006)));
+            .is_err_and(|e| e.failed_routine_status() == Some(1006)));
         r.go_to_next_line();
     }
 

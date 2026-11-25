@@ -70,14 +70,15 @@ use crate::geom::extent1d::{Extent1d, ExtentNd};
 use crate::geom::matrix::Matrix;
 use crate::math::{BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT};
 
-// Upstream status `SM_ERR`.
-use crate::error::SM_ERR;
-
 /// Whether the Jacobian system's solve failed with `SM_ERR` (the system is not solvable),
-/// which ends the iteration: by its status, so also a typed failure that replaced the
-/// `Upstream` (#13790).
+/// which ends the iteration. [`Matrix::solve_linear_system`] fails with `SM_ERR` only as
+/// [`GeomFailure::Singular`] or as [`GeomFailure::CallFailed`] around its LU
+/// decomposition; its other failures are refused input.
 fn is_bad_jacobian(error: &SolidError) -> bool {
-    error.upstream_status() == Some(SM_ERR)
+    matches!(
+        error.geom_failure(),
+        Some(GeomFailure::Singular { .. } | GeomFailure::CallFailed { .. })
+    )
 }
 
 /// How [`LocalSolveNd::solve_it`] treats next guesses that leave the parameter
@@ -941,7 +942,12 @@ mod tests {
     struct Failing;
     impl EvalNFunctions for Failing {
         fn evaluate(&mut self, _: &[f64], _: &mut [f64], _: Option<&mut Matrix>) -> Result<bool> {
-            Err(SolidError::geom("test", GeomFailure::StageFailed))
+            Err(SolidError::geom(
+                "test",
+                GeomFailure::Defect {
+                    why: "the test's evaluation fails",
+                },
+            ))
         }
     }
 
@@ -1016,7 +1022,10 @@ mod tests {
             if x[0] == 1.0 && ((x[1] < 0.25) == self.reject_scaled) {
                 // Failed evaluators may leave apparently converged output.
                 f.fill(0.0);
-                return Err(SolidError::sm_err("test::bounded_linear"));
+                return Err(SolidError::failed_routine(
+                    "test::bounded_linear",
+                    crate::error::SM_ERR,
+                ));
             }
             f[0] = x[0] - 3.0;
             f[1] = x[1] - 0.5;
@@ -1068,7 +1077,10 @@ mod tests {
         ) -> Result<bool> {
             if x[0] != 0.0 {
                 f.fill(0.0);
-                return Err(SolidError::sm_err("test::only_initial"));
+                return Err(SolidError::failed_routine(
+                    "test::only_initial",
+                    crate::error::SM_ERR,
+                ));
             }
             f[0] = -2.0;
             if let Some(j) = jacobian {
@@ -1106,7 +1118,10 @@ mod tests {
             self.calls += 1;
             if self.calls == 4 {
                 f.fill(0.0);
-                return Err(SolidError::sm_err("test::best_reevaluation"));
+                return Err(SolidError::failed_routine(
+                    "test::best_reevaluation",
+                    crate::error::SM_ERR,
+                ));
             }
             f[0] = x[0] * x[0] * x[0] - 2.0 * x[0] + 2.0;
             if let Some(j) = jacobian {
@@ -1172,7 +1187,7 @@ mod tests {
         let e = s.solve_it(&[1.0], EFF_ZERO).unwrap_err();
         assert!(matches!(e.geom_failure(), Some(GeomFailure::Defect { .. })));
         assert!(e.is_defect());
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
     }
 
     #[test]
@@ -1206,26 +1221,31 @@ mod tests {
                 at: 0.5
             })
         );
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
         // as upstream, the parameter stays perturbed
         assert_eq!(x, [0.5, -1.0]);
     }
 
-    /// #13790: a typed `SM_ERR` that replaced the linear solve's `Upstream` ends the
-    /// iteration as a bad Jacobian, as the `Upstream` does.
+    /// The linear solve's `SM_ERR` failures end the iteration; its refused input does not.
     #[test]
-    fn bad_jacobian_reads_the_status_of_a_typed_failure() {
-        use crate::error::replaced_upstream_samples::{native_failures, replaced_upstream};
+    fn bad_jacobian_is_the_linear_solve_s_sm_err() {
         let op = "geom::matrix::Matrix::solve_linear_system";
-        assert!(is_bad_jacobian(&SolidError::sm_err(op)));
-        for typed in replaced_upstream(op, SM_ERR, None) {
-            assert!(is_bad_jacobian(&typed), "{typed:?}");
-        }
-        for other in replaced_upstream(op, 1007, None)
-            .into_iter()
-            .chain(native_failures(op, SM_ERR))
-        {
-            assert!(!is_bad_jacobian(&other), "{other:?}");
-        }
+        assert!(is_bad_jacobian(&SolidError::geom(
+            op,
+            GeomFailure::Singular { measure: 0.0 }
+        )));
+        let call = SolidError::geom_call(op)(SolidError::geom(
+            "geom::matrix::Matrix::lu_decompose",
+            GeomFailure::Singular { measure: 0.0 },
+        ));
+        assert!(is_bad_jacobian(&call), "{call:?}");
+        assert!(!is_bad_jacobian(&SolidError::InvalidInput {
+            operation: op,
+            reason: "matrix index out of range",
+        }));
+        assert!(!is_bad_jacobian(&SolidError::geom(
+            op,
+            GeomFailure::NearlySingular
+        )));
     }
 }

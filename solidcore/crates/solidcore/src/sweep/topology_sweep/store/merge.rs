@@ -1249,7 +1249,10 @@ mod tests {
         let result: Result<()> = store.with_merge(dest, dest, source, 0.1, 0.2, |store, id| {
             store.run_merge(id, |k, driver| {
                 temporary = Some(driver.new_face_brep(k, dest)?);
-                Err(SolidError::sm_err("injected after native body allocation"))
+                Err(SolidError::failed_routine(
+                    "injected after native body allocation",
+                    crate::error::SM_ERR,
+                ))
             })
         });
         assert!(result.is_err());
@@ -1391,7 +1394,7 @@ mod tests {
             assert_eq!(e.kind(), ErrorKind::InvalidInput, "{e}");
             assert!(!e.is_defect(), "{e}");
             assert!(e.to_string().contains(CONSUMED_OTHER), "{e}");
-            assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER), "{e}");
+            assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER), "{e}");
         }
         store.delete_merge(merge);
     }

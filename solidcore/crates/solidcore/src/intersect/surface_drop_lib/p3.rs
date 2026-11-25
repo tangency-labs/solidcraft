@@ -34,7 +34,7 @@
 //!   `SurfaceCurveMaxDistanceBetween` (its outputs are `0.0` after a failure, as
 //!   upstream initialises them). `GetNextPoint` returns a status upstream keeps
 //!   (see [`DropPt::get_next_point`]); a Rust error from it becomes its code
-//!   ([`SolidError::Upstream`]'s code, `SM_ERR_INVALID_INPUT` for
+//!   (the status a routine's failure keeps, `SM_ERR_INVALID_INPUT` for
 //!   [`SolidError::InvalidInput`], else `SM_ERR`). [`SolidError::Unported`] always
 //!   propagates. `IsClosed` answers `false` when it fails (upstream returns a
 //!   boolean).
@@ -1199,7 +1199,7 @@ fn knot_line_crossing(
 
 /// The outcome upstream stores for a failed `GetNextPoint` (see the module notes).
 fn status_of(e: &SolidError) -> PointOutcome {
-    if let Some(code) = e.upstream_status() {
+    if let Some(code) = e.failed_routine_status() {
         return PointOutcome::from_status(code);
     }
     match e {
@@ -1970,7 +1970,7 @@ impl Surface {
                 CreateUvTrimCurvePathType::DropDomainUncontainedFail,
                 &early,
             );
-            // the caller's domain (rule 9)
+            // the caller's domain
             return Err(SolidError::intersect(
                 OP,
                 IntersectFailure::DomainOutsideSurface,
@@ -2136,7 +2136,7 @@ impl Surface {
             )?
         };
 
-        // there should always be at least one solution (none found: rule 7)
+        // there should always be at least one solution (none found)
         if solutions.is_empty() {
             return Err(SolidError::intersect(OP, IntersectFailure::NoFoot));
         }
@@ -2440,7 +2440,7 @@ impl Surface {
             let seam_t_zero =
                 EFF_ZERO_PARAM * (1.0 + s_interval.min().abs() + s_interval.max().abs());
 
-            // the curve cache (made once; the build's error stays the cause, rule 6)
+            // the curve cache (made once; the build's error stays the cause)
             let cache = match &mut curve_cache {
                 Some(c) => &*c,
                 slot => &*slot.insert(match make_curve_cache::<()>(k, curve, None) {
@@ -3115,7 +3115,7 @@ impl Surface {
                                         added?;
                                         None
                                     } else {
-                                        // the fix-up's refusal, kept as the cause of the drop's stop (rule 6)
+                                        // the fix-up's refusal, kept as the cause of the drop's stop
                                         let refusal = added.as_ref().err().cloned();
                                         ignore_status(added)?;
                                         refusal

@@ -753,7 +753,7 @@ impl<'s> SurfaceDropCurve<'s> {
             let domain = surface.natural_uv_domain_with_nurb(k)?;
             let (on_boundary, uv_tang) = domain.is_point_on_boundary(uv, EFF_ZERO_SQRT);
             if !on_boundary {
-                // error - singular surface point not on boundary (rule 8)
+                // error - singular surface point not on boundary
                 return Err(SolidError::intersect(
                     OP_CPV,
                     IntersectFailure::SingularPointInside,
@@ -1065,7 +1065,7 @@ impl<'s> SurfaceDropCurve<'s> {
         let curve_cache = match make_curve_cache::<()>(k, curve, None) {
             Ok(c) => c,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            // the build's error stays the cause (rule 6)
+            // the build's error stays the cause
             Err(e) => {
                 return Err(
                     Failure::new(OP_BOUNDARY, IntersectFailure::CurveCacheNotBuilt)
@@ -1411,7 +1411,7 @@ impl<'s> SurfaceDropCurve<'s> {
                     };
                     let Some(p) = pick else {
                         // we failed to resolve singularity problem: the drop of the point
-                        // just off the singular point found no foot (rule 7)
+                        // just off the singular point found no foot
                         return Err(SolidError::intersect(OP_BOUNDARY, IntersectFailure::NoFoot));
                     };
                     if singular_dir == SurfParamType::U {

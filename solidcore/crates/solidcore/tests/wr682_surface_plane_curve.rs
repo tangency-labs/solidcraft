@@ -283,7 +283,7 @@ fn assert_not_found(a: &Surface, b: &Surface, from: Point3, to: Point3) {
     let r = curves(&Kernel::default(), a, b, from, to);
     // a typed blend failure keeps the status of the bare `Upstream` (#13790)
     let e = r.unwrap_err();
-    assert_eq!(solidcore::error::upstream_status(&e), Some(1001), "{e:?}");
+    assert_eq!(e.sm_status(), Some(1001), "{e:?}");
 }
 
 /// Not traced on the plane's equation: the intersectors' exact line from `from` to `to`
@@ -523,11 +523,7 @@ fn a_heading_along_neither_way_round_is_refused() {
                 ),
                 "{from} -> {to}, {what}: {e:?}"
             );
-            assert_eq!(
-                solidcore::error::upstream_status(&e),
-                Some(1001),
-                "{from} -> {to}, {what}"
-            );
+            assert_eq!(e.sm_status(), Some(1001), "{from} -> {to}, {what}");
         }
     }
     // the half cylinder from 0 to 180 degrees: from 20 to 110, heading down (towards 0)
@@ -559,7 +555,7 @@ fn a_heading_along_neither_way_round_is_refused() {
         ),
         "{e:?}"
     );
-    assert_eq!(solidcore::error::upstream_status(&e), Some(1001));
+    assert_eq!(e.sm_status(), Some(1001));
     // heading up, the half circle's arc
     let mut up = heading(20.0, 1.0);
     check_arc(
@@ -776,11 +772,7 @@ fn a_curve_through_a_closure_off_a_seam_it_crosses_keeps_the_drop_error() {
             ),
             "{from} -> {to}: {e:?}"
         );
-        assert_eq!(
-            solidcore::error::upstream_status(&e),
-            Some(1001),
-            "{from} -> {to}"
-        );
+        assert_eq!(e.sm_status(), Some(1001), "{from} -> {to}");
     }
     // through the closure, over no seam of the sphere: both UV curves
     let c = intersect(

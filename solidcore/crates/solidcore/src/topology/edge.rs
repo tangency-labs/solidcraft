@@ -3337,11 +3337,12 @@ mod tests {
     fn cancellation_status_trimmed_curve_handler_preserves_control_errors() {
         let copy = || Curve::from(BSplineCurve::default());
         assert!(trimmed_nurbs_result(Ok(()), copy()).unwrap().is_some());
-        assert!(
-            trimmed_nurbs_result(Err(SolidError::sm_err("trim")), copy())
-                .unwrap()
-                .is_none()
-        );
+        assert!(trimmed_nurbs_result(
+            Err(SolidError::failed_routine("trim", crate::error::SM_ERR)),
+            copy()
+        )
+        .unwrap()
+        .is_none());
         for error in [
             SolidError::cancelled("trim"),
             SolidError::unported("trim", "unit"),
@@ -3361,7 +3362,10 @@ mod tests {
     fn cancellation_status_shell_step_off_handler_preserves_control_errors() {
         assert_eq!(shell_step_off_status(Ok(())), Ok(()));
         assert_eq!(
-            shell_step_off_status(Err(SolidError::sm_err("step-off"))),
+            shell_step_off_status(Err(SolidError::failed_routine(
+                "step-off",
+                crate::error::SM_ERR
+            ))),
             Ok(())
         );
         for error in [
@@ -3400,7 +3404,10 @@ mod tests {
         let cancelled = SolidError::cancelled("radial-sector-classification");
         assert_eq!(failed(cancelled.clone()), Err(cancelled));
         assert_eq!(
-            failed(SolidError::sm_err("ordinary-classification-failure")),
+            failed(SolidError::failed_routine(
+                "ordinary-classification-failure",
+                crate::error::SM_ERR
+            )),
             Ok(())
         );
         let unported = SolidError::unported("callee", "unit");
@@ -3600,12 +3607,15 @@ mod tests {
                             None,
                             None,
                         );
-                        Err(SolidError::sm_err(OP))
+                        Err(SolidError::failed_routine(OP, crate::error::SM_ERR))
                     })
                 })
             })
             .unwrap();
-            assert_eq!(error, Err(SolidError::sm_err(OP)));
+            assert_eq!(
+                error,
+                Err(SolidError::failed_routine(OP, crate::error::SM_ERR))
+            );
             assert_eq!(records.get(&original.key).unwrap().user_index1(), 71);
             assert_eq!(records.get(&result.key).unwrap().user_index1(), 71);
             assert_eq!(kernel.context.doing_boolean(), previous);

@@ -87,8 +87,8 @@ fn entity_id(e: Option<E>) -> i64 {
 }
 fn status(e: &SolidError) -> i64 {
     match e {
-        e if solidcore::error::upstream_status(e).is_some() => {
-            i64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+        e if crate::output::recorded_status(e).is_some() => {
+            i64::from(crate::output::recorded_status(e).unwrap_or(-1))
         }
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007,
         e if nlib_number(e).is_some() => 1001,
@@ -135,7 +135,7 @@ impl Model {
         let mut keys = BTreeMap::new();
         let mut curve_keys = BTreeMap::new();
         for id in 0..64 {
-            let entity = entity(id).ok_or_else(|| SolidError::null_pointer("runner"))?;
+            let entity = entity(id).ok_or_else(|| SolidError::port_invariant("runner", "no fixture entity for the id"))?;
             let (brep, local) = match entity {
                 E::Vertex(b, v) => (b, R::Vertex(v)),
                 E::Edge(b, e) => (b, R::Edge(e)),
@@ -217,16 +217,22 @@ fn service_object(
         ),
     }
 }
+/// A B-rep id that names no B-rep of the fixture model: the caller's target names a null
+/// entity (`SweepFailure::NullTarget`, status `SM_ERR_NULL_POINTER`, the status of the null
+/// pointer it replaced).
+fn no_brep(operation: &'static str) -> SolidError {
+    solidcore::error::Failure::new(operation, solidcore::error::sweep::SweepFailure::NullTarget).into_error()
+}
 impl SweepAccess for Model {
     fn brep(&self, id: BrepId) -> Result<&Brep> {
         self.b
             .get(id.index() as usize)
-            .ok_or_else(|| SolidError::null_pointer("runner"))
+            .ok_or_else(|| no_brep("runner"))
     }
     fn brep_mut(&mut self, id: BrepId) -> Result<&mut Brep> {
         self.b
             .get_mut(id.index() as usize)
-            .ok_or_else(|| SolidError::null_pointer("runner"))
+            .ok_or_else(|| no_brep("runner"))
     }
     fn kernel(&self, _id: BrepId) -> Result<&Kernel> {
         Ok(&self.k)
@@ -247,7 +253,7 @@ impl SweepAccess for Model {
         let brep = self
             .b
             .get_mut(id.index() as usize)
-            .ok_or_else(|| SolidError::null_pointer("sweep test model"))?;
+            .ok_or_else(|| no_brep("sweep test model"))?;
         let face_objects =
             |face: FaceId| service_object(id, solidcore::error::EntityRef::Face(face));
         let key_of = |entity| service_object(id, entity);
@@ -284,14 +290,14 @@ impl SweepAccess for Model {
         let (left, right) = self
             .b
             .split_at_mut_checked(si.max(di))
-            .ok_or_else(|| SolidError::null_pointer("sweep test model"))?;
+            .ok_or_else(|| no_brep("sweep test model"))?;
         let (src, dst) = if si < di {
             (left.get_mut(si), right.first_mut())
         } else {
             (right.first_mut(), left.get_mut(di))
         };
-        let src = src.ok_or_else(|| SolidError::null_pointer("sweep test model"))?;
-        let dst = dst.ok_or_else(|| SolidError::null_pointer("sweep test model"))?;
+        let src = src.ok_or_else(|| no_brep("sweep test model"))?;
+        let dst = dst.ok_or_else(|| no_brep("sweep test model"))?;
         let face_objects =
             |face: FaceId| service_object(destination, solidcore::error::EntityRef::Face(face));
         let key_of = |entity| service_object(destination, entity);
@@ -311,7 +317,7 @@ impl SweepAccess for Model {
         let brep = self
             .b
             .get_mut(id.index() as usize)
-            .ok_or_else(|| SolidError::null_pointer("sweep test model"))?;
+            .ok_or_else(|| no_brep("sweep test model"))?;
         let key_of = |entity| service_object(id, entity);
         let mut env = solidcore::topology::edge::NotifyEnv {
             records: &mut self.records,
@@ -351,7 +357,7 @@ impl SweepAccess for Model {
         let key = self
             .keys
             .get(&e)
-            .ok_or_else(|| SolidError::null_pointer("runner"))?;
+            .ok_or_else(|| SolidError::port_invariant("runner", "entity not in the fixture key pool"))?;
         Ok(self
             .attributes
             .find_attribute(*key, ids::TAG)
@@ -368,7 +374,7 @@ impl SweepAccess for Model {
         let key = *self
             .keys
             .get(&e)
-            .ok_or_else(|| SolidError::null_pointer("runner"))?;
+            .ok_or_else(|| SolidError::port_invariant("runner", "entity not in the fixture key pool"))?;
         let h = self
             .attributes
             .insert(Attribute::tag(ids::TAG, tag, Behavior::Copy))?;
@@ -378,7 +384,7 @@ impl SweepAccess for Model {
         let key = self
             .curve_keys
             .get(&edge)
-            .ok_or_else(|| SolidError::null_pointer("runner"))?;
+            .ok_or_else(|| SolidError::port_invariant("runner", "no curve key for the edge"))?;
         Ok(self
             .attributes
             .find_attribute(*key, ids::TAG)
@@ -1174,7 +1180,7 @@ fn rust(i: &Input) -> Result<Output> {
         }
     }
     for id in 16..32 {
-        let tag = model.tag(entity(id).ok_or_else(|| SolidError::null_pointer("runner"))?)?;
+        let tag = model.tag(entity(id).ok_or_else(|| SolidError::port_invariant("runner", "no fixture entity for the id"))?)?;
         out.push(i64::from(tag.is_some()));
         out.extend(tag.unwrap_or_default().to_array());
     }
@@ -1224,6 +1230,8 @@ impl UnitDiff for Runner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solidcore::error::topology::TopologyFailure;
+    use solidcore::error::Failure;
     use solidcore::geom::extent2d::Extent2d;
     use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
     use solidcore::surface::{plane::Plane, surface::Surface};
@@ -1261,7 +1269,7 @@ mod tests {
         model.b[0].set_infinite_region(None);
         let missing = model.infinite_region(b);
         assert!(
-            matches!(&missing, Err(e) if solidcore::error::upstream_status(e) == Some(1006)),
+            matches!(&missing, Err(e) if crate::output::recorded_status(e) == Some(1006)),
             "{missing:?}"
         );
         Ok(())
@@ -1272,7 +1280,7 @@ mod tests {
         let brep = BrepId::from_index(0);
         assert!(matches!(
             model.remove_all_topology(brep),
-            Err(ref e) if solidcore::error::upstream_status(e) == Some(solidcore::error::SM_ERR)
+            Err(ref e) if crate::output::recorded_status(e) == Some(solidcore::error::SM_ERR)
         ));
         model.b[0].set_editing_enabled(true);
         // No traversable shell topology: the actual empty cleanup now completes.
@@ -1280,7 +1288,7 @@ mod tests {
         assert!(model.b[0].editing_enabled());
         assert!(matches!(
             model.remove_all_topology(BrepId::from_index(99)),
-            Err(ref e) if solidcore::error::upstream_status(e) == Some(1006)
+            Err(ref e) if crate::output::recorded_status(e) == Some(1006)
         ));
         Ok(())
     }
@@ -1318,7 +1326,7 @@ mod tests {
                 SweepMergeId(0),
                 &mut mates
             ),
-            Err(ref e) if solidcore::error::upstream_status(e) == Some(1006)
+            Err(ref e) if crate::output::recorded_status(e) == Some(1006)
         ));
         Ok(())
     }
@@ -1330,7 +1338,7 @@ mod tests {
             .edge(EdgeId::from_index(0))?
             .curve
             .clone()
-            .ok_or_else(|| SolidError::null_pointer("test"))?;
+            .ok_or_else(|| Failure::new("test", TopologyFailure::EdgeWithoutCurve).into_error())?;
         let input = FaceInput {
             region: (BrepId::from_index(0), RegionId::from_index(0)),
             loop_counts: vec![1],
@@ -1365,7 +1373,7 @@ mod tests {
         assert_eq!(model.shell_vertices(b)?, vec![vertex.1]);
         assert!(matches!(
             model.shell_vertices(BrepId::from_index(99)),
-            Err(ref e) if solidcore::error::upstream_status(e) == Some(1006)
+            Err(ref e) if crate::output::recorded_status(e) == Some(1006)
         ));
         let face = model.b[0].add_face_record(Face::new(ShellId::from_index(0)))?;
         // This bare face has no upward faceuse. The real PRE_EDIT notification
@@ -1375,7 +1383,7 @@ mod tests {
         assert!(
             matches!(
                 vertex_loop,
-                Err(ref e) if e.operation() == "topology::brep::p9" && solidcore::error::upstream_status(e) == Some(1006)
+                Err(ref e) if e.operation() == "topology::brep::p9" && crate::output::recorded_status(e) == Some(1006)
             ),
             "{vertex_loop:?}"
         );
@@ -1387,7 +1395,7 @@ mod tests {
         let curve = edge
             .curve
             .clone()
-            .ok_or_else(|| SolidError::null_pointer("test"))?;
+            .ok_or_else(|| Failure::new("test", TopologyFailure::EdgeWithoutCurve).into_error())?;
         let interval = edge.interval;
         assert!(matches!(
             model.make_edge_in_face(
@@ -1400,7 +1408,7 @@ mod tests {
                 OrientType::Same,
                 0.375
             ),
-            Err(ref e) if solidcore::error::upstream_status(e) == Some(solidcore::error::SM_ERR)
+            Err(ref e) if crate::output::recorded_status(e) == Some(solidcore::error::SM_ERR)
         ));
         model.b[0].set_editing_enabled(true);
         let uv_line = solidcore::curve::curve::Curve::from(
@@ -1419,7 +1427,7 @@ mod tests {
             ),
             // FindVertexSector (topology.face_p4) finds no sector of a face without
             // face uses, so MakeEdgeInFace's NER(pStartVU) reports a null pointer
-            Err(ref e) if e.operation() == solidcore::topology::brep::p5::NO_VERTEX_SECTOR_OP && solidcore::error::upstream_status(e) == Some(1006)
+            Err(ref e) if e.operation() == solidcore::topology::brep::p5::NO_VERTEX_SECTOR_OP && crate::output::recorded_status(e) == Some(1006)
         ));
         model.b[0].set_editing_enabled(false);
         assert!(!model.has_lamina_edge((b, face))?);
@@ -1571,7 +1579,7 @@ mod tests {
                 &mut point,
                 &mut normal
             )
-            .is_err_and(|e| solidcore::error::upstream_status(&e) == Some(1007)));
+            .is_err_and(|e| crate::output::recorded_status(&e) == Some(1007)));
         assert_eq!(point, Point3::new(7., 8., 9.));
         assert_eq!(normal, Point3::new(3., 2., 1.));
         Ok(())

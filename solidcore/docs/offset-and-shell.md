@@ -221,8 +221,8 @@ and the radius, and `Unsound` becomes ops' own `Unsoundness`, the input's entity
 names given by its index in the call's record `Order` (`RecordEntity`; a call without an order
 names a face by its place among the body's faces, and no edge or vertex). `OffsetFailure` is
 `#[non_exhaustive]`, so ops matches it with a wildcard: a reason ops does not name yet takes the
-error of its class where that has one (walls that touch, a fold, a vanishing edge); it and the routines' phrase causes (`OffsetFailure::is_phrase`)
-otherwise arrive as the transitional `OffsetRefusal::Phrase`, with the kernel's class, whether it
+error of its class where that has one (walls that touch, a fold, a vanishing edge); it otherwise
+arrives as the transitional `OffsetRefusal::Phrase`, with the kernel's class, whether it
 is a defect (`OffsetFailure::is_defect`) and the kernel's words. In the sheet offset and the
 symmetric thicken, a refusal `offset_brep` returns before its executive runs (such as
 `DistanceUnresolved`) and the

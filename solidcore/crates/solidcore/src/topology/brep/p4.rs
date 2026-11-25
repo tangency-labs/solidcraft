@@ -2386,7 +2386,7 @@ mod tests {
             };
             if delete_connected_vertex {
                 let e = result.unwrap_err();
-                assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+                assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
                 assert_eq!(e.topology_failure(), Some(&TopologyFailure::VertexHasEdges));
                 b.vertex(vertex).unwrap();
             } else {
@@ -2531,7 +2531,7 @@ mod tests {
                 e.topology_failure(),
                 Some(&TopologyFailure::EditingDisabled)
             );
-            assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+            assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
             assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
             assert_eq!(e.operation(), op);
         }
@@ -2550,7 +2550,7 @@ mod tests {
             e.topology_failure(),
             Some(&TopologyFailure::Defect { why: EU_NO_LU })
         );
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         assert!(e.is_defect(), "{e}");
         assert_eq!(e.operation(), OP_DELETE_EDGE);
         // built at its call site (`#[track_caller]`), not in the helper
@@ -2599,7 +2599,7 @@ mod tests {
         // not on the list any more: a defect with SM_ERR, nothing changed
         let e = shell_remove_faceuse(&mut b, s, fus[0], OP_DELETE_EDGE).unwrap_err();
         assert!(e.is_defect(), "{e}");
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
         assert_eq!(
             b.shell(s).unwrap().get_faceuses().unwrap(),
             vec![fus[1], fus[2]]

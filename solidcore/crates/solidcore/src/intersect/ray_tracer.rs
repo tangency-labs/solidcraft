@@ -1724,7 +1724,7 @@ fn find_poly_hit(
                 continue;
             }
             let (normal, _) = brep.face_normal(k, poly_face, false, true)?;
-            // a face of the caller's poly B-rep without a boundary (rule 9)
+            // a face of the caller's poly B-rep without a boundary
             let no_edges = || SolidError::intersect(OP, IntersectFailure::PolyFaceWithoutEdges);
             let poly_loop = brep.face_outer_poly_loop(poly_face)?.ok_or_else(no_edges)?;
             let first_edge = brep.loop_first_poly_edge(poly_loop)?.ok_or_else(no_edges)?;
@@ -1803,7 +1803,7 @@ mod tests {
             .add_surface_with_fetched_cache(&k, &surface, cache)
             .unwrap_err();
         assert_eq!(e.intersect_failure(), Some(&IntersectFailure::NotSetUp));
-        assert_eq!(crate::error::upstream_status(&e), Some(SM_ERR));
+        assert_eq!(SolidError::failed_routine_status(&e), Some(SM_ERR));
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
     }
 

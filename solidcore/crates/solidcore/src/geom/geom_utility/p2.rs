@@ -1480,7 +1480,7 @@ mod tests {
         let flat = [Vec3::ZERO, Vec3::ZERO, v(1.0, 0.0, 0.0)];
         assert!(matches!(
             frenet_from_derivatives(&flat, 2),
-            Err(e) if e.upstream_status() == Some(1001)
+            Err(e) if e.failed_routine_status() == Some(1001)
         ));
     }
 
@@ -1490,7 +1490,7 @@ mod tests {
         let vals = [Vec3::ZERO, v(1.0, 0.0, 0.0), Vec3::ZERO, v(0.0, 0.0, 1.0)];
         assert!(matches!(
             frenet_from_derivatives(&vals, 3),
-            Err(e) if e.upstream_status() == Some(1001)
+            Err(e) if e.failed_routine_status() == Some(1001)
         ));
         let vals = [
             Vec3::ZERO,

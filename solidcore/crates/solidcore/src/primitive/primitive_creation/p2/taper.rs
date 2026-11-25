@@ -41,7 +41,7 @@ use crate::curve::curve::p4::fix_chain_curves_list;
 use crate::curve::curve::p5::crvs_cleanup;
 use crate::curve::curve::Curve;
 use crate::error::primitive::PrimitiveFailure;
-use crate::error::{Failure, Result, SolidError, SM_ERR_NULL_POINTER};
+use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::geom_utility::p2::ContinuityType;
@@ -58,15 +58,6 @@ use crate::topology::BrepId;
 const OP: &str = "primitive::primitive_creation::p2::taper";
 const SURFACE_INTERSECTION_OP: &str =
     "primitive::primitive_creation::p2::taper::surface_intersection_method";
-
-/// A defect ([`PrimitiveFailure::Defect`]) of an object the kernel built that is not
-/// there, with the status `SM_ERR_NULL_POINTER` of the null pointer it replaces.
-#[track_caller]
-fn broken_link(why: &'static str) -> SolidError {
-    Failure::new(OP, PrimitiveFailure::Defect { why })
-        .with_status(SM_ERR_NULL_POINTER)
-        .into_error()
-}
 
 // Why each step that fails here is the kernel's fault (`PrimitiveFailure::Defect`).
 
@@ -793,15 +784,16 @@ fn surface_intersection_method(
         // the map attribute of the curve that generated the face
         let map = a
             .offset_map((intersections, face))?
-            .ok_or_else(|| broken_link(FACE_NO_MAP))?;
-        let index = usize::try_from(map.curve).map_err(|_| broken_link(MAP_INDEX_NEGATIVE))?;
+            .ok_or_else(|| SolidError::primitive_broken_link(OP, FACE_NO_MAP))?;
+        let index = usize::try_from(map.curve)
+            .map_err(|_| SolidError::primitive_broken_link(OP, MAP_INDEX_NEGATIVE))?;
         let corner_offset = map.corner_offset;
 
         // Parent curve that generated this surface
         let ends = state
             .generators
             .get(index)
-            .ok_or_else(|| broken_link(MAP_PAST_GENERATORS))?
+            .ok_or_else(|| SolidError::primitive_broken_link(OP, MAP_PAST_GENERATORS))?
             .ends()?;
 
         // Compare each face vertex with the parent curve ends

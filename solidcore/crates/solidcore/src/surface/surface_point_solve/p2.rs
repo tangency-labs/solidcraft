@@ -2555,7 +2555,7 @@ mod tests {
             let inner = with_out_of_bounds_enabled_in_place(&s, || Ok(oob(&s)));
             assert_eq!(inner.ok(), Some(true));
             assert!(oob(&s));
-            Err::<(), _>(SolidError::sm_err("test"))
+            Err::<(), _>(SolidError::failed_routine("test", crate::error::SM_ERR))
         });
         assert!(r.is_err());
         assert!(!oob(&s));

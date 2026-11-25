@@ -63,7 +63,7 @@ impl CornerShape {
         clippy::match_same_arms,
         reason = "one arm per variant, sorted by name, so causes added in parallel touch disjoint lines"
     )]
-    pub const fn upstream_status(self) -> i32 {
+    pub const fn status(self) -> i32 {
         match self {
             Self::AdjacentBlendedEdges => SM_ERR,
             Self::BevelNotOfThreeEdges => SM_ERR,
@@ -90,7 +90,7 @@ impl CornerShape {
 /// surface the solver's ([`SolverFailure::FilletGeomWithoutSurface`]), and a target-body
 /// edge without curve is [`BlendFailure::EdgeWithoutCurve`].
 ///
-/// [`CornerInput::upstream_status`] is each kind's default status. A site whose C++ reports
+/// [`CornerInput::status`] is each kind's default status. A site whose C++ reports
 /// the condition otherwise (a failed state check, `SE(SM_ERR)`, where the default is
 /// `SM_ERR_NULL_POINTER`) overrides it with that status, so the status is always the site's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -213,7 +213,7 @@ impl CornerInput {
         clippy::match_same_arms,
         reason = "one arm per variant, sorted by name, so causes added in parallel touch disjoint lines"
     )]
-    pub const fn upstream_status(self) -> i32 {
+    pub const fn status(self) -> i32 {
         match self {
             Self::EdgeEndNotSet => SM_ERR_NULL_POINTER,
             Self::EdgeNotInCorner => SM_ERR,
@@ -884,7 +884,7 @@ impl CornerPatchMiss {
         clippy::match_same_arms,
         reason = "one arm per variant, sorted by name, so causes added in parallel touch disjoint lines"
     )]
-    pub const fn upstream_status(self) -> i32 {
+    pub const fn status(self) -> i32 {
         match self {
             Self::CentreLineFootNotUnique => SM_ERR,
             Self::ConstantRadiusBaseNotArc => SM_ERR,

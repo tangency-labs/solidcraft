@@ -3229,7 +3229,7 @@ fn defect(op: &'static str, why: &'static str) -> SolidError {
 }
 
 /// A defect ([`BlendFailure::Defect`]) with the status `SM_ERR` of the `SER` it replaces,
-/// keeping `cause`, the error of the step that failed, where there is one (rule 6): its
+/// keeping `cause`, the error of the step that failed, where there is one: its
 /// class decides whether the failure reads as a defect or a refusal.
 #[track_caller]
 fn defect_after(op: &'static str, why: &'static str, cause: Option<SolidError>) -> SolidError {
@@ -3408,11 +3408,11 @@ mod tests {
     };
 
     fn code(e: &SolidError) -> Option<i32> {
-        e.upstream_status()
+        e.failed_routine_status()
     }
 
     fn failure(e: &SolidError) -> (Option<&BlendFailure>, Option<i32>) {
-        (e.blend_failure(), e.upstream_status())
+        (e.blend_failure(), e.failed_routine_status())
     }
 
     fn vertex(fb: &mut FilletBrep, k: &Kernel, p: Point3) -> VertexId {
@@ -3866,7 +3866,10 @@ mod tests {
             &mut failed_orients,
             &|id, _| {
                 assert_eq!(id, actual_id);
-                Err(SolidError::sm_err("retained solver lookup"))
+                Err(SolidError::failed_routine(
+                    "retained solver lookup",
+                    crate::error::SM_ERR,
+                ))
             },
         )
         .unwrap_err();
@@ -4121,7 +4124,7 @@ mod tests {
             err.is_refusal() && !err.is_defect() && !err.sized(),
             "{err:?}"
         );
-        assert_eq!(err.upstream_status(), Some(SM_ERR));
+        assert_eq!(err.failed_routine_status(), Some(SM_ERR));
         assert_eq!(err.entity(), Some(EntityRef::Edge(te)));
 
         // at the middle of the same curve the tangent is (0, 0, 1): no refusal there

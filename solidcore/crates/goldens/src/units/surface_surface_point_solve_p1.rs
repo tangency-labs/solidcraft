@@ -37,7 +37,6 @@ use solidcore::surface::surface::Surface;
 use solidcore::surface::surface_point_solve::p1::{
     triangles_dist, well_behaved_control_net, SurfPtGlobalSolver, SurfPtSolveStepper,
 };
-use solidcore::SolidError;
 
 use super::surface_surface_cache_p1::{
     default_form, dom_of, fin, flag, gen_knots, gen_sub_dom, gvec, harness, push3, push_dom, srf, status, v3,
@@ -305,7 +304,7 @@ fn rust_op(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> {
             OpIn::SeamsCpts { iu, iv } => {
                 let g = global()?;
                 let Some((nu, nv, pts, rational)) = net_of(&g) else {
-                    return Err(SolidError::sm_err("difftest: no control net"));
+                    return Err(crate::output::routine_failure("difftest: no control net"));
                 };
                 let (a, b) = g.check_guess_for_seams_cpts(*iu, *iv, nu, nv, &pts, rational)?;
                 o.extend([0.0, a as f64, b as f64]);
@@ -337,7 +336,7 @@ fn rust_op(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> {
             OpIn::TriDist { i: a, j } => {
                 let g = global()?;
                 let Some((nu, nv, pts, rational)) = net_of(&g) else {
-                    return Err(SolidError::sm_err("difftest: no control net"));
+                    return Err(crate::output::routine_failure("difftest: no control net"));
                 };
                 let (d, u, v) = triangles_dist(g.base.test_point(), &pts, rational, *a, *j, nu, nv)?;
                 o.extend([0.0, d, u, v]);
@@ -345,7 +344,7 @@ fn rust_op(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> {
             OpIn::Well { i: a, j } => {
                 let g = global()?;
                 let Some((nu, nv, pts, rational)) = net_of(&g) else {
-                    return Err(SolidError::sm_err("difftest: no control net"));
+                    return Err(crate::output::routine_failure("difftest: no control net"));
                 };
                 let b = well_behaved_control_net(g.base.test_point(), &pts, rational, *a, *j, nu, nv)?;
                 o.extend([0.0, flag(b)]);

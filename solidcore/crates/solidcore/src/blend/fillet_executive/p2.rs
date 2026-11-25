@@ -2256,7 +2256,7 @@ mod tests {
         assert_eq!(error.kind(), crate::error::ErrorKind::InvalidInput);
         assert_eq!(error.sm_status(), Some(crate::error::SM_ERR_INVALID_INPUT));
         assert_eq!(
-            error.upstream_status(),
+            error.failed_routine_status(),
             Some(crate::error::SM_ERR_INVALID_INPUT)
         );
         assert_eq!(error.operation(), OP);

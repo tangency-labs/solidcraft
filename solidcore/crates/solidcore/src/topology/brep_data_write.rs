@@ -1645,7 +1645,7 @@ mod tests {
                 Some(&TopologyFailure::SurfaceWithoutGenerator),
                 "{e:?}"
             );
-            assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+            assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
             assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
         }
     }
@@ -1679,7 +1679,7 @@ mod tests {
             Some(&TopologyFailure::EdgeWithoutEdgeuses),
             "{e:?}"
         );
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         assert!(!e.is_defect());
     }
 

@@ -352,7 +352,7 @@ fn run_script(k: &mut Kernel, b: &mut Brep, i: &Inputs) -> SolidResult<RustRun> 
             let feature = ex
                 .features()
                 .get(fi)
-                .ok_or_else(|| solidcore::SolidError::null_pointer("difftest"))?;
+                .ok_or_else(|| solidcore::SolidError::port_invariant("difftest", "no feature at the index add_feature returned"))?;
             record.push(feature.loops.len() as f64);
             for l in &feature.loops {
                 record.push(l.base_edges.len() as f64);

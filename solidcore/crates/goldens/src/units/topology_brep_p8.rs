@@ -300,8 +300,8 @@ fn status<T>(r: &Result<T, SolidError>) -> Result<f64, Fail> {
             "cpp-guard:ub-119",
             "SmTrimmingTools::FindOuterLoops",
         )))),
-        Err(e) if solidcore::error::upstream_status(e).is_some() => {
-            Ok(f64::from(solidcore::error::upstream_status(e).unwrap_or(-1)))
+        Err(e) if crate::output::recorded_status(e).is_some() => {
+            Ok(f64::from(crate::output::recorded_status(e).unwrap_or(-1)))
         }
         Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(1007.0),
         Err(e) => Err(match Output::unported(e) {

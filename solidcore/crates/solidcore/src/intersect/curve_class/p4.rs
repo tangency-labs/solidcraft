@@ -134,7 +134,7 @@ const EU_NO_EDGE: &str = "the edge use has no edge, a link the kernel sets when 
 const EU_NO_NEIGHBOUR: &str = "an edge use of a loop has no clockwise or counter-clockwise \
      neighbour, links the kernel sets on every edge use when it builds the loop";
 
-/// An edge of the caller's body with no curve (rule 9; upstream's `NER`,
+/// An edge of the caller's body with no curve (upstream's `NER`,
 /// `SM_ERR_NULL_POINTER`).
 #[track_caller]
 fn no_curve(op: &'static str) -> SolidError {
@@ -142,13 +142,13 @@ fn no_curve(op: &'static str) -> SolidError {
 }
 
 /// The classification has no source curve, or its handle does not resolve (the caller's
-/// classification, rule 9; upstream's `NER`, `SM_ERR_NULL_POINTER`).
+/// classification; upstream's `NER`, `SM_ERR_NULL_POINTER`).
 #[track_caller]
 fn no_source_curve(op: &'static str) -> SolidError {
     SolidError::intersect(op, IntersectFailure::NoSourceCurve)
 }
 
-/// A drop onto the face's surface that found no foot point (an empty search, rule 7;
+/// A drop onto the face's surface that found no foot point (an empty search;
 /// upstream's `SER(SM_ERR)`).
 #[track_caller]
 fn no_foot(op: &'static str) -> SolidError {

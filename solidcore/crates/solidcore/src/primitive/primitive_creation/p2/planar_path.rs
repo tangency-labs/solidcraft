@@ -30,7 +30,7 @@ use super::{as_bspline, PrimitiveCreationAccess};
 use crate::curve::curve::p9::CurveSolveOptions;
 use crate::curve::curve::Curve;
 use crate::error::primitive::PrimitiveFailure;
-use crate::error::{Failure, Result, SolidError, SM_ERR_NULL_POINTER};
+use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p2::ContinuityType;
@@ -98,15 +98,6 @@ fn extend_into(
 /// and the line is returned (it is always made when the status is good).
 fn line(start: Vec3, end: Vec3) -> Result<BSplineCurve> {
     BSplineCurve::create_line_segment(3, start, end)
-}
-
-/// A defect ([`PrimitiveFailure::Defect`]) of a curve the kernel built that is not
-/// there, with the status `SM_ERR_NULL_POINTER` of the null pointer it replaces.
-#[track_caller]
-fn broken_link(why: &'static str) -> SolidError {
-    Failure::new(OP, PrimitiveFailure::Defect { why })
-        .with_status(SM_ERR_NULL_POINTER)
-        .into_error()
 }
 
 // Why each step that fails here is the kernel's fault (`PrimitiveFailure::Defect`).
@@ -471,9 +462,9 @@ impl PrimitiveCreation {
                     // fork c8f6a31: SER(pBrepBefore->BrepIntersect(..)).
                     let (intersections, _) = intersection_search?;
                     if intersections.len() > 1 {
-                        let temp = temp_cutting
-                            .as_ref()
-                            .ok_or_else(|| broken_link(NO_TEMP_CUTTING))?;
+                        let temp = temp_cutting.as_ref().ok_or_else(|| {
+                            SolidError::primitive_broken_link(OP, NO_TEMP_CUTTING)
+                        })?;
                         let temp = Curve::from(temp.clone());
                         let mut best = Vec3::UNDEF;
                         let mut best2 = Vec3::UNDEF;
@@ -620,9 +611,9 @@ impl PrimitiveCreation {
                     let cutting_point = after[0] + (average * 50.0);
                     let cut_line = line(after[0], cutting_point)?;
                     extend_into(&cut_line, 50.0, CurveEnd::Start, &mut cutting)?;
-                    let curve = cutting
-                        .as_ref()
-                        .ok_or_else(|| broken_link(NO_EXTENDED_CUTTING))?;
+                    let curve = cutting.as_ref().ok_or_else(|| {
+                        SolidError::primitive_broken_link(OP, NO_EXTENDED_CUTTING)
+                    })?;
 
                     // the piece before is this pass's own
                     let before_id = after_brep;
@@ -938,7 +929,7 @@ mod tests {
             Some(&PrimitiveFailure::PathTurnsBack),
             "{e}"
         );
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
         assert_eq!(e.kind(), crate::error::ErrorKind::Unsupported);
     }
 }

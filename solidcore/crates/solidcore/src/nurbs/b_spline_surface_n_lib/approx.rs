@@ -146,12 +146,12 @@ mod tests {
                     columns: 4,
                 }))
                 && e.sm_status() == Some(crate::error::SM_ERR)
-                && e.upstream_status() == Some(crate::error::SM_ERR)
+                && e.failed_routine_status() == Some(crate::error::SM_ERR)
                 && e.kind() == crate::error::ErrorKind::InvalidInput
         ));
         assert!(matches!(
             BSplineSurface::approximate_points(&grid(3, 7), 3, 7, 3, 3),
-            Err(e) if e.upstream_status() == Some(crate::error::SM_ERR)
+            Err(e) if e.failed_routine_status() == Some(crate::error::SM_ERR)
                 && e.nurbs_failure() == Some(&NurbsFailure::BSpline(BSplineFailure::RoutineFailed))
                 && e.cause().is_some_and(SolidError::is_nurbs_failure)
         ));

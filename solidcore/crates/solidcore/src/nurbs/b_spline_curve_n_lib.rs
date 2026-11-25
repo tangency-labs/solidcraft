@@ -4095,7 +4095,11 @@ mod tests {
     fn b_spline_cause<T>(r: Result<T>) -> BSplineFailure {
         match r {
             Err(e) => {
-                assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR), "{e:?}");
+                assert_eq!(
+                    e.failed_routine_status(),
+                    Some(crate::error::SM_ERR),
+                    "{e:?}"
+                );
                 match e.nurbs_failure() {
                     Some(NurbsFailure::BSpline(b)) => {
                         assert_eq!(e.kind(), b.kind(), "{e:?}");

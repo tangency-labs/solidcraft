@@ -109,7 +109,7 @@ fn located(op: &'static str, failure: BlendFailure, entity: Option<EntityRef>) -
 
 /// Invalid input to `op`: the caller's corner, fillet B-rep or body is not what the corner's
 /// construction reads (`input`), about `entity` where the check reads one, with the
-/// default status of `input` ([`CornerInput::upstream_status`]). The entry points are
+/// default status of `input` ([`CornerInput::status`]). The entry points are
 /// public and take a caller's corner.
 #[track_caller]
 fn bad_input(op: &'static str, input: CornerInput, entity: Option<EntityRef>) -> SolidError {
@@ -1185,7 +1185,7 @@ mod tests {
         assert_eq!(err.blend_failure(), Some(&BlendFailure::NoVertexGiven));
         assert_eq!(err.kind(), crate::error::ErrorKind::InvalidInput);
         assert_eq!(
-            crate::error::upstream_status(&err),
+            SolidError::failed_routine_status(&err),
             Some(SM_ERR_NULL_POINTER)
         );
     }

@@ -1313,7 +1313,10 @@ mod tests_c1 {
             e.entity(),
             Some(crate::error::EntityRef::Edge(curveless_edge))
         );
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(
+            e.failed_routine_status(),
+            Some(crate::error::SM_ERR_NULL_POINTER)
+        );
 
         // an edge use of the caller's body without an edge: at the edge use,
         // SM_ERR_NULL_POINTER
@@ -1336,7 +1339,10 @@ mod tests_c1 {
         );
         assert_eq!(e.entity(), Some(crate::error::EntityRef::Edgeuse(eus[0])));
         assert!(!e.is_defect(), "{e:?}");
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(
+            e.failed_routine_status(),
+            Some(crate::error::SM_ERR_NULL_POINTER)
+        );
 
         // an edge curve not of a B-spline class (a Hermite curve): SM_ERR_NULL_POINTER
         let (mut tb, eus) = target(Some(Curve::from(
@@ -1368,7 +1374,10 @@ mod tests_c1 {
             ),
             "{e:?}"
         );
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(
+            e.failed_routine_status(),
+            Some(crate::error::SM_ERR_NULL_POINTER)
+        );
 
         // no edge use 0: an upstream NULL dereference
         ops.0.edgeuses = [None, None];
@@ -1470,7 +1479,7 @@ mod tests_c1 {
                 count: 1
             })
         );
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
     }
 
     /// A caller-built fillet geometry reaches the rail checks through the public
@@ -1496,7 +1505,7 @@ mod tests_c1 {
         );
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
         assert!(!e.is_defect(), "{e:?}");
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
 
         let (mut tb, eus) = target(Some(line_curve([0.0, 0.0, 0.0], [2.0, 0.0, 0.0], 3)));
         let (mut fb, g, _) = fillets(&k, ROWS);
@@ -1512,7 +1521,10 @@ mod tests_c1 {
         );
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
         assert!(!e.is_defect(), "{e:?}");
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(
+            e.failed_routine_status(),
+            Some(crate::error::SM_ERR_NULL_POINTER)
+        );
     }
 
     #[test]
@@ -1537,7 +1549,7 @@ mod tests_c1 {
         let e = c1_collect_points(&mut ops, &mut cx, &mut st, 0).unwrap_err();
         assert_eq!(e.operation(), "topology::edgeuse::p3");
         assert_eq!(
-            e.upstream_status(),
+            e.failed_routine_status(),
             Some(crate::error::SM_ERR_INVALID_INPUT)
         );
         assert_eq!(e.entity(), None);
@@ -1611,7 +1623,10 @@ mod tests_c1 {
         // status (here NER) is SER'd
         let e = c1_collect_points(&mut ops, &mut cx, &mut st, 0).unwrap_err();
         assert_eq!(e.operation(), "topology::edgeuse::p3");
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(
+            e.failed_routine_status(),
+            Some(crate::error::SM_ERR_NULL_POINTER)
+        );
         assert_eq!(e.entity(), None);
     }
 }
@@ -2172,7 +2187,7 @@ mod tests_c2 {
         let (mut st, _) = state(&[]);
         let e = c2_clean_ends(&mut fs, &mut cx, &mut st).unwrap_err();
         assert_eq!(e, fail(SolverFailure::NoTracePoints));
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
 
         // two points are never pruned, however close
         let (mut st, refs) = state(&[(0.5, 0.5), (0.5, 0.5)]);
@@ -2623,7 +2638,10 @@ mod tests_c3 {
                 kind: once.type_string(),
             })
         );
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(
+            e.failed_routine_status(),
+            Some(crate::error::SM_ERR_NULL_POINTER)
+        );
     }
 
     #[test]
@@ -2640,7 +2658,7 @@ mod tests_c3 {
         let mut st = state(line(), [pa, offset(&k, 0.5, &offset(&k, 0.5, &pb))]);
         let r = with_cx(&k, |cx| c3_try_analytic(&mut fs, cx, &mut st));
         assert_eq!(
-            r.unwrap_err().upstream_status(),
+            r.unwrap_err().failed_routine_status(),
             Some(crate::error::SM_ERR_NULL_POINTER)
         );
     }
@@ -3263,7 +3281,10 @@ mod tests_c4 {
         // SM_ERR_NULL_POINTER.
         let e = c4_trace(&mut solver, &mut cx, &mut st, &mut fi).unwrap_err();
         assert_eq!(e, fail(SolverFailure::NoCenterLineTraced));
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(
+            e.failed_routine_status(),
+            Some(crate::error::SM_ERR_NULL_POINTER)
+        );
         // bExtendBefore = m_bExtendAfter, then TRUE for the missed point;
         // bExtendAfter = m_bExtendBefore
         assert!(st.trace.extend_before);
@@ -3330,9 +3351,10 @@ mod tests_c4 {
     /// cusp recovery would read its stale centre line, or at the end.
     #[test]
     fn an_unmade_geometry_fails_unless_a_later_flush_makes_it() {
-        let skin = || SolidError::blend_failed(OP, "skin");
-        let skin2 = || SolidError::blend_failed(OP, "skin again");
-        let traced = || SolidError::blend_failed(OP, "traced");
+        let failed = |why| SolidError::blend(OP, BlendFailure::Defect { why });
+        let skin = || failed("skin");
+        let skin2 = || failed("skin again");
+        let traced = || failed("traced");
         // a failed flush, then a final pass whose flush makes the geometry: success
         let mut u = UnmadeGeometry::default();
         u.after_pass(true, false, Err(skin()));
@@ -4096,7 +4118,7 @@ mod tests_c5 {
             fail(SolverFailure::FilletGeomWithoutCenterLine { fillet_geom: f.g })
         );
         assert!(!e.is_defect(), "{e:?}");
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         assert_close(f.rail_start(0), Point3::new(1.0, 0.0, 0.0));
         assert_close(
             f.surface_at(Point2::new(0.0, 0.25)),
@@ -4115,7 +4137,11 @@ mod tests_c5 {
         // the creation's status is passed on (fork 66b02de `SER`, WR-661; upstream
         // ignores it and fails later at NER(pUVCurve)): the edge use has no face use
         let e = f.run().unwrap_err();
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER), "{e:?}");
+        assert_eq!(
+            e.failed_routine_status(),
+            Some(SM_ERR_NULL_POINTER),
+            "{e:?}"
+        );
         assert!(
             matches!(
                 e.failure().map(|f| &f.reason),
@@ -4135,7 +4161,7 @@ mod tests_c5 {
         let e = f.run().unwrap_err();
         assert_eq!(e, rail_without_curve());
         assert!(!e.is_defect(), "{e:?}");
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
     }
 
     #[test]
@@ -4150,7 +4176,11 @@ mod tests_c5 {
             fail(SolverFailure::FilletGeomWithoutSolver { fillet_geom: f.g })
         );
         assert!(!e.is_defect(), "{e:?}");
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER), "{e:?}");
+        assert_eq!(
+            e.failed_routine_status(),
+            Some(SM_ERR_NULL_POINTER),
+            "{e:?}"
+        );
     }
 
     /// A trace can succeed without a flush, so geometry 0's rails reach the split as the
@@ -4170,7 +4200,7 @@ mod tests_c5 {
         let e = c5_split_rail(&mut cx, &f.st, f.g, 1, 0.0).unwrap_err();
         assert_eq!(e, rail_without_curve());
         assert!(!e.is_defect(), "{e:?}");
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
 
         let mut f = Fixture::new();
         f.fb.brep_mut()
@@ -4193,7 +4223,7 @@ mod tests_c5 {
             })
         );
         assert!(!e.is_defect(), "{e:?}");
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
     }
 
     #[test]
@@ -4222,7 +4252,7 @@ mod tests_c5 {
             (
                 e.operation(),
                 e.kind() == crate::error::ErrorKind::InvalidInput && !e.is_defect(),
-                e.upstream_status()
+                e.failed_routine_status()
             ),
             (
                 "blend::fillet_geom::p4::FilletBrep::calc_blending_geom",
@@ -4251,7 +4281,7 @@ mod tests_c5 {
                 })
             )
         );
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
 
         // a cross-section edge of a blends geometry is not calculated
         let mut f = Fixture::new();
@@ -4613,7 +4643,7 @@ mod tests_c6 {
         let mut p = TsectPnt::new();
         // StepSolve (blend.fillet_solver_p3) finds no step on these planes: SM_ERR
         let err = run(&mut fs, &k, 1.0, &mut p, Some(&prev)).unwrap_err();
-        assert_eq!(err.upstream_status(), Some(1001), "{err:?}");
+        assert_eq!(err.failed_routine_status(), Some(1001), "{err:?}");
         assert_eq!(p.curve_pv[1], Vec3::new(0.0, 1.0, 0.0));
     }
 

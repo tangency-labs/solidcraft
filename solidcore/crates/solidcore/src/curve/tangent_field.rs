@@ -997,7 +997,7 @@ mod tests {
             Some(&CurveFailure::TooManyDerivatives { asked: 2, most: 1 })
         );
         assert_eq!(
-            crate::error::upstream_status(&err),
+            SolidError::failed_routine_status(&err),
             Some(crate::error::SM_ERR)
         );
         // inside the interval: the surface normal (surface::surface::p7) is available
@@ -1101,7 +1101,7 @@ mod tests {
         };
         assert!(matches!(
             TangentField::create(k, 1e-6, &base, &uv, &srf, start, bad),
-            Err(e) if crate::error::upstream_status(&e) == Some(1001)
+            Err(e) if SolidError::failed_routine_status(&e) == Some(1001)
                 && matches!(e.curve_failure(), Some(CurveFailure::EndsApart { gap, tolerance })
                     if *gap > 1e-6 && *tolerance == 1e-6)
         ));
@@ -1113,7 +1113,7 @@ mod tests {
         };
         assert!(matches!(
             TangentField::create(k, 1e-6, &base, &uv, &srf, bad_start, end),
-            Err(e) if crate::error::upstream_status(&e) == Some(1001)
+            Err(e) if SolidError::failed_routine_status(&e) == Some(1001)
                 && matches!(e.curve_failure(), Some(CurveFailure::StartsApart { gap, tolerance })
                     if *gap > 1e-6 && *tolerance == 1e-6)
         ));

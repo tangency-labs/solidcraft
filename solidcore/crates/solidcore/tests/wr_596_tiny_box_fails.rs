@@ -35,7 +35,7 @@ fn tiny_box() -> solidcore::Result<Brep> {
 fn wr_596_tiny_box_is_sm_err() {
     let r = tiny_box();
     assert!(
-        matches!(&r, Err(e) if solidcore::error::upstream_status(e) == Some(1001)),
+        matches!(&r, Err(e) if e.sm_status() == Some(1001)),
         "{:?}",
         r.map(|b| b.face_list().len())
     );

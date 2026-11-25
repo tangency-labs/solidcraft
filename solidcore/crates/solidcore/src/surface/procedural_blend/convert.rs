@@ -1811,7 +1811,7 @@ mod tests {
         ];
         for (typed, failure, code, kind) in samples {
             assert_eq!(typed.sm_status(), Some(code), "{typed:?}");
-            assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
+            assert_eq!(typed.failed_routine_status(), Some(code), "{typed:?}");
             assert_eq!(typed.kind(), kind, "{typed:?}");
             assert_eq!(typed.entity(), None, "{typed:?}");
             assert!(!typed.is_defect(), "{typed:?}");
@@ -1830,13 +1830,13 @@ mod tests {
             .at(face)
             .caused_by(why.clone())
             .into_error();
-        let before = SolidError::Upstream {
-            operation: OP_FACE,
-            code: crate::error::SM_ERR_INVALID_INPUT,
-            entity: Some(face),
-        };
+        let before =
+            SolidError::failed_routine_at(OP_FACE, crate::error::SM_ERR_INVALID_INPUT, face);
         assert_eq!(typed.sm_status(), before.sm_status());
-        assert_eq!(typed.upstream_status(), before.upstream_status());
+        assert_eq!(
+            typed.failed_routine_status(),
+            before.failed_routine_status()
+        );
         assert_eq!(typed.kind(), before.kind());
         assert_eq!(typed.operation(), before.operation());
         assert_eq!(typed.entity(), Some(face));

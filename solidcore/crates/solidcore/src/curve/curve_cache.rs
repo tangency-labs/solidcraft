@@ -1812,7 +1812,7 @@ mod tests {
             Some(&CurveFailure::TooFewKnots { knots: 1 })
         );
         assert_eq!(
-            crate::error::upstream_status(&err),
+            SolidError::failed_routine_status(&err),
             Some(crate::error::SM_ERR)
         );
         // the span measure takes a B-spline span only
@@ -1831,7 +1831,7 @@ mod tests {
         .unwrap_err();
         assert_eq!(err.curve_failure(), Some(&CurveFailure::SpanNotBSpline));
         assert_eq!(
-            crate::error::upstream_status(&err),
+            SolidError::failed_routine_status(&err),
             Some(crate::error::SM_ERR)
         );
     }

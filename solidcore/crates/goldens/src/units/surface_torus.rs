@@ -237,8 +237,8 @@ fn push_v(o: &mut Vec<f64>, v: Vec3) {
 /// The `SmStatus` of a Rust error; `-1` for one upstream cannot return.
 fn status(e: &SolidError) -> f64 {
     match e {
-        e if solidcore::error::nurbs::upstream_status(e).is_some() => {
-            f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
+        e if crate::output::recorded_status(e).is_some() => {
+            f64::from(crate::output::recorded_status(e).unwrap_or(-1))
         }
         _ => -1.0,
     }
@@ -641,7 +641,13 @@ fn is_nurb(
         .base()
         .gw_nurb()
         .cloned()
-        .ok_or_else(|| SolidError::null_pointer("difftest::surface_torus::is_nurb"))?;
+        .ok_or_else(|| {
+            solidcore::error::Failure::new(
+                "difftest::surface_torus::is_nurb",
+                solidcore::error::surface::SurfaceFailure::NoNurb,
+            )
+            .into_error()
+        })?;
     let ix = nurb.indices();
     for i in 0..=ix.n {
         for j in 0..=ix.m {

@@ -2127,11 +2127,11 @@ mod tests {
 
     fn code(e: &SolidError) -> Option<i32> {
         // a typed blend failure reads as the status of the bare `Upstream` (#13790)
-        e.upstream_status()
+        e.failed_routine_status()
     }
 
     fn failure(e: &SolidError) -> (Option<&BlendFailure>, Option<i32>) {
-        (e.blend_failure(), e.upstream_status())
+        (e.blend_failure(), e.failed_routine_status())
     }
 
     fn unit_of(e: &SolidError) -> Option<&'static str> {
@@ -2358,10 +2358,13 @@ mod tests {
             &mut Brep::new(),
             &mut (),
             0,
-            |_, _, (), _| Err(SolidError::sm_err("main vertex")),
+            |_, _, (), _| Err(SolidError::failed_routine("main vertex", SM_ERR)),
             |(), _, _, _| Ok(0),
         );
-        assert_eq!(r.unwrap_err(), SolidError::sm_err("main vertex"));
+        assert_eq!(
+            r.unwrap_err(),
+            SolidError::failed_routine("main vertex", SM_ERR)
+        );
         assert!(!fb.fillet_vertex(a).unwrap().is_processed());
     }
 
@@ -2918,7 +2921,7 @@ mod tests {
             "blend::drop",
             BlendFailure::NoRoom(NoRoomReason::BandsOverlap),
         );
-        let defect = SolidError::blend("blend::drop", BlendFailure::StageFailed);
+        let defect = SolidError::blend("blend::drop", BlendFailure::Defect { why: "x" });
         for cause in [refusal, defect] {
             let e = end_drop_failed::<()>(Err(cause.clone()), true, 1e-4);
             assert_eq!(e.operation(), OP_FIF, "{e:?}");

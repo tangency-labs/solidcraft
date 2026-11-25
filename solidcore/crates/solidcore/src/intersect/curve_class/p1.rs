@@ -175,8 +175,7 @@ const OP_APPLY: &str = "intersect::curve_class::p1::apply_point_solution";
 const OP_GAPS: &str = "intersect::curve_class::p1::get_cci_surface_gaps";
 
 /// A defect ([`IntersectFailure::Defect`]) for something the kernel built that is not there,
-/// keeping the status `SM_ERR_NULL_POINTER` of the `NER` it replaces (the conversion guide,
-/// `docs/failure-codes-and-reproduction.md` §6 rule 2).
+/// keeping the status `SM_ERR_NULL_POINTER` of the `NER` it replaces.
 #[track_caller]
 pub(super) fn missing_defect(op: &'static str, why: &'static str) -> SolidError {
     Failure::new(op, IntersectFailure::Defect { why })
@@ -2613,7 +2612,7 @@ fn apply_point_solution_impl<O, S: Copy>(
         None => return Ok(out),
         Some(Ok(p)) => out.sss_point = p,
         Some(Err(e)) if e.is_unported_or_cancelled() => return Err(e),
-        Some(Err(e)) if e.upstream_status() == Some(SM_ERR) => return Ok(out),
+        Some(Err(e)) if e.failed_routine_status() == Some(SM_ERR) => return Ok(out),
         Some(Err(_)) => {}
     }
 
@@ -3102,7 +3101,7 @@ pub fn compute_face_point_class_in(
         Ok(c) => Some(c),
         Err(e) if e.is_unported_or_cancelled() => return Err(e),
         // no trimmed cache: the plain one is the fallback (the trimmed build's error is control
-        // flow when it builds); when it does not, its error is the cause (rule 6), and a
+        // flow when it builds); when it does not, its error is the cause, and a
         // cancellation or an unported step passes on as from the trimmed build
         Err(_) => match make_surface_cache(k, &surface, None::<EntityRef>) {
             Ok(_) => None,
@@ -3352,7 +3351,10 @@ mod tests {
         let e = missing_defect(OP_CC, EVAL_1ST);
         assert!(e.is_defect());
         assert_eq!(e.sm_status(), Some(SM_ERR_NULL_POINTER));
-        assert_eq!(crate::error::upstream_status(&e), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(
+            SolidError::failed_routine_status(&e),
+            Some(SM_ERR_NULL_POINTER)
+        );
         assert_eq!(
             e.intersect_failure(),
             Some(&IntersectFailure::Defect { why: EVAL_1ST })

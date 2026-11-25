@@ -45,7 +45,7 @@
 //! - `SelectTopologyToKeep` reads `SurfaceMaxDistanceBetween`'s gap even when the call
 //!   fails (upstream status ignored): the previous gap, as upstream's reused local.
 //!   Upstream reads an uninitialised local when the very first call fails; the port
-//!   returns [`SolidError::Upstream`] `SM_ERR` there.
+//!   returns a failure with status `SM_ERR` there.
 //! - `test_and_split_edge` records the live edge's zone tolerance on its curve for
 //!   the drop's cache, which cannot dereference the owning B-rep. The independent
 //!   stitch/snap tolerance is unchanged; no curve copy or extra arena lookup is
@@ -3238,7 +3238,7 @@ mod tests {
         assert_eq!(e.operation(), OP);
         assert_eq!(e.cause(), Some(&error));
         assert!(e.is_defect());
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
     }
 
     /// The stitcher's checks of the caller's arguments, and its declined split, are named
@@ -3260,7 +3260,7 @@ mod tests {
         ] {
             let err = select_topology_to_keep(&mut cb, &k, &b, first, second, 0.0).unwrap_err();
             assert_eq!(err.heal_failure(), Some(&HealFailure::PairOfDifferentKinds));
-            assert_eq!(err.upstream_status(), Some(SM_ERR_NULL_POINTER));
+            assert_eq!(err.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
             assert_eq!(err.kind(), ErrorKind::InvalidInput);
         }
         let mut stitch = Stitch::new(&mut cb, 0.01, false, false);
@@ -3271,7 +3271,7 @@ mod tests {
                 .do_simple_face_stitch(&mut k, &mut b, keep, delete)
                 .unwrap_err();
             assert_eq!(err.heal_failure(), Some(&HealFailure::FaceListsDiffer));
-            assert_eq!(err.upstream_status(), Some(SM_ERR));
+            assert_eq!(err.failed_routine_status(), Some(SM_ERR));
             assert_eq!(err.kind(), ErrorKind::InvalidInput);
         }
         // a declined split (at an end of the edge, or with editing off) is named
@@ -3280,20 +3280,20 @@ mod tests {
             b.set_editing_enabled(editing);
             let err = make_vertex_split_edge(&mut k, &mut b, e, start).unwrap_err();
             assert_eq!(err.heal_failure(), Some(&HealFailure::EdgeNotSplit));
-            assert_eq!(err.upstream_status(), Some(SM_ERR));
+            assert_eq!(err.failed_routine_status(), Some(SM_ERR));
         }
         // vertex lists with no vertex in a B-rep
         let err = stitch
             .stitch_vertex_pairs(&mut k, &mut b, &mut [None], &mut [None])
             .unwrap_err();
         assert_eq!(err.heal_failure(), Some(&HealFailure::NotInBrep));
-        assert_eq!(err.upstream_status(), Some(SM_ERR));
+        assert_eq!(err.failed_routine_status(), Some(SM_ERR));
         // an edge without its curve
         let point = b.vertex(v).unwrap().point;
         b.edge_mut(e).unwrap().curve = None;
         let err = test_and_split_edge(&mut k, &mut b, e, point, 0.01).unwrap_err();
         assert_eq!(err.heal_failure(), Some(&HealFailure::EdgeWithoutCurve));
-        assert_eq!(err.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(err.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(err.kind(), ErrorKind::InvalidInput);
     }
 

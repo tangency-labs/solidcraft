@@ -93,7 +93,7 @@ use crate::error::surface::SurfaceFailure;
 /// SolidCraft fork (tangency-labs/smlib dfc7cb6, `SM_ERR_NOT_WITHIN_TOLERANCE`).
 pub(crate) fn is_off_generator(e: &SolidError) -> bool {
     // the status, not the variant: a typed failure that replaced the `Upstream` (#13790)
-    e.upstream_status() == Some(crate::error::SM_ERR) && e.operation() == OP_STEP_INV
+    e.failed_routine_status() == Some(crate::error::SM_ERR) && e.operation() == OP_STEP_INV
 }
 
 /// The off-surface failure of `operation` (status `SM_ERR_NOT_WITHIN_TOLERANCE`): an
@@ -1332,7 +1332,10 @@ mod tests {
     #[test]
     fn off_generator_reads_the_status_of_a_typed_failure() {
         use crate::error::replaced_upstream_samples::{native_failures, replaced_upstream};
-        assert!(is_off_generator(&SolidError::sm_err(OP_STEP_INV)));
+        assert!(is_off_generator(&SolidError::failed_routine(
+            OP_STEP_INV,
+            crate::error::SM_ERR
+        )));
         for typed in replaced_upstream(OP_STEP_INV, crate::error::SM_ERR, None) {
             assert!(is_off_generator(&typed), "{typed:?}");
         }

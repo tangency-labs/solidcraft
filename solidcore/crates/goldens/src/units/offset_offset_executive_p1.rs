@@ -1247,7 +1247,6 @@ type RResult<T> = Result<T, RunError>;
 fn operation<T>(result: solidcore::Result<T>) -> RResult<(i64, Option<T>)> {
     match result {
         Ok(value) => Ok((i64::from(NATIVE_SUCCESS), Some(value))),
-        Err(SolidError::Upstream { code, .. }) => Ok((i64::from(code), None)),
         // a failure in solidcore's terms (#2615): its C++ comparison status
         Err(e @ SolidError::Failed(_)) => Ok((i64::from(e.sm_status().unwrap_or(solidcore::error::SM_ERR)), None)),
         Err(error) => Err(RunError::Kernel(error)),
@@ -2665,9 +2664,6 @@ fn rust_replace(input: &ReplaceIn) -> RResult<Output> {
             );
             match surface.evaluate_point(&kernel, uv) {
                 Ok(p) => raw.extend([f64::from(NATIVE_SUCCESS), p.x, p.y, p.z]),
-                Err(SolidError::Upstream { code, .. }) => {
-                    raw.extend([f64::from(code), 0.0, 0.0, 0.0]);
-                }
                 Err(e) => return Err(RunError::Kernel(e)),
             }
         }

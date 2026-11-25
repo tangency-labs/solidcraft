@@ -9202,7 +9202,7 @@ mod tests {
         let defect =
             mating_result::<()>(Err(defect(OP_MATE, SSI_UV_CURVE_KIND, SM_ERR))).unwrap_err();
         assert!(defect.is_defect());
-        assert_eq!(defect.upstream_status(), Some(SM_ERR));
+        assert_eq!(defect.failed_routine_status(), Some(SM_ERR));
         assert_eq!(mating_result(Ok(())).unwrap(), Some(()));
     }
 
@@ -10070,7 +10070,7 @@ mod tests {
     #[test]
     fn audit_483_tangent_gaps_preserve_errors_and_no_solution() {
         let k = Kernel::default();
-        let error = SolidError::sm_err("injected tangent-gap service");
+        let error = SolidError::failed_routine("injected tangent-gap service", SM_ERR);
         for fail_evaluation in [false, true] {
             let mut calls = Vec::new();
             let result = tangent_gap_samples(
@@ -10143,7 +10143,10 @@ mod tests {
             1e-6,
             |_, _, t| {
                 if t == 0.5 {
-                    Err(SolidError::sm_err("injected evaluation failure"))
+                    Err(SolidError::failed_routine(
+                        "injected evaluation failure",
+                        SM_ERR,
+                    ))
                 } else {
                     Ok(Vec3::X * t)
                 }
@@ -10214,7 +10217,7 @@ mod tests {
         let e = surface
             .evaluate(&k, uv, 2, 2, EvaluateFlags::default())
             .unwrap_err();
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert_eq!(
             e.operation(),
             "surface::offset_surface::OffsetSurface::evaluate"
@@ -10447,7 +10450,7 @@ mod tests {
         // the sphere's error decides the class, never a defect of its own
         assert_eq!(e.is_defect(), built.is_defect());
         assert_eq!(e.is_refusal(), built.is_refusal());
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert_eq!(e.cause(), Some(&built));
     }
 
@@ -10483,14 +10486,14 @@ mod tests {
             .map(|_| ())
             .unwrap_err();
         assert_eq!(e.offset_failure(), Some(&OffsetFailure::VertexNotGiven));
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
         let e = creator
             .vertex_offset_with_backend(&k, &mut brep, Some(0), &[0, 1, 2])
             .map(|_| ())
             .unwrap_err();
         assert_eq!(e.offset_failure(), Some(&OffsetFailure::VertexCurveNotArc));
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert_eq!(e.operation(), OP_VERTEX);
     }
 
@@ -10504,7 +10507,7 @@ mod tests {
         let point = Curve::from(BSplineCurve::create_degenerate_curve(3, Point3::ZERO).unwrap());
         let e = passes_through(&k, &point, 0.5, &plane, Point2::new(0.0, 0.0), 1e-5).unwrap_err();
         assert_eq!(e.offset_failure(), Some(&OffsetFailure::CrossingUndecided));
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert!(e.cause().is_some(), "{e:?}");
     }
 
@@ -10555,7 +10558,7 @@ mod tests {
             .faceuse_offset_with_backend(&mut brep, H(2))
             .unwrap_err();
         assert_eq!(e.offset_failure(), Some(&OffsetFailure::LocalFaceNotListed));
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
     }
 }

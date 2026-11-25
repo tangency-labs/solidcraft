@@ -599,7 +599,7 @@ const SM_SUCCESS: i64 = 1000;
 fn status(r: &solidcore::Result<()>) -> i64 {
     match r {
         Ok(()) => SM_SUCCESS,
-        Err(err) if solidcore::error::upstream_status(err).is_some() => i64::from(solidcore::error::upstream_status(err).unwrap_or(-1)),
+        Err(err) if crate::output::recorded_status(err).is_some() => i64::from(crate::output::recorded_status(err).unwrap_or(-1)),
         Err(_) => -1,
     }
 }

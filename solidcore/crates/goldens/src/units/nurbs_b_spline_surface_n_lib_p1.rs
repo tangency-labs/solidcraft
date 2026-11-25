@@ -547,8 +547,8 @@ fn dump_curve(o: &mut Vec<f64>, c: &BSplineCurve) {
 fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
-        e if solidcore::error::nurbs::upstream_status(e).is_some() => {
-            f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
+        e if crate::output::recorded_status(e).is_some() => {
+            f64::from(crate::output::recorded_status(e).unwrap_or(-1))
         }
         _ => -1.0,
     }
@@ -626,8 +626,8 @@ fn rust_member(this: &mut BSplineSurface, op: &OpIn) -> Result<Result<Vec<f64>, 
                     dump_state(&mut o, this);
                     Ok(())
                 }
-                Err(e) if solidcore::error::nurbs::upstream_status(&e).is_some() => {
-                    let mut f = vec![f64::from(solidcore::error::nurbs::upstream_status(&e).unwrap_or(-1))];
+                Err(e) if crate::output::recorded_status(&e).is_some() => {
+                    let mut f = vec![f64::from(crate::output::recorded_status(&e).unwrap_or(-1))];
                     dump_state(&mut f, this);
                     return Ok(Ok(f));
                 }

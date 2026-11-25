@@ -3089,7 +3089,7 @@ mod tests {
             "{err:?}"
         );
         assert_eq!(
-            crate::error::upstream_status(&err),
+            SolidError::failed_routine_status(&err),
             Some(crate::error::SM_ERR)
         );
         // a circle, but a solve that is neither a minimisation nor an intersection
@@ -3123,7 +3123,7 @@ mod tests {
         let err = empty.set_up_polar_conversion(&k).unwrap_err();
         assert_eq!(err.curve_failure(), Some(&CurveFailure::EllipseWithoutNurb));
         assert_eq!(
-            crate::error::upstream_status(&err),
+            SolidError::failed_routine_status(&err),
             Some(crate::error::SM_ERR)
         );
     }
@@ -3176,7 +3176,7 @@ mod tests {
             })
         );
         assert_eq!(
-            crate::error::upstream_status(&err),
+            SolidError::failed_routine_status(&err),
             Some(crate::error::SM_ERR)
         );
     }
@@ -3317,7 +3317,7 @@ mod tests {
             })
         );
         assert_eq!(
-            crate::error::upstream_status(&err),
+            SolidError::failed_routine_status(&err),
             Some(crate::error::SM_ERR)
         );
         let err = c.transform(&k, &mv, Some(Vec3::ZERO)).unwrap_err();
@@ -3326,7 +3326,7 @@ mod tests {
             Some(&CurveFailure::ZeroScale { scale: 0.0 })
         );
         assert_eq!(
-            crate::error::upstream_status(&err),
+            SolidError::failed_routine_status(&err),
             Some(crate::error::SM_ERR)
         );
     }

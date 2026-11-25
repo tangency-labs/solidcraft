@@ -1354,7 +1354,7 @@ mod tests {
         let e = c
             .subdivide_by_block(&Kernel::default(), NodeId(0))
             .expect_err("null");
-        assert_eq!(e.upstream_status(), Some(1006));
+        assert_eq!(e.failed_routine_status(), Some(1006));
         // the node is the caller's: a refusal of its input, not a kernel defect
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
         assert!(!e.is_defect());

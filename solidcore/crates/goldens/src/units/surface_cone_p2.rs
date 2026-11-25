@@ -323,8 +323,8 @@ fn push_v(o: &mut Vec<f64>, v: Vec3) {
 /// one upstream cannot return.
 fn status(e: &SolidError) -> f64 {
     match e {
-        e if solidcore::error::nurbs::upstream_status(e).is_some() => {
-            f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
+        e if crate::output::recorded_status(e).is_some() => {
+            f64::from(crate::output::recorded_status(e).unwrap_or(-1))
         }
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => SM_ERR_INVALID_INPUT,
         _ => -1.0,

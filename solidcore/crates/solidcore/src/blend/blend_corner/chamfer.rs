@@ -125,7 +125,7 @@ fn missing_defect(op: &'static str, why: &'static str) -> SolidError {
 
 /// Invalid input to `op`: the caller's corner, fillet B-rep or body is not what the corner's
 /// construction reads (`input`), about `entity` where the check reads one, with the status
-/// the site returned before ([`CornerInput::upstream_status`]). The entry points are public
+/// the site returned before ([`CornerInput::status`]). The entry points are public
 /// and take a caller's corner.
 #[track_caller]
 fn bad_input(op: &'static str, input: CornerInput, entity: Option<EntityRef>) -> SolidError {
@@ -133,7 +133,7 @@ fn bad_input(op: &'static str, input: CornerInput, entity: Option<EntityRef>) ->
 }
 
 /// [`bad_input`] with the site's own `status` where its C++ reports the condition otherwise
-/// than the kind's default ([`CornerInput::upstream_status`]): a failed state check,
+/// than the kind's default ([`CornerInput::status`]): a failed state check,
 /// `SE(SM_ERR)`, where the default is `SM_ERR_NULL_POINTER`.
 #[track_caller]
 fn bad_input_status(op: &'static str, input: CornerInput, status: i32) -> SolidError {
@@ -766,7 +766,7 @@ fn unsupported(why: String) -> ChamferClass {
 ///
 /// # Errors
 ///
-/// [`SolidError::null_pointer`] for missing topology or geometry; those of the queries.
+/// a failure with status `SM_ERR_NULL_POINTER` for missing topology or geometry; those of the queries.
 #[allow(clippy::too_many_lines)] // one classification
 pub fn classify_chamfer(
     k: &Kernel,
@@ -1154,7 +1154,7 @@ fn corner_patch(
 /// # Errors
 ///
 /// `SM_ERR` where the corner is not as its topology made it or a solved crossing is not
-/// at its exact point; [`SolidError::null_pointer`] without the event.
+/// at its exact point; a failure with status `SM_ERR_NULL_POINTER` without the event.
 pub fn place_chamfer_vertices(pseudo: &mut FilletBrep, corner: &FilletCorner) -> Result<()> {
     let event = &corner
         .chamfer_corner
@@ -1236,7 +1236,7 @@ fn uv_line(
 /// # Errors
 ///
 /// `SM_ERR` where the corner is not as its topology made it or a chamfer's surface is not
-/// affine in its parameters along an edge; [`SolidError::null_pointer`] for missing
+/// affine in its parameters along an edge; a failure with status `SM_ERR_NULL_POINTER` for missing
 /// topology or geometry; those of the curve and surface constructions.
 #[allow(clippy::too_many_lines)] // one construction
 pub fn chamfer_corner_edge_geom(
@@ -1534,7 +1534,7 @@ fn patch_faces(event: &mut ChamferCorner, patch: &ChamferPatch) -> Result<()> {
 ///
 /// # Errors
 ///
-/// [`SolidError::null_pointer`] without a face, the fillet B-rep or a new face; those of the
+/// a failure with status `SM_ERR_NULL_POINTER` without a face, the fillet B-rep or a new face; those of the
 /// face construction.
 pub fn create_chamfer_patch(
     corner: &mut FilletCorner,
@@ -1610,7 +1610,7 @@ mod tests {
         );
         assert!(!err.is_defect(), "{err:?}");
         assert_eq!(
-            crate::error::upstream_status(&err),
+            SolidError::failed_routine_status(&err),
             Some(SM_ERR_NULL_POINTER)
         );
     }
@@ -1645,7 +1645,7 @@ mod tests {
             }),
             "{err:?}"
         );
-        assert_eq!(crate::error::upstream_status(&err), Some(SM_ERR));
+        assert_eq!(SolidError::failed_routine_status(&err), Some(SM_ERR));
     }
 
     /// The square corner's frame: the edges along u, v, w; face i between edges i - 1

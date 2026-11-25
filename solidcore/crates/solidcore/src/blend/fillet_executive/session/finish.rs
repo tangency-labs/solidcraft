@@ -61,13 +61,12 @@ use std::collections::BTreeSet;
 const OP: &str = "blend::fillet_executive::session::finish";
 
 /// The operation, status and entity of a failure the executive turns into a
-/// [`SolidError::FilletRefused`] when a size builds (WR-696): one that answers with an
-/// upstream status, by its status rather than its variant, so a typed failure that replaced
-/// an [`SolidError::Upstream`] is refused alike (#13790). Failures that stand for no
-/// upstream status are passed on as they are.
+/// [`SolidError::FilletRefused`] when a size builds (WR-696): one that a routine failed with
+/// ([`SolidError::failed_routine_status`]), whatever its variant (#13790). Other failures
+/// are passed on as they are.
 fn refusable(error: &SolidError) -> Option<(&'static str, i32, Option<EntityRef>)> {
     error
-        .upstream_status()
+        .failed_routine_status()
         .map(|code| (error.operation(), code, error.entity()))
 }
 
@@ -1791,7 +1790,7 @@ mod ball_fit_tests {
     fn the_generic_failure_is_typed_with_its_status() {
         let e = step_failed();
         assert_eq!(e.blend_failure(), Some(&BlendFailure::ExecutiveStepFailed));
-        assert_eq!(e.upstream_status(), Some(1001));
+        assert_eq!(e.failed_routine_status(), Some(1001));
         assert_eq!(e.operation(), OP);
         assert_eq!(e.entity(), None);
         assert_eq!(refusable(&e), Some((OP, 1001, None)));
@@ -1869,11 +1868,7 @@ mod ball_fit_tests {
         use crate::topology::EdgeId;
         let edge = Some(EntityRef::Edge(EdgeId::from_index(3)));
         // the refusal with a fit size
-        let upstream = SolidError::Upstream {
-            operation: "intersect::x",
-            code: 1001,
-            entity: edge,
-        };
+        let upstream = SolidError::failed_routine_at("intersect::x", 1001, edge);
         assert_eq!(refusable(&upstream), Some(("intersect::x", 1001, edge)));
         for typed in replaced_upstream("intersect::x", 1001, edge) {
             assert_eq!(refusable(&typed), refusable(&upstream), "{typed:?}");
@@ -1949,39 +1944,33 @@ mod ball_fit_tests {
         let before = keeping_cause(step_failed(), root);
         let after = rooted_in(
             before.clone(),
-            SolidError::blend_missing("blend::blend_corner::setback", "z"),
+            SolidError::blend("blend::blend_corner::setback", BlendFailure::CornerRefused),
         );
         assert_eq!(after, before);
         assert_eq!(
             rooted_in(
-                SolidError::sm_err("op"),
+                SolidError::failed_routine("op", crate::error::SM_ERR),
                 SolidError::blend(OP, BlendFailure::CornerRefused)
             ),
-            SolidError::sm_err("op")
+            SolidError::failed_routine("op", crate::error::SM_ERR)
         );
     }
 
     /// #19803: a later failure whose root is a record that could keep a cause, but is not
-    /// the missing corner (another stage's failure at another edge, the same phrase in
-    /// another operation, a missing corner that already keeps a cause), is returned as it
-    /// is: nothing ties it to the unsupported vertex.
+    /// the missing corner (another stage's failure at another edge, another failure of the
+    /// session, the missing corner in another operation or one that already keeps a cause),
+    /// is returned as it is: nothing ties it to the unsupported vertex.
     #[test]
     fn a_classification_error_is_not_kept_under_an_unrelated_root() {
         let unrelated = [
-            SolidError::blend_failed("blend::fillet_geom::p2::srf_srf_intersection", "w"),
-            SolidError::blend_missing("blend::fillet_executive::session", "the corner"),
-            SolidError::blend_missing(
-                "blend::fillet_solver::p1::set_extension_flags",
-                "the vertex's corner",
+            SolidError::blend(
+                "blend::fillet_geom::p2::srf_srf_intersection",
+                BlendFailure::Defect { why: "w" },
             ),
-            keeping_cause(
-                SolidError::blend_missing(
-                    "blend::fillet_executive::session",
-                    "the vertex's corner",
-                ),
-                SolidError::sm_err("op"),
+            SolidError::blend(
+                "blend::fillet_executive::session",
+                BlendFailure::CornerRefused,
             ),
-            // the same with the cause the session's missing corner now has
             SolidError::blend(
                 "blend::fillet_solver::p1::set_extension_flags",
                 BlendFailure::FilletVertexWithoutCorner,
@@ -1991,7 +1980,7 @@ mod ball_fit_tests {
                     "blend::fillet_executive::session",
                     BlendFailure::FilletVertexWithoutCorner,
                 ),
-                SolidError::sm_err("op"),
+                SolidError::failed_routine("op", crate::error::SM_ERR),
             ),
         ];
         for root in unrelated {

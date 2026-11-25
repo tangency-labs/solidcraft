@@ -159,9 +159,8 @@ const SOLVER_ON_ITS_EDGEUSE: &str = "each fillet solver is built on the edge use
 const CORNER_OF_ITS_ID: &str =
     "a corner id is an index of the session's corner table, which only grows";
 
-/// A reviewed defect (section 6 of `docs/failure-codes-and-reproduction.md`): `why` says why
-/// the missing thing is there. Status `SM_ERR_NULL_POINTER`, the fork's `NER`, as the phrase
-/// cause it replaces had.
+/// A reviewed defect: `why` says why the missing thing is there. Status
+/// `SM_ERR_NULL_POINTER`, the fork's `NER`.
 #[track_caller]
 fn null_defect(op: &'static str, why: &'static str) -> SolidError {
     crate::error::Failure::new(op, crate::error::blend::BlendFailure::Defect { why })
@@ -9172,7 +9171,7 @@ mod tests {
             );
             assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
             assert_eq!(
-                e.upstream_status(),
+                e.failed_routine_status(),
                 Some(crate::error::SM_ERR_INVALID_INPUT)
             );
             assert_eq!(e.operation(), OP);
@@ -9299,7 +9298,10 @@ mod tests {
         let result = session.do_fillet(&mut k);
         // The later stage's own failure is returned.
         assert_eq!(
-            result.as_ref().err().and_then(SolidError::upstream_status),
+            result
+                .as_ref()
+                .err()
+                .and_then(SolidError::failed_routine_status),
             Some(1001),
             "{result:?}"
         );
@@ -9447,7 +9449,11 @@ mod tests {
         assert_eq!(error.location, *at);
         let e = result.as_ref().unwrap_err();
         assert_eq!(e.operation(), "blend::fillet_executive::session::finish");
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR), "{e:?}");
+        assert_eq!(
+            e.failed_routine_status(),
+            Some(crate::error::SM_ERR),
+            "{e:?}"
+        );
         // the stage's error here is not a record that can keep a cause, so the
         // classification's error is not chained onto it: the chain is as it was
         assert_eq!(e.cause(), Some(&face_without_surface()), "{e:?}");

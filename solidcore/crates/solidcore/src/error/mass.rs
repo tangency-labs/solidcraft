@@ -12,22 +12,16 @@
 //! | [`MassFailure::EdgeCurveSingular`], [`MassFailure::TrimNotFinite`] | `SM_ERR`  |
 //! | [`MassFailure::EdgeWithoutCurve`], [`MassFailure::FaceWithoutSurface`], [`MassFailure::FaceuseWithoutRegion`] | `SM_ERR_NULL_POINTER` (or the site's, through `with_status`) |
 //! | [`MassFailure::FaceWithoutFaceuse`], [`MassFailure::FaceuseWithoutMate`], [`MassFailure::EdgeuseWithoutEdge`], [`MassFailure::EdgeuseWithoutVertexuse`], [`MassFailure::VertexuseWithoutVertex`] | `SM_ERR_NULL_POINTER` |
-//! | [`MassFailure::Failed`]         | `SM_ERR`                 |
 //! | [`MassFailure::Integrand`]      | `SM_ERR`                 |
-//! | [`MassFailure::Missing`]        | `SM_ERR_NULL_POINTER`    |
-//! | [`MassFailure::SkippedSpan`]    | `SM_ERR`                 |
 //! | [`MassFailure::StepControl`]    | `SM_ERR`                 |
 //!
 //! [`MassFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
 //! reason: a defect ([`ErrorKind::StageFailed`], class 127). The named causes from
 //! [`MassFailure::EdgeWithoutCurve`] on are the caller's body ([`ErrorKind::InvalidInput`])
-//! or its degenerate geometry. The phrase variants ([`MassFailure::Failed`],
-//! [`MassFailure::Missing`]) are no longer built here (the conversion guide:
-//! `docs/failure-codes-and-reproduction.md` §6).
+//! or its degenerate geometry.
 //!
 //! Deviations: not upstream. A failure says by its variant what went wrong; the failure's
-//! `operation` path says which routine. No failure names an entity: the sites they
-//! replace named none. Checks of a caller's arguments that report no status stay
+//! `operation` path says which routine. No failure names an entity. Checks of a caller's arguments that report no status stay
 //! [`crate::SolidError::InvalidInput`].
 
 use super::{ErrorKind, Failure, Reason, SM_ERR, SM_ERR_NULL_POINTER};
@@ -71,17 +65,9 @@ pub enum MassFailure {
     /// A face use of the caller's body is in no shell or its shell in no region.
     /// [`ErrorKind::InvalidInput`]; status `SM_ERR_NULL_POINTER`.
     FaceuseWithoutRegion,
-    /// The routine could not continue, as the phrase says (for example "the strip has
-    /// no such side").
-    Failed(&'static str),
     /// The integrand evaluated to no number (a surface evaluated to a non-finite
     /// point).
     Integrand,
-    /// Something the routine needs is missing, as the phrase says (for example "the
-    /// edge's curve").
-    Missing(&'static str),
-    /// The integrator took no step over a span of a face.
-    SkippedSpan,
     /// The integrator's step control cannot meet the accuracy: the step shrank below
     /// its minimum, or the steps ran out, or the error owed exceeds the accuracy.
     StepControl,
@@ -99,9 +85,7 @@ impl MassFailure {
         match self {
             Self::Defect { .. }
             | Self::EdgeCurveSingular
-            | Self::Failed(_)
             | Self::Integrand
-            | Self::SkippedSpan
             | Self::StepControl
             | Self::TrimNotFinite => SM_ERR,
             Self::EdgeWithoutCurve
@@ -111,15 +95,13 @@ impl MassFailure {
             | Self::FaceWithoutSurface
             | Self::FaceuseWithoutMate
             | Self::FaceuseWithoutRegion
-            | Self::Missing(_)
             | Self::VertexuseWithoutVertex => SM_ERR_NULL_POINTER,
         }
     }
 
-    /// The failure's stable [`ErrorKind`]: [`ErrorKind::Missing`] for
-    /// [`MassFailure::Missing`], [`ErrorKind::InvalidInput`] for the caller's body (an
-    /// edge or face without its geometry, a trim that is not finite, a face use in no
-    /// region, a missing link of its topology), [`ErrorKind::Degenerate`] for
+    /// The failure's stable [`ErrorKind`]: [`ErrorKind::InvalidInput`] for the caller's
+    /// body (an edge or face without its geometry, a trim that is not finite, a face use in
+    /// no region, a missing link of its topology), [`ErrorKind::Degenerate`] for
     /// [`MassFailure::EdgeCurveSingular`], [`ErrorKind::Failed`] otherwise.
     /// [`MassFailure::Defect`] is [`ErrorKind::StageFailed`], a defect.
     #[must_use]
@@ -156,10 +138,7 @@ impl core::fmt::Display for MassFailure {
             Self::FaceWithoutSurface => f.write_str("the face has no surface"),
             Self::FaceuseWithoutMate => f.write_str("the face use has no mate"),
             Self::FaceuseWithoutRegion => f.write_str("the face use has no region"),
-            Self::Failed(what) => f.write_str(what),
             Self::Integrand => f.write_str("the integrand is not a finite number"),
-            Self::Missing(what) => write!(f, "{what} is missing"),
-            Self::SkippedSpan => f.write_str("the integrator took no step over a span of a face"),
             Self::StepControl => {
                 f.write_str("the integrator's step control cannot meet the accuracy")
             }
@@ -200,22 +179,15 @@ mod tests {
     #[test]
     fn mass_failures_keep_the_status_and_kind_of_the_upstream_they_replace() {
         let cases = [
-            (MassFailure::Failed("x"), SM_ERR),
-            (MassFailure::Missing("x"), SM_ERR_NULL_POINTER),
             (MassFailure::StepControl, SM_ERR),
             (MassFailure::Integrand, SM_ERR),
-            (MassFailure::SkippedSpan, SM_ERR),
         ];
         for (failure, code) in cases {
             let typed = SolidError::mass("mass::op", failure);
-            let before = SolidError::Upstream {
-                operation: "mass::op",
-                code,
-                entity: None,
-            };
+            let before = SolidError::failed_routine("mass::op", code);
             assert_eq!(typed.sm_status(), before.sm_status(), "{failure:?}");
-            assert_eq!(typed.upstream_status(), Some(code), "{failure:?}");
-            assert_eq!(super::super::upstream_status(&typed), Some(code));
+            assert_eq!(typed.failed_routine_status(), Some(code), "{failure:?}");
+            assert_eq!(SolidError::failed_routine_status(&typed), Some(code));
             assert_eq!(typed.kind(), before.kind(), "{failure:?}");
             assert_eq!(typed.operation(), before.operation(), "{failure:?}");
             assert_eq!(typed.entity(), before.entity(), "{failure:?}");
@@ -228,18 +200,16 @@ mod tests {
             assert_eq!(typed.mass_failure(), Some(&failure));
         }
         assert_eq!(
-            SolidError::mass("mass::op", MassFailure::Missing("the edge's curve")).to_string(),
-            "mass::op: the edge's curve is missing"
-        );
-        assert_eq!(
-            SolidError::mass("mass::op", MassFailure::Failed("x")).kind(),
+            SolidError::mass("mass::op", MassFailure::StepControl).kind(),
             ErrorKind::Failed
         );
-        assert_eq!(SolidError::sm_err("mass::op").mass_failure(), None);
+        assert_eq!(
+            SolidError::failed_routine("mass::op", SM_ERR).mass_failure(),
+            None
+        );
     }
 
-    /// The named causes of the mass properties keep the status of the phrase each
-    /// replaced, and have their class.
+    /// The named causes of the mass properties have their status and class.
     #[test]
     fn the_mass_causes_keep_their_status_and_have_their_class() {
         use ErrorKind as K;
@@ -289,30 +259,22 @@ mod tests {
         ];
         for (failure, status, kind) in cases {
             let e = SolidError::mass("mass::op", failure);
-            assert_eq!(e.upstream_status(), Some(status), "{failure:?}");
-            assert_eq!(super::super::upstream_status(&e), Some(status));
+            assert_eq!(e.failed_routine_status(), Some(status), "{failure:?}");
+            assert_eq!(SolidError::failed_routine_status(&e), Some(status));
             assert_eq!(e.sm_status(), Some(status), "{failure:?}");
             assert_eq!(e.kind(), kind, "{failure:?}");
             assert_eq!(e.mass_failure(), Some(&failure));
             assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
         }
-        // `edge_length`'s check keeps the `SM_ERR` of the phrase it replaced
+        // `edge_length`'s check reports `SM_ERR`
         let e = Failure::new("mass::op", MassFailure::EdgeWithoutCurve)
             .with_status(SM_ERR)
             .into_error();
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert_eq!(e.kind(), K::InvalidInput);
     }
 
-    /// The mass-property routines build no bare `Upstream` status in their library
-    /// code.
-    #[test]
-    fn the_mass_routines_build_no_bare_statuses() {
-        super::super::bare_scan::assert_waiting("mass", 3, &[]);
-    }
-
-    /// A reviewed defect is of class 127 with the status of the phrase cause it replaces,
-    /// and says why.
+    /// A reviewed defect is of class 127 with its status, and says why.
     #[test]
     fn a_reviewed_defect_is_class_127_with_its_reason() {
         let why =
@@ -321,7 +283,7 @@ mod tests {
         let op = "mass::op";
         super::super::tests::assert_defect(
             &SolidError::mass(op, defect),
-            &SolidError::mass(op, MassFailure::Failed("x")),
+            &SolidError::mass(op, MassFailure::StepControl),
             op,
             SM_ERR,
             &format!("{op}: stage_failed: {why}"),
@@ -331,36 +293,11 @@ mod tests {
             .into_error();
         super::super::tests::assert_defect(
             &missing,
-            &SolidError::mass(op, MassFailure::Missing("x")),
+            &SolidError::mass(op, MassFailure::EdgeuseWithoutEdge),
             op,
             SM_ERR_NULL_POINTER,
             &format!("{op}: stage_failed: {why}"),
         );
         assert_eq!(missing.mass_failure(), Some(&defect));
-    }
-
-    /// The sites that build a mass-property phrase cause only fall:
-    /// per file, in the library code of `solidcore` and `solidcore-ops`, as
-    /// [`super::super::site_scan`] counts them. A PR that converts sites lowers its
-    /// files' counts here, and a file at 0 loses its line (the conversion guide:
-    /// `docs/failure-codes-and-reproduction.md` §6).
-    #[test]
-    fn the_mass_phrase_cause_sites_only_shrink() {
-        use super::super::site_scan::{assert_pinned, crate_sites, Builder, Scan, Wrappers};
-        const PHRASES: Scan = Scan {
-            builders: &[
-                Builder::Variant("MassFailure", "Failed"),
-                Builder::Variant("MassFailure", "Missing"),
-            ],
-            wrappers: Wrappers::Phrase,
-        };
-        #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
-        const PINNED: &[(&str, usize)] = &[
-        ];
-        assert_pinned(
-            "mass-property phrase-cause sites",
-            &crate_sites(&PHRASES),
-            PINNED,
-        );
     }
 }

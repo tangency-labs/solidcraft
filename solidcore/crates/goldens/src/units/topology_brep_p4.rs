@@ -591,7 +591,7 @@ fn rust_status(e: &SolidError) -> Output {
         return o;
     }
     match e {
-        e if solidcore::error::upstream_status(e).is_some() => status_output(f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))),
+        e if crate::output::recorded_status(e).is_some() => status_output(f64::from(crate::output::recorded_status(e).unwrap_or(-1))),
         // the kernel's refusal of the input (a damaged B-rep it will not walk)
         other => Output::err(other.to_string()),
     }
@@ -789,7 +789,7 @@ impl UnitDiff for Runner {
                 // a failed edit leaves the records it changed (the shim walks the B-rep
                 // after a failed status of the edits as well)
                 let o = rust_status(&e);
-                if edits(i.op) && solidcore::error::upstream_status(&e).is_some() {
+                if edits(i.op) && crate::output::recorded_status(&e).is_some() {
                     let counts = record_counts(&b)
                         .iter()
                         .map(|&n| n as i64)

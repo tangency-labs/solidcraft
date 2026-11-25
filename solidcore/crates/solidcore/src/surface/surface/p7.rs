@@ -5889,13 +5889,9 @@ mod tests {
         ];
         for (operation, failure, code, kind) in samples {
             let typed = SolidError::surface(operation, failure);
-            let before = SolidError::Upstream {
-                operation,
-                code,
-                entity: None,
-            };
+            let before = SolidError::failed_routine(operation, code);
             assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
-            assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
+            assert_eq!(typed.failed_routine_status(), Some(code), "{typed:?}");
             assert_eq!(typed.kind(), kind, "{typed:?}");
             assert_eq!(typed.operation(), before.operation(), "{typed:?}");
             assert_eq!(typed.entity(), None, "{typed:?}");
@@ -5910,7 +5906,7 @@ mod tests {
     #[test]
     fn a_cache_failure_chains_its_cause_including_a_port_failure() {
         use crate::error::surface::SurfaceFailure;
-        let inner = SolidError::sm_err("surface::inner");
+        let inner = SolidError::failed_routine("surface::inner", crate::error::SM_ERR);
         let e = chained(
             OP_SOLVE,
             SurfaceFailure::SurfaceCacheNotBuilt,

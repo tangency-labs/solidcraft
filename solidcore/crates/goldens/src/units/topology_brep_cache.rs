@@ -7,6 +7,8 @@ use crate::case::CaseContext;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use solidcore::error::topology::TopologyFailure;
+use solidcore::error::Failure;
 use solidcore::geom::a_object::{BREP_TYPE, POLY_BREP_TYPE};
 use solidcore::geom::extent3d::Extent3d;
 use solidcore::geom::tree::{AuxDataType, NodeId, Tree, TreeOwner};
@@ -209,9 +211,13 @@ fn run_with_intermediate_owners(i: &Inputs, intermediate_owners: bool) -> SolidR
                 b.edge_mut(e)?
                     .curve
                     .as_mut()
-                    .ok_or(solidcore::SolidError::null_pointer(
-                        "difftest::topology_brep_cache::owner_chain",
-                    ))?
+                    .ok_or_else(|| {
+                        Failure::new(
+                            "difftest::topology_brep_cache::owner_chain",
+                            TopologyFailure::EdgeWithoutCurve,
+                        )
+                        .into_error()
+                    })?
                     .set_owner(Some(generated), None);
                 owners.insert(generated, edgeuse);
                 owners.insert(edgeuse, identity(CacheObject::Edge(e)));

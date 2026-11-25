@@ -16,7 +16,7 @@
 //! | `clamp_vector`          | `ExtentNd::new`, `get_mut`, `clamp_vector`     | `SmExtentNd(ULONG)`, `operator[]`, `ClampVector` |
 //!
 //! Upstream statuses are compared as the int `status` (0 = `SM_SUCCESS`, else the
-//! `SM_ERR_*` value; Rust `InvalidInput` is 1007, `Upstream` its code). A failed
+//! `SM_ERR_*` value; Rust `InvalidInput` is 1007, a typed failure its status). A failed
 //! `Intersect` reports upstream's `Init()` result interval. `Inversion`'s undefined
 //! parameter is `SM_UNDEF_DOUBLE`. Every run has at least [`MIN_GENERATED`] generated
 //! cases.
@@ -126,9 +126,8 @@ fn e2(e: &Extent1d) -> E2 {
 fn status_of(e: &SolidError) -> Result<f64, HarnessError> {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => Ok(1007.0),
-        SolidError::Upstream { code, .. } => Ok(f64::from(*code)),
-        e if solidcore::error::upstream_status(e).is_some() => {
-            Ok(f64::from(solidcore::error::upstream_status(e).unwrap_or(-1)))
+        e if crate::output::recorded_status(e).is_some() => {
+            Ok(f64::from(crate::output::recorded_status(e).unwrap_or(-1)))
         }
         other => Err(harness(format!("unexpected rust error: {other}"))),
     }

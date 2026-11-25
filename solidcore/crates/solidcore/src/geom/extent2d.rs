@@ -1085,7 +1085,7 @@ mod tests {
             outside.geom_failure(),
             Some(&crate::error::geom::GeomFailure::PointOutsideExtent { u: 2.0, v: 0.5 })
         );
-        assert_eq!(outside.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(outside.failed_routine_status(), Some(crate::error::SM_ERR));
         let mapped = e
             .point_map_to_domain(
                 p(2.0, 0.5),
@@ -1094,7 +1094,7 @@ mod tests {
             )
             .unwrap_err();
         assert_eq!(mapped.geom_failure(), outside.geom_failure());
-        assert_eq!(mapped.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(mapped.failed_routine_status(), Some(crate::error::SM_ERR));
     }
 
     #[test]

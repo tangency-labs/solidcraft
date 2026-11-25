@@ -1,5 +1,5 @@
-//! Regression test for #2012: every `SmStatus` number a [`SolidError::Upstream`] can
-//! carry is public in `solidcore::error`, defined once, and equal to upstream's.
+//! Regression test for #2012: every `SmStatus` number a [`SolidError`] can
+//! answer with is public in `solidcore::error`, defined once, and equal to upstream's.
 //!
 //! The expected numbers are copied from the pinned upstream `SmMessages.h` (`SM_SUCCESS`
 //! to `SM_ERR_TESS_FAIL_FACE`, lines 45-70) and `SmTypes.h` (`TRUE`, `FALSE`, `UNSURE`),
@@ -115,25 +115,25 @@ mod re_exports {
 
 #[test]
 fn issue_2012_is_offset_edge_vanishes_only_for_1043() {
-    let upstream = |code| SolidError::Upstream {
-        operation: "op",
-        code,
-        entity: None,
-    };
-    assert!(upstream(SM_ERR_OFFSET_EDGE_VANISHES).is_offset_edge_vanishes());
-    assert!(upstream(1043).is_offset_edge_vanishes());
-    for code in [
-        SM_ERR,
-        SM_ERR_OFFSET_WALLS_TOUCH,
-        SM_ERR_INVALID_INPUT,
-        1044,
+    use solidcore::error::{geom::GeomFailure, offset::OffsetFailure, ErrorKind, Failure};
+    let vanishes = Failure::new(
+        "op",
+        OffsetFailure::EdgeVanishes {
+            edge: None,
+            face: None,
+        },
+    )
+    .into_error();
+    assert!(vanishes.is_offset_edge_vanishes());
+    assert_eq!(vanishes.sm_status(), Some(SM_ERR_OFFSET_EDGE_VANISHES));
+    for class in [
+        ErrorKind::Failed,
+        ErrorKind::InvalidInput,
+        ErrorKind::OffsetWallsTouch,
     ] {
-        assert!(!upstream(code).is_offset_edge_vanishes(), "{code}");
+        let other = Failure::new("op", GeomFailure::CallFailed { class }).into_error();
+        assert!(!other.is_offset_edge_vanishes(), "{other:?}");
+        assert_eq!(other.sm_status(), Some(SM_ERR), "{other:?}");
     }
-    assert!(!SolidError::sm_err("op").is_offset_edge_vanishes());
     assert!(!SolidError::unported("Sym", "unit").is_offset_edge_vanishes());
-    assert_eq!(
-        upstream(SM_ERR_OFFSET_EDGE_VANISHES).sm_status(),
-        Some(SM_ERR_OFFSET_EDGE_VANISHES)
-    );
 }

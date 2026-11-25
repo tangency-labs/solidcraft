@@ -27,8 +27,7 @@
 //! Static entry points take non-null references/owned values (null is undefined
 //! upstream); member null is native 1006, API null/invalid selection is native 1007.
 //!
-//! Failures (the conversion guide, `docs/failure-codes-and-reproduction.md` §6): each keeps
-//! the status upstream's site returned. A link or entity of a B-rep the kernel built, or of
+//! Failures: each keeps the status upstream's site returned. A link or entity of a B-rep the kernel built, or of
 //! the executive's own data, that is not there is an [`OffsetFailure::Defect`] whose `why`
 //! says which (p1's reasons where the two files share the link); a missing B-rep, a link
 //! of the input body that is not there (a caller can build such a body with `Brep`'s public
@@ -2004,7 +2003,7 @@ pub(super) fn select_offset_faceuse(
     Ok(faceuse)
 }
 
-// The links of the operation's input below are the caller's (rule 9): a caller can build a
+// The links of the operation's input below are the caller's: a caller can build a
 // body without them with `Brep`'s public mutators, so each is a named invalid input that
 // keeps upstream's null-pointer status.
 
@@ -2822,7 +2821,9 @@ fn collapse_offset_status<T>(result: Result<T>) -> Result<T> {
         if error.is_unported_or_cancelled() {
             error
         } else {
-            SolidError::failed_after(OP_OFFSET, "the offset could not be built", error)
+            Failure::new(OP_OFFSET, OffsetFailure::OffsetNotBuilt)
+                .caused_by(error)
+                .into_error()
         }
     })
 }
@@ -4696,7 +4697,7 @@ mod tests {
             );
             assert_eq!(kernel.context.doing_boolean(), previous);
             for error in [
-                SolidError::sm_err(OP_SOLID),
+                SolidError::failed_routine(OP_SOLID, crate::error::SM_ERR),
                 SolidError::unported("SmBrep::ShrinkGeometry", "topology.brep_p4"),
             ] {
                 let result: Result<()> = with_doing_boolean(&mut kernel, |kernel| {
@@ -5139,15 +5140,18 @@ mod tests {
     #[test]
     fn static_offset_collapses_only_ordinary_statuses() {
         for error in [
-            SolidError::null_pointer(OP_SOLID),
+            SolidError::failed_routine(OP_SOLID, SM_ERR_NULL_POINTER),
             SolidError::invalid_input(OP_SOLID, "bad topology"),
-            SolidError::Upstream {
-                operation: OP_SOLID,
-                code: 1023,
-                entity: None,
-            },
+            SolidError::failed_routine(OP_SOLID, 1023),
         ] {
-            assert_status(collapse_offset_status::<()>(Err(error)), SM_ERR);
+            let collapsed = collapse_offset_status::<()>(Err(error.clone()));
+            let failure = collapsed.as_ref().unwrap_err();
+            assert_eq!(
+                failure.offset_failure(),
+                Some(&OffsetFailure::OffsetNotBuilt)
+            );
+            assert_eq!(failure.cause(), Some(&error));
+            assert_status(collapsed, SM_ERR);
         }
         assert_eq!(collapse_offset_status(Ok(17)), Ok(17));
         assert_dependency(
@@ -5326,7 +5330,10 @@ mod tests {
                         assert!(kernels.primary.context.is_mark_locked(mark));
                         assert_eq!(kernels.primary.context.current_mark(mark), before);
                         if exit == 1 {
-                            return Err(SolidError::sm_err("test::early"));
+                            return Err(SolidError::failed_routine(
+                                "test::early",
+                                crate::error::SM_ERR,
+                            ));
                         }
                         *other = None;
                         if exit == 2 {
@@ -5437,7 +5444,10 @@ mod tests {
                             attributes,
                             BooleanOperation::Difference,
                         )?;
-                        Err(SolidError::sm_err("test::after-notify"))
+                        Err(SolidError::failed_routine(
+                            "test::after-notify",
+                            crate::error::SM_ERR,
+                        ))
                     },
                 ),
                 SM_ERR,
@@ -6362,9 +6372,9 @@ mod tests {
         assert!(brep_is_manifold_solid(&thin).unwrap());
     }
 
-    /// TE-O-18 part 5 (#19851): what the offset and the shell refuse of their input, and
+    /// #19851: what the offset and the shell refuse of their input, and
     /// the extended offset's refusals, are named offset causes that keep the status upstream
-    /// returned (`solidcore/docs/failure-codes-and-reproduction.md` §6, rules 1, 7 and 9).
+    /// returned.
     #[test]
     fn the_inputs_and_refusals_of_p2_are_named_causes_with_their_statuses() {
         use crate::error::{ErrorKind, SM_ERR_INVALID_INPUT};
@@ -6506,9 +6516,9 @@ mod tests {
         );
     }
 
-    /// TE-O-18 part 5 (#19851): a link of the input's B-rep, or the executive's own offset
+    /// #19851: a link of the input's B-rep, or the executive's own offset
     /// B-rep, that is not there is a defect that says which, with the status of upstream's
-    /// `NER` (the conversion guide, rule 2).
+    /// `NER`.
     #[test]
     fn a_missing_offset_brep_is_a_defect_and_a_missing_input_link_is_named() {
         let defect = |e: SolidError, says: &str| {
@@ -6606,9 +6616,9 @@ mod tests {
         );
     }
 
-    /// TE-O-18 part 6 (#19851): the shell's difference missing an operand or its result,
-    /// and a sheet's wall without a surface, are defects that say which (the conversion
-    /// guide, rule 2), with the status of upstream's `NER`.
+    /// #19851: the shell's difference missing an operand or its result,
+    /// and a sheet's wall without a surface, are defects that say which, with the status of
+    /// upstream's `NER`.
     #[test]
     fn a_missing_operand_result_or_wall_surface_is_a_defect_that_says_which() {
         let defect = |e: SolidError, says: &str| {

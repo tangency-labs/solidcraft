@@ -4089,7 +4089,7 @@ mod tests {
             e.blend_failure(),
             Some(&BlendFailure::Solver(SolverFailure::JacobianNotLoaded))
         );
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
         assert_eq!(e.cause(), Some(&inner));
         assert!(e.is_defect());
     }
@@ -4181,8 +4181,7 @@ mod tests {
         for (cause, class, status) in cases {
             let e = Failure::new("blend::op", cause).into_error();
             assert_eq!(e.kind(), class, "{cause:?}");
-            assert_eq!(e.upstream_status(), Some(status), "{cause:?}");
-            assert!(!cause.is_phrase(), "{cause:?}");
+            assert_eq!(e.failed_routine_status(), Some(status), "{cause:?}");
             assert!(!e.is_defect(), "{cause:?}");
         }
         for why in [
@@ -4193,7 +4192,7 @@ mod tests {
         ] {
             let e = defect("blend::op", why);
             assert!(e.is_defect());
-            assert_eq!(e.upstream_status(), Some(SM_ERR));
+            assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         }
     }
 
@@ -4228,7 +4227,7 @@ mod tests {
                 piece: 2.0,
             }))
         );
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
         assert_eq!(e.kind(), crate::error::ErrorKind::Unsupported);
     }
 
@@ -4535,7 +4534,7 @@ mod tests {
             e.blend_failure(),
             Some(&BlendFailure::Solver(SolverFailure::OffsetNormalsParallel))
         );
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
         let mut fs = SurfaceSurfaceFs::new(
             &k,
             &mut FilletBrep::new(),
@@ -4559,7 +4558,10 @@ mod tests {
                 FilletSetUp::SolverExecutive
             ))
         );
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(
+            e.failed_routine_status(),
+            Some(crate::error::SM_ERR_NULL_POINTER)
+        );
     }
 
     #[test]
@@ -4614,7 +4616,10 @@ mod tests {
                 FilletSetUp::ReferenceCurve
             ))
         );
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(
+            e.failed_routine_status(),
+            Some(crate::error::SM_ERR_NULL_POINTER)
+        );
         // (no fillet geometry: upstream reads m_vFilletGeoms[0] out of bounds)
         assert!(matches!(
             vr.re_calc_fillet_geom(&k, &mut pseudo, false, None, Some(&centre)),

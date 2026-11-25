@@ -1629,7 +1629,7 @@ mod tests {
             Some(&CurveFailure::OffsetDirectionUnknown { direction: 4 })
         );
         assert_eq!(
-            crate::error::upstream_status(&err),
+            SolidError::failed_routine_status(&err),
             Some(crate::error::SM_ERR)
         );
         // no curves: no offset is made
@@ -1638,7 +1638,7 @@ mod tests {
         };
         assert_eq!(err.curve_failure(), Some(&CurveFailure::NoOffsetCurve));
         assert_eq!(
-            crate::error::upstream_status(&err),
+            SolidError::failed_routine_status(&err),
             Some(crate::error::SM_ERR)
         );
         assert!(matches!(

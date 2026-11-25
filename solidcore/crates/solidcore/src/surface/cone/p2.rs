@@ -693,9 +693,7 @@ impl Cone {
         }
         if self.rev.base.gw_nurb().is_none() {
             return Err(match made {
-                Err(e) => {
-                    SolidError::surface_nurb_not_made(OP_REPARAM, SM_ERR_NULL_POINTER, Err(e))
-                }
+                Err(e) => SolidError::surface_nurb_not_made(OP_REPARAM, SM_ERR_NULL_POINTER, e),
                 Ok(()) => Failure::new(
                     OP_REPARAM,
                     SurfaceFailure::Defect {

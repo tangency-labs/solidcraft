@@ -813,7 +813,8 @@ impl Two {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Upstream`] with `SM_ERR_NULL_POINTER` (upstream's `NER`);
+    /// [`TopologyFailure::VerticesShareNoRegion`](solidcore::error::topology::TopologyFailure)
+    /// (`SM_ERR_NULL_POINTER`, upstream's `NER`);
     /// [`SolidError::InvalidInput`] for shells of both B-reps
     /// without a region (`NULL == NULL`: upstream would go on to merge shells across
     /// B-reps) or a missing arena.
@@ -839,9 +840,11 @@ impl Two {
                 }
             }
         }
-        Err(SolidError::null_pointer(
+        Err(solidcore::error::Failure::new(
             "difftest::boolean_topology_intersector_p1::Two::glue_vertices_of_two_breps",
-        ))
+            solidcore::error::topology::TopologyFailure::VerticesShareNoRegion,
+        )
+        .into_error())
     }
 
     /// Deletes the cache of the B-rep behind `brep` (`SmBrep::Notify`'s `PRE_EDIT` /
@@ -1671,7 +1674,11 @@ impl IntersectorBrep<H> for Two {
             },
         )?;
         if !out.split {
-            return Err(SolidError::sm_err("difftest::topology_intersector::split"));
+            return Err(solidcore::error::Failure::new(
+                "difftest::topology_intersector::split",
+                solidcore::error::topology::TopologyFailure::EdgeNotSplit,
+            )
+            .into_error());
         }
         let [a, z] = out
             .edges
@@ -2329,7 +2336,11 @@ impl TopologyObjects<H> for Two {
     }
     fn face_surface(&self, face: H) -> solidcore::Result<H> {
         self.face_surface_h(face).flatten().ok_or_else(|| {
-            SolidError::null_pointer("difftest::boolean_topology_intersector_p1::face_surface")
+            solidcore::error::Failure::new(
+                "difftest::boolean_topology_intersector_p1::face_surface",
+                solidcore::error::intersect::IntersectFailure::FaceWithoutSurface,
+            )
+            .into_error()
         })
     }
     fn surface(&self, surface: H) -> solidcore::Result<&Surface> {
@@ -3234,7 +3245,7 @@ fn status<T>(r: Result<T, SolidError>, o: &mut Vec<f64>) -> Result<Option<T>, Fa
             o.push(0.0);
             Ok(Some(v))
         }
-        Err(e @ (SolidError::Upstream { .. } | SolidError::Failed(_))) => {
+        Err(e @ SolidError::Failed(_)) => {
             o.push(f64::from(e.sm_status().unwrap_or(solidcore::error::SM_ERR)));
             Ok(None)
         }
@@ -3490,7 +3501,7 @@ pub(super) fn run_rust_script_counted(
                 if let Some(e) = &r.status {
                     o.pop();
                     o.push(match e {
-                        SolidError::Upstream { .. } | SolidError::Failed(_) => {
+                        SolidError::Failed(_) => {
                             f64::from(e.sm_status().unwrap_or(solidcore::error::SM_ERR))
                         }
                         _ => NULL_DEREF,
@@ -5515,8 +5526,8 @@ mod glue_tests {
             let r = two.glue_vertices(&mut k, hd(this_slot, K_BREP, 0), v0, v1, None);
             assert!(
                 matches!(
-                    r,
-                    Err(SolidError::Upstream { code: solidcore::error::SM_ERR_NULL_POINTER, .. })
+                    &r,
+                    Err(e) if e.sm_status() == Some(solidcore::error::SM_ERR_NULL_POINTER)
                 ),
                 "this={this_slot}: {r:?}"
             );

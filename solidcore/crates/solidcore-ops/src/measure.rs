@@ -4,6 +4,7 @@
 //! length and middle. Every number is the kernel's; ops converts and compares.
 
 use solidcore::curve::from_parameters;
+use solidcore::error::query::QueryFailure;
 use solidcore::error::EntityRef;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::extent3d::Extent3d;
@@ -1976,8 +1977,9 @@ impl Body {
         let f = order::face(order, face)?;
         let n = with_body("face_plane_normal", self, |k, b| {
             let planar = {
-                let surface = face::surface(b, f)?
-                    .ok_or_else(|| solidcore::SolidError::null_pointer("ops::face_plane_normal"))?;
+                let surface = face::surface(b, f)?.ok_or_else(|| {
+                    missing("ops::face_plane_normal", QueryFailure::FaceWithoutSurface)
+                })?;
                 surface.is_planar(k, face::tolerance(b, f)?)?.is_planar
             };
             if !planar {
@@ -2094,7 +2096,7 @@ impl Body {
         let p = read_body("edge_middle", self, |k, b| {
             let interval = edge::interval(b, e)?;
             let curve = edge::curve(b, e)?
-                .ok_or_else(|| solidcore::SolidError::null_pointer("ops::edge_middle"))?;
+                .ok_or_else(|| missing("ops::edge_middle", QueryFailure::EdgeWithoutCurve))?;
             curve
                 .evaluate_point(k, middle(interval.min(), interval.max()))
                 .map(array)
@@ -2125,7 +2127,7 @@ impl Body {
         let points = read_body("edge_points", self, |k, b| {
             let interval = edge::interval(b, e)?;
             let curve = edge::curve(b, e)?
-                .ok_or_else(|| solidcore::SolidError::null_pointer("ops::edge_points"))?;
+                .ok_or_else(|| missing("ops::edge_points", QueryFailure::EdgeWithoutCurve))?;
             let (lo, hi) = (interval.min(), interval.max());
             (1..=n)
                 .map(|i| curve.evaluate_point(k, inside(lo, hi, i, n)).map(array))
@@ -2581,6 +2583,12 @@ fn across(b: &Brep, e: EdgeId, set: &[FaceId]) -> solidcore::Result<Result<FaceI
             "a rim edge without exactly one face across it",
         )),
     })
+}
+
+/// The kernel's query failure for a face with no surface or an edge with no curve, as the
+/// kernel's own queries answer it (`SM_ERR_NULL_POINTER`).
+fn missing(operation: &'static str, failure: QueryFailure) -> solidcore::SolidError {
+    solidcore::error::Failure::new(operation, failure).into_error()
 }
 
 /// `direction` made unit at any finite length, `None` for a coordinate that is not finite or a

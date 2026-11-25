@@ -553,7 +553,7 @@ pub fn is_on_face_corner(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<(bool,
         // a failure with an upstream status leaves the initial outputs; as the fork, any
         // failure is no best point (tangency-labs/smlib 7a35f33)
         Err(e)
-            if (e.operation() == OP && e.upstream_status().is_some())
+            if (e.operation() == OP && e.failed_routine_status().is_some())
                 || !e.is_unported_or_cancelled() =>
         {
             FaceCorner {

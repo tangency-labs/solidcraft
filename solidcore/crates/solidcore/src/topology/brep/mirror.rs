@@ -1184,7 +1184,7 @@ mod tests {
             })
         );
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
         assert_eq!(points(&b), before);
         assert_eq!(counts(&b), [6, 12, 8]);
     }

@@ -625,11 +625,10 @@ fn net_partials(
     out.ok_or_else(|| SolidError::port_invariant(OP, "a box of a UV curve without parts"))
 }
 
-/// Whether `e` is the certificate's own `SM_ERR` (a wide box's non-positive weight): an
-/// [`SolidError::Upstream`], or a typed failure that replaced one (its
-/// [`SolidError::upstream_status`], #13790).
+/// Whether `e` is the certificate's own `SM_ERR` (a wide box's non-positive weight): a
+/// routine's failure with that status (its [`SolidError::failed_routine_status`], #13790).
 fn is_certificate_sm_err(e: &SolidError) -> bool {
-    e.upstream_status() == Some(crate::error::SM_ERR)
+    e.failed_routine_status() == Some(crate::error::SM_ERR)
         && e.operation() == "blend::fillet_section::certificate"
 }
 
@@ -1592,7 +1591,7 @@ fn lift_offset_surface(
     let base_dom = base.natural_uv_domain_with_nurb(k)?;
     let bs_base = exact_nurbs_surface(k, base)?.ok_or_else(unsupported_base)?;
     let base_net = Nurbs::of(&bs_base).map_err(|e| match e {
-        e if e.upstream_status().is_some() => unsupported_base(),
+        e if e.failure().is_some() => unsupported_base(),
         other => other,
     })?;
     let ext_srf = off
@@ -1608,7 +1607,7 @@ fn lift_offset_surface(
             }
             let bs_ext = exact_nurbs_surface(k, &e_srf)?.ok_or_else(unsupported_base)?;
             let ext_net = Nurbs::of(&bs_ext).map_err(|e| match e {
-                e if e.upstream_status().is_some() => unsupported_base(),
+                e if e.failure().is_some() => unsupported_base(),
                 other => other,
             })?;
             let ext_dom = e_srf.natural_uv_domain_with_nurb(k)?;
@@ -1884,7 +1883,7 @@ impl LiftSurface {
         };
         let bs = exact_nurbs_surface(k, surface)?.ok_or_else(unsupported_srf)?;
         let net = Nurbs::of(&bs).map_err(|e| match e {
-            e if e.upstream_status().is_some() => unsupported_srf(),
+            e if e.failure().is_some() => unsupported_srf(),
             other => other,
         })?;
         let dom = surface.natural_uv_domain_with_nurb(k)?;
@@ -3023,9 +3022,12 @@ mod tests {
     fn certificate_sm_err_reads_the_status_of_a_typed_failure() {
         use crate::error::replaced_upstream_samples::{native_failures, replaced_upstream};
         let op = "blend::fillet_section::certificate";
-        assert!(is_certificate_sm_err(&SolidError::sm_err(op)));
+        assert!(is_certificate_sm_err(&SolidError::failed_routine(
+            op,
+            crate::error::SM_ERR
+        )));
         assert!(matches!(
-            partials_or_subdivide(Err(SolidError::sm_err(op))),
+            partials_or_subdivide(Err(SolidError::failed_routine(op, crate::error::SM_ERR))),
             Ok(None)
         ));
         for typed in replaced_upstream(op, crate::error::SM_ERR, None) {

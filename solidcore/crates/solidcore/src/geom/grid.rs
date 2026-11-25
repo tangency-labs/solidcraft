@@ -1376,7 +1376,7 @@ mod tests {
         let mut cache = plane_cache(k, Some(3));
         assert!(matches!(
             g.expand_hierarchy(k, h, &mut cache),
-            Err(e) if e.upstream_status() == Some(crate::error::SM_ERR)
+            Err(e) if e.failed_routine_status() == Some(crate::error::SM_ERR)
         ));
         assert!(matches!(
             g.expand_hierarchy(k, HierarchyId(99), &mut cache),
@@ -1557,7 +1557,7 @@ mod tests {
         let (_, leaves) = top_box_and_leaves(k, &mut anonymous);
         assert!(matches!(
             g.add_surface_node(k, &mut anonymous, leaves[0], &b),
-            Err(e) if e.upstream_status() == Some(crate::error::SM_ERR)
+            Err(e) if e.failed_routine_status() == Some(crate::error::SM_ERR)
         ));
         assert!(g.elements().is_empty());
     }

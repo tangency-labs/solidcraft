@@ -459,11 +459,7 @@ impl NotifyCallback for Recorder {
             ]);
         }
         // ignored by Notify
-        Err(SolidError::Upstream {
-            operation: "recorder",
-            code: solidcore::error::SM_ERR,
-            entity: None,
-        })
+        Err(crate::output::routine_failure("recorder"))
     }
 }
 
@@ -977,9 +973,9 @@ impl RustRun {
                         out.push(self.cache_index(c));
                         Ok(Step::Status(0))
                     }
-                    Err(err) if solidcore::error::upstream_status(&err).is_some() => {
+                    Err(err) if crate::output::recorded_status(&err).is_some() => {
                         out.push(-1);
-                        Ok(Step::Status(i64::from(solidcore::error::upstream_status(&err).unwrap_or(-1))))
+                        Ok(Step::Status(i64::from(crate::output::recorded_status(&err).unwrap_or(-1))))
                     }
                     Err(e) => fail(e),
                 }

@@ -592,8 +592,8 @@ fn side(left: bool) -> Side {
 fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
-        e if solidcore::error::nurbs::upstream_status(e).is_some() => {
-            f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
+        e if crate::output::recorded_status(e).is_some() => {
+            f64::from(crate::output::recorded_status(e).unwrap_or(-1))
         }
         _ => -1.0,
     }
@@ -790,7 +790,7 @@ fn revolution_surface(k: &Kernel, r: &RevIn) -> Result<solidcore::Result<Surface
 }
 
 fn base_err() -> SolidError {
-    SolidError::sm_err("difftest: base class default")
+    crate::output::routine_failure("difftest: base class default")
 }
 
 /// An edit: status then the surface state (whatever the status).
@@ -855,7 +855,7 @@ fn surface_op_on(
                             .get(i)
                             .and_then(|r| r.get(j))
                             .copied()
-                            .ok_or_else(|| SolidError::sm_err("difftest: short matrix"))?;
+                            .ok_or_else(|| crate::output::routine_failure("difftest: short matrix"))?;
                         push3(o, v);
                     }
                 }

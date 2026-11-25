@@ -2625,7 +2625,7 @@ mod tests {
                 tolerance: 1e-7
             })
         );
-        assert_eq!(crate::error::upstream_status(&err), Some(1001));
+        assert_eq!(SolidError::failed_routine_status(&err), Some(1001));
         // a line from the end that turns off the line through both
         let bent = Curve::from(Line::from_points(x(14.0, 0.0), x(20.0, 1.0), 3));
         let err = seg().join_with(1, &bent, 0, Some(1e-7)).unwrap_err();
@@ -2642,7 +2642,7 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
-        assert_eq!(crate::error::upstream_status(&err), Some(1001));
+        assert_eq!(SolidError::failed_routine_status(&err), Some(1001));
         // a quarter circle from the end
         let k = Kernel::default();
         let arc = Ellipse::new_circle(
@@ -2662,7 +2662,7 @@ mod tests {
             err.curve_failure(),
             Some(&CurveFailure::JoinOtherNotStraight { tolerance: 1e-7 })
         );
-        assert_eq!(crate::error::upstream_status(&err), Some(1001));
+        assert_eq!(SolidError::failed_routine_status(&err), Some(1001));
     }
 
     #[test]
@@ -2696,7 +2696,7 @@ mod tests {
                 reason: FastDropBlock::Operation
             })
         );
-        assert_eq!(crate::error::upstream_status(&err), Some(1001));
+        assert_eq!(SolidError::failed_routine_status(&err), Some(1001));
         let g = l.global_point_solve_step::<u8>(
             &l.step_interval(),
             SolverOperation::Maximize,

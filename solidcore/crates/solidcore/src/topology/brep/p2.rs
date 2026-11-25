@@ -68,7 +68,7 @@
 //! - `MateLaminaEdgeToSurface` checks for the face's surface before the neighbour
 //!   (lamina / seam) checks; upstream binds the surface only for `IsSeam`, so a face
 //!   without surface there ends in the distance loop instead of
-//!   [`SolidError::null_pointer`]. Its intersection UV curve must be a plain
+//!   a failure with status `SM_ERR_NULL_POINTER`. Its intersection UV curve must be a plain
 //!   B-spline (`SM_CAST_PTR(SmBSplineCurve, ..)` also passes `SmLine` and the conics,
 //!   which the port treats as the null cast); the extended mating surface is always a
 //!   B-spline, so the intersector returns NURBS curves. A negative extension distance
@@ -757,7 +757,7 @@ fn brep_shells(k: &mut Kernel, b: &Brep) -> Result<Vec<ShellId>> {
 fn check_uv_trim_curve(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<bool> {
     match p1::check_uv_trim_curve(k, b, eu) {
         Ok(()) => Ok(true),
-        Err(e) if e.upstream_status() == Some(SM_ERR) => Ok(false),
+        Err(e) if e.failed_routine_status() == Some(SM_ERR) => Ok(false),
         Err(e) => Err(e),
     }
 }
@@ -3759,7 +3759,7 @@ mod tests {
         let mut env = state.env(None);
         let err =
             mate_lamina_edge_to_surface(&k, &mut b, &mut env, e, &mating, 1.0, 1.0).unwrap_err();
-        assert_eq!(err.upstream_status(), Some(SM_ERR));
+        assert_eq!(err.failed_routine_status(), Some(SM_ERR));
         assert_eq!(err.operation(), OP);
         assert_eq!(
             err.topology_failure(),

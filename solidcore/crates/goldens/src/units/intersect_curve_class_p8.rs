@@ -237,8 +237,8 @@ fn rust(input: Input) -> Result<Output, HarnessError> {
     }
     let status = match result {
         Ok(()) => 0,
-        Err(e) if solidcore::error::upstream_status(&e).is_some() => {
-            solidcore::error::upstream_status(&e).unwrap_or(-1)
+        Err(e) if crate::output::recorded_status(&e).is_some() => {
+            crate::output::recorded_status(&e).unwrap_or(-1)
         }
         _ => 1001,
     };

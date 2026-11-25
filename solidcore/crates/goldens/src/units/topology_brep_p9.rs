@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use solidcore::curve::curve::Curve;
 use solidcore::curve::line::Line;
+use solidcore::error::query::QueryFailure;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::tol::zone_tol3d;
 use solidcore::geom::vector2d::Point2;
@@ -130,7 +131,7 @@ fn status(e: &SolidError) -> Result<Output, HarnessError> {
 fn ordinary<T>(r: solidcore::Result<T>) -> Result<i32, SolidError> {
     match r {
         Ok(_) => Ok(0),
-        Err(e) if solidcore::error::upstream_status(&e).is_some() => Ok(solidcore::error::upstream_status(&e).unwrap_or(-1)),
+        Err(e) if crate::output::recorded_status(&e).is_some() => Ok(crate::output::recorded_status(&e).unwrap_or(-1)),
         Err(e) => Err(e),
     }
 }
@@ -401,10 +402,13 @@ fn rust(i: &Inputs, mut b: Brep, initial: [f64; 2]) -> Result<Output, HarnessErr
                 let end = vu(1);
                 let point = |v: Option<VertexuseId>, default| -> solidcore::Result<Vec3> {
                     if let Some(v) = v {
-                        let vertex = b
-                            .vertexuse(v)?
-                            .vertex
-                            .ok_or_else(|| SolidError::null_pointer("difftest::brep_p9"))?;
+                        let vertex = b.vertexuse(v)?.vertex.ok_or_else(|| {
+                            solidcore::error::Failure::new(
+                                "difftest::brep_p9",
+                                QueryFailure::VertexuseWithoutVertex,
+                            )
+                            .into_error()
+                        })?;
                         Ok(b.vertex(vertex)?.point)
                     } else {
                         Ok(default)
@@ -443,14 +447,19 @@ fn rust(i: &Inputs, mut b: Brep, initial: [f64; 2]) -> Result<Output, HarnessErr
                     BrepMerge, PointClassType, PointClassification,
                 };
                 use solidcore::EntityRef;
-                let edge = target::<EdgeId>(b.edges().len(), i.selector)
-                    .ok_or_else(|| SolidError::sm_err("difftest::brep_p9"))?;
+                let edge = target::<EdgeId>(b.edges().len(), i.selector).ok_or_else(|| {
+                    solidcore::error::Failure::new(
+                        "difftest::brep_p9",
+                        QueryFailure::BrepWithoutEdges,
+                    )
+                    .into_error()
+                })?;
                 let target = if i.op == 6 {
                     EntityRef::Edge(edge)
                 } else {
                     EntityRef::Vertex(
                         solidcore::topology::edge::start_vertex(&b, edge)?
-                            .ok_or_else(|| SolidError::sm_err("difftest::brep_p9"))?,
+                            .ok_or_else(|| crate::output::routine_failure("difftest::brep_p9"))?,
                     )
                 };
                 let mut pc = PointClassification::new(zone_tol3d(&k, 1e-7));
@@ -507,13 +516,18 @@ fn rust(i: &Inputs, mut b: Brep, initial: [f64; 2]) -> Result<Output, HarnessErr
                 ordinary(result)
             }
             8 => {
-                let face = target::<FaceId>(b.faces().len(), i.selector)
-                    .ok_or_else(|| SolidError::sm_err("difftest::brep_p9"))?;
+                let face = target::<FaceId>(b.faces().len(), i.selector).ok_or_else(|| {
+                    solidcore::error::Failure::new(
+                        "difftest::brep_p9",
+                        QueryFailure::BrepWithoutFaces,
+                    )
+                    .into_error()
+                })?;
                 let f = b.face(face)?;
                 let surface = f
                     .surface
                     .as_ref()
-                    .ok_or_else(|| SolidError::sm_err("difftest::brep_p9"))?
+                    .ok_or_else(|| crate::output::routine_failure("difftest::brep_p9"))?
                     .clone();
                 let y = if i.variant == 1 { 2.0 } else { 0.5 };
                 let (x0, x1) = if i.variant == 2 {
@@ -557,8 +571,8 @@ fn rust(i: &Inputs, mut b: Brep, initial: [f64; 2]) -> Result<Output, HarnessErr
             skeleton_caches(&mut b);
             Ok(graph_reachable(&b, record))
         }
-        Err(e) if i.op <= 4 && solidcore::error::upstream_status(&e).is_some() => {
-            let code = solidcore::error::upstream_status(&e).unwrap_or(-1);
+        Err(e) if i.op <= 4 && crate::output::recorded_status(&e).is_some() => {
+            let code = crate::output::recorded_status(&e).unwrap_or(-1);
             // These APIs clear their pointer outputs before the first fallible
             // operation. Compare defined native failures as statuses, not harness
             // errors; any partial graph changes are still compared normally.

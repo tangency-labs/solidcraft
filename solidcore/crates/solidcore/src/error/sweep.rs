@@ -29,8 +29,7 @@
 //!
 //! [`SweepFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
 //! reason: a defect ([`ErrorKind::StageFailed`], class 127). Every other cause names what
-//! happened, with its class (the conversion guide: `docs/failure-codes-and-reproduction.md`
-//! §6).
+//! happened, with its class.
 //!
 //! Deviations: not upstream. The failure's `operation` path says which routine. The failures
 //! that are checks of a caller's arguments the routines made before this record stay
@@ -383,12 +382,11 @@ impl SweepFailure {
         }
     }
 
-    /// True for a failure that replaced a C++ status the routine returns (every cause but
-    /// a loft's own refusals): it answers with that status the way the `Upstream` it
-    /// replaced did ([`crate::error::upstream_status`]). A loft's refusal is solidcore's own
-    /// and replaced none.
+    /// True for a routine's failure, which answers with the status the routine returns
+    /// (`SolidError::failed_routine_status`): every cause but a loft's own
+    /// refusals, which are solidcore's and stand for no status.
     #[must_use]
-    pub const fn replaces_upstream_status(&self) -> bool {
+    pub const fn is_failed_routine(&self) -> bool {
         !matches!(
             self,
             Self::RailPastStationCap { .. }
@@ -585,8 +583,8 @@ impl crate::SolidError {
         Failure::new(operation, failure).into_error()
     }
 
-    /// A sweep failure that answers with `status` in place of its cause's default (rule 1:
-    /// the site's status is kept).
+    /// A sweep failure that answers with `status` in place of its cause's default (the
+    /// site's status is kept).
     #[must_use]
     pub(crate) fn sweep_with_status(
         operation: &'static str,
@@ -829,14 +827,10 @@ mod tests {
         ];
         for (failure, code, kind) in cases {
             let typed = SolidError::sweep("sweep::op", failure);
-            let before = SolidError::Upstream {
-                operation: "sweep::op",
-                code,
-                entity: None,
-            };
+            let before = SolidError::failed_routine("sweep::op", code);
             assert_eq!(typed.sm_status(), before.sm_status(), "{failure:?}");
-            assert_eq!(typed.upstream_status(), Some(code), "{failure:?}");
-            assert_eq!(super::super::upstream_status(&typed), Some(code));
+            assert_eq!(typed.failed_routine_status(), Some(code), "{failure:?}");
+            assert_eq!(SolidError::failed_routine_status(&typed), Some(code));
             assert_eq!(typed.kind(), kind, "{failure:?}");
             assert_eq!(failure.kind(), kind, "{failure:?}");
             assert_eq!(typed.operation(), before.operation(), "{failure:?}");
@@ -848,7 +842,7 @@ mod tests {
                 "{failure:?}"
             );
             assert_eq!(typed.is_status_answer(), before.is_status_answer());
-            assert!(failure.replaces_upstream_status(), "{failure:?}");
+            assert!(failure.is_failed_routine(), "{failure:?}");
             assert_eq!(typed.sweep_failure(), Some(&failure));
         }
         // a site whose status is not its cause's default keeps it
@@ -857,7 +851,7 @@ mod tests {
             SweepFailure::EdgeWithoutCurve { edge },
             SM_ERR,
         );
-        assert_eq!(kept.upstream_status(), Some(SM_ERR));
+        assert_eq!(kept.failed_routine_status(), Some(SM_ERR));
         assert_eq!(kept.kind(), ErrorKind::InvalidInput);
         assert_eq!(
             SolidError::sweep("sweep::op", SweepFailure::EdgeWithoutCurve { edge }).to_string(),
@@ -867,7 +861,10 @@ mod tests {
             SolidError::sweep("sweep::op", SweepFailure::FaceAlreadySwept).to_string(),
             "sweep::op: the face was already swept"
         );
-        assert_eq!(SolidError::sm_err("sweep::op").sweep_failure(), None);
+        assert_eq!(
+            SolidError::failed_routine("sweep::op", SM_ERR).sweep_failure(),
+            None
+        );
     }
 
     /// A railed loft's refusal reports what it reported before the sweep routines' failures
@@ -883,23 +880,14 @@ mod tests {
         let e = SolidError::sweep("sweep::loft_rails", cap);
         assert_eq!(e.sm_status(), Some(SM_ERR));
         assert_eq!(e.kind(), ErrorKind::NotWithinTolerance);
-        assert_eq!(e.upstream_status(), None);
-        assert_eq!(super::super::upstream_status(&e), None);
-        assert!(!cap.replaces_upstream_status());
+        assert_eq!(e.failed_routine_status(), None);
+        assert_eq!(SolidError::failed_routine_status(&e), None);
+        assert!(!cap.is_failed_routine());
         assert!(e.is_status_answer());
         assert!(!e.is_port_failure());
     }
 
-    /// The sweep routines describe their failures: their library code builds no bare
-    /// `Upstream` status (the count is the bare sites a file may still hold while a site
-    /// waits on other work).
-    #[test]
-    fn the_sweep_routines_build_no_bare_statuses() {
-        super::super::bare_scan::assert_waiting("sweep", 21, &[]);
-    }
-
-    /// A reviewed defect is of class 127 with the status of the phrase cause it replaces,
-    /// and says why.
+    /// A reviewed defect is of class 127 with its status, and says why.
     #[test]
     fn a_reviewed_defect_is_class_127_with_its_reason() {
         let why =
@@ -922,27 +910,5 @@ mod tests {
             &format!("{op}: stage_failed: {why}"),
         );
         assert_eq!(missing.sweep_failure(), Some(&defect));
-    }
-
-    /// The sites that build a sweep phrase cause only fall:
-    /// per file, in the library code of `solidcore` and `solidcore-ops`, as
-    /// [`super::super::site_scan`] counts them. A PR that converts sites lowers its
-    /// files' counts here, and a file at 0 loses its line (the conversion guide:
-    /// `docs/failure-codes-and-reproduction.md` §6).
-    #[test]
-    fn the_sweep_phrase_cause_sites_only_shrink() {
-        use super::super::site_scan::{assert_pinned, crate_sites, Builder, Scan, Wrappers};
-        const PHRASES: Scan = Scan {
-            builders: &[
-                Builder::Variant("SweepFailure", "Failed"),
-                Builder::Variant("SweepFailure", "Missing"),
-                Builder::Method("sweep_failed", Some(1)),
-                Builder::Method("sweep_missing", Some(1)),
-            ],
-            wrappers: Wrappers::Phrase,
-        };
-        // every sweep site is converted (TE-O-22): none may come back
-        const PINNED: &[(&str, usize)] = &[];
-        assert_pinned("sweep phrase-cause sites", &crate_sites(&PHRASES), PINNED);
     }
 }

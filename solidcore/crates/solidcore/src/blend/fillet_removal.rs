@@ -247,7 +247,7 @@ fn edge_vertex(v: Option<VertexId>, edge: EdgeId) -> Result<VertexId> {
 
 /// `curve` (of the edge `edge`, where there is one) has no B-spline form where upstream
 /// casts it to `SmBSplineCurve` and dereferences the result
-/// ([`BlendFailure::CurveWithoutNet`], keeping `SM_ERR_NULL_POINTER`; rule 8).
+/// ([`BlendFailure::CurveWithoutNet`], keeping `SM_ERR_NULL_POINTER`).
 #[track_caller]
 fn curve_without_net(edge: Option<EdgeId>, curve: &Curve) -> SolidError {
     Failure::new(
@@ -2233,7 +2233,7 @@ mod tests {
         assert_eq!(error, editing_disabled());
         assert!(!error.is_defect() && !error.is_refusal());
         assert_eq!(error.sm_status(), Some(crate::error::SM_ERR));
-        assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(error.failed_routine_status(), Some(crate::error::SM_ERR));
         assert_eq!(crate::topology::brep::p1::faces(&b, None).unwrap().len(), 6);
     }
 
@@ -2254,7 +2254,7 @@ mod tests {
         );
         assert_eq!(error.kind(), crate::error::ErrorKind::NotARemovableFillet);
         assert!(error.is_refusal() && !error.is_defect() && !error.sized());
-        assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(error.failed_routine_status(), Some(crate::error::SM_ERR));
         assert_eq!(crate::topology::brep::p1::faces(&b, None).unwrap().len(), 6);
     }
 
@@ -2272,7 +2272,7 @@ mod tests {
             missing.blend_failure(),
             Some(&BlendFailure::Defect { why: "held" })
         );
-        assert_eq!(missing.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(missing.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         assert!(missing.is_defect() && !missing.is_refusal());
         let link = have::<()>(None, RemovalInput::EdgeUseMate).unwrap_err();
         assert_eq!(
@@ -2281,7 +2281,7 @@ mod tests {
                 RemovalInput::EdgeUseMate
             ))
         );
-        assert_eq!(link.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(link.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         assert!(!link.is_defect() && !link.is_refusal());
         let call = SolidError::invalid_input("blend::call", "no such face");
         let failed = stopped_after(RemovalStop::CornerNotSolved, call.clone());
@@ -2289,7 +2289,7 @@ mod tests {
             failed.blend_failure(),
             Some(&BlendFailure::RemovalStopped(RemovalStop::CornerNotSolved))
         );
-        assert_eq!(failed.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(failed.failed_routine_status(), Some(crate::error::SM_ERR));
         assert_eq!(failed.cause(), Some(&call));
         // The stop's own kind is its class; the cause decides defect or refusal.
         assert_eq!(failed.kind(), crate::error::ErrorKind::NotFound);

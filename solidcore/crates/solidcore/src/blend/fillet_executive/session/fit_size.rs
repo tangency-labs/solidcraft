@@ -1680,7 +1680,7 @@ mod tests {
                 "lk {lk}: {e:?}"
             );
             assert_eq!(
-                e.upstream_status(),
+                e.failed_routine_status(),
                 Some(crate::error::SM_ERR_INVALID_INPUT),
                 "lk {lk}: {e:?}"
             );

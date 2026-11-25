@@ -459,12 +459,12 @@ fn bisector_output(
 // ---- Rust side ----------------------------------------------------------------------------
 
 /// A Rust error as the case outcome: deferred for [`SolidError::Unported`], the upstream
-/// status for an `Upstream` error, else an error no C++ output has (a visible failure).
+/// status for a failure that has one, else an error no C++ output has (a visible failure).
 fn rust_err(e: &SolidError) -> Output {
     if let Some(d) = Output::unported(e) {
         return d;
     }
-    match solidcore::error::upstream_status(e) {
+    match crate::output::recorded_status(e) {
         Some(code) => status_err(f64::from(code)),
         None => Output::err(format!("rust_error: {e}")),
     }

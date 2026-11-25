@@ -2538,7 +2538,7 @@ mod tests {
         let mut s = Volume::new(VolumeKind::BSpline(b_spline()));
         let before = s.kind().clone();
         assert_eq!(
-            s.transform(&ax, None).unwrap_err().upstream_status(),
+            s.transform(&ax, None).unwrap_err().failed_routine_status(),
             Some(1001)
         );
         assert_eq!(s.kind(), &before);

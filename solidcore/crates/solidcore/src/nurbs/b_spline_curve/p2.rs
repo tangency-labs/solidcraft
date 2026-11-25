@@ -2336,7 +2336,11 @@ mod tests {
             Some(&NurbsFailure::BSpline(cause)),
             "{e:?}"
         );
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR), "{e:?}");
+        assert_eq!(
+            e.failed_routine_status(),
+            Some(crate::error::SM_ERR),
+            "{e:?}"
+        );
         assert_eq!(e.kind(), cause.kind(), "{e:?}");
     }
 

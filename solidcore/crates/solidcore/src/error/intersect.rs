@@ -10,24 +10,15 @@
 //! | Rust                                | Status difftest compares   |
 //! |-------------------------------------|----------------------------|
 //! | [`IntersectFailure::Defect`]        | the site's (`SM_ERR`, or another through `with_status`) |
-//! | [`IntersectFailure::Failed`]        | `SM_ERR`                   |
-//! | [`IntersectFailure::Inconsistent`]  | `SM_ERR_ASSERT_FAILURE`    |
-//! | [`IntersectFailure::Missing`]       | `SM_ERR_NULL_POINTER`      |
-//! | [`IntersectFailure::OutsideDomain`] | `SM_ERR_OUTSIDE_OF_DOMAIN` |
 //! | [`IntersectFailure::PointsWhereAPlaneCrosses`] | `SM_ERR`        |
-//! | [`IntersectFailure::StageFailed`]   | the site's (`SM_ERR`, or `SM_ERR_NULL_POINTER` for an `NER`) |
 //! | [`IntersectFailure::StepTangentTooShort`] | `SM_ERR`             |
 //! | [`IntersectFailure::UvPolygonNotInDomain`] | `SM_ERR`            |
-//! | the named causes, from [`IntersectFailure::NoIntersection`] on | the status of the phrase each replaced (`comparison_status`), or the site's through `with_status` |
+//! | the named causes, from [`IntersectFailure::NoIntersection`] on | the status of the site each replaced (`comparison_status`), or the site's through `with_status` |
 //!
-//! **The record** (#15034). A check that refuses builds a typed cause; a stage that fails
-//! with no reason the kernel names is an [`IntersectFailure::StageFailed`], a defect
+//! **The record** (#15034). A check that refuses builds a typed cause; a stage that fails as
+//! the kernel's fault is an [`IntersectFailure::Defect`] with its reason, a defect
 //! ([`ErrorKind::StageFailed`]), keeping the error of the call it made as its cause where it
-//! has one. The phrase causes ([`IntersectFailure::Failed`] to
-//! [`IntersectFailure::Inconsistent`]) are sites not yet converted, and so is an
-//! [`IntersectFailure::StageFailed`] not yet reviewed: a reviewed one is an
-//! [`IntersectFailure::Defect`] with its reason (the conversion guide:
-//! `docs/failure-codes-and-reproduction.md` §6).
+//! has one.
 //!
 //! Deviations: not upstream. The failure's `operation` path says which routine. The handles these routines work on are the
 //! classification's or intersector's own, not ids of the caller's B-rep, so no failure
@@ -125,11 +116,6 @@ pub enum IntersectFailure {
     EmptyStack,
     /// A face of the caller's body has no surface. [`ErrorKind::InvalidInput`].
     FaceWithoutSurface,
-    /// The routine could not continue, as the phrase says (for example "the ray hits no
-    /// face").
-    Failed(&'static str),
-    /// A consistency check of the routine's own data did not hold, as the phrase says.
-    Inconsistent(&'static str),
     /// The two classifications of one curve, which are combined interval by interval, have
     /// different numbers of intervals (`this` and `other`). Class `failed`.
     IntervalCountsDiffer {
@@ -159,9 +145,6 @@ pub enum IntersectFailure {
         /// The law parameter that was inverted.
         parameter: f64,
     },
-    /// Something the routine needs is missing, as the phrase says (for example "the
-    /// edge's curve").
-    Missing(&'static str),
     /// The boundary fix-up moved a span of the UV polygon by an amount it cannot prove within
     /// `budget`, what is left of the drop's tolerance (negative where the trace already
     /// accepted a span over it). [`ErrorKind::NotWithinTolerance`].
@@ -248,9 +231,6 @@ pub enum IntersectFailure {
     /// The interval to collapse is the classification's only one, which is never squeezed
     /// out. Class `failed`.
     OnlyInterval,
-    /// A point or parameter falls outside the domain it must lie in, as the phrase says
-    /// (for example "the span's end does not snap onto the seam").
-    OutsideDomain(&'static str),
     /// The parameter given lies off the classified curve, before its start or past its end, by
     /// `distance`, more than the `tolerance` the interval's end snaps within.
     /// [`ErrorKind::OutsideDomain`].
@@ -356,12 +336,6 @@ pub enum IntersectFailure {
     /// number of intervals (the squeeze's error, where it gave one, is the cause). Class
     /// `failed`.
     SqueezeStalled,
-    /// A stage of an intersection routine failed with no reason the kernel names: a defect
-    /// ([`ErrorKind::StageFailed`]). The failure holds the operation, the status the C++
-    /// reports (for the goldens only), where it was built, and the error of the call it made
-    /// where it has one. The form not yet reviewed: new code builds
-    /// [`IntersectFailure::Defect`], a named cause or a refusal instead.
-    StageFailed,
     /// The start point the point intersection added was gone when it came to trace from it.
     /// The driver clears the list and adds the first through point's copy itself, and no
     /// kernel `IntersectorVirtuals` implementor touches the list, so only a caller's
@@ -459,7 +433,6 @@ impl IntersectFailure {
             | Self::EdgeNotSplit
             | Self::EmptyDomain
             | Self::EmptyStack
-            | Self::Failed(_)
             | Self::IntervalCountsDiffer { .. }
             | Self::IntervalEndMisplaced
             | Self::IntervalIndexPastEnd { .. }
@@ -492,7 +465,6 @@ impl IntersectFailure {
             | Self::SingularPointInside
             | Self::SphereTrimNotCertified { .. }
             | Self::SqueezeStalled
-            | Self::StageFailed
             | Self::StepTangentTooShort
             | Self::Tangent
             | Self::TangentAlongNormal { .. }
@@ -513,7 +485,6 @@ impl IntersectFailure {
             | Self::EdgeWithoutCurve
             | Self::EdgeuseWithoutTrimCurve
             | Self::FaceWithoutSurface
-            | Self::Missing(_)
             | Self::NoClassObject
             | Self::NoCurveToReverse
             | Self::NoEndSector
@@ -527,18 +498,16 @@ impl IntersectFailure {
             | Self::StartPointLost
             | Self::SurfaceCacheNotBuilt
             | Self::SurfaceNotOffset { .. } => SM_ERR_NULL_POINTER,
-            Self::Inconsistent(_) | Self::TouchesUnpaired { .. } => SM_ERR_ASSERT_FAILURE,
-            Self::OutsideDomain(_)
-            | Self::ParameterOffClassifiedCurve { .. }
-            | Self::SeamJumpNotSnapped => SM_ERR_OUTSIDE_OF_DOMAIN,
+            Self::TouchesUnpaired { .. } => SM_ERR_ASSERT_FAILURE,
+            Self::ParameterOffClassifiedCurve { .. } | Self::SeamJumpNotSnapped => {
+                SM_ERR_OUTSIDE_OF_DOMAIN
+            }
         }
     }
 
     /// The failure's stable [`ErrorKind`]: [`ErrorKind::StageFailed`] for
-    /// [`IntersectFailure::StageFailed`] and [`IntersectFailure::Defect`], a defect;
-    /// [`ErrorKind::Missing`] for
-    /// [`IntersectFailure::Missing`], [`ErrorKind::OutsideDomain`] for
-    /// [`IntersectFailure::OutsideDomain`], [`IntersectFailure::SeamJumpNotSnapped`] and
+    /// [`IntersectFailure::Defect`], a defect; [`ErrorKind::OutsideDomain`] for
+    /// [`IntersectFailure::SeamJumpNotSnapped`] and
     /// [`IntersectFailure::ParameterOffClassifiedCurve`],
     /// [`ErrorKind::NotWithinTolerance`] for [`IntersectFailure::PointsWhereAPlaneCrosses`]
     /// and [`IntersectFailure::MoveNotProved`], [`ErrorKind::InvalidInput`] for a check of
@@ -598,7 +567,7 @@ impl IntersectFailure {
             Self::PointsWhereAPlaneCrosses { .. } | Self::MoveNotProved { .. } => {
                 ErrorKind::NotWithinTolerance
             }
-            Self::StageFailed | Self::Defect { .. } => ErrorKind::StageFailed,
+            Self::Defect { .. } => ErrorKind::StageFailed,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -651,8 +620,6 @@ impl core::fmt::Display for IntersectFailure {
             Self::EmptyDomain => f.write_str("the uv domain is empty or not a number"),
             Self::EmptyStack => f.write_str("the stack holds no point and tangent"),
             Self::FaceWithoutSurface => f.write_str("the face has no surface"),
-            Self::Failed(what) | Self::OutsideDomain(what) => f.write_str(what),
-            Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
             Self::IntervalCountsDiffer { this, other } => write!(
                 f,
                 "the two classifications have different numbers of intervals ({this} and {other})"
@@ -669,7 +636,6 @@ impl core::fmt::Display for IntersectFailure {
                 f,
                 "the law curve's normal cannot be interpolated at the parameter {parameter}"
             ),
-            Self::Missing(what) => write!(f, "{what} is missing"),
             Self::MoveNotProved { budget } => write!(
                 f,
                 "a span's move is not proved within the tolerance left ({budget:e})"
@@ -782,7 +748,6 @@ impl core::fmt::Display for IntersectFailure {
             Self::SqueezeStalled => f.write_str(
                 "squeezing out the smallest interval did not shorten the classification",
             ),
-            Self::StageFailed => write!(f, "{}", ErrorKind::StageFailed),
             Self::StartPointLost => {
                 f.write_str("the start point added for the trace was gone when the trace began")
             }
@@ -912,23 +877,22 @@ pub(super) mod tests {
     #[test]
     fn intersect_failures_keep_the_status_and_kind_of_the_upstream_they_replace() {
         let cases = [
-            (IntersectFailure::Failed("x"), SM_ERR),
-            (IntersectFailure::Missing("x"), SM_ERR_NULL_POINTER),
+            (IntersectFailure::NoIntersection, SM_ERR),
+            (IntersectFailure::NoEndSector, SM_ERR_NULL_POINTER),
             (
-                IntersectFailure::OutsideDomain("x"),
+                IntersectFailure::SeamJumpNotSnapped,
                 SM_ERR_OUTSIDE_OF_DOMAIN,
             ),
-            (IntersectFailure::Inconsistent("x"), SM_ERR_ASSERT_FAILURE),
+            (
+                IntersectFailure::TouchesUnpaired { count: 3 },
+                SM_ERR_ASSERT_FAILURE,
+            ),
         ];
         for (failure, code) in cases {
             let typed = SolidError::intersect("intersect::op", failure);
-            let before = SolidError::Upstream {
-                operation: "intersect::op",
-                code,
-                entity: None,
-            };
+            let before = SolidError::failed_routine("intersect::op", code);
             assert_eq!(typed.sm_status(), before.sm_status(), "{failure:?}");
-            assert_eq!(typed.upstream_status(), Some(code), "{failure:?}");
+            assert_eq!(typed.failed_routine_status(), Some(code), "{failure:?}");
             assert_eq!(typed.kind(), before.kind(), "{failure:?}");
             assert_eq!(typed.operation(), before.operation(), "{failure:?}");
             assert_eq!(typed.entity(), None, "{failure:?}");
@@ -937,86 +901,19 @@ pub(super) mod tests {
             assert_eq!(typed.intersect_failure(), Some(&failure));
         }
         assert_eq!(
-            SolidError::intersect(
-                "intersect::op",
-                IntersectFailure::Missing("the edge's curve")
-            )
-            .to_string(),
-            "intersect::op: the edge's curve is missing"
+            SolidError::intersect("intersect::op", IntersectFailure::NoEndSector).to_string(),
+            "intersect::op: no vertex use at an end of the edge has a sector of the face"
         );
     }
 
-    /// A sample of the second set of converted files (`surface_intersector/p2` to `p4`,
-    /// `topology_solver/p1` and `p2`): each keeps the operation, status, kind and entity of
-    /// its `Upstream`.
     #[test]
-    fn the_surface_intersector_and_topology_solver_samples_keep_their_upstream_answers() {
-        let samples = [
-            (
-                "intersect::surface_intersector::p2::SurfaceIntersector::compute_point_values",
-                IntersectFailure::Failed("the surface point has no normal"),
-                SM_ERR,
-            ),
-            (
-                "intersect::surface_intersector::p3::SurfaceIntersector::find_boundary_start_points",
-                IntersectFailure::Missing("the surface's cache"),
-                SM_ERR_NULL_POINTER,
-            ),
-            (
-                "intersect::surface_intersector::p4::SurfaceIntersector::do_law_intersection",
-                IntersectFailure::Missing("the first surface's offset surface"),
-                SM_ERR_NULL_POINTER,
-            ),
-            (
-                "intersect::topology_solver::p1::LocalSolver::solve_it",
-                IntersectFailure::Failed("the base, point and curve local solvers solve nothing"),
-                SM_ERR,
-            ),
-            (
-                "intersect::topology_solver::p2::LocalSolver::solve_face_face",
-                IntersectFailure::Missing("the first surface to solve against"),
-                SM_ERR_NULL_POINTER,
-            ),
-        ];
-        for (operation, failure, code) in samples {
-            let typed = SolidError::intersect(operation, failure);
-            let before = SolidError::Upstream {
-                operation,
-                code,
-                entity: None,
-            };
-            assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
-            assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
-            assert_eq!(super::super::upstream_status(&typed), Some(code));
-            assert_eq!(typed.kind(), before.kind(), "{typed:?}");
-            assert_eq!(typed.operation(), before.operation(), "{typed:?}");
-            assert_eq!(typed.entity(), None, "{typed:?}");
-            assert_eq!(typed.is_port_failure(), before.is_port_failure());
-            assert_eq!(typed.is_status_answer(), before.is_status_answer());
-            assert_eq!(
-                typed.is_unported_or_cancelled(),
-                before.is_unported_or_cancelled()
-            );
-        }
-    }
-
-    #[test]
-    fn a_stage_failure_is_a_defect_and_a_typed_cause_keeps_its_status() {
-        for status in [SM_ERR, SM_ERR_NULL_POINTER] {
-            super::super::tests::assert_stage_failure(
-                &Failure::new("intersect::op", IntersectFailure::StageFailed)
-                    .with_status(status)
-                    .into_error(),
-                "intersect::op",
-                status,
-            );
-        }
+    fn a_typed_cause_keeps_its_status() {
         let e = SolidError::intersect("intersect::op", IntersectFailure::StepTangentTooShort);
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert_eq!(e.kind(), ErrorKind::Failed);
         assert!(!e.is_defect() && e.is_status_answer());
         let e = SolidError::intersect_uv_polygon_not_in_domain("intersect::op");
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert_eq!(e.kind(), ErrorKind::Failed);
         assert!(!e.is_defect() && e.is_status_answer());
         assert_eq!(
@@ -1029,7 +926,7 @@ pub(super) mod tests {
         );
     }
 
-    /// A reviewed defect is of class 127 with the stage failure's status, and says why.
+    /// A reviewed defect is of class 127 with its site's status, and says why.
     #[test]
     fn a_reviewed_defect_is_class_127_with_its_reason() {
         let why = "the trace lost the branch it was started on, which its own step control keeps";
@@ -1040,9 +937,7 @@ pub(super) mod tests {
                 .into_error();
             super::super::tests::assert_defect(
                 &e,
-                &Failure::new("intersect::op", IntersectFailure::StageFailed)
-                    .with_status(status)
-                    .into_error(),
+                &SolidError::failed_routine("intersect::op", status),
                 "intersect::op",
                 status,
                 &format!("intersect::op: stage_failed: {why}"),
@@ -1051,9 +946,7 @@ pub(super) mod tests {
         }
         super::super::tests::assert_defect(
             &SolidError::intersect("intersect::op", defect),
-            &Failure::new("intersect::op", IntersectFailure::StageFailed)
-                .with_status(SM_ERR)
-                .into_error(),
+            &SolidError::failed_routine("intersect::op", SM_ERR),
             "intersect::op",
             SM_ERR,
             &format!("intersect::op: stage_failed: {why}"),
@@ -1061,8 +954,8 @@ pub(super) mod tests {
     }
 
     /// The named causes of the drops, the point classification, the ray tracer and the
-    /// intersection entries keep the status of the phrase each replaced, so
-    /// `upstream_status` reads what it did, and have their class.
+    /// intersection entries keep the status of the site each replaced, so
+    /// `failed_routine_status` reads what it did, and have their class.
     #[test]
     fn the_drop_classification_and_ray_causes_keep_their_status_and_have_their_class() {
         use ErrorKind as K;
@@ -1117,7 +1010,7 @@ pub(super) mod tests {
             let e = SolidError::intersect(op, failure);
             assert_eq!(e.sm_status(), Some(status), "{failure:?}");
             assert_eq!(
-                super::super::upstream_status(&e),
+                SolidError::failed_routine_status(&e),
                 Some(status),
                 "{failure:?}"
             );
@@ -1130,7 +1023,7 @@ pub(super) mod tests {
         let e = Failure::new(op, F::FaceWithoutSurface)
             .with_status(SM_ERR)
             .into_error();
-        assert_eq!(super::super::upstream_status(&e), Some(SM_ERR));
+        assert_eq!(SolidError::failed_routine_status(&e), Some(SM_ERR));
         assert_eq!(e.kind(), K::InvalidInput);
         // the cache build's error stays the cause, and decides defect or refusal
         let why = "a step the kernel got wrong";
@@ -1140,10 +1033,13 @@ pub(super) mod tests {
             .into_error();
         assert_eq!(e.cause(), Some(&cause));
         assert!(e.is_defect());
-        assert_eq!(super::super::upstream_status(&e), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(
+            SolidError::failed_routine_status(&e),
+            Some(SM_ERR_NULL_POINTER)
+        );
     }
 
-    /// The marching surface/surface intersector's causes (#19844, TE-O-11 part 1) keep the
+    /// The marching surface/surface intersector's causes (#19844) keep the
     /// status of the site they replace and have their class.
     #[test]
     fn the_surface_intersector_causes_keep_their_status_and_have_their_class() {
@@ -1214,7 +1110,7 @@ pub(super) mod tests {
         for (failure, status, kind) in cases {
             let e = SolidError::intersect(op, failure);
             assert_eq!(
-                super::super::upstream_status(&e),
+                SolidError::failed_routine_status(&e),
                 Some(status),
                 "{failure:?}"
             );
@@ -1238,14 +1134,14 @@ pub(super) mod tests {
             assert_eq!(e.cause(), Some(&cause));
             assert!(e.is_defect(), "{failure:?}");
             assert_eq!(
-                super::super::upstream_status(&e),
+                SolidError::failed_routine_status(&e),
                 Some(status),
                 "{failure:?}"
             );
         }
     }
 
-    /// The curve classification's causes keep the status of the phrase each replaced, and
+    /// The curve classification's causes keep the status of the site each replaced, and
     /// a chained cause decides defect or refusal.
     #[test]
     fn the_curve_classification_causes_keep_their_status_and_have_their_class() {
@@ -1323,7 +1219,7 @@ pub(super) mod tests {
             let e = SolidError::intersect(op, failure);
             assert_eq!(e.sm_status(), Some(status), "{failure:?}");
             assert_eq!(
-                super::super::upstream_status(&e),
+                SolidError::failed_routine_status(&e),
                 Some(status),
                 "{failure:?}"
             );
@@ -1348,40 +1244,9 @@ pub(super) mod tests {
             .into_error();
         assert!(e.is_defect());
         assert_eq!(e.kind(), K::StageFailed);
-        assert_eq!(super::super::upstream_status(&e), Some(SM_ERR_NULL_POINTER));
-    }
-
-    /// The intersection routines describe their failures: their library code builds no
-    /// bare `Upstream` status.
-    #[test]
-    fn the_intersect_routines_build_no_bare_statuses() {
-        super::super::bare_scan::assert_waiting("intersect", 40, &[]);
-    }
-
-    /// The sites that build a intersection phrase cause only fall:
-    /// per file, in the library code of `solidcore` and `solidcore-ops`, as
-    /// [`super::super::site_scan`] counts them. A PR that converts sites lowers its
-    /// files' counts here, and a file at 0 loses its line (the conversion guide:
-    /// `docs/failure-codes-and-reproduction.md` §6).
-    #[test]
-    fn the_intersect_phrase_cause_sites_only_shrink() {
-        use super::super::site_scan::{assert_pinned, crate_sites, Builder, Scan, Wrappers};
-        const PHRASES: Scan = Scan {
-            builders: &[
-                Builder::Variant("IntersectFailure", "Failed"),
-                Builder::Variant("IntersectFailure", "Missing"),
-                Builder::Variant("IntersectFailure", "OutsideDomain"),
-                Builder::Variant("IntersectFailure", "Inconsistent"),
-                Builder::Method("intersect_missing", Some(1)),
-            ],
-            wrappers: Wrappers::Phrase,
-        };
-        // every intersection site is converted (TE-O-10): none may come back
-        const PINNED: &[(&str, usize)] = &[];
-        assert_pinned(
-            "intersection phrase-cause sites",
-            &crate_sites(&PHRASES),
-            PINNED,
+        assert_eq!(
+            SolidError::failed_routine_status(&e),
+            Some(SM_ERR_NULL_POINTER)
         );
     }
 }

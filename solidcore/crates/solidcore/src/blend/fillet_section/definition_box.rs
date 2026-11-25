@@ -25,7 +25,7 @@
 //!   are borrowed for the certificate's lifetime. Its pieces' cache is a `Vec` grown to
 //!   the net's knot count on first use, as the fork's.
 //! - **Out-params.** Every function returns its results; `SM_ERR` is
-//!   [`SolidError::sm_err`], which the certificate takes as nothing proved.
+//!   a failure with status `SM_ERR`, which the certificate takes as nothing proved.
 //! - **Bounds.** The enclosure of the inner definition's feet takes no definition of its
 //!   own (its supports are NURBS faces), so the nesting is one deep.
 //! - **Pieces (#2570).** The fork takes, over every box, the faces' and the leader's
@@ -896,7 +896,7 @@ mod tests {
         assert_eq!(first, second);
         assert_eq!(first.operation(), OP);
         assert_eq!(
-            crate::error::upstream_status(&first),
+            SolidError::failed_routine_status(&first),
             Some(crate::error::SM_ERR)
         );
         let Some(&BlendFailure::StationDidNotConverge { s: at, .. }) = first.blend_failure() else {

@@ -109,10 +109,13 @@ fn dump(
                 .map_or(-1, |i| i as i64)
         }));
         ints.push(edge.edgeuses.len() as i64);
-        let curve = edge
-            .curve
-            .as_ref()
-            .ok_or_else(|| SolidError::null_pointer("merge_adapter"))?;
+        let curve = edge.curve.as_ref().ok_or_else(|| {
+            solidcore::error::Failure::new(
+                "merge_adapter",
+                solidcore::error::geom::GeomFailure::EdgeWithoutCurve,
+            )
+            .into_error()
+        })?;
         ints.push(curve.type_code());
         values.extend([edge.interval.min(), edge.interval.max(), edge.tolerance]);
         for f in [0., 0.25, 0.5, 0.75, 1.] {
@@ -287,9 +290,12 @@ fn main() -> Result<()> {
     })();
     let (status, deferred) = match result {
         Ok(()) => (0, None),
-        Err(SolidError::Upstream { code, .. }) => (code, None),
         Err(SolidError::Unported { unit, .. }) => (0, Some(unit)),
-        Err(error) => return Err(error),
+        // a failure the C++ reports by its status: that status
+        Err(error) => match error.sm_status() {
+            Some(code) => (code, None),
+            None => return Err(error),
+        },
     };
     let mut ints = vec![
         i64::from(status),

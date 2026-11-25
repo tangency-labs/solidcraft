@@ -365,11 +365,7 @@ fn chamfered(k: &mut Kernel, input: &TwoOffsetChamfer) -> SolidResult<Result<Cha
         // StitchAndOrient's status is ignored, as SmApiSetBevelCorners ignores it.
         match stitch_and_orient(k, &mut body, &StitchAndOrientOptions::default()) {
             Ok(())
-            | Err(
-                SolidError::Upstream { .. }
-                | SolidError::InvalidInput { .. }
-                | SolidError::PortInvariant { .. },
-            ) => {}
+            | Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {}
             Err(error) => return Err(error),
         }
     }

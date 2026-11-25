@@ -2602,7 +2602,7 @@ mod tests {
             );
             let result: Result<()> = kernels.mark_action(|contexts| {
                 lock.new_mark(contexts)?;
-                Err(SolidError::sm_err("test"))
+                Err(SolidError::failed_routine("test", crate::error::SM_ERR))
             });
             assert!(result.is_err());
             assert!(kernels.primary.context.doing_boolean());
@@ -2645,7 +2645,10 @@ mod tests {
                             called = true;
                             match late {
                                 0 => Ok(()),
-                                1 => Err(SolidError::sm_err("test::cache")),
+                                1 => Err(SolidError::failed_routine(
+                                    "test::cache",
+                                    crate::error::SM_ERR,
+                                )),
                                 _ => Err(SolidError::unported(
                                     "topology::brep::p2::delete_stale_caches",
                                     "topology.brep_p2",

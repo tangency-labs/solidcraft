@@ -35,8 +35,8 @@ struct Inputs {
 /// The status code of an operation error (its upstream `SmStatus`).
 fn error(e: &SolidError) -> f64 {
     match e {
-        e if solidcore::error::upstream_status(e).is_some() => {
-            f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+        e if crate::output::recorded_status(e).is_some() => {
+            f64::from(crate::output::recorded_status(e).unwrap_or(-1))
         }
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.,
         _ => 1001.,
@@ -46,7 +46,7 @@ fn error(e: &SolidError) -> f64 {
 /// p1's curve record: a B-spline line or a quadratic circular arc.
 fn curve(data: &[f64]) -> Result<BSplineCurve> {
     let [kind, x, y, z, a, b, c] = data else {
-        return Err(SolidError::sm_err("fixture"));
+        return Err(crate::output::routine_failure("fixture"));
     };
     if *kind == 0. {
         BSplineCurve::create_line_segment(3, Vec3::new(*x, *y, *z), Vec3::new(*a, *b, *c))

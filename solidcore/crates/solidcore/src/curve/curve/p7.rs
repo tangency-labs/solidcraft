@@ -1639,7 +1639,7 @@ mod tests {
         assert_eq!(e.curve_failure(), Some(&CurveFailure::CurveNodeWithoutData));
         assert!(!e.is_defect());
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
     }
 
     #[test]
@@ -1739,7 +1739,7 @@ mod tests {
             )
             .unwrap_err();
         assert_eq!(e.curve_failure(), Some(&CurveFailure::CacheNotBuilt));
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(e.cause(), Some(&built));
     }
 }

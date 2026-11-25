@@ -973,7 +973,7 @@ fn a_refused_edit_leaves_the_body_as_it_was() {
         scramble(br);
         let v = br.vertex_list()[0];
         br.vertex_mut(v)?.tolerance = 0.5;
-        Err(solidcore::SolidError::sm_err("test"))
+        Err(routine_failure("test"))
     });
     assert_eq!(failed, Err(Error::Status(1001)));
     assert_eq!(as_it_is(&b), before);
@@ -1659,4 +1659,16 @@ fn pcurves_of_malformed_records_are_refused_as_invalid() {
     assert!(matches!(one(&collapsed, [0., 1.]), Err(Error::Invalid(_))));
     // And a well-formed one still gets its pcurve.
     assert!(one(&line, [0., 1.]).is_ok());
+}
+
+/// A kernel routine's failure with status `SM_ERR` and nothing more about its cause, for
+/// the tests whose subject reads only that status.
+pub(crate) fn routine_failure(operation: &'static str) -> solidcore::SolidError {
+    solidcore::error::Failure::new(
+        operation,
+        solidcore::error::geom::GeomFailure::CallFailed {
+            class: solidcore::error::ErrorKind::Failed,
+        },
+    )
+    .into_error()
 }

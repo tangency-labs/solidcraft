@@ -3549,8 +3549,11 @@ mod tests {
     fn an_unresolved_edge_face_coincidence_keeps_the_glue_error() {
         let reason = crate::error::Reason::Boolean(BooleanFailure::CoincidenceUnresolved);
         for cause in [
-            SolidError::sm_err("glue"),
-            SolidError::blend("glue", crate::error::blend::BlendFailure::StageFailed),
+            SolidError::failed_routine("glue", crate::error::SM_ERR),
+            SolidError::blend(
+                "glue",
+                crate::error::blend::BlendFailure::Defect { why: "x" },
+            ),
             SolidError::PreparationRequired { operation: "glue" },
         ] {
             let e = coincidence_unresolved(cause.clone());
@@ -3569,13 +3572,13 @@ mod tests {
             assert_eq!(e.is_refusal(), cause.is_refusal(), "{e:?}");
             assert_eq!(e.is_port_failure(), cause.is_port_failure(), "{e:?}");
         }
-        // a bare status under it leaves it unclassed, as it was; a stage failure under it
+        // a bare status under it leaves it unclassed, as it was; a defect under it
         // reads as a defect, a solidcore-side failure as no status answer
-        let bare = coincidence_unresolved(SolidError::sm_err("glue"));
+        let bare = coincidence_unresolved(SolidError::failed_routine("glue", crate::error::SM_ERR));
         assert!(!bare.is_defect() && !bare.is_refusal() && bare.is_status_answer());
         let stage = coincidence_unresolved(SolidError::blend(
             "glue",
-            crate::error::blend::BlendFailure::StageFailed,
+            crate::error::blend::BlendFailure::Defect { why: "x" },
         ));
         assert!(stage.is_defect() && stage.is_status_answer());
         let port = coincidence_unresolved(SolidError::PreparationRequired { operation: "glue" });

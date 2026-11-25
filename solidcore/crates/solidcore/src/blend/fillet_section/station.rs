@@ -2695,7 +2695,7 @@ mod tests {
                 })
             )
         );
-        assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(error.failed_routine_status(), Some(crate::error::SM_ERR));
     }
 
     /// A cylinder of radius 10 about z (height 20) as its NURBS, a point of it inside a

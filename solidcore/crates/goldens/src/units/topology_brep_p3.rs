@@ -607,7 +607,7 @@ fn status<T>(r: Result<T, SolidError>) -> Result<(f64, Option<T>), Fail> {
         Err(e) => match Output::unported(&e) {
             Some(o) => Err(Fail::Deferred(Box::new(o))),
             None => match e {
-                e if solidcore::error::upstream_status(&e).is_some() => Ok((f64::from(solidcore::error::upstream_status(&e).unwrap_or(-1)), None)),
+                e if crate::output::recorded_status(&e).is_some() => Ok((f64::from(crate::output::recorded_status(&e).unwrap_or(-1)), None)),
                 other => Err(Fail::Harness(harness(format!("rust: {other}")))),
             },
         },
@@ -1079,8 +1079,13 @@ fn put_curve(o: &mut Vec<f64>, c: Option<&SmCurve>) -> Result<(), Fail> {
 /// `SmRegion::m_bIsVoidFlag` of the new B-rep's infinite region (`SmRegion::IsVoid`,
 /// unit `topology.shell`).
 fn region_void_flag(b: &Brep, r: Option<RegionId>) -> Result<f64, SolidError> {
-    let r =
-        r.ok_or_else(|| SolidError::null_pointer("difftest::topology_brep_p3::region_void_flag"))?;
+    let r = r.ok_or_else(|| {
+        solidcore::error::Failure::new(
+            "difftest::topology_brep_p3::region_void_flag",
+            solidcore::error::topology::TopologyFailure::InfiniteRegionNotFound,
+        )
+        .into_error()
+    })?;
     Ok(f64::from(b.region(r)?.is_void()))
 }
 

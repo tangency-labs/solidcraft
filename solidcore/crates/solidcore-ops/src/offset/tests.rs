@@ -1421,25 +1421,8 @@ fn a_thickened_sheet_that_is_no_solid_is_refused() {
 fn the_offset_refusals_are_typed() {
     use solidcore::error::offset::OffsetFailure;
     use solidcore::error::Failure;
-    use solidcore::error::{SM_ERR_OFFSET_EDGE_VANISHES, SM_ERR_OFFSET_WALLS_TOUCH};
-    use solidcore::{FaceId, SolidError};
+    use solidcore::FaceId;
     let none = |_: solidcore::EntityRef| -> Option<crate::RecordEntity> { None };
-    let up = |code| SolidError::Upstream {
-        operation: "test",
-        code,
-        entity: None,
-    };
-    assert_eq!(
-        super::status(up(SM_ERR_OFFSET_WALLS_TOUCH), &none),
-        Error::WallsTouch
-    );
-    assert_eq!(
-        super::status(up(SM_ERR_OFFSET_EDGE_VANISHES), &none),
-        Error::OffsetRefused {
-            face: None,
-            why: crate::OffsetRefusal::EdgeVanishes,
-        }
-    );
     // the kernel's typed offset refusals (solidcore#2615)
     let refused = |o| Failure::new("test", o).into_error();
     assert_eq!(
@@ -1494,7 +1477,10 @@ fn the_offset_refusals_are_typed() {
             },
         }
     );
-    assert_eq!(super::status(up(1001), &none), Error::Status(1001));
+    assert_eq!(
+        super::status(crate::tests::routine_failure("test"), &none),
+        Error::Status(1001)
+    );
 }
 
 /// Each of the kernel's other offset refusals as [`Error::OffsetRefused`] (#14783): its reason,
@@ -1622,54 +1608,16 @@ fn every_other_offset_refusal_says_why_and_where() {
                 what: Unsoundness::VolumeUndecided,
             },
         ),
-        // a routine's own failure, so far only a phrase: its class, whether it is the kernel's
-        // fault, and the kernel's words, as it said them when it arrived as text
-        (
-            O::Failed("the face has no surface"),
-            None,
-            R::Phrase {
-                class: ErrorKind::Failed,
-                defect: false,
-                phrase: "the face has no surface".to_owned(),
-            },
-        ),
-        (
-            O::Missing("the face's surface"),
-            None,
-            R::Phrase {
-                class: ErrorKind::Missing,
-                defect: false,
-                phrase: "the face's surface is missing".to_owned(),
-            },
-        ),
-        (
-            O::InvalidValue("the face has no outer face use"),
-            None,
-            R::Phrase {
-                class: ErrorKind::InvalidInput,
-                defect: false,
-                phrase: "invalid input: the face has no outer face use".to_owned(),
-            },
-        ),
-        (
-            O::Inconsistent("an offset edge has no curve"),
-            None,
-            R::Phrase {
-                class: ErrorKind::Failed,
-                defect: true,
-                phrase: "a consistency check failed: an offset edge has no curve".to_owned(),
-            },
-        ),
     ];
     for (o, face, why) in cases {
         let got = refused(o);
         assert_eq!(got, Error::OffsetRefused { face, why }, "{o:?}");
         assert!(!got.to_string().contains("status"), "{got}");
-        // only a phrase arrives as one: every reason the kernel names is named here too
+        // only a defect arrives as a phrase: every reason the kernel names is named here too
         let Error::OffsetRefused { why, .. } = &got else {
             panic!("not an offset refusal: {o:?}");
         };
-        assert_eq!(matches!(why, R::Phrase { .. }), o.is_phrase(), "{o:?}");
+        assert_eq!(matches!(why, R::Phrase { .. }), o.is_defect(), "{o:?}");
     }
     // walls meeting across a square boss name the largest wall, not a radius of curvature
     let across = R::WallsMeetAcross {
@@ -1681,10 +1629,10 @@ fn every_other_offset_refusal_says_why_and_where() {
         "the wall reaches half the width between two opposite faces of a boss; the largest wall \
          that fits is 1"
     );
-    // the face the kernel sets on a failure whose reason names none (a draft's face without a
-    // surface) is the one said
-    let what = "the face has no surface or no outer face use";
-    let at = Failure::new("test", O::InvalidValue(what))
+    // the face the kernel sets on a failure whose reason names none (a defect at a face) is
+    // the one said, with the defect in the kernel's words
+    let why = "the offset edge use just built has no mate";
+    let at = Failure::new("test", O::Defect { why })
         .at(solidcore::EntityRef::Face(named))
         .into_error();
     assert_eq!(
@@ -1692,9 +1640,9 @@ fn every_other_offset_refusal_says_why_and_where() {
         Error::OffsetRefused {
             face: Some(7),
             why: R::Phrase {
-                class: ErrorKind::InvalidInput,
-                defect: false,
-                phrase: format!("invalid input: {what}"),
+                class: ErrorKind::StageFailed,
+                defect: true,
+                phrase: format!("stage_failed: {why}"),
             },
         }
     );
@@ -1785,11 +1733,10 @@ fn a_kernel_offset_refusal_is_typed_for_a_caller_without_an_order() {
         })),
         Some(Error::WallFolds { largest: Some(1.0) })
     );
-    assert_eq!(super::refusal(&solidcore::SolidError::sm_err("x")), None);
+    assert_eq!(super::refusal(&crate::tests::routine_failure("x")), None);
     // `status` and `refusal` agree: `status` is the refusal, else the kernel's status
     let errors = [
-        failed(OffsetFailure::Failed("x")),
-        failed(OffsetFailure::InvalidValue("x")),
+        failed(OffsetFailure::Defect { why: "x" }),
         failed(OffsetFailure::Folds {
             face,
             distance: 2.0,
@@ -1811,12 +1758,7 @@ fn a_kernel_offset_refusal_is_typed_for_a_caller_without_an_order() {
         failed(OffsetFailure::SeamOpened { face }),
         failed(OffsetFailure::Unsound { what }),
         failed(OffsetFailure::ExactCurveUncut),
-        solidcore::SolidError::sm_err("x"),
-        solidcore::SolidError::Upstream {
-            operation: "offset::x",
-            code: solidcore::error::SM_ERR_OFFSET_WALLS_TOUCH,
-            entity: None,
-        },
+        crate::tests::routine_failure("x"),
     ];
     for e in errors {
         let expected = super::refusal(&e).unwrap_or_else(|| crate::error::status(e.clone()));
@@ -1968,7 +1910,7 @@ fn an_unmeasurable_face_is_unsupported() {
             .face(f)?
             .surface
             .clone()
-            .ok_or(solidcore::SolidError::sm_err("test"))?;
+            .ok_or_else(|| crate::tests::routine_failure("test"))?;
         let off = solidcore::surface::offset_surface::OffsetSurface::new(k, 0.0, base, true, 0)?;
         b.face_mut(f)?.surface = Some(solidcore::surface::surface::Surface::from(off));
         super::room(k, &mut b, &[], 2.0)
@@ -3053,29 +2995,25 @@ fn offset_failures_keep_the_kernel_reason_and_class() {
     use solidcore::error::Failure;
     use solidcore::{EntityRef, FaceId};
 
-    for why in [
-        OffsetFailure::Failed("the offset edge has no intersection"),
-        OffsetFailure::Missing("the face's surface"),
-        OffsetFailure::InvalidValue("the offset distance is zero"),
-        OffsetFailure::Inconsistent("the edge's mate is absent"),
-    ] {
-        let error = Failure::new("offset::offset_executive::crossing_loops", why)
-            .at(EntityRef::Face(FaceId::from_index(2)))
-            .into_error();
-        let diagnostic = super::diagnostic(&error);
-        assert_eq!(diagnostic.detail, error.to_string());
-        assert_eq!(
-            diagnostic.refusal,
-            Some(Error::OffsetRefused {
-                face: None,
-                why: OffsetRefusal::Phrase {
-                    class: why.kind(),
-                    defect: why.is_defect(),
-                    phrase: error.to_string()
-                },
-            })
-        );
-    }
+    let why = OffsetFailure::Defect {
+        why: "the edge's mate is absent",
+    };
+    let error = Failure::new("offset::offset_executive::crossing_loops", why)
+        .at(EntityRef::Face(FaceId::from_index(2)))
+        .into_error();
+    let diagnostic = super::diagnostic(&error);
+    assert_eq!(diagnostic.detail, error.to_string());
+    assert_eq!(
+        diagnostic.refusal,
+        Some(Error::OffsetRefused {
+            face: None,
+            why: OffsetRefusal::Phrase {
+                class: why.kind(),
+                defect: why.is_defect(),
+                phrase: error.to_string()
+            },
+        })
+    );
 }
 
 #[test]
@@ -3087,7 +3025,9 @@ fn typed_offset_refusals_keep_their_nested_kernel_cause() {
 
     let cause = Failure::new(
         "intersect::clip",
-        IntersectFailure::Failed("the exact trim does not cross the face boundary"),
+        IntersectFailure::Defect {
+            why: "the exact trim does not cross the face boundary",
+        },
     )
     .into_error();
     let error = Failure::new("offset::trim", OffsetFailure::ExactCurveUncut)
@@ -3103,9 +3043,9 @@ fn typed_offset_refusals_keep_their_nested_kernel_cause() {
     );
     assert_eq!(diagnostic.detail, error.to_string());
     assert!(
-        diagnostic
-            .detail
-            .contains("intersect::clip: the exact trim does not cross the face boundary"),
+        diagnostic.detail.contains(
+            "intersect::clip: stage_failed: the exact trim does not cross the face boundary"
+        ),
         "{}",
         diagnostic.detail
     );
@@ -3132,24 +3072,29 @@ fn typed_offset_refusals_keep_their_nested_kernel_cause() {
 /// including the failure beneath an offset stage.
 #[test]
 fn offset_substages_keep_their_failure_reason() {
+    use solidcore::error::boolean::BooleanFailure;
     use solidcore::error::intersect::IntersectFailure;
     use solidcore::error::offset::OffsetFailure;
-    use solidcore::error::{Failure, Reason};
+    use solidcore::error::Failure;
 
     let cause = Failure::new(
         "intersect::surface_surface",
-        IntersectFailure::Failed("the two face trims do not cross"),
+        IntersectFailure::Defect {
+            why: "the two face trims do not cross",
+        },
     )
     .into_error();
-    let offset = Failure::new("offset::offset_executive", OffsetFailure::StageFailed)
-        .caused_by(cause.clone())
-        .into_error();
-    let boolean = Failure::new(
-        "boolean::merge::p3",
-        Reason::Failed("a Boolean of the tree failed"),
+    let offset = Failure::new(
+        "offset::offset_executive",
+        OffsetFailure::Defect {
+            why: "the executive's stage failed",
+        },
     )
     .caused_by(cause.clone())
     .into_error();
+    let boolean = Failure::new("boolean::merge::p3", BooleanFailure::TreeBooleanFailed)
+        .caused_by(cause.clone())
+        .into_error();
     for error in [cause, offset, boolean] {
         let diagnostic = super::diagnostic(&error);
         assert_eq!(diagnostic.detail, error.to_string());

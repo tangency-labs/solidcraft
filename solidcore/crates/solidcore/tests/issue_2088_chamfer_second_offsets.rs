@@ -135,7 +135,7 @@ fn issue_2088_second_radii_size_mismatch() {
         .unwrap_err();
     // the status, not the variant: a typed blend failure replaced the `Upstream` (#13790)
     assert_eq!(
-        solidcore::error::upstream_status(&err),
+        err.sm_status(),
         Some(solidcore::error::SM_ERR_INVALID_INPUT),
         "{err:?}"
     );

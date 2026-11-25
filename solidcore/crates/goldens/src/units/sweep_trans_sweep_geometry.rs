@@ -80,8 +80,8 @@ fn v(p: [f64; 3]) -> Vec3 {
 }
 fn status(e: &SolidError) -> f64 {
     match e {
-        e if solidcore::error::upstream_status(e).is_some() => {
-            f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+        e if crate::output::recorded_status(e).is_some() => {
+            f64::from(crate::output::recorded_status(e).unwrap_or(-1))
         }
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.,
         e if nlib_number(e).is_some() => 1001.,
@@ -353,7 +353,7 @@ fn rust(i: &Input) -> Result<Vec<f64>> {
                     CurveKind::BSpline(c) => c.copy(),
                     CurveKind::Line(c) => c.base_with_nurb()?.into_owned(),
                     CurveKind::Ellipse(c) => c.base().copy(),
-                    _ => return Err(SolidError::sm_err("runner")),
+                    _ => return Err(crate::output::routine_failure("runner")),
                 };
                 Surface::from(BSplineSurface::create_linear_sweep(
                     &mut bs,

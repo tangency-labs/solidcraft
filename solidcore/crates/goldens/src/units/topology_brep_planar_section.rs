@@ -15,6 +15,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use solidcore::curve::curve::Curve;
+use solidcore::error::topology::TopologyFailure;
+use solidcore::error::Failure;
 use solidcore::intersect::api_intersectors::intersect_brep_with_plane;
 use solidcore::kernel::Kernel;
 use solidcore::math::Vec3;
@@ -133,7 +135,7 @@ fn path(i: &Inputs) -> Result<String, HarnessError> {
 /// The status code of a section call (`SM_SUCCESS` is `0`).
 fn status(e: &SolidError) -> Option<f64> {
     match e {
-        up_err if solidcore::error::upstream_status(up_err).is_some() => Some(f64::from(solidcore::error::upstream_status(up_err).unwrap_or(-1))),
+        up_err if crate::output::recorded_status(up_err).is_some() => Some(f64::from(crate::output::recorded_status(up_err).unwrap_or(-1))),
         SolidError::InvalidInput { .. } => Some(1007.),
         _ => None,
     }
@@ -220,7 +222,7 @@ fn box_strut(k: &mut Kernel, size: [f64; 3], strut: [f64; 3]) -> SolidResult<Bre
     use solidcore::topology::face::p4 as face4;
     let mut b =
         solidcore::primitive::api_primitives::create_box(k, Vec3::ZERO, size[0], size[1], size[2])?;
-    let null = || SolidError::null_pointer("difftest::topology_brep_planar_section::box_strut");
+    let null = || SolidError::port_invariant("difftest::topology_brep_planar_section::box_strut", "box strut has no top face or vertex");
     let mut top = None;
     for f in brep1::faces(&b, None)? {
         let vs = face4::vertices(&b, f, None, false, None)?;
@@ -337,7 +339,13 @@ fn forced_record(
     for f in faces {
         let uv_domain = face2::uv_domain(b, f)?;
         let surface = face2::surface(b, f)?
-            .ok_or_else(|| SolidError::null_pointer("difftest::topology_brep_planar_section"))?
+            .ok_or_else(|| {
+                Failure::new(
+                    "difftest::topology_brep_planar_section",
+                    TopologyFailure::FaceWithoutSurface,
+                )
+                .into_error()
+            })?
             .clone_for_evaluation()?;
         let face_tol = face2::tolerance(b, f)?;
         let section = match face_planar_section_curves(
@@ -434,7 +442,13 @@ fn faces_record(
     for f in faces {
         let uv_domain = face2::uv_domain(b, f)?;
         let surface = face2::surface(b, f)?
-            .ok_or_else(|| SolidError::null_pointer("difftest::topology_brep_planar_section"))?
+            .ok_or_else(|| {
+                Failure::new(
+                    "difftest::topology_brep_planar_section",
+                    TopologyFailure::FaceWithoutSurface,
+                )
+                .into_error()
+            })?
             .clone_for_evaluation()?;
         match face_planar_section_curves(
             k, b, f, &surface, &uv_domain, point, normal, tol, ang_tol,

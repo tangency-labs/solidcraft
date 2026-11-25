@@ -20,7 +20,7 @@
 //!   `SetProperties`' two `SM_ERR` returns for a zero or normal-parallel curve tangent
 //!   and every propagated callee failure (`SER`) are errors. `GetNextPoint` stores the
 //!   outcome of `SetProperties` (and goes on with its second try): an error there
-//!   becomes the outcome of its code, the `code` of a [`SolidError::Upstream`],
+//!   becomes the outcome of its code, the status a routine's failure keeps,
 //!   `SM_ERR_INVALID_INPUT` for [`SolidError::InvalidInput`] and `SM_ERR` for any other
 //!   variant (Rust errors do not carry every upstream code); [`SolidError::Unported`]
 //!   always propagates.
@@ -623,7 +623,7 @@ impl PointOutcome {
 
 /// The outcome upstream would store for a failed callee (see the module notes).
 fn status_of(e: &SolidError) -> PointOutcome {
-    if let Some(code) = e.upstream_status() {
+    if let Some(code) = e.failed_routine_status() {
         return PointOutcome::from_status(code);
     }
     match e {
@@ -894,7 +894,7 @@ impl DropPt {
         if self.degen_curve != Some(true) {
             // can't drop Crv1stDeriv vectors parallel to m_SrfNormal (degenerate case)
             // (no angle: a zero tangent or normal, which upstream reads as 0 degrees; the
-            // angle's error stays the cause, rule 6)
+            // angle's error stays the cause)
             let stop = match self.srf_normal.angle_between(self.crv_pd[1]) {
                 Ok(rad) => Some(rad_to_deg(rad))
                     .filter(|degrees| *degrees < 3.0)
@@ -1107,7 +1107,7 @@ impl DropPt {
         let (found_answer, local_uv) =
             local_point_solve(k, surface, uv_domain, end.crv_pd[0], end.uv_pd[0])?;
 
-        // MINIMIZE should always find some solution (none found: rule 7).
+        // MINIMIZE should always find some solution (none found).
         if !found_answer {
             return Err(SolidError::intersect(OP_NEXT, IntersectFailure::NoFoot));
         }
@@ -1202,7 +1202,7 @@ impl DropPt {
             // A larger correction rejects this candidate without moving the endpoint.
             match start.check_seam_jump(k, surface, srf_closure, approx_tol_3d, end) {
                 Ok(()) => {}
-                Err(e) if e.upstream_status() == Some(SM_ERR_OUTSIDE_OF_DOMAIN) => {
+                Err(e) if e.failed_routine_status() == Some(SM_ERR_OUTSIDE_OF_DOMAIN) => {
                     return Ok(PointOutcome::OutsideOfDomain)
                 }
                 Err(e) => return Err(e),
@@ -1963,7 +1963,7 @@ mod tests {
             e.intersect_failure(),
             Some(&IntersectFailure::DegenerateTangent)
         );
-        assert_eq!(crate::error::upstream_status(&e), Some(SM_ERR));
+        assert_eq!(SolidError::failed_routine_status(&e), Some(SM_ERR));
         assert!(
             matches!(
                 e.cause(),

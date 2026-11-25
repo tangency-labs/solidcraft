@@ -9,12 +9,7 @@
 //! | Rust                               | Status difftest compares       |
 //! |------------------------------------|--------------------------------|
 //! | [`SurfaceFailure::Defect`]         | `SM_ERR` (or the site's, through `with_status`) |
-//! | [`SurfaceFailure::Failed`]         | `SM_ERR`                       |
-//! | [`SurfaceFailure::InvalidValue`]   | `SM_ERR_INVALID_INPUT`         |
-//! | [`SurfaceFailure::Missing`]        | `SM_ERR_NULL_POINTER`          |
-//! | [`SurfaceFailure::OffSurface`]     | `SM_ERR_NOT_WITHIN_TOLERANCE`  |
-//! | [`SurfaceFailure::OutsideDomain`]  | `SM_ERR_OUTSIDE_OF_DOMAIN`     |
-//! | the named causes of the surface solvers, [`SurfaceFailure::SolverWithout`] to [`SurfaceFailure::NothingLifted`] | the status of the phrase each replaced (`comparison_status`), or the site's through `with_status` |
+//! | the named causes of the surface solvers, [`SurfaceFailure::SolverWithout`] to [`SurfaceFailure::NothingLifted`] | each its own (`comparison_status`), or the site's through `with_status` |
 //! | the named causes of the volume surfaces and the implicit checks, [`SurfaceFailure::TooFewKnots`] to [`SurfaceFailure::CallFailed`] | `SM_ERR`, except [`SurfaceFailure::NoNurb`]: `SM_ERR_NULL_POINTER` (a site that reported `SM_ERR` keeps it through `with_status`) |
 //! | [`SurfaceFailure::BlendCurveNotBSpline`], [`SurfaceFailure::BlendDefinitionUnreadable`], [`SurfaceFailure::NetNotCertified`], [`SurfaceFailure::CurveDimensionTooLarge`], [`SurfaceFailure::NoBSplineForm`], [`SurfaceFailure::DoesNotContinueAsItself`], [`SurfaceFailure::OffsetNestedTooDeep`], [`SurfaceFailure::NoNormal`], [`SurfaceFailure::InvertedPointOffOffset`], [`SurfaceFailure::ExtensionTowardFailed`], [`SurfaceFailure::RevolutionArcOutOfRange`], [`SurfaceFailure::ExtensionSpanNotPositive`], [`SurfaceFailure::ExtensionSpansPastBound`], [`SurfaceFailure::AsItselfNetUnexpected`], [`SurfaceFailure::RevolutionAxisDegenerate`], [`SurfaceFailure::GeneratorCircleUndefined`], [`SurfaceFailure::AsItselfWeightNotPositive`], [`SurfaceFailure::RotationSenseUndefined`], [`SurfaceFailure::NoNonsingularStepoff`] | `SM_ERR` |
 //! | [`SurfaceFailure::DisjointFaceDomain`] | `SM_ERR_INVALID_INPUT` (class [`ErrorKind::InvalidInput`]) |
@@ -25,13 +20,11 @@
 //! | [`SurfaceFailure::ScaleNotUniform`], [`SurfaceFailure::CurveWithoutNurb`], [`SurfaceFailure::BallDefinitionUnreadable`], [`SurfaceFailure::PointOnAxis`], [`SurfaceFailure::IsoCircleUndefined`], [`SurfaceFailure::ExtensionNotMadeInBracket`] | `SM_ERR` |
 //! | [`SurfaceFailure::SurfaceCacheNotBuilt`], [`SurfaceFailure::SurfaceCacheTreeNotBuilt`], [`SurfaceFailure::CurveCacheNotBuilt`], [`SurfaceFailure::CurveCacheTreeNotBuilt`] | `SM_ERR_NULL_POINTER` (class [`ErrorKind::Failed`]; defect-ness follows the cause) |
 //! | [`SurfaceFailure::SurfaceNotBSplineKind`], [`SurfaceFailure::CurveNotBSplineKind`] | `SM_ERR_NULL_POINTER` (class [`ErrorKind::Unsupported`]) |
-//! | [`SurfaceFailure::SurfaceNotBSplineKind`] | `SM_ERR_NULL_POINTER` (class [`ErrorKind::Unsupported`]) |
-//! | the other named causes, from [`SurfaceFailure::ScaleNotUniform`] on | the status of the phrase each replaced (`comparison_status`), or the site's through `with_status` |
+//! | the other named causes, from [`SurfaceFailure::ScaleNotUniform`] on | each its own (`comparison_status`), or the site's through `with_status` |
 //! | every other named cause            | `SM_ERR`, with the class its doc names |
 //!
 //! [`SurfaceFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
-//! reason: a defect ([`ErrorKind::StageFailed`], class 127). The phrase causes are sites
-//! not yet converted (the conversion guide: `docs/failure-codes-and-reproduction.md` §6).
+//! reason: a defect ([`ErrorKind::StageFailed`], class 127).
 //!
 //! **Classes of the named causes.** A check of the caller's argument or object that is
 //! malformed is [`ErrorKind::InvalidInput`]; a box or point outside the domain it must lie
@@ -40,13 +33,12 @@
 //! [`ErrorKind::Degenerate`]; a routine whose callee failed keeps that error as its cause
 //! ([`SurfaceFailure::CallFailed`]).
 //!
-//! Deviations: not upstream. A failure says in a phrase (or by its variant) what went wrong;
+//! Deviations: not upstream. A failure says by its variant what went wrong;
 //! the failure's `operation` path says which routine. A failure names an entity only where the
 //! site it replaces named one (a blend face whose net fails its re-certification). A check of a
 //! caller's argument that reports no status stays [`crate::SolidError::InvalidInput`]; one that
 //! reports a status is a named cause of the class the paragraph above gives, keeping that
-//! status. Only part of `crate::surface` uses these yet; the files that still build bare
-//! statuses are listed in this module's ratchet test.
+//! status.
 
 use super::{
     ErrorKind, Failure, Reason, SM_ERR, SM_ERR_INVALID_INPUT, SM_ERR_NOT_WITHIN_TOLERANCE,
@@ -66,7 +58,7 @@ pub enum SurfaceFailure {
     AngleNotMeasured,
     /// The cubic approximation of a surface was still farther from it than the tolerance
     /// after the last subdivision pass: a solve that stops with its numbers, a defect
-    /// (guide §6 rule 3; class [`ErrorKind::StageFailed`], `SM_ERR`).
+    /// (class [`ErrorKind::StageFailed`], `SM_ERR`).
     ApproximationNotConverged {
         /// The largest distance of the approximation from the surface it sampled.
         achieved: f64,
@@ -263,9 +255,6 @@ pub enum SurfaceFailure {
     /// The caller's face has no surface ([`ErrorKind::InvalidInput`],
     /// `SM_ERR_NULL_POINTER`).
     FaceHasNoSurface,
-    /// The routine could not continue, as the phrase says (for example "the generator
-    /// curve has no NURB form").
-    Failed(&'static str),
     /// The point found near a singular boundary is proven farther from the test point than
     /// the guess. Class `failed`.
     FartherThanGuess {
@@ -300,11 +289,6 @@ pub enum SurfaceFailure {
     /// The caller's derivative surface definition fails its validity check
     /// ([`ErrorKind::InvalidInput`], `SM_ERR`).
     InvalidDerivativeSurface,
-    /// A value the routine computes with has no defined result, as the phrase says (for
-    /// example "the line direction is the zero vector"). Upstream returns
-    /// `SM_ERR_INVALID_INPUT` as a status here, so its kind is
-    /// [`ErrorKind::InvalidInput`].
-    InvalidValue(&'static str),
     /// The sphere's inversion could not answer whether the point is on it: the point is at
     /// the centre of a sphere whose radius is not above the 3D tolerance, so it has no
     /// parameters. [`ErrorKind::Degenerate`].
@@ -351,9 +335,6 @@ pub enum SurfaceFailure {
         /// The merged range's end parameter.
         end: f64,
     },
-    /// Something the routine needs is missing, as the phrase says (for example "the
-    /// surface's cache").
-    Missing(&'static str),
     /// A blend face's net is not proved within its bound of its definition (or is not a net
     /// of its definition's stations), as a body rebuilt from a record must be before its
     /// faces are operands. Class `failed`; the re-certification's own error is its cause.
@@ -435,18 +416,12 @@ pub enum SurfaceFailure {
     /// gave one). Class `failed`; whether it is a defect or a refusal is its cause's
     /// ([`crate::SolidError::is_defect`] follows the chain).
     NurbNotMade,
-    /// A point is farther from the surface than the tolerance, as the phrase says (for
-    /// example "the point is off the surface"): an inversion's answer.
-    OffSurface(&'static str),
     /// The offset surface given has a base that is an offset surface whose own base is an
     /// offset surface: offsets nest one deep at most. [`ErrorKind::InvalidInput`].
     OffsetNestedTooDeep,
     /// The solve operation asked for is not one the routine takes (a plane's fast drop
     /// takes minimize, normalize and intersect). [`ErrorKind::InvalidInput`].
     OperationNotTaken,
-    /// A parameter or domain lies outside the surface's domain, as the phrase says (for
-    /// example "the point is outside the sweep of the surface of revolution").
-    OutsideDomain(&'static str),
     /// The two surfaces' normals are parallel, so they span no plane
     /// ([`ErrorKind::Degenerate`], `SM_ERR`).
     ParallelNormals,
@@ -812,7 +787,6 @@ impl SurfaceFailure {
             | Self::FaceHasNoSurface
             | Self::GeneratorNotMade
             | Self::InputNotGiven { .. }
-            | Self::Missing(_)
             | Self::NoInputStream
             | Self::NoNurb
             | Self::NoPolarConverter
@@ -829,20 +803,19 @@ impl SurfaceFailure {
             Self::DegenerateIsoCurve
             | Self::DisjointFaceDomain
             | Self::DomainPastApex
-            | Self::InvalidValue(_)
             | Self::LineDirectionZero
             | Self::NormalsCancel
             | Self::RecordDoesNotRebuild => SM_ERR_INVALID_INPUT,
-            Self::OffSurface(_) | Self::PointOffSurface => SM_ERR_NOT_WITHIN_TOLERANCE,
-            Self::OutsideDomain(_) | Self::PointOutsideSweep => SM_ERR_OUTSIDE_OF_DOMAIN,
+            Self::PointOffSurface => SM_ERR_NOT_WITHIN_TOLERANCE,
+            Self::PointOutsideSweep => SM_ERR_OUTSIDE_OF_DOMAIN,
             Self::PlanesLineNearlySingular => SM_ERR_WARNING,
             _ => SM_ERR,
         }
     }
 
     /// The failure's stable [`ErrorKind`]: [`ErrorKind::InvalidInput`] for a check of the
-    /// caller's argument, surface, curve or file, otherwise the kind of the status it
-    /// replaced ([`ErrorKind::Failed`], [`ErrorKind::Missing`], [`ErrorKind::InvalidInput`],
+    /// caller's argument, surface, curve or file, otherwise the kind of its status
+    /// ([`ErrorKind::Failed`], [`ErrorKind::Missing`], [`ErrorKind::InvalidInput`],
     /// [`ErrorKind::OutsideDomain`], [`ErrorKind::NotWithinTolerance`]).
     /// [`SurfaceFailure::Defect`] is [`ErrorKind::StageFailed`], a defect. Each named
     /// cause has the class its doc names.
@@ -1107,10 +1080,6 @@ impl core::fmt::Display for SurfaceFailure {
             Self::ExtensionSpansPastBound => f.write_str("the extension needs more spans than its bound"),
             Self::ExtensionTowardFailed => f.write_str("the G1R extension toward the point failed"),
             Self::FaceHasNoSurface => f.write_str("the face has no surface"),
-            Self::Failed(what)
-            | Self::InvalidValue(what)
-            | Self::OffSurface(what)
-            | Self::OutsideDomain(what) => f.write_str(what),
             Self::FartherThanGuess { found, guess } => write!(
                 f,
                 "the point found is farther from the test point than the guess: at least {found}, the guess at most {guess}"
@@ -1154,7 +1123,6 @@ impl core::fmt::Display for SurfaceFailure {
             Self::MergedRangeReversed { start, end } => {
                 write!(f, "a merged solution range is reversed: from {start} to {end}")
             }
-            Self::Missing(what) => write!(f, "{what} is missing"),
             Self::NetNotCertified => f.write_str("the blend face's net is not proved within its bound of its definition"),
             Self::NoBSplineForm => f.write_str("the surface is of a kind with no B-spline form"),
             Self::NoCommonEllipsePlane => {
@@ -1343,20 +1311,13 @@ impl crate::SolidError {
     }
 
     /// [`SurfaceFailure::NurbNotMade`] with status `status`, for a routine whose NURB form
-    /// is still missing after `made`, the result of the call that was to make it: its
-    /// error, when it failed, is the cause.
+    /// the call that was to make it failed to make: that call's error is the cause.
     #[must_use]
-    pub(crate) fn surface_nurb_not_made(
-        operation: &'static str,
-        status: i32,
-        made: Result<(), Self>,
-    ) -> Self {
-        let failure = Failure::new(operation, SurfaceFailure::NurbNotMade).with_status(status);
-        match made {
-            Err(e) => failure.caused_by(e),
-            Ok(()) => failure,
-        }
-        .into_error()
+    pub(crate) fn surface_nurb_not_made(operation: &'static str, status: i32, cause: Self) -> Self {
+        Failure::new(operation, SurfaceFailure::NurbNotMade)
+            .with_status(status)
+            .caused_by(cause)
+            .into_error()
     }
 
     /// The surface failure behind this error, for a [`crate::SolidError::Failed`] with a
@@ -1381,23 +1342,13 @@ mod tests {
 
     #[test]
     fn surface_failures_keep_the_status_and_kind_of_the_upstream_they_replace() {
-        let cases = [
-            (SurfaceFailure::Failed("x"), SM_ERR),
-            (SurfaceFailure::Missing("x"), SM_ERR_NULL_POINTER),
-            (SurfaceFailure::InvalidValue("x"), SM_ERR_INVALID_INPUT),
-            (SurfaceFailure::OutsideDomain("x"), SM_ERR_OUTSIDE_OF_DOMAIN),
-            (SurfaceFailure::OffSurface("x"), SM_ERR_NOT_WITHIN_TOLERANCE),
-        ];
+        let cases = [(SurfaceFailure::ExtensionTowardFailed, SM_ERR)];
         for (failure, code) in cases {
             let typed = SolidError::surface("surface::op", failure);
-            let before = SolidError::Upstream {
-                operation: "surface::op",
-                code,
-                entity: None,
-            };
+            let before = SolidError::failed_routine("surface::op", code);
             assert_eq!(typed.sm_status(), before.sm_status(), "{failure:?}");
-            assert_eq!(typed.upstream_status(), Some(code), "{failure:?}");
-            assert_eq!(super::super::upstream_status(&typed), Some(code));
+            assert_eq!(typed.failed_routine_status(), Some(code), "{failure:?}");
+            assert_eq!(SolidError::failed_routine_status(&typed), Some(code));
             assert_eq!(typed.kind(), before.kind(), "{failure:?}");
             assert_eq!(typed.operation(), before.operation(), "{failure:?}");
             assert_eq!(typed.entity(), before.entity(), "{failure:?}");
@@ -1410,34 +1361,13 @@ mod tests {
             assert_eq!(typed.surface_failure(), Some(&failure));
         }
         assert_eq!(
-            SolidError::surface(
-                "surface::op",
-                SurfaceFailure::Missing("the surface's cache")
-            )
-            .to_string(),
-            "surface::op: the surface's cache is missing"
+            SolidError::failed_routine("surface::op", SM_ERR).surface_failure(),
+            None
         );
-        assert_eq!(
-            SolidError::surface(
-                "surface::op",
-                SurfaceFailure::Failed("the generator has no NURB form")
-            )
-            .to_string(),
-            "surface::op: the generator has no NURB form"
-        );
-        assert_eq!(
-            SolidError::surface(
-                "surface::op",
-                SurfaceFailure::OffSurface("the point is off")
-            )
-            .to_string(),
-            "surface::op: the point is off"
-        );
-        assert_eq!(SolidError::sm_err("surface::op").surface_failure(), None);
     }
 
-    /// The named causes of the general surface evaluation (TE-O-07) keep the status of the
-    /// phrase cause each replaced, with their own class.
+    /// The named causes of the general surface evaluation have their status, with
+    /// their own class.
     #[test]
     fn the_surface_evaluation_causes_keep_their_status_with_their_class() {
         use ErrorKind as K;
@@ -1542,7 +1472,7 @@ mod tests {
         for (failure, code, kind) in cases {
             let typed = SolidError::surface("surface::op", failure);
             assert_eq!(typed.sm_status(), Some(code), "{failure:?}");
-            assert_eq!(typed.upstream_status(), Some(code), "{failure:?}");
+            assert_eq!(typed.failed_routine_status(), Some(code), "{failure:?}");
             assert_eq!(typed.kind(), kind, "{failure:?}");
             assert!(typed.is_status_answer(), "{failure:?}");
             assert_eq!(typed.is_defect(), kind == K::StageFailed, "{failure:?}");
@@ -1569,58 +1499,20 @@ mod tests {
         assert_eq!(chained.sm_status(), Some(SM_ERR_NULL_POINTER));
     }
 
-    /// A sample of the second set of converted files (`extend` and its sides, `side`,
-    /// `implicit`, the volumes, `srf_in_volume`, `procedural_blend` and its offset,
-    /// `trim_srf_cache`): each keeps the operation, status, kind and entity of its
-    /// `Upstream`.
+    /// Samples of the surface files (`trim_srf_cache`, `procedural_blend`): each keeps the
+    /// operation, status, kind and entity of the routine failure it replaced.
     #[test]
-    fn the_extend_volume_and_blend_samples_keep_their_upstream_answers() {
-        let samples = [
-            (
-                "surface::extend::analytic::analytic_extended_sides",
-                SurfaceFailure::Failed("the joint is not an interior knot"),
-                SM_ERR,
-            ),
-            (
-                "surface::extend::ball",
-                SurfaceFailure::Failed("the B-spline surface has no NURB"),
-                SM_ERR,
-            ),
-            (
-                "surface::volume::p1::Volume::copy",
-                SurfaceFailure::Failed("a plain volume cannot be copied"),
-                SM_ERR,
-            ),
-            (
-                "surface::srf_in_volume",
-                SurfaceFailure::Failed("the volume's inversion failed"),
-                SM_ERR,
-            ),
-            (
-                "surface::procedural_blend::ProceduralBlend::read_from_db",
-                SurfaceFailure::Missing("the input stream"),
-                SM_ERR_NULL_POINTER,
-            ),
-            (
-                "surface::trim_srf_cache::TrimSrfCache::build_tree_with_face",
-                SurfaceFailure::DisjointFaceDomain,
-                SM_ERR_INVALID_INPUT,
-            ),
-            (
-                "surface::side",
-                SurfaceFailure::Failed("the iso curve has no NURB"),
-                SM_ERR,
-            ),
-        ];
+    fn the_trim_cache_and_blend_samples_keep_their_routine_answers() {
+        let samples = [(
+            "surface::trim_srf_cache::TrimSrfCache::build_tree_with_face",
+            SurfaceFailure::DisjointFaceDomain,
+            SM_ERR_INVALID_INPUT,
+        )];
         for (operation, failure, code) in samples {
             let typed = SolidError::surface(operation, failure);
-            let before = SolidError::Upstream {
-                operation,
-                code,
-                entity: None,
-            };
+            let before = SolidError::failed_routine(operation, code);
             assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
-            assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
+            assert_eq!(typed.failed_routine_status(), Some(code), "{typed:?}");
             assert_eq!(typed.kind(), before.kind(), "{typed:?}");
             assert_eq!(typed.operation(), before.operation(), "{typed:?}");
             assert_eq!(typed.entity(), None, "{typed:?}");
@@ -1635,21 +1527,21 @@ mod tests {
         )
         .at(face)
         .into_error();
-        let before = SolidError::Upstream {
-            operation: "surface::procedural_blend::recertify_faces",
-            code: SM_ERR,
-            entity: Some(face),
-        };
+        let before = SolidError::failed_routine_at(
+            "surface::procedural_blend::recertify_faces",
+            SM_ERR,
+            face,
+        );
         assert_eq!(typed.sm_status(), before.sm_status());
-        assert_eq!(typed.upstream_status(), Some(SM_ERR));
+        assert_eq!(typed.failed_routine_status(), Some(SM_ERR));
         assert_eq!(typed.kind(), before.kind());
         assert_eq!(typed.operation(), before.operation());
         assert_eq!(typed.entity(), Some(face));
         assert_eq!(typed.is_status_answer(), before.is_status_answer());
     }
 
-    /// Each named cause keeps the status of the phrase it replaced and says its class; a
-    /// cause that chains the stage's error keeps it.
+    /// Each named cause has its status and says its class; a cause that chains the stage's
+    /// error keeps it.
     #[test]
     fn the_solver_causes_keep_their_status_and_say_their_class() {
         let op = "surface::op";
@@ -1750,7 +1642,7 @@ mod tests {
         ];
         for (failure, status, kind) in cases {
             let e = SolidError::surface(op, failure);
-            assert_eq!(e.upstream_status(), Some(status), "{e:?}");
+            assert_eq!(e.failed_routine_status(), Some(status), "{e:?}");
             assert_eq!(e.kind(), kind, "{e:?}");
             assert_eq!(e.operation(), op, "{e:?}");
             assert_eq!(e.surface_failure(), Some(&failure));
@@ -1761,30 +1653,21 @@ mod tests {
         let e = Failure::new(op, SurfaceFailure::LineDirectionZero)
             .with_status(SM_ERR)
             .into_error();
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert_eq!(e.kind(), ErrorKind::InvalidInput);
         // a chained cause is kept
         let stage = SolidError::invalid_input("stage::op", "bad");
         let e = Failure::new(op, SurfaceFailure::SolveCacheNotMade)
             .caused_by(stage.clone())
             .into_error();
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(e.cause(), Some(&stage));
     }
 
-    /// The surface routines describe their failures: their library code builds no bare
-    /// `Upstream` status, except the files listed (with the bare sites each may still hold)
-    /// whose conversion waits on other open work or a later part of the slice.
+    /// The named causes of the offset and procedural blend surfaces have their status, with
+    /// the kind their condition is: the caller's input, or a failure of the geometry.
     #[test]
-    fn the_surface_routines_build_no_bare_statuses() {
-        super::super::bare_scan::assert_waiting("surface", 51, &[]);
-    }
-
-    /// The named causes of the offset and procedural blend surfaces keep the status of the
-    /// phrase causes they replaced, with the kind their condition is: the caller's input, or
-    /// a failure of the geometry.
-    #[test]
-    fn the_named_offset_and_blend_causes_keep_the_status_they_replaced() {
+    fn the_named_offset_and_blend_causes_keep_their_status() {
         use crate::error::ErrorKind as K;
         let cases = [
             (
@@ -1842,8 +1725,12 @@ mod tests {
         for (failure, code, kind) in cases {
             let e = SolidError::surface("surface::op", failure);
             assert_eq!(e.sm_status(), Some(code), "{failure:?}");
-            assert_eq!(e.upstream_status(), Some(code), "{failure:?}");
-            assert_eq!(super::super::upstream_status(&e), Some(code), "{failure:?}");
+            assert_eq!(e.failed_routine_status(), Some(code), "{failure:?}");
+            assert_eq!(
+                SolidError::failed_routine_status(&e),
+                Some(code),
+                "{failure:?}"
+            );
             assert_eq!(e.kind(), kind, "{failure:?}");
             assert_eq!(e.surface_failure(), Some(&failure));
             assert!(!e.is_defect(), "{failure:?}");
@@ -1861,15 +1748,15 @@ mod tests {
             SurfaceFailure::PlaneCanvasNotFinite,
         ] {
             let e = SolidError::surface(op, failure);
-            assert_eq!(e.upstream_status(), Some(SM_ERR), "{failure:?}");
+            assert_eq!(e.failed_routine_status(), Some(SM_ERR), "{failure:?}");
             assert_eq!(e.kind(), ErrorKind::Failed, "{failure:?}");
             assert_eq!(e.surface_failure(), Some(&failure));
             assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
         }
     }
 
-    /// The named causes keep the status of the phrase each replaced, so `upstream_status`
-    /// (which most goldens units read) is unchanged; their class says whose the failure is,
+    /// The named causes have their status, which `failed_routine_status` (which most goldens
+    /// units read) reports; their class says whose the failure is,
     /// and a cause chained under one decides whether it is a defect.
     #[test]
     fn the_analytic_and_swept_causes_keep_their_status_and_say_their_class() {
@@ -2069,7 +1956,7 @@ mod tests {
             let e = SolidError::surface(op, failure);
             assert_eq!(e.sm_status(), Some(status), "{failure:?}");
             assert_eq!(
-                super::super::upstream_status(&e),
+                SolidError::failed_routine_status(&e),
                 Some(status),
                 "{failure:?}"
             );
@@ -2089,22 +1976,22 @@ mod tests {
             "surface::op: the NURB is not of the analytic kind: its height is degenerate"
         );
         // a NURB not made keeps the site's status, and its make's defect decides the class
-        let made = Err(SolidError::surface(op, SurfaceFailure::Defect { why: "x" }));
+        let made = SolidError::surface(op, SurfaceFailure::Defect { why: "x" });
         let e = SolidError::surface_nurb_not_made(op, SM_ERR_NULL_POINTER, made);
         assert_eq!(e.sm_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(e.surface_failure(), Some(&SurfaceFailure::NurbNotMade));
         assert!(e.is_defect());
-        let e = SolidError::surface_nurb_not_made(op, SM_ERR, Ok(()));
+        let made = SolidError::surface(op, SurfaceFailure::RadiusNotPositive);
+        let e = SolidError::surface_nurb_not_made(op, SM_ERR, made);
         assert_eq!(e.sm_status(), Some(SM_ERR));
-        assert!(e.cause().is_none() && !e.is_defect());
+        assert!(!e.is_defect());
     }
 
-    /// The named causes of the surface extensions and the ball patch keep the status of the
-    /// phrase causes they replaced (a site whose status differs from the cause's own keeps
-    /// it through `with_status`), with the kind their condition is: the caller's input, or a
-    /// failure of the geometry.
+    /// The named causes of the surface extensions and the ball patch have their status (a
+    /// site whose status differs from the cause's own keeps it through `with_status`), with
+    /// the kind their condition is: the caller's input, or a failure of the geometry.
     #[test]
-    fn the_named_extension_causes_keep_the_status_they_replaced() {
+    fn the_named_extension_causes_keep_their_status() {
         use crate::error::ErrorKind as K;
         let cases = [
             (
@@ -2153,8 +2040,12 @@ mod tests {
             }
             let e = f.into_error();
             assert_eq!(e.sm_status(), Some(code), "{failure:?}");
-            assert_eq!(e.upstream_status(), Some(code), "{failure:?}");
-            assert_eq!(super::super::upstream_status(&e), Some(code), "{failure:?}");
+            assert_eq!(e.failed_routine_status(), Some(code), "{failure:?}");
+            assert_eq!(
+                SolidError::failed_routine_status(&e),
+                Some(code),
+                "{failure:?}"
+            );
             assert_eq!(e.kind(), kind, "{failure:?}");
             assert_eq!(e.surface_failure(), Some(&failure));
             assert!(!e.is_defect(), "{failure:?}");
@@ -2165,8 +2056,7 @@ mod tests {
         );
     }
 
-    /// A reviewed defect is of class 127 with the status of the phrase cause it replaces,
-    /// and says why.
+    /// A reviewed defect is of class 127 with its status, and says why.
     #[test]
     fn a_reviewed_defect_is_class_127_with_its_reason() {
         let why = "the B-spline form the surface just converted to has no control net, which conversion always gives";
@@ -2174,7 +2064,7 @@ mod tests {
         let op = "surface::op";
         super::super::tests::assert_defect(
             &SolidError::surface(op, defect),
-            &SolidError::surface(op, SurfaceFailure::Failed("x")),
+            &SolidError::surface(op, SurfaceFailure::ExtensionTowardFailed),
             op,
             SM_ERR,
             &format!("{op}: stage_failed: {why}"),
@@ -2184,7 +2074,7 @@ mod tests {
             .into_error();
         super::super::tests::assert_defect(
             &missing,
-            &SolidError::surface(op, SurfaceFailure::Missing("x")),
+            &SolidError::surface(op, SurfaceFailure::NoNurb),
             op,
             SM_ERR_NULL_POINTER,
             &format!("{op}: stage_failed: {why}"),
@@ -2192,8 +2082,8 @@ mod tests {
         assert_eq!(missing.surface_failure(), Some(&defect));
     }
 
-    /// The named causes of the surface caches and point solvers keep the status of the
-    /// phrase they replace, with their own class.
+    /// The named causes of the surface caches and point solvers have their status, with
+    /// their own class.
     #[test]
     fn the_surface_cache_and_solver_causes_keep_their_status_with_their_class() {
         use crate::surface::surface::p7::chained;
@@ -2260,7 +2150,7 @@ mod tests {
         for (failure, code, kind) in cases {
             let typed = SolidError::surface("surface::op", failure);
             assert_eq!(typed.sm_status(), Some(code), "{failure:?}");
-            assert_eq!(typed.upstream_status(), Some(code), "{failure:?}");
+            assert_eq!(typed.failed_routine_status(), Some(code), "{failure:?}");
             assert_eq!(typed.kind(), kind, "{failure:?}");
             assert!(!typed.is_defect(), "{failure:?}");
             assert!(!typed.is_port_failure(), "{failure:?}");
@@ -2285,8 +2175,8 @@ mod tests {
         assert!(!kept.is_status_answer());
     }
 
-    /// Each named cause keeps the status of the phrase it replaced and says its class; it
-    /// is neither a defect nor a refusal by itself.
+    /// Each named cause has its status and says its class; it is neither a defect nor a
+    /// refusal by itself.
     #[test]
     fn the_named_causes_keep_their_status_and_say_their_class() {
         let op = "surface::op";
@@ -2357,7 +2247,7 @@ mod tests {
         for (failure, status, kind) in cases {
             let e = SolidError::surface(op, failure);
             assert_eq!(e.sm_status(), Some(status), "{failure:?}");
-            assert_eq!(e.upstream_status(), Some(status), "{failure:?}");
+            assert_eq!(e.failed_routine_status(), Some(status), "{failure:?}");
             assert_eq!(e.kind(), kind, "{failure:?}");
             assert_eq!(e.operation(), op);
             assert_eq!(e.surface_failure(), Some(&failure));
@@ -2365,38 +2255,9 @@ mod tests {
         }
         // a NURB that could not be made keeps the site's status and chains the make's error
         let made = SolidError::surface(op, SurfaceFailure::RadiusNotPositive);
-        let e = SolidError::surface_nurb_not_made(op, SM_ERR_NULL_POINTER, Err(made.clone()));
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        let e = SolidError::surface_nurb_not_made(op, SM_ERR_NULL_POINTER, made.clone());
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(e.surface_failure(), Some(&SurfaceFailure::NurbNotMade));
         assert_eq!(e.cause(), Some(&made));
-        let e = SolidError::surface_nurb_not_made(op, SM_ERR, Ok(()));
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
-        assert!(e.cause().is_none());
-    }
-
-    /// The sites that build a surface phrase cause only fall:
-    /// per file, in the library code of `solidcore` and `solidcore-ops`, as
-    /// [`super::super::site_scan`] counts them. A PR that converts sites lowers its
-    /// files' counts here, and a file at 0 loses its line (the conversion guide:
-    /// `docs/failure-codes-and-reproduction.md` §6).
-    #[test]
-    fn the_surface_phrase_cause_sites_only_shrink() {
-        use super::super::site_scan::{assert_pinned, crate_sites, Builder, Scan, Wrappers};
-        const PHRASES: Scan = Scan {
-            builders: &[
-                Builder::Variant("SurfaceFailure", "Failed"),
-                Builder::Variant("SurfaceFailure", "Missing"),
-                Builder::Variant("SurfaceFailure", "InvalidValue"),
-                Builder::Variant("SurfaceFailure", "OutsideDomain"),
-                Builder::Variant("SurfaceFailure", "OffSurface"),
-                Builder::Method("surface_failed", Some(1)),
-                Builder::Method("surface_missing", Some(1)),
-            ],
-            wrappers: Wrappers::Phrase,
-        };
-        #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
-        const PINNED: &[(&str, usize)] = &[
-        ];
-        assert_pinned("surface phrase-cause sites", &crate_sites(&PHRASES), PINNED);
     }
 }

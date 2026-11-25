@@ -792,7 +792,7 @@ mod tests {
         );
         // corners that coincide in double precision: the side keeps the line's error
         let side = |e: &SolidError| {
-            e.upstream_status() == Some(SM_ERR)
+            e.failed_routine_status() == Some(SM_ERR)
                 && e.primitive_failure() == Some(&PrimitiveFailure::PolygonSideNotMade)
                 && e.cause().is_some()
         };

@@ -2618,7 +2618,11 @@ mod tests {
 
         // a status from the solve costs that pair alone
         for (fi, pi) in [(0, 0), (2, 1), (faces.len() - 1, points.len() - 1)] {
-            let _clear = forced::solve(fi, pi, SolidError::sm_err("forced"));
+            let _clear = forced::solve(
+                fi,
+                pi,
+                SolidError::failed_routine("forced", crate::error::SM_ERR),
+            );
             let got = faces_closest_distances_within(&mut k, &mut b, id, &faces, &points, 1e3)
                 .expect("a status is no failure of the pass");
             for (f, row) in got.iter().enumerate() {
@@ -2635,7 +2639,10 @@ mod tests {
         // a status from the shape costs that face's row, and no other
         let fi = 1;
         {
-            let _clear = forced::shape(fi, SolidError::null_pointer("forced"));
+            let _clear = forced::shape(
+                fi,
+                SolidError::failed_routine("forced", crate::error::SM_ERR_NULL_POINTER),
+            );
             let got = faces_closest_distances_within(&mut k, &mut b, id, &faces, &points, 1e3)
                 .expect("a status is no failure of the pass");
             assert!(
@@ -2683,8 +2690,8 @@ mod tests {
         );
         // a bare status is no answer about the pair
         for e in [
-            SolidError::sm_err("op"),
-            SolidError::null_pointer("op"),
+            SolidError::failed_routine("op", crate::error::SM_ERR),
+            SolidError::failed_routine("op", crate::error::SM_ERR_NULL_POINTER),
             SolidError::query(OP, QueryFailure::NoClosestPoint),
         ] {
             assert!(e.is_status_answer(), "{e:?} should be a status answer");
@@ -2717,7 +2724,11 @@ mod tests {
             (get_edges(&b).unwrap_err(), QueryFailure::BrepWithoutEdges),
             (get_faces(&b).unwrap_err(), QueryFailure::BrepWithoutFaces),
         ] {
-            assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR), "{e:?}");
+            assert_eq!(
+                e.failed_routine_status(),
+                Some(crate::error::SM_ERR),
+                "{e:?}"
+            );
             assert_eq!(e.operation(), OP);
             assert_eq!(e.query_failure(), Some(&cause));
         }

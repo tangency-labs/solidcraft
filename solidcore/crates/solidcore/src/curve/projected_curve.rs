@@ -960,7 +960,7 @@ mod tests {
             err.curve_failure(),
             Some(&CurveFailure::ProjectionVectorZero)
         );
-        assert_eq!(crate::error::upstream_status(&err), Some(SM_ERR));
+        assert_eq!(SolidError::failed_routine_status(&err), Some(SM_ERR));
         // a rotation's auxiliary vector: zero, then along the projection vector
         c.proj_vec = Vec3::Z;
         let err = c.make_ortho_normal().unwrap_err();
@@ -968,7 +968,7 @@ mod tests {
             err.curve_failure(),
             Some(&CurveFailure::AuxiliaryVectorZero)
         );
-        assert_eq!(crate::error::upstream_status(&err), Some(SM_ERR));
+        assert_eq!(SolidError::failed_routine_status(&err), Some(SM_ERR));
         c.aux_data = Vec3::new(0.0, 0.0, 2.0);
         let err = c.make_ortho_normal().unwrap_err();
         assert_eq!(
@@ -976,7 +976,7 @@ mod tests {
             Some(&CurveFailure::AuxiliaryAlongProjection)
         );
         assert_eq!(
-            crate::error::upstream_status(&err),
+            SolidError::failed_routine_status(&err),
             Some(SM_ERR_INVALID_INPUT)
         );
     }
@@ -1027,7 +1027,7 @@ mod tests {
                 edit: CurveEdit::Reparametrise
             })
         );
-        assert_eq!(crate::error::upstream_status(&err), Some(SM_ERR));
+        assert_eq!(SolidError::failed_routine_status(&err), Some(SM_ERR));
         let mut a = Axis2Placement::new(Vec3::new(1.0, 0.0, 0.0), Vec3::X, Vec3::Y);
         assert_eq!(
             c.transform(&k, &a, None).unwrap_err().curve_failure(),
@@ -1090,7 +1090,7 @@ mod tests {
 
     /// `r` with its error as its operation and upstream status.
     fn status_of<T>(r: Result<T>) -> core::result::Result<T, Status> {
-        r.map_err(|e| (e.operation(), crate::error::upstream_status(&e)))
+        r.map_err(|e| (e.operation(), SolidError::failed_routine_status(&e)))
     }
 
     /// WR-28 (fixed in v1.0.1 `3fd5b95`): `SmProjectedCurve::MakeOrthoNormal` unitizes a

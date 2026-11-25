@@ -544,8 +544,8 @@ fn side(left: bool) -> Side {
 fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
-        e if solidcore::error::upstream_status(e).is_some() => {
-            f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+        e if crate::output::recorded_status(e).is_some() => {
+            f64::from(crate::output::recorded_status(e).unwrap_or(-1))
         }
         _ => -1.0,
     }
@@ -664,7 +664,7 @@ fn push_matrix(
                     .get(i)
                     .and_then(|r| r.get(j))
                     .copied()
-                    .ok_or_else(|| SolidError::sm_err("difftest: short matrix"))?;
+                    .ok_or_else(|| crate::output::routine_failure("difftest: short matrix"))?;
                 push3(o, v);
             }
         }
@@ -696,7 +696,7 @@ fn the_cbs(s: &Surface) -> solidcore::Result<&CurveBoundedSurface> {
         | SurfaceKind::Step(_)
         | SurfaceKind::OffsetSurface(_)
         | SurfaceKind::SrfInVolume(_) => {
-            Err(SolidError::sm_err("difftest: not a curve bounded surface"))
+            Err(crate::output::routine_failure("difftest: not a curve bounded surface"))
         }
     }
 }

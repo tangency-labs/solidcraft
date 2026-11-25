@@ -78,11 +78,7 @@ fn upstream_invalid_input_has_its_status() {
     let mut env = state.env(None);
     // SmApiBrepCopy(NULL): SM_ERR_INVALID_INPUT
     let e = p3::api_brep_copy(&mut k, &mut env, None, &|e| named(e, 0)).unwrap_err();
-    assert_eq!(
-        solidcore::error::upstream_status(&e),
-        Some(SM_ERR_INVALID_INPUT),
-        "{e:?}"
-    );
+    assert_eq!(e.sm_status(), Some(SM_ERR_INVALID_INPUT), "{e:?}");
     assert_eq!(e.sm_status(), Some(SM_ERR_INVALID_INPUT));
     assert_eq!(e.sm_status(), Some(1007));
 }

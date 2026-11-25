@@ -1614,7 +1614,7 @@ fn roll_over(
 /// [`Error::BlendNotCertified`], the refusal [`status`] gives it; `None` for any other error.
 #[must_use]
 pub fn failure(e: &SolidError) -> Option<Error> {
-    let b = e.blend_failure().filter(|b| b.replaces_upstream_status())?;
+    let b = e.blend_failure()?;
     if let BlendFailure::NotCertified { halvings, stations } = *b {
         return Some(Error::BlendNotCertified { halvings, stations });
     }

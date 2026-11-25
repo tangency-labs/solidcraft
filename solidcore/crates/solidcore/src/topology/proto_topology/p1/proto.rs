@@ -4845,12 +4845,12 @@ mod tests {
             .unwrap()
             .remove_vertex_definition(VertexDefId::from_index(7))
             .unwrap_err();
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
         assert_eq!(e.topology_failure(), Some(&TopologyFailure::NotOnOwnerList));
         let e = m
             .remove_proto_vertex(ProtoVertexId::from_index(99))
             .unwrap_err();
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
         assert_eq!(e.topology_failure(), Some(&TopologyFailure::NotOnOwnerList));
     }
 
@@ -4911,7 +4911,7 @@ mod tests {
         for (e, cause) in errors {
             assert_eq!(e.topology_failure(), Some(&cause), "{e}");
             assert_eq!(e.kind(), ErrorKind::InvalidInput, "{e}");
-            assert_eq!(e.upstream_status(), Some(SM_ERR), "{e}");
+            assert_eq!(e.failed_routine_status(), Some(SM_ERR), "{e}");
             assert!(!e.is_defect(), "{e}");
         }
     }

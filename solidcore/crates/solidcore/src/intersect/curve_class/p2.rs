@@ -853,7 +853,7 @@ impl<O: ClassObject> CurveClassification<O> {
 
         // Curve is 3d branch - Use drop point
         let Some(face) = self.face else {
-            // check state - the surface must be given (the caller's classification, rule 9)
+            // check state - the surface must be given (the caller's classification)
             return Err(SolidError::intersect(OP_UV, IntersectFailure::NoClassFace));
         };
         let surface = match geometry.topology_entity(face) {
@@ -1464,15 +1464,15 @@ fn tail_curve_curve<O: ClassObject, S: Copy>(
     Ok(true)
 }
 
-/// An interval index the caller gave that is not below the classification's `size` (rule 9;
-/// upstream's `SER(SM_ERR)`).
+/// An interval index the caller gave that is not below the classification's `size`
+/// (upstream's `SER(SM_ERR)`).
 #[track_caller]
 fn index_past_end(op: &'static str, index: usize, size: usize) -> SolidError {
     SolidError::intersect(op, IntersectFailure::IntervalIndexPastEnd { index, size })
 }
 
-/// A new interval end the caller gave outside the range its neighbours `allowed` (rule 9;
-/// upstream's `SER(SM_ERR)`).
+/// A new interval end the caller gave outside the range its neighbours `allowed`
+/// (upstream's `SER(SM_ERR)`).
 #[track_caller]
 fn outside_range(op: &'static str, param: f64, allowed: &Extent1d) -> SolidError {
     SolidError::intersect(

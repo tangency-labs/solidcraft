@@ -7,11 +7,9 @@
 //! | Rust                                | Status difftest compares            |
 //! |-------------------------------------|-------------------------------------|
 //! | [`BooleanFailure::Defect`]          | `SM_ERR` (or the site's, through `with_status`) |
-//! | [`BooleanFailure::EntityMissing`]   | `SM_ERR_NULL_POINTER`               |
 //! | [`BooleanFailure::RelateConflict`]  | `SM_ERR`                            |
 //! | [`BooleanFailure::SolidLeaks`]      | `SM_ERR` (WR-619, solidcore-native) |
-//! | [`BooleanFailure::StageFailed`]     | `SM_ERR`                            |
-//! | the named causes, from [`BooleanFailure::FaceWithoutSurface`] on | the status of the phrase each replaced (`comparison_status`) |
+//! | the named causes, from [`BooleanFailure::FaceWithoutSurface`] on | the status of the site each replaced (`comparison_status`) |
 //!
 //! [`BooleanFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with
 //! its reason: a defect ([`ErrorKind::StageFailed`], class 127). A check of the caller's
@@ -19,11 +17,9 @@
 //! without operands) is a named cause of class `invalid_input`; it stays a
 //! [`crate::SolidError::Failed`] with its status, so the intersector's handling of
 //! ignored statuses (which passes [`crate::SolidError::InvalidInput`] on) is unchanged.
-//! [`BooleanFailure::StageFailed`] and [`BooleanFailure::EntityMissing`] are sites not yet
-//! converted (the conversion guide: `docs/failure-codes-and-reproduction.md` §6).
 //!
-//! Deviations: not upstream. A stage's failure names the stage ([`BooleanStage`]) and
-//! says in a phrase what went wrong; the handles the stages work on are the
+//! Deviations: not upstream. A defect names the stage ([`BooleanStage`]) and says why it
+//! is the kernel's fault; the handles the stages work on are the
 //! intersector's own, not ids of the caller's B-rep, so only [`BooleanFailure::SolidLeaks`]
 //! names an entity; [`BooleanFailure::RelateConflict`] places its three by their points
 //! (#16098). The failures that are checks of a caller's handles stay
@@ -212,14 +208,6 @@ pub enum BooleanFailure {
     EdgeWithoutCurve,
     /// The Boolean of the surface and B-rep lists left nothing: its result has no shell.
     EmptyResult,
-    /// A stage needs an entity that the operands' B-reps do not have, as the phrase says
-    /// (for example "a vertex at the end of the edge").
-    EntityMissing {
-        /// The stage.
-        stage: BooleanStage,
-        /// What is missing.
-        what: &'static str,
-    },
     /// The vertex is already related to a vertex that lies closer than the one asked for,
     /// so the squeeze keeps the existing relation and refuses the new one.
     ExistingRelationBetter,
@@ -324,15 +312,6 @@ pub enum BooleanFailure {
         /// The face, of the B-rep the operation edits.
         face: FaceId,
     },
-    /// A stage could not continue, as the phrase says (for example "a different entity is
-    /// already related to it"). The form not yet reviewed: new code builds
-    /// [`BooleanFailure::Defect`], a named cause or a refusal instead.
-    StageFailed {
-        /// The stage.
-        stage: BooleanStage,
-        /// What went wrong.
-        what: &'static str,
-    },
     /// A Boolean of the tree failed; its error is the cause.
     TreeBooleanFailed,
     /// An operator of the Boolean tree has fewer than two operands before it (the caller's
@@ -363,9 +342,7 @@ impl BooleanFailure {
     pub fn entity(&self) -> Option<EntityRef> {
         match *self {
             Self::SolidLeaks { face } => Some(EntityRef::Face(face)),
-            Self::StageFailed { .. }
-            | Self::EntityMissing { .. }
-            | Self::RelateConflict { .. }
+            Self::RelateConflict { .. }
             | Self::MergedVertexReaches { .. }
             | Self::SelfLoopSplitReachesVertex { .. }
             | Self::AbsorbedCoverReachesVertex { .. }
@@ -438,14 +415,12 @@ impl BooleanFailure {
             | Self::SelfLoopSplitReachesVertex { .. }
             | Self::SliceNeedsSheet
             | Self::SolidLeaks { .. }
-            | Self::StageFailed { .. }
             | Self::TreeBooleanFailed
             | Self::TreeOperatorWithoutOperands
             | Self::UnknownTreeOperator { .. }
             | Self::VertexInNoRegion
             | Self::VertexPairNotDropped { .. } => SM_ERR,
             Self::EdgeWithoutCurve
-            | Self::EntityMissing { .. }
             | Self::FaceWithoutSurface
             | Self::LoopVertexUnrelated
             | Self::MergeWithoutOperands
@@ -457,7 +432,6 @@ impl BooleanFailure {
     /// [`BooleanFailure::Defect`], a defect; [`ErrorKind::InvalidInput`] for a check of the
     /// caller's argument or body; [`ErrorKind::Unsupported`] for a curve kind or case the
     /// Boolean does not take; [`ErrorKind::NotConverged`] for drops that stopped;
-    /// [`ErrorKind::Missing`] for [`BooleanFailure::EntityMissing`];
     /// [`ErrorKind::Failed`] otherwise.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
@@ -484,7 +458,6 @@ impl BooleanFailure {
             | Self::SelfLoopLeavesReach { .. }
             | Self::SelfLoopSplitReachesVertex { .. }
             | Self::SolidLeaks { .. }
-            | Self::StageFailed { .. }
             | Self::TreeBooleanFailed
             | Self::VertexInNoRegion => ErrorKind::Failed,
             Self::Defect { .. } => ErrorKind::StageFailed,
@@ -500,7 +473,6 @@ impl BooleanFailure {
             | Self::SliceNeedsSheet
             | Self::TreeOperatorWithoutOperands
             | Self::UnknownTreeOperator { .. } => ErrorKind::InvalidInput,
-            Self::EntityMissing { .. } => ErrorKind::Missing,
             Self::VertexPairNotDropped { .. } | Self::CoincidentFacesNotSettled { .. } => {
                 ErrorKind::NotConverged
             }
@@ -561,9 +533,6 @@ impl core::fmt::Display for BooleanFailure {
             ),
             Self::EdgeWithoutCurve => f.write_str("an edge of an operand has no curve"),
             Self::EmptyResult => f.write_str("the Boolean left nothing: the result has no shell"),
-            Self::EntityMissing { stage, what } => {
-                write!(f, "{stage} needs {what}, which the B-rep does not have")
-            }
             Self::ExistingRelationBetter => f.write_str(
                 "the vertex is already related to a closer vertex, which the squeeze keeps",
             ),
@@ -662,7 +631,6 @@ impl core::fmt::Display for BooleanFailure {
                 "the union deleted face {} and the solid it bounded merged into the outside",
                 face.index()
             ),
-            Self::StageFailed { stage, what } => write!(f, "{stage} failed: {what}"),
             Self::TreeBooleanFailed => f.write_str("a Boolean of the tree failed"),
             Self::TreeOperatorWithoutOperands => {
                 f.write_str("an operator of the Boolean tree has fewer than two operands")
@@ -719,32 +687,6 @@ impl crate::SolidError {
             .into_error()
     }
 
-    /// [`crate::SolidError::Failed`] for a Boolean stage that could not continue, with
-    /// status [`SM_ERR`] (upstream `return SE(SM_ERR)`). No site builds this form any more
-    /// (#19837 named the proto topology's three); the class tests keep it until the variant
-    /// is retired.
-    #[cfg(test)]
-    pub(crate) fn boolean_stage_failed(
-        operation: &'static str,
-        stage: BooleanStage,
-        what: &'static str,
-    ) -> Self {
-        super::Failure::new(operation, BooleanFailure::StageFailed { stage, what }).into_error()
-    }
-
-    /// [`crate::SolidError::Failed`] for an entity a Boolean stage needs that is not there,
-    /// with status [`SM_ERR_NULL_POINTER`] (upstream `NER(ptr)` on a `NULL` pointer). No
-    /// site builds this form any more (#19856); the class tests keep it until the variant
-    /// is retired.
-    #[cfg(test)]
-    pub(crate) fn boolean_entity_missing(
-        operation: &'static str,
-        stage: BooleanStage,
-        what: &'static str,
-    ) -> Self {
-        super::Failure::new(operation, BooleanFailure::EntityMissing { stage, what }).into_error()
-    }
-
     /// [`crate::SolidError::Failed`] for a relation refused because `entity` already has a
     /// different mate, with status [`SM_ERR`] (upstream `Relate`'s `return SE(SM_ERR)`).
     pub(crate) fn boolean_relate_conflict(
@@ -786,7 +728,7 @@ mod tests {
         let e = super::super::Failure::new(op, defect).into_error();
         super::super::tests::assert_defect(
             &e,
-            &SolidError::boolean_stage_failed(op, BooleanStage::CloseLoop, "x"),
+            &SolidError::boolean_defect(op, BooleanStage::CloseLoop, "x"),
             op,
             SM_ERR,
             &format!("{op}: stage_failed: closing an intersection loop failed: {why}"),
@@ -902,26 +844,5 @@ mod tests {
             assert_eq!(e.sm_status(), Some(status), "{e:?}");
             assert!(e.to_string().ends_with(why), "{e}");
         }
-    }
-
-    /// The sites that build a Boolean phrase cause only fall:
-    /// per file, in the library code of `solidcore` and `solidcore-ops`, as
-    /// [`super::super::site_scan`] counts them. A PR that converts sites lowers its
-    /// files' counts here, and a file at 0 loses its line (the conversion guide:
-    /// `docs/failure-codes-and-reproduction.md` §6).
-    #[test]
-    fn the_boolean_phrase_cause_sites_only_shrink() {
-        use super::super::site_scan::{assert_pinned, crate_sites, Builder, Scan, Wrappers};
-        const PHRASES: Scan = Scan {
-            builders: &[
-                Builder::Variant("BooleanFailure", "EntityMissing"),
-                Builder::Method("boolean_entity_missing", Some(2)),
-            ],
-            wrappers: Wrappers::Phrase,
-        };
-        #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
-        const PINNED: &[(&str, usize)] = &[
-        ];
-        assert_pinned("Boolean phrase-cause sites", &crate_sites(&PHRASES), PINNED);
     }
 }

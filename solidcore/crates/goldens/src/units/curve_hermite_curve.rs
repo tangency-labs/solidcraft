@@ -186,8 +186,8 @@ fn status_code(e: &SolidError) -> f64 {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => {
             f64::from(SM_ERR_INVALID_INPUT)
         }
-        e if solidcore::error::upstream_status(e).is_some() => {
-            f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+        e if crate::output::recorded_status(e).is_some() => {
+            f64::from(crate::output::recorded_status(e).unwrap_or(-1))
         }
         _ => -1.0,
     }

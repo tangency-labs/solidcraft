@@ -951,7 +951,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
             };
             match r {
                 Ok(()) => o.push(0.0),
-                Err(err) if solidcore::error::upstream_status(&err).is_some() => o.push(f64::from(solidcore::error::upstream_status(&err).unwrap_or(-1))),
+                Err(err) if crate::output::recorded_status(&err).is_some() => o.push(f64::from(crate::output::recorded_status(&err).unwrap_or(-1))),
                 Err(e) => return rust_fail(&e),
             }
             put_gf(&mut o, &f);

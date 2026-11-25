@@ -315,7 +315,7 @@ fn lift_output(flat: &[f64]) -> Output {
 }
 
 fn lift_flat(k: &Kernel, c: &Curve, max_dist: f64) -> solidcore::Result<Vec<f64>> {
-    let b = bspline_part(c).map_err(|_| solidcore::SolidError::sm_err("difftest::lift"))?;
+    let b = bspline_part(c).map_err(|_| crate::output::routine_failure("difftest::lift"))?;
     let mut o = vec![0.0, max_dist, c.type_code() as f64, c.dim() as f64];
     o.push(b.degree()? as f64);
     let cp = b.control_points()?;

@@ -74,8 +74,7 @@
 //! error as its cause, which decides its class (a defect is passed on), unported callees
 //! aside.
 //!
-//! Failures (the conversion guide, `docs/failure-codes-and-reproduction.md` §6): each keeps
-//! the status upstream's site returned. A link or entity of a B-rep, or of the executive's
+//! Failures: each keeps the status upstream's site returned. A link or entity of a B-rep, or of the executive's
 //! own data, that is not there is an [`OffsetFailure::Defect`] (`SM_ERR_NULL_POINTER`)
 //! whose `why` says which; a missing argument, a face of the input with no surface and an
 //! edge of the input with no curve are the caller's input; a kind the routine does not
@@ -1636,7 +1635,6 @@ impl OffsetExecutive {
             match status {
                 Ok(()) => {}
                 // a defect (the kernel's fault) is passed on, never read as a gap left open
-                // (`solidcore/docs/failure-codes-and-reproduction.md` §6, rule 5)
                 Err(error) if error.is_unported_or_cancelled() || error.is_defect() => {
                     return Err(error)
                 }
@@ -3327,7 +3325,7 @@ fn present<T>(value: Option<T>, why: &'static str) -> Result<T> {
 /// The value of a call whose failure the executive reads as a step that did not apply
 /// ([`crate::error::ignored`]: upstream ignores its status). A defect (the kernel's fault,
 /// [`SolidError::is_defect`]) is passed on with its reason, never read as a step that did
-/// not apply (`solidcore/docs/failure-codes-and-reproduction.md` §6, rule 5).
+/// not apply.
 pub(super) fn ignored_unless_defect<T>(r: Result<T>) -> Result<Option<T>> {
     match r {
         Err(e) if e.is_defect() => Err(e),
@@ -3890,9 +3888,9 @@ mod tests {
     use crate::surface::side::BoxSide;
     use crate::topology::{Edge, Edgeuse, Face, Faceuse, ShellId, Vertex, Vertexuse};
 
-    /// A radial or face use missing from an edge use of the input is the caller's input
-    /// (the conversion guide, rule 9): a caller can build such a body with the public record
-    /// mutators, so each names its cause, not a defect.
+    /// A radial or face use missing from an edge use of the input is the caller's input: a
+    /// caller can build such a body with the public record mutators, so each names its cause,
+    /// not a defect.
     #[test]
     fn a_missing_input_edgeuse_radial_or_faceuse_is_named() {
         // an edge use in no loop and with no neighbour around its edge
@@ -3938,7 +3936,8 @@ mod tests {
         assert!(relates_mated_offsets(false, false, tangent).unwrap());
         assert!(!relates_mated_offsets(false, false, not_tangent).unwrap());
         // the tangency test is not evaluated where the fork short-circuits it
-        let unreachable = || -> Result<bool> { Err(SolidError::sm_err("test: not evaluated")) };
+        let unreachable =
+            || -> Result<bool> { Err(SolidError::failed_routine("test: not evaluated", SM_ERR)) };
         assert!(!relates_mated_offsets(true, true, unreachable).unwrap());
         assert!(relates_mated_offsets(true, false, unreachable).unwrap());
     }
@@ -5098,7 +5097,11 @@ mod tests {
     /// The class, the status the goldens read and whether it is a defect, of `r`'s error.
     fn outcome<T: core::fmt::Debug>(r: &Result<T>) -> (ErrorKind, Option<i32>, bool) {
         let e = r.as_ref().unwrap_err();
-        (e.kind(), crate::error::upstream_status(e), e.is_defect())
+        (
+            e.kind(),
+            SolidError::failed_routine_status(e),
+            e.is_defect(),
+        )
     }
 
     /// A missing link of a B-rep (the kernel's fault) is a defect; a missing argument is
@@ -5252,12 +5255,12 @@ mod tests {
         let null = Some(SM_ERR_NULL_POINTER);
         let e = present(None::<()>, NO_OFFSET).unwrap_err();
         assert_eq!(
-            (e.kind(), crate::error::upstream_status(&e)),
+            (e.kind(), SolidError::failed_routine_status(&e)),
             (ErrorKind::StageFailed, null)
         );
         assert!(e.is_defect() && e.to_string().contains(NO_OFFSET), "{e}");
         let e = defect(OFFSET_EDGE_NO_CURVE, SM_ERR);
-        assert_eq!(crate::error::upstream_status(&e), Some(SM_ERR));
+        assert_eq!(SolidError::failed_routine_status(&e), Some(SM_ERR));
         assert_eq!(e.operation(), OP);
         // an offset edge with no curve, where the arc and line tests read one: SM_ERR
         let mut brep = Brep::new();
@@ -5273,7 +5276,7 @@ mod tests {
         // the pipe fallback's curve: the input's edge with none is the caller's input
         let e = no_trimmed_curve(&brep, offset_edge);
         assert_eq!(
-            (e.kind(), crate::error::upstream_status(&e), e.entity()),
+            (e.kind(), SolidError::failed_routine_status(&e), e.entity()),
             (
                 ErrorKind::InvalidInput,
                 null,
@@ -5284,7 +5287,11 @@ mod tests {
         let line_use = add_use(&mut brep, 0.0, 1.0, 1.0);
         let e = no_trimmed_curve(&brep, edge_of(&brep, line_use).unwrap());
         assert_eq!(
-            (e.kind(), crate::error::upstream_status(&e), e.is_defect()),
+            (
+                e.kind(),
+                SolidError::failed_routine_status(&e),
+                e.is_defect()
+            ),
             (ErrorKind::StageFailed, null, true),
             "{e}"
         );
@@ -5301,7 +5308,7 @@ mod tests {
         brep.edge_mut(offset_edge).unwrap().curve = Some(hermite);
         let e = no_trimmed_curve(&brep, offset_edge);
         assert_eq!(
-            (e.kind(), crate::error::upstream_status(&e)),
+            (e.kind(), SolidError::failed_routine_status(&e)),
             (ErrorKind::Unsupported, null)
         );
         assert_eq!(
@@ -5603,7 +5610,7 @@ mod tests {
             e.operation(),
             "intersect::topology_solver::p1::TopologyObjects::brep_trees"
         );
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
     }
 
     #[test]
@@ -5750,7 +5757,7 @@ mod tests {
             matches!(
                 &r,
                 Err(e) if e.operation() == "nurbs::b_spline_curve::p1::BSplineCurve::make_nurb"
-                    && e.upstream_status() == Some(1001)
+                    && e.failed_routine_status() == Some(1001)
                     && e.nurbs_failure()
                         == Some(&crate::error::nurbs::NurbsFailure::BSpline(
                             crate::error::nurbs::BSplineFailure::NoNurbsForm

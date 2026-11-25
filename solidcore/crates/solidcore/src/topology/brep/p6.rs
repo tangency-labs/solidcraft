@@ -652,7 +652,7 @@ pub(crate) fn make_face_topology_attempt_with_state(
         options,
     );
     if let Err(error) = &attempt.status {
-        if error.upstream_status().is_none() {
+        if error.failed_routine_status().is_none() {
             return Err(error.clone());
         }
     }
@@ -1313,7 +1313,7 @@ fn find_sector(
             )?;
         }
         // the status is ignored
-        Err(e) if e.upstream_status().is_some() => {}
+        Err(e) if e.failed_routine_status().is_some() => {}
         Err(error) => return Err(error),
     }
 
@@ -1342,7 +1342,11 @@ fn find_sector(
         Ok(sector) => Ok(sector
             .radial_edgeuse
             .map_or(SectorFound::Empty, SectorFound::Found)),
-        Err(e) if e.upstream_status().is_some() => Ok(SectorFound::Failed(e)),
+        // `find_radial_sector_between` fails with a native status only as a typed
+        // topology failure or as a spent work budget
+        Err(e) if e.topology_failure().is_some() || e.is_not_certified() => {
+            Ok(SectorFound::Failed(e))
+        }
         Err(error) => Err(error),
     }
 }
@@ -1478,7 +1482,7 @@ fn finish_split_attempt(
 ) -> Result<RegionSplitAttempt> {
     match status {
         Ok(()) => Ok(attempt),
-        Err(error) if error.upstream_status().is_some() => {
+        Err(error) if error.failed_routine_status().is_some() => {
             attempt.status = Err(error);
             Ok(attempt)
         }
@@ -1933,7 +1937,7 @@ fn native_keeping<T>(r: Result<T>, last: &mut Option<SolidError>) -> Result<Opti
 }
 
 /// [`TopologyFailure::NoClassifiablePoint`], with the last native failure of a step or a
-/// ray fire as its cause where there was one (rule 6).
+/// ray fire as its cause where there was one.
 fn no_classifiable_point(last: Option<SolidError>) -> SolidError {
     let failure = Failure::new(OP, TopologyFailure::NoClassifiablePoint);
     match last {
@@ -2698,7 +2702,7 @@ mod tests {
             shell: Some(ShellId::from_index(7)),
             region: Some(RegionId::from_index(11)),
         };
-        let error = SolidError::sm_err("native::split");
+        let error = SolidError::failed_routine("native::split", crate::error::SM_ERR);
         let attempt = finish_split_attempt(partial(), Err(error.clone())).unwrap();
         assert_eq!(attempt.status, Err(error));
         assert_eq!(attempt.shell, Some(ShellId::from_index(7)));
@@ -2868,7 +2872,7 @@ mod tests {
         )
         .unwrap();
         let e = r.status.unwrap_err();
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         // a B-rep without an infinite region, and no region given: the caller's body
         assert_eq!(
             e.topology_failure(),
@@ -2894,7 +2898,7 @@ mod tests {
         )
         .unwrap();
         let e = r.status.unwrap_err();
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(e.topology_failure(), Some(&TopologyFailure::NoSurfaceGiven));
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
         assert_eq!(r.face, None);

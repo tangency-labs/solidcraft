@@ -103,7 +103,7 @@ pub fn curves_from_views(
     let (curves, status) = intersect_surfaces_within(k, &a_sweep, &b_sweep, Some(tol));
     match status {
         Ok(()) => curves.iter().map(|c| spline(k, c)).collect(),
-        // the extrusions do not meet: an empty search (rule 7), refused as this routine's
+        // the extrusions do not meet: an empty search, refused as this routine's
         Err(e)
             if curves.is_empty()
                 && e.intersect_failure() == Some(&IntersectFailure::NoIntersection) =>

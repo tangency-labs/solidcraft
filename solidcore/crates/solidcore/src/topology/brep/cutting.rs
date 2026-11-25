@@ -837,7 +837,10 @@ mod tests {
             None,
             |_, _, _, _| {
                 stitched = true;
-                Err(SolidError::sm_err("test::stitch"))
+                Err(SolidError::failed_routine(
+                    "test::stitch",
+                    crate::error::SM_ERR,
+                ))
             },
         );
         assert!(stitched, "the cut reached its stitch");

@@ -4420,14 +4420,14 @@ mod tests {
         assert_eq!(
             calculate_an_internal_point(&k, &mut b, f)
                 .err()
-                .and_then(|e| e.upstream_status()),
+                .and_then(|e| e.failed_routine_status()),
             Some(SM_ERR)
         );
         b.face_mut(f).unwrap().surface = Some(plane());
         assert_eq!(
             calculate_an_internal_point(&k, &mut b, f)
                 .err()
-                .and_then(|e| e.upstream_status()),
+                .and_then(|e| e.failed_routine_status()),
             Some(SM_ERR)
         );
         b.face_mut(f)
@@ -4449,7 +4449,7 @@ mod tests {
         assert_eq!(
             calculate_an_internal_point(&k, &mut b, f)
                 .err()
-                .and_then(|e| e.upstream_status()),
+                .and_then(|e| e.failed_routine_status()),
             Some(SM_ERR)
         );
     }
@@ -4487,7 +4487,7 @@ mod tests {
         // a face without loops: CurveOnClassify's status
         let r = create_curves_by_trimming(&k, &mut b, f, Some(1.0), None, Some(&uv), false, true);
         assert!(
-            matches!(&r, Err(e) if e.upstream_status().is_some()),
+            matches!(&r, Err(e) if e.failed_routine_status().is_some()),
             "{r:?}"
         );
         assert!(create_curves_by_trimming(&k, &mut b, f, None, None, None, true, false).is_err());

@@ -581,7 +581,7 @@ impl RustRun {
                     return Ok(Step::Deferred(d));
                 }
                 match e {
-                    err if solidcore::error::upstream_status(&err).is_some() => Ok(Step::Status(i64::from(solidcore::error::upstream_status(&err).unwrap_or(-1)))),
+                    err if crate::output::recorded_status(&err).is_some() => Ok(Step::Status(i64::from(crate::output::recorded_status(&err).unwrap_or(-1)))),
                     other => Err(harness(&other)),
                 }
             }

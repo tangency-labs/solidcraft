@@ -3097,8 +3097,7 @@ pub fn brep_mass_properties_estimated_prepared(
 
 /// The integration's failures as their own errors (upstream's `SM_ERR` for each): its step
 /// control failing is [`SolidError::NotConverged`]; a non-finite integrand (a surface
-/// evaluated to no number) is [`SolidError::Degenerate`]; a span it took no step over is
-/// [`SolidError::Unsupported`]. Every other error is as it came.
+/// evaluated to no number) is [`SolidError::Degenerate`]. Every other error is as it came.
 fn typed_failure(e: SolidError) -> SolidError {
     use super::OP_INTEGRAND;
     match e.mass_failure() {
@@ -3109,10 +3108,6 @@ fn typed_failure(e: SolidError) -> SolidError {
         Some(MassFailure::Integrand) => SolidError::Degenerate {
             operation: OP_INTEGRAND,
             entity: e.entity(),
-        },
-        Some(MassFailure::SkippedSpan) => SolidError::Unsupported {
-            operation: OP,
-            reason: "the integrator took no step over a span of a face",
         },
         _ => e,
     }
@@ -3634,7 +3629,7 @@ mod tests {
             Some(&MassFailure::FaceuseWithoutMate),
             "{err}"
         );
-        assert_eq!(err.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(err.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(err.kind(), crate::error::ErrorKind::InvalidInput);
         assert!(!err.is_defect(), "{err}");
         // (`face_area` on a face without its face use, or with an edge use without its
@@ -3675,7 +3670,7 @@ mod tests {
         let err = trim_integrand(&k, &iso, &trim, 0.0, 0.5, &mut scratch, &mut dy).unwrap_err();
         assert!(err.to_string().contains("not finite"), "{err}");
         assert_eq!(err.mass_failure(), Some(&MassFailure::TrimNotFinite));
-        assert_eq!(err.upstream_status(), Some(SM_ERR));
+        assert_eq!(err.failed_routine_status(), Some(SM_ERR));
     }
     /// A constant integrand is integrated exactly: the piece's width times it, whatever its
     /// size (summed weight by weight, the rounded Kronrod weights' sum `2 + 2^-54` put
@@ -3848,7 +3843,6 @@ mod tests {
     #[test]
     fn integration_failures_are_typed_by_cause() {
         use super::super::{OP_INTEGRAND, OP_STEP_CONTROL};
-        const OP_SKIPPED_SPAN: &str = "mass::integrator::properties::skipped_span";
         assert!(matches!(
             typed_failure(SolidError::mass(OP_STEP_CONTROL, MassFailure::StepControl)),
             SolidError::NotConverged { .. }
@@ -3857,12 +3851,8 @@ mod tests {
             typed_failure(SolidError::mass(OP_INTEGRAND, MassFailure::Integrand)),
             SolidError::Degenerate { .. }
         ));
-        assert!(matches!(
-            typed_failure(SolidError::mass(OP_SKIPPED_SPAN, MassFailure::SkippedSpan)),
-            SolidError::Unsupported { .. }
-        ));
         // any other status stays as it came
-        let other = SolidError::sm_err(OP);
+        let other = SolidError::failed_routine(OP, SM_ERR);
         assert_eq!(typed_failure(other.clone()), other);
     }
 

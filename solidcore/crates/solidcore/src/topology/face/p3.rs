@@ -29,7 +29,7 @@
 //!   Where upstream dereferences null (a face without surface, an edge without curve, an
 //!   edge use without vertex use or clockwise neighbour, `GetLast` of an empty array, an
 //!   uninitialised `SmPoint2d`) the port returns [`SolidError::InvalidInput`]. `SER` /
-//!   `NER` returns are the callee's error or [`SolidError::Upstream`] `SM_ERR`.
+//!   `NER` returns are the callee's error or a failure with status `SM_ERR`.
 //! - **`SmFace::GetEdges`** with default arguments is the co-ported
 //!   `topology_traverser::face_edges`; `GetEdges(.., TRUE)` (outer loop only),
 //!   `GetUpwardLoopuses`, `GetUpwardEdgeuses`, `GetUpwardVertexuses` (default arguments)

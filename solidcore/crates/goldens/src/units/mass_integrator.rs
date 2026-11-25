@@ -30,7 +30,7 @@ fn default_steps() -> u32 {
 fn eval(i: &Input, t: f64, y: &[f64], dy: &mut [f64]) -> solidcore::Result<()> {
     for ((p, v), d) in i.coefficients.iter().zip(y).zip(dy) {
         if i.kind == 3 && t >= p[0] {
-            return Err(SolidError::sm_err("test evaluator"));
+            return Err(crate::output::routine_failure("test evaluator"));
         }
         *d = match i.kind {
             1 => p[0] * (p[1] * t + p[2]).sin() + p[3] * v,
@@ -50,7 +50,7 @@ fn output(v: Vec<f64>) -> Output {
 fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
-        err if solidcore::error::upstream_status(err).is_some() => f64::from(solidcore::error::upstream_status(err).unwrap_or(-1)),
+        err if crate::output::recorded_status(err).is_some() => f64::from(crate::output::recorded_status(err).unwrap_or(-1)),
         _ => 1001.0,
     }
 }
@@ -423,7 +423,7 @@ pub fn face_model(
                 &mut fenv,
             )?;
             *made.faces.first().ok_or_else(|| {
-                SolidError::sm_err("CreateFacesWithCurves made no face")
+                crate::output::routine_failure("CreateFacesWithCurves made no face")
             })?
         } else {
             solidcore::topology::brep::p8::create_face_from_surface(
@@ -584,7 +584,7 @@ fn geometry_rust(g: &Geometry) -> Output {
                                 .face(face)?
                                 .surface
                                 .as_ref()
-                                .ok_or_else(|| SolidError::sm_err("missing surface"))?;
+                                .ok_or_else(|| crate::output::routine_failure("missing surface"))?;
                             let eval = solidcore::surface::surface::p1::AreaIntegrand {
                                 surface,
                                 uv_domain: dom,
@@ -623,7 +623,7 @@ fn geometry_rust(g: &Geometry) -> Output {
                             )?;
                             Ok(vec![0.0, m.properties.area])
                         }
-                        _ => Err(SolidError::sm_err("unknown query")),
+                        _ => Err(crate::output::routine_failure("unknown query")),
                     }
                 }
             }

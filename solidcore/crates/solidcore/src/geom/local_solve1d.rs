@@ -1212,7 +1212,7 @@ mod tests {
         fn evaluate(&mut self, t: f64, out: &mut FunctionValue, s: bool) -> Result<()> {
             if t.to_bits() == LAST_GUESS.to_bits() {
                 *out = FunctionValue::default();
-                return Err(SolidError::sm_err("test: no value here"));
+                return Err(SolidError::failed_routine("test: no value here", SM_ERR));
             }
             Cycle.evaluate(t, out, s)
         }
@@ -1225,7 +1225,7 @@ mod tests {
         fn evaluate(&mut self, t: f64, out: &mut FunctionValue, s: bool) -> Result<()> {
             if t.to_bits() == 1f64.to_bits() {
                 *out = FunctionValue::default();
-                return Err(SolidError::sm_err("test: no value here"));
+                return Err(SolidError::failed_routine("test: no value here", SM_ERR));
             }
             Sq.evaluate(t, out, s)
         }
@@ -1241,14 +1241,7 @@ mod tests {
         let mut s = LocalSolve1d::new();
         let e = s.solve_it(&mut SqFailingAtOne, 1.0, 1e-9).unwrap_err();
         assert!(
-            matches!(
-                e,
-                SolidError::Upstream {
-                    code: SM_ERR,
-                    operation: "test: no value here",
-                    ..
-                }
-            ),
+            e.failed_routine_status() == Some(SM_ERR) && e.operation() == "test: no value here",
             "{e:?}"
         );
 
@@ -1349,7 +1342,10 @@ mod tests {
             fn evaluate(&mut self, t: f64, out: &mut FunctionValue, _: bool) -> Result<()> {
                 if [0.25, 0.75, 0.13, 0.38, 0.82, 0.87, 0.01, 0.99].contains(&t) {
                     out.f = self.0;
-                    return Err(SolidError::sm_err("test: failed interior sample"));
+                    return Err(SolidError::failed_routine(
+                        "test: failed interior sample",
+                        SM_ERR,
+                    ));
                 }
                 out.f = t * t + 1.0;
                 out.f_prime = 2.0 * t;
@@ -1386,7 +1382,10 @@ mod tests {
             fn evaluate(&mut self, t: f64, out: &mut FunctionValue, _: bool) -> Result<()> {
                 if t == 0.25 {
                     *out = FunctionValue::default();
-                    return Err(SolidError::sm_err("test: failed quarter sample"));
+                    return Err(SolidError::failed_routine(
+                        "test: failed quarter sample",
+                        SM_ERR,
+                    ));
                 }
                 out.f = (t - 0.75) * (t - 0.75) - 0.01;
                 out.f_prime = 2.0 * (t - 0.75);
@@ -1464,7 +1463,7 @@ mod tests {
         ));
         assert!(matches!(
             s.solve_it(&mut Base, 0.5, 1e-9),
-            Err(e) if e.upstream_status() == Some(1001)
+            Err(e) if e.failed_routine_status() == Some(1001)
         ));
         assert_eq!(
             SolverAlgorithm::from_code(2),
@@ -1577,14 +1576,7 @@ mod tests {
         // valid start now converges to `sqrt(2)` instead of stepping `-1.584e19` (WR-19).
         let err = s.solve_it(&mut SqFailingAtOne, 1.0, 1e-9).unwrap_err();
         assert!(
-            matches!(
-                err,
-                SolidError::Upstream {
-                    code: SM_ERR,
-                    operation: "test: no value here",
-                    ..
-                }
-            ),
+            err.failed_routine_status() == Some(SM_ERR) && err.operation() == "test: no value here",
             "{err:?}"
         );
         let ok = s.solve_it(&mut SqFailingAtOne, 1.5, 1e-9).unwrap();

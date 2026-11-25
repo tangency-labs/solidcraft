@@ -3900,17 +3900,20 @@ mod tests {
         );
         assert_eq!(as_sm_err(e.clone(), "op"), e);
         // any other failure becomes `SM_ERR`, a named cause that keeps the failure
-        let stage = SolidError::sm_err("t");
+        let stage = SolidError::failed_routine("t", crate::error::SM_ERR);
         let flat = as_sm_err(stage.clone(), "op");
         assert_eq!(
             flat.blend_failure(),
             Some(&BlendFailure::Solver(SolverFailure::JacobianNotLoaded))
         );
-        assert_eq!(flat.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(flat.failed_routine_status(), Some(crate::error::SM_ERR));
         assert_eq!(flat.cause(), Some(&stage));
         assert_eq!(bool_status(Err(e.clone())), Err(e.clone()));
         assert!(singularity_status(Err(e.clone())).is_err());
-        assert_eq!(bool_status(Err(SolidError::sm_err("t"))), Ok(true));
+        assert_eq!(
+            bool_status(Err(SolidError::failed_routine("t", crate::error::SM_ERR))),
+            Ok(true)
+        );
     }
 
     #[test]
@@ -3962,13 +3965,16 @@ mod tests {
                 assert!(core::ptr::eq(actual, &raw const solver));
                 visited.push(id);
                 if Some(&id) == ids.get(1) {
-                    return Err(SolidError::sm_err("second geometry trim"));
+                    return Err(SolidError::failed_routine(
+                        "second geometry trim",
+                        crate::error::SM_ERR,
+                    ));
                 }
                 pseudo.geom_mut(id)?.deviations[0] = actual.approx_tol_3d;
                 Ok(())
             })
             .unwrap_err();
-        assert!(matches!(error, SolidError::Upstream { code: 1001, .. }));
+        assert_eq!(error.failed_routine_status(), Some(1001), "{error:?}");
         assert_eq!(visited, ids[..2]);
         assert_eq!(
             pseudo.geom(ids[0]).unwrap().deviations[0],
@@ -4053,12 +4059,15 @@ mod tests {
                 if calls == 1 {
                     Ok(&corner)
                 } else {
-                    Err(SolidError::sm_err("second actual corner lookup"))
+                    Err(SolidError::failed_routine(
+                        "second actual corner lookup",
+                        crate::error::SM_ERR,
+                    ))
                 }
             })
             .unwrap_err();
         assert_eq!(calls, 2);
-        assert!(matches!(error, SolidError::Upstream { code: 1001, .. }));
+        assert_eq!(error.failed_routine_status(), Some(1001), "{error:?}");
         assert!(!solver.extend_before);
         assert!(solver.extend_after);
     }
@@ -4124,7 +4133,7 @@ mod tests {
     }
 
     fn is_sm_err(r: &Result<(f64, f64, bool)>) -> bool {
-        matches!(r, Err(e) if e.blend_failure().is_some() && e.upstream_status() == Some(crate::error::SM_ERR))
+        matches!(r, Err(e) if e.blend_failure().is_some() && e.failed_routine_status() == Some(crate::error::SM_ERR))
     }
 
     #[test]

@@ -24,10 +24,13 @@
 
 use std::f64::consts::{PI, TAU};
 
+use solidcore::EntityRef;
 use solidcore::curve::curve::p3::compute_crvs_normal;
 use solidcore::curve::curve::{Curve, CurveKind};
 use solidcore::curve::ellipse::Ellipse;
 use solidcore::curve::line::Line;
+use solidcore::error::Failure;
+use solidcore::error::sweep::{ProfileCurveStep, SweepFailure};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::tol::USE_DEFAULT;
@@ -50,7 +53,6 @@ use solidcore::topology::brep::p7::copy_faces;
 use solidcore::topology::brep::p8::{FaceBuildEnv, create_planar_face_with_3d_curves, create_planar_faces_with_3d_curves};
 use solidcore::topology::topology_traverser::Marks;
 use solidcore::topology::{Brep, FaceId};
-use solidcore::{EntityRef, SolidError};
 
 use super::blend::status;
 use super::{Body, run};
@@ -606,7 +608,9 @@ fn carried(k: &Kernel, profile: &[Curve], m: &Rigid) -> solidcore::Result<Vec<Cu
     let mut out = Vec::with_capacity(profile.len());
     for c in profile {
         let mut copy = c.clone();
-        copy.transform(k, &at, None).map_err(|_| SolidError::sm_err("SmCurve::Transform"))?;
+        copy.transform(k, &at, None).map_err(|cause| {
+            Failure::new("SmCurve::Transform", SweepFailure::ProfileCurveStepFailed { step: ProfileCurveStep::Place }).caused_by(cause).into_error()
+        })?;
         out.push(copy);
     }
     Ok(out)
@@ -643,7 +647,11 @@ fn piecewise(k: &mut Kernel, profile: &[Curve], segs: &[Segment], cap: bool) -> 
         let this_face = |f: FaceId| key_of(EntityRef::Face(f));
         match copy_faces(k, &mut piece, &faces, &mut b, false, &this_face, &mut env) {
             Ok((_, true)) => {}
-            Ok((_, false)) => return Ok(Err(status(SolidError::sm_err("CopyFaces")))),
+            Ok((_, false)) => {
+                let why =
+                    "copy_faces copies the segment pieces' faces the kernel just built, each a face of one closed piece with its surface and loops";
+                return Ok(Err(status(Failure::new("CopyFaces", SweepFailure::Defect { why }).into_error())));
+            }
             Err(e) => return Ok(Err(status(e))),
         }
         m = g.carry(&m, g.length);

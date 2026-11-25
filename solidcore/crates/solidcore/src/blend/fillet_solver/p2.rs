@@ -4148,7 +4148,7 @@ mod tests {
         let r = run(&k, &pseudo, rail, &cc, &mut RolloverSideEdge::default());
         // GetOriginalFace is NER'd: a null pointer, not an unported stub
         let e = r.unwrap_err();
-        assert_eq!(e.upstream_status(), Some(1006));
+        assert_eq!(e.failed_routine_status(), Some(1006));
         assert!(
             matches!(e.blend_failure(), Some(&BlendFailure::Defect { .. })),
             "{e:?}"
@@ -4170,7 +4170,7 @@ mod tests {
         );
         let mut io = RolloverSideEdge::default();
         let r = run(&k, &pseudo, rail, &cc, &mut io);
-        assert_eq!(r.unwrap_err().upstream_status(), Some(1001));
+        assert_eq!(r.unwrap_err().failed_routine_status(), Some(1001));
         assert_eq!(io.curr_index, 1);
         assert!(!io.trim_side_faces);
 
@@ -4209,7 +4209,7 @@ mod tests {
             ],
         );
         let r = run(&k, &pseudo, rail, &cc, &mut RolloverSideEdge::default());
-        assert_eq!(r.unwrap_err().upstream_status(), Some(1001));
+        assert_eq!(r.unwrap_err().failed_routine_status(), Some(1001));
     }
 
     #[test]

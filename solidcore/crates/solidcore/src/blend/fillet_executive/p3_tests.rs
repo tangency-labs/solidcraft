@@ -854,13 +854,13 @@ fn null_create_status_is_remapped_by_do_filleting_and_boolean_restores() {
     let mut k = Kernel::default();
     assert!(matches!(
         executive.create_fillet_brep(&mut k, &mut access, None),
-        Err(ref e) if e.upstream_status() == Some(1006)
+        Err(ref e) if e.failed_routine_status() == Some(1006)
     ));
     for prior in [false, true] {
         k.context.set_doing_boolean(prior);
         assert!(matches!(
             executive.do_filleting(&mut k, &mut access, None),
-            Err(ref e) if e.upstream_status() == Some(1001)
+            Err(ref e) if e.failed_routine_status() == Some(1001)
         ));
         assert_eq!(k.context.doing_boolean(), prior);
     }
@@ -1023,7 +1023,7 @@ fn final_stitch_failure_sets_bad_merge_and_stops_before_cleanup_postprocess() {
     let mut k = Kernel::default();
     assert!(matches!(
         executive.do_filleting(&mut k, &mut access, None),
-        Err(ref e) if e.upstream_status() == Some(1001)
+        Err(ref e) if e.failed_routine_status() == Some(1001)
     ));
     assert_eq!(access.stitch_tolerances.len(), 5);
     assert_eq!(executive.error.code, 7);
@@ -1093,7 +1093,7 @@ fn corner_failure_records_context_and_stops_without_allocating_shell() {
     };
     assert!(matches!(
         executive.create_fillet_brep(&mut Kernel::default(), &mut access, None),
-        Err(ref e) if e.upstream_status() == Some(1001)
+        Err(ref e) if e.failed_routine_status() == Some(1001)
     ));
     assert_eq!(executive.error.code, 3);
     assert_eq!(executive.error.status, 2);
@@ -1137,7 +1137,7 @@ fn corner_error_reporting_preserves_a_null_filleted_vertex() {
     };
     assert!(matches!(
         executive.create_fillet_brep(&mut Kernel::default(), &mut access, None),
-        Err(ref e) if e.upstream_status() == Some(1001)
+        Err(ref e) if e.failed_routine_status() == Some(1001)
     ));
     assert_eq!(executive.error.code, 3);
     assert!(executive.error.vertex.is_none());
@@ -1372,13 +1372,13 @@ fn failing_at(stage: &'static str, error: SolidError) -> (FilletExecutive<Handle
 fn stage_errors() -> [SolidError; 5] {
     use crate::error::blend::BlendFailure;
     let over = |cause: SolidError| {
-        Failure::new("test::stage", BlendFailure::Failed("the stage failed"))
+        Failure::new("test::stage", BlendFailure::ExecutiveStepFailed)
             .caused_by(cause)
             .into_error()
     };
     [
-        SolidError::sm_err("test::stage"),
-        SolidError::blend("test::stage", BlendFailure::StageFailed),
+        SolidError::failed_routine("test::stage", SM_ERR),
+        SolidError::blend("test::stage", BlendFailure::Defect { why: "x" }),
         over(SolidError::blend(
             "test::corner",
             BlendFailure::NoRoom(NoRoomReason::BallDoesNotFit),
@@ -1391,13 +1391,17 @@ fn stage_errors() -> [SolidError; 5] {
 }
 
 /// `e` is the executive's failure as it was before its cause was kept (the same operation,
-/// phrase, status and kind), now keeping `cause`, whose class it takes.
+/// reason, status and kind), now keeping `cause`, whose class it takes.
 fn assert_failure_keeps(e: &SolidError, cause: &SolidError) {
     let bare = failure();
     assert_eq!(e.operation(), OP, "{e:?}");
     assert_eq!(e.blend_failure(), bare.blend_failure(), "{e:?}");
     assert_eq!(e.sm_status(), Some(SM_ERR), "{e:?}");
-    assert_eq!(e.upstream_status(), bare.upstream_status(), "{e:?}");
+    assert_eq!(
+        e.failed_routine_status(),
+        bare.failed_routine_status(),
+        "{e:?}"
+    );
     assert_eq!(e.kind(), bare.kind(), "{e:?}");
     assert_eq!(e.entity(), None, "{e:?}");
     assert_eq!(e.cause(), Some(cause), "{e:?}");
@@ -1577,7 +1581,7 @@ fn do_filleting_keeps_the_failure_of_the_fillet_body() {
         };
         executive.do_filleting(&mut Kernel::default(), &mut access, None)
     };
-    let stage = SolidError::sm_err("test::stage");
+    let stage = SolidError::failed_routine("test::stage", SM_ERR);
     let e = run(stage.clone()).unwrap_err();
     let created = e.cause().unwrap().clone();
     assert_failure_keeps(&created, &stage);

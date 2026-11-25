@@ -1196,7 +1196,11 @@ mod tests {
         // SM_ERR of the Hermite curve's base Copy, before the later NULL is seen
         let err =
             create_rotational_sweep(&mut k, &[Some(&h), None], o, z, 90.0, false).unwrap_err();
-        assert_eq!(err.upstream_status(), Some(crate::error::SM_ERR), "{err:?}");
+        assert_eq!(
+            err.failed_routine_status(),
+            Some(crate::error::SM_ERR),
+            "{err:?}"
+        );
         assert!(invalid(&create_taper_extrude(
             &mut k,
             &[],
@@ -1235,7 +1239,7 @@ mod tests {
             create_linear_sweep_with_repetitions(&mut k, &ok, z, 5.0, 0, true).is_err_and(|e| {
                 e.primitive_failure()
                     == Some(&crate::error::primitive::PrimitiveFailure::CappedSweepNoRepetition)
-                    && e.upstream_status() == Some(crate::error::SM_ERR)
+                    && e.failed_routine_status() == Some(crate::error::SM_ERR)
                     && e.kind() == crate::error::ErrorKind::InvalidInput
             })
         );

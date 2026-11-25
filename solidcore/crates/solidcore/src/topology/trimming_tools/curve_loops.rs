@@ -776,7 +776,7 @@ mod tests {
     fn cause(r: Result<impl core::fmt::Debug>, want: TopologyFailure, status: i32) {
         let e = r.unwrap_err();
         assert_eq!(e.topology_failure(), Some(&want));
-        assert_eq!(e.upstream_status(), Some(status));
+        assert_eq!(e.failed_routine_status(), Some(status));
     }
 
     fn loops(counts: &[usize]) -> CurveLoops {

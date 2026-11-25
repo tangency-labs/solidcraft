@@ -24,7 +24,7 @@ use super::PrimitiveCreationAccess;
 use crate::curve::composite_curve::CompositeCurve;
 use crate::curve::curve::Curve;
 use crate::error::primitive::PrimitiveFailure;
-use crate::error::{Failure, Result, SolidError, SM_ERR_NULL_POINTER};
+use crate::error::{Failure, Result, SolidError};
 use crate::math::{max2, min2, BIG_DOUBLE, EFF_ZERO_DEG, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::primitive::primitive_creation::p1::PrimitiveCreation;
@@ -40,15 +40,6 @@ const OP: &str = "primitive::primitive_creation::p2::skin";
 #[track_caller]
 fn defect(why: &'static str) -> SolidError {
     SolidError::primitive(OP, PrimitiveFailure::Defect { why })
-}
-
-/// A defect ([`PrimitiveFailure::Defect`]) of an object the kernel built that is not
-/// there, with the status `SM_ERR_NULL_POINTER` of the null pointer it replaces.
-#[track_caller]
-fn broken_link(why: &'static str) -> SolidError {
-    Failure::new(OP, PrimitiveFailure::Defect { why })
-        .with_status(SM_ERR_NULL_POINTER)
-        .into_error()
 }
 
 // Why each step that fails here is the kernel's fault (`PrimitiveFailure::Defect`).
@@ -488,7 +479,9 @@ fn skin_with_scratch(
     // wire already proves that the profiles do not share one plane.
     if cap_ends && !wire_profiles {
         let k = a.kernel(brep)?;
-        let &(first_brep, first) = faces.first().ok_or_else(|| broken_link(NO_FIRST_FACE))?;
+        let &(first_brep, first) = faces
+            .first()
+            .ok_or_else(|| SolidError::primitive_broken_link(OP, NO_FIRST_FACE))?;
         let (mut coplanar, point0, normal0) =
             match crate::topology::face::p2::surface(a.brep(first_brep)?, first)? {
                 Some(surface) => {
@@ -532,7 +525,7 @@ fn skin_with_scratch(
         let mut sides = Vec::new();
         for &face in side_faces.iter() {
             let surface = crate::topology::face::p2::surface(a.brep(brep)?, face)?
-                .ok_or_else(|| broken_link(SIDE_FACE_NO_SURFACE))?;
+                .ok_or_else(|| SolidError::primitive_broken_link(OP, SIDE_FACE_NO_SURFACE))?;
             let domain = surface.natural_uv_domain_with_nurb(k)?;
             skin_u_min = min2(skin_u_min, domain.min().x);
             skin_u_max = max2(skin_u_max, domain.max().x);

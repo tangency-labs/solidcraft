@@ -48,7 +48,6 @@ pub(super) fn status(e: SolidError) -> Error {
         return Error::Refused(failed);
     }
     match e {
-        SolidError::Upstream { code, .. } => Error::Status(code),
         e if stands_for_status(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
         SolidError::InvalidInput { operation, reason } => Error::Rejected { operation, reason },
         SolidError::Unsupported { reason, .. } if reason == MIXED_CORNER_RAILS_CROSS => Error::Unported(MIXED_CORNER_UNSUPPORTED),
@@ -63,7 +62,7 @@ pub(super) fn status(e: SolidError) -> Error {
 
 /// The kernel failures SolidCraft still passes on as the status they stand for ([`Error::Status`]),
 /// because solidcore-ops gives them no type of their own yet: each replaced a status its routine
-/// returned (`Upstream` before solidcore described it), whether or not it names an entity. A
+/// returned (a bare status before solidcore described it), whether or not it names an entity. A
 /// B-spline method's (`NurbsFailure::BSpline`); an intersection or classification, primitive
 /// (extrusion, revolution, skin, taper), mass-property, healing, geometry-utility, query,
 /// topology or surface routine's; and a sweep, curve or offset routine's that replaced a status
@@ -76,23 +75,23 @@ fn stands_for_status(e: &SolidError) -> bool {
         || e.mass_failure().is_some()
         || e.heal_failure().is_some()
         || e.geom_failure().is_some()
-        || e.sweep_failure().is_some_and(|w| w.replaces_upstream_status())
+        || e.sweep_failure().is_some_and(|w| w.is_failed_routine())
         || e.query_failure().is_some()
         || e.topology_failure().is_some()
-        || e.curve_failure().is_some_and(|c| c.replaces_upstream_status())
+        || e.curve_failure().is_some_and(|c| c.is_failed_routine())
         || e.surface_failure().is_some()
-        || e.offset_failure().is_some_and(|o| o.replaces_upstream_status())
+        || e.offset_failure().is_some_and(|o| o.is_failed_routine())
 }
 
 /// A failure of the Boolean engine (which slice, sweep and the other users of the merge engine
 /// run), which solidcore names in its own terms as a [`SolidError::Failed`] from a
-/// `boolean::` stage where it once returned [`SolidError::Upstream`].
+/// `boolean::` stage where it once returned a bare status.
 fn is_boolean_failure(e: &SolidError) -> bool {
     matches!(e, SolidError::Failed(f) if f.operation.starts_with("boolean::"))
 }
 
 /// The status of a Boolean failure as the capi passes it on: the status the failure stands for
-/// ([`Error::Status`]), as the `Upstream` it replaced gave. A stage that failed because a call is
+/// ([`Error::Status`]), as the bare status it replaced gave. A stage that failed because a call is
 /// not ported is not that status ([`SolidError::is_status_answer`]): it is as unported code is,
 /// not supported.
 fn boolean_status(e: SolidError) -> Error {
@@ -585,47 +584,46 @@ pub(crate) fn fillet_variable(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solidcore::error::Failure;
 
-    /// A B-spline method's failure passes on as the status it stands for, as the `Upstream` it
+    /// A B-spline method's failure passes on as the status it stands for, as the bare status it
     /// replaced did; a cancellation or unported call a B-spline method passes through is not one.
     #[test]
     fn b_spline_failures_pass_on_as_their_status() {
-        use solidcore::error::Failure;
         use solidcore::error::nurbs::BSplineFailure;
         let op = "nurbs::b_spline_surface::p2::BSplineSurface::split_at";
         let failed = |b| Failure::new(op, NurbsFailure::BSpline(b)).into_error();
         assert!(matches!(status(failed(BSplineFailure::NoNurbsForm)), Error::Status(1001)));
         assert!(matches!(status(failed(BSplineFailure::RoutineFailed)), Error::Status(1001)));
-        assert!(matches!(status(failed(BSplineFailure::Missing("the NURBS form"))), Error::Status(1006)));
         assert!(matches!(status(failed(BSplineFailure::ZeroAxis)), Error::Status(1007)));
         assert!(matches!(status(SolidError::unported("SmX", "x")), Error::Unsupported));
     }
 
-    /// A sweep routine's failure passes on as the status it replaced, as the `Upstream` it replaced
+    /// A sweep routine's failure passes on as the status it replaced, as the bare status it replaced
     /// did; a railed loft's refusal, which replaced no status, keeps passing on as solidcore's text.
     #[test]
     fn sweep_failures_pass_on_as_their_status() {
-        use solidcore::error::Failure;
         use solidcore::error::sweep::SweepFailure;
         let sweep = |w| Failure::new("sweep::topology_sweep", w).into_error();
         assert!(matches!(status(sweep(SweepFailure::FaceAlreadySwept)), Error::Status(1001)));
         assert!(matches!(status(sweep(SweepFailure::NullTarget)), Error::Status(1006)));
-        assert!(matches!(status(SolidError::sm_err("CopyFaces")), Error::Status(1001)));
+        assert!(matches!(status(sweep(SweepFailure::Defect { why: "a face was not copied" })), Error::Status(1001)));
+        let place = SweepFailure::ProfileCurveStepFailed { step: solidcore::error::sweep::ProfileCurveStep::Place };
+        assert!(matches!(status(sweep(place)), Error::Status(1001)));
         let cap = SweepFailure::RailPastStationCap { asked: 1e-6, reached: 1e-3, wires: 64 };
         assert!(matches!(status(sweep(cap)), Error::Solidcore(_)));
     }
 
-    /// A curve routine's failure passes on as the status it replaced, as the `Upstream` it replaced
+    /// A curve routine's failure passes on as the status it replaced, as the bare status it replaced
     /// did; a length bracket's refusal, which replaced no status, keeps passing on as solidcore's
     /// text.
     #[test]
     fn curve_failures_pass_on_as_their_status() {
-        use solidcore::error::Failure;
         use solidcore::error::curve::CurveFailure;
         let curve = |c| Failure::new("curve::curve::p2::Curve::create_by_split_curve", c).into_error();
-        assert!(matches!(status(curve(CurveFailure::Failed("the split parameter is at the curve's end"))), Error::Status(1001)));
-        assert!(matches!(status(curve(CurveFailure::Missing("the curve's cache"))), Error::Status(1006)));
-        assert!(matches!(status(curve(CurveFailure::ZeroDirection("the auxiliary direction"))), Error::Status(1007)));
+        assert!(matches!(status(curve(CurveFailure::SingleLinearCurve)), Error::Status(1001)));
+        assert!(matches!(status(curve(CurveFailure::CacheNotBuilt)), Error::Status(1006)));
+        assert!(matches!(status(curve(CurveFailure::AuxiliaryAlongProjection)), Error::Status(1007)));
         let floor = CurveFailure::LengthBelowFloor { asked: 1e-12, floor: 1e-10, pieces: 8 };
         assert!(matches!(status(curve(floor)), Error::Solidcore(_)));
         let cap = CurveFailure::LengthPastPieceCap { asked: 1e-9, reached: 1e-6, pieces: 4096 };
@@ -654,47 +652,43 @@ mod tests {
         assert_eq!(pick(&all, &[[3.1, 0.0, 0.0], [2.9, 0.0, 0.0]], 0.5, 1e-6, d).unwrap(), Ok((vec![3.0], vec![0])));
     }
 
-    /// A query's failure passes on as the status it replaced, as the `Upstream` it replaced did.
+    /// A query's failure passes on as the status it replaced, as the bare status it replaced did.
     #[test]
     fn query_failures_pass_on_as_their_status() {
-        use solidcore::error::Failure;
         use solidcore::error::query::QueryFailure;
         let query = |q| Failure::new("query::edge", q).into_error();
-        assert!(matches!(status(query(QueryFailure::Failed("the region has no shells"))), Error::Status(1001)));
-        assert!(matches!(status(query(QueryFailure::Missing("the face's surface"))), Error::Status(1006)));
-        assert!(matches!(status(query(QueryFailure::InvalidValue("a vector of zero length has no direction"))), Error::Status(1007)));
+        assert!(matches!(status(query(QueryFailure::BoundOverflows)), Error::Status(1001)));
+        assert!(matches!(status(query(QueryFailure::NoEdgeGiven)), Error::Status(1006)));
+        assert!(matches!(status(query(QueryFailure::ZeroLengthVector)), Error::Status(1007)));
     }
 
-    /// A topology routine's failure passes on as the status it replaced, as the `Upstream` it
+    /// A topology routine's failure passes on as the status it replaced, as the bare status it
     /// replaced did, whether or not it names an entity.
     #[test]
     fn topology_failures_pass_on_as_their_status() {
-        use solidcore::error::Failure;
         use solidcore::error::topology::TopologyFailure;
         let topology = |t| Failure::new("topology::edge", t).into_error();
-        assert!(matches!(status(topology(TopologyFailure::Failed("the loop does not close"))), Error::Status(1001)));
-        assert!(matches!(status(topology(TopologyFailure::Missing("the edge's curve"))), Error::Status(1006)));
-        assert!(matches!(status(topology(TopologyFailure::InvalidValue("a zero normal"))), Error::Status(1007)));
-        assert!(matches!(status(topology(TopologyFailure::Inconsistent("two outer loops"))), Error::Status(1005)));
+        assert!(matches!(status(topology(TopologyFailure::FacesNotCopiedOnce)), Error::Status(1001)));
+        assert!(matches!(status(topology(TopologyFailure::VertexWithoutUses)), Error::Status(1006)));
+        assert!(matches!(status(topology(TopologyFailure::ZeroLengthVector)), Error::Status(1007)));
         assert!(matches!(status(topology(TopologyFailure::DropFailed { status: 1010 })), Error::Status(1010)));
-        let at = Failure::new("topology::vertexuse", TopologyFailure::Failed("x"))
+        let at = Failure::new("topology::vertexuse", TopologyFailure::FacesNotCopiedOnce)
             .at(solidcore::EntityRef::Vertex(solidcore::topology::VertexId::from_index(2)))
             .into_error();
         assert!(matches!(status(at), Error::Status(1001)));
     }
 
-    /// A surface routine's failure passes on as the status it replaced, as the `Upstream` it
+    /// A surface routine's failure passes on as the status it replaced, as the bare status it
     /// replaced did.
     #[test]
     fn surface_failures_pass_on_as_their_status() {
-        use solidcore::error::Failure;
         use solidcore::error::surface::SurfaceFailure;
         let surface = |s| Failure::new("surface::surface::p2::Surface::step_inversion", s).into_error();
-        assert!(matches!(status(surface(SurfaceFailure::Failed("the point is not on the generator"))), Error::Status(1001)));
-        assert!(matches!(status(surface(SurfaceFailure::Missing("the surface's cache"))), Error::Status(1006)));
-        assert!(matches!(status(surface(SurfaceFailure::InvalidValue("the line direction is the zero vector"))), Error::Status(1007)));
-        assert!(matches!(status(surface(SurfaceFailure::OutsideDomain("the point is outside the sweep"))), Error::Status(1020)));
-        assert!(matches!(status(surface(SurfaceFailure::OffSurface("the point is off the surface"))), Error::Status(1021)));
+        assert!(matches!(status(surface(SurfaceFailure::ExtensionTowardFailed)), Error::Status(1001)));
+        assert!(matches!(status(surface(SurfaceFailure::NoNurb)), Error::Status(1006)));
+        assert!(matches!(status(surface(SurfaceFailure::LineDirectionZero)), Error::Status(1007)));
+        assert!(matches!(status(surface(SurfaceFailure::PointOutsideSweep)), Error::Status(1020)));
+        assert!(matches!(status(surface(SurfaceFailure::PointOffSurface)), Error::Status(1021)));
     }
 
     /// SMLib's rejection of its input reaches SolidCraft with solidcore's reason, not as the bare
@@ -709,22 +703,20 @@ mod tests {
         assert_eq!(ops.to_string(), "SMLib rejected the input: loop gap larger than tolerance (topology::brep::p7)");
     }
 
-    /// An offset routine's failure passes on as the status it replaced, as the `Upstream` it
+    /// An offset routine's failure passes on as the status it replaced, as the bare status it
     /// replaced did, whether or not it names a face; an offset's refusal does not pass on as a
     /// status.
     #[test]
     fn offset_failures_pass_on_as_their_status() {
-        use solidcore::error::Failure;
         use solidcore::error::offset::OffsetFailure;
         let offset = |o| Failure::new("offset::offset_executive::crossing_loops", o).into_error();
-        assert!(matches!(status(offset(OffsetFailure::Failed("x"))), Error::Status(1001)));
-        assert!(matches!(status(offset(OffsetFailure::Missing("the face's surface"))), Error::Status(1006)));
-        assert!(matches!(status(offset(OffsetFailure::InvalidValue("x"))), Error::Status(1007)));
-        assert!(matches!(status(offset(OffsetFailure::Inconsistent("x"))), Error::Status(1005)));
-        let at = Failure::new("offset::draft", OffsetFailure::InvalidValue("the face has no surface or no outer face use"))
+        assert!(matches!(status(offset(OffsetFailure::Defect { why: "x" })), Error::Status(1001)));
+        let edgeuse = solidcore::topology::EdgeuseId::from_index(3);
+        assert!(matches!(status(offset(OffsetFailure::EdgeuseHasNoFaceuse { edgeuse })), Error::Status(1006)));
+        let at = Failure::new("offset::draft", OffsetFailure::Defect { why: "the face has no surface or no outer face use" })
             .at(solidcore::EntityRef::Face(solidcore::topology::FaceId::from_index(2)))
             .into_error();
-        assert!(matches!(status(at), Error::Status(1007)));
+        assert!(matches!(status(at), Error::Status(1001)));
         let folds = offset(OffsetFailure::Folds { face: solidcore::topology::FaceId::from_index(1), distance: 2.0, largest: 1.0 });
         assert!(!matches!(status(folds), Error::Status(_)));
     }
@@ -734,7 +726,6 @@ mod tests {
     /// refusals with kinds of their own keep their errors.
     #[test]
     fn offset_refusals_pass_on_as_ops_refusals() {
-        use solidcore::error::Failure;
         use solidcore::error::offset::{LoopCrossing, OffsetFailure};
         use solidcore_ops::{Error as Ops, OffsetRefusal};
         let face = solidcore::topology::FaceId::from_index(3);
@@ -757,12 +748,11 @@ mod tests {
         assert!(!matches!(status(offset(OffsetFailure::Folds { face, distance: 2.0, largest: 1.0 })), Error::Refused(_) | Error::Status(_)));
     }
 
-    /// A blend routine's failure passes on as the status it replaced, as the `Upstream` it
+    /// A blend routine's failure passes on as the status it replaced, as the bare status it
     /// replaced did, whether or not it names an edge, and keeps solidcore's reason for it
     /// ([`Error::BlendFailed`]): a bare status names no cause the user or a report can act on.
     #[test]
     fn blend_failures_pass_on_as_their_status_with_their_reason() {
-        use solidcore::error::Failure;
         use solidcore::error::blend::BlendFailure;
         let blend = |b| Failure::new("blend::feature_executive", b).into_error();
         // the status and the reason the failure carries, and its class (the kernel's own)
@@ -770,26 +760,17 @@ mod tests {
             Error::Refused(solidcore_ops::Error::BlendFailed { class, status, phrase }) => (status, phrase, class),
             e => panic!("not a typed blend failure: {e:?}"),
         };
-        let x = |status: i32, phrase: &str| (status, phrase.to_owned());
-        let cases = [
-            (BlendFailure::Failed("x"), x(1001, "x")),
-            (BlendFailure::Missing("the edge use's edge"), x(1006, "the edge use's edge is missing")),
-            (BlendFailure::InvalidValue("x"), x(1007, "x")),
-            (BlendFailure::Inconsistent("x"), x(1005, "a consistency check failed: x")),
-            (BlendFailure::BadIntersections("x"), x(1027, "x")),
-            (BlendFailure::NotConverged("x"), x(1022, "x")),
-            (BlendFailure::PassedOn { what: "x", status: 1020 }, x(1020, "x")),
-        ];
-        for (failure, (want_status, want_phrase)) in cases {
+        let cases = [(BlendFailure::CornerRefused, 1001), (BlendFailure::BevelVertexNotFilleted, 1006), (BlendFailure::ChamferSizeInvalid, 1007)];
+        for (failure, want_status) in cases {
             let (status, phrase, class) = carried(status(blend(failure)));
-            assert_eq!((status, phrase.as_str(), class), (want_status, want_phrase.as_str(), failure.class()), "{failure:?}");
+            assert_eq!((status, phrase, class), (want_status, failure.to_string(), failure.class()), "{failure:?}");
         }
-        let at = Failure::new("blend::fillet_executive::p3", BlendFailure::Failed("x"))
+        let at = Failure::new("blend::fillet_executive::p3", BlendFailure::CornerRefused)
             .at(solidcore::EntityRef::Edge(solidcore::topology::EdgeId::from_index(2)))
             .into_error();
         assert_eq!(carried(status(at)).0, 1001);
         // the trim of a blend whose faces leak past its rails, as the message says it
-        let leak = blend(BlendFailure::Failed("the faces the rails enclose reach past the rails"));
-        assert_eq!(status(leak).to_string(), "the blend failed (status 1001): the faces the rails enclose reach past the rails");
+        let leak = blend(BlendFailure::TrimLoopDoesNotSeparate);
+        assert_eq!(status(leak).to_string(), format!("the blend failed (status 1001): {}", BlendFailure::TrimLoopDoesNotSeparate));
     }
 }

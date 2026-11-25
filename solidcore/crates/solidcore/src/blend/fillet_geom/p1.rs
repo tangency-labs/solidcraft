@@ -1524,7 +1524,7 @@ impl FilletGeom {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Upstream`] (`SM_ERR_INVALID_INPUT`) for a rail index past 1.
+    /// A failure with status `SM_ERR_INVALID_INPUT` for a rail index past 1.
     pub fn set_offset_surface(
         &mut self,
         which: usize,
@@ -4882,7 +4882,7 @@ mod tests {
         Surface::from(BSplineSurface::from_nurb(nurb, false))
     }
 
-    /// #19827 (TE-B-F1): a point that no tolerance drops onto the surface is an answer,
+    /// #19827: a point that no tolerance drops onto the surface is an answer,
     /// `None`, not an error (upstream's `SM_ERR` "Unable to drop point"); a point on the
     /// surface drops.
     #[test]
@@ -4910,7 +4910,7 @@ mod tests {
         assert!(!hit.is_empty());
     }
 
-    /// #19827 (TE-B-F1): a start point that drops onto one surface but not the other gives
+    /// #19827: a start point that drops onto one surface but not the other gives
     /// no curve (`None`), before the direction is unitised, as upstream returns the drop's
     /// status before `Unitize`.
     #[test]
@@ -5369,7 +5369,7 @@ mod tests {
                 })
             )
         );
-        assert_eq!(err.upstream_status(), Some(1006));
+        assert_eq!(err.failed_routine_status(), Some(1006));
         // the offset distance was zeroed for the drop and restored
         assert_eq!(
             solver.solver.surfaces[0]
@@ -5434,7 +5434,7 @@ mod tests {
                 ))
             )
         );
-        assert_eq!(err.upstream_status(), Some(1006));
+        assert_eq!(err.failed_routine_status(), Some(1006));
         assert_eq!(err.kind(), crate::error::ErrorKind::InvalidInput);
         // and with the good surface meeting the corner nothing is adjusted
         let (mut fb, [_, g1], [start_fv, end_fv], _, _) = corner_for_examine(&k);
@@ -5528,7 +5528,7 @@ mod tests {
         body.face_mut(face).unwrap().surface = None;
         let removed = |e: &SolidError| {
             assert_eq!(
-                (e.operation(), e.blend_failure(), e.upstream_status()),
+                (e.operation(), e.blend_failure(), e.failed_routine_status()),
                 (
                     OP_FILLET_SURFACE,
                     Some(&BlendFailure::BoundSurfaceRemoved),
@@ -5567,7 +5567,7 @@ mod tests {
         for rail in 0..2 {
             let e = g.offset_surface(rail, None).unwrap_err();
             assert_eq!(
-                (e.operation(), e.blend_failure(), e.upstream_status()),
+                (e.operation(), e.blend_failure(), e.failed_routine_status()),
                 (
                     OP_OFFSET,
                     Some(&BlendFailure::FilletSetUpInvalid(

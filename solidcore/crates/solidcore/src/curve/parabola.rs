@@ -850,7 +850,7 @@ mod tests {
             Some(&CurveFailure::TooManyDerivatives { asked: 4, most: 3 })
         );
         assert_eq!(
-            crate::error::upstream_status(&err),
+            SolidError::failed_routine_status(&err),
             Some(crate::error::SM_ERR)
         );
         let d = p.evaluate_step(1.0, 3).unwrap();
@@ -924,7 +924,7 @@ mod tests {
             })
         );
         assert_eq!(
-            crate::error::upstream_status(&err),
+            SolidError::failed_routine_status(&err),
             Some(crate::error::SM_ERR)
         );
         p.transform(&Axis2Placement::default(), Some(Vec3::new(2.0, 2.0, 2.0)))

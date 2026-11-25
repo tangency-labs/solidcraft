@@ -118,11 +118,7 @@ fn issue_1073_the_default_kernels_overlapping_bands_are_refused() {
             // executive's status as a stage failure, not main's defect (the session's error
             // info notes the overlap, below)
             Err(error) if name == "variable_radius_fillet" => {
-                assert_eq!(
-                    solidcore::error::upstream_status(&error),
-                    Some(1001),
-                    "{name}: {error:?}"
-                );
+                assert_eq!(error.sm_status(), Some(1001), "{name}: {error:?}");
                 assert!(!error.is_defect(), "{name}: {error:?}");
             }
             other => panic!("{name}: expected BandsOverlap, got {other:?}"),

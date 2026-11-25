@@ -793,7 +793,7 @@ pub fn push_point(t: f64, uv: [Point2; 2], stack: &mut Vec<f64>) {
 fn top_of(stack: &[f64], op: &'static str) -> Result<(f64, [Point2; 2])> {
     match stack.len().checked_sub(5).and_then(|i| stack.get(i..)) {
         Some([t, u, v, du, dv]) => Ok((*t, [Point2::new(*u, *v), Vec2::new(*du, *dv)])),
-        // the caller's stack (rule 9)
+        // the caller's stack
         _ => Err(SolidError::intersect(op, IntersectFailure::EmptyStack)),
     }
 }
@@ -1245,7 +1245,7 @@ impl Surface {
                 continue;
             }
             // SM_CAST_PTR(SmBSplineCurve, sUVCurves[ii]): a null cast is not usable
-            // a curve kind the trim cannot take (rule 8), keeping the null cast's status
+            // a curve kind the trim cannot take, keeping the null cast's status
             if !is_bspline_kind(&uv) {
                 return Err(Failure::new(OP_TRIM, IntersectFailure::CurveNotBSpline)
                     .with_status(SM_ERR_NULL_POINTER)

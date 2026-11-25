@@ -581,8 +581,7 @@ const INDEX_PAST_END: &str = "an index into the crossings' own lists is past the
 
 /// A wall strip's result: a strip that cannot be made is `None`, as [`crate::error::ignored`]
 /// reads it. A defect (the kernel's fault, [`SolidError::is_defect`]) is passed on with its
-/// reason, never read as a strip that cannot be made
-/// (`solidcore/docs/failure-codes-and-reproduction.md` §6, rule 5).
+/// reason, never read as a strip that cannot be made.
 fn strip_result<T>(r: Result<T>) -> Result<Option<T>> {
     match r {
         Err(e) if e.is_defect() => Err(e),
@@ -840,7 +839,7 @@ impl OffsetExecutive {
         };
         // a failed routine's status (not a refusal) is returned as it is, as it was before
         // the routine described it
-        if refusal.replaces_upstream_status() {
+        if refusal.is_failed_routine() {
             return SolidError::Failed(failure);
         }
         let input_face = match self.faceuse_to_faces.firsts(f).as_slice() {
@@ -2393,7 +2392,7 @@ mod tests {
             ),
         ];
         for (error, status, why) in cases {
-            assert_eq!(error.upstream_status(), Some(status), "{error:?}");
+            assert_eq!(error.failed_routine_status(), Some(status), "{error:?}");
             assert_eq!(error.kind(), ErrorKind::StageFailed, "{error:?}");
             assert!(error.is_defect(), "{error:?}");
             assert_eq!(error.operation(), OP, "{error:?}");

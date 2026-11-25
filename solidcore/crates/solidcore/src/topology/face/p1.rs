@@ -3989,7 +3989,7 @@ mod tests {
     }
 
     fn is_null_pointer(e: &SolidError) -> bool {
-        e.upstream_status() == Some(SM_ERR_NULL_POINTER)
+        e.failed_routine_status() == Some(SM_ERR_NULL_POINTER)
     }
 
     /// `plane_face` with the pair of face uses (no loops) the edits walk.
@@ -4188,7 +4188,7 @@ mod tests {
             "{e}"
         );
         assert!(e.is_defect(), "{e}");
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER), "{e}");
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER), "{e}");
     }
 
     #[test]
@@ -4507,7 +4507,7 @@ mod swap_refused_tests {
         };
         let before = state(&b);
         let e = swap_uv(&k, &mut b, face).unwrap_err();
-        assert!(e.upstream_status().is_some(), "{e:?}");
+        assert!(e.failed_routine_status().is_some(), "{e:?}");
         assert!(state(&b) == before, "the refused swap changed the face");
     }
 }

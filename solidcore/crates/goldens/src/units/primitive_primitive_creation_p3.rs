@@ -8,6 +8,10 @@ use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use solidcore::curve::curve::Curve;
+#[cfg(test)]
+use solidcore::error::topology::TopologyFailure;
+#[cfg(test)]
+use solidcore::error::Failure;
 use solidcore::error::{Result, SolidError};
 #[cfg(test)]
 use solidcore::geom::attribute::TagData;
@@ -47,8 +51,8 @@ struct Inputs {
 }
 fn error(e: &SolidError) -> f64 {
     match e {
-        e if solidcore::error::upstream_status(e).is_some() => {
-            f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+        e if crate::output::recorded_status(e).is_some() => {
+            f64::from(crate::output::recorded_status(e).unwrap_or(-1))
         }
         SolidError::InvalidInput { .. } => 1007.,
         _ => 1001.,
@@ -56,7 +60,7 @@ fn error(e: &SolidError) -> f64 {
 }
 fn curve(data: &[f64]) -> Result<BSplineCurve> {
     let [kind, x, y, z, a, b, c] = data else {
-        return Err(SolidError::sm_err("fixture"));
+        return Err(crate::output::routine_failure("fixture"));
     };
     if *kind == 0. {
         BSplineCurve::create_line_segment(3, Vec3::new(*x, *y, *z), Vec3::new(*a, *b, *c))
@@ -382,7 +386,9 @@ impl SweepAccess for EmptyModel {
             .edge(edge.1)?
             .curve
             .as_ref()
-            .ok_or_else(|| SolidError::null_pointer("primitive_p3_fixture"))?;
+            .ok_or_else(|| {
+                Failure::new("primitive_p3_fixture", TopologyFailure::EdgeWithoutCurve).into_error()
+            })?;
         Ok(None)
     }
     fn set_editing(&mut self, _: BrepId, value: bool) -> Result<bool> {
@@ -615,9 +621,9 @@ fn entry(i: &Inputs) -> Result<Vec<f64>> {
                 curvature: solidcore::surface::surface::p2::CurvatureType::from_code(
                     data[0] as u64,
                 )
-                .ok_or_else(|| SolidError::sm_err("fixture"))?,
+                .ok_or_else(|| crate::output::routine_failure("fixture"))?,
                 ends: solidcore::surface::surface::p2::BlendEndType::from_code(data[1] as u64)
-                    .ok_or_else(|| SolidError::sm_err("fixture"))?,
+                    .ok_or_else(|| crate::output::routine_failure("fixture"))?,
                 curves_direction: data[2] as u64,
                 start_tangent_length: data[3],
                 end_tangent_length: data[4],

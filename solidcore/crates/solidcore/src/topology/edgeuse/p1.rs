@@ -890,7 +890,7 @@ pub fn set_member_uv_trim_curve(
 /// upstream dereferences) and [`SolidError::NotFound`] propagate.
 fn ignore_status<T>(r: Result<T>) -> Result<()> {
     match r {
-        Err(e) if e.upstream_status().is_some() || e.is_nurbs_failure() => Ok(()),
+        Err(e) if e.failed_routine_status().is_some() || e.is_nurbs_failure() => Ok(()),
         Err(e) => Err(e),
         Ok(_) => Ok(()),
     }
@@ -2113,7 +2113,7 @@ mod tests {
         // a degenerate edge interval fails before the gap function
         b.edge_mut(EdgeId::from_index(0)).unwrap().interval = Extent1d::from_value(0.5);
         assert!(calc_max_edge_face_gap(&k, &mut b, a0, true)
-            .is_err_and(|e| e.upstream_status().is_some()));
+            .is_err_and(|e| e.failed_routine_status().is_some()));
     }
 
     #[test]

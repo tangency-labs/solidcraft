@@ -4410,7 +4410,7 @@ mod tests {
             _boundary_intersections: bool,
         ) -> Result<PointClassification<H>> {
             if self.classify_fails {
-                return Err(SolidError::sm_err("classify"));
+                return Err(SolidError::failed_routine("classify", crate::error::SM_ERR));
             }
             let idx = self.points.len();
             self.points.push(point);
@@ -5879,7 +5879,7 @@ mod tests {
             e.topology_failure(),
             Some(&TopologyFailure::AbsorbedCurveAtNoFiniteDistance)
         );
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
         assert_eq!(moved, before, "a refused move changes nothing");
         // a B-rep other than 1 and 2 is the caller's argument, and changes nothing
         let e = moved
@@ -5889,7 +5889,7 @@ mod tests {
             e.topology_failure(),
             Some(&TopologyFailure::BrepSideNotOneOrTwo { which: 3 })
         );
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
         assert_eq!(moved, before);
     }
 
@@ -6630,7 +6630,10 @@ mod tests {
         let e = m
             .update_edges(&k, &mut geo, 1, Some(e_old), &[e_new, e_new], Some(calling))
             .unwrap_err();
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(
+            e.failed_routine_status(),
+            Some(crate::error::SM_ERR_NULL_POINTER)
+        );
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput, "{e}");
         assert_eq!(
             e.topology_failure(),
@@ -6716,10 +6719,9 @@ mod tests {
         let e = m
             .edge_definition_split(&k, &mut geo, ed, ivl.mid(), Some(v_mid), None)
             .unwrap_err();
-        // the classification's own error (main read the unclassified point and refused
-        // with `SplitDefinitionNotAdded`, caused by `ClassificationOffTopology`)
+        // the classification's own error (main read the unclassified point and refused)
         assert_eq!(e.operation(), "classify", "{e}");
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR), "{e}");
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR), "{e}");
         assert!(!e.is_defect(), "{e}");
         assert_eq!(m.edge_def(ed).unwrap(), &before);
         assert!(m

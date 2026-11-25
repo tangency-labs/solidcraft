@@ -1888,7 +1888,7 @@ impl<O: LoopObject> FaceProps<O> {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` ([`SolidError::Upstream`]) when `exe_heal_op` is before
+    /// `SM_ERR` (a failure's status) when `exe_heal_op` is before
     /// [`HealerOpType::FixTolsizes`]; [`SolidError::InvalidInput`] for a face without
     /// surface or face use, and for a handle type that cannot name the face's B-rep
     /// objects (`SmFace::HasSeamProblem`, see the module docs); the errors of the
@@ -3028,7 +3028,7 @@ mod tests {
         let mut p: FaceProps<H> = FaceProps::new();
         // before Fix_TolSizes: SM_ERR, nothing is touched
         let named = |e: &SolidError| {
-            e.upstream_status() == Some(1001)
+            e.failed_routine_status() == Some(1001)
                 && e.heal_failure() == Some(&HealFailure::HealStepNotRun)
                 && e.kind() == crate::error::ErrorKind::InvalidInput
         };

@@ -58,7 +58,7 @@
 //! - **Statuses.** Upstream logs and ignores many statuses (`SE`, ignored calls): those
 //!   stay ignored, through `ignore_status`. A status upstream returns becomes the
 //!   `Err` of the Rust call; `SM_ERR_ASSERT_FAILURE` (`AERN`) is
-//!   [`SolidError::Upstream`] with that code. `AddFeature` returning `NULL` is `None`.
+//!   a failure with that code. `AddFeature` returning `NULL` is `None`.
 //! - **Marks.** The executive locks and releases a mark in its constructor, as
 //!   upstream's local `SmNewMarkAndLock` (so the mark is not held afterwards); the
 //!   marks set on the base B-rep's objects persist in the executive's [`Marks`] store,
@@ -987,7 +987,7 @@ fn open_loop_edge(feature: &Feature) -> Option<EdgeId> {
 pub(crate) fn is_open_base_refusal(error: &SolidError) -> bool {
     match error {
         // the status, not the variant: a typed failure that replaced the `Upstream` (#13790)
-        e if e.upstream_status() == Some(SM_ERR)
+        e if e.failed_routine_status() == Some(SM_ERR)
             && e.operation() == OP
             && matches!(e.entity(), Some(EntityRef::Edge(_))) =>
         {
@@ -3222,7 +3222,7 @@ mod tests {
         assert_eq!(e.blend_failure(), Some(&BlendFailure::NoFeatureMade));
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
         assert_eq!(e.sm_status(), Some(SM_ERR_ASSERT_FAILURE));
-        assert_eq!(e.upstream_status(), e.sm_status());
+        assert_eq!(e.failed_routine_status(), e.sm_status());
         assert_eq!(e.operation(), OP);
         assert_eq!(e.entity(), None);
     }
@@ -3251,11 +3251,7 @@ mod tests {
         use crate::error::replaced_upstream_samples::{native_failures, replaced_upstream};
         use crate::topology::EdgeId;
         let edge = Some(EntityRef::Edge(EdgeId::from_index(5)));
-        let upstream = SolidError::Upstream {
-            operation: OP,
-            code: SM_ERR,
-            entity: edge,
-        };
+        let upstream = SolidError::failed_routine_at(OP, SM_ERR, edge);
         assert!(is_open_base_refusal(&upstream));
         for typed in replaced_upstream(OP, SM_ERR, edge) {
             assert!(is_open_base_refusal(&typed), "{typed:?}");

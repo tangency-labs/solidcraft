@@ -239,10 +239,16 @@ fn probes(k: &Kernel, brep: &Brep, face: FaceId, input: &Inputs) -> SolidResult<
             let eu = edges
                 .first()
                 .copied()
-                .ok_or_else(|| SolidError::null_pointer("difftest::native_face::edgeuse"))?;
+                .ok_or_else(|| SolidError::port_invariant("difftest::native_face::edgeuse", "a boundary loop use has no edge uses"))?;
             let curve = solidcore::topology::edgeuse::p1::uv_trim_curve(brep, eu)?
                 .0
-                .ok_or_else(|| SolidError::null_pointer("difftest::native_face::uv_trim_curve"))?;
+                .ok_or_else(|| {
+                    solidcore::error::Failure::new(
+                        "difftest::native_face::uv_trim_curve",
+                        solidcore::error::surface::SurfaceFailure::EdgeuseHasNoTrimCurve,
+                    )
+                    .into_error()
+                })?;
             let interval = curve.natural_interval();
             for mode in [1, 2] {
                 let t = if mode == 1 {
@@ -265,8 +271,8 @@ fn probes(k: &Kernel, brep: &Brep, face: FaceId, input: &Inputs) -> SolidResult<
 
 fn status(error: SolidError) -> SolidResult<f64> {
     match error {
-        e if solidcore::error::upstream_status(&e).is_some() => {
-            Ok(f64::from(solidcore::error::upstream_status(&e).unwrap_or(-1)))
+        e if crate::output::recorded_status(&e).is_some() => {
+            Ok(f64::from(crate::output::recorded_status(&e).unwrap_or(-1)))
         }
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => Ok(1007.0),
         other => Err(other),
@@ -320,7 +326,13 @@ fn rust_record(input: &Inputs, brep: &mut Brep, face: FaceId) -> SolidResult<Vec
     let source = record
         .surface
         .as_ref()
-        .ok_or_else(|| SolidError::null_pointer("difftest::native_face"))?;
+        .ok_or_else(|| {
+            solidcore::error::Failure::new(
+                "difftest::native_face",
+                solidcore::error::surface::SurfaceFailure::FaceHasNoSurface,
+            )
+            .into_error()
+        })?;
     let mut out = vec![
         SUCCESS,
         f64::from(face.index()),

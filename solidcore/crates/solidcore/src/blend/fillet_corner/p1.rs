@@ -1350,7 +1350,7 @@ const OP_END_PATCH: &str = "blend::fillet_corner::p1::create_end_patch";
 /// Error")`, then `SM_ERR`): the corner's end face could not be made. One site for every
 /// path that makes it (upstream's one face, the seam cap's two):
 /// [`CornerPatchMiss::FaceNotMade`] (`SM_ERR`), with the error of the step that could not
-/// make it kept as the cause (rule 6).
+/// make it kept as the cause.
 #[track_caller]
 fn end_face_not_made(cause: SolidError) -> SolidError {
     Failure::new(
@@ -3864,7 +3864,7 @@ fn make_face(
 }
 
 /// `error`, a failure this module builds in place of a routine's error, keeping `cause`,
-/// that routine's error (guide rule 6, #13790). Its operation, reason and status stay
+/// that routine's error (#13790). Its operation, reason and status stay
 /// `error`'s.
 ///
 /// **An `error` that is not a [`SolidError::Failed`] is returned as it is and `cause` is
@@ -3948,7 +3948,10 @@ mod tests {
                 visited.push(edge);
                 if edge == edges[1] {
                     *global_merge = false;
-                    return Err(SolidError::sm_err("defined edge failure"));
+                    return Err(SolidError::failed_routine(
+                        "defined edge failure",
+                        crate::error::SM_ERR,
+                    ));
                 }
                 Ok(())
             },
@@ -3964,7 +3967,7 @@ mod tests {
             )),
             "{e:?}"
         );
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert_eq!(context.1, edges[..2]);
         assert_eq!(
             context.0.fillet_edge(edges[0]).unwrap().status(),
@@ -4011,7 +4014,10 @@ mod tests {
             |(pseudo, visited, _), vertex| {
                 visited.push(vertex);
                 if vertex == second {
-                    return Err(SolidError::null_pointer("defined calculator failure"));
+                    return Err(SolidError::failed_routine(
+                        "defined calculator failure",
+                        SM_ERR_NULL_POINTER,
+                    ));
                 }
                 pseudo
                     .fillet_vertex_mut(vertex)?
@@ -4031,7 +4037,7 @@ mod tests {
             )),
             "{e:?}"
         );
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         assert_eq!(context.1, [first, second]);
         assert!(context.0.fillet_vertex(first).unwrap().is_processed());
         assert!(!context.0.fillet_vertex(second).unwrap().is_processed());
@@ -4048,11 +4054,11 @@ mod tests {
                 "calculator",
                 BlendFailure::NoRoom(crate::blend::fillet_executive::NoRoomReason::BallDoesNotFit),
             ),
-            SolidError::blend("calculator", BlendFailure::StageFailed),
+            SolidError::blend("calculator", BlendFailure::Defect { why: "x" }),
             SolidError::PreparationRequired {
                 operation: "calculator",
             },
-            SolidError::sm_err("calculator"),
+            SolidError::failed_routine("calculator", crate::error::SM_ERR),
         ]
     }
 
@@ -4073,7 +4079,7 @@ mod tests {
             "{e:?}"
         );
         assert_eq!(e.sm_status(), Some(SM_ERR), "{e:?}");
-        assert_eq!(e.upstream_status(), Some(SM_ERR), "{e:?}");
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR), "{e:?}");
         assert_eq!(
             e.kind(),
             crate::error::ErrorKind::of_status(SM_ERR),
@@ -4175,7 +4181,7 @@ mod tests {
     }
 
     /// An end face that `make_face_brep` does not make is reported as before (`SM_ERR`),
-    /// keeping the face builder's error as its cause (rule 6).
+    /// keeping the face builder's error as its cause.
     #[test]
     fn an_end_face_not_made_keeps_the_face_builders_error() {
         for cause in calculator_errors() {
@@ -4196,12 +4202,9 @@ mod tests {
         let cancelled = SolidError::Cancelled {
             operation: "re-solve",
         };
-        let cause = Failure::new(
-            "calculator",
-            BlendFailure::Failed("the calculation stopped"),
-        )
-        .caused_by(cancelled.clone())
-        .into_error();
+        let cause = Failure::new("calculator", BlendFailure::ExecutiveStepFailed)
+            .caused_by(cancelled.clone())
+            .into_error();
         // the site passes on only a cancellation itself, not one beneath another error
         assert!(!cause.is_unported_or_cancelled());
         let e = corner_vertex_failure(&cause);
@@ -4239,9 +4242,12 @@ mod tests {
             assert_eq!(re_solved(Err(passed.clone()), sm_err), Err(passed));
         }
         // an error without a record has no cause to keep (no caller passes one)
-        let bare = SolidError::sm_err(OP_CONST_RAD);
+        let bare = SolidError::invalid_input(OP_CONST_RAD, "x");
         assert_eq!(
-            keeping_cause(bare.clone(), SolidError::sm_err("re-solve")),
+            keeping_cause(
+                bare.clone(),
+                SolidError::failed_routine("re-solve", crate::error::SM_ERR)
+            ),
             bare
         );
     }
@@ -4313,7 +4319,7 @@ mod tests {
             }),
             "{e:?}"
         );
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         let b = fb.brep();
         assert_eq!(b.edge(rail).unwrap().vertices, [kv, d]);
         assert_eq!(b.vertexuse(r0_vu).unwrap().vertex, Some(kv));
@@ -4473,7 +4479,7 @@ mod tests {
             )),
             "{e:?}"
         );
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR));
         let line = [p[0], p[1], Point3::new(2.0, 0.0, 0.0)];
         assert!(create_planar_surface(&k, &line, 0.0).is_err());
     }

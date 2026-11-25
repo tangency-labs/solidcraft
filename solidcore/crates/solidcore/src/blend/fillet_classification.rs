@@ -246,7 +246,10 @@ mod tests {
                             "blend.fillet_solver_p5",
                         ))
                     } else {
-                        Err(SolidError::sm_err("classification test boundary"))
+                        Err(SolidError::failed_routine(
+                            "classification test boundary",
+                            crate::error::SM_ERR,
+                        ))
                     }
                 })
                 .unwrap_err();

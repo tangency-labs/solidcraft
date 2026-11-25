@@ -1310,7 +1310,7 @@ fn typed(e: SolidError) -> Error {
             };
             Error::NotOneFoot { found: *found }
         }
-        // the kernel's statuses (Upstream, Failed, the refusals the families map further), and any
+        // the kernel's statuses (Failed, the refusals the families map further), and any
         // kind the kernel adds by the status it stands for
         e => match e.blend_failure() {
             // a blend certificate that ran out of its work budget: a refusal of its own

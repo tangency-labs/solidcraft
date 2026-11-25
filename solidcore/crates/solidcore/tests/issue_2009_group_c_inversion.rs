@@ -20,9 +20,7 @@ fn kernel() -> Kernel {
 
 fn code<T: std::fmt::Debug>(r: &solidcore::Result<T>) -> i32 {
     match r {
-        Err(e) if solidcore::error::upstream_status(e).is_some() => {
-            solidcore::error::upstream_status(e).unwrap_or(-1)
-        }
+        Err(e) if e.sm_status().is_some() => e.sm_status().unwrap_or(-1),
         other => panic!("expected an upstream status, got {other:?}"),
     }
 }

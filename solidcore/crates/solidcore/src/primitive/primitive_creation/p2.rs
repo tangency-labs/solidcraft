@@ -298,7 +298,7 @@ mod tests {
     }
     fn code<T>(result: &Result<T>) -> Option<i32> {
         match result {
-            Err(e) if e.upstream_status().is_some() => e.upstream_status(),
+            Err(e) if e.failed_routine_status().is_some() => e.failed_routine_status(),
             Err(SolidError::InvalidInput { .. }) => Some(1007),
             _ => None,
         }
@@ -647,7 +647,7 @@ mod tests {
         expected.add_point(end);
         let normal = boxes
             .normal
-            .ok_or_else(|| SolidError::sm_err("no normal box"))?;
+            .ok_or_else(|| SolidError::failed_routine("no normal box", crate::error::SM_ERR))?;
         assert_eq!(
             (normal.min(), normal.max()),
             (expected.min(), expected.max())

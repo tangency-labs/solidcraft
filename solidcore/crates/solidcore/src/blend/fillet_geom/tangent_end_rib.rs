@@ -1191,7 +1191,7 @@ mod tests {
         let e = section_contact_order(&solver).unwrap_err();
         assert_eq!(e.operation(), OP_ORDER);
         assert_eq!(
-            (e.blend_failure(), e.upstream_status()),
+            (e.blend_failure(), e.failed_routine_status()),
             (
                 Some(&BlendFailure::Defect {
                     why: NO_SURFACE_GENERATOR
@@ -1456,7 +1456,7 @@ mod tests {
             err.blend_failure(),
             Some(BlendFailure::RibFitCap { .. })
         ));
-        assert_eq!(err.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(err.failed_routine_status(), Some(crate::error::SM_ERR));
         // the same rib through the routine's own solve builds
         assert!(tangent_end_rib(&k, &fillet, &end, 2, p, q, None, false, 1e-6, 0.0).is_ok());
     }
@@ -1484,7 +1484,7 @@ mod tests {
         );
         assert_eq!(err.kind(), crate::error::ErrorKind::NotWithinTolerance);
         assert!(!err.is_defect() && !err.is_refusal());
-        assert_eq!(err.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(err.failed_routine_status(), Some(crate::error::SM_ERR));
     }
 
     /// An end surface that is the fillet surface itself: both ends lie on both, but at every
@@ -1516,7 +1516,7 @@ mod tests {
             "{err:?}"
         );
         assert!(err.is_defect() && !err.is_refusal());
-        assert_eq!(err.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(err.failed_routine_status(), Some(crate::error::SM_ERR));
     }
 
     /// A zero-speed rib (contact order 3) whose end surface is singular at the tangent end:
@@ -1560,7 +1560,7 @@ mod tests {
         );
         assert_eq!(err.kind(), crate::error::ErrorKind::Unsupported);
         assert!(!err.is_defect() && !err.is_refusal());
-        assert_eq!(err.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(err.failed_routine_status(), Some(crate::error::SM_ERR));
     }
 
     /// The same surfaces without the bump: the rib is the line `x = y − 1/2` on `z = 0`. It

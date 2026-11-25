@@ -175,7 +175,7 @@ fn output(raw: &[f64]) -> Result<Output, HarnessError> {
 /// The status code of a wrapper error (`SM_SUCCESS` is `0`).
 fn status(e: &SolidError) -> Option<f64> {
     match e {
-        up_err if solidcore::error::upstream_status(up_err).is_some() => Some(f64::from(solidcore::error::upstream_status(up_err).unwrap_or(-1))),
+        up_err if crate::output::recorded_status(up_err).is_some() => Some(f64::from(crate::output::recorded_status(up_err).unwrap_or(-1))),
         SolidError::InvalidInput { .. } => Some(1007.),
         _ => None,
     }
@@ -395,7 +395,7 @@ fn put_trims(k: &Kernel, o: &mut Vec<f64>, b: &Brep) -> SolidResult<()> {
                 match c.evaluate_point(k, d.evaluate(f)) {
                     Ok(p) => o.extend([0.0, p.x, p.y, p.z]),
                     Err(e) if e.is_unported() => return Err(e),
-                    Err(up_err) if solidcore::error::upstream_status(&up_err).is_some() => o.push(f64::from(solidcore::error::upstream_status(&up_err).unwrap_or(-1))),
+                    Err(up_err) if crate::output::recorded_status(&up_err).is_some() => o.push(f64::from(crate::output::recorded_status(&up_err).unwrap_or(-1))),
                     Err(_) => o.push(-1.0),
                 }
             }
@@ -412,13 +412,17 @@ fn build_mixed_box(k: &mut Kernel, size: [f64; 3]) -> SolidResult<Brep> {
     use solidcore::topology::brep::p2::{replace_surface, ArenaNotifyState, OldSurface};
     use solidcore::topology::brep_cache::{arena_identity, CacheObject};
     let mut b = build_box(k, size, 0.0)?;
-    let face = *bl::faces(&b, None)?
-        .first()
-        .ok_or_else(|| SolidError::sm_err("difftest::topology_api_files::build_mixed_box"))?;
+    let face = *bl::faces(&b, None)?.first().ok_or_else(|| {
+        solidcore::error::Failure::new(
+            "difftest::topology_api_files::build_mixed_box",
+            solidcore::error::query::QueryFailure::BrepWithoutFaces,
+        )
+        .into_error()
+    })?;
     let nurb = match b.face(face)?.surface.as_ref().map(Surface::kind) {
         Some(SurfaceKind::Plane(p)) => Surface::from(p.base_with_nurb()?.into_owned()),
         _ => {
-            return Err(SolidError::sm_err(
+            return Err(crate::output::routine_failure(
                 "difftest::topology_api_files::build_mixed_box: face 0 is not a plane",
             ))
         }
@@ -689,7 +693,7 @@ fn write_rejection(s: &WriteSrc) -> Option<String> {
 fn write_status(e: &SolidError) -> i64 {
     match e {
         SolidError::InvalidInput { .. } => 1007,
-        up_err if solidcore::error::upstream_status(up_err).is_some() => i64::from(solidcore::error::upstream_status(up_err).unwrap_or(-1)),
+        up_err if crate::output::recorded_status(up_err).is_some() => i64::from(crate::output::recorded_status(up_err).unwrap_or(-1)),
         _ => -1,
     }
 }

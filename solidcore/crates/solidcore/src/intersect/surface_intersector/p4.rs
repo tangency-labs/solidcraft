@@ -2586,7 +2586,7 @@ mod tests {
         assert!(
             r.as_ref()
                 .err()
-                .and_then(SolidError::upstream_status)
+                .and_then(SolidError::failed_routine_status)
                 .is_some(),
             "{r:?}"
         );
@@ -2667,7 +2667,7 @@ mod tests {
         );
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
         assert!(!e.is_defect());
-        assert_eq!(e.upstream_status(), Some(1006));
+        assert_eq!(e.failed_routine_status(), Some(1006));
     }
 
     #[test]
@@ -2699,7 +2699,11 @@ mod tests {
         let one = si
             .do_law_intersection(k, &[p], &opts, &mut law)
             .unwrap_err();
-        assert_eq!(one.upstream_status(), Some(crate::error::SM_ERR), "{one}");
+        assert_eq!(
+            one.failed_routine_status(),
+            Some(crate::error::SM_ERR),
+            "{one}"
+        );
         assert_eq!(
             one.intersect_failure(),
             Some(&IntersectFailure::PointCountNotTaken { given: 1 })
@@ -2709,7 +2713,7 @@ mod tests {
             .do_law_intersection(k, &[p, q], &opts, &mut law)
             .unwrap_err();
         assert_eq!(
-            two.upstream_status(),
+            two.failed_routine_status(),
             Some(crate::error::SM_ERR_NULL_POINTER),
             "{two}"
         );
@@ -2806,7 +2810,10 @@ mod tests {
             e.intersect_failure(),
             Some(&IntersectFailure::CurveCacheNotBuilt)
         );
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(
+            e.failed_routine_status(),
+            Some(crate::error::SM_ERR_NULL_POINTER)
+        );
         assert!(e.cause().is_some(), "{e}");
 
         // Pair validation still precedes even the first curve-cache build.
@@ -2831,7 +2838,10 @@ mod tests {
             e.intersect_failure(),
             Some(&IntersectFailure::CurveCacheNotBuilt)
         );
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(
+            e.failed_routine_status(),
+            Some(crate::error::SM_ERR_NULL_POINTER)
+        );
     }
 
     /// #16669 (`CodeRabbit` on #16670): a point the step-growth loop's `TestPoint` snaps to a

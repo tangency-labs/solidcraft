@@ -1296,7 +1296,7 @@ fn a_leg_below_the_body_s_resolution_is_refused_naming_the_edge() {
         assert_eq!(named_edge(&err), Some(edge), "{err:?}");
         assert_eq!(err.operation(), "blend::weld_bead");
         assert_eq!(
-            solidcore::error::upstream_status(&err),
+            err.sm_status(),
             Some(solidcore::error::SM_ERR_INVALID_INPUT)
         );
         assert!(smb(&k, &b) == before, "the corner changed");

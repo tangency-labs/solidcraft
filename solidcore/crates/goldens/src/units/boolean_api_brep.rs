@@ -486,7 +486,7 @@ fn level_2() -> u8 {
 fn status(e: &SolidError) -> i64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => SM_ERR_INVALID_INPUT,
-        SolidError::Upstream { .. } | SolidError::Failed(_) => {
+        SolidError::Failed(_) => {
             e.sm_status().map_or(-1, i64::from)
         }
         _ => -1,

@@ -3513,7 +3513,7 @@ mod tests {
         );
         assert_eq!(refusal.error.kind(), crate::error::ErrorKind::InvalidInput);
         assert_eq!(
-            crate::error::upstream_status(&refusal.error),
+            SolidError::failed_routine_status(&refusal.error),
             Some(crate::error::SM_ERR)
         );
     }
@@ -3530,7 +3530,7 @@ mod tests {
             Some(BlendFailure::EaseNotBuilt(EaseStop::RampsOverlap))
         ));
         assert_eq!(
-            crate::error::upstream_status(&err),
+            SolidError::failed_routine_status(&err),
             Some(crate::error::SM_ERR)
         );
         let refusal = Refusal::unbuildable(CornerStep::SetbackFillNotCertified, "why");
@@ -3542,7 +3542,7 @@ mod tests {
             ))
         );
         assert_eq!(
-            crate::error::upstream_status(&refusal.error),
+            SolidError::failed_routine_status(&refusal.error),
             Some(crate::error::SM_ERR)
         );
     }
@@ -3580,7 +3580,7 @@ mod tests {
             assert_eq!(err.kind(), kind, "{step:?}");
             assert!(!err.is_defect(), "{step:?}");
             assert_eq!(
-                crate::error::upstream_status(&err),
+                SolidError::failed_routine_status(&err),
                 Some(crate::error::SM_ERR),
                 "{step:?}"
             );
@@ -3600,7 +3600,7 @@ mod tests {
             Some(&BlendFailure::Defect { why: WHY_TABLE })
         );
         assert_eq!(
-            crate::error::upstream_status(&err),
+            SolidError::failed_routine_status(&err),
             Some(crate::error::SM_ERR)
         );
     }
@@ -3624,7 +3624,7 @@ mod tests {
         assert_eq!(err, fill_not_from_split());
         assert_eq!(err.kind(), crate::error::ErrorKind::InvalidInput);
         assert_eq!(
-            crate::error::upstream_status(&err),
+            SolidError::failed_routine_status(&err),
             Some(crate::error::SM_ERR)
         );
     }
@@ -3667,7 +3667,7 @@ mod tests {
         let err = containment(&Kernel::default(), &fill, &plane, true, 0.5).unwrap_err();
         assert_eq!(err, fill_not_from_split());
         assert_eq!(
-            crate::error::upstream_status(&err),
+            SolidError::failed_routine_status(&err),
             Some(crate::error::SM_ERR)
         );
     }
@@ -3686,7 +3686,7 @@ mod tests {
         let err = corner_step(CornerStep::SetbackFacesMeetInNoPoint);
         assert_eq!(err.kind(), crate::error::ErrorKind::Degenerate);
         assert_eq!(
-            crate::error::upstream_status(&err),
+            SolidError::failed_routine_status(&err),
             Some(crate::error::SM_ERR)
         );
     }
@@ -3761,7 +3761,7 @@ mod tests {
         assert_eq!(err, corner_step(CornerStep::SetbackFacesMeetInNoPoint));
         assert_eq!(err.kind(), crate::error::ErrorKind::Degenerate);
         assert_eq!(
-            crate::error::upstream_status(&err),
+            SolidError::failed_routine_status(&err),
             Some(crate::error::SM_ERR)
         );
     }

@@ -734,7 +734,7 @@ mod tests {
             assert_eq!(e.blend_failure(), Some(&cause), "{e:?}");
             assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput, "{e:?}");
             assert_eq!(
-                e.upstream_status(),
+                e.failed_routine_status(),
                 Some(crate::error::SM_ERR_INVALID_INPUT)
             );
         }
@@ -786,7 +786,7 @@ mod tests {
             assert_eq!(e_err.entity(), Some(EntityRef::Edge(e)), "{e_err:?}");
             assert_eq!(e_err.operation(), OP_ALONG, "{e_err:?}");
             assert_eq!(
-                e_err.upstream_status(),
+                e_err.failed_routine_status(),
                 Some(crate::error::SM_ERR_INVALID_INPUT)
             );
         }
@@ -829,7 +829,7 @@ mod tests {
             assert_eq!(err.entity(), Some(EntityRef::Edge(e)), "{err:?}");
             assert_eq!(err.operation(), OP_ALONG, "{err:?}");
             assert_eq!(
-                err.upstream_status(),
+                err.failed_routine_status(),
                 Some(crate::error::SM_ERR_INVALID_INPUT)
             );
         }
@@ -968,7 +968,7 @@ mod tests {
                     "blend::fillet_executive::session::prepare_chamfers_along"
                 );
                 assert_eq!(
-                    err.upstream_status(),
+                    err.failed_routine_status(),
                     Some(crate::error::SM_ERR_INVALID_INPUT)
                 );
                 FilletSession::new(&mut k, &mut body)

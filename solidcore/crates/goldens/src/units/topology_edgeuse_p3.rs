@@ -154,7 +154,7 @@ fn output_of(body: &[f64]) -> Output {
 /// The status a failed Rust op reports (`None`: not an upstream status).
 fn status_of(e: &SolidError) -> Option<f64> {
     match e {
-        up_err if solidcore::error::upstream_status(up_err).is_some() => Some(f64::from(solidcore::error::upstream_status(up_err).unwrap_or(-1))),
+        up_err if crate::output::recorded_status(up_err).is_some() => Some(f64::from(crate::output::recorded_status(up_err).unwrap_or(-1))),
         _ => None,
     }
 }

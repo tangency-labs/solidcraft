@@ -1186,7 +1186,7 @@ fn set_backs(
 ///
 /// # Errors
 ///
-/// [`SolidError::null_pointer`] where a ring edge use has no solver or one no offset surface
+/// a failure with status `SM_ERR_NULL_POINTER` where a ring edge use has no solver or one no offset surface
 /// (`NER`); those of the queries.
 #[allow(clippy::too_many_arguments)]
 pub fn classify_setback(
@@ -1379,7 +1379,7 @@ fn lookup(corner: FilletCornerId, this: &FilletCorner) -> CornerLookup<'_> {
 /// # Errors
 ///
 /// `SM_ERR` for a corner that is not a Setback of three or more ring edge uses;
-/// [`SolidError::null_pointer`] where the fork dereferences missing topology (`NER`); those
+/// a failure with status `SM_ERR_NULL_POINTER` where the fork dereferences missing topology (`NER`); those
 /// of the pseudo B-rep's construction.
 #[allow(clippy::too_many_lines)] // the fork's one function
 pub fn make_setback_topology(
@@ -2801,7 +2801,7 @@ fn past_rails(asked: Option<SetBackFill>, vtx: VertexId, reach: f64) -> SetbackR
 /// # Errors
 ///
 /// `SM_ERR` where the corner's topology is not the Setback's, a setback vertex is not
-/// processed or the fill does not match it; [`SolidError::null_pointer`] where the fork
+/// processed or the fill does not match it; a failure with status `SM_ERR_NULL_POINTER` where the fork
 /// dereferences missing geometry (`NER`); those of the queries.
 #[allow(clippy::too_many_lines)] // the fork's one function
 pub fn build_setback_fill<S: SetbackSolvers>(
@@ -3312,7 +3312,7 @@ fn keep_definition(
 ///
 /// # Errors
 ///
-/// [`SolidError::null_pointer`] without the fill or the fillet B-rep (`NER`); `SM_ERR`
+/// a failure with status `SM_ERR_NULL_POINTER` without the fill or the fillet B-rep (`NER`); `SM_ERR`
 /// where the fill has not `2 n` patches; those of the curves' and faces' construction.
 pub fn create_setback_patches(
     corner: &mut FilletCorner,
@@ -3458,7 +3458,7 @@ mod tests {
         assert_eq!(err.entity(), Some(EntityRef::Edge(e)));
         assert_eq!(err.operation(), OP_CLASSIFY);
         assert_eq!(
-            crate::error::upstream_status(&err),
+            SolidError::failed_routine_status(&err),
             Some(crate::error::SM_ERR_NULL_POINTER)
         );
     }

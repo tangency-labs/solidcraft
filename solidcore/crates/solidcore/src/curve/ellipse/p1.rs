@@ -2706,7 +2706,7 @@ mod tests {
             Some(&CurveFailure::PolarConversionNotSetUp)
         );
         assert_eq!(
-            crate::error::upstream_status(&err),
+            SolidError::failed_routine_status(&err),
             Some(crate::error::SM_ERR_NULL_POINTER)
         );
     }
@@ -2794,7 +2794,7 @@ mod tests {
         let line = Curve::from(BSplineCurve::create_degenerate_curve(3, Vec3::UNDEF).unwrap());
         let err = a.join_with(&k, 1, &line, 0, None, None).unwrap_err();
         assert_eq!(err.curve_failure(), Some(&CurveFailure::JoinOtherKind));
-        assert_eq!(crate::error::upstream_status(&err), Some(1001));
+        assert_eq!(SolidError::failed_routine_status(&err), Some(1001));
         // a circle of another radius is no piece of this one
         let wider = Curve::from(circle(&k, 180.0, 270.0, 2.0));
         let err = a.join_with(&k, 1, &wider, 0, Some(1e-6), None).unwrap_err();
@@ -2806,7 +2806,7 @@ mod tests {
                 tolerance: 1e-6
             })
         );
-        assert_eq!(crate::error::upstream_status(&err), Some(1001));
+        assert_eq!(SolidError::failed_routine_status(&err), Some(1001));
         // a circle's radius must be above zero
         let err = Ellipse::create_canonical_circle(&k, &Axis2Placement::default(), 0.0, None, None)
             .unwrap_err();
@@ -2814,7 +2814,7 @@ mod tests {
             err.curve_failure(),
             Some(&CurveFailure::RadiusNotPositive { radius: 0.0 })
         );
-        assert_eq!(crate::error::upstream_status(&err), Some(1001));
+        assert_eq!(SolidError::failed_routine_status(&err), Some(1001));
     }
 
     #[test]
@@ -2919,7 +2919,7 @@ mod tests {
                 tolerance: tol
             })
         );
-        assert_eq!(crate::error::upstream_status(&err), Some(1001));
+        assert_eq!(SolidError::failed_routine_status(&err), Some(1001));
         assert_eq!(err.sm_status(), Some(1001));
         assert_eq!(
             err.operation(),

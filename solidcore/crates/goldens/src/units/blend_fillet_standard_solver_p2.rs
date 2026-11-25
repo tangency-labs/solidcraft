@@ -486,17 +486,8 @@ fn rust_edgeuse_body(
                 d.min().x + fu * (d.max().x - d.min().x),
                 d.min().y + fv * (d.max().y - d.min().y),
             );
-            match s.surface.evaluate_point(&k, uv) {
-                Ok(p) => v.extend([0.0, p.x, p.y, p.z]),
-                Err(e) if e.is_unported() => return Err(e),
-                Err(e) => {
-                    let st = match e {
-                        SolidError::Upstream { code, .. } => f64::from(code),
-                        _ => return Err(e),
-                    };
-                    v.extend([st, 0.0, 0.0, 0.0]);
-                }
-            }
+            let p = s.surface.evaluate_point(&k, uv)?;
+            v.extend([0.0, p.x, p.y, p.z]);
         }
     }
     let radial_face = match radial {
@@ -591,8 +582,8 @@ fn rust_cr_eu_body(
         Ok(fs) => fs,
         Err(e) if e.is_unported() => return Err(e),
         // the tangent-surface exits (SM_ERR only signalled upstream)
-        Err(e) if solidcore::error::upstream_status(&e).is_some() => {
-            return Ok(vec![f64::from(solidcore::error::upstream_status(&e).unwrap_or(-1))]);
+        Err(e) if crate::output::recorded_status(&e).is_some() => {
+            return Ok(vec![f64::from(crate::output::recorded_status(&e).unwrap_or(-1))]);
         }
         Err(e) => return Err(e),
     };
@@ -819,7 +810,7 @@ fn surface_of(s: &SrfIn) -> Result<Surface, HarnessError> {
 fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
-        e => solidcore::error::upstream_status(e).map_or(-1.0, f64::from),
+        e => crate::output::recorded_status(e).map_or(-1.0, f64::from),
     }
 }
 

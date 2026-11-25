@@ -884,7 +884,7 @@ mod tests {
             Some(&CurveFailure::TooManyDerivatives { asked: 4, most: 3 })
         );
         assert_eq!(
-            crate::error::upstream_status(&err),
+            SolidError::failed_routine_status(&err),
             Some(crate::error::SM_ERR)
         );
         let d = h.evaluate_step(0.25, 3).unwrap();
@@ -929,7 +929,7 @@ mod tests {
             })
         );
         assert_eq!(
-            crate::error::upstream_status(&err),
+            SolidError::failed_routine_status(&err),
             Some(crate::error::SM_ERR)
         );
         // a degenerate domain has parallel end tangents: no NURB

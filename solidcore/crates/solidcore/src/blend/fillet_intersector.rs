@@ -3502,7 +3502,7 @@ mod tests {
             SolidError::blend_trace(OP_SPAN, TraceFailure::SectionTangentZero { t: 0.1 })
         );
         assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
         assert_eq!(s.surface(0).unwrap().offset_distance(), 1.0);
     }
 
@@ -3597,7 +3597,7 @@ mod tests {
             _uv2: Point2,
             _point: &mut TsectPnt,
         ) -> Result<bool> {
-            Err(SolidError::sm_err("test"))
+            Err(SolidError::failed_routine("test", crate::error::SM_ERR))
         }
 
         fn compute_point_values(
@@ -3633,7 +3633,7 @@ mod tests {
             *flags = StepSolve::default();
             flags.clipped = self.unclipped_landing.is_none();
             if self.fail {
-                return Err(SolidError::sm_err("test"));
+                return Err(SolidError::failed_routine("test", crate::error::SM_ERR));
             }
             if let Some(landing) = self.unclipped_landing {
                 for s in SRFS {
@@ -4138,7 +4138,7 @@ mod tests {
             self.calls += 1;
             self.starts.push([uv1, uv2]);
             if self.calls <= self.err_first {
-                return Err(SolidError::sm_err("test"));
+                return Err(SolidError::failed_routine("test", crate::error::SM_ERR));
             }
             if self.calls <= self.fail_first {
                 return Ok(false);
@@ -4178,7 +4178,7 @@ mod tests {
             _flags: &mut StepSolve,
             _next: &mut TsectPnt,
         ) -> Result<()> {
-            Err(SolidError::sm_err("test"))
+            Err(SolidError::failed_routine("test", crate::error::SM_ERR))
         }
 
         fn compute_surface_values(

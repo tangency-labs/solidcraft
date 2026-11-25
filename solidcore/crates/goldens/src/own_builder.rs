@@ -876,7 +876,7 @@ fn ellipse_face(k: &mut Kernel, b: &mut Brep, i: &EllipseIn) -> Result<(), Solid
     let nurb = local
         .base()
         .gw_nurb()
-        .ok_or_else(|| SolidError::sm_err("own_builder::ellipse_face"))?;
+        .ok_or_else(|| crate::output::routine_failure("own_builder::ellipse_face"))?;
     let uv = Curve::from(BSplineCurve::from_gw_nurb(2, nurb));
     let edge = Curve::from(edge);
     let mut curves = vec![Some(edge.clone())];
@@ -925,17 +925,18 @@ fn ellipse_face(k: &mut Kernel, b: &mut Brep, i: &EllipseIn) -> Result<(), Solid
     };
     let f = made
         .face
-        .ok_or_else(|| SolidError::sm_err("own_builder::ellipse_face"))?;
+        .ok_or_else(|| crate::output::routine_failure("own_builder::ellipse_face"))?;
     let mut uv = Some(uv);
     for e in solidcore::topology::face::p4::edges(b, f, None, false, None)? {
         let eu = eu1::primary_edgeuse(b, e)?
-            .ok_or_else(|| SolidError::sm_err("own_builder::ellipse_face"))?;
+            .ok_or_else(|| crate::output::routine_failure("own_builder::ellipse_face"))?;
         let is_arc = matches!(
             b.edge(e)?.curve.as_ref().map(Curve::kind),
             Some(CurveKind::Ellipse(_))
         );
         let curve = if is_arc { uv.take() } else { uv_chord.take() };
-        let curve = curve.ok_or_else(|| SolidError::sm_err("own_builder::ellipse_face"))?;
+        let curve =
+            curve.ok_or_else(|| crate::output::routine_failure("own_builder::ellipse_face"))?;
         eu1::set_uv_trim_curve(
             b,
             eu,
@@ -948,7 +949,7 @@ fn ellipse_face(k: &mut Kernel, b: &mut Brep, i: &EllipseIn) -> Result<(), Solid
     if uv.is_none() && uv_chord.is_none() {
         Ok(())
     } else {
-        Err(SolidError::sm_err("own_builder::ellipse_face"))
+        Err(crate::output::routine_failure("own_builder::ellipse_face"))
     }
 }
 
@@ -1071,10 +1072,12 @@ fn hermite_sheet_face(
     };
     let face = made
         .face
-        .ok_or_else(|| SolidError::sm_err("own_builder::hermite_sheet_face"))?;
+        .ok_or_else(|| crate::output::routine_failure("own_builder::hermite_sheet_face"))?;
     let edges = solidcore::topology::face::p4::edges(b, face, None, false, None)?;
     if edges.len() != 4 {
-        return Err(SolidError::sm_err("own_builder::hermite_sheet_face"));
+        return Err(crate::output::routine_failure(
+            "own_builder::hermite_sheet_face",
+        ));
     }
     for edge in edges {
         if !b
@@ -1083,7 +1086,9 @@ fn hermite_sheet_face(
             .as_ref()
             .is_some_and(|curve| matches!(curve.kind(), CurveKind::Hermite(_)))
         {
-            return Err(SolidError::sm_err("own_builder::hermite_sheet_face"));
+            return Err(crate::output::routine_failure(
+                "own_builder::hermite_sheet_face",
+            ));
         }
         solidcore::topology::edge::set_tolerance(b, edge, edge_tol, false, false)?;
     }
@@ -1851,11 +1856,10 @@ pub(crate) fn counts(b: &Brep) -> [usize; 10] {
     ]
 }
 
-/// The `SmStatus` the shim reports for a failed build of the port's error `e`: an
-/// upstream code as is, `SM_ERR` otherwise.
+/// The `SmStatus` the shim reports for a failed build of the port's error `e`: a
+/// failure's status as is, `SM_ERR_INVALID_INPUT` for an input error, `SM_ERR` otherwise.
 pub(crate) fn build_status(e: &SolidError) -> f64 {
     match e {
-        SolidError::Upstream { code, .. } => f64::from(*code),
         // a failure in solidcore's terms (#2615): its C++ comparison status
         e @ SolidError::Failed(_) => f64::from(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => {

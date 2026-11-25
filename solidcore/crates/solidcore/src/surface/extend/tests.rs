@@ -1675,7 +1675,7 @@ fn a_span_past_its_work_budget_is_passed_on_not_an_ask_that_does_not_work() {
             stations: 2,
         },
     );
-    assert!(budget.upstream_status().is_some());
+    assert!(budget.failed_routine_status().is_some());
     assert_eq!(
         span_of_ask(Err(budget.clone()), feet).err(),
         Some(budget),
@@ -1687,8 +1687,8 @@ fn a_span_past_its_work_budget_is_passed_on_not_an_ask_that_does_not_work() {
         Some(cancelled)
     );
     // a plain status failure, an invalid input and an unproved span: no ask
-    let failed = SolidError::blend("t", BlendFailure::Failed("x"));
-    assert!(failed.upstream_status().is_some() && !failed.is_unported_or_cancelled());
+    let failed = SolidError::failed_routine("t", SM_ERR);
+    assert!(failed.failed_routine_status().is_some() && !failed.is_unported_or_cancelled());
     assert!(matches!(span_of_ask(Err(failed), feet), Ok(None)));
     let invalid = SolidError::invalid_input("t", "x");
     assert!(matches!(span_of_ask(Err(invalid), feet), Ok(None)));

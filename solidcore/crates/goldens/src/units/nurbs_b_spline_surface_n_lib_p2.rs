@@ -488,8 +488,8 @@ fn dump_state(o: &mut Vec<f64>, s: &BSplineSurface) {
 fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
-        e if solidcore::error::nurbs::upstream_status(e).is_some() => {
-            f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
+        e if crate::output::recorded_status(e).is_some() => {
+            f64::from(crate::output::recorded_status(e).unwrap_or(-1))
         }
         _ => -1.0,
     }
@@ -544,7 +544,7 @@ fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
                                 .get(i)
                                 .and_then(|r| r.get(j))
                                 .copied()
-                                .ok_or_else(|| SolidError::sm_err("difftest: short matrix"))?;
+                                .ok_or_else(|| crate::output::routine_failure("difftest: short matrix"))?;
                             o.extend([v.x, v.y, v.z]);
                         }
                     }

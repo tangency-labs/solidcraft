@@ -436,8 +436,8 @@ fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
                 Ok(()) => 0,
                 Err(e) if e.is_unported() => return Err(e),
                 Err(solidcore::SolidError::InvalidInput { .. } | solidcore::SolidError::PortInvariant { .. }) => 1007,
-                Err(e) if solidcore::error::upstream_status(&e).is_some() => {
-                    solidcore::error::upstream_status(&e).unwrap_or(-1)
+                Err(e) if crate::output::recorded_status(&e).is_some() => {
+                    crate::output::recorded_status(&e).unwrap_or(-1)
                 }
                 Err(_) => solidcore::error::SM_ERR,
             };
@@ -472,8 +472,8 @@ fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
                 Ok(()) => 0,
                 Err(e) if e.is_unported() => return Err(e),
                 Err(solidcore::SolidError::InvalidInput { .. } | solidcore::SolidError::PortInvariant { .. }) => 1007,
-                Err(e) if solidcore::error::upstream_status(&e).is_some() => {
-                    solidcore::error::upstream_status(&e).unwrap_or(-1)
+                Err(e) if crate::output::recorded_status(&e).is_some() => {
+                    crate::output::recorded_status(&e).unwrap_or(-1)
                 }
                 Err(_) => solidcore::error::SM_ERR,
             };
@@ -531,8 +531,8 @@ fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
                 Ok(()) => 0,
                 Err(e) if e.is_unported() => return Err(e),
                 Err(solidcore::SolidError::InvalidInput { .. } | solidcore::SolidError::PortInvariant { .. }) => 1007,
-                Err(e) if solidcore::error::upstream_status(&e).is_some() => {
-                    solidcore::error::upstream_status(&e).unwrap_or(-1)
+                Err(e) if crate::output::recorded_status(&e).is_some() => {
+                    crate::output::recorded_status(&e).unwrap_or(-1)
                 }
                 Err(_) => solidcore::error::SM_ERR,
             };
@@ -554,7 +554,7 @@ fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
             if consumed {
                 let result = output
                     .as_ref()
-                    .ok_or_else(|| solidcore::SolidError::null_pointer("difftest::primitive_p1"))?;
+                    .ok_or_else(|| solidcore::SolidError::port_invariant("difftest::primitive_p1", "no output B-rep"))?;
                 record.extend([
                     solidcore::topology::brep::p1::faces(result, None)?.len() as f64,
                     solidcore::topology::brep::p1::edges(result, None)?.len() as f64,

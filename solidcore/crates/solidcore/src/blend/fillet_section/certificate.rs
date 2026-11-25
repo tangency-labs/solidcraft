@@ -6046,7 +6046,10 @@ mod tests {
             reason: "a box crosses a knot line where the face or curve is not continuous enough",
         };
         assert!(matches!(through(other), Ok(None)));
-        assert!(matches!(through(SolidError::sm_err(OP)), Ok(None)));
+        assert!(matches!(
+            through(SolidError::failed_routine(OP, crate::error::SM_ERR)),
+            Ok(None)
+        ));
     }
 
     /// #14284, the two planes of `two_plane_span_bound_is_zero` at a square corner, the ball
@@ -7696,7 +7699,7 @@ mod tests {
                 BlendFailure::SectionDegenerate(SectionDegeneracy::NoSpanCoversInterval)
             )
         );
-        assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(error.failed_routine_status(), Some(crate::error::SM_ERR));
     }
 
     /// A quarter circle r 0.2 about (−300, 0, 1), the rational quadratic: over a piece of

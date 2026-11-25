@@ -132,7 +132,7 @@
 //!   fails part-way may have appended curves upstream; the Rust intersectors return
 //!   nothing on failure. `FindParameterAtArcLength`'s `SM_ERR_NOT_CONVERGING` is an
 //!   error where upstream `SER`s it.
-//! - **Failures (#15034, TE-B-02 #19810).** No check in this file decides a refusal (the
+//! - **Failures (#15034, #19810).** No check in this file decides a refusal (the
 //!   rail/edge-use miss at a corner that is not a blending corner is the vertex's
 //!   `NoIntRailEu` status, which the executive reads, not a failure). Each failure keeps
 //!   upstream's status and is built where it happens (its origin is that file and line):
@@ -612,8 +612,7 @@ fn solver_surface<'s>(
 
 /// A step of the routine `op` that cannot fail unless the kernel broke its own contract: a
 /// reviewed [`BlendFailure::Defect`] whose `why` says why (the reasons are the `const`s at
-/// the end of this file), keeping upstream's `SM_ERR`; its origin is the call's file and line
-/// (guide section 6, rules 2 and 4).
+/// the end of this file), keeping upstream's `SM_ERR`; its origin is the call's file and line.
 #[track_caller]
 fn defect(op: &'static str, why: &'static str) -> SolidError {
     SolidError::blend(op, BlendFailure::Defect { why })
@@ -648,7 +647,7 @@ fn face_without_surface(op: &'static str, f: FaceId) -> SolidError {
 
 /// `NER(p)`: an object the kernel built or linked that is not there. A reviewed
 /// [`BlendFailure::Defect`] whose `why` names the link, keeping upstream's
-/// `SM_ERR_NULL_POINTER`; its origin is the call's file and line (guide section 6, rule 2).
+/// `SM_ERR_NULL_POINTER`; its origin is the call's file and line.
 #[track_caller]
 fn broken_link(op: &'static str, why: &'static str) -> SolidError {
     Failure::new(op, BlendFailure::Defect { why })
@@ -659,7 +658,7 @@ fn broken_link(op: &'static str, why: &'static str) -> SolidError {
 /// `NER(p)` of a link of the fillet structures the routine is given (the fillet body, its
 /// corners and solvers, which a caller can build with the public API and leave without it):
 /// [`BlendFailure::FilletSetUpInvalid`] naming the link, keeping upstream's
-/// `SM_ERR_NULL_POINTER` (guide section 6, rule 12).
+/// `SM_ERR_NULL_POINTER`.
 #[track_caller]
 fn missing_set_up(op: &'static str, part: FilletSetUp) -> SolidError {
     Failure::new(op, BlendFailure::FilletSetUpInvalid(part))
@@ -5122,7 +5121,7 @@ fn find_stepoff_uv(
     super::p1::find_stepoff_uv(k, target, &as_assisted(fs), curve_param, stepoff_dist)
 }
 
-// The reviewed defects' reasons (TE-B-02, #19810), one per reason, shared by its sites.
+// The reviewed defects' reasons (#19810), one per reason, shared by its sites.
 
 /// A derivative list shorter than its evaluation's order.
 const SHORT_DERIVATIVES: &str =
@@ -5697,7 +5696,7 @@ mod tests {
             );
             assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
             assert!(!e.is_defect());
-            assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+            assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         };
         let none = CornerLookup::default();
         no_corner(
@@ -5732,7 +5731,7 @@ mod tests {
             )
         );
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
-        assert_eq!(e.upstream_status(), Some(1001));
+        assert_eq!(e.failed_routine_status(), Some(1001));
         let e = fb
             .calc_rail_int_edgeuse(&k, v, None, none, &mut solvers, &mut target)
             .unwrap_err();
@@ -5745,7 +5744,7 @@ mod tests {
             ("blend::fillet_geom::p1::CornerLookup::corner", true),
             "{e:?}"
         );
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         // an id outside the table is the NULL corner (`CornerLookup::corner`, p1, a stage
         // failure since #15034); a corner in it gets to the geometry check
         let e = fb
@@ -5759,7 +5758,7 @@ mod tests {
             ("blend::fillet_geom::p1::CornerLookup::corner", true),
             "{e:?}"
         );
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         let corners = [FilletCorner::new(
             crate::blend::fillet_corner::p3::FilletCornerKind::FourByThree,
             None,
@@ -5793,7 +5792,7 @@ mod tests {
             );
             assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
             assert!(!e.is_defect());
-            assert_eq!(e.upstream_status(), Some(1001));
+            assert_eq!(e.failed_routine_status(), Some(1001));
         }
     }
 

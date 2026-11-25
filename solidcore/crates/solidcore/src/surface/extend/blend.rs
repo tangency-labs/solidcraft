@@ -420,7 +420,7 @@ pub(super) fn span_of_ask(
         Ok(span) if span.certified.is_finite() && feet(&span)? => span,
         Ok(_) | Err(SolidError::InvalidInput { .. }) => return Ok(None),
         Err(e) if e.is_unported_or_cancelled() => return Err(e),
-        Err(e) if e.upstream_status().is_some() => return Ok(None),
+        Err(e) if e.failed_routine_status().is_some() => return Ok(None),
         Err(e) => return Err(e),
     }))
 }

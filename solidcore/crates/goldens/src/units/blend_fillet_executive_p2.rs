@@ -478,7 +478,14 @@ impl ExecutiveAccess<Handle> for Access {
             .edge(id)?
             .curve
             .as_ref()
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| {
+                solidcore::error::Failure::new(
+                    OP,
+                    solidcore::error::blend::BlendFailure::EdgeWithoutCurve,
+                )
+                .at(solidcore::EntityRef::Edge(id))
+                .into_error()
+            })?;
         let knots = curve.knots(k, None)?.0;
         if let std::collections::btree_map::Entry::Vacant(entry) = self.edge_caches.entry(id) {
             // The cache manager returns null on construction failure; LoadFilletSolver
@@ -495,7 +502,16 @@ impl ExecutiveAccess<Handle> for Access {
                 if error.is_unported() {
                     error
                 } else {
-                    SolidError::null_pointer(OP)
+                    solidcore::error::Failure::new(
+                        OP,
+                        solidcore::error::blend::BlendFailure::Solver(
+                            solidcore::error::blend::SolverFailure::EdgeCurveCacheNotBuilt {
+                                edge: id,
+                            },
+                        ),
+                    )
+                    .caused_by(error)
+                    .into_error()
                 }
             })?;
             entry.insert(cache);
@@ -805,16 +821,32 @@ impl ExecutiveAccess<Handle> for Access {
             .map(Handle::Geom))
     }
     fn solver_edge(&self, solver: Handle) -> SolidResult<Handle> {
-        const OP: &str = "blend::fillet_executive::p2: solver_edge";
         let eu = self
             .solver_base(solver)?
             .edgeuse(0)?
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| {
+                // the solver's missing edge use, as the kernel names it: a blend failure of
+                // the p2 module with status `SM_ERR_NULL_POINTER`, which `status_of` reads
+                solidcore::error::Failure::new(
+                    P2_OP,
+                    solidcore::error::blend::BlendFailure::InputMissing(
+                        solidcore::error::blend::BlendInput::SolverEdgeuse { rail: 0 },
+                    ),
+                )
+                .into_error()
+            })?;
         self.brep(Handle::Brep(0))?
             .edgeuse(eu)?
             .edge
             .map(Handle::Edge)
-            .ok_or_else(|| SolidError::null_pointer(OP))
+            .ok_or_else(|| {
+                solidcore::error::Failure::new(
+                    P2_OP,
+                    solidcore::error::blend::BlendFailure::EdgeUseWithoutEdge,
+                )
+                .at(solidcore::EntityRef::Edgeuse(eu))
+                .into_error()
+            })
     }
     fn solver_approx_tolerance(&self, _: Handle) -> SolidResult<f64> {
         missing()
@@ -1444,11 +1476,6 @@ impl ExecutiveAccess<Handle> for Access {
     }
 }
 
-/// The prefix of the p2 module's null-object operations (`SM_ERR_NULL_POINTER` raised
-/// there, `blend::fillet_executive::p2: <what>`, marks a null dereference upstream,
-/// `-2`).
-const OP_P2: &str = "blend::fillet_executive::p2: ";
-
 /// The p2 module's operation: its null objects, typed, are blend failures of it that keep
 /// the status `SM_ERR_NULL_POINTER` (a `Defect` for an object the executive built, the
 /// named cause for the caller's missing law list; #19823).
@@ -1457,14 +1484,11 @@ const P2_OP: &str = "blend::fillet_executive::p2";
 /// The `SmStatus` of a Rust error.
 fn status_of(e: &SolidError) -> f64 {
     match e {
-        SolidError::Upstream {
-            operation, code, ..
-        } if *code == SM_ERR_NULL_POINTER && operation.starts_with(OP_P2) => NULL_DEREF,
         // the p2 module's own null objects, typed (#13790, #19823): a blend failure of the
         // module's operation keeping `SM_ERR_NULL_POINTER`
         e if e.operation() == P2_OP
             && e.blend_failure().is_some()
-            && solidcore::error::upstream_status(e) == Some(SM_ERR_NULL_POINTER) =>
+            && crate::output::recorded_status(e) == Some(SM_ERR_NULL_POINTER) =>
         {
             NULL_DEREF
         }
@@ -2033,7 +2057,7 @@ fn temp_radius(variable: bool, start: f64, end: f64, bx: &BoxIn) -> Result<Outpu
             None => None,
         };
         let Some(side) = side else {
-            return Ok(error_output(&SolidError::sm_err(
+            return Ok(error_output(&crate::output::routine_failure(
                 "harness::fillet_executive_p2::temporary_radius_change",
             )));
         };

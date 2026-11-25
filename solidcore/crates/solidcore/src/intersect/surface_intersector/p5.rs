@@ -1352,7 +1352,7 @@ mod tests {
             e.intersect_failure(),
             Some(&IntersectFailure::NoSurfaceCaches)
         );
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
         // the tolerances are set first
         assert_eq!(ssi.base.this_approx_tol_3d, 0.5);
@@ -1482,7 +1482,7 @@ mod tests {
             e.intersect_failure(),
             Some(&IntersectFailure::SurfaceCacheNotBuilt)
         );
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(
             e.cause(),
             Some(&SolidError::invalid_input("test::identity", "no such face"))
@@ -1523,7 +1523,7 @@ mod tests {
             e.intersect_failure(),
             Some(&IntersectFailure::SurfaceCacheNotBuilt)
         );
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(e.cause(), Some(&built));
     }
 

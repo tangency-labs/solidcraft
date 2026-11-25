@@ -2,7 +2,9 @@
 
 use std::collections::BTreeMap;
 
+use solidcore::error::geom::GeomFailure;
 use solidcore::error::nurbs::NurbsFailure;
+use solidcore::error::{ErrorKind, Failure, Reason};
 use solidcore::SolidError;
 
 /// What the runner produced for a case.
@@ -229,22 +231,70 @@ impl Topology {
     }
 }
 
-/// The status of an [`SolidError::Upstream`], or of a typed failure that replaced one, as the
-/// blend runners read a status: a typed blend failure (solidcore's `BlendFailure`, #13790), or
-/// a B-spline failure (`NurbsFailure::BSpline`, #19848), whose sites keep the status they had
-/// as bare statuses and which `upstream_status` reads the same way. Other errors, including
-/// other areas' typed failures, give `None`, as they did before those sites were converted, so
-/// a runner's rows stay as they were.
+/// The status of a typed failure that replaced a bare status, as the blend runners read a
+/// status: a typed blend failure (solidcore's `BlendFailure`, #13790), a B-spline failure
+/// (`NurbsFailure::BSpline`, #19848), whose sites keep the status they had as bare statuses
+/// and which [`recorded_status`] reads the same way, or a harness's own [`routine_failure`]
+/// (an operation under `harness::`), which keeps the status its bare form had. Other errors,
+/// including other areas' typed failures, give `None`, as they did before those sites were
+/// converted, so a runner's rows stay as they were.
 #[must_use]
 pub fn blend_status(e: &SolidError) -> Option<i32> {
     match e {
-        SolidError::Upstream { code, .. } => Some(*code),
-        e if e.blend_failure().is_some() => solidcore::error::upstream_status(e),
-        e if matches!(e.nurbs_failure(), Some(NurbsFailure::BSpline(_))) => {
-            solidcore::error::upstream_status(e)
-        }
+        e if is_harness_routine_failure(e) => recorded_status(e),
+        e if e.blend_failure().is_some() => recorded_status(e),
+        e if matches!(e.nurbs_failure(), Some(NurbsFailure::BSpline(_))) => recorded_status(e),
         _ => None,
     }
+}
+
+/// The status a runner records for an error, as the goldens were recorded: the status of a
+/// typed failure from an area whose sites returned bare statuses before they were typed (a B-spline, intersect, primitive, mass,
+/// heal, geom, query, topology, surface or blend failure, or a sweep, curve or offset
+/// failure that replaced a bare status). Every other error records no status, as it did
+/// when the goldens were recorded, so no recorded value moves.
+#[must_use]
+pub fn recorded_status(e: &SolidError) -> Option<i32> {
+    match e {
+        SolidError::Failed(f) => match &f.reason {
+            Reason::Nurbs(NurbsFailure::BSpline(_))
+            | Reason::Intersect(_)
+            | Reason::Primitive(_)
+            | Reason::Mass(_)
+            | Reason::Heal(_)
+            | Reason::Geom(_)
+            | Reason::Query(_)
+            | Reason::Topology(_)
+            | Reason::Surface(_)
+            | Reason::Blend(_) => e.sm_status(),
+            Reason::Sweep(w) if w.is_failed_routine() => e.sm_status(),
+            Reason::Curve(c) if c.is_failed_routine() => e.sm_status(),
+            Reason::Offset(o) if o.is_failed_routine() => e.sm_status(),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// A failure a fixture or harness returns in place of a routine's failure (a builder that
+/// cannot build, a hook told to fail): a geom `CallFailed` of class `Failed`, with status
+/// `SM_ERR` (1001), which [`recorded_status`] reads as the bare `SM_ERR` it replaced.
+#[must_use]
+pub fn routine_failure(operation: &'static str) -> SolidError {
+    Failure::new(
+        operation,
+        GeomFailure::CallFailed {
+            class: ErrorKind::Failed,
+        },
+    )
+    .into_error()
+}
+
+/// Whether `e` is a blend harness's [`routine_failure`]: one under `harness::`, which no
+/// solidcore operation is.
+fn is_harness_routine_failure(e: &SolidError) -> bool {
+    e.operation().starts_with("harness::")
+        && matches!(e, SolidError::Failed(f) if matches!(f.reason, Reason::Geom(GeomFailure::CallFailed { .. })))
 }
 
 /// The upstream status number the goldens record for a pointer check: `SM_SUCCESS` (1000)
@@ -358,7 +408,7 @@ mod tests {
             .transform(&Axis2Placement::IDENTITY, Some(Vec3::new(1.0, 2.0, 1.0)))
             .unwrap_err();
         assert!(
-            curve.nurbs_failure().is_none() && solidcore::error::upstream_status(&curve).is_some(),
+            curve.nurbs_failure().is_none() && crate::output::recorded_status(&curve).is_some(),
             "{curve:?}"
         );
         assert_eq!(blend_status(&curve), None);

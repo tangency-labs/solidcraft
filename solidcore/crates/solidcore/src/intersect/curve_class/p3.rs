@@ -1848,7 +1848,6 @@ impl<O: ClassObject> CurveClassification<O> {
                 if coin == Coincident::Unsure {
                     // This signals an unrecoverable error: unsure only for an end classified
                     // to an edge whose object is not an edge, the classification's object
-                    // (rule 9)
                     return Err(crate::error::Failure::new(
                         OP_CLEANUP,
                         IntersectFailure::NoClassObject,

@@ -37,8 +37,8 @@ certified rounding bounds) and says so in its doc comment. Everything else is Ru
 - **APIs.** Return values, not out-params (tuples or small structs for multiple
   outputs). Fallible fns return `solidcore::Result<T>`; build `SolidError` with the
   `operation` path (e.g. `"nurbs::knots::insert"`) and entity id. Many optional
-  arguments become an options struct with `Default`. Upstream `SmStatus` codes with no
-  matching variant map to `SolidError::Upstream { code, .. }`.
+  arguments become an options struct with `Default`. A failure is a typed
+  `SolidError::Failed` whose reason keeps the upstream `SmStatus` (`sm_status()`).
 - **Names.** Drop `NL_`/`Sm`/`SM_`/`smgu_`/Hungarian prefixes; snake_case fns,
   CamelCase types (`SmBSplineCurve` -> `BSplineCurve`, `NL_KnotInsert` -> `knot_insert`).
 - **Organisation.** A unit's `rust_module` (`nurbs::knots`) lives at

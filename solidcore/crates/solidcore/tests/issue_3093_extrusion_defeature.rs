@@ -284,7 +284,7 @@ fn a_feature_that_cannot_be_partitioned_refuses_the_call_and_leaves_the_base() {
     assert!(
         r.as_ref()
             .err()
-            .and_then(solidcore::error::upstream_status)
+            .and_then(solidcore::SolidError::sm_status)
             .is_some(),
         "{r:?}"
     );

@@ -1190,7 +1190,7 @@ mod tests {
         ));
         let z = m(2, 2, &[1.0, 2.0, 0.0, 0.0]);
         let singular = z.solve_linear_system(&[1.0, 2.0]).unwrap_err();
-        assert_eq!(singular.upstream_status(), Some(1001));
+        assert_eq!(singular.failed_routine_status(), Some(1001));
         assert_eq!(
             singular.geom_failure(),
             Some(&GeomFailure::CallFailed {
@@ -1345,7 +1345,7 @@ mod tests {
         let mut ns3 = m(3, 3, &[1.0, 2.0, 0.0, 3.0, 4.0, 0.0, 0.0, 0.0, 1.0]);
         assert!(matches!(
             ns3.compute_3x3_eigen_vectors(),
-            Err(e) if e.upstream_status() == Some(1001)
+            Err(e) if e.failed_routine_status() == Some(1001)
         ));
     }
 

@@ -2471,7 +2471,7 @@ mod tests {
             Some(&CurveFailure::SamePointToleranceNotPositive { tolerance: 0.0 })
         );
         assert_eq!(
-            crate::error::upstream_status(&err),
+            SolidError::failed_routine_status(&err),
             Some(crate::error::SM_ERR)
         );
         let err = CompositeCurve::build_composites_from_curves(k, curves, 1e-6, 1e-7).unwrap_err();
@@ -2483,7 +2483,7 @@ mod tests {
             })
         );
         assert_eq!(
-            crate::error::upstream_status(&err),
+            SolidError::failed_routine_status(&err),
             Some(crate::error::SM_ERR)
         );
         // a composite has no evaluation of its own
@@ -2494,7 +2494,7 @@ mod tests {
             Some(&CurveFailure::NoEvaluationOfItsOwn)
         );
         assert_eq!(
-            crate::error::upstream_status(&err),
+            SolidError::failed_routine_status(&err),
             Some(crate::error::SM_ERR)
         );
         assert_eq!(
@@ -2521,7 +2521,7 @@ mod tests {
             Some(&CurveFailure::CornerByCurveExtension)
         );
         assert_eq!(
-            crate::error::upstream_status(&err),
+            SolidError::failed_routine_status(&err),
             Some(crate::error::SM_ERR)
         );
     }

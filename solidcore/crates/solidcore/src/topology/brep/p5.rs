@@ -164,7 +164,7 @@ pub const NO_VERTEX_SECTOR_OP: &str = "topology::brep::p5::make_edge_in_face";
 #[must_use]
 pub fn is_no_vertex_sector(error: &SolidError) -> bool {
     // the status, not the variant: a typed failure that replaced the `Upstream` (#13790)
-    error.upstream_status().is_some() && error.operation() == NO_VERTEX_SECTOR_OP
+    error.failed_routine_status().is_some() && error.operation() == NO_VERTEX_SECTOR_OP
 }
 
 /// Runs `f` with the caller's notification environment, or, for a plain entry point
@@ -256,8 +256,7 @@ fn broken_link(why: &'static str) -> SolidError {
         .into_error()
 }
 
-/// `failure`, with the error a step before it ignored as its cause when there is one
-/// (`docs/failure-codes-and-reproduction.md` §6, rule 6).
+/// `failure`, with the error a step before it ignored as its cause when there is one.
 #[track_caller]
 fn caused(failure: TopologyFailure, ignored: Option<SolidError>) -> SolidError {
     let f = Failure::new(OP, failure);
@@ -4501,13 +4500,13 @@ mod tests {
                 e.topology_failure(),
                 Some(&TopologyFailure::NoVertexSector { at_end })
             );
-            assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+            assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
             assert!(is_no_vertex_sector(&e), "{e}");
         }
         run(Some(()), 0).unwrap();
         let e = run(None, 0).unwrap_err();
         assert_eq!(e.topology_failure(), Some(&TopologyFailure::NoFaceGiven));
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         assert!(!is_no_vertex_sector(&e));
     }
 
@@ -4605,7 +4604,7 @@ mod tests {
     #[test]
     fn the_callers_input_is_refused_by_cause_with_upstreams_status() {
         use crate::error::{SM_ERR, SM_ERR_NULL_POINTER};
-        let status = |e: &SolidError| (e.topology_failure().copied(), e.upstream_status());
+        let status = |e: &SolidError| (e.topology_failure().copied(), e.failed_routine_status());
         let mut k = Kernel::default();
 
         // no regions to keep given, and a B-rep with no finite region
@@ -4675,7 +4674,7 @@ mod tests {
     #[test]
     fn squeeze_cleanup_continues_after_typed_native_failures() {
         let errors = [
-            SolidError::sm_err("SmStitch::StitchVertexPairs"),
+            SolidError::failed_routine("SmStitch::StitchVertexPairs", crate::error::SM_ERR),
             SolidError::NotFound {
                 operation: "SmStitch::SplitEdgesWithVertices",
                 entity: crate::error::EntityRef::Edge(EdgeId::from_index(2)),
@@ -4697,7 +4696,7 @@ mod tests {
         assert_eq!(failed.as_ref(), Some(&first));
         let e = caused(TopologyFailure::FaceStitchFailed, failed);
         assert_eq!(e.cause(), Some(&first));
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR));
         assert_eq!(
             e.topology_failure(),
             Some(&TopologyFailure::FaceStitchFailed)
@@ -5060,7 +5059,7 @@ mod tests {
     #[test]
     fn no_vertex_sector_reads_the_status_of_a_typed_failure() {
         use crate::error::replaced_upstream_samples::{native_failures, replaced_upstream};
-        let upstream = SolidError::null_pointer(NO_VERTEX_SECTOR_OP);
+        let upstream = SolidError::failed_routine(NO_VERTEX_SECTOR_OP, SM_ERR_NULL_POINTER);
         assert!(is_no_vertex_sector(&upstream));
         for typed in replaced_upstream(NO_VERTEX_SECTOR_OP, 1006, None) {
             assert!(is_no_vertex_sector(&typed), "{typed:?}");

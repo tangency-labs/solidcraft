@@ -29,7 +29,7 @@ struct FaultAccess<'k> {
     fail: (&'static str, usize),
 }
 fn injected() -> SolidError {
-    SolidError::sm_err("audit_483_injected_planar_service")
+    SolidError::failed_routine("audit_483_injected_planar_service", crate::error::SM_ERR)
 }
 impl<'k> FaultAccess<'k> {
     fn new(k: &'k mut Kernel, fail: (&'static str, usize)) -> Self {

@@ -1067,7 +1067,7 @@ mod tests {
         );
         assert_eq!(error.kind(), crate::error::ErrorKind::InvalidInput);
         assert_eq!(error.sm_status(), Some(SM_ERR_NULL_POINTER));
-        assert_eq!(error.upstream_status(), error.sm_status());
+        assert_eq!(error.failed_routine_status(), error.sm_status());
         assert_eq!(error.operation(), OP);
     }
 
@@ -1097,7 +1097,10 @@ mod tests {
         fn evaluate(&mut self, t: f64, out: &mut FunctionValue, s: bool) -> Result<()> {
             if t.to_bits() == LAST_GUESS.to_bits() {
                 *out = FunctionValue::default();
-                return Err(SolidError::sm_err("test: no value here"));
+                return Err(SolidError::failed_routine(
+                    "test: no value here",
+                    crate::error::SM_ERR,
+                ));
             }
             Cycle.evaluate(t, out, s)
         }

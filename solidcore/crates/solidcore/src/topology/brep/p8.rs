@@ -1451,7 +1451,7 @@ mod tests {
     use crate::surface::plane::Plane;
 
     fn code(e: &SolidError) -> Option<i32> {
-        e.upstream_status()
+        e.failed_routine_status()
     }
 
     /// Runs `f` on a new B-rep (`new SmBrep()`) with an arena-only notification store.
@@ -1633,7 +1633,7 @@ mod tests {
     }
 
     /// A failure that chains a caught error takes its class from it and keeps `SM_ERR`
-    /// (`docs/failure-codes-and-reproduction.md` rule 6; review of #21110): an
+    /// (review of #21110): an
     /// unsupported or invalid-input error caught by the plane or the face construction is
     /// reported as unsupported or invalid input, not as `failed`.
     #[test]

@@ -375,7 +375,7 @@ pub(crate) fn defect(operation: &'static str, why: &'static str) -> SolidError {
 mod tests {
     use super::*;
 
-    /// Every cause keeps its status through the record, reads as no phrase, stands in for
+    /// Every cause keeps its status through the record, stands in for
     /// the status its site returned, and takes its class from the cause.
     #[test]
     fn trace_causes_keep_their_status_and_class() {
@@ -395,12 +395,10 @@ mod tests {
         for (cause, status) in causes {
             let e = SolidError::blend_trace("blend::op", cause);
             assert_eq!(e.sm_status(), Some(status), "{cause:?}");
-            assert_eq!(e.upstream_status(), Some(status), "{cause:?}");
+            assert_eq!(e.failed_routine_status(), Some(status), "{cause:?}");
             assert_eq!(e.kind(), cause.class(), "{cause:?}");
-            let b = e.blend_failure().unwrap();
-            assert!(!b.is_phrase() && b.replaces_upstream_status(), "{cause:?}");
         }
-        // A solve that stops with its numbers is a defect (failure-codes guide §6 rule 3),
+        // A solve that stops with its numbers is a defect,
         // and keeps the site's SM_ERR.
         let e = SolidError::blend_trace(
             "blend::op",
@@ -417,7 +415,7 @@ mod tests {
         assert_eq!(d.sm_status(), Some(SM_ERR_NULL_POINTER));
         let d = defect("blend::op", "why");
         assert!(d.is_defect());
-        assert_eq!(d.upstream_status(), Some(SM_ERR));
+        assert_eq!(d.failed_routine_status(), Some(SM_ERR));
     }
 
     /// The three wrapping causes keep `SM_ERR` and carry the caught error as their cause,

@@ -198,6 +198,6 @@ mod tests {
                 BlendFailure::SectionNotProved(SectionProof::SectionWeightPositive)
             )
         );
-        assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(error.failed_routine_status(), Some(crate::error::SM_ERR));
     }
 }

@@ -1163,9 +1163,7 @@ impl SurfOfExtrusion {
         }
         let Some(sur) = self.base.nurb.as_mut() else {
             return Err(match made {
-                Err(e) => {
-                    SolidError::surface_nurb_not_made(OP_REPARAM, SM_ERR_NULL_POINTER, Err(e))
-                }
+                Err(e) => SolidError::surface_nurb_not_made(OP_REPARAM, SM_ERR_NULL_POINTER, e),
                 Ok(()) => Failure::new(
                     OP_REPARAM,
                     SurfaceFailure::Defect {

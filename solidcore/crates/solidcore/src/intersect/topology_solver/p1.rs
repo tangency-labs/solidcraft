@@ -2624,8 +2624,11 @@ pub(crate) mod tests {
         }
         fn curve(&self, object: Obj) -> Result<&Curve> {
             match object {
-                Obj::Curve(i, _) => self.curves.get(i).ok_or(SolidError::sm_err("curve")),
-                _ => Err(SolidError::sm_err("curve")),
+                Obj::Curve(i, _) => self
+                    .curves
+                    .get(i)
+                    .ok_or_else(|| SolidError::failed_routine("curve", crate::error::SM_ERR)),
+                _ => Err(SolidError::failed_routine("curve", crate::error::SM_ERR)),
             }
         }
         fn analytic_curve_handle(&self, curve: Obj) -> Option<Obj> {
@@ -2637,13 +2640,13 @@ pub(crate) mod tests {
         fn vertex_point(&self, vertex: Obj) -> Result<Point3> {
             match vertex {
                 Obj::Vertex(i) => Ok(self.vertices[i].0),
-                _ => Err(SolidError::sm_err("vertex")),
+                _ => Err(SolidError::failed_routine("vertex", crate::error::SM_ERR)),
             }
         }
         fn vertex_tolerance(&self, vertex: Obj) -> Result<f64> {
             match vertex {
                 Obj::Vertex(i) => Ok(self.vertices[i].1),
-                _ => Err(SolidError::sm_err("vertex")),
+                _ => Err(SolidError::failed_routine("vertex", crate::error::SM_ERR)),
             }
         }
         fn curve_edge(&self, curve: Obj) -> Result<Option<Obj>> {
@@ -2664,14 +2667,14 @@ pub(crate) mod tests {
         fn edge_interval(&self, edge: Obj) -> Result<Extent1d> {
             match edge {
                 Obj::Edge(i) => Ok(self.edges[i].1),
-                _ => Err(SolidError::sm_err("edge")),
+                _ => Err(SolidError::failed_routine("edge", crate::error::SM_ERR)),
             }
         }
         fn edge_tolerance(&self, edge: Obj) -> Result<f64> {
             // SmEdge's default tolerance (the point/edge solve reads it for the cache)
             match edge {
                 Obj::Edge(_) => Ok(0.0),
-                _ => Err(SolidError::sm_err("edge")),
+                _ => Err(SolidError::failed_routine("edge", crate::error::SM_ERR)),
             }
         }
         fn surface_face(&self, _surface: Obj) -> Result<Option<Obj>> {
@@ -2680,17 +2683,17 @@ pub(crate) mod tests {
         fn face_surface(&self, face: Obj) -> Result<Obj> {
             match face {
                 Obj::Face(index) => Ok(Obj::Surface(index)),
-                _ => Err(SolidError::sm_err("face")),
+                _ => Err(SolidError::failed_routine("face", crate::error::SM_ERR)),
             }
         }
         fn surface(&self, _surface: Obj) -> Result<&Surface> {
-            Err(SolidError::sm_err("surface"))
+            Err(SolidError::failed_routine("surface", crate::error::SM_ERR))
         }
         fn face_uv_domain(&self, _face: Obj) -> Result<Extent2d> {
-            Err(SolidError::sm_err("face"))
+            Err(SolidError::failed_routine("face", crate::error::SM_ERR))
         }
         fn face_tolerance(&self, _face: Obj) -> Result<f64> {
-            Err(SolidError::sm_err("face"))
+            Err(SolidError::failed_routine("face", crate::error::SM_ERR))
         }
         fn surface_owner(&self, _surface: Obj) -> Result<Option<Obj>> {
             Ok(None)
@@ -2939,7 +2942,7 @@ pub(crate) mod tests {
         );
         let mut ls = LocalSolver::new(LocalSolverKind::Curve, false, None);
         let e = ls.solve_it(&k, &mut ts, None, None).unwrap_err();
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR), "{e}");
+        assert_eq!(e.failed_routine_status(), Some(crate::error::SM_ERR), "{e}");
         assert_eq!(
             e.intersect_failure(),
             Some(&IntersectFailure::AbstractLocalSolver),
@@ -2948,7 +2951,7 @@ pub(crate) mod tests {
         assert_eq!(e.kind(), crate::error::ErrorKind::Unsupported, "{e}");
         let mut ls = LocalSolver::new(LocalSolverKind::FaceFace, false, None);
         let e = ls.solve_it(&k, &mut ts, None, None).unwrap_err();
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER), "{e}");
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER), "{e}");
         assert_eq!(
             e.intersect_failure(),
             Some(&IntersectFailure::NoObjectToSolve),

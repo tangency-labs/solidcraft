@@ -108,7 +108,7 @@ pub(super) fn status(r: SolidResult<()>) -> SolidResult<f64> {
     match r {
         Ok(()) => Ok(0.),
         Err(e) if e.is_unported() => Err(e),
-        Err(up_err) if solidcore::error::upstream_status(&up_err).is_some() => Ok(f64::from(solidcore::error::upstream_status(&up_err).unwrap_or(-1))),
+        Err(up_err) if crate::output::recorded_status(&up_err).is_some() => Ok(f64::from(crate::output::recorded_status(&up_err).unwrap_or(-1))),
         // a failure in solidcore's terms (#2615): its C++ comparison status
         Err(e @ SolidError::Failed(_)) => Ok(f64::from(e.sm_status().unwrap_or(solidcore::error::SM_ERR))),
         Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(1007.),

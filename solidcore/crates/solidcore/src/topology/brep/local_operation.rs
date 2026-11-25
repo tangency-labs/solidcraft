@@ -2458,7 +2458,7 @@ mod tests {
             local_operation(&mut k, b, &[face], Vec::new(), notes)
         });
         let e = r.unwrap_err();
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.failed_routine_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(e.operation(), OP);
         assert_eq!(
             e.topology_failure(),

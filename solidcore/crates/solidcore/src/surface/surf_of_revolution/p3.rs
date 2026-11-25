@@ -284,9 +284,7 @@ impl SurfOfRevolution {
         }
         let Some(sur) = self.base.nurb.as_mut() else {
             return Err(match made {
-                Err(e) => {
-                    SolidError::surface_nurb_not_made(OP_REPARAM, SM_ERR_NULL_POINTER, Err(e))
-                }
+                Err(e) => SolidError::surface_nurb_not_made(OP_REPARAM, SM_ERR_NULL_POINTER, e),
                 Ok(()) => Failure::new(
                     OP_REPARAM,
                     SurfaceFailure::Defect {
@@ -1678,7 +1676,7 @@ mod tests {
             Some(&SurfaceFailure::TrimDomainOutside)
         );
         assert_eq!(
-            e.upstream_status(),
+            e.failed_routine_status(),
             Some(crate::error::SM_ERR_OUTSIDE_OF_DOMAIN)
         );
     }
@@ -1800,7 +1798,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(e.surface_failure(), Some(&SurfaceFailure::PointOffSurface));
         assert_eq!(
-            e.upstream_status(),
+            e.failed_routine_status(),
             Some(crate::error::SM_ERR_NOT_WITHIN_TOLERANCE)
         );
         assert_eq!(
@@ -1824,7 +1822,7 @@ mod tests {
             Some(&SurfaceFailure::PointOutsideSweep)
         );
         assert_eq!(
-            e.upstream_status(),
+            e.failed_routine_status(),
             Some(crate::error::SM_ERR_OUTSIDE_OF_DOMAIN)
         );
         let line = |a: Vec3, b: Vec3| {

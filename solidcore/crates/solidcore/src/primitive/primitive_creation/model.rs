@@ -967,7 +967,10 @@ mod tests {
         SweepAccess::delete_brep(&mut model, other);
         // a deleted B-rep's id is a defect keeping upstream's `NER` status
         let e = model.take_brep(other).unwrap_err();
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(
+            e.failed_routine_status(),
+            Some(crate::error::SM_ERR_NULL_POINTER)
+        );
         assert!(e.is_defect(), "{e}");
         assert_eq!(
             e.primitive_failure(),
@@ -1007,7 +1010,10 @@ mod tests {
         let e = model
             .delete_primitive_faces(BrepId::from_index(99), &[main_face])
             .unwrap_err();
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(
+            e.failed_routine_status(),
+            Some(crate::error::SM_ERR_NULL_POINTER)
+        );
         assert_eq!(
             e.primitive_failure(),
             Some(&PrimitiveFailure::Defect { why: NO_BREP })
