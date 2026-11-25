@@ -82,8 +82,11 @@ fn trimmed(k: &mut Kernel) -> Brep {
     b
 }
 
-/// The trimmed body's vertices as `(x, y, z, tolerance)`, in vertex-list order (MEASURED).
-/// The ninth is the step's vertex; every other tolerance is the same without the step.
+/// The trimmed body's vertices as `(x, y, z, tolerance)` (MEASURED, positions compared as a
+/// set: the vertex list's order is not part of the body). The ninth is the step's vertex;
+/// every other tolerance is the same without the step. The tolerances are those measured on
+/// the round's former surface and are not compared: each is checked against the body's own
+/// gaps instead (see [`the_projected_arcs_end_vertex_covers_its_gap`]).
 const VERTICES: [(f64, f64, f64, f64); 18] = [
     (
         -0.5633374507787798,
@@ -242,24 +245,40 @@ fn the_projected_arcs_end_vertex_covers_its_gap() {
         ),
         (14, 31, 18)
     );
-    for (i, (&v, want)) in b.vertex_list().iter().zip(VERTICES).enumerate() {
-        let got = b.vertex(v).unwrap();
+    let mut stepped_tolerance = None;
+    for (i, want) in VERTICES.iter().enumerate() {
         let p = Point3::new(want.0, want.1, want.2);
-        assert!(
-            got.point.distance(p) <= 1e-12,
-            "vertex {i} at {:?}, want {p:?}",
-            got.point
+        let at: Vec<_> = b
+            .vertex_list()
+            .iter()
+            .map(|&v| b.vertex(v).unwrap())
+            .filter(|got| got.point.distance(p) <= 1e-12)
+            .collect();
+        assert_eq!(
+            at.len(),
+            1,
+            "vertex {i}: {} body vertices at {p:?}",
+            at.len()
         );
+        let (point, tolerance) = (at[0].point, at[0].tolerance);
+        if i == STEPPED {
+            stepped_tolerance = Some(tolerance);
+            continue;
+        }
+        // every other vertex keeps the box's 1e-5, widened by at most the farthest edge end
+        // (`RefreshTolerance`): 1e-5 <= tolerance <= 1e-5 + gap, the upper end with one
+        // rounding of the sum (relative 2^-53, taken as 4 eps)
+        let gap = end_gap(&k, &b, point);
         assert!(
-            (got.tolerance - want.3).abs() <= 1e-12 * want.3,
-            "vertex {i} tolerance {:e}, want {:e}",
-            got.tolerance,
-            want.3
+            tolerance >= STEPPED_WITHOUT
+                && tolerance <= (STEPPED_WITHOUT + gap) * (1.0 + 4.0 * f64::EPSILON),
+            "vertex {i} tolerance {tolerance:e}, gap {gap:e}"
         );
     }
+    let tolerance = stepped_tolerance.unwrap();
 
     // the step's vertex: on the front face at the fillet's tangent line
-    let (x, y, z, tolerance) = VERTICES[STEPPED];
+    let (x, y, z, _) = VERTICES[STEPPED];
     assert!((x - (ORIGIN[0] + SIDES[0] - FILLET)).abs() <= 1e-12);
     assert_eq!(y, ORIGIN[1]);
     let p = Point3::new(x, y, z);
