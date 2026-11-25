@@ -911,39 +911,6 @@ pub(crate) fn loft_to_point_through(sections: &[Vec<Profile>], apex: [f64; 3], p
     super::call::ops("smlib_loft_to_point_through", || solidcore_ops::sweep::loft_to_point_through(&ops, apex, params))
 }
 
-/// `placed`: a copy of `c` as a plain B-spline with every control point carried by `s`, the
-/// weights unchanged (an affine map moves a NURBS curve exactly by its control points).
-fn placed(c: &BSplineCurve, s: &Affine) -> Out<Curve> {
-    let can = called(c.canonical())?;
-    if can.dim != 3 {
-        return Err(Error::Status(1001));
-    }
-    let m = &s.m;
-    let points: Vec<Point3> = can
-        .control_points
-        .iter()
-        .map(|p| {
-            Vec3::new(
-                m[0][0] * p.x + m[1][0] * p.y + m[2][0] * p.z + s.t[0],
-                m[0][1] * p.x + m[1][1] * p.y + m[2][1] * p.z + s.t[1],
-                m[0][2] * p.x + m[1][2] * p.y + m[2][2] * p.z + s.t[2],
-            )
-        })
-        .collect();
-    let data = CanonicalData {
-        dim: 3,
-        degree: can.degree,
-        control_points: &points,
-        form: BSplineCurveForm::Unspecified,
-        knot_multiplicities: &can.knot_multiplicities,
-        knots: &can.knots,
-        knot_type: KnotType::Unspecified,
-        weights: (!can.weights.is_empty()).then_some(can.weights.as_slice()),
-        trim: None,
-    };
-    called(BSplineCurve::create_canonical(&data)).map(Curve::from)
-}
-
 /// `smlib_sweep_stations`: the profile carried through each station's map and skinned
 /// ([`solidcore_ops::sweep::sweep_stations`]), its ends open, capped or joined.
 pub(crate) fn sweep_stations(profile: &[Profile], stations: &[Affine], end: Ends) -> Result<Body> {
