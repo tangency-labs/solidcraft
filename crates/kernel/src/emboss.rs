@@ -273,23 +273,21 @@ pub fn emboss_project_face(body: &Body, face: usize, at: Vec3, plane: &Plane, re
                 continue;
             };
             if let Some((start, end)) = prism_heights {
-                let patches = piece.lumps()?;
-                let fits = if patches.len() == 1 {
-                    // A profile over an edge or a hole leaves the two ends connected round the side.
-                    crate::boolean(prism, &slab, crate::BoolOp::Cut)?.map_or(0, |rest| rest.lumps().map_or(0, |l| l.len())) == 2
-                } else if let Some(patch) = nearest_projected_patch(body, face, at, patches)? {
-                    // A face can cross the prism on both sides of a closed body. The picked
-                    // patch alone must separate the end caps, even if a farther patch fits.
-                    piece = patch;
-                    let ends = crate::boolean(prism, &piece, crate::BoolOp::Cut)?.map(|rest| rest.lumps()).transpose()?.unwrap_or_default();
-                    let has_cap = |part, h| crate::splitface::has_cap_at(part, plane, h, end - start);
-                    matches!(ends.as_slice(), [a, b] if (has_cap(a, start) && has_cap(b, end)) || (has_cap(b, start) && has_cap(a, end)))
-                } else {
-                    false
-                };
-                if !fits {
-                    missed.push((i + 1).to_string());
-                    continue;
+                // Keep the original intersection whenever cutting the whole slab leaves
+                // exactly two parts, including when the intersection has several patches.
+                let whole_slab_fits = crate::boolean(prism, &slab, crate::BoolOp::Cut)
+                    .map(|rest| rest.is_some_and(|rest| rest.lumps().is_ok_and(|parts| parts.len() == 2)));
+                if !matches!(whole_slab_fits, Ok(true)) {
+                    // A face can cross the prism on both sides of a closed body. When the
+                    // whole slab does not fit, the picked patch alone must separate the ends.
+                    match nearest_projected_patch(body, face, at, piece.lumps()?)? {
+                        Some(patch) if patch_separates_ends(prism, &patch, plane, start, end)? => piece = patch,
+                        _ => {
+                            whole_slab_fits?;
+                            missed.push((i + 1).to_string());
+                            continue;
+                        }
+                    }
                 }
             }
             pieces.push(piece);
@@ -308,6 +306,9 @@ pub fn emboss_project_face(body: &Body, face: usize, at: Vec3, plane: &Plane, re
 
 /// Resolve separate crossings by distance to the exact picked face point.
 fn nearest_projected_patch(body: &Body, face: usize, at: Vec3, patches: Vec<Body>) -> Result<Option<Body>> {
+    if patches.len() < 2 {
+        return Ok(None);
+    }
     let Some(pick) = crate::point_closest(at, body, crate::Members::Faces(&[face]))? else { return Ok(None) };
     let mut ranked = Vec::with_capacity(patches.len());
     for patch in patches {
@@ -319,6 +320,14 @@ fn nearest_projected_patch(body: &Body, face: usize, at: Vec3, patches: Vec<Body
     let [(first, patch), (second, next_patch), ..] = ranked.as_slice() else { return Ok(None) };
     let tol = body.record().tolerance.max(patch.record().tolerance).max(next_patch.record().tolerance);
     Ok((second - first > tol).then(|| patch.clone()))
+}
+
+/// Does cutting the prism with just this patch leave one part against each original cap?
+fn patch_separates_ends(prism: &Body, patch: &Body, plane: &Plane, start: f64, end: f64) -> Result<bool> {
+    let Some(rest) = crate::boolean(prism, patch, crate::BoolOp::Cut)? else { return Ok(false) };
+    let parts = rest.lumps()?;
+    let has_cap = |part, h| crate::splitface::has_cap_at(part, plane, h, end - start);
+    Ok(matches!(parts.as_slice(), [a, b] if (has_cap(a, start) && has_cap(b, end)) || (has_cap(b, start) && has_cap(a, end))))
 }
 
 /// The heights of a box's corners above `o` along `dir`: lowest and highest.

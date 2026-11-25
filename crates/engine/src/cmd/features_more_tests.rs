@@ -697,6 +697,32 @@ fn projected_emboss_on_a_full_revolve_changes_only_the_sketch_side() {
 }
 
 #[test]
+fn projected_emboss_keeps_a_tilted_profile_that_already_fit() {
+    use solidcore_record::Vec3;
+    use solidcraft_kernel::PointClass;
+
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":{"origin":[0,0,0],"x_dir":[1,0,0],"y_dir":[0,0,1]},"name":"Profile"}));
+    run(&mut s, "sketch.line", json!({"points":[[20,0],[10,30],[0,30],[0,0],[20,0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"sketch":"Profile","axis":"y","angle":"360 deg","operation":"new","body_name":"Cone"}));
+    let root = 17.0_f64.sqrt();
+    run(&mut s, "sketch.create", json!({"plane":{"origin":[0,-60,0],"x_dir":[1,0,0],"y_dir":[0,-1.0/root,4.0/root]},"name":"Mark"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[-3,-11],"p1":[3,-8]}));
+    run(&mut s, "sketch.finish", json!({}));
+
+    // The tilt takes the mark over the lower rim on the picked side, but it fully crosses
+    // the far wall. The whole slab separates the prism, so emboss already built both patches.
+    // Both witnesses are between the original radius 20 - z/3 and its 1 mm normal offset.
+    let points = [Vec3::new(0.0, -20.6, 0.4), Vec3::new(0.0, 17.0, 10.0)];
+    let classes = |s: &Session| s.model.state().body("Cone").unwrap().body.classify_points(&points).unwrap();
+    assert_eq!(classes(&s), [PointClass::Outside; 2]);
+    run(&mut s, "solid.emboss", json!({"sketch":"Mark","depth":1,"face":[0,-52.0/3.0,8],"targets":"Cone"}));
+    assert_eq!(classes(&s), [PointClass::Inside; 2]);
+    assert_eq!(s.model.state().body("Cone").unwrap().body.shell_count(), 1);
+}
+
+#[test]
 fn overlapping_text_glyphs_deboss_and_emboss() {
     // #20422: negative letter_spacing crosses curved glyph outlines, leaving vertical self-touching
     // polynomial spline edges across sequential profile booleans. Both with and without an explicit
