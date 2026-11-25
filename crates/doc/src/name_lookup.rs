@@ -12,7 +12,9 @@
 //! when no edge's faces answer to it, and one of its faces is gone from a feature still on the
 //! body, the reference's point decides (see [`renamed_edge`]); so it does when a face of it is
 //! named after neighbours it no longer has, or answers to several faces, and the point lies on
-//! one edge between them (see [`resuffixed_edge`]). A face whose name was worked out from
+//! one edge between them (see [`resuffixed_edge`]). An extrude's From or To face stands only for
+//! where it lies, so a split one is the piece the reference's point lies on (see
+//! [`locate_level_face_on_body`], #22281). A face whose name was worked out from
 //! geometry, found where the reference's point no longer lies, is reported: only geometry decided.
 //! Saved numbered Project links also have a compatibility check for a whole face that
 //! contains the saved pick and comes directly from its original construction feature.
@@ -1289,6 +1291,40 @@ pub fn locate_face_on_body(st: &ModelState, body: Option<&str>, name: &str, p: V
 /// piece never covered.
 pub fn locate_thread_face_on_body(st: &ModelState, body: Option<&str>, name: &str, p: Vec3) -> Option<FaceHit> {
     locate_face_on_body_with(st, body, name, p, true)
+}
+
+/// [`locate_face_on_body`] for a face that stands only for where it lies: an extrude's From or To
+/// face. When the named face is now split into pieces (a letter with a closed hole cut into it
+/// leaves an island of it, #22281), every piece lies on the face's own surface, so the piece the
+/// saved point lies on stands for the face as well as the face did: see [`split_face_piece`].
+/// A feature that works on the face's material (a shell, a draft) still finds nothing in a split
+/// face: the piece under its point is not all it took.
+pub fn locate_level_face_on_body(st: &ModelState, body: Option<&str>, name: &str, p: Vec3) -> Option<FaceHit> {
+    locate_face_on_body(st, body, name, p).or_else(|| split_face_piece(st, name, p))
+}
+
+/// The one piece of a split face that point `p` lies on (exactly, as [`on_face`] decides), when
+/// the stored name `name` is the whole face's (not a piece told apart by its neighbours, nor a name
+/// saved before format 14), and all the faces answering to it are on one body. `None` when the
+/// point lies on none of them or on several (an edge they share), or the pieces are on several
+/// bodies.
+fn split_face_piece(st: &ModelState, name: &str, p: Vec3) -> Option<FaceHit> {
+    if name.is_empty() || !p.is_finite() || legacy_name(name).is_some() || crate::sheet::split_sheet_face_name(name).is_some() || qualified(name) {
+        return None;
+    }
+    let mut pieces: Vec<(usize, usize)> = Vec::new();
+    for (bi, b) in st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh()) {
+        let names = naming::names(b);
+        pieces.extend((0..names.faces.len()).filter(|&f| crate::history_names::matches(&names, f, name).is_some_and(exactly)).map(|f| (bi, f)));
+    }
+    let (bi, _) = *pieces.first()?;
+    if pieces.len() < 2 || pieces.iter().any(|(other, _)| *other != bi) {
+        return None;
+    }
+    let b = st.bodies.get(bi)?;
+    let mut on = pieces.iter().filter_map(|&(_, f)| on_face(b, f, p));
+    let (face, point) = on.next().filter(|_| on.next().is_none())?;
+    Some(FaceHit { body: bi, face, point, verified: naming::names(b).verified(face), on_point: true })
 }
 
 fn locate_face_on_body_with(st: &ModelState, body: Option<&str>, name: &str, p: Vec3, round: bool) -> Option<FaceHit> {

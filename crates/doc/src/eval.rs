@@ -12483,6 +12483,9 @@ fn with_named_face_points(doc: &Document, vals: &BTreeMap<String, Value>, state:
         // Only a thread may find a numbered piece of a round side again as its whole face (#16602).
         let hit = if matches!(f.kind, FeatureKind::Thread { .. }) {
             crate::name_lookup::locate_thread_face_on_body(input, body, n, from)
+        } else if matches!(f.kind, FeatureKind::Extrude { .. }) {
+            // An extrude's faces are its From and To faces: only where they lie counts (#22281).
+            crate::name_lookup::locate_level_face_on_body(input, body, n, from)
         } else {
             crate::name_lookup::locate_face_on_body(input, body, n, from)
         };

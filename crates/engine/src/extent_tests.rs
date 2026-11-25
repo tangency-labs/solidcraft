@@ -830,3 +830,40 @@ fn the_faces_of_an_extrude_with_a_taper_of_zero_and_a_start_offset_take_a_sketch
         }
     }
 }
+
+/// A block with a text parameter `lbl` cut 1 mm into its top by a whole-sketch text, and a post
+/// extruded From the top at (35, 35), away from the text. `lbl` starts as `first`.
+fn labelled_block_with_post(first: &str) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "lbl", "unit": "text", "expression": first}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "body_name": "Block"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10, "name": "label"}));
+    run(&mut s, "sketch.text", json!({"text_expression": "lbl", "at": [5, 15], "height": 8}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "label", "operation": "cut", "direction": "negative", "distance": 1}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 20, "name": "post"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [35, 35], "radius": 2}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "post", "operation": "join", "from": [35, 35, 10], "distance": 3, "name": "post"}));
+    s
+}
+
+/// A letter with a closed hole (`0`, `8`) leaves an island of the top face inside it, so the
+/// top face a post starts From becomes two pieces. The saved From point lies on one of them:
+/// the post still starts there, as on a block built with those words from the start (#22281).
+#[test]
+fn extrude_from_a_face_a_letters_island_splits_starts_on_the_piece_under_its_point() {
+    for words in ["30", "8"] {
+        let mut s = labelled_block_with_post("22");
+        run(&mut s, "parameters.change", json!({"name": "lbl", "expression": words}));
+        for r in &s.model.results {
+            assert!(r.error.is_none(), "{words}: {}: {:?}", r.name, r.error);
+        }
+        let changed = body(&mut s, "Block")["volume_mm3"].as_f64().unwrap();
+        let mut fresh = labelled_block_with_post(words);
+        let built = body(&mut fresh, "Block")["volume_mm3"].as_f64().unwrap();
+        assert!((changed - built).abs() < 1e-3, "{words}: {changed} after the change, {built} built so");
+        let top = body(&mut s, "Block")["bbox"]["max"][2].as_f64().unwrap();
+        assert!((top - 13.0).abs() < 1e-6, "{words}: the post ends at {top}");
+    }
+}
