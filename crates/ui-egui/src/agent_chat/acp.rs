@@ -533,7 +533,10 @@ pub enum Incoming {
         output: Option<String>,
     },
     /// The agent's plan: each entry with its status.
-    Plan(Vec<(String, String)>),
+    Plan {
+        session: String,
+        entries: Vec<(String, String)>,
+    },
     /// The agent asks before running a tool call; answered with [`permission_reply`].
     Permission {
         rpc: Value,
@@ -672,8 +675,10 @@ fn update(u: &Value, session: &str) -> Incoming {
             ConfigParse::Snapshot(options) if !session.is_empty() => Incoming::ConfigOptions { session: session.into(), options },
             _ => Incoming::Ignored,
         },
-        Some("plan") => Incoming::Plan(
-            u.get("entries")
+        Some("plan") if !session.is_empty() => Incoming::Plan {
+            session: session.into(),
+            entries: u
+                .get("entries")
                 .and_then(Value::as_array)
                 .map(|a| {
                     a.iter()
@@ -685,7 +690,7 @@ fn update(u: &Value, session: &str) -> Incoming {
                         .collect()
                 })
                 .unwrap_or_default(),
-        ),
+        },
         _ => Incoming::Ignored,
     }
 }

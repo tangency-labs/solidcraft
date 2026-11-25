@@ -1309,6 +1309,18 @@ fn composer(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state: St
 fn transcript_body(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) -> f32 {
     // Select All and Copy of the whole conversation, read before its labels see the keys.
     super::select_all::handle(chat, ui.ctx());
+    let top = ui.cursor().top();
+    if let Some(stage) = chat.current_stage() {
+        let t = Tokens::get();
+        let label = trf("ui.agent_chat_current_stage", &[("step", stage)]);
+        inset(ui, |ui| {
+            let line = ui
+                .add(egui::Label::new(RichText::new(&label).color(t.text_dim).size(t.font_small)).truncate().selectable(false))
+                .backing_on_hover_text(&label);
+            solidcraft_ui_registry::publish_rect("agent_chat:current_stage", line.rect);
+        });
+    }
+    let stage_height = ui.cursor().top() - top;
     let margin = Tokens::get().space_12 as i8;
     let height = ui.available_height();
     // The height inside the margins, less a point so rounding never shows a scroll bar.
@@ -1328,7 +1340,7 @@ fn transcript_body(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) ->
             scroll_while_selecting(ui);
         });
     solidcraft_ui_registry::publish_rect("agent_chat:conversation", conversation.inner_rect);
-    conversation.content_size.y
+    stage_height + conversation.content_size.y
 }
 
 #[cfg(not(target_arch = "wasm32"))]

@@ -6474,6 +6474,55 @@ fn timed_chat() -> (crate::scenario::Harness, Script) {
     (h, script)
 }
 
+#[test]
+fn current_stage_follows_the_active_plan_above_the_conversation() {
+    let (mut h, script) = timed_chat();
+    let ctx = h.ctx.clone();
+    let stage_rect = || crate::scenario::rect_of("agent_chat:current_stage");
+    let report_plan = |steps: &[(&str, &str)]| {
+        script.report(Event::Plan(steps.iter().map(|(name, status)| (name.to_string(), status.to_string())).collect()));
+    };
+    send(&mut h.app, &ctx, "make a mounting plate".into());
+    h.frames(2);
+    assert!(stage_rect().is_none(), "a turn can run without a plan");
+
+    report_plan(&[("Set the hole diameter", "pending"), ("\n Inspect the mounting face\nMore detail", "in_progress")]);
+    h.frames(2);
+    assert_eq!(drawn(&h, "Current step · Inspect the mounting face"), 1);
+    assert!(stage_rect().unwrap().bottom() <= crate::scenario::rect_of("agent_chat:conversation").unwrap().top());
+
+    report_plan(&[("Inspect the mounting face", "completed"), ("Drill the holes", "in_progress")]);
+    h.frames(2);
+    assert_eq!(drawn(&h, "Current step · Drill the holes"), 1);
+    assert_eq!(drawn(&h, "Current step · Inspect the mounting face"), 0);
+
+    report_plan(&[("Drill the holes", "completed"), ("Measure the diameter", "pending"), (" ", "in_progress")]);
+    h.frames(2);
+    assert!(stage_rect().is_none(), "no named running step");
+    report_plan(&[("Measure the diameter", "in_progress")]);
+    h.frames(2);
+    assert!(stage_rect().is_some());
+    report_plan(&[]);
+    h.frames(2);
+    assert!(stage_rect().is_none(), "an empty plan clears the line");
+
+    report_plan(&[("Measure the diameter", "in_progress")]);
+    ended(&script, "");
+    h.frames(2);
+    assert!(stage_rect().is_none(), "the turn ended");
+    assert!(h.app.agent_chat.items.iter().any(|i| matches!(i, Item::Plan(steps) if steps.iter().any(|(name, _)| name == "Measure the diameter"))));
+
+    send(&mut h.app, &ctx, "add a second plate".into());
+    h.frames(2);
+    assert!(stage_rect().is_none(), "the next turn starts without the old plan");
+    report_plan(&[("Make the second plate", "in_progress")]);
+    h.frames(2);
+    assert!(stage_rect().is_some());
+    cancel(&mut h.app);
+    h.frames(2);
+    assert!(stage_rect().is_none(), "Stop hides the line before the agent acknowledges it");
+}
+
 /// Move everything in the conversation `ms` into the past, as if that long had gone by.
 fn age(chat: &mut AgentChat, ms: f64) {
     for stamp in &mut chat.times {

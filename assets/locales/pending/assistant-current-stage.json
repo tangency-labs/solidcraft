@@ -1,0 +1,26 @@
+{
+  "en": {
+    "ui.agent_chat_current_stage": "Current step · {step}"
+  },
+  "ar": {
+    "ui.agent_chat_current_stage": "الخطوة الحالية · {step}"
+  },
+  "de": {
+    "ui.agent_chat_current_stage": "Aktueller Schritt · {step}"
+  },
+  "he": {
+    "ui.agent_chat_current_stage": "השלב הנוכחי · {step}"
+  },
+  "ja": {
+    "ui.agent_chat_current_stage": "現在の工程 · {step}"
+  },
+  "ko": {
+    "ui.agent_chat_current_stage": "현재 단계 · {step}"
+  },
+  "vi": {
+    "ui.agent_chat_current_stage": "Bước hiện tại · {step}"
+  },
+  "zh": {
+    "ui.agent_chat_current_stage": "当前步骤 · {step}"
+  }
+}

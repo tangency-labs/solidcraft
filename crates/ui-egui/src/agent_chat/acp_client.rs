@@ -244,7 +244,14 @@ impl AcpBackend {
             }
             Incoming::Text { thought, text } => out.push(Event::Text { thought, text }),
             Incoming::Tool { id, title, kind, status, input, output } => out.push(Event::Tool { id, title, kind, status, input, output }),
-            Incoming::Plan(p) => out.push(Event::Plan(p)),
+            // Accept updates only during the matching session's prompt. A prompt reply earlier in
+            // this poll can start a queued turn when the chat reads the events.
+            Incoming::Plan { session, entries }
+                if self.session.as_deref() == Some(session.as_str()) && self.pending.values().any(|p| *p == Pending::Prompt) =>
+            {
+                out.push(Event::Plan(entries));
+            }
+            Incoming::Plan { .. } => {}
             Incoming::Permission { rpc, title, kind, options } => {
                 self.next_key += 1;
                 self.permissions.insert(self.next_key, rpc);
@@ -564,6 +571,45 @@ done
         backend.handle(Incoming::Reply { id: 1, result: Ok(json!({"agentInfo":{"name":"fake"}})) }, &mut events);
         backend.handle(Incoming::Reply { id: 2, result: Ok(json!({"sessionId":"s1"})) }, &mut events);
         Ok(backend)
+    }
+
+    #[test]
+    fn plan_updates_belong_to_the_active_session_and_pending_prompt() {
+        let mut backend = ready_backend().unwrap();
+        let mut events = Vec::new();
+        let plan = |session: &str, content: &str, status: &str| {
+            let message = json!({
+                "jsonrpc": "2.0",
+                "method": "session/update",
+                "params": {
+                    "sessionId": session, "update": {"sessionUpdate": "plan", "entries": [{"content": content, "status": status}]}
+                }
+            });
+            acp::parse(&message.to_string()).unwrap()
+        };
+
+        backend.handle(plan("s1", "Before prompt", "in_progress"), &mut events);
+        backend.prompt(&[PromptPart::Text("make a plate".into())]);
+        let prompt = backend.next_id;
+        backend.handle(plan("old-session", "Wrong session", "in_progress"), &mut events);
+        assert!(events.is_empty());
+
+        backend.handle(plan("s1", "Make plate", "in_progress"), &mut events);
+        backend.handle(plan("s1", "Make plate", "completed"), &mut events);
+        backend.handle(Incoming::Reply { id: prompt, result: Ok(json!({"stopReason":"end_turn"})) }, &mut events);
+        backend.handle(plan("s1", "Late update from the previous prompt", "in_progress"), &mut events);
+        assert!(
+            matches!(events.as_slice(), [Event::Plan(active), Event::Plan(completed), Event::TurnEnded { .. }]
+                if active.as_slice() == [("Make plate".to_owned(), "in_progress".to_owned())]
+                    && completed.as_slice() == [("Make plate".to_owned(), "completed".to_owned())]),
+            "{events:?}"
+        );
+
+        events.clear();
+        backend.prompt(&[PromptPart::Text("add a hole".into())]);
+        backend.handle(plan("s1", "Drill hole", "in_progress"), &mut events);
+        assert!(matches!(events.as_slice(), [Event::Plan(active)] if active.as_slice() == [("Drill hole".to_owned(), "in_progress".to_owned())]));
+        backend.shutdown(true);
     }
 
     /// Wait for native cleanup, then supply the replacement's initialize reply.
