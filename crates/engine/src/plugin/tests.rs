@@ -4656,6 +4656,13 @@ mod exporters {
         assert_eq!(s.execute("file.export", &json!({"path": at(&root, "own.json")})).unwrap()["format"], "Design");
         assert!(s.execute("file.export", &json!({"path": at(&root, "own.stl"), "options": {}})).is_err(), "options are a plugin's");
         assert!(s.execute("file.export", &json!({"path": at(&root, "b.smp"), "bodies": ["Box"]})).is_err());
+        // A plugin writes its own mesh: SolidCraft's mesh controls are refused, not dropped (#20393).
+        for key in [json!({"quality": "fine"}), json!({"chord": 0.05})] {
+            let mut p = json!({"path": at(&root, "c.smp")});
+            p.as_object_mut().unwrap().extend(key.as_object().unwrap().clone());
+            let e = s.execute("file.export", &p).unwrap_err().to_string();
+            assert!(e.contains("own formats"), "{p}: {e}");
+        }
         assert_eq!(files(&root), ["bracket.smp", "copy.json", "own.json"]);
         // A disabled plugin writes nothing.
         s.disabled_plugins.insert("smp".into());

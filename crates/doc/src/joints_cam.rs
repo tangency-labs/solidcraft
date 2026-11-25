@@ -1085,6 +1085,8 @@ mod tests {
             exprs: Default::default(),
             offset_xy: [0.0; 2],
             captured: None,
+            base_values: None,
+            base_exprs: Vec::new(),
             constraint: None,
             dynamics: Vec::new(),
         };
@@ -1094,6 +1096,7 @@ mod tests {
             parent: 0,
             name: format!("O{id}"),
             transform: IDENTITY,
+            base_transform: None,
             grounded,
             bom_type: None,
             expressed_moves: Vec::new(),
@@ -1173,6 +1176,8 @@ mod tests {
             exprs: Default::default(),
             offset_xy: [0.0; 2],
             captured: None,
+            base_values: None,
+            base_exprs: Vec::new(),
             constraint: None,
         };
         let occ = |id: u64, grounded: bool| crate::Occurrence {
@@ -1181,6 +1186,7 @@ mod tests {
             parent: 0,
             name: format!("Occurrence{id}"),
             transform: IDENTITY,
+            base_transform: None,
             grounded,
             expressed_moves: Vec::new(),
             bom_type: None,

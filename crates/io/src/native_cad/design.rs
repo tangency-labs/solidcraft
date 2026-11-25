@@ -468,7 +468,7 @@ impl Builder {
             },
             Some("cone") if whole("angle", TAU) => FeatureKind::Cone {
                 base: corner,
-                axis: Dir(z),
+                axis: solidcraft_doc::dir_expr(z),
                 radius: mm(len("radius1")?),
                 top_radius: mm(len("radius2")?),
                 height: mm(len("height")?),

@@ -1045,7 +1045,7 @@ fn a_new_rib_starts_with_extend_ends_off() {
     }
 }
 form_case!(web, "solid.web", ["Direction", "Thickness", "Depth"]);
-form_case!(emboss, "solid.emboss", ["Depth", "Type"]);
+form_case!(emboss, "solid.emboss", ["Depth", "Type", "Offset X", "Offset Y", "Angle"]);
 form_case!(
     cell_grid,
     "solid.cell_grid",
@@ -2582,6 +2582,26 @@ fn coil_reverse_direction_winds_the_coil_down_its_axis() {
         _ => None,
     });
     assert_eq!(reversed, Some(true), "the coil winds down");
+}
+
+/// Reverse Direction keeps an axis of expressions (#21932): the axis is sent as written with
+/// `reversed`, so the reversed coil still follows its parameter.
+#[test]
+fn coil_reverse_direction_keeps_an_axis_of_expressions() {
+    use solidcraft_engine::doc::FeatureKind;
+    let mut h = fixture();
+    h.app.run("parameters.add", json!({"name": "t", "expression": "45 deg"})).unwrap();
+    let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
+    d.extra.insert("reversed".into(), json!(true));
+    d.extra.insert("axis".into(), json!([0.0, "-sin(t)", "-cos(t)"]));
+    let (id, p) = apply_commands(&h.app, &d).unwrap().remove(0);
+    assert_eq!((&p["axis"], &p["reversed"]), (&json!([0.0, "-sin(t)", "-cos(t)"]), &json!(true)), "{p}");
+    h.app.run(&id, p.clone()).unwrap_or_else(|e| panic!("{e}: {p}"));
+    let axis = h.app.session.doc.features.iter().rev().find_map(|f| match &f.kind {
+        FeatureKind::Coil { axis, .. } => Some(axis.clone()),
+        _ => None,
+    });
+    assert!(axis.as_ref().is_some_and(|a| solidcraft_engine::doc::literal_dir(a).is_none()), "still expressions: {axis:?}");
 }
 
 /// A square-ended coil edited onto a sketch profile is accepted: the profile's plane is the
