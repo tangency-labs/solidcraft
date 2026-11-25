@@ -52,8 +52,6 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         let count = solidcraft_ui_text::format("prefs.appearance.theme_count", &[("count", &theme_choices(app).len().to_string())]);
         ui_kit::settings_section_count(ui, "theme", app.tr("ui.theme"), Some(&count), |ui| {
             theme_row(app, ui);
-            let order = setting::theme_files_by_name(app, ui);
-            crate::scenario::publish_target("prefs:theme_files_by_name", order.rect);
             theme_options_row(app, ui);
         });
         ui_kit::settings_section(ui, "viewport_logo", app.tr("prefs.appearance.viewport_logo"), |ui| {

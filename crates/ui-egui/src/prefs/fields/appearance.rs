@@ -21,8 +21,6 @@ macro_rules! appearance_preferences {
             theme: String = "dark".into(), PAGE_APPEARANCE;
             /// Theme used when the operating system is light; unknown ids resolve to Light.
             theme_day: String = "light".into(), PAGE_APPEARANCE;
-            /// Theme files use alphabetical order or built-in order followed by imported themes.
-            theme_files_by_name: bool = true, PAGE_APPEARANCE => check_id_help("prefs.theme_files_by_name", "prefs.theme_files_by_name_help");
             /// Desktop: a `solidcraft-theme/1` file another tool writes, followed as the theme and
             /// reloaded when it changes (#7573). Empty (the default): no file is followed.
             theme_follow: String = String::new(), PAGE_APPEARANCE;
