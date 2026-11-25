@@ -14,7 +14,11 @@
 //! curve and the trim's image ([`crate::certify::trim_tolerance::trim_bounds_any_surface`]:
 //! the kernel's `trim_image_gap_bound`, bisected interval enclosures with rounding carried,
 //! a UV line enclosed on any surface with an exact net) is within the edge's tolerance, over
-//! the whole edge interval. No point sample decides it. A trim whose bound is not enclosed is
+//! the whole edge interval. No point sample decides it. A trim whose kernel bound is over the
+//! tolerance is certified by the mean-value certifier ([`crate::trims_on_edges::certify_edgeuse`])
+//! instead, where that proves it within the tolerance; the kernel's enclosure is loose for
+//! some circle trims on a flat B-spline cap (#22037), and the count of such trims is asserted
+//! ([`MEAN_VALUE_CERTIFIED`]). A trim whose bound is not enclosed is
 //! accepted only where its edge is in `certify/trim_tolerance_open.tsv` with the class
 //! `not-enclosed`, and every such entry of these rows must be reached.
 
@@ -26,6 +30,11 @@ use crate::case::{repo_root, CaseContext};
 
 /// Generated cases per unit, as `goldens` runs them (`main.rs` `DEFAULT_SEEDS`).
 const SEEDS: usize = 16;
+
+/// The kept trims whose kernel bound is over their edge's tolerance and which the mean-value
+/// certifier proves instead (#22037): the four quarter arcs and two full circles of
+/// `subdivide_cylinder_face0_cinf`'s caps. A change in the kernel's enclosure shows here.
+const MEAN_VALUE_CERTIFIED: usize = 6;
 
 /// The rows, unit and case.
 const ROWS: &[(&str, &str)] = &[
@@ -133,6 +142,7 @@ fn every_kept_trim_is_certified() {
             .collect();
     let mut open_seen = BTreeSet::new();
     let mut failures = Vec::new();
+    let mut fallback = Vec::new();
     let (mut kept, mut certified, mut open_trims) = (0_usize, 0_usize, 0_usize);
     let ctx = CaseContext {
         root: repo_root(),
@@ -178,13 +188,36 @@ fn every_kept_trim_is_certified() {
                     for (eu, bound) in bounds {
                         kept += 1;
                         row_kept += 1;
-                        match bound {
-                            Some(x) if x <= tol => certified += 1,
-                            None if open.contains(&key) => {
+                        // UNPROVED by the kernel's enclosure (#22037): it is thousands of times
+                        // loose for the circle trims of `subdivide_cylinder_face0_cinf` (bounds
+                        // 7.15e-4 to 0.098 for trims about 5e-15 off). A trim whose kernel bound
+                        // is over the tolerance is certified by the mean-value certifier instead,
+                        // at the target `certify_brep` uses; each such trim is listed and counted.
+                        let mean_value = match bound {
+                            Some(x) if x > tol => {
+                                crate::trims_on_edges::certify_edgeuse(&k, b, eu, tol / 8.0)
+                                    .ok()
+                                    .filter(crate::trims_on_edges::TrimCertificate::holds)
+                            }
+                            _ => None,
+                        };
+                        match (bound, mean_value) {
+                            (Some(x), None) if x <= tol => certified += 1,
+                            (Some(x), Some(c)) => {
+                                certified += 1;
+                                fallback.push(format!(
+                                    "{at} body {bi} edge {} use {}: kernel B {x:e} over \
+                                     {tol:e}; proved {:e} by trims_on_edges::certify_edgeuse",
+                                    e.index(),
+                                    eu.index(),
+                                    c.bound
+                                ));
+                            }
+                            (None, _) if open.contains(&key) => {
                                 open_trims += 1;
                                 open_seen.insert(key.clone());
                             }
-                            x => failures.push(format!(
+                            (x, _) => failures.push(format!(
                                 "{at} body {bi} edge {} use {}: B {x:?} over {tol:e}",
                                 e.index(),
                                 eu.index()
@@ -200,10 +233,17 @@ fn every_kept_trim_is_certified() {
     }
     eprintln!(
         "every_kept_trim_is_certified: {} rows, {kept} kept trims, {certified} certified, \
-         {open_trims} open",
-        ROWS.len()
+         {open_trims} open; {} certified by the mean-value certifier (#22037):\n{}",
+        ROWS.len(),
+        fallback.len(),
+        fallback.join("\n")
     );
     assert_eq!(open_seen, open, "not-enclosed entries not reached");
+    assert_eq!(
+        fallback.len(),
+        MEAN_VALUE_CERTIFIED,
+        "trims certified by the mean-value certifier, not the kernel's bound (#22037)"
+    );
     assert!(
         failures.is_empty(),
         "{} failures:\n{}",
