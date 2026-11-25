@@ -236,6 +236,10 @@ pub struct PreviewState {
     /// The running job is a joint pose (see [`motion_key`]): once obsolete, it gets
     /// [`STALE_MOTION_MS`].
     running_motion: bool,
+    /// The running job is a cut shown as the bodies it leaves ([`cut_result`]).
+    running_cut: bool,
+    /// The setup ([`stream_key`]) of the cut whose result is shown; `None`: another preview is.
+    shown_cut: Option<u64>,
     /// Bodies the preview stands in for (hidden in the model scene).
     pub replaced: Vec<String>,
     /// What hovering one of them outlines (see [`Built::outlines`]).
@@ -485,8 +489,14 @@ impl PreviewState {
         Some(JointPose { source, generation: self.generation, joints })
     }
 
+    /// Whether the view shows the bodies a cut leaves, in place of the ones it cuts.
+    pub(crate) fn shows_cut_result(&self) -> bool {
+        self.active && !self.rolled_back && self.shown_cut.is_some() && !self.replaced.is_empty()
+    }
+
     fn apply(&mut self, key: u64, job: Job) {
         self.shown_key = Some(key);
+        self.shown_cut = None;
         self.ms = crate::now_ms() - self.started;
         match job {
             Ok(b) => {
@@ -577,6 +587,7 @@ impl PreviewState {
                 self.running = None;
                 let good = matches!(&job, Ok(b) if b.error.is_none());
                 let intermediate = good && (self.running_tool || stream_key.is_some() && self.running_stream_key == stream_key);
+                let cut = std::mem::take(&mut self.running_cut).then_some(self.running_stream_key).flatten();
                 self.running_stream_key = None;
                 self.running_tool = false;
                 self.running_motion = false;
@@ -586,6 +597,7 @@ impl PreviewState {
                 // key.
                 if k == key || intermediate {
                     self.apply(k, job);
+                    self.shown_cut = cut;
                 }
             }
         }
@@ -596,8 +608,12 @@ impl PreviewState {
         // waiting for it and let the current inputs start now (#7167). A tool, or a value
         // streaming within one setup, still shows each finished result; inputs that don't stream
         // wait as before. At most `DETACHED` jobs are left behind; while they run, the next
-        // obsolete one is waited for as before.
-        let other_setup = !self.running_tool && stream_key.is_some() && self.running_stream_key.is_some() && self.running_stream_key != stream_key;
+        // obsolete one is waited for as before. A cut is left behind for inputs that don't stream
+        // too (an operation changed to Join): their preview must not wait for its boolean.
+        let other_setup = !self.running_tool
+            && (stream_key.is_some() || self.running_cut)
+            && self.running_stream_key.is_some()
+            && self.running_stream_key != stream_key;
         // A joint pose for a value the slider has left, still running after `STALE_MOTION_MS`:
         // stop it and start the latest value (#14264).
         let stale_motion = self.running_motion && stream_key.is_some() && now - self.started >= STALE_MOTION_MS;
@@ -619,6 +635,7 @@ impl PreviewState {
         self.running_tool = false;
         self.running_stream_key = None;
         self.running_motion = false;
+        self.running_cut = false;
     }
 }
 
@@ -673,7 +690,8 @@ fn stream_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
     if let Some(key) = motion_key(cmds, revision, colors) {
         return Some(key);
     }
-    if cmds.is_empty() || as_new_body(cmds).is_some() {
+    let cut = cut_result(cmds, colors);
+    if cmds.is_empty() || !cut && as_new_body(cmds).is_some() {
         return None;
     }
     let mut setup = cmds.to_vec();
@@ -695,6 +713,9 @@ fn stream_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
             // another (a spacing of 1 on the way to 15 over an 80 mm extent makes 81 copies) is
             // left behind as soon as the next is typed, not waited for (#8523).
             "solid.pattern.rectangular" => &[],
+            // A cut shown as the bodies it leaves streams its main value, as Extrude's does.
+            "solid.revolve" if cut => &["angle", "angle2"],
+            _ if cut => &["diameter", "thickness"],
             _ => return None,
         };
         let params = params.as_object_mut()?;
@@ -800,6 +821,7 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let stream_key = stream_key(&cmds, app.session.revision, colors);
     let tool = as_new_body(&cmds).is_some();
+    let cut = cut_result(&cmds, colors);
     // What poses the preview, and the design it was computed against: a reader of the pose knows
     // what posed it and which design it belongs to.
     let source = app.dialog.as_ref().filter(|d| d.previews() && d.preview_enabled).and_then(|d| d.command());
@@ -822,15 +844,15 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
             app.preview.moving = moving;
         }
         if let Some(job) = job {
-            // A cut shown as the bodies it leaves is computed off the window thread, as a value
-            // moves the last one staying up; its outline shows until the first is ready.
-            let cut = job.as_ref().is_ok_and(|b| b.error.is_none()) && as_new_body(&cmds).is_some_and(|(_, op)| shows_cut(&op, colors));
-            if !cut {
+            // A cut shown as the bodies it leaves is computed off the window thread. As a value
+            // moves the last one stays up; over anything else (nothing yet, a Join's tool, a red
+            // cut the preference was on for, another profile's cut) its outline shows until then.
+            if !cut || !job.as_ref().is_ok_and(|b| b.error.is_none()) {
                 app.preview.apply(key, job);
                 app.preview.busy = false;
                 return;
             }
-            if !app.preview.active {
+            if app.preview.shown_cut != stream_key || app.preview.replaced.is_empty() {
                 app.preview.apply(key, job);
                 app.preview.shown_key = None;
             }
@@ -840,6 +862,10 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
             crate::plugin_menu::dry_run(&mut scratch, id);
         }
         spawn(&mut app.preview, key, scratch, cmds, colors, tool, PreviewWork { fallback, ..PreviewWork::default() });
+        // Unlike a tool, a cut's result shows for its own setup only.
+        if cut && app.preview.running.is_some() {
+            (app.preview.running_cut, app.preview.running_tool) = (true, false);
+        }
     }
     app.preview.busy = app.preview.running.is_some();
     // Both worker results and the web's synchronous results are ready before their first draw.
@@ -977,7 +1003,7 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
 fn compute_tool(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
     let Some((alt, op)) = as_new_body(cmds) else { return compute(s, cmds, colors) };
     let colors = if op == "cut" && makes_primitive(cmds) { Colors { cut_tint: true, ..colors } } else { colors };
-    let cut = shows_cut(&op, colors).then(|| compute_cut(s, cmds, colors));
+    let cut = cut_result(cmds, colors).then(|| compute_cut(s, cmds, colors));
     if let Some(Ok(Some(built))) = cut {
         return Ok(built);
     }
@@ -1006,12 +1032,12 @@ fn makes_primitive(cmds: &[(String, Value)]) -> bool {
     cmds.iter().any(|(command, p)| PRIMITIVES.contains(&p.get("command").and_then(Value::as_str).unwrap_or(command)))
 }
 
-/// Whether a feature with this operation previews as the bodies it leaves, not as its tool: a
-/// cut whose tool Graphics' Show removed material in red leaves transparent, which would show
-/// nothing but an outline on the whole body. Not on the web, where the boolean would hold the
-/// window (no threads).
-fn shows_cut(op: &str, colors: Colors) -> bool {
-    op == "cut" && !colors.cut_tint && cfg!(not(target_arch = "wasm32"))
+/// Whether the commands preview as the bodies they leave, not as their tool: a cut whose tool
+/// Graphics' Show removed material in red leaves transparent, which would show nothing but an
+/// outline on the whole body. Not one of [`PRIMITIVES`], whose tool always shows, and not on the
+/// web, where the boolean would hold the window (no threads).
+fn cut_result(cmds: &[(String, Value)], colors: Colors) -> bool {
+    cfg!(not(target_arch = "wasm32")) && !colors.cut_tint && !makes_primitive(cmds) && as_new_body(cmds).is_some_and(|(_, op)| op == "cut")
 }
 
 /// The bodies a cut leaves, in place of the ones it cuts: the removed material is not drawn, so
@@ -2791,6 +2817,121 @@ mod tests {
                     assert_eq!(h.app.preview.replaced, ["Stock"], "profile {profile}: the body is shown cut");
                 }
             }
+        }
+    }
+
+    /// A block with Extrude open on its top face, the distance and operation set by hand.
+    fn extrude_on_top(red: bool, op: &str) -> crate::scenario::Harness {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.cut_preview_tint = red;
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Stock"})).unwrap();
+        h.app.session.selection = vec![face_of(&h.app, Vec3::Z)];
+        h.app.start("solid.extrude");
+        set_extrude(&mut h, op, "-5");
+        h
+    }
+
+    fn face_of(app: &SolveApp, normal: Vec3) -> solidcraft_engine::Sel {
+        let faces = app.session.world_state().unwrap().body("Stock").unwrap().body.faces(0.001).unwrap();
+        let face = faces.into_iter().find(|f| f.plane_normal.is_some_and(|n| n.dot(normal) > 0.99)).unwrap();
+        solidcraft_engine::Sel::Face { body: "Stock".into(), index: face.index, point: face.centroid }
+    }
+
+    fn set_extrude(h: &mut crate::scenario::Harness, op: &str, value: &str) {
+        let crate::dialogs::Kind::Extrude { distance, operation, auto_op, .. } = &mut h.app.dialog.as_mut().unwrap().kind else {
+            panic!("Extrude is open")
+        };
+        *distance = value.into();
+        *operation = crate::dialogs::OPS.iter().position(|o| *o == op).unwrap();
+        *auto_op = false;
+    }
+
+    /// One update, and the scene it hands the renderer, if any.
+    fn one_update(h: &mut crate::scenario::Harness) -> Option<GpuScene> {
+        update(&mut h.app, &egui::Context::default());
+        h.app.preview.slot.lock().unwrap().take()
+    }
+
+    /// What is on screen while a cut shown as the bodies it leaves is being computed: the last
+    /// cut as its distance changes, and its outline over any other preview (a Join's tool, the red
+    /// tool the preference was on for, the cut of another face), never that preview.
+    #[test]
+    fn a_cut_being_computed_leaves_no_other_preview_up() {
+        // From a Join to a Cut.
+        let mut h = extrude_on_top(false, "join");
+        preview_red(&mut h);
+        set_extrude(&mut h, "cut", "-5");
+        let outline = one_update(&mut h).expect("the outline, at once");
+        assert!(outline.tris.is_empty() && outline.xray.is_empty() && !outline.overlay.is_empty());
+        assert!(h.app.preview.busy && h.app.preview.replaced.is_empty(), "the cut is still being computed");
+        preview_red(&mut h);
+        assert_eq!(h.app.preview.replaced, ["Stock"]);
+
+        // Its distance changed: the cut shown stays up until the next one is ready.
+        set_extrude(&mut h, "cut", "-6");
+        assert!(one_update(&mut h).is_none(), "nothing in its place");
+        assert!(h.app.preview.busy && h.app.preview.replaced == ["Stock"]);
+        preview_red(&mut h);
+
+        // Another face: the first one's cut is not it.
+        h.app.dialog.as_mut().unwrap().inputs[0].items = vec![face_of(&h.app, Vec3::X)];
+        assert!(one_update(&mut h).is_some_and(|sc| sc.tris.is_empty() && !sc.overlay.is_empty()));
+        assert!(h.app.preview.replaced.is_empty());
+
+        // The preference turned off under a red cut.
+        let mut h = extrude_on_top(true, "cut");
+        assert!(preview_red(&mut h).iter().all(|n| *n > 0));
+        h.app.preferences.cut_preview_tint = false;
+        let outline = one_update(&mut h).expect("the outline, at once");
+        assert_eq!(red_fill(&outline, super::colors(&h.app)), 0);
+    }
+
+    /// A Join picked while a cut is still being computed shows at once, and the cut never shows.
+    #[test]
+    fn another_operation_does_not_wait_for_a_cut_being_computed() {
+        let mut h = extrude_on_top(false, "cut");
+        one_update(&mut h);
+        // A cut that does not finish.
+        let (key, _) = h.app.preview.running.take().unwrap();
+        let (held, rx) = std::sync::mpsc::channel::<Job>();
+        h.app.preview.running = Some((key, rx));
+        set_extrude(&mut h, "join", "-5");
+        let join = one_update(&mut h).expect("the Join, at once");
+        assert!(!join.tris.is_empty());
+        assert!(!h.app.preview.busy && h.app.preview.running.is_none() && h.app.preview.detached.len() == 1);
+        // It finishes after all: dropped.
+        let cut =
+            compute_tool(&h.app.session, &[("solid.box".to_string(), json!({"length": 1, "width": 1, "height": 1, "operation": "join"}))], colors());
+        held.send(cut).unwrap();
+        assert!(one_update(&mut h).is_none());
+        assert!(h.app.preview.detached.is_empty() && h.app.preview.replaced.is_empty());
+    }
+
+    /// A picked profile is outlined, not filled, over the cut shown: the fill covered the opening.
+    /// With the red on, and once the dialog closes, it is filled as ever.
+    #[test]
+    fn a_picked_profile_does_not_cover_the_cut_shown() {
+        for red in [true, false] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.preferences.cut_preview_tint = red;
+            h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Stock"})).unwrap();
+            h.app.run("sketch.create", json!({"plane": {"face": [20, 15, 20]}})).unwrap();
+            h.app.run("sketch.rectangle.two_point", json!({"p0": [10, 8], "p1": [30, 22]})).unwrap();
+            h.app.run("sketch.finish", json!({})).unwrap();
+            let sketch = h.app.session.model.state().sketches[0].clone();
+            let index = sketch.profiles.iter().position(|p| p.region.holes.is_empty()).unwrap();
+            h.app.session.selection = vec![solidcraft_engine::Sel::Profile { sketch: sketch.feature, index }];
+            h.app.start("solid.extrude");
+            set_extrude(&mut h, "cut", "-8");
+            let color = solidcraft_theme::Tokens::get().sel_profile.to_srgba_unmultiplied();
+            preview_red(&mut h);
+            assert_eq!(h.app.preview.shows_cut_result(), !red);
+            let lit = crate::viewport::build_highlight(&h.app).merged();
+            assert_eq!(count(&lit, &lit.trans, crate::gpu::TRI_SIZE, color) > 0, red, "filled only while the cut is not shown");
+            assert!(!lit.lines.is_empty(), "outlined either way");
+            h.app.preview.clear();
+            let lit = crate::viewport::build_highlight(&h.app).merged();
+            assert!(count(&lit, &lit.trans, crate::gpu::TRI_SIZE, color) > 0, "filled again without the preview");
         }
     }
 

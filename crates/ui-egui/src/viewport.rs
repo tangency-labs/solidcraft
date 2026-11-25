@@ -6361,7 +6361,8 @@ pub(crate) fn profile_fill(sc: &mut GpuScene, app: &SolveApp, sketch: u64, index
     // In the translucent pass (after the grid and edges) so it covers them.
     let proj = display_proj(app);
     let display = crate::sketch_display::profile_region(app, sketch, index, &plane, &proj);
-    for [a, b, c] in display.as_ref().as_ref().map_or_else(Vec::new, |region| crate::sketch_display::fill_triangles(region, &mut 65_536)) {
+    let region = display.as_ref().as_ref().filter(|_| fill != Color32::TRANSPARENT);
+    for [a, b, c] in region.map_or_else(Vec::new, |region| crate::sketch_display::fill_triangles(region, &mut 65_536)) {
         sc.trans_tri(w(a), [0.0; 3], col);
         sc.trans_tri(w(b), [0.0; 3], col);
         sc.trans_tri(w(c), [0.0; 3], col);
@@ -7328,7 +7329,10 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
             Sel::Profile { sketch, index }
                 if crate::dim_view::previewed_sketch(app) != Some(*sketch) && solidcraft_engine::view::sketch_shown(&app.session, *sketch) =>
             {
-                profile_fill(&mut feedback, app, *sketch, *index, t.sel_profile, t.sel_profile_edge)
+                // Over a cut shown as the bodies it leaves, the outline alone: the fill would cover
+                // the opening.
+                let fill = if app.preview.shows_cut_result() { Color32::TRANSPARENT } else { t.sel_profile };
+                profile_fill(&mut feedback, app, *sketch, *index, fill, t.sel_profile_edge)
             }
             // A 3D sketch curve, in the sketch it names, or whichever sketch has it.
             Sel::SketchCurve { id, sketch } if st.sketches.iter().any(|ss| ss.sketch.wire_index(id).is_some()) => {
