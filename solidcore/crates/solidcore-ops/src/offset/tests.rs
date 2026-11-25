@@ -577,6 +577,30 @@ fn a_feature_narrower_than_twice_the_wall_stays_solid() {
     assert_eq!(b.check(crate::CheckLevel::All).unwrap().failures, 0);
 }
 
+/// The stress corpus's cut spheres and tori with a thin feature (S6226, S2226): a pin r 2,
+/// 10 high, on the cut ball's cap, shelled closed with a 3 wall. The cap is the cutting box's
+/// bottom, so its surface normal points into the ball, and only its other face use faces out
+/// of the material. Read from the side along the normal, every edge of the cap read the
+/// wrong way round: the pin's foot convex and the rim concave. So the walks from the ball and
+/// from the cap both took the pin in, no feature was found, and the pin's collapse refused the
+/// shell.
+///
+/// The hollow is the cut ball's: the ball r 47 below z = 27, V = pi (R + h)² (2R - h) / 3 for
+/// R 50, h 30 less R 47, h 27, with the pin, pi 2² 10, solid on it.
+#[test]
+fn a_thin_pin_on_a_cut_balls_cap_stays_solid() {
+    all_fixes();
+    let pin = make_cylinder([0.0, 0.0, 30.0], 2.0, 10.0).unwrap();
+    let b = crate::boolean::boolean(cut_ball(), pin, crate::BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    shell(&b, &order(&b), &[], -3.0).unwrap();
+    let want = PI * 6400.0 * 70.0 / 3.0 + PI * 4.0 * 10.0 - PI * 5476.0 * 67.0 / 3.0;
+    assert!(rel(volume(&b), want) < 1e-9, "{} {want}", volume(&b));
+    assert!(b.is_manifold_solid().unwrap());
+    assert_eq!(b.check(crate::CheckLevel::All).unwrap().failures, 0);
+}
+
 /// A 1200 x 2400 cylinder (r 600) with a 140 x 140 boss (r 70) on its top whose side touches
 /// the top's rim from inside (its axis 530 from the cylinder's: 530 + 70 = 600), shelled
 /// closed with a 72 wall (stress corpus S6050, S0837). The boss's side offset by 72 passes its
