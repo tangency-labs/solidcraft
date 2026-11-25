@@ -35,7 +35,7 @@ use solidcore::nurbs::funcs_basic::CurveFunction;
 use solidcore::nurbs::geom::Interval;
 use solidcore::nurbs::math::{CPoint, NOW, NOZ};
 use solidcore::nurbs::srf_basic::{Surface, SurfaceIndices};
-use solidcore::{Result as SolidResult};
+use solidcore::{Result as SolidResult, SolidError};
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;
@@ -433,8 +433,15 @@ fn to_output(i: &Inputs, flat: &[f64]) -> Result<Output, HarnessError> {
 fn status<T>(r: &SolidResult<T>) -> f64 {
     match r {
         Ok(_) => crate::status::ok_slot(0.0),
-        Err(e) if nlib_number(e).is_some() => f64::from(nlib_number(e).unwrap_or_default()),
-        Err(_) => -1.0,
+        Err(e) => crate::status::kind_slot(e, legacy_status(e)),
+    }
+}
+
+/// [`status`]'s error value as recorded before kinds.
+fn legacy_status(e: &SolidError) -> f64 {
+    match e {
+        e if nlib_number(e).is_some() => f64::from(nlib_number(e).unwrap_or_default()),
+        _ => -1.0,
     }
 }
 

@@ -1,17 +1,19 @@
 //! A log of every status write whose `GOLDENS_TYPED=1` value differs from its legacy value,
-//! for checking a re-bless entry by entry (feature `call-log`, off by default; never in a
-//! normal build).
+//! for checking the re-bless entry by entry. Scaffolding for the switch to kinds: it goes
+//! with the `legacy` arguments and [`crate::status::typed`] once the goldens record kinds.
 //!
-//! With `GOLDENS_CALL_LOG=<dir>` set, each case's distinct differing writes are appended to
-//! `<dir>/<unit>.log` when the case ends, one line each:
+//! Off unless `GOLDENS_CALL_LOG=<dir>` is set; then each case's distinct differing writes are
+//! appended to `<dir>/<unit>.log` when the case ends, one line each:
 //! `case<TAB>helper<TAB>file:line<TAB>legacy<TAB>typed`. A write outside a case (a fixture
-//! built before the loop) is logged under case `?`.
+//! built before the loop) is logged to `_outside.log` under case `?`.
 
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::fmt::Debug;
 use std::io::Write;
 use std::panic::Location;
+use std::path::PathBuf;
+use std::sync::OnceLock;
 
 /// Environment variable naming the directory the logs go to.
 pub const CALL_LOG_ENV: &str = "GOLDENS_CALL_LOG";
@@ -21,14 +23,31 @@ thread_local! {
     static CALLS: RefCell<BTreeSet<String>> = const { RefCell::new(BTreeSet::new()) };
 }
 
-/// Starts logging the writes of `case` of `unit`.
+fn dir() -> Option<&'static PathBuf> {
+    static DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
+    DIR.get_or_init(|| std::env::var_os(CALL_LOG_ENV).map(PathBuf::from))
+        .as_ref()
+}
+
+/// True when `GOLDENS_CALL_LOG` is set.
+pub fn active() -> bool {
+    dir().is_some()
+}
+
+/// Starts logging the writes of `case` of `unit` (nothing unless [`active`]).
 pub fn begin(unit: &str, case: &str) {
+    if !active() {
+        return;
+    }
     CASE.with(|c| *c.borrow_mut() = Some((unit.to_owned(), case.to_owned())));
     CALLS.with(|c| c.borrow_mut().clear());
 }
 
 /// Ends the case [`begin`] started and appends its writes to the unit's log.
 pub fn end() {
+    if !active() {
+        return;
+    }
     let Some((unit, case)) = CASE.with(|c| c.borrow_mut().take()) else {
         return;
     };
@@ -37,7 +56,7 @@ pub fn end() {
 
 fn flush(unit: &str, case: &str) {
     let calls = CALLS.with(|c| std::mem::take(&mut *c.borrow_mut()));
-    let Some(dir) = std::env::var_os(CALL_LOG_ENV) else {
+    let Some(dir) = dir() else {
         return;
     };
     if calls.is_empty() {
@@ -50,18 +69,18 @@ fn flush(unit: &str, case: &str) {
         text.push_str(&call);
         text.push('\n');
     }
-    let path = std::path::Path::new(&dir).join(format!("{unit}.log"));
+    let path = dir.join(format!("{unit}.log"));
     let written = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(&path)
         .and_then(|mut f| f.write_all(text.as_bytes()));
     if let Err(e) = written {
-        eprintln!("call-log: {}: {e}", path.display());
+        eprintln!("call log: {}: {e}", path.display());
     }
 }
 
-/// Notes one write (only when the two values differ).
+/// Notes one write (only when the two values differ). Callers check [`active`] first.
 pub(crate) fn note(helper: &str, at: &Location<'_>, legacy: &dyn Debug, typed: &dyn Debug) {
     let legacy = format!("{legacy:?}");
     let typed = format!("{typed:?}");

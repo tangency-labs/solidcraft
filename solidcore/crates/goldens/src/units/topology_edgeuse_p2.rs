@@ -372,7 +372,9 @@ pub(super) fn put_eu_state(k: &Kernel, o: &mut Vec<f64>, b: &Brep, eu: Option<Ed
     o.push(crate::own_builder::uv_owner_index(b, eu, None));
     let fail = r.drop_curve_fail.as_deref();
     o.push(flag(fail.is_some()));
-    o.push(fail.map_or(0.0, |f| f64::from(f.fail_status)));
+    o.push(fail.map_or(0.0, |f| {
+        crate::status::drop_status_slot(f.fail_status, f64::from(f.fail_status))
+    }));
     o.push(flag(fail.is_some_and(|f| f.brep.is_some())));
     o.push(match r.vertexuse {
         Some(vu) => flag(b.vertexuse(vu)?.vertex_face_gap.is_init()),

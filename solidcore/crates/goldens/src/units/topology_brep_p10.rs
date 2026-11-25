@@ -1246,7 +1246,9 @@ fn snapshot_impl(
             i64::from(e.drop_curve_fail.is_some()),
             e.drop_curve_fail
                 .as_ref()
-                .map_or(0, |f| i64::from(f.fail_status)),
+                .map_or(0, |f| {
+                    crate::status::drop_status_slot(f.fail_status, i64::from(f.fail_status))
+                }),
             i64::from(e.drop_curve_fail.as_ref().is_some_and(|f| f.brep.is_some())),
             i64::from(e.max_edge_face_gap.is_init()),
             i64::from(e.edge_ccw_edge_gap.is_init()),

@@ -7,11 +7,6 @@ publish = false
 description = "Checks every unit's cases against its committed expected output (goldens)."
 build = "build.rs"
 
-[features]
-# Logs every status write whose GOLDENS_TYPED=1 value differs from its legacy value to
-# $GOLDENS_CALL_LOG/<unit>.log, for checking a re-bless entry by entry (src/call_log.rs).
-call-log = []
-
 [dependencies]
 solidcore ={ path = "../solidcore" }
 # The `ssi` engine of --ssi-corpus (a surface/surface intersection of its own, not a port).

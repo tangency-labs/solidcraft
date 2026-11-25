@@ -1452,7 +1452,7 @@ fn rust_static_op(op: &OpIn) -> Result<Run, HarnessError> {
             f.set(&args);
             let dump = |o: &mut Vec<f64>, g: &DropCurveFail<Handle>| {
                 o.extend([
-                    f64::from(g.fail_status),
+                    crate::status::drop_status_slot(g.fail_status, f64::from(g.fail_status)),
                     g.from_call as f64,
                     f64::from(g.create_path_type as i32),
                     flag(g.has_context),

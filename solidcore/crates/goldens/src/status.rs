@@ -51,28 +51,20 @@ impl RunnerState {
     }
 }
 
-/// `typed_value` when `GOLDENS_TYPED=1`, else `legacy`; with feature `call-log`, a write
-/// whose two values differ is logged against the helper's caller ([`crate::call_log`]).
+/// `typed_value` when `GOLDENS_TYPED=1`, else `legacy`. With `GOLDENS_CALL_LOG` set, both
+/// are computed and a write whose two values differ is logged against the helper's caller
+/// ([`crate::call_log`]).
 #[track_caller]
 fn pick<T: std::fmt::Debug>(helper: &str, legacy: T, typed_value: impl FnOnce() -> T) -> T {
-    #[cfg(feature = "call-log")]
-    {
+    if crate::call_log::active() {
         let t = typed_value();
         crate::call_log::note(helper, std::panic::Location::caller(), &legacy, &t);
-        if typed() {
-            t
-        } else {
-            legacy
-        }
+        return if typed() { t } else { legacy };
     }
-    #[cfg(not(feature = "call-log"))]
-    {
-        let _ = helper;
-        if typed() {
-            typed_value()
-        } else {
-            legacy
-        }
+    if typed() {
+        typed_value()
+    } else {
+        legacy
     }
 }
 
@@ -156,6 +148,25 @@ pub fn kernel_text(e: &SolidError, legacy: impl Into<String>) -> String {
     pick("kernel_text", legacy.into(), || format!("kind_{}", code(e)))
 }
 
+/// A drop record's `fail_status` (`DropCurveFail::fail_status`, an upstream status number
+/// until the kernel types it as an outcome in the re-bless): `0` for a drop that succeeded
+/// (`SM_SUCCESS`), [`RunnerState::NotReached`] for a record no drop has written
+/// (`SM_ERR_UNKNOWN`, the kernel's "never used"), else the status's kind code.
+#[track_caller]
+pub fn drop_status_slot<V: SlotValue>(status: i32, legacy: V) -> V {
+    pick("drop_status_slot", legacy, || {
+        V::from_i32(match status {
+            solidcore::error::SM_SUCCESS => 0,
+            solidcore::error::SM_ERR_UNKNOWN => RunnerState::NotReached.value(),
+            s => code(&SolidError::Upstream {
+                operation: "drop_curve_fail",
+                code: s,
+                entity: None,
+            }),
+        })
+    })
+}
+
 /// The largest size that works, for a refused extension that names one (recorded as
 /// `values["largest_size"]` beside the kind).
 pub(crate) fn largest_size(e: &SolidError) -> Option<f64> {
@@ -183,6 +194,47 @@ mod tests {
             reason: "test",
         };
         assert!(e.kind().code() > 0);
+    }
+
+    /// `0` is success alone: no runner state and no kind has the value `0`, so a reader's
+    /// `== 0.0` test means the call succeeded. `ErrorKind` is `#[non_exhaustive]` with no list
+    /// of its kinds, so its declaration is read: every kind has an explicit discriminant, and
+    /// none is `0`.
+    #[test]
+    fn zero_is_reserved_for_success() {
+        for s in [
+            RunnerState::NotReached,
+            RunnerState::Skipped,
+            RunnerState::NoSuchEntity,
+        ] {
+            assert_ne!(s.value(), 0, "{s:?}");
+        }
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../solidcore/src/error.rs");
+        let text = std::fs::read_to_string(&path).unwrap_or_default();
+        let body: Vec<&str> = text
+            .lines()
+            .skip_while(|l| !l.starts_with("pub enum ErrorKind {"))
+            .skip(1)
+            .take_while(|l| !l.starts_with('}'))
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with("//"))
+            .collect();
+        assert!(
+            body.len() > 10,
+            "no ErrorKind declaration in {}",
+            path.display()
+        );
+        for line in body {
+            let code = line
+                .strip_suffix(',')
+                .and_then(|l| l.split_once(" = "))
+                .and_then(|(_, n)| n.parse::<u16>().ok());
+            assert!(
+                code.is_some_and(|c| c > 0),
+                "ErrorKind kind without a positive code: {line}"
+            );
+        }
     }
 
     /// Every unit says whether an error text is the kernel's or the harness's

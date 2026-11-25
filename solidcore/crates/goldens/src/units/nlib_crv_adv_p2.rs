@@ -468,7 +468,7 @@ fn rust_record(i: &Inputs, c: &InlineCrv, cur: &Curve) -> Vec<f64> {
     let inplace = |f: &dyn Fn(&mut Curve) -> Result<(), SolidError>| {
         let mut q = cur.clone();
         let st = match f(&mut q) {
-            Ok(()) => 0.0,
+            Ok(()) => crate::status::ok_slot(0.0),
             Err(e) => status(&e),
         };
         let mut r = vec![st];

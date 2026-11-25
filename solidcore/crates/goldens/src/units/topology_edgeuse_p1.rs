@@ -827,7 +827,11 @@ fn eu_state(k: &Kernel, b: &Brep, eu: Option<EdgeuseId>, out: &mut Vec<f64>) -> 
     // the curve's owner, as the shim's `g.find(6, uv->GetOwner())`
     out.push(crate::own_builder::uv_owner_index(b, eu, None));
     match r.drop_curve_fail.as_deref() {
-        Some(f) => out.extend([1.0, f64::from(f.fail_status), flag(f.brep.is_some())]),
+        Some(f) => out.extend([
+            1.0,
+            crate::status::drop_status_slot(f.fail_status, f64::from(f.fail_status)),
+            flag(f.brep.is_some()),
+        ]),
         None => out.extend([0.0, 0.0, 0.0]),
     }
     match r.vertexuse {

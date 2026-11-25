@@ -103,8 +103,7 @@ impl Output {
     /// returned unless `GOLDENS_TYPED=1`.
     #[track_caller]
     pub fn kernel(e: &SolidError, legacy: impl Into<String>) -> Self {
-        #[cfg(feature = "call-log")]
-        {
+        if crate::call_log::active() {
             let at = std::panic::Location::caller();
             let deferred = Self::unported(e).is_some();
             crate::call_log::note("kernel_deferred", at, &false, &deferred);
