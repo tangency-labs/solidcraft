@@ -197,6 +197,10 @@ shell
   inputs:
     Thickness = shell.thickness (Length)
   expressions: shell.thickness
+dome
+  inputs:
+    Height = dome.height (Length)
+  expressions: dome.height
 draft
   inputs:
     Angle = draft.angle (Angle)
@@ -454,6 +458,12 @@ surface_offset
     Distance = soff.distance (Length)
     Tolerance = soff.tolerance (Length)
   expressions: soff.distance, soff.tolerance
+surface_midsurface
+  inputs:
+    Max thickness = smid.max_thickness (Length)
+    Min thickness = smid.min_thickness (Length)
+    Fill holes below = smid.suppress_holes_below (Length)
+  expressions: smid.max_thickness, smid.min_thickness, smid.suppress_holes_below
 surface_blend
 surface_boundary
 surface_network

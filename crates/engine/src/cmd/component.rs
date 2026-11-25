@@ -146,6 +146,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("component.list", "List Components", crate::checked!("component.list", list))
         .icon("list")
         .noundo()
+        .read_only()
         .contract(&LIST_CONTRACT)
         .output(output_schema_for::<ListResult>)
         .params(
@@ -707,12 +708,22 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
         .flat_map(|(_, mats)| mats)
         .map(|m| m.to_ascii_lowercase())
         .collect();
-    for (body, feat, comp) in &body_owners {
-        if removed.features.contains(feat) || removed.components.contains(comp) {
+    for (body, feat, _) in &body_owners {
+        if removed.features.contains(feat) {
             d.materials.remove(body);
         }
     }
     for (feature, made, skipped) in imported {
+        // A body an outside Import keeps building only drops its material when it is one of the
+        // skipped (deleted) parts; a surviving feature's body keeps what it was assigned.
+        if let Some(f) = d.feature(feature) {
+            let slots = f.body_name_slots(made.len());
+            for (slot, name) in slots.iter().zip(&made) {
+                if skipped.contains(&(*slot as u64)) {
+                    d.materials.remove(name);
+                }
+            }
+        }
         for link in d.links.values_mut().filter(|l| l.feature == feature) {
             for &slot in &skipped {
                 if let Some(snap) = link.inherited.get_mut(slot as usize) {
