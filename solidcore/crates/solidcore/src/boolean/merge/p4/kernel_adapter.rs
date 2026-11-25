@@ -66,8 +66,6 @@ fn cache_kernel(k: &Kernel, context: &Context) -> Kernel {
             ..crate::kernel::Caches::default()
         },
         context: context.metadata_copy(),
-        fillet_point_step: core::cell::Cell::new(k.fillet_point_step.get()),
-        process_fillet_point_step: k.process_fillet_point_step,
         upstream_ub_passed: Vec::new(),
         memoize_curve_caches: k.memoize_curve_caches,
         fixes: k.fixes,

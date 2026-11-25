@@ -68,7 +68,8 @@ use std::sync::Arc;
 
 use crate::blend::fillet_section::section::GnSectionFsg;
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{Result, SolidError};
+use crate::error::surface::SurfaceFailure;
+use crate::error::{Failure, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::tol::are_same;
@@ -330,9 +331,9 @@ fn read_curve(k: &Kernel, db: &mut DatabaseReader, version: u64) -> Result<BSpli
             Ok(b)
         }
         // "a curve of its definition is not a B-spline"
-        _ => Err(SolidError::surface_failed(
+        _ => Err(SolidError::surface(
             OP_READ,
-            "a curve of the definition is not a B-spline",
+            SurfaceFailure::BlendCurveNotBSpline,
         )),
     }
 }
@@ -345,7 +346,7 @@ fn copy_curve(curve: &BSplineCurve) -> BSplineCurve {
 }
 
 /// A chamfer's sizes as the database holds them (#2486): kind 0 two distances, 1 a
-/// distance and an angle, 2 a chord (its one size the first), then the wedge.
+/// distance and an angle, 2 a chord, 3 an equal setback at every station, then the wedge.
 fn chamfer_of_db(kind: i64, sizes: [f64; 3]) -> Result<ChamferDefinition> {
     let [a, b, wedge] = sizes;
     let size = match kind {
@@ -355,6 +356,10 @@ fn chamfer_of_db(kind: i64, sizes: [f64; 3]) -> Result<ChamferDefinition> {
             angle: b,
         },
         2 => ChamferSize::Chord(a),
+        3 => {
+            return ChamferDefinition::new(ChamferSize::Distances([a; 2]), wedge)?
+                .at_every_station()
+        }
         _ => {
             return Err(SolidError::invalid_input(
                 OP_READ,
@@ -368,6 +373,9 @@ fn chamfer_of_db(kind: i64, sizes: [f64; 3]) -> Result<ChamferDefinition> {
 /// The database's numbers of a chamfer's sizes ([`chamfer_of_db`]'s inverse).
 #[must_use]
 pub fn chamfer_to_db(c: &ChamferDefinition) -> (i64, [f64; 3]) {
+    if let Some(d) = c.constant_setback() {
+        return (3, [d, 0.0, c.wedge]);
+    }
     match c.size {
         ChamferSize::Distances([a, b]) => (0, [a, b, c.wedge]),
         ChamferSize::DistanceAngle { distance, angle } => (1, [distance, angle, c.wedge]),
@@ -438,9 +446,10 @@ impl ProceduralBlend {
     /// # Errors
     ///
     /// [`SolidError::InvalidInput`] (`SM_ERR_INVALID_INPUT`, named) for an order out of
-    /// 1 to 4, n >= 2 with a law or an invalid thumbweight, sides other than +-1,
-    /// offsets or a bound not finite and positive, a circle's offsets that differ, and
-    /// supports nested deeper than [`BLEND_MAX_DEPTH`]; those of copying a support.
+    /// 0 to 4, inconsistent chamfer sizes or reference offsets, n >= 2 with a law or
+    /// an invalid thumbweight, sides other than +-1, offsets or a bound not finite
+    /// and positive, a circle's offsets that differ, and supports nested deeper than
+    /// [`BLEND_MAX_DEPTH`]; those of copying a support.
     pub fn create(
         k: &Kernel,
         net: &BSplineSurface,
@@ -454,9 +463,12 @@ impl ProceduralBlend {
                 "a section's order is 0 to 4",
             ));
         }
-        // the chord is a chamfer: its sizes, of a constant pair of offsets (#2486)
+        // The chord's sizes and reference wedge must agree with its offsets.
         let chamfer_held = match (&input.chamfer, order, input.law) {
-            (Some(c), 0, None) => c.holds(input.offsets),
+            (Some(c), 0, None) => {
+                c.validate()?;
+                c.holds(input.offsets)
+            }
             (None, 1..=MAX_ORDER, _) => true,
             _ => false,
         };
@@ -719,13 +731,14 @@ impl ProceduralBlend {
         &self.def.leader
     }
 
-    /// `GetLaw`: the radius law r(s), or none (a ball of one radius).
+    /// `GetLaw`: the radius law r(s) when prescribed as a curve on the leader.
     #[must_use]
     pub const fn law(&self) -> Option<&BSplineCurve> {
         self.def.law.as_ref()
     }
 
-    /// `GetOffset(i)`: the ball's offset from support `i` (0 with a law).
+    /// `GetOffset(i)`: the ball's offset from support `i` at the reference wedge
+    /// (0 when the radius is prescribed as a curve on the leader).
     #[must_use]
     pub fn offset(&self, i: usize) -> Option<f64> {
         self.def.offsets.get(i).copied()
@@ -967,7 +980,7 @@ impl ProceduralBlend {
         let (order, swapped, has_law, values) = if ascii {
             let st = db
                 .in_stream_mut()
-                .ok_or_else(|| SolidError::surface_missing(OP_READ, "the input stream"))?;
+                .ok_or_else(|| SolidError::surface(OP_READ, SurfaceFailure::NoInputStream))?;
             let order = st.extract_ulong();
             let swapped = st.extract_int();
             let has_law = st.extract_int();
@@ -975,7 +988,7 @@ impl ProceduralBlend {
             let mut values = [0.0_f64; 10];
             let st = db
                 .in_stream_mut()
-                .ok_or_else(|| SolidError::surface_missing(OP_READ, "the input stream"))?;
+                .ok_or_else(|| SolidError::surface(OP_READ, SurfaceFailure::NoInputStream))?;
             let mut read = true;
             for v in &mut values {
                 match st.extract_double() {
@@ -989,9 +1002,9 @@ impl ProceduralBlend {
                 (Some(o), Some(s), Some(h)) if read && !failed => (o, s != 0, h != 0, values),
                 // "its definition could not be read"
                 _ => {
-                    return Err(SolidError::surface_failed(
+                    return Err(SolidError::surface(
                         OP_READ,
-                        "the definition could not be read",
+                        SurfaceFailure::BlendDefinitionUnreadable,
                     ))
                 }
             }
@@ -1017,7 +1030,7 @@ impl ProceduralBlend {
             let (kind, sizes) = if ascii {
                 let st = db
                     .in_stream_mut()
-                    .ok_or_else(|| SolidError::surface_missing(OP_READ, "the input stream"))?;
+                    .ok_or_else(|| SolidError::surface(OP_READ, SurfaceFailure::NoInputStream))?;
                 let kind = st.extract_int();
                 let mut sizes = [0.0_f64; 3];
                 let mut read = true;
@@ -1033,9 +1046,9 @@ impl ProceduralBlend {
                     Some(kd) if read && !failed => (i64::from(kd), sizes),
                     // "its definition could not be read"
                     _ => {
-                        return Err(SolidError::surface_failed(
+                        return Err(SolidError::surface(
                             OP_READ,
-                            "the definition could not be read",
+                            SurfaceFailure::BlendDefinitionUnreadable,
                         ))
                     }
                 }
@@ -1052,8 +1065,8 @@ impl ProceduralBlend {
         } else {
             None
         };
-        let mut supports = Vec::new();
-        for _ in 0..2 {
+        // the two supports, then the leader and the two seeds, in the file's order
+        let read_support = |db: &mut DatabaseReader| -> Result<Surface> {
             if ascii {
                 db.go_to_next_line();
             }
@@ -1061,19 +1074,22 @@ impl ProceduralBlend {
                 .read_type(false)?
                 .type_code
                 .ok_or_else(|| SolidError::invalid_input(OP_READ, "surface type not read"))?;
-            supports.push(Surface::read_from_db(k, ty, db, version)?);
-        }
+            Surface::read_from_db(k, ty, db, version)
+        };
+        let s0 = read_support(db)?;
+        let s1 = read_support(db)?;
         if ascii {
             db.go_to_next_line();
         }
         let leader = read_curve(k, db, version)?;
-        let mut seeds = Vec::new();
-        for _ in 0..2 {
+        let read_seed = |db: &mut DatabaseReader| -> Result<BSplineCurve> {
             if ascii {
                 db.go_to_next_line();
             }
-            seeds.push(read_curve(k, db, version)?);
-        }
+            read_curve(k, db, version)
+        };
+        let seed0 = read_seed(db)?;
+        let seed1 = read_seed(db)?;
         let law = if has_law {
             if ascii {
                 db.go_to_next_line();
@@ -1096,19 +1112,8 @@ impl ProceduralBlend {
                 "its parametrization is singular",
             ));
         }
-        let (Some(s0), Some(s1), Some(seed0), Some(seed1)) = (
-            supports.first(),
-            supports.get(1),
-            seeds.first(),
-            seeds.get(1),
-        ) else {
-            return Err(SolidError::surface_failed(
-                OP_READ,
-                "the definition has fewer than two supports or seeds",
-            ));
-        };
         let input = BlendDefinitionInput {
-            supports: [s0, s1],
+            supports: [&s0, &s1],
             sides: [side0, side1],
             offsets: [r0, r1],
             law: law.as_ref(),
@@ -1116,7 +1121,7 @@ impl ProceduralBlend {
             order: u32::try_from(order).unwrap_or(u32::MAX),
             thumbweight,
             leader: &leader,
-            seeds: [seed0, seed1],
+            seeds: [&seed0, &seed1],
             bound,
             chamfer,
         };
@@ -1499,9 +1504,9 @@ impl ProceduralBlend {
         if let Some(sc) = scale {
             #[allow(clippy::neg_cmp_op_on_partial_ord)] // the fork's NaN-refusing test
             if !are_same(sc.x, sc.y) || !are_same(sc.x, sc.z) || !(sc.x > EFF_ZERO) {
-                return Err(SolidError::surface_failed(
+                return Err(SolidError::surface(
                     OP_TRANSFORM,
-                    "the scale is not uniform and positive",
+                    SurfaceFailure::ScaleNotUniform,
                 ));
             }
             factor = sc.x;
@@ -1548,13 +1553,10 @@ pub fn recertify_faces(k: &Kernel, b: &crate::topology::Brep) -> Result<()> {
                 if e.is_cancelled() {
                     return e;
                 }
-                SolidError::surface_at(
-                    OP_RECERTIFY,
-                    crate::error::surface::SurfaceFailure::Failed(
-                        "the face's net is not proved within its bound of its definition",
-                    ),
-                    crate::error::EntityRef::Face(f),
-                )
+                Failure::new(OP_RECERTIFY, SurfaceFailure::NetNotCertified)
+                    .at(crate::error::EntityRef::Face(f))
+                    .caused_by(e)
+                    .into_error()
             })?;
         }
     }
@@ -2156,6 +2158,54 @@ mod tests {
         assert!(chord(&k, 0, [1.0, 2.0], c).is_err());
         assert!(chord(&k, 1, [2.0, 1.0], c).is_err());
         assert!(chord(&k, 2, [2.0, 1.0], c).is_err());
+    }
+
+    #[test]
+    fn the_database_preserves_which_chamfer_dimension_is_constant() {
+        let wedge = 0.4 * crate::math::PI;
+        let size = ChamferDefinition::new(ChamferSize::Distances([0.2; 2]), wedge).unwrap();
+        let local = size.at_every_station().unwrap();
+        for (c, tag) in [(size, 0), (local, 3)] {
+            let (kind, sizes) = chamfer_to_db(&c);
+            assert_eq!(kind, tag);
+            assert_eq!(chamfer_of_db(kind, sizes).unwrap(), c);
+        }
+        assert_eq!(local.scaled(3.0).constant_setback(), Some(3.0 * 0.2));
+        assert!(
+            ChamferDefinition::new(ChamferSize::Distances([0.2, 0.3]), wedge)
+                .unwrap()
+                .at_every_station()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn create_rechecks_the_size_of_a_stationwise_chamfer() {
+        let k = Kernel::default();
+        let wedge = 0.5 * crate::math::PI;
+        let local = ChamferDefinition::new(ChamferSize::Distances([0.2; 2]), wedge)
+            .unwrap()
+            .at_every_station()
+            .unwrap();
+        let blend = chord(&k, 0, local.offsets().unwrap(), Some(local)).unwrap();
+        for size in [
+            ChamferSize::Distances([0.2, 0.3]),
+            ChamferSize::Chord(0.2),
+            ChamferSize::DistanceAngle {
+                distance: 0.2,
+                angle: 0.25 * crate::math::PI,
+            },
+        ] {
+            let ordinary = ChamferDefinition::new(size, wedge).unwrap();
+            let offsets = ordinary.offsets().unwrap();
+            assert!(chord(&k, 0, offsets, Some(ordinary)).is_ok());
+            let mut changed = *blend.chamfer().unwrap();
+            changed.size = size;
+            assert!(matches!(
+                chord(&k, 0, offsets, Some(changed)),
+                Err(SolidError::InvalidInput { .. })
+            ));
+        }
     }
 
     #[test]

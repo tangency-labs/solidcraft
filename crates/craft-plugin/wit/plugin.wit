@@ -12,15 +12,36 @@ package craft:plugin@0.2.0;
 // - `storage@0.1`: with `commands`, the app's `storage.*` commands and the `storage` interface, so a
 //   plugin keeps its own data in the open design: its main document as JSON, its files as bytes.
 // - `design@0.1`: with `commands`, design-state, for document identity/revision and read listeners.
+// - `ui@0.1`: ui and ui-provider (world `panel-plugin`).
 // - `forms@0.1`: with `commands`, forms.open, to request a populated command form;
 //   programs receive an interactive-required refusal instead of a window.
-// Later capabilities (ui, viewport) arrive as their own interfaces. While the version is
+// Later capabilities (viewport) arrive as their own interfaces. While the version is
 // 0.x, a minor version may break the one before it. 0.2 added `plugin-error.unsupported`. A host
 // still runs plugins built against 0.1 (`../wit-0.1/plugin.wit`): it reads the version from the
 // component's imports and exports, and shows their `invalid-input` as before.
 // App commands and their schemas are data; this world never names app types.
 interface types {
     type json = string;
+  /// A scalar the host can show, edit and store.
+  variant value {
+    none,
+    flag(bool),
+    integer(s64),
+    number(f64),
+    text(string),
+    /// A reference to a face, edge or body, stable across edits.
+    geometry-ref(string),
+  }
+
+  /// One entry in a panel's data, addressed by a slash path such as
+  /// "/tools/3/dia". Stored values are always mm and degrees.
+  record datum {
+    path: string,
+    value: value,
+  }
+
+  /// Colour roles. Plugins never send RGB.
+  enum color-role { accent, ok, warn, danger, dim, series-1, series-2, series-3, series-4, series-5, series-6, series-7, series-8 }
     record command-failure { command: string, reason: string }
     record field-failure { field: string, reason: string }
     variant plugin-error {
@@ -171,6 +192,174 @@ world exporter-plugin {
     import control;
     import clock;
     export formats-provider;
+}
+
+/// Panels and workspaces. Host-drawn; a plugin ships no UI code.
+interface ui {
+  use types.{value, datum, color-role, plugin-error};
+
+  enum dock-zone { left, right, bottom }
+
+  /// Layouts are flat: nodes refer to children by index. WIT has no
+  /// recursive types, and the flat form is easy to validate and limit.
+  record layout {
+    /// Index of the root node.
+    root: u32,
+    nodes: list<node>,
+  }
+
+  record node {
+    widget: widget,
+  }
+
+  enum field-kind { number, length, angle, text, toggle, choice, selection }
+
+  record field {
+    key: string,
+    label: string,
+    kind: field-kind,
+    /// For choice fields.
+    choices: list<string>,
+    /// Entry called when the value changes. Absent: read-only.
+    on-change: option<string>,
+  }
+
+  record column {
+    key: string,
+    label: string,
+    /// "length", "angle" and so on; shown in the user's units.
+    unit: option<string>,
+  }
+
+  enum selection-mode { none, single, multi }
+
+  record table-spec {
+    /// Data path of the rows, for example "/tools".
+    bind: string,
+    row-id: string,
+    columns: list<column>,
+    select: selection-mode,
+    on-select: option<string>,
+    on-edit: option<string>,
+  }
+
+  record button-spec {
+    label: string,
+    icon: option<string>,
+    entry: string,
+  }
+
+  record chart-series {
+    label: string,
+    role: color-role,
+    /// Data path of the x and y lists.
+    x: string,
+    y: string,
+  }
+
+  enum chart-kind { line, bar, scatter }
+
+  variant widget {
+    /// Children are indexes into layout.nodes.
+    group(list<u32>),
+    tabs(list<tab>),
+    split(split-spec),
+    toolbar(list<button-spec>),
+    button(button-spec),
+    form(form-spec),
+    item-list(list-spec),
+    item-tree(tree-spec),
+    table(table-spec),
+    chart(chart-spec),
+    text(string),
+    progress(string),
+    empty-state(string),
+  }
+
+  record tab { label: string, child: u32 }
+  record split-spec { vertical: bool, first: u32, second: u32 }
+  record form-spec { bind: string, fields: list<field> }
+  record list-spec { bind: string, on-select: option<string> }
+  record tree-spec { bind: string, on-select: option<string> }
+  record chart-spec { kind: chart-kind, series: list<chart-series> }
+
+  record panel-spec {
+    id: string,
+    title: string,
+    zones: list<dock-zone>,
+    layout: layout,
+  }
+
+  record ribbon-group { name: string, entries: list<string> }
+  record ribbon-tab { name: string, groups: list<ribbon-group> }
+
+  enum design-kind { part, assembly, sketch, drawing }
+
+  record workspace-spec {
+    id: string,
+    name: string,
+    /// Name from the app icon registry.
+    icon: string,
+    applies-to: list<design-kind>,
+    ribbon: list<ribbon-tab>,
+    /// Panel ids per zone.
+    panels: list<tuple<dock-zone, list<string>>>,
+    /// Host panels kept, for example "browser".
+    builtin-panels: list<string>,
+    /// Read-only entries with a 1 s deadline.
+    on-enter: option<string>,
+    on-exit: option<string>,
+  }
+
+  record declarations {
+    /// Bump when widget kinds are added; unknown kinds draw a placeholder.
+    ui-version: u32,
+    panels: list<panel-spec>,
+    workspaces: list<workspace-spec>,
+  }
+
+  enum event-kind { press, select, edit, change, enter, exit }
+
+  record ui-event {
+    panel: string,
+    event: event-kind,
+    path: string,
+    row: option<string>,
+    value: option<value>,
+  }
+
+  /// Host calls, available to a plugin that declares the "ui" capability.
+  /// Replace some or all of a panel's data. Merged once per frame.
+  set-data: func(panel: string, updates: list<datum>) -> result<_, plugin-error>;
+  clear-data: func(panel: string) -> result<_, plugin-error>;
+  /// Show or hide a panel in the current workspace.
+  show-panel: func(panel: string, visible: bool) -> result<_, plugin-error>;
+}
+
+/// What a UI plugin exports. Static declarations are read at install time,
+/// so the approval screen can list them without running any entry.
+interface ui-provider {
+  use types.{plugin-error};
+  use ui.{declarations, ui-event};
+
+  describe: func() -> declarations;
+  /// The host turns user actions into events. They run as ordinary commands.
+  on-event: func(event: ui-event) -> result<_, plugin-error>;
+  /// Called when a plugin workspace is entered or left, if declared.
+  on-enter: func(workspace: string) -> result<_, plugin-error>;
+  on-exit: func(workspace: string) -> result<_, plugin-error>;
+}
+
+
+world panel-plugin {
+    include command-plugin;
+    import ui;
+    export ui-provider;
+}
+
+world panel-dialog-plugin {
+    include panel-plugin;
+    export dialog-provider;
 }
 
 // Optional, additive capability dialog@0.1. Existing worlds retain their exports.

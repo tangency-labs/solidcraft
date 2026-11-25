@@ -9,7 +9,16 @@ use crate::profiles3d::find_planar_3d_profiles;
 use crate::wire::WireSpace;
 
 fn wire(id: &str, pts: &[Vec3]) -> crate::wire::Wire {
-    crate::wire::Wire { id: id.into(), pts: pts.to_vec(), space: WireSpace::Component, link: None, fit: Vec::new(), arc: None, exact: Vec::new() }
+    crate::wire::Wire {
+        id: id.into(),
+        pts: pts.to_vec(),
+        space: WireSpace::Component,
+        link: None,
+        fit: Vec::new(),
+        arc: None,
+        control: None,
+        exact: Vec::new(),
+    }
 }
 
 /// The issue's pyramid: a 20×20 square on XY, 3D lines from its corners to an apex at (0,0,15).
@@ -354,6 +363,30 @@ fn closed_triangle_survives_many_wires_joined_to_it() {
     let ps = find_planar_3d_profiles(&sk, Plane::XY);
     assert_eq!(ps.len(), 1);
     assert!((ps[0].area - 0.5).abs() < 1e-9, "area {}", ps[0].area);
+}
+
+#[test]
+fn a_loop_after_a_long_open_wire_still_spans_its_plane() {
+    // A helix of 40 points comes first: the planes its own points span are more than the planes
+    // budget. A closed triangle wire after it, in a plane of its own, is still found, as the
+    // curves' key points span planes before every other point does.
+    let mut sk = Sketch::new();
+    sk.view.three_d = true;
+    let helix: Vec<Vec3> = (0..40)
+        .map(|i| {
+            let t = f64::from(i) * 0.3;
+            Vec3 { x: 10.0 * t.cos(), y: 10.0 * t.sin(), z: 2.0 * t }
+        })
+        .collect();
+    sk.wires.push(wire("helix", &helix));
+    let a = Vec3 { x: 50.0, y: 0.0, z: 30.0 };
+    sk.wires.push(wire("tri", &[a, Vec3 { x: 60.0, y: 0.0, z: 30.0 }, Vec3 { x: 55.0, y: 8.0, z: 30.0 }, a]));
+    let ps = find_planar_3d_profiles(&sk, Plane::XY);
+    assert!(
+        ps.iter().any(|p| p.outer_curves == ["tri"] && (p.area - 40.0).abs() < 1e-6),
+        "the triangle (area 40): {:?}",
+        ps.iter().map(|p| (&p.outer_curves, p.area)).collect::<Vec<_>>()
+    );
 }
 
 #[test]

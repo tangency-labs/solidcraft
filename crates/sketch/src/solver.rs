@@ -18,21 +18,28 @@ use solidcore_record::{Seg2, Vec2};
 use solidcraft_geom::prelude::*;
 
 use crate::decompose::Budget;
-use crate::linalg::{Mat, determined_vars, solve as lin_solve};
+use crate::linalg::{Mat, determined_vars, solve as lin_solve, solve_unless};
 use crate::model::{ConstraintKind, CurveKind, Sketch, TwoCircles};
 #[cfg(feature = "solver-profiling")]
 use crate::profiling::{self, Decision, Phase, StopReason};
+use crate::sparse::{Normal, Pattern};
 use crate::union_find::{find, union};
 
 #[path = "cursor.rs"]
 mod cursor;
 pub use cursor::{move_line_towards, move_point_towards};
 
+#[path = "lm_memo.rs"]
+mod lm_memo;
+
 #[path = "redundancy.rs"]
 mod redundancy;
 pub use redundancy::{CONSISTENT, constraint_residual, determined_by};
 
 const MAX_ITERS: usize = 500;
+/// Components of at least this many unknowns solve LM's steps with the sparse factorisation
+/// ([`Pattern`]); smaller ones with the dense elimination, which costs little at their size.
+const SPARSE_MIN_VARS: usize = 64;
 /// Variables in one connected component. Each component is solved as a dense system: an n by n
 /// matrix for the Levenberg-Marquardt step, rows by n for the Jacobian. 4,000 variables is a
 /// 128 MB matrix; past that the request grows to gigabytes and an allocation failure aborts the
@@ -367,7 +374,9 @@ impl State<'_> {
                 // A general weighted spline has no Seg2 form. Its display chords pull an
                 // on-curve point off the spline, including points used as Break/Trim boundaries.
                 if let Some(record) = nurbs.as_ref().and_then(|n| n.rational_record(&p, *degree)) {
-                    let Some(hit) = solidcore_ops::curve::closest_point(&record, [q.x, q.y, 0.0], 1e-9).ok().flatten() else { return f64::INFINITY };
+                    let Some(hit) = solidcraft_kernel::services::curve::closest_point(&record, [q.x, q.y, 0.0], 1e-9).ok().flatten() else {
+                        return f64::INFINITY;
+                    };
                     let Some((_, tangent)) = solidcraft_geom::brep::eval::CurveEval::new(&record).ok().and_then(|c| c.derivs(hit.parameter)) else {
                         return f64::INFINITY;
                     };
@@ -779,8 +788,15 @@ fn residuals(s: &State, k: &ConstraintKind, out: &mut Vec<f64>) {
             out.extend([d.x, d.y]);
         }
         Midpoint { p, l } => {
-            let (a, b) = s.line(l);
-            let d = s.p(p) - (a + b) * 0.5;
+            // A line's middle is its ends' mean; an arc's is the point halfway along it, which
+            // is not the middle of its chord.
+            let middle = if matches!(s.sk.curves.get(l).map(|c| &c.kind), Some(CurveKind::Arc { .. })) {
+                s.along(l, 0.5)
+            } else {
+                let (a, b) = s.line(l);
+                (a + b) * 0.5
+            };
+            let d = s.p(p) - middle;
             out.extend([d.x, d.y]);
         }
         Symmetric { p, q, l } => {
@@ -938,6 +954,7 @@ pub fn point_along(sk: &Sketch, c: usize, at: f64) -> Option<Vec2> {
 
 /// One residual block: implicit arc radius equality, a user constraint, or a tangency at a known
 /// touch point (better conditioned than the distance form when an end point is on the curve).
+#[derive(Debug)]
 enum Block<'a> {
     Closure { a: usize, b: usize },
     Arc { c: usize, a: usize, b: usize },
@@ -1144,6 +1161,7 @@ fn block_refs(sk: &Sketch, b: &Block) -> Vec<Ref> {
     use Ref::{Curve as C, Line as L, Point as P, Round as R};
     let is = |c: usize, f: fn(&CurveKind) -> bool| sk.curves.get(c).is_some_and(|x| f(&x.kind));
     let line = |c: usize| is(c, |k| matches!(k, CurveKind::Line { .. }));
+    let arc = |c: usize| is(c, |k| matches!(k, CurveKind::Arc { .. }));
     let freeform = |c: usize| is(c, CurveKind::is_freeform);
     // A tangency reads a free-form curve as such, else a line and a round, or two rounds.
     let tangent = |a: usize, b: usize| {
@@ -1172,6 +1190,8 @@ fn block_refs(sk: &Sketch, b: &Block) -> Vec<Ref> {
             | DistanceX { p, q, .. }
             | DistanceY { p, q, .. } => vec![P(p), P(q)],
             PointOnCurve { p, c } | PointAlong { p, c, .. } => vec![P(p), C(c)],
+            // The middle of an arc depends on its centre and both ends, as a point along it does.
+            Midpoint { p, l } if arc(l) => vec![P(p), C(l)],
             Midpoint { p, l } | PointLineDistance { p, l, .. } | LinearDiameter { p, l, .. } => vec![P(p), L(l)],
             LineCircleDistance { l, c, .. } => vec![L(l), R(c)],
             PointCircleDistance { p, c, .. } => vec![P(p), R(c)],
@@ -1354,6 +1374,118 @@ fn local_system(
     (r, j, owner)
 }
 
+/// A large component's normal equations kept sparse ([`Normal`]), with what fills them each
+/// iteration: per block, the component's columns it reads (each once, in the order of its
+/// variables) and the slot of each pair of them in the matrix.
+struct SparseSystem {
+    pattern: Pattern,
+    normal: Normal,
+    slots: crate::sparse::Slots,
+    blocks: Vec<BlockColumns>,
+    /// A block's small Jacobian, rows by its columns, reused.
+    jac: Vec<f64>,
+}
+
+struct BlockColumns {
+    /// The variable of each column, and the column.
+    vars: Vec<(usize, usize)>,
+    /// Per pair of columns `(i, j)`, at `i * m + j`: its slot in the normal matrix.
+    pairs: Vec<Option<usize>>,
+}
+
+impl SparseSystem {
+    fn new(blocks: &[(Block, Vec<usize>)], col: &[usize], n: usize) -> SparseSystem {
+        let groups: Vec<Vec<usize>> =
+            blocks.iter().map(|(_, bv)| bv.iter().filter_map(|v| col.get(*v).copied().filter(|c| *c < n)).collect()).collect();
+        let pattern = Pattern::new(n, &groups);
+        let normal = Normal::new(n, &groups);
+        let slots = pattern.bind(&normal);
+        let blocks = blocks
+            .iter()
+            .map(|(_, bv)| {
+                let mut vars: Vec<(usize, usize)> = Vec::new();
+                for &v in bv {
+                    if let Some(c) = col.get(v).copied().filter(|c| *c < n)
+                        && !vars.iter().any(|(_, seen)| *seen == c)
+                    {
+                        vars.push((v, c));
+                    }
+                }
+                let pairs = vars.iter().flat_map(|&(_, ci)| vars.iter().map(move |&(_, cj)| (ci, cj))).map(|(ci, cj)| normal.slot(ci, cj)).collect();
+                BlockColumns { vars, pairs }
+            })
+            .collect();
+        SparseSystem { pattern, normal, slots, blocks, jac: Vec::new() }
+    }
+
+    /// Fill the normal matrix and `g` (`Jᵀr`) for the residuals `r` at `x`: the Jacobian
+    /// [`local_system`] would build, block by block, each entry summed over the rows in order
+    /// as there. False when an entry falls outside the structure (never, for the blocks it was
+    /// made for): the caller builds the matrix densely instead.
+    fn fill(&mut self, sk: &Sketch, lay: &Layout, blocks: &[(Block, Vec<usize>)], x: &mut [f64], r: &[f64], g: &mut [f64]) -> bool {
+        self.normal.clear();
+        let mut plus = Vec::new();
+        let mut minus = Vec::new();
+        let mut row = 0;
+        let mut whole = true;
+        for ((b, _), cols) in blocks.iter().zip(&self.blocks) {
+            plus.clear();
+            block_residuals(&State { sk, lay, x }, b, &mut plus);
+            let rows = plus.len();
+            let m = cols.vars.len();
+            self.jac.clear();
+            self.jac.resize(rows * m, 0.0);
+            for (i, &(v, _)) in cols.vars.iter().enumerate() {
+                let Some(x0) = x.get(v).copied() else { continue };
+                let opening = distance_opening_slope(&State { sk, lay, x }, b, v);
+                let h = direction_difference_step(&State { sk, lay, x }, b, v, x0);
+                if let Some(xv) = x.get_mut(v) {
+                    *xv = x0 + h;
+                }
+                plus.clear();
+                block_residuals(&State { sk, lay, x }, b, &mut plus);
+                if let Some(xv) = x.get_mut(v) {
+                    *xv = x0 - h;
+                }
+                minus.clear();
+                block_residuals(&State { sk, lay, x }, b, &mut minus);
+                if let Some(xv) = x.get_mut(v) {
+                    *xv = x0;
+                }
+                for k in 0..rows {
+                    let d = (plus.get(k).copied().unwrap_or(0.0) - minus.get(k).copied().unwrap_or(0.0)) / (2.0 * h);
+                    if let Some(slot) = self.jac.get_mut(k * m + i) {
+                        *slot = if k == 0 { opening.unwrap_or(d) } else { d };
+                    }
+                }
+            }
+            for k in 0..rows {
+                let ri = r.get(row + k).copied().unwrap_or(0.0);
+                let Some(jrow) = self.jac.get(k * m..(k + 1) * m) else { continue };
+                for (i, &di) in jrow.iter().enumerate() {
+                    if di == 0.0 {
+                        continue;
+                    }
+                    if let Some(gi) = cols.vars.get(i).and_then(|(_, c)| g.get_mut(*c)) {
+                        *gi += di * ri;
+                    }
+                    for (j, &dj) in jrow.iter().enumerate() {
+                        if dj == 0.0 {
+                            continue;
+                        }
+                        match cols.pairs.get(i * m + j).copied().flatten().and_then(|s| self.normal.vals.get_mut(s)) {
+                            Some(a) => *a += di * dj,
+                            None => whole = false,
+                        }
+                    }
+                }
+            }
+            row += rows;
+        }
+        whole
+    }
+}
+
 /// An infinite line's direction derivative must be sampled within its defining span. The
 /// usual coordinate-sized step can cross its other end and measure a half-turn instead
 /// of the local slope when the saved defining points are very close (#11001).
@@ -1441,8 +1573,92 @@ fn lm_capped_with_budget(
     lm_run(sk, lay, blocks, vars, x, col, max_iters, budget, false)
 }
 
-/// [`lm_capped_with_budget`], giving up once stalled when `give_up` (see [`STALL_ITERS`]).
+/// [`lm_capped_with_budget`], giving up once stalled when `give_up` (see [`STALL_ITERS`]). A run
+/// of a large component made before in the same edit's solve is taken again ([`lm_memo`]).
 fn lm_run(
+    sk: &Sketch,
+    lay: &Layout,
+    blocks: &[(Block, Vec<usize>)],
+    vars: &[usize],
+    x: &mut Vec<f64>,
+    col: &[usize],
+    max_iters: usize,
+    budget: Option<&mut Budget>,
+    give_up: bool,
+) -> Option<(usize, f64)> {
+    // A run with a work budget charges its work to it: always made.
+    let key =
+        (budget.is_none() && lm_memo::remembers(vars.len()) && lm_memo::active()).then(|| run_key(sk, lay, blocks, vars, x, col, max_iters, give_up));
+    if let Some(key) = &key
+        && let Some((values, out)) = lm_memo::get(key)
+    {
+        #[cfg(test)]
+        lm_vars::add(vars.len());
+        for (&v, value) in vars.iter().zip(values) {
+            if let Some(slot) = x.get_mut(v) {
+                *slot = value;
+            }
+        }
+        return out;
+    }
+    let out = lm_compute(sk, lay, blocks, vars, x, col, max_iters, budget, give_up);
+    // A cancelled run stopped part way: not its result.
+    if let Some(key) = key
+        && !cancelled()
+    {
+        lm_memo::put(key, lm_memo::Entry { values: vars.iter().map(|v| x.get(*v).copied().unwrap_or(f64::NAN)).collect(), out });
+    }
+    out
+}
+
+/// Everything an LM run reads, hashed ([`lm_memo`]): the sketch (its constants and curves; its
+/// constraints it reads through the blocks), the layout, the blocks with their values, the
+/// variables and their columns, the whole starting point bit for bit, the iteration cap and
+/// whether it gives up when stalled.
+fn run_key(
+    sk: &Sketch,
+    lay: &Layout,
+    blocks: &[(Block, Vec<usize>)],
+    vars: &[usize],
+    x: &[f64],
+    col: &[usize],
+    max_iters: usize,
+    give_up: bool,
+) -> [u64; 2] {
+    let mut key = lm_memo::Key::new();
+    key.usize(max_iters);
+    key.usize(usize::from(give_up));
+    key.bytes(sk.solve_fingerprint().as_bytes());
+    key.usize(lay.n);
+    key.usize(lay.points);
+    for v in lay.pvar.iter().chain(&lay.rvar) {
+        key.usize(v.unwrap_or(usize::MAX));
+    }
+    for (slide, heavy) in lay.slide.iter().zip(&lay.heavy) {
+        key.usize(usize::from(*slide) + 2 * usize::from(*heavy));
+    }
+    key.usize(blocks.len());
+    for (b, bv) in blocks {
+        key.bytes(format!("{b:?}").as_bytes());
+        key.usize(bv.len());
+        for v in bv {
+            key.usize(*v);
+        }
+    }
+    key.usize(vars.len());
+    for v in vars {
+        key.usize(*v);
+        key.usize(col.get(*v).copied().unwrap_or(usize::MAX));
+    }
+    key.usize(x.len());
+    for v in x {
+        key.f64(*v);
+    }
+    key.finish()
+}
+
+/// [`lm_run`]'s iteration.
+fn lm_compute(
     sk: &Sketch,
     lay: &Layout,
     blocks: &[(Block, Vec<usize>)],
@@ -1462,6 +1678,9 @@ fn lm_run(
     let n = vars.len();
     #[cfg(test)]
     lm_vars::add(n);
+    // A large component's steps are solved on the sparse structure of its normal equations
+    // (see `sparse`): the unknowns each block reads are where the matrix can have entries.
+    let mut sparse = (n >= SPARSE_MIN_VARS).then(|| SparseSystem::new(blocks, col, n));
     let mut lambda = 1e-3;
     let (mut r, _, _) = system(sk, lay, blocks, x, false);
     let mut f = norm2(&r);
@@ -1470,6 +1689,11 @@ fn lm_run(
     // The sum of squares at the start of each iteration, while giving up is allowed.
     let mut costs = Vec::new();
     for it in 0..max_iters {
+        if cancelled() {
+            #[cfg(feature = "solver-profiling")]
+            profiling::finish_run(run, StopReason::Cancelled, max_abs(&r));
+            return Some((it, max_abs(&r)));
+        }
         if max_abs(&r) < TOL {
             #[cfg(feature = "solver-profiling")]
             profiling::finish_run(run, StopReason::ResidualTolerance, max_abs(&r));
@@ -1495,23 +1719,20 @@ fn lm_run(
         }
         #[cfg(feature = "solver-profiling")]
         profiling::count(|c| c.outer_iterations = c.outer_iterations.saturating_add(1));
+        #[cfg(feature = "solver-profiling")]
         let (_, j, _) = local_system(sk, lay, blocks, x, col, n);
         // Normal equations of this component.
         #[cfg(feature = "solver-profiling")]
         let normal_timer = profiling::timer(Phase::NormalEquations);
-        let mut a = Mat::zeros(n, n);
         let mut g = vec![0.0; n];
-        for row in 0..j.rows {
-            let ri = r.get(row).copied().unwrap_or(0.0);
-            let nz: Vec<(usize, f64)> = (0..n).map(|li| (li, j.get(row, li))).filter(|(_, d)| *d != 0.0).collect();
-            for &(li, di) in &nz {
-                if let Some(gi) = g.get_mut(li) {
-                    *gi += di * ri;
-                }
-                for &(lk, dk) in &nz {
-                    a.add(li, lk, di * dk);
-                }
-            }
+        // A large component's matrix is kept sparse (its Jacobian read block by block, each
+        // entry summed over the rows in the same order as the dense matrix's): the same entries,
+        // without clearing and scanning a dense n by n matrix every iteration.
+        let mut dense_a = None;
+        let filled = sparse.as_mut().is_some_and(|sys| sys.fill(sk, lay, blocks, x, &r, &mut g));
+        if !filled {
+            g.fill(0.0);
+            dense_a = Some(normal_equations(&local_system(sk, lay, blocks, x, col, n).1, &r, n, &mut g));
         }
         #[cfg(feature = "solver-profiling")]
         drop(normal_timer);
@@ -1541,16 +1762,34 @@ fn lm_run(
                 profiling::finish_run(run, StopReason::WorkBudget, max_abs(&r));
                 return Some((it, max_abs(&r)));
             }
-            let mut m = a.clone();
-            for (i, w) in weight.iter().enumerate() {
-                m.add(i, i, lambda * w + 1e-12);
-            }
+            let shift: Vec<f64> = weight.iter().map(|w| lambda * w + 1e-12).collect();
             let rhs: Vec<f64> = g.iter().map(|v| -v).collect();
             #[cfg(feature = "solver-profiling")]
             let linear_timer = profiling::timer(Phase::LinearSolve);
-            let step = lin_solve(m, rhs);
+            let dense = |a: &Mat| {
+                let mut m = a.clone();
+                for (i, s) in shift.iter().enumerate() {
+                    m.add(i, i, *s);
+                }
+                solve_unless(m, rhs.clone(), &mut 0.0, &cancelled)
+            };
+            // A pivot the sparse factorisation cannot trust (a system on the edge of singular)
+            // is left to the dense elimination, as every step was before.
+            let step = match (&dense_a, &sparse) {
+                (Some(a), _) => dense(a),
+                (None, Some(sys)) => sys
+                    .pattern
+                    .solve_bound(&sys.normal, &sys.slots, &shift, &rhs, &cancelled)
+                    .or_else(|| if cancelled() { None } else { dense(&sys.normal.dense()) }),
+                (None, None) => None,
+            };
             #[cfg(feature = "solver-profiling")]
             drop(linear_timer);
+            if cancelled() {
+                #[cfg(feature = "solver-profiling")]
+                profiling::finish_run(run, StopReason::Cancelled, max_abs(&r));
+                return Some((it, max_abs(&r)));
+            }
             let Some(step) = step else {
                 #[cfg(feature = "solver-profiling")]
                 profiling::record_trial(run, it, _attempt, lambda, f, None, &g, &j, None, Decision::LinearFailure);
@@ -1600,6 +1839,30 @@ fn lm_run(
     #[cfg(feature = "solver-profiling")]
     profiling::finish_run(run, StopReason::IterationLimit, max_abs(&r));
     Some((max_iters, max_abs(&r)))
+}
+
+/// Whether the work this solve runs for was cancelled ([`crate::cancel`]).
+fn cancelled() -> bool {
+    crate::cancel::is_cancelled()
+}
+
+/// The dense normal matrix `JᵀJ` of a component's Jacobian `j` (`n` columns), adding `Jᵀr` to
+/// `g`.
+fn normal_equations(j: &Mat, r: &[f64], n: usize, g: &mut [f64]) -> Mat {
+    let mut a = Mat::zeros(n, n);
+    for row in 0..j.rows {
+        let ri = r.get(row).copied().unwrap_or(0.0);
+        let nz: Vec<(usize, f64)> = (0..n).map(|li| (li, j.get(row, li))).filter(|(_, d)| *d != 0.0).collect();
+        for &(li, di) in &nz {
+            if let Some(gi) = g.get_mut(li) {
+                *gi += di * ri;
+            }
+            for &(lk, dk) in &nz {
+                a.add(li, lk, di * dk);
+            }
+        }
+    }
+    a
 }
 
 fn within_budget(budget: &mut Option<&mut Budget>, work: usize) -> bool {
@@ -2027,6 +2290,22 @@ pub fn solve_after_edit(sk: &mut Sketch, old: &DrivingValues, stored: Option<&[V
 /// [`solve_after_edit`] with only the requested diagnostics. Continuation, branch checks and
 /// geometry restoration are identical at every analysis level.
 pub fn solve_after_edit_with_analysis(sk: &mut Sketch, old: &DrivingValues, stored: Option<&[Vec2]>, analysis: Analysis) -> SolveReport {
+    // Its continuation and step tries repeat runs of one another ([`lm_memo`]).
+    lm_memo::scope(|| solve_after_edit_now(sk, old, stored, analysis))
+}
+
+/// [`solve_after_edit_with_analysis`] remembering nothing, and the same remembering runs of
+/// components of any size with the runs it took again: for tests that the two are the same.
+#[cfg(test)]
+pub(crate) fn solve_after_value_edit_both(sk: &Sketch, old: &DrivingValues) -> ((Sketch, SolveReport), (Sketch, SolveReport), usize) {
+    let mut plain = sk.clone();
+    let plain_report = solve_after_edit_now(&mut plain, old, None, Analysis::Full);
+    let mut remembered = sk.clone();
+    let (report, hits) = lm_memo::tests::any_size(|| solve_after_edit_with_analysis(&mut remembered, old, None, Analysis::Full));
+    ((plain, plain_report), (remembered, report), hits)
+}
+
+fn solve_after_edit_now(sk: &mut Sketch, old: &DrivingValues, stored: Option<&[Vec2]>, analysis: Analysis) -> SolveReport {
     let drawn: Vec<Vec2> = stored.map_or_else(|| sk.points.iter().map(|p| p.pos).collect(), <[Vec2]>::to_vec);
     // A constraint added since `old` has no value there. Measure what it reads on the drawn
     // geometry and use that as the value it was edited from: otherwise neither the value's
@@ -3331,7 +3610,22 @@ fn solve_sensed(
         .filter(|(_, t)| matches!(t, Turn::Mirror { .. }))
         .flat_map(|(arc, _)| before.iter().find(|b| b.arc == *arc).map(|b| b.lines.iter().map(|l| l.2).collect::<Vec<_>>()).unwrap_or_default())
         .collect();
-    let folded: Vec<String> = over.into_iter().chain(mirrored_still).filter_map(|ci| sk.constraints.get(ci).map(|c| c.id.clone())).collect();
+    let mut folded: Vec<String> = over.into_iter().chain(mirrored_still).filter_map(|ci| sk.constraints.get(ci).map(|c| c.id.clone())).collect();
+    // A swap puts the arc on the other side of its chord: a point held at its middle would now sit
+    // at the opposite end of the circle while the solve reported success. Read it again.
+    for (arc, t) in &turns {
+        if !matches!(t, Turn::Swap) {
+            continue;
+        }
+        for (ci, c) in sk.constraints.iter().enumerate() {
+            if matches!(c.kind, ConstraintKind::Midpoint { l, .. } if l == *arc)
+                && constraint_residual(sk, ci).is_some_and(|r| r > 1e-6)
+                && !folded.contains(&c.id)
+            {
+                folded.push(c.id.clone());
+            }
+        }
+    }
     if folded.is_empty() {
         return report;
     }
@@ -3360,6 +3654,25 @@ fn solve_inner(
     let _timer = profiling::timer(Phase::Solve);
     #[cfg(feature = "solver-profiling")]
     profiling::count(|c| c.solve_calls = c.solve_calls.saturating_add(1));
+    // Cancelled: the work this solve was for is no longer wanted. Nothing is solved, and the
+    // geometry stays as it was. (An edit's continuation and its retries each solve again, and
+    // each would otherwise still construct its start.)
+    if cancelled() {
+        return SolveReport {
+            status: SolveStatus::Failed,
+            dof: 0,
+            iterations: 0,
+            max_residual: f64::MAX,
+            failing: Vec::new(),
+            folded: Vec::new(),
+            continuations: 0,
+            point_determined: Vec::new(),
+            curve_determined: Vec::new(),
+            redundant: Vec::new(),
+            oversized: None,
+            wires: None,
+        };
+    }
     sk.prune_patterns();
     sk.refresh_pattern_shapes();
     place_pierced_points(sk);
@@ -3609,6 +3922,8 @@ fn solve_inner(
         }
     }
 
+    // A cancelled solve's report is not shown: it only says whether it solved.
+    let analysis = if cancelled() { Analysis::StatusOnly } else { analysis };
     // Final residuals and analysis, component by component (the Jacobian is block diagonal:
     // its rank is the sum of the components' ranks).
     #[cfg(feature = "solver-profiling")]
@@ -3991,17 +4306,17 @@ mod typed_dimension_tests {
         assert_eq!(sk.points, points);
     }
 
-    /// A constraint read on a curve of the wrong kind (a midpoint of an arc, pushed past
+    /// A constraint read on a curve of the wrong kind (a midpoint of a circle, pushed past
     /// validation) reads constants for it: its component is tied to them, not floating, and the
     /// pinned analysis agrees with the dense one (checked in every test solve).
     #[test]
     fn a_curve_read_as_another_kind_ties_its_component() {
         let mut sk = Sketch::new();
-        let arc = sk.add_arc(Vec2::new(5.0, 5.0), Vec2::new(15.0, 5.0), Vec2::new(5.0, 15.0), [None, None, None], None).unwrap();
+        let circle = sk.add_circle(Vec2::new(5.0, 5.0), 10.0, None, None).unwrap();
         let p = sk.add_point(Vec2::new(3.0, 1.0), None).unwrap();
         sk.constraints.push(crate::model::Constraint {
             id: "m".into(),
-            kind: ConstraintKind::Midpoint { p, l: arc },
+            kind: ConstraintKind::Midpoint { p, l: circle },
             param: None,
             driven: false,
             text: None,
@@ -4009,7 +4324,50 @@ mod typed_dimension_tests {
         let rep = solve(&mut sk);
         assert!(rep.ok(), "{rep:?}");
         assert!(rep.point_determined[p], "the midpoint of the constant line: {rep:?}");
-        assert_eq!(rep.dof, 5, "the arc's centre and ends, less its equal radii: {rep:?}");
+        assert_eq!(rep.dof, 3, "the circle's centre and radius: {rep:?}");
+    }
+
+    /// The middle of an arc is halfway along it, not the middle of its chord, for a short arc and
+    /// for one of more than half a turn.
+    #[test]
+    fn a_point_at_the_middle_of_an_arc_sits_halfway_along_it() {
+        let r = 10.0;
+        for (end, middle_angle) in [(Vec2::new(0.0, 10.0), 45.0_f64), (Vec2::new(0.0, -10.0), 135.0)] {
+            let mut sk = Sketch::new();
+            let arc = sk.add_arc(Vec2::ZERO, Vec2::new(10.0, 0.0), end, [None, None, None], None).unwrap();
+            sk.curves[arc].fixed = true;
+            let p = sk.add_point(Vec2::new(3.0, 1.0), None).unwrap();
+            sk.add_constraint(ConstraintKind::Midpoint { p, l: arc }, None).unwrap();
+            let rep = solve(&mut sk);
+            assert!(rep.ok(), "{rep:?}");
+            let want = Vec2::new(r * middle_angle.to_radians().cos(), r * middle_angle.to_radians().sin());
+            assert!(sk.points[p].pos.dist(want) < 1e-6, "{:?} should be {want:?}", sk.points[p].pos);
+            assert!(rep.point_determined[p], "{rep:?}");
+            assert_eq!(rep.dof, 0, "{rep:?}");
+        }
+    }
+
+    /// The point keeps the middle when the arc changes: its radius is dimensioned afterwards.
+    #[test]
+    fn a_point_at_the_middle_of_an_arc_follows_its_radius() {
+        let mut sk = Sketch::new();
+        let arc = sk.add_arc(Vec2::ZERO, Vec2::new(10.0, 0.0), Vec2::new(0.0, 10.0), [None, None, None], None).unwrap();
+        let p = sk.add_point(Vec2::new(7.0, 7.0), None).unwrap();
+        sk.add_constraint(ConstraintKind::Midpoint { p, l: arc }, None).unwrap();
+        sk.curves[arc].fixed = false;
+        sk.add_constraint(ConstraintKind::Radius { c: arc, value: 20.0 }, None).unwrap();
+        let rep = solve(&mut sk);
+        assert!(rep.ok(), "{rep:?}");
+        let CurveKind::Arc { c, a, b } = sk.curves[arc].kind else { panic!("the curve is an arc") };
+        let (centre, start, end) = (sk.points[c].pos, sk.points[a].pos, sk.points[b].pos);
+        assert!((centre.dist(start) - 20.0).abs() < 1e-6, "radius 20: {}", centre.dist(start));
+        let mut sweep = (end - centre).angle() - (start - centre).angle();
+        while sweep <= 0.0 {
+            sweep += std::f64::consts::TAU;
+        }
+        let half = (start - centre).angle() + sweep / 2.0;
+        let want = centre + Vec2::new(20.0 * half.cos(), 20.0 * half.sin());
+        assert!(sk.points[p].pos.dist(want) < 1e-5, "{:?} should be {want:?}", sk.points[p].pos);
     }
 
     #[test]
