@@ -2145,15 +2145,7 @@ pub(crate) fn direction_expr_form(v: &Value) -> std::result::Result<solidcraft_d
 }
 
 pub(crate) fn direction_dir_form(v: &Value) -> std::result::Result<Vec3, &'static str> {
-    match v {
-        Value::String(a) => match a.trim().to_ascii_uppercase().as_str() {
-            "X" => Ok(Vec3::X),
-            "Y" => Ok(Vec3::Y),
-            "Z" => Ok(Vec3::Z),
-            _ => Err("`direction` must be [x, y, z]"),
-        },
-        v => vec3(v).and_then(|a| a.normalized()).ok_or("`direction` must be a non-zero [x, y, z]"),
-    }
+    axis_dir_form(v).map_err(|_| "`direction` must be a non-zero [x, y, z]")
 }
 
 pub(crate) fn direction_expr_param(s: &Session, p: &Value, cmd: &str) -> Result<Option<(solidcraft_doc::DirExpr, Vec3)>> {
