@@ -784,11 +784,6 @@ crates/geom/src/mesh_distance.rs:TriangleSet::new triangles
 crates/geom/src/mesh_distance.rs:closest_on_segments dot
 crates/geom/src/mesh_distance.rs:segment_through cross,dot
 crates/geom/src/mesh_distance.rs:triangle_distance closest_on_triangle
-crates/geom/src/network.rs:EndCondition::natural dot
-crates/geom/src/network.rs:EndCondition::scale dot
-crates/geom/src/network.rs:end_frame dot,normalized
-crates/geom/src/network.rs:network_surface dot
-crates/geom/src/network.rs:refine dot
 crates/geom/src/paper/annotate.rs:Terminator::place normalized
 crates/geom/src/paper/clip.rs:Clip::cuts dot
 crates/geom/src/plane.rs:Plane::from_normal cross,dot,normalized
@@ -867,12 +862,12 @@ crates/io/src/lib.rs:export_stl_face_solids triangles
 crates/io/src/lib.rs:export_with_parts_noted triangles
 crates/io/src/lib.rs:mass_properties triangles
 crates/io/src/lib.rs:mesh_import_feature_in_prepared triangles
-crates/io/src/lib.rs:mesh_object triangles
 crates/io/src/lib.rs:mesh_text triangles
 crates/io/src/lib.rs:normal_at dot,normalized
 crates/io/src/lib.rs:push_facet cross,normalized
 crates/io/src/lib.rs:stl_ascii triangles
 crates/io/src/lib.rs:stl_binary cross,normalized,triangles
+crates/io/src/lib.rs:weld_for_3mf triangles
 crates/io/src/native_cad/design.rs:Builder::extrude dot
 crates/io/src/native_cad/design.rs:Builder::revolve cross,dot
 crates/io/src/native_cad/design.rs:Builder::sketch cross
@@ -1050,6 +1045,11 @@ crates/kernel/src/meshbody.rs:mesh_ray cross,dot,normalized,raycast,triangles
 crates/kernel/src/meshbody.rs:unify_winding triangles
 crates/kernel/src/meshbody.rs:weld_mesh normalized,triangles
 crates/kernel/src/native/preview.rs:native_preview_mesh triangles
+crates/kernel/src/network.rs:EndCondition::natural dot
+crates/kernel/src/network.rs:EndCondition::scale dot
+crates/kernel/src/network.rs:end_frame dot,normalized
+crates/kernel/src/network.rs:network_surface dot
+crates/kernel/src/network.rs:refine dot
 crates/kernel/src/offset.rs:Surf::same dot
 crates/kernel/src/offset.rs:axes cross,normalized
 crates/kernel/src/offset.rs:surf_of cross,dot,normalized

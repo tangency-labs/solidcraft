@@ -2011,7 +2011,7 @@ fn w38d_record_fixture(hole: bool) -> (crate::Document, u64, crate::WholeProfile
         .unwrap()
         .boundary;
     let region = drawing.sheet_fill_region(&doc, 41, &boundary).unwrap();
-    drawing.patterns.push(Arc::new(PatternSnapshot { id: 71, pattern: solidcore_record::hatch::Pattern::lines_45() }));
+    drawing.patterns.push(Arc::new(PatternSnapshot { id: 71, pattern: crate::drawing::hatch::Pattern::lines_45() }));
     drawing.fills.push(Arc::new(SketchFill { id: 70, sketch: 41, boundary: boundary.clone(), paint: FillPaint::Solid, last_region: region }));
     drawing.validate().unwrap();
     doc.put_drawing(Arc::new(drawing));

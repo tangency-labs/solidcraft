@@ -872,13 +872,14 @@ mod local_operation {
     use crate::UnitDiff;
 
     /// A trim off its edge's tolerance on an edge no moved value touches fails (#19318).
-    /// `box_face0_in` moves no value; the first two trimmed uses of its first edge with two
-    /// swap their trims (each now in the other face's parameters), so neither lies on its
-    /// edge.
+    /// `gen0002` moves no value; the first two trimmed uses of its first edge with two swap
+    /// their trims (each now in the other face's parameters), so neither lies on its edge.
+    /// (`box_face0_in` served until WR-495's exact mate left its result with no trimmed edge
+    /// use, tangency-labs/solidcraft#21301.)
     #[test]
     #[should_panic(expected = "a trim off its edge's tolerance on an untouched edge")]
     fn an_off_trim_on_an_untouched_edge_fails() {
-        let case = crate::case::regression_case(&Runner, "box_face0_in");
+        let case = crate::case::regression_case(&Runner, "gen0002");
         let out = Runner.run_rust(&case).unwrap();
         let (_, mut bodies) = result_breps(&case).unwrap();
         let (_, b) = &mut bodies[0];
@@ -899,7 +900,7 @@ mod local_operation {
         let t1 = b.edgeuse(u1).unwrap().uv_trim_curve.clone();
         b.edgeuse_mut(u0).unwrap().uv_trim_curve = t1;
         b.edgeuse_mut(u1).unwrap().uv_trim_curve = t0;
-        super::certify_body("box_face0_in", &out, "", b, Some(&mut raw), &[], &[], true);
+        super::certify_body("gen0002", &out, "", b, Some(&mut raw), &[], &[], true);
     }
 }
 
