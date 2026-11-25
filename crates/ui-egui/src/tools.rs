@@ -126,6 +126,10 @@ pub struct Tool {
     /// Construction/Normal switch under the Length box sets `line_type`, and only a typed length
     /// makes a segment. Kept in step with the preference while the tool runs.
     pub classic: bool,
+    /// The 3-Point Arc's tangent mode is on (`sketch_arc_tangent_snap`, #20719): its third point
+    /// has Radius and Sweep boxes and a centre cross. Kept in step with the preference while the
+    /// tool runs; off, the tool shows only the pointer's coordinates, as before.
+    pub arc_modes: bool,
     /// True when the constraint/dimension tool was entered from a valid preselection: once that
     /// single operation commits, the tool unselects itself (`app.tool = None`).
     pub preselected: bool,
@@ -188,6 +192,7 @@ impl Tool {
             chain: Default::default(),
             line_type: 3,
             classic: false,
+            arc_modes: false,
             preselected: false,
             finished: false,
         })
@@ -233,21 +238,35 @@ fn xy(p: &(Vec2, Option<String>)) -> Value {
 /// A clicked point that is held where it snapped: a midpoint, on-curve, crossing or body-vertex
 /// snap goes as itself, so the command keeps the point there. A snap to an existing point goes as
 /// its place, where the command's `connect` joins the two with a Coincident the sketch shows.
-/// So does a snap whose curve is no longer in the sketch: Undo between a rectangle's two clicks
-/// can take away the curve its first corner snapped to, and the command would refuse the snap
-/// click after click (the Line's chain re-checks the same way, #10016). And so does every snap
-/// in a drawing sheet's sketch, where the commands take no snap yet.
+/// So does every snap in a drawing sheet's sketch, where the commands take no snap yet. A snap
+/// whose curve the Undo button took away does not reach this function as a snap: `run_shape`
+/// passes every stored click through `standing` first, which turns it into the place clicked.
 fn held(app: &SolveApp, p: &(Vec2, Option<String>)) -> Value {
-    let stands = |id: &str| {
-        if app.session.sheet_sketching() {
-            return false;
-        }
-        let st = crate::open_meshing::session_world(&app.session);
-        app.session.active_sketch.and_then(|sid| st.sketch(sid)).is_some_and(|ss| crate::sketch_line_arc::chain_point(&ss.sketch, id, p.0).is_some())
-    };
     match &p.1 {
-        Some(id) if solidcraft_engine::cmd::SNAP_PREFIXES.iter().any(|k| id.starts_with(k)) && stands(id) => json!(id),
+        Some(id) if solidcraft_engine::cmd::SNAP_PREFIXES.iter().any(|k| id.starts_with(k)) && snap_stands(app, id, p.0) == Some(true) => json!(id),
         _ => xy(p),
+    }
+}
+
+/// Whether the snap `id` of a click at `at` still names a point, curve or crossing of the sketch
+/// being edited. None when there is no such sketch to look in, as in a drawing sheet's sketch.
+fn snap_stands(app: &SolveApp, id: &str, at: Vec2) -> Option<bool> {
+    if app.session.sheet_sketching() {
+        return None;
+    }
+    let st = crate::open_meshing::session_world(&app.session);
+    let ss = app.session.active_sketch.and_then(|sid| st.sketch(sid))?;
+    Some(crate::sketch_line_arc::chain_point(&ss.sketch, id, at).is_some())
+}
+
+/// A stored click as a shape sends it: a snap whose point or curve the Undo button took away
+/// after the click (it leaves the tool on) goes as the place clicked, so the command does not
+/// refuse click after click (#21835), as the Line's chain re-checks its point (#10016). It is
+/// checked when the shape is sent, so a Redo that brings the curve back brings the snap back.
+fn standing(app: &SolveApp, p: &(Vec2, Option<String>)) -> (Vec2, Option<String>) {
+    match &p.1 {
+        Some(id) if snap_stands(app, id, p.0) == Some(false) => (p.0, None),
+        _ => p.clone(),
     }
 }
 
@@ -537,18 +556,30 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
         }
         Kind::Pick(n) => {
             let hits = curve_operands(tool.cmd, pick(app, proj, pos));
-            let entity = hits.iter().find_map(|h| match h {
-                Hit::SketchPoint { id, .. } | Hit::SketchCurve { id, .. } => Some(id.clone()),
-                Hit::Axis { name } => axis_pick(app, &tool, name),
-                _ => None,
-            });
+            let entity = if app.ui.project_link_tools {
+                active_entity(app, &hits).map(|(id, _)| id).or_else(|| {
+                    hits.iter().find_map(|h| match h {
+                        Hit::Axis { name } => axis_pick(app, &tool, name),
+                        _ => None,
+                    })
+                })
+            } else {
+                // Keep main's hit order unless the enhanced projection workflow is enabled.
+                hits.iter().find_map(|h| match h {
+                    Hit::SketchPoint { id, .. } | Hit::SketchCurve { id, .. } => Some(id.clone()),
+                    Hit::Axis { name } => axis_pick(app, &tool, name),
+                    _ => None,
+                })
+            };
+            // Fix never projects model or foreign-sketch geometry.
+            let projects = tool.cmd != "sketch.constraint.fix";
             // With nothing of the sketch there, a body's edge or vertex is picked (kept as its
             // reference): the command projects it, so any body can be constrained to, a mirrored
-            // copy too (#6348). Projected geometry is already fixed, so Fix takes sketch entities.
+            // copy too (#6348). Another sketch's curve is projected here first ([`project_pick`]).
             // Coincident at an edge's middle takes that middle (#17920), as at a sketch line's.
             let model = || {
                 hits.iter()
-                    .filter(|h| tool.cmd != "sketch.constraint.fix" && matches!(h, Hit::Edge { .. } | Hit::Vertex { .. }))
+                    .filter(|h| projects && matches!(h, Hit::Edge { .. } | Hit::Vertex { .. }))
                     .find_map(|h| {
                         let r = crate::sketch_tools::model_ref(app, h)?;
                         let middle = matches!(h, Hit::Edge { mid, .. } if tool.cmd == "sketch.constraint.coincident"
@@ -557,7 +588,9 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                     })
                     .map(|r| r.to_string())
             };
-            if let Some(id) = entity.or_else(model)
+            if let Some(id) = entity
+                .or_else(model)
+                .or_else(|| if projects && app.ui.project_link_tools { project_pick(app, &hits).map(|(id, _)| id) } else { None })
                 && !tool.picks.contains(&id)
             {
                 tool.picks.push(id);
@@ -574,7 +607,12 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                 }
             }
         }
-        Kind::Ext => crate::sketch_tools::on_click(app, &mut tool, proj, pos),
+        Kind::Ext => {
+            crate::sketch_tools::on_click(app, &mut tool, proj, pos);
+            if crate::sketch_tools::take_ended() {
+                return;
+            }
+        }
         Kind::Dimension => {
             let hits = pick(app, proj, pos);
             // The snap identifies the intended line even when another (projected) edge
@@ -650,7 +688,19 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                 app.tool = Some(tool);
                 return;
             }
-            if let Some(typed) = crate::dim_view::live() {
+            let typed = crate::dim_view::live();
+            // A model edge or vertex (or another sketch's curve) joins as its projection, but a
+            // click that only places the text of a dimension being typed projects nothing.
+            let joins = app.ui.project_link_tools && typed.is_none_or(|typed| !typed) && tool.picks.len() < 2;
+            let hit = hit.or_else(|| {
+                let (id, curve) = if joins { project_pick(app, &hits)? } else { return None };
+                let sketch = app.session.active_sketch.and_then(|sid| app.session.doc.sketch(sid).ok());
+                let line = sketch
+                    .and_then(|sk| sk.curve_index(&id).and_then(|l| sk.shape(l)))
+                    .is_some_and(|shape| matches!(shape, solidcraft_engine::sketch::Shape::Line { .. }));
+                Some((id, curve, !curve || line))
+            });
+            if let Some(typed) = typed {
                 match hit {
                     // Before anything is typed, another entity joins the dimension, as in the
                     // place-first flow (a distance, an angle between lines).
@@ -807,6 +857,14 @@ pub fn place(app: &mut SolveApp, p: (Vec2, Option<String>)) {
                     }
                 }
                 let placed: Vec<Vec2> = tool.pts.iter().map(|p| p.0).collect();
+                // A 3-Point Arc whose third point was the tangent snap is tangent to the curves it
+                // starts and ends on (#20719).
+                if tool.cmd == "sketch.arc.three_point"
+                    && let [start, end, through] = placed[..]
+                    && let Some(arc) = curves.first()
+                {
+                    crate::inference::commit_arc(app, arc, start, end, through);
+                }
                 crate::sketch_tools::constrain_lined(app, &mut tool, &placed, &before);
                 tool.pts.clear();
                 crate::sketch_dims::reset(&mut tool);
@@ -827,7 +885,10 @@ pub fn place(app: &mut SolveApp, p: (Vec2, Option<String>)) {
 /// placed until fully constrained; the engine's `dimension_roles` decides which shapes those are.
 /// This is the one place drawing tools commit through: the 3D tools (`sketch3d`) take part by
 /// committing here once their creators are listed there.
-pub(crate) fn draw(app: &mut SolveApp, t: &Tool, params: Value) -> Result<Value, String> {
+pub(crate) fn draw(app: &mut SolveApp, t: &Tool, mut params: Value) -> Result<Value, String> {
+    if matches!(t.cmd, "sketch.spline.control_point" | "sketch.spline.control_point_5") {
+        params["control_polygon"] = json!(true);
+    }
     let dimensions = crate::sketch_dims::dimensions(t);
     let as_drawn = app.preferences.sketch_auto_dimensions && solidcraft_engine::dimension_roles(t.cmd).is_some();
     let locate = as_drawn && app.preferences.sketch_auto_locate;
@@ -853,7 +914,8 @@ pub(crate) fn draw(app: &mut SolveApp, t: &Tool, params: Value) -> Result<Value,
 }
 
 fn run_shape(app: &mut SolveApp, t: &Tool) -> Result<Vec<String>, String> {
-    let p = &t.pts;
+    let pts: Vec<_> = t.pts.iter().map(|p| standing(app, p)).collect();
+    let p = &pts;
     let d = |a: usize, b: usize| p[a].0.dist(p[b].0);
     let sides = crate::sketch_dims::locked_value(app, t, "Sides").map_or(6, |v| v as usize);
     let params = match t.cmd {
@@ -869,7 +931,9 @@ fn run_shape(app: &mut SolveApp, t: &Tool) -> Result<Vec<String>, String> {
             // The second click gives the edge's direction and half-length, the third its width.
             // The middle goes as the circle's centre does: a snap to a line's midpoint, a curve or
             // a crossing as itself, so it is held there; a snap to a point as its place (#7299).
-            let (a, p1) = (p[0].0, edge_end(p[0].0, &p[1]));
+            // The edge's end is read from the click as it was made, as the preview reads it: a
+            // snap whose curve Undo took away still keeps the edge off the axis nudge.
+            let (a, p1) = (p[0].0, edge_end(p[0].0, &t.pts[1]));
             let d = (p1 - a).normalized().ok_or("the edge's end must differ from its middle")?;
             let corner = a + d * (p1 - a).len() + d.perp() * (p[2].0 - a).dot(d.perp());
             let anchor = match &p[0].1 {
@@ -1221,6 +1285,40 @@ pub(crate) fn pick_axis_from_browser(app: &mut SolveApp, name: &str) -> bool {
     true
 }
 
+/// The active sketch's point (`false`) or curve (`true`) under the cursor. Other sketches'
+/// entities are not this sketch's: they are projected first ([`project_pick`]).
+fn active_entity(app: &SolveApp, hits: &[Hit]) -> Option<(String, bool)> {
+    let active = app.session.active_sketch?;
+    hits.iter().find_map(|h| match h {
+        Hit::SketchPoint { sketch, id, .. } if *sketch == active => Some((id.clone(), false)),
+        Hit::SketchCurve { sketch, id, .. } if *sketch == active => Some((id.clone(), true)),
+        _ => None,
+    })
+}
+
+/// A model vertex or edge, or another sketch's curve, under the cursor, projected into the
+/// active sketch so a constraint or dimension can use it: the projected point (`false`) or
+/// curve (`true`). The status line tells what was projected (or why it could not be).
+fn project_pick(app: &mut SolveApp, hits: &[Hit]) -> Option<(String, bool)> {
+    let active = app.session.active_sketch?;
+    let (r, what) = hits.iter().find_map(|h| match h {
+        Hit::Vertex { body, point } => Some((json!({"vertex": [point.x, point.y, point.z], "body": body}), "vertex")),
+        Hit::Edge { body, mid, .. } => Some((json!({"edge": [mid.x, mid.y, mid.z], "body": body}), "edge")),
+        Hit::SketchCurve { sketch, id, .. } if *sketch != active => Some((json!({"sketch": sketch, "curve": id}), "curve")),
+        _ => None,
+    })?;
+    let v = app.run("sketch.project", json!({"refs": [r]})).ok()?;
+    let link = v["links"].get(0)?;
+    let first = |k: &str| link[k].get(0).and_then(Value::as_str).map(str::to_string);
+    // A vertex projects to a point, and so does an edge seen end-on.
+    let curve = if what == "vertex" { None } else { first("curves") };
+    let picked = curve.map(|c| (c, true)).or_else(|| first("points").map(|p| (p, false)));
+    if picked.is_some() {
+        app.set_status(solidcraft_ui_text::tr(&format!("sketch.projected_{what}")), false);
+    }
+    picked
+}
+
 fn run_pick(app: &mut SolveApp, t: &Tool) -> bool {
     // An entity id, or a model edge's or vertex's reference.
     let k: Vec<Value> = t.picks.iter().map(|pick| serde_json::from_str(pick).ok().filter(Value::is_object).unwrap_or_else(|| json!(pick))).collect();
@@ -1242,7 +1340,14 @@ fn run_pick(app: &mut SolveApp, t: &Tool) -> bool {
         }
         _ => json!({"a": k[0], "b": k[1]}),
     };
-    app.run(t.cmd, params).is_ok()
+    // A command that changed nothing says why (Fix on projected geometry).
+    let ran = app.run(t.cmd, params);
+    if let Ok(v) = &ran
+        && let Some(note) = v["result"]["note"].as_str()
+    {
+        app.set_status(note, false);
+    }
+    ran.is_ok()
 }
 
 /// Parallel, Perpendicular, Equal and Collinear constrain two curves, and their commands take no
@@ -1515,15 +1620,8 @@ pub(crate) fn preview_curve(
     Some(sk)
 }
 
-fn preview_circumcentre(a: Vec2, b: Vec2, c: Vec2) -> Option<Vec2> {
-    let ab = b - a;
-    let ac = c - a;
-    let d = 2.0 * ab.cross(ac);
-    if !d.is_finite() || d.abs() < 1e-12 {
-        return None;
-    }
-    let centre = a + Vec2::new(ac.y * ab.len2() - ab.y * ac.len2(), ab.x * ac.len2() - ac.x * ab.len2()) / d;
-    centre.is_finite().then_some(centre)
+pub(crate) fn preview_circumcentre(a: Vec2, b: Vec2, c: Vec2) -> Option<Vec2> {
+    solidcraft_kernel::services::sketch_arc::circumcentre(a.into(), b.into(), c.into()).map(Vec2::from)
 }
 
 /// The polygon's actual straight edges, in the same orientation as the eventual command.

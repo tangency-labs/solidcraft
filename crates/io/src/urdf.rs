@@ -182,6 +182,43 @@ pub struct Mimic {
     pub offset: f64,
 }
 
+/// What the tree walk met that each format words, or writes, its own way; in the order met.
+#[derive(Clone, Debug)]
+pub(crate) enum Note {
+    /// The same in every format.
+    Text(String),
+    /// Joint `joint` would close a loop, so the tree leaves it out. `a` and `b` are the links of
+    /// its two sides, `frame` its A side's frame in link `a`'s frame (mm), as the design is now.
+    Loop { joint: String, kind: JointKind, a: usize, b: usize, frame: Mat },
+    /// Joint `joint` is a relation whose turns follow a fixed step: fixed where it is.
+    Relation { joint: String, kind: JointKind },
+    /// Joint `joint` slides without a limit.
+    Unlimited { joint: String },
+    /// Link `link` is a copy of a jointed occurrence: fixed where it is.
+    JointedCopy { link: String },
+}
+
+impl Note {
+    fn urdf(self) -> String {
+        match self {
+            Note::Text(t) => t,
+            Note::Loop { joint, .. } => format!("joint `{joint}` closes a loop: skipped (URDF is a tree)"),
+            Note::Relation { joint, kind } => format!("joint `{joint}` is a {kind:?} relation, which URDF has no joint for: written fixed as it is"),
+            Note::Unlimited { joint } => format!("joint `{joint}` slides without a limit: written as ±1000 m (URDF needs one)"),
+            Note::JointedCopy { link } => format!(
+                "`{link}` is a copy of a jointed occurrence: fixed where it is (the URDF moves only the first placement; copies would need <mimic>)"
+            ),
+        }
+    }
+}
+
+/// The robot as the tree walk builds it, before a format writes it.
+pub(crate) struct Walked {
+    pub model: UrdfModel,
+    pub meshes: Vec<(String, Vec<u8>)>,
+    pub notes: Vec<Note>,
+}
+
 impl UrdfModel {
     /// Every link's world frame (mm) for the given value of each step.
     pub fn link_frames(&self, value: impl Fn(&UrdfJoint) -> f64) -> Vec<Mat> {
@@ -208,14 +245,14 @@ impl UrdfModel {
     }
 }
 
-fn translation(v: Vec3) -> Mat {
+pub(crate) fn translation(v: Vec3) -> Mat {
     let mut m = IDENTITY;
     m[3] = [v.x, v.y, v.z, 1.0];
     m
 }
 
 /// Rotation by `a` about the unit axis `u` (Rodrigues), column-major like `Mat`.
-fn rotation(u: Vec3, a: f64) -> Mat {
+pub(crate) fn rotation(u: Vec3, a: f64) -> Mat {
     let (s, c) = a.sin_cos();
     let t = 1.0 - c;
     let r = [
@@ -255,7 +292,7 @@ fn steps(kind: JointKind) -> Option<Vec<(Step, Vec3, usize)>> {
 /// SDFormat and XML. A file name is taken in Unicode NFC and also keeps `-`, any Unicode letter or
 /// digit and combining marks, so parts named in another script keep distinct, readable mesh files
 /// (#20409).
-fn sanitise(raw: &str, file: bool) -> String {
+pub(crate) fn sanitise(raw: &str, file: bool) -> String {
     use unicode_normalization::{UnicodeNormalization as _, char::is_combining_mark};
     let keep = |c: char| c.is_ascii_alphanumeric() || c == '_' || (file && (c == '-' || c.is_alphanumeric() || is_combining_mark(c)));
     let s: String =
@@ -505,7 +542,7 @@ struct Tree<'a> {
     parts: BTreeMap<u64, Part>,
     names: Names,
     model: UrdfModel,
-    warnings: Vec<String>,
+    notes: Vec<Note>,
     /// Occurrence to its link and the link's world frame (0: `base_link`).
     placed: BTreeMap<u64, (usize, Mat)>,
     /// Each usable joint's name, taken before any link's so it keeps the name the user gave.
@@ -577,7 +614,7 @@ impl<'a> Tree<'a> {
                 Some((parent, mat_mul(&mat_inverse(&at)?, &mat_mul(&self.world(occ), &local))))
             });
             let Some((parent, origin)) = frame else {
-                self.warnings.push(format!("frame `{}` is skipped: its origin doesn't resolve", o.name));
+                self.notes.push(Note::Text(format!("frame `{}` is skipped: its origin doesn't resolve", o.name)));
                 continue;
             };
             let name = self.names.take(&o.name);
@@ -629,7 +666,12 @@ impl<'a> Tree<'a> {
                 taken.insert(j.id);
                 let child = if j.a.occurrence == p { j.b.occurrence } else { j.a.occurrence };
                 if self.placed.contains_key(&child) {
-                    self.warnings.push(format!("joint `{}` closes a loop: skipped (URDF is a tree)", j.name));
+                    if let (Some(&(a, af)), Some(&(b, _))) = (self.placed.get(&j.a.occurrence), self.placed.get(&j.b.occurrence))
+                        && let Some(inv) = mat_inverse(&af)
+                    {
+                        let frame = mat_mul(&inv, &mat_mul(&self.world(j.a.occurrence), fa));
+                        self.notes.push(Note::Loop { joint: j.name.clone(), kind: j.kind, a, b, frame });
+                    }
                     continue;
                 }
                 if self.attach(j, fa, p, child, values.get(&j.id).map(Vec::as_slice).unwrap_or(&[])).is_some() {
@@ -645,7 +687,7 @@ impl<'a> Tree<'a> {
         let (chain, m) = match steps(j.kind) {
             Some(chain) => (chain, joints::motion(j.kind, q)),
             None => {
-                self.warnings.push(format!("joint `{}` is a {:?} relation, which URDF has no joint for: written fixed as it is", j.name, j.kind));
+                self.notes.push(Note::Relation { joint: j.name.clone(), kind: j.kind });
                 (Vec::new(), IDENTITY)
             }
         };
@@ -711,7 +753,7 @@ impl<'a> Tree<'a> {
                 j.limits.get(dof).copied().flatten().filter(|(lo, hi)| lo.is_finite() && hi.is_finite()).map(|(lo, hi)| (lo.min(hi), lo.max(hi)));
             let limit = match (step, limit) {
                 (Step::Prismatic, None) => {
-                    self.warnings.push(format!("joint `{}` slides without a limit: written as ±1000 m (URDF needs one)", j.name));
+                    self.notes.push(Note::Unlimited { joint: j.name.clone() });
                     Some((-UNLIMITED_TRAVEL_MM, UNLIMITED_TRAVEL_MM))
                 }
                 (_, l) => l,
@@ -720,7 +762,7 @@ impl<'a> Tree<'a> {
             let saved = j.dynamics.get(dof).copied().flatten().unwrap_or_default();
             let dynamics = saved.sane();
             if dynamics != saved {
-                self.warnings.push(format!("joint `{}`: dynamics that are not usable numbers are ignored", j.name));
+                self.notes.push(Note::Text(format!("joint `{}`: dynamics that are not usable numbers are ignored", j.name)));
             }
             self.model.joints.push(UrdfJoint {
                 name,
@@ -745,9 +787,9 @@ impl<'a> Tree<'a> {
         let mut copies: BTreeMap<Vec<u64>, (usize, Mat)> = BTreeMap::new();
         let placements = self.doc.placements();
         if placements.len() > MAX_PLACEMENTS || placements.iter().any(|p| p.1.len() > MAX_PLACEMENT_DEPTH) {
-            self.warnings.push(format!(
+            self.notes.push(Note::Text(format!(
                 "the assembly is deeper than {MAX_PLACEMENT_DEPTH} levels or has more than {MAX_PLACEMENTS} placements: copies past that are left out"
-            ));
+            )));
         }
         for (_, path, w) in placements {
             let Some((&occ, parent_path)) = path.split_last() else { continue };
@@ -767,10 +809,7 @@ impl<'a> Tree<'a> {
             if jointed.contains(&occ)
                 && let Some(l) = self.model.links.get(i)
             {
-                self.warnings.push(format!(
-                    "`{}` is a copy of a jointed occurrence: fixed where it is (the URDF moves only the first placement; copies would need <mimic>)",
-                    l.name
-                ));
+                self.notes.push(Note::JointedCopy { link: l.name.clone() });
             }
         }
     }
@@ -790,10 +829,37 @@ pub fn urdf(doc: &Document, st: &ModelState, stem: &str, options: &UrdfOptions) 
     }
     let active = doc.active_assembly();
     let doc = &*active;
+    let Walked { mut model, meshes, notes } = walk(doc, st, stem, options)?;
+    let mut warnings: Vec<String> = notes.into_iter().map(Note::urdf).collect();
+    if options.mimic {
+        resolve_mimics(&mut model, doc, "URDF", &mut warnings);
+    }
+
+    let on_fallback: Vec<&str> = model
+        .joints
+        .iter()
+        .filter(|j| {
+            j.step != Step::Fixed
+                && ((j.dynamics.effort.is_none() && options.effort.is_none()) || (j.dynamics.velocity.is_none() && options.velocity.is_none()))
+        })
+        .map(|j| j.name.as_str())
+        .collect();
+    if !on_fallback.is_empty() {
+        warnings.push(format!(
+            "joint effort and velocity limits are not given for {}: written as {DEFAULT_EFFORT} and {DEFAULT_VELOCITY} (use joint.dynamics, or pass effort and velocity)",
+            on_fallback.join(", ")
+        ));
+    }
+    let xml = write_xml(&model, &sanitise(stem, false), options);
+    Ok(UrdfPackage { xml, meshes, model, warnings })
+}
+
+/// The tree of links and joints, and the mesh files, that every format writes: `doc` is the
+/// active assembly.
+pub(crate) fn walk(doc: &Document, st: &ModelState, stem: &str, options: &UrdfOptions) -> Result<Walked> {
     let mut names = Names::default();
     let mut out = UrdfPackage { xml: String::new(), meshes: Vec::new(), model: UrdfModel::default(), warnings: Vec::new() };
     let base = names.take("base_link");
-    let robot = sanitise(stem, false);
     let parts = parts(doc, st, stem, options, &mut names, &mut out)?;
     for d in options.decals.iter().filter(|d| !parts.contains_key(&d.component)) {
         out.warnings.push(format!("decal `{}`: its component is placed nowhere in the assembly: left out", d.name));
@@ -804,7 +870,7 @@ pub fn urdf(doc: &Document, st: &ModelState, stem: &str, options: &UrdfOptions) 
         parts,
         names,
         model: UrdfModel::default(),
-        warnings: std::mem::take(&mut out.warnings),
+        notes: std::mem::take(&mut out.warnings).into_iter().map(Note::Text).collect(),
         placed: BTreeMap::from([(0, (0, IDENTITY))]),
         joint_names: BTreeMap::new(),
     };
@@ -832,7 +898,7 @@ pub fn urdf(doc: &Document, st: &ModelState, stem: &str, options: &UrdfOptions) 
             joints::resolve_origin(doc, st, &j.a).ok().map(|frame| j.offset_frame_a(frame)).filter(|_| joints::resolve_origin(doc, st, &j.b).is_ok());
         match fa {
             Some(fa) if exists(j.a.occurrence) && exists(j.b.occurrence) && j.a.occurrence != j.b.occurrence => usable.push((j, fa)),
-            _ => tree.warnings.push(format!("joint `{}` is skipped: its origins don't resolve or it joins an occurrence to itself", j.name)),
+            _ => tree.notes.push(Note::Text(format!("joint `{}` is skipped: its origins don't resolve or it joins an occurrence to itself", j.name))),
         }
     }
     let jointed: HashSet<u64> = usable.iter().flat_map(|(j, _)| [j.a.occurrence, j.b.occurrence]).collect();
@@ -867,7 +933,7 @@ pub fn urdf(doc: &Document, st: &ModelState, stem: &str, options: &UrdfOptions) 
             .or_else(|| doc.occurrences.iter().find(|o| !done(&tree, o.id)).map(|o| (o.id, true)));
         let Some((occ, to_base)) = next else { break };
         let Some(i) = tree.fix(occ, to_base) else {
-            tree.warnings.push(format!("occurrence {occ} has a degenerate placement: left out"));
+            tree.notes.push(Note::Text(format!("occurrence {occ} has a degenerate placement: left out")));
             left_out.insert(occ);
             continue;
         };
@@ -875,44 +941,23 @@ pub fn urdf(doc: &Document, st: &ModelState, stem: &str, options: &UrdfOptions) 
         let nested = tree.occurrence(occ).is_some_and(|o| o.parent != 0);
         let name = tree.model.links.get(i).map(|l| l.name.clone()).unwrap_or_default();
         if jointed.contains(&occ) {
-            tree.warnings.push(format!("`{name}` is not grounded: fixed where it is"));
+            tree.notes.push(Note::Text(format!("`{name}` is not grounded: fixed where it is")));
         } else if !nested || to_base {
-            tree.warnings.push(format!("`{name}` has no joint: fixed where it is"));
+            tree.notes.push(Note::Text(format!("`{name}` has no joint: fixed where it is")));
         }
     }
     tree.copies(&jointed);
     tree.frames();
-    plausibility(&tree.model, &mut tree.warnings);
-    if options.mimic {
-        resolve_mimics(&mut tree.model, doc, &mut tree.warnings);
-    }
-
-    let on_fallback: Vec<&str> = tree
-        .model
-        .joints
-        .iter()
-        .filter(|j| {
-            j.step != Step::Fixed
-                && ((j.dynamics.effort.is_none() && options.effort.is_none()) || (j.dynamics.velocity.is_none() && options.velocity.is_none()))
-        })
-        .map(|j| j.name.as_str())
-        .collect();
-    if !on_fallback.is_empty() {
-        tree.warnings.push(format!(
-            "joint effort and velocity limits are not given for {}: written as {DEFAULT_EFFORT} and {DEFAULT_VELOCITY} (use joint.dynamics, or pass effort and velocity)",
-            on_fallback.join(", ")
-        ));
-    }
-    out.xml = write_xml(&tree.model, &robot, options);
-    out.model = tree.model;
-    out.warnings = tree.warnings;
-    Ok(out)
+    let mut warnings = Vec::new();
+    plausibility(&tree.model, &mut warnings);
+    tree.notes.extend(warnings.into_iter().map(Note::Text));
+    Ok(Walked { model: tree.model, meshes: out.meshes, notes: tree.notes })
 }
 
-/// A motion link as `<mimic>`: the follower's URDF joint takes its value from the driver's. Tools
+/// A motion link as `<mimic>` (`format` names the one written in warnings): the follower's URDF joint takes its value from the driver's. Tools
 /// accept a mimic only of a joint that is not one itself, so a chain of links is composed down to
 /// its first driver. Values stay in stored units (mm, rad) until the last step.
-fn resolve_mimics(model: &mut UrdfModel, doc: &Document, warnings: &mut Vec<String>) {
+pub(crate) fn resolve_mimics(model: &mut UrdfModel, doc: &Document, format: &str, warnings: &mut Vec<String>) {
     let name = |id: u64| doc.assembly.joints.iter().find(|j| j.id == id).map_or_else(|| id.to_string(), |j| j.name.clone());
     let index: BTreeMap<(u64, usize), usize> = model.joints.iter().enumerate().filter_map(|(i, j)| Some((j.source?, i))).collect();
     let links = &doc.assembly.links;
@@ -920,11 +965,11 @@ fn resolve_mimics(model: &mut UrdfModel, doc: &Document, warnings: &mut Vec<Stri
     for l in links {
         let follower = name(l.b);
         if !l.coupling_is_linear() {
-            warnings.push(format!("the cam driving `{follower}` is not linear: `{follower}` is left free in the URDF"));
+            warnings.push(format!("the cam driving `{follower}` is not linear: `{follower}` is left free in the {format}"));
             continue;
         }
         let Some(&at) = index.get(&(l.b, l.ib)) else {
-            warnings.push(format!("the motion link to `{follower}` is left out: that joint is not in the URDF"));
+            warnings.push(format!("the motion link to `{follower}` is left out: that joint is not in the {format}"));
             continue;
         };
         // value of b = ratio · value of driver + offset, walking back to the first driver.
@@ -946,15 +991,15 @@ fn resolve_mimics(model: &mut UrdfModel, doc: &Document, warnings: &mut Vec<Stri
             }
         }
         if cycle {
-            warnings.push(format!("motion links form a cycle through `{follower}`: it is left free in the URDF"));
+            warnings.push(format!("motion links form a cycle through `{follower}`: it is left free in the {format}"));
             continue;
         }
         let Some((from, ratio, offset)) = found else {
-            warnings.push(format!("the joint driving `{follower}` is not in the URDF: `{follower}` is left free"));
+            warnings.push(format!("the joint driving `{follower}` is not in the {format}: `{follower}` is left free"));
             continue;
         };
         if !ratio.is_finite() || !offset.is_finite() {
-            warnings.push(format!("the motion link to `{follower}` is not usable numbers: `{follower}` is left free in the URDF"));
+            warnings.push(format!("the motion link to `{follower}` is not usable numbers: `{follower}` is left free in the {format}"));
             continue;
         }
         let (Some(d), Some(f)) = (model.joints.get(from), model.joints.get(at)) else { continue };

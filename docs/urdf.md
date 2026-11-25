@@ -215,5 +215,5 @@ The export still writes the file, and warns about:
 
 - Images wrapped around curved faces: a decal is a flat image on a plane.
 - Automatic convex decomposition of a concave part.
-- SDF and MJCF export, and URDF import.
+- URDF import. (SDF and MJCF have exports of their own: [SDF](sdf.md), [MJCF](mjcf.md).)
 - Joint motion inside the copies of a component placed several times.

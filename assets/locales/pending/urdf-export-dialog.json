@@ -64,5 +64,16 @@
     "urdf.positive_number": "请输入大于 0 的数字",
     "urdf.place_meshes": "将网格写入前缀所指的位置",
     "cmd.file.export_urdf_options": "带选项导出 URDF"
+  },
+  "fr": {
+    "Couple motion links": "Coupler les liaisons de mouvement",
+    "Export URDF": "Exporter en URDF",
+    "Mesh file prefix": "Préfixe des fichiers de maillage",
+    "Joint effort": "Effort de la liaison",
+    "Joint velocity": "Vitesse de la liaison",
+    "urdf.fallback_help": "L’effort et la vitesse s’appliquent aux liaisons sans dynamique enregistrée. Laissez vide pour utiliser 1000 et 10.",
+    "urdf.positive_number": "saisissez un nombre supérieur à 0",
+    "urdf.place_meshes": "Écrire les maillages à l’emplacement indiqué par le préfixe",
+    "cmd.file.export_urdf_options": "Exporter en URDF avec options"
   }
 }
