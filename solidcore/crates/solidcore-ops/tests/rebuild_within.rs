@@ -105,6 +105,36 @@ fn a_span_too_narrow_for_zero_to_one_is_not_lost() {
     }
 }
 
+/// A polyline with a span one float wide in the middle of its domain is rebuilt. The polyline
+/// is on `[-1, 1]`. Between its knot 0.5 and the next float it runs 1.5e-3 up, from (1, 0, 0)
+/// to (1, 1.5e-3, 0). A polyline through the middle of that leg is within 0.75e-3 of it at
+/// every parameter, so a tolerance of 1e-3 can be met. No curve comes nearer than half the
+/// leg: within one float of parameter the polyline is at both of the leg's ends.
+///
+/// Mapped onto `[0, 1]` first, the two knots are one (0.75), a knot of a multiplicity above
+/// the degree. The mapped curve has no parameter for the leg, the kernel's evaluation at that
+/// knot gives the leg's far end, and a fit of those samples is pulled across the leg: it was
+/// refused past the tolerance. On its own domain every span of the polyline has its
+/// parameters.
+#[test]
+fn a_polyline_with_a_span_one_float_wide_in_its_middle_is_rebuilt() {
+    let leg = 1.5e-3;
+    let at = 0.5_f64;
+    let next = f64::from_bits(at.to_bits() + 1);
+    let (start, end) = ([0.0, 0.0, 0.0], [2.0, leg, 0.0]);
+    let source = Curve::Spline {
+        knots: vec![-1.0, -1.0, at, next, 1.0, 1.0],
+        points: vec![start, [1.0, 0.0, 0.0], [1.0, leg, 0.0], end],
+    };
+    let (c, bound) = rebuild_within(&source, 1, 1e-3, None, None).unwrap();
+    assert!(bound <= 1e-3, "{bound}");
+    assert!(bound >= 0.499 * leg, "{bound}");
+    clamped_on_unit(&c, 1);
+    let (_, to) = spline(&c);
+    assert_eq!(to[0], start);
+    assert_eq!(to[to.len() - 1], end);
+}
+
 /// A tolerance below what the rounding of the curve's own coordinates allows any bound to be
 /// is answered with the bound of the first fit: no count of control points reaches it.
 #[test]
