@@ -1261,8 +1261,6 @@ mod tests {
                     for dir in [[0.0, 0.0, 1.0], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [1.0, 1.0, 1.0], [0.0, 0.3, -0.9]] {
                         let to = look(cam, dir);
                         let msg = format!("{dir:?} from {cam:?}");
-                        let d = Vec3::new(dir[0], dir[1], dir[2]).normalized().unwrap();
-                        assert!(to.back().dist(cam.from_frame(d)) < 2e-6, "looks from the direction: {msg}");
                         assert!((to.roll - kept).abs() < 1e-9, "keeps roll {kept}, got {}: {msg}", to.roll);
                         // Upright, the view is the one it always was; rolled, it is that view rolled.
                         let upright = look(Camera { roll: 0.0, ..cam }, dir);

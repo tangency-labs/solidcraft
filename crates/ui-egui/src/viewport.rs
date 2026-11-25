@@ -11745,16 +11745,12 @@ fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, focused_v
     // The compass returns a view action; its drag came from `axis_view_orbit` above.
     match crate::view_compass::show(ui, &compass) {
         Some(crate::view_compass::ViewAction::Snap { direction, .. }) => {
+            // The tip the view already looks from turns it round. The view itself comes from
+            // `view.navigate`, as for the custom navigator's faces, so both pick a view one way (#21480).
             let d = Vec3::from(direction);
-            let frame = app.cam.to_frame(d);
-            let dir = if app.cam.back().dot(d) > 0.9999 { -d } else { d };
-            let mut to = app.cam.looking_from(dir);
-            if frame.z.abs() > 0.5 {
-                to.yaw = nearest_quarter_turn(app.cam.yaw);
-            }
-            // A view rolled on its side or upside down stays that way (#21480).
-            to.roll = app.cam.quarter_roll();
-            app.animate_turn(to);
+            let from = app.cam_anim.map_or(app.cam, |a| a.to);
+            let dir = if from.back().dot(d) > 0.9999 { -d } else { d };
+            navigator_controls::navigate(app, None, Some(from.to_frame(dir)));
         }
         Some(crate::view_compass::ViewAction::Home) => app.animate_view("home"),
         Some(crate::view_compass::ViewAction::TurnAround) => {
