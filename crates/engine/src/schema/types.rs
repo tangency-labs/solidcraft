@@ -689,6 +689,14 @@ keyword_param!(
     "Whether the profiles are raised from the face (emboss, the default) or sunk into it (deboss). Any case."
 );
 keyword_param!(
+    /// `solid.dome`'s `shape`.
+    DomeShapeParam,
+    "shape",
+    &["elliptical", "spherical"],
+    "elliptical or spherical",
+    "The dome's meridian: elliptical (a quarter ellipse, the default; on a circle, a half ellipsoid of revolution) or spherical (the sphere through the rim and the apex, on a circle). Any case."
+);
+keyword_param!(
     /// `surface.ruled`'s `mode`.
     RuledModeParam,
     "mode",
@@ -1308,7 +1316,7 @@ impl JsonSchema for RailFitParam {
 /// rails to count; `None` leaves the count to the handler. `default_sketch`: a rail may
 /// leave its `sketch` out. A key a rail doesn't take, which the handler ignores, is refused too.
 pub(super) fn guide_rails_problem(v: &Value, count_for: Option<&str>, default_sketch: bool) -> Option<String> {
-    let Value::Array(given) = v else { return Some(whole("`rails` must list one or two rails: [{sketch, curves: [ids]}]")) };
+    let Value::Array(given) = v else { return Some(whole("`rails` must list guide rails: [{sketch, curves: [ids]}]")) };
     if let Some(what) = count_for
         && !(1..=2).contains(&given.len())
     {

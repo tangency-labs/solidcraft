@@ -97,7 +97,7 @@ fn schemas_and_the_key_check_agree() {
     );
     assert_keys(
         input_schema_for::<BoundaryFillParams>(),
-        &["body_name", "body_names", "cells", "name", "operation", "participants", "remove_tools", "tools", "touching"],
+        &["body_name", "body_names", "cells", "name", "operation", "participants", "planes", "remove_tools", "tools", "touching"],
     );
     assert_keys(
         input_schema_for::<CoilParams>(),
@@ -537,4 +537,15 @@ fn replace_face_checks_its_keys() {
     let p = json!({"faces": [[10, 10, 10]], "target": "XY", "flp": true});
     let error = low_and_high(ParamCheck::Strict).execute("solid.replace_face", &p).err().map(|e| e.to_string()).unwrap_or_default();
     assert!(error.contains("`flp`"), "{error}");
+}
+
+/// Boundary Fill's `planes` may be empty (the handler reads `[]` as none); its `tools` may not.
+#[test]
+fn boundary_fill_schema_takes_an_empty_planes_list_but_not_empty_tools() {
+    let schema = input_schema_for::<BoundaryFillParams>();
+    let schema = schema.as_value();
+    let call = |tools: Value, planes: Value| json!({"tools": tools, "planes": planes, "cells": [[1, 2, 3]]});
+    assert!(conforms(schema, schema, &call(json!(["A"]), json!([]))));
+    assert!(conforms(schema, schema, &call(json!(["A"]), json!(["XY"]))));
+    assert!(!conforms(schema, schema, &call(json!([]), json!([]))));
 }

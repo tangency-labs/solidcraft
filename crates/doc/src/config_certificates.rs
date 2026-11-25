@@ -892,8 +892,10 @@ impl Document {
         }
         self.coplanar_pieces(body, &indices, |index| names.verified(index))?;
         // A piece by its own name stands for itself, which a piece of a face split on purpose
-        // (Split Face) never does: that needs a fixed plane.
+        // (Split Face) told apart only by the faces around it never does: that needs a fixed
+        // plane. One by the name Split Face gave it (`F2:top#[F7:split:in]`) does.
         if crate::naming::strip_piece(name) != name
+            && !crate::history_names::names_split_piece(name)
             && let Some(plane) = indices.first().and_then(|index| body.body.planar_face(*index))
             && split_on_purpose(body, &plane)
         {

@@ -324,6 +324,8 @@ pub struct ViewportState {
     patches: u64,
     /// Model scenes built since the viewport started (a scene with levels filled in is not one).
     pub(crate) scenes_built: u64,
+    /// Sketch scenes built since the viewport started: one per change of what that scene shows.
+    pub(crate) sketch_scenes_built: u64,
     /// The GPU target that last received this view's scene uploads.
     scene_target: Option<u64>,
     /// Ground geometry is reused independently of the camera-dependent sketch/grid scene.
@@ -468,6 +470,10 @@ pub struct ViewportState {
     pub(crate) axis_warp: Option<Pos2>,
     /// Unsnapped camera while Shift-orbit previews a standard or diagonal view.
     pub orbit_free: Option<Camera>,
+    /// Set when a mouse orbit drag starts: whether the `free_orbit_key` was held, so the drag
+    /// turns in the other orbit style than `free_orbit` says until it ends (#20917). None between
+    /// drags.
+    pub(crate) orbit_flip: Option<bool>,
     pub build_ms: f64,
     /// Adaptive supersampling (#1288) and ambient occlusion while moving (#7165): the view drawn
     /// last (its view-projection and pixels) and since when it has held still (app time, s).
@@ -3380,6 +3386,7 @@ pub(crate) fn refresh_sketch_scene(app: &mut SolveApp, proj: &Proj) {
         if let Ok(mut slot) = app.viewport.sketch_slot.lock() {
             *slot = Some(scene);
         }
+        app.viewport.sketch_scenes_built += 1;
         app.viewport.sketch_key = sk;
     }
 }
@@ -3418,6 +3425,11 @@ fn refresh_wireframe(app: &mut SolveApp, proj: &Proj) {
 pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
     let tk = Tokens::get();
     let mut sc = GpuScene::default();
+    // The last scene's sizes are this one's best guess: the lists are filled in one go instead of
+    // growing (and copying) through many reallocations.
+    if let Some(sizes) = app.viewport.sketch_slot.lock().ok().and_then(|slot| slot.as_ref().map(GpuScene::capacity_hint)) {
+        sc.reserve_lists(sizes);
+    }
     let st = crate::open_meshing::shown_world(app);
     if ground_shadow_shown(app) {
         let geometry = shadow_geometry(app, &st);
@@ -4310,6 +4322,7 @@ pub fn construction_points(app: &SolveApp) -> Vec<(String, Vec3)> {
 /// (#4345). A component's
 /// origin plane drawn like the design Origin's instead: a quarter of the square, from its origin
 /// along its own axes ([`origin_quads`]), so a placement's origin reads like the design's.
+/// A plane given a size of its own (`view.plane_size`) is drawn at that size instead.
 pub fn construction_quads(app: &SolveApp) -> Vec<(String, Vec3, [Vec3; 4])> {
     let size = origin_size(app.cam.half_height());
     let h = size * 1.2;
@@ -4320,19 +4333,10 @@ pub fn construction_quads(app: &SolveApp) -> Vec<(String, Vec3, [Vec3; 4])> {
     solidcraft_engine::view::construction_planes(scratch.as_ref().unwrap_or(&app.session))
         .into_iter()
         .filter(|(_, n, _)| app.session.construction_visible(n))
-        .map(|(_, name, pl)| {
-            let mut r = match faces.get(&name) {
-                // The face's size, and never smaller than a quarter of the square (zoomed out).
-                Some(face) => {
-                    let (c, m) = (face.center(), Vec2::new(0.25 * h, 0.25 * h));
-                    solidcraft_engine::geom::Aabb2 { min: c - m, max: c + m }.union(face)
-                }
-                None => solidcraft_engine::geom::Aabb2 { min: Vec2::new(-h, -h), max: Vec2::new(h, h) },
-            };
-            for (_, b) in bodies.iter() {
-                r = r.union(&plane_cover(&pl, b));
-            }
-            let q = [r.min, Vec2::new(r.max.x, r.min.y), r.max, Vec2::new(r.min.x, r.max.y)];
+        .map(|(id, name, pl)| {
+            let auto = auto_plane_extent(&pl, h, &bodies, faces.get(&name));
+            let [x0, y0, x1, y1] = crate::plane_resize::extent(app, id, auto);
+            let q = [Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)];
             (name, pl.normal(), q.map(|p| pl.to_world(p)))
         })
         .chain(app.session.shown_component_origins().into_iter().filter_map(|(name, g)| match g {
@@ -4343,6 +4347,35 @@ pub fn construction_quads(app: &SolveApp) -> Vec<(String, Vec3, [Vec3; 4])> {
             _ => None,
         }))
         .collect()
+}
+
+/// The rectangle `[x0, y0, x1, y1]` a plane not given a size is drawn as (see [`construction_quads`]).
+fn auto_plane_extent(
+    pl: &Plane,
+    h: f64,
+    bodies: &[(String, solidcraft_engine::geom::Aabb3)],
+    face: Option<&solidcraft_engine::geom::Aabb2>,
+) -> [f64; 4] {
+    let mut r = match face {
+        // The face's size, and never smaller than a quarter of the square (zoomed out).
+        Some(face) => {
+            let (c, m) = (face.center(), Vec2::new(0.25 * h, 0.25 * h));
+            solidcraft_engine::geom::Aabb2 { min: c - m, max: c + m }.union(face)
+        }
+        None => solidcraft_engine::geom::Aabb2 { min: Vec2::new(-h, -h), max: Vec2::new(h, h) },
+    };
+    for (_, b) in bodies.iter() {
+        r = r.union(&plane_cover(pl, b));
+    }
+    [r.min.x, r.min.y, r.max.x, r.max.y]
+}
+
+/// [`auto_plane_extent`] for one plane at the current view and model.
+pub(crate) fn plane_auto_extent(app: &SolveApp, name: &str, pl: &Plane) -> [f64; 4] {
+    let h = origin_size(app.cam.half_height()) * 1.2;
+    let st = crate::open_meshing::shown_world(app);
+    let faces = plane_face_covers(app, &st);
+    auto_plane_extent(pl, h, &body_bounds(app, &st), faces.get(name))
 }
 
 type PlaneFaces =
@@ -6596,6 +6629,8 @@ fn highlight_key_with_projection(app: &SolveApp, projection: impl FnOnce() -> Pr
     app.preferences.origin_axes_across_view.hash(&mut h);
     // A typed dimension value hides the hovered profile (see `build_highlight`).
     crate::dim_view::preview_solve(app).is_some().hash(&mut h);
+    // A construction plane's handle being dragged: its quad is drawn at the live size.
+    crate::plane_resize::live_key().hash(&mut h);
     for p in preview_points(app) {
         [p.x, p.y, p.z].map(f64::to_bits).hash(&mut h);
     }
@@ -8013,7 +8048,6 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let sketch = app.session.active_sketch;
     let held_tool = if sketch.is_some() && crate::sketch_view::active_sketch(app).is_none() { app.tool.take() } else { None };
     show_view(app, ui);
-    crate::view_tiles::single_sketch_chrome(app, ui);
     if let Some(tool) = held_tool
         && app.session.active_sketch == sketch
         && app.tool.is_none()
@@ -8604,8 +8638,8 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             } else {
                 let annotation = sketch_constraint_at(app, p, cand.as_ref().map(|c| &c.0));
-                if crate::sketch_text_handles::over(app, &proj, p) {
-                    // A text's resize or rotation handle: the text stays selected.
+                if crate::sketch_text_handles::over(app, &proj, p) || crate::plane_resize::over(app, &proj, p) {
+                    // A text's resize or rotation handle, or a plane's: it stays selected.
                 } else if !crate::sketch3d::click(app, &proj, p) {
                     match annotation {
                         Some(sel) => select(app, Some(sel), add || pen_select, allow_toggle || pen_select),
@@ -8979,10 +9013,17 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
             && !crate::shell::covered(app, a)
             && !axes.contains(a)
             && !crate::joint_handles::start_drag(app, &proj, a)
+            && !crate::plane_resize::drag_start(app, &proj, a)
             && !crate::occurrence_drag::start(app, &proj, a)
             && !crate::joint_drag::start(app, &proj, a)
         {
             crate::drag_extrude::press(app, &proj, a);
+        }
+        if crate::plane_resize::dragging()
+            && resp.dragged_by(egui::PointerButton::Primary)
+            && let Some(p) = hover
+        {
+            crate::plane_resize::drag_to(&proj, p, mods.shift);
         }
         if resp.dragged_by(egui::PointerButton::Primary)
             && let Some(p) = hover
@@ -9024,6 +9065,20 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     if resp.drag_stopped() || !primary_down {
         crate::drag_extrude::end(app);
     }
+    if crate::plane_resize::dragging() && (resp.drag_stopped() || !ui.input(|i| i.pointer.primary_down())) {
+        // A move and the release in one frame (#8265): the plane goes where the button went up,
+        // which the drag above has not seen. A drag whose release never came ends where it is.
+        let released = ui.input(|i| {
+            i.events.iter().rev().find_map(|e| match e {
+                egui::Event::PointerButton { button: egui::PointerButton::Primary, pressed: false, pos, .. } => Some(*pos),
+                _ => None,
+            })
+        });
+        if let Some(p) = released.filter(|p| p.is_finite()) {
+            crate::plane_resize::drag_to(&proj, p, ui.input(|i| i.modifiers.shift));
+        }
+        crate::plane_resize::drag_end(app);
+    }
     // Box selection: a primary drag on the model when no navigation mode is on.
     if app.tool.is_none()
         && !held
@@ -9038,6 +9093,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
         && !crate::dim_view::dragging()
         && !crate::sketch3d::dragging()
         && !crate::sketch_text_handles::dragging(app)
+        && !crate::plane_resize::dragging()
     {
         let origin = ui.input(|i| i.pointer.press_origin());
         if resp.dragged_by(egui::PointerButton::Primary)
@@ -9085,6 +9141,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     crate::dim_view::show(app, ui, &painter, &proj);
     crate::sketch_text_handles::show(app, ui, &painter, &proj, hover);
+    crate::plane_resize::show(app, ui, &painter, &proj, hover);
     crate::sketch3d::show(app, &painter, &proj);
     let tracking_cursor = hover.filter(|_| inside && !navigating && !app.esc_handled && !ui.input(|i| i.key_pressed(egui::Key::Escape)));
     crate::inference::track_and_show(app, &painter, &proj, tracking_cursor);
@@ -21029,6 +21086,60 @@ mod grid_plane_tests {
         let state = crate::open_meshing::session_world(&h.app.session);
         assert!(on(state.sketches.first().map(|s| s.plane), "XZ"), "the click sketches on XZ");
         assert!(previewed_sketch_plane(&h.app).is_none(), "the open sketch has its own grid");
+    }
+
+    /// The sketch scene is built when what it shows changes (the camera moves its grid and the
+    /// sampling of its curves), and not again while nothing has changed.
+    #[test]
+    fn the_sketch_scene_is_not_built_again_while_nothing_changed() {
+        let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        app.run("sketch.rectangle.two_point", json!({"p0": [-10, -10], "p1": [10, 10]})).unwrap();
+        app.run("sketch.finish", json!({})).unwrap();
+        let proj = projection(&app, rect);
+        refresh_sketch_scene(&mut app, &proj);
+        assert_eq!(app.viewport.sketch_scenes_built, 1, "built once");
+        for _ in 0..5 {
+            refresh_sketch_scene(&mut app, &proj);
+        }
+        assert_eq!(app.viewport.sketch_scenes_built, 1, "five still frames build nothing");
+        app.cam.yaw += 0.1;
+        {
+            let proj = projection(&app, rect);
+            refresh_sketch_scene(&mut app, &proj);
+        }
+        assert_eq!(app.viewport.sketch_scenes_built, 2, "an orbit moves the grid and the sampling");
+        {
+            let proj = projection(&app, rect);
+            refresh_sketch_scene(&mut app, &proj);
+        }
+        assert_eq!(app.viewport.sketch_scenes_built, 2, "and holding still builds nothing again");
+        app.preferences.sketch_halo = !app.preferences.sketch_halo;
+        {
+            let proj = projection(&app, rect);
+            refresh_sketch_scene(&mut app, &proj);
+        }
+        assert_eq!(app.viewport.sketch_scenes_built, 3, "a change of what the scene shows builds it");
+    }
+
+    /// The capacity hint only reserves room: the scene's bytes are those of one built without it.
+    #[test]
+    fn a_capacity_hint_leaves_the_sketch_scene_unchanged() {
+        let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.ui.show_grid = true;
+        app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        app.run("sketch.circle.center", json!({"center": [0, 0], "radius": 12.0})).unwrap();
+        app.run("sketch.finish", json!({})).unwrap();
+        let proj = projection(&app, rect);
+        let plain = build_sketch_scene(&app, &proj);
+        assert!(app.viewport.sketch_slot.lock().unwrap().is_none(), "nothing to size it by yet");
+        *app.viewport.sketch_slot.lock().unwrap() = Some(plain.clone());
+        let hinted = build_sketch_scene(&app, &proj);
+        assert!(!plain.under.is_empty() && !plain.lines.is_empty());
+        assert_eq!((&plain.lines, &plain.overlay, &plain.under, &plain.trans), (&hinted.lines, &hinted.overlay, &hinted.under, &hinted.trans));
+        assert_eq!(plain.palette.entries(), hinted.palette.entries());
     }
 
     /// A finished sketch is depth-tested unless the preference draws reference geometry through

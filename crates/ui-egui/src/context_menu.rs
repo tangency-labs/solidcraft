@@ -1018,6 +1018,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
             v.push(cmd(app, "solid.press_pull", "Press Pull"));
         }
         v.push(cmd(app, "solid.shell", "Shell"));
+        v.push(cmd(app, "solid.dome", "Dome"));
         if crate::joint_handles::selected_occurrence(app).is_some() {
             v.push(cmd(app, "occurrence.move", "Move"));
         }
@@ -1074,6 +1075,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(act("ui.saveMesh", "Save As Mesh", "export").with(json!({ "bodies": [body] })));
         v.push(Item::sep());
         v.push(act("ui.tangentChain", "Select Tangent Chain", "chain"));
+        v.push(cmd(app, "select.edge_loop", "Select Edge Loop"));
         v.push(cmd(app, "inspect.measure", "Measure"));
     } else if has(|s| matches!(s, Sel::Body { .. })) {
         v.extend(body_items(app, &sel_bodies(app), false));
@@ -1083,7 +1085,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
     } else {
         // Empty space, or a plane: both lead with Create Sketch (#3032). On a plane it sketches
         // there, with Look At beside it; on empty space it is the toolbar's, which asks for the
-        // plane or face.
+        // plane or face. A plane resized by hand offers its size back.
         let sketch = cmd(app, "sketch.create", "Create Sketch");
         match &app.menu.plane {
             Some(plane) => {
@@ -1091,6 +1093,11 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
                 v.push(act("ui.lookAt", "Look At", "lookat").with(json!({ "plane": plane })));
             }
             None => v.push(sketch),
+        }
+        if let Some(plane) = &app.menu.plane
+            && let Some(f) = app.session.doc.find_feature(plane).filter(|f| app.session.doc.plane_extents.contains_key(&f.id))
+        {
+            v.push(reset_plane_size(app, f.id, plane));
         }
         v.push(Item::sep());
         v.push(act("ui.nav", "Pan", "pan").with(json!({ "mode": "pan" })));
@@ -1308,6 +1315,7 @@ fn plane_items(app: &SolveApp, id: u64) -> Vec<Item> {
         items.push(Item::sep());
     }
     items.push(act("ui.editFeature", "Edit Feature", crate::timeline::icon_of(&f.kind)).with(json!({ "feature": id })));
+    items.push(reset_plane_size(app, id, &f.name));
     items.push(Item::sep());
     items.extend([
         act("ui.delete", "Delete", "delete").key("Del").with(json!({ "items": [{"type": "feature", "id": id}] })),
@@ -1319,6 +1327,11 @@ fn plane_items(app: &SolveApp, id: u64) -> Vec<Item> {
         act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({ "feature": id })),
     ]);
     items
+}
+
+/// Back to a size that follows the zoom, for a construction plane dragged to a size of its own.
+fn reset_plane_size(app: &SolveApp, id: u64, name: &str) -> Item {
+    cmd(app, "view.plane_size", "Reset Size").with(json!({ "plane": name, "extent": null })).on(app.session.doc.plane_extents.contains_key(&id))
 }
 
 /// An origin plane's row in the browser: sketch on it, show or hide.
@@ -1558,6 +1571,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     }
     if doc.links.get(&id).is_some_and(|link| link.step_names.is_none()) {
         own.push(act("ui.relinkSource", "Relink Source (All Instances)…", "update").with(json!({"component": id})));
+        own.push(act("ui.relinkSourceNames", "Relink Source and Use Its Names…", "update").with(json!({"component": id})));
     } else if id != 0 && app.session.can_extract(id) {
         own.push(act("ui.extractComponent", "Extract to File…", "export").with(json!({"component": id})));
     }
@@ -2179,6 +2193,11 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 crate::linked_source::start(app, component, id_of(&p, "occurrence"));
             }
         }
+        "ui.relinkSourceNames" => {
+            if let Some(component) = id_of(&p, "component") {
+                crate::linked_source::start_with(app, component, None, true);
+            }
+        }
         "ui.extractComponent" => {
             if let Some(component) = id_of(&p, "component") {
                 crate::linked_source::extract(app, component);
@@ -2708,6 +2727,12 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 if calibrate {
                     app.set_status(solidcraft_ui_text::tr("browser.calibrate_click_a"), false);
                 }
+            }
+        }
+        "ui.traceCanvasRegion" => {
+            if let Some(c) = id_of(&p, "canvas") {
+                app.tree.canvas_panel = Some(crate::browser::CanvasPanel::trace(app, c));
+                app.set_status(solidcraft_ui_text::tr("browser.trace_click"), false);
             }
         }
         "ui.straightenCanvas" => {

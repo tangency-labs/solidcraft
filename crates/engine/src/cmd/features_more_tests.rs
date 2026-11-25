@@ -667,6 +667,62 @@ fn emboss_and_deboss_on_a_face() {
 }
 
 #[test]
+fn projected_emboss_on_a_full_revolve_changes_only_the_sketch_side() {
+    use solidcore_record::Vec3;
+    use solidcraft_kernel::PointClass;
+
+    // The flat top keeps the spline wall clear of the revolve axis. The mark is 6 by 4 mm.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":{"origin":[0,0,0],"x_dir":[1,0,0],"y_dir":[0,0,1]},"name":"Profile"}));
+    run(&mut s, "sketch.spline.control_point", json!({"points":[[20,0],[20,20],[10,30],[5,30]]}));
+    run(&mut s, "sketch.line", json!({"points":[[5,30],[0,30],[0,0],[20,0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"sketch":"Profile","axis":"y","angle":"360 deg","operation":"new","body_name":"Dome"}));
+    run(&mut s, "sketch.create", json!({"plane":{"origin":[0,-60,0],"x_dir":[1,0,0],"y_dir":[0,0,1]},"name":"Mark"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[-3,8],"p1":[3,12]}));
+    run(&mut s, "sketch.finish", json!({}));
+
+    // At z = 10 the cubic has radius 19.08248 mm. Offsetting its meridian by 1 mm along
+    // the outward unit normal gives radius 20.10069 mm at the same height.
+    let points = [Vec3::new(0.0, -20.08, 10.0), Vec3::new(0.0, 19.5, 10.0), Vec3::new(0.0, -20.12, 10.0)];
+    let classes = |s: &Session| s.model.state().body("Dome").unwrap().body.classify_points(&points).unwrap();
+    assert_eq!(classes(&s), [PointClass::Outside; 3]);
+    run(
+        &mut s,
+        "solid.emboss",
+        json!({"sketch":"Mark","depth":1,"face":[12.790737518975714,-14.613635681307521,7.741993784911808],"targets":"Dome"}),
+    );
+    assert_eq!(classes(&s), [PointClass::Inside, PointClass::Outside, PointClass::Outside]);
+    assert_eq!(s.model.state().body("Dome").unwrap().body.shell_count(), 1);
+}
+
+#[test]
+fn projected_emboss_keeps_a_tilted_profile_that_already_fit() {
+    use solidcore_record::Vec3;
+    use solidcraft_kernel::PointClass;
+
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":{"origin":[0,0,0],"x_dir":[1,0,0],"y_dir":[0,0,1]},"name":"Profile"}));
+    run(&mut s, "sketch.line", json!({"points":[[20,0],[10,30],[0,30],[0,0],[20,0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"sketch":"Profile","axis":"y","angle":"360 deg","operation":"new","body_name":"Cone"}));
+    let root = 17.0_f64.sqrt();
+    run(&mut s, "sketch.create", json!({"plane":{"origin":[0,-60,0],"x_dir":[1,0,0],"y_dir":[0,-1.0/root,4.0/root]},"name":"Mark"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[-3,-11],"p1":[3,-8]}));
+    run(&mut s, "sketch.finish", json!({}));
+
+    // The tilt takes the mark over the lower rim on the picked side, but it fully crosses
+    // the far wall. The whole slab separates the prism, so emboss already built both patches.
+    // Both witnesses are between the original radius 20 - z/3 and its 1 mm normal offset.
+    let points = [Vec3::new(0.0, -20.6, 0.4), Vec3::new(0.0, 17.0, 10.0)];
+    let classes = |s: &Session| s.model.state().body("Cone").unwrap().body.classify_points(&points).unwrap();
+    assert_eq!(classes(&s), [PointClass::Outside; 2]);
+    run(&mut s, "solid.emboss", json!({"sketch":"Mark","depth":1,"face":[0,-52.0/3.0,8],"targets":"Cone"}));
+    assert_eq!(classes(&s), [PointClass::Inside; 2]);
+    assert_eq!(s.model.state().body("Cone").unwrap().body.shell_count(), 1);
+}
+
+#[test]
 fn overlapping_text_glyphs_deboss_and_emboss() {
     // #20422: negative letter_spacing crosses curved glyph outlines, leaving vertical self-touching
     // polynomial spline edges across sequential profile booleans. Both with and without an explicit
@@ -4200,6 +4256,62 @@ fn a_narrow_profile_across_a_wall_along_the_extrusion_keeps_the_trim_to_the_body
         outside * 10.0,
         0.2 * 2.0
     );
+}
+
+/// #19532: a dome on a box top adds two thirds of its base times its height, and it is kept when
+/// the design is saved and read back.
+#[test]
+fn a_dome_on_a_box_top_adds_two_thirds_of_its_base_times_its_height_and_survives_a_save() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Stock"}));
+    run(&mut s, "solid.dome", json!({"face":[5,5,10],"height":5,"name":"Cap"}));
+    let want = 1000.0 + 2.0 / 3.0 * 100.0 * 5.0;
+    assert!((body_volume(&s, "Stock") - want).abs() < 1e-3, "{}", body_volume(&s, "Stock"));
+    assert!(s.model.results.iter().all(|f| f.error.is_none()), "{:?}", s.model.results);
+    let mut loaded = Session { doc: solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap().into(), ..Default::default() };
+    loaded.refresh();
+    assert!(loaded.model.results.iter().all(|f| f.error.is_none()), "{:?}", loaded.model.results);
+    assert!((body_volume(&loaded, "Stock") - want).abs() < 1e-3, "{}", body_volume(&loaded, "Stock"));
+}
+
+/// #19532: the dome's face is the box top whatever the box's height is, so changing the height
+/// parameter rebuilds the dome on the new top.
+#[test]
+fn a_dome_follows_its_face_when_the_box_height_parameter_changes() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name":"box_h","expression":"10 mm"}));
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":"box_h","body_name":"Stock"}));
+    run(&mut s, "solid.dome", json!({"face":[5,5,10],"height":5}));
+    run(&mut s, "parameters.change", json!({"name":"box_h","expression":"20 mm"}));
+    assert!(s.model.results.iter().all(|f| f.error.is_none()), "{:?}", s.model.results);
+    let want = 10.0 * 10.0 * 20.0 + 2.0 / 3.0 * 100.0 * 5.0;
+    assert!((body_volume(&s, "Stock") - want).abs() < 1e-3, "{}", body_volume(&s, "Stock"));
+}
+
+/// #19532: every refusal of a dome comes back as the command's error, and the design stays as it
+/// was.
+#[test]
+fn every_dome_refusal_is_a_command_error_and_changes_nothing() {
+    let box_cases = [
+        (json!({"face":[5,5,10],"height":0}), "the height must be positive"),
+        (json!({"face":[5,5,10],"height":-2}), "the height must be positive"),
+        (json!({"face":[5,5,10],"height":5,"shape":"spherical"}), "a spherical dome needs a circular face"),
+        (json!({"face":[5,5,10],"height":5,"reverse":true}), "not supported yet"),
+        (json!({"face":[5,5,10],"height":5,"shape":"cone"}), "unknown shape `cone`"),
+        (json!({"height":5}), "`face` must be a point"),
+    ];
+    for (params, message) in box_cases {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Stock"}));
+        let e = s.execute("solid.dome", &params);
+        assert!(e.as_ref().is_err_and(|e| e.to_string().contains(message)), "{params}: {e:?}");
+        assert!((body_volume(&s, "Stock") - 1000.0).abs() < 1e-6, "{params}");
+    }
+    let mut ball = Session::default();
+    run(&mut ball, "solid.sphere", json!({"radius":5,"center":[0,0,0],"operation":"new","body_name":"Ball"}));
+    let e = ball.execute("solid.dome", &json!({"face":[0,0,5],"height":2}));
+    assert!(e.as_ref().is_err_and(|e| e.to_string().contains("the face is not planar")), "{e:?}");
+    assert!(ball.model.results.iter().all(|f| f.error.is_none()), "{:?}", ball.model.results);
 }
 
 /// A 3° draft on a pocket wall whose vertical corners carry 4 mm rounds drafts the wall with the
