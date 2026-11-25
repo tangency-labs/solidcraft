@@ -137,8 +137,9 @@ fn on_cylinder(p: Point3) -> f64 {
     p.x.hypot(p.y) - 4.0
 }
 
-/// The issue's case: a cylinder r5, h10 shelled 1 inward, its top open. By default
-/// (upstream) the new inner edges are marched. Upstream split the rim at an extra vertex
+/// The issue's case: a cylinder r5, h10 shelled 1 inward, its top open. Without the fix
+/// (upstream) `MateEdges` marches the new inner edges; the seam stays marched after the
+/// shell's last step, `make_edges_on_analytics_exact` (WR-545). Upstream split the rim at an extra vertex
 /// (7 edges and 5 vertices) because each replaced edge's tolerance was doubled to 2e-5
 /// (#18009: the edge tolerance passed as the trim's distance, which `SetUVTrimCurve`
 /// doubles); with the raise at the trims' proved distance (#18162) the march closes the rim
@@ -209,8 +210,12 @@ fn on_frustum(p: Point3) -> f64 {
     p.x.hypot(p.y) - frustum_inner_radius(p.z)
 }
 
-/// A frustum r5 to r3 over h10 shelled 1 inward, its top open. By default its floor
-/// and rim are marched; with the fix they are exact circles on the inner cone.
+/// A frustum r5 to r3 over h10 shelled 1 inward, its top open. `MateEdges` marches its
+/// floor and rim without `offset_analytic_mate_edges`, and the shell's last step,
+/// `make_edges_on_analytics_exact` (WR-545, every shell since its flag was retired), makes
+/// each one the exact circle its plane meets the inner cone on (main pinned them marched,
+/// 0 exact, while that step was off by default). With the fix `MateEdges` makes them
+/// circles itself. Either way the seam, the inner cone against itself, stays marched.
 #[test]
 fn issue_1453_shelled_cone_edges_are_exact() {
     let stock = shelled(
@@ -222,7 +227,17 @@ fn issue_1453_shelled_cone_edges_are_exact() {
         on_frustum,
         None,
     );
-    assert_eq!(stock.exact, 0, "upstream's marched floor and rim");
+    assert_eq!((stock.edges, stock.vertices), (6, 4));
+    assert_eq!(stock.inner, 3, "floor circle, seam, rim circle");
+    assert_eq!(
+        stock.exact, 2,
+        "the shell's last step makes floor and rim circles"
+    );
+    assert!(
+        stock.worst <= 1e-12,
+        "inner edges on the inner cone: {}",
+        stock.worst
+    );
     let fixed = shelled(
         "issue_1453 cone",
         true,

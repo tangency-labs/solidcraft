@@ -6,7 +6,7 @@ members = ["crates/*", "apps/*", "xtask"]
 exclude = ["solidcore", "vendor"]
 
 [workspace.package]
-version = "0.47.0"
+version = "0.49.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.95"
@@ -23,6 +23,8 @@ solidcraft-profile = { path = "crates/profile" }
 solidcraft-develop = { path = "crates/develop" }
 solidcraft-sketch = { path = "crates/sketch" }
 solidcraft-kernel = { path = "crates/kernel" }
+# The kernel interface: the trait a kernel's adapter implements (docs/design/kernel-layer.md)
+solidcraft-kernel-api = { path = "crates/kernel-api" }
 solidcraft-smlib = { path = "crates/smlib" }
 solidcraft-render = { path = "crates/render" }
 solidcraft-dynamics = { path = "crates/dynamics" }
@@ -31,6 +33,8 @@ solidcraft-doc = { path = "crates/doc" }
 # Versioned file formats: the format tag, the version registry and its upgrade, a newer file told
 solidcraft-format = { path = "crates/format" }
 solidcraft-io = { path = "crates/io" }
+# A saved design's picture and summary for file browsers, without the kernel (apps/solidcraft-quicklook)
+solidcraft-design-preview = { path = "crates/design-preview" }
 solidcraft-engine = { path = "crates/engine" }
 # Without its default features, so an app built with `--no-default-features` leaves out what
 # they bring (usage statistics); each app turns them on in its own defaults.
@@ -89,6 +93,9 @@ schemars = "1.2"
 serde_path_to_error = "0.1"
 log = "0.4"
 sha2 = "0.10"
+# A container part's CRC-32, to check a part copied on save holds what it is saved for; already in
+# the tree through zip.
+crc32fast = "1.5"
 # Provenance: the CBOR manifest encoding (RFC 8949), COSE_Sign1 records (RFC 9052) and Ed25519
 # (RFC 8032). All pure Rust and permissive (Apache-2.0; BSD-3-Clause), so the browser build and
 # `cargo xtask licences --check` keep working.
@@ -178,6 +185,11 @@ too_many_arguments = "allow"
 type_complexity = "allow"
 # `!(x > tol)` is our idiom for "not a usable number" (NaN-safe).
 neg_cmp_op_on_partial_ord = "allow"
+# `eprintln!` and `eprint!` panic when stderr is a pipe whose reader has closed, which an agent
+# running `solidcraft mcp` (and the app that one starts) can leave behind (#10111). Write through
+# `solidcraft_geom::note!` (`solidcraft_engine::note!`), which ignores a failed write. Tests are
+# exempt (clippy.toml `allow-print-in-tests`); examples and build scripts allow it at the top.
+print_stderr = "deny"
 
 # Dev builds keep line tables only, so backtraces still name file:line. Full debug info made the
 # app binary 4.9 GB and every relink slow. For a debugger, override it:
