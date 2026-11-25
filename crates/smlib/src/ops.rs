@@ -129,6 +129,15 @@ impl Brep {
         r
     }
 
+    /// [`Brep::boolean`] of `self` tagged as operand 0 and `other` as operand 1
+    /// ([`Brep::tagged`]), the result's [`Brep::history`] naming them: the same result as
+    /// `self.tagged(0)?.boolean(&other.tagged(1)?, op)`, with one copy of each operand fewer.
+    pub fn boolean_tagged(&self, other: &Brep, op: BooleanOp) -> Result<Option<Brep>> {
+        let r = core::boolean::boolean_tagged(self.core(), other.core(), op).map(|r| r.map(Brep::made_core));
+        trace::maybe("boolean_tagged", &[self, other], &r, || json!({"op": op.word()}));
+        r
+    }
+
     /// The union of `breps` in one call: they are unioned pairwise, level by level, so none takes
     /// part in more than about log2(n) unions. The result is as [`Brep::boolean`]'s; operands
     /// tagged each with its own number ([`Brep::tagged`]) give a result whose [`Brep::history`]
@@ -140,6 +149,19 @@ impl Brep {
         let bodies: Vec<&core::Body> = breps.iter().map(|b| b.core()).collect();
         let r = core::boolean::union_all(&bodies).map(Brep::made_core);
         trace::made("union_all", breps, &r, || json!({}));
+        r
+    }
+
+    /// [`Brep::union_all`] of `breps` each tagged as its own operand, in order ([`Brep::tagged`]):
+    /// the same result as the union of `breps[i].tagged(i)`, with one copy of each operand fewer.
+    /// At least one body and at most [`MAX_UNION_BREPS`].
+    pub fn union_all_tagged(breps: &[&Brep]) -> Result<Brep> {
+        if breps.is_empty() || breps.len() > MAX_UNION_BREPS {
+            return Err(Error::Argument);
+        }
+        let bodies: Vec<&core::Body> = breps.iter().map(|b| b.core()).collect();
+        let r = core::boolean::union_all_tagged(&bodies).map(Brep::made_core);
+        trace::made("union_all_tagged", breps, &r, || json!({}));
         r
     }
 
