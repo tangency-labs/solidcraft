@@ -1067,7 +1067,8 @@ impl Dialog {
                     wall2: length_default(s, "1"),
                 },
                 vec![SelInput::new("Profiles", EXTRUDE_ACCEPT, true)],
-            ),
+            )
+            .named(s.doc.unique_name("Extrude")),
             "solid.revolve" => Dialog::new(
                 Kind::Revolve { angle: "360 deg".into(), operation: 0, axis: None },
                 vec![SelInput::new("Profile", PROFILES | PLANAR_FACES, true), SelInput::new("Axis", AXIS_PICKS, false)],
@@ -1582,6 +1583,13 @@ impl Dialog {
 
     pub fn edit_param(s: &Session, name: &str) -> Dialog {
         Dialog::new(Kind::EditParam { name: name.into(), expr: s.doc.param(name).map(|p| p.expr.clone()).unwrap_or_default() }, vec![])
+    }
+
+    /// The Name row's text (Extrude): what the feature is called, or will be.
+    fn named(mut self, name: String) -> Self {
+        self.extra.insert("name_default".into(), json!(name.clone()));
+        self.extra.insert("name".into(), json!(name));
+        self
     }
 
     /// Extrude and Revolve take the sketch they start from (#14128).
@@ -4077,6 +4085,15 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
     {
         d.refuse(app, error);
     }
+    // An Extrude's taken name is refused by `apply_commands` before any preview runs (#18668), so
+    // it is said here; its other refusals (a missing profile) keep their own way of showing.
+    if matches!(d.kind, Kind::Extrude { .. })
+        && d.previews()
+        && let Err(error) = apply_commands(app, d)
+        && error.starts_with("another feature is called")
+    {
+        d.refuse(app, error);
+    }
     let shown_id = egui::Id::unique("sc_dialog_refusal_shown");
     if d.error.is_none() && app.preview.error.is_none() {
         ui.data_mut(|m| m.remove::<String>(shown_id));
@@ -6556,6 +6573,9 @@ pub fn apply_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>
         return Ok(vec![("timeline.delete".into(), json!({ "feature": id }))]);
     }
     let mut normalized = d.clone();
+    // The Name row (#18668): left blank it is the default name when making a feature and the name
+    // it has when editing one; an edit that gives another name renames it after the rebuild.
+    let rename = extrude_rename(app, &mut normalized)?;
     normalized.sync_material(&app.session);
     for value in crate::length_input::fields(&app.session.doc, &mut normalized.kind) {
         *value = crate::length_input::expression(&app.session.doc, value, ValueKind::Length);
@@ -6623,9 +6643,48 @@ pub fn apply_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>
                 }
             }
         }
-        return Ok(vec![("timeline.redefine".into(), json!({"feature": id, "command": cmd, "params": params}))]);
+        let mut cmds = vec![("timeline.redefine".into(), json!({"feature": id, "command": cmd, "params": params}))];
+        if let Some(name) = rename {
+            cmds.push(("timeline.rename".into(), json!({"feature": id, "name": name})));
+        }
+        return Ok(cmds);
     }
     Ok(cmds)
+}
+
+/// An Extrude dialog's Name row: a blank name, or the default the window suggested, is not sent
+/// (making one, the engine names it, so a name taken meanwhile cannot collide; editing one, it
+/// keeps its name), and the new name of an edited feature is returned to be applied as a rename,
+/// which `timeline.redefine` does not do. A name another feature has is refused here, before any
+/// command runs, so the edit is not half done.
+fn extrude_rename(app: &SolveApp, d: &mut Dialog) -> Result<Option<String>, String> {
+    if !matches!(d.kind, Kind::Extrude { .. }) {
+        return Ok(None);
+    }
+    let name = d.extra.get("name").and_then(Value::as_str).map(|n| n.trim().to_string()).unwrap_or_default();
+    let suggested = d.extra.remove("name_default").and_then(|v| v.as_str().map(str::to_string));
+    d.extra.remove("name");
+    if name.is_empty() {
+        return Ok(None);
+    }
+    match d.editing {
+        None => {
+            if suggested.as_deref() != Some(name.as_str()) {
+                d.extra.insert("name".into(), json!(name));
+            }
+            Ok(None)
+        }
+        Some((id, _)) => {
+            let Some(feature) = app.session.doc.feature(id) else { return Ok(None) };
+            if feature.name == name {
+                return Ok(None);
+            }
+            if app.session.doc.features.iter().any(|f| f.name == name && f.id != id) {
+                return Err(format!("another feature is called `{name}`"));
+            }
+            Ok(Some(name))
+        }
+    }
 }
 
 /// A dialog highlights exactly the profile regions it picks, so its commands build exactly those:
@@ -10324,6 +10383,10 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 _ => break,
             }
         }
+    }
+    // Extrude shows the name it has, to read and to change (#18668).
+    if matches!(f.kind, FeatureKind::Extrude { .. }) {
+        d.extra.insert("name".into(), json!(f.name));
     }
     d.editing = Some((id, marker));
     d.active = 0;

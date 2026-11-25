@@ -1603,6 +1603,100 @@ fn removing_an_earlier_input_keeps_the_active_one() {
     assert_eq!(inputs[active].label, "Target Bodies");
 }
 
+/// #18668: the Extrude dialog has a Name row. Editing, it shows the feature's name and a changed
+/// one renames it after the edit (a rename is a step of its own to undo); blank or unchanged
+/// keeps the name.
+#[test]
+fn editing_an_extrude_can_rename_it_with_the_edit() {
+    let mut h = make(json!({}));
+    let undo = h.app.session.undo.len();
+    open(&mut h);
+    assert_eq!(h.app.dialog.as_ref().unwrap().extra.get("name"), Some(&json!("Depth")), "the row shows the name it has");
+    h.app.dialog.as_mut().unwrap().extra.insert("name".into(), json!("  Boss "));
+    h.frames(2);
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+    assert!(h.app.session.doc.find_feature("Boss").is_some() && h.app.session.doc.find_feature("Depth").is_none());
+    assert_eq!(h.app.session.undo.len(), undo + 2, "the edit and the rename");
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert!(h.app.session.doc.find_feature("Depth").is_some() && h.app.session.doc.find_feature("Boss").is_none());
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(h.app.session.undo.len(), undo);
+    // Blank, or the name it has: nothing is renamed.
+    for same in ["", "Depth"] {
+        open(&mut h);
+        h.app.dialog.as_mut().unwrap().extra.insert("name".into(), json!(same));
+        h.frames(2);
+        h.step(&json!({"widget":"OK"})).unwrap();
+        assert!(h.app.dialog.is_none());
+        assert!(h.app.session.doc.find_feature("Depth").is_some(), "{same:?}");
+    }
+}
+
+#[test]
+fn a_new_extrude_starts_with_its_default_name_and_takes_another() {
+    for (typed, want) in [(Some("Rim"), "Rim"), (Some("  "), "Extrude1"), (None, "Extrude1")] {
+        let mut h = make(json!({}));
+        h.app.run("timeline.delete", json!({"feature":"Depth"})).unwrap();
+        let sketch = h.app.session.doc.find_feature("Base").unwrap().id;
+        h.app.session.selection = vec![solidcraft_engine::Sel::Profile { sketch, index: 0 }];
+        h.app.start("solid.extrude");
+        h.frames(8);
+        let d = h.app.dialog.as_mut().expect("the extrude dialog");
+        assert_eq!(d.extra.get("name"), Some(&json!("Extrude1")), "the name it will get");
+        if let Some(typed) = typed {
+            d.extra.insert("name".into(), json!(typed));
+        }
+        h.frames(2);
+        h.step(&json!({"widget":"OK"})).unwrap();
+        assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+        assert!(h.app.session.doc.find_feature(want).is_some(), "{typed:?} -> {want}");
+    }
+}
+
+#[test]
+fn a_name_another_feature_has_is_refused_and_leaves_the_design_alone() {
+    let mut h = make(json!({}));
+    h.app.run("solid.extrude", json!({"sketch":"Base","distance":"3 mm","operation":"new","name":"Other","body_name":"Second"})).unwrap();
+    h.frames(4);
+    let undo = h.app.session.undo.len();
+    open(&mut h);
+    // A changed distance and a taken name together: the name is refused before anything runs, so
+    // the distance is not applied either.
+    h.step(&json!({"click":{"handle":"dialog:Distance"}})).unwrap();
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"text":"20 mm"})).unwrap();
+    h.app.dialog.as_mut().unwrap().extra.insert("name".into(), json!("Other"));
+    h.frames(2);
+    h.frames(3);
+    h.step(&json!({"widget":"OK"})).unwrap();
+    // The window stays open and says why; nothing was committed.
+    assert!(h.app.dialog.is_some());
+    let said = h.app.dialog.as_ref().and_then(|d| d.error.clone()).or(h.app.preview.error.clone());
+    assert!(said.as_deref().is_some_and(|e| e.contains("another feature is called `Other`")), "{said:?}");
+    assert_eq!(h.app.session.undo.len(), undo);
+    assert!(h.app.session.doc.find_feature("Depth").is_some());
+    assert_eq!(extent(&h).distance, "10 mm", "the edit did not half happen");
+}
+
+#[test]
+fn a_default_name_nobody_touched_is_left_to_the_engine() {
+    // The window suggested Extrude1; another feature took it before OK. The untouched suggestion is
+    // not sent, so the engine names the new one Extrude2 instead of failing on a duplicate.
+    let mut h = make(json!({}));
+    h.app.run("timeline.delete", json!({"feature":"Depth"})).unwrap();
+    let sketch = h.app.session.doc.find_feature("Base").unwrap().id;
+    h.app.session.selection = vec![solidcraft_engine::Sel::Profile { sketch, index: 0 }];
+    h.app.start("solid.extrude");
+    h.frames(8);
+    assert_eq!(h.app.dialog.as_ref().unwrap().extra.get("name"), Some(&json!("Extrude1")));
+    h.app.run("solid.extrude", json!({"sketch":"Base","distance":"2 mm","operation":"new","name":"Extrude1","body_name":"Taken"})).unwrap();
+    h.frames(2);
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+    assert!(h.app.session.doc.find_feature("Extrude2").is_some());
+}
+
 #[test]
 fn editing_symmetric_extrude_toggles_symmetric_offset() {
     let mut h = make(json!({"direction": "symmetric", "start_offset": "4 mm"}));

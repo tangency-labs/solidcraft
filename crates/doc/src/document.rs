@@ -5566,7 +5566,8 @@ impl Document {
             .or_else(|| self.resolve_feature_name(name).ok())
     }
 
-    fn unique_name(&self, base: &str) -> String {
+    /// The name a new feature of `base`'s kind gets (`Extrude` → `Extrude3`): the first number not taken.
+    pub fn unique_name(&self, base: &str) -> String {
         // The numbers taken after `base`, gathered once: the thousandth cylinder of a design
         // tried Cylinder1, Cylinder2 … each against every feature's name.
         let taken = crate::params::numbers_after(base, self.features.iter().map(|f| f.name.as_str()));

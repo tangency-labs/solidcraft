@@ -598,6 +598,15 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             wall_side,
             wall2,
         } => {
+            // The feature's name (#18668): what it is called, or will be. Blank is the default name.
+            let mut name = d.extra.get("name").and_then(Value::as_str).unwrap_or_default().to_string();
+            let before = name.clone();
+            form_row(ui, "Name", |ui| {
+                enter |= ui_kit::text_field(ui, &mut name, "").0;
+            });
+            if name != before {
+                d.extra.insert("name".into(), json!(name));
+            }
             form_row(ui, "Direction", |ui| {
                 // One Side, Two Sides, Symmetric (a flip is a negative distance).
                 let order = [0usize, TWO_SIDES, 2];
