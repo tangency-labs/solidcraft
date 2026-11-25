@@ -91,6 +91,7 @@ pub mod provenance;
 pub mod query;
 pub mod record_check;
 pub mod session;
+pub mod sketch_arc;
 pub mod spline_projection;
 pub mod split;
 pub mod step_assembly;

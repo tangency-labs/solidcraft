@@ -12,6 +12,7 @@ use solidcore_record::Vec2;
 use solidcraft_engine::doc::Document;
 use solidcraft_engine::doc::expr::{Kind as ValueKind, definition};
 use solidcraft_engine::geom::prelude::*;
+use solidcraft_kernel::services::sketch_arc as arcs;
 
 use crate::SolveApp;
 use crate::tools::Tool;
@@ -118,18 +119,8 @@ fn sign(x: f64) -> f64 {
 /// The circle through `s`, `e` and `t`: its centre, radius and the sweep (radians) of the arc from
 /// `s` to `e` that passes through `t`. None for points on one line.
 pub(crate) fn three_point_circle(s: Vec2, e: Vec2, t: Vec2) -> Option<(Vec2, f64, f64)> {
-    let centre = crate::tools::preview_circumcentre(s, t, e)?;
-    let r = centre.dist(s);
-    let chord = e - s;
-    let n = chord.normalized()?.perp();
-    if !r.is_finite() || r <= 1e-9 {
-        return None;
-    }
-    let mid = (s + e) * 0.5;
-    let minor = 2.0 * (chord.len() / (2.0 * r)).clamp(-1.0, 1.0).asin();
-    // The arc through `t` is the long one when `t` is on the centre's side of the chord.
-    let long = n.dot(t - mid) * n.dot(centre - mid) > 0.0;
-    Some((centre, r, if long { std::f64::consts::TAU - minor } else { minor }))
+    let (centre, r, sweep) = arcs::three_point_circle(s.into(), e.into(), t.into())?;
+    Some((centre.into(), r, sweep))
 }
 
 /// The dotted guides of a 3-Point Arc whose centre is `centre`: one from the centre to each end
@@ -147,24 +138,7 @@ pub(crate) fn centre_guides(centre: Vec2, ends: [Vec2; 2], tol: f64) -> Vec<(Vec
 /// nearest the cursor. A radius picks among the minor and major arcs on either side of the chord;
 /// a sweep takes the cursor's side. None: no such arc (a radius under half the chord).
 fn arc_through(s: Vec2, e: Vec2, h: Vec2, radius: Option<f64>, sweep: Option<f64>) -> Option<Vec2> {
-    let chord = e - s;
-    let len = chord.len();
-    let n = chord.normalized()?.perp();
-    let mid = (s + e) * 0.5;
-    if let Some(sweep) = sweep {
-        if !(sweep > 1e-9 && sweep < std::f64::consts::TAU - 1e-9) {
-            return None;
-        }
-        let half = sweep * 0.5;
-        let r = len / (2.0 * half.sin());
-        return Some(mid + n * (sign(n.dot(h - mid)) * r * 2.0 * (half * 0.5).sin().powi(2)));
-    }
-    let r = radius?;
-    if !r.is_finite() || r * 2.0 < len - 1e-9 {
-        return None;
-    }
-    let k = (r * r - len * len * 0.25).max(0.0).sqrt();
-    [k + r, k - r, r - k, -k - r].into_iter().map(|d| mid + n * d).filter(|p| p.is_finite()).min_by(|x, y| x.dist(h).total_cmp(&y.dist(h)))
+    arcs::arc_third_point(s.into(), e.into(), h.into(), radius, sweep).map(Vec2::from)
 }
 
 /// The next point the tool would place for the cursor at `h`, honouring locked values.

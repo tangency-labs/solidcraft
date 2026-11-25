@@ -44,6 +44,7 @@ pub use solidcore_ops::point_identity;
 pub use solidcore_ops::prism;
 pub use solidcore_ops::query;
 pub use solidcore_ops::session;
+pub use solidcore_ops::sketch_arc;
 pub use solidcore_ops::spline_projection;
 pub use solidcore_ops::sweep;
 pub use solidcore_ops::{Body as ExactBody, CheckLevel, Order, Result, boolean, make_box, make_sphere, measure};

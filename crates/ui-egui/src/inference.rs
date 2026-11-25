@@ -11,6 +11,7 @@ use egui::Stroke;
 use serde_json::json;
 use solidcore_record::Vec2;
 use solidcraft_engine::sketch::{CurveKind, Sketch};
+use solidcraft_kernel::services::sketch_arc as arcs;
 
 use crate::SolveApp;
 use crate::viewport::Proj;
@@ -161,7 +162,7 @@ fn leaving(sk: &Sketch, p: Vec2) -> Vec<(String, Vec2)> {
             CurveKind::Line { a, b } => {
                 if (near(sk.point(a)) || near(sk.point(b)))
                     && let Some((a, b)) = line_ends(sk, i)
-                    && let Some(d) = (b - a).normalized()
+                    && let Some(d) = arcs::unit_between(a.into(), b.into()).map(Vec2::from)
                 {
                     out.push((c.id.clone(), d));
                 }
@@ -169,8 +170,8 @@ fn leaving(sk: &Sketch, p: Vec2) -> Vec<(String, Vec2)> {
             CurveKind::Arc { .. } => {
                 let Some(o) = sk.center(i) else { continue };
                 let at_end = c.kind.point_ids().into_iter().any(|id| near(sk.point(id)) && sk.point(id).is_some_and(|q| q.dist(o) > 1e-9));
-                if at_end && let Some(d) = (p - o).normalized() {
-                    out.push((c.id.clone(), d.perp()));
+                if at_end && let Some(d) = arcs::left_normal_between(o.into(), p.into()).map(Vec2::from) {
+                    out.push((c.id.clone(), d));
                 }
             }
             _ => {}
@@ -187,21 +188,10 @@ fn leaving(sk: &Sketch, p: Vec2) -> Vec<(String, Vec2)> {
 pub fn arc_tangent(sk: &Sketch, start: Vec2, end: Vec2, lp: Vec2, tol: f64) -> Option<Inference> {
     let mut best: Option<Inference> = None;
     for (from, other) in [(start, end), (end, start)] {
-        let w = from - other;
-        if w.len() <= 1e-9 {
-            continue;
-        }
         for (curve, dir) in leaving(sk, from) {
-            // The centre lies on the normal at `from`, as far from it as it is from `other`:
-            // |from + n t - other|^2 = t^2.
-            let n = dir.perp();
-            let k = n.dot(w);
-            if k.abs() <= 1e-9 * w.len() {
-                continue;
-            }
-            let t = -w.len2() / (2.0 * k);
-            let centre = from + n * t;
-            let r = t.abs();
+            // The circle through both ends that touches the curve's direction at `from`.
+            let Some((centre, r)) = arcs::tangent_arc_centre(from.into(), other.into(), dir.into()) else { continue };
+            let centre = Vec2::from(centre);
             let v = lp - centre;
             let d = v.len();
             if d <= 1e-12 || !r.is_finite() {
@@ -220,9 +210,7 @@ pub fn arc_tangent(sk: &Sketch, start: Vec2, end: Vec2, lp: Vec2, tol: f64) -> O
 /// The centre of the 3-Point Arc from `start` to `end` that lies on the perpendicular bisector of
 /// the chord and nearest `p`; None when `start` and `end` coincide.
 fn bisector_centre(start: Vec2, end: Vec2, p: Vec2) -> Option<Vec2> {
-    let mid = (start + end) * 0.5;
-    let n = (end - start).normalized()?.perp();
-    Some(mid + n * n.dot(p - mid))
+    arcs::bisector_centre(start.into(), end.into(), p.into()).map(Vec2::from)
 }
 
 /// A 3-Point Arc from `start` to `end` whose third point is near the cursor `lp`: when the centre
@@ -277,10 +265,13 @@ pub fn commit_arc(app: &mut SolveApp, arc: &str, start: Vec2, end: Vec2, through
         let (Some(centre), Some(r)) = (sk.center(i), sk.radius(i)) else { return };
         let mut ids: Vec<String> = Vec::new();
         for p in [start, end] {
-            let Some(radial) = (p - centre).normalized() else { continue };
             for (id, dir) in leaving(sk, p) {
                 // Tangent: along the curve is across the arc's radius there.
-                if id != arc && dir.dot(radial).abs() <= 1e-6 && (p.dist(centre) - r).abs() <= 1e-6 * r.max(1.0) && !ids.contains(&id) {
+                if id != arc
+                    && arcs::is_square_to_radius(centre.into(), p.into(), dir.into())
+                    && (p.dist(centre) - r).abs() <= 1e-6 * r.max(1.0)
+                    && !ids.contains(&id)
+                {
                     ids.push(id);
                 }
             }

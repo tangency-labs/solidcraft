@@ -1529,14 +1529,7 @@ pub(crate) fn preview_curve(
 }
 
 pub(crate) fn preview_circumcentre(a: Vec2, b: Vec2, c: Vec2) -> Option<Vec2> {
-    let ab = b - a;
-    let ac = c - a;
-    let d = 2.0 * ab.cross(ac);
-    if !d.is_finite() || d.abs() < 1e-12 {
-        return None;
-    }
-    let centre = a + Vec2::new(ac.y * ab.len2() - ab.y * ac.len2(), ab.x * ac.len2() - ac.x * ab.len2()) / d;
-    centre.is_finite().then_some(centre)
+    solidcraft_kernel::services::sketch_arc::circumcentre(a.into(), b.into(), c.into()).map(Vec2::from)
 }
 
 /// The polygon's actual straight edges, in the same orientation as the eventual command.
