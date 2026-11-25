@@ -1178,11 +1178,120 @@ pub fn loft(sections: &[Vec<Curve>], degree: u32, cap: bool) -> Result<Body> {
             return Ok(Err(Error::Argument));
         }
         let counts: Vec<usize> = sections.iter().map(Vec::len).collect();
+        if let Some(planar) = planar_sides(k, &counts, &made.curves, cap)? {
+            return Ok(planar);
+        }
         match create_skin_primitive(k, &counts, &made.refs(), degree as usize, cap) {
             Ok(r) => finish(k, r.brep, if cap { Expect::SOLID } else { Expect::FACES }),
             Err(e) => Ok(Err(status(e))),
         }
     })
+}
+
+/// A loft of two sections of lines in equal number (three or more), each one closed loop,
+/// whose every side (a line of the first section, its partner in the second and the lines
+/// between their ends) is flat: the sides as planar faces on their lines and, with `cap`, the
+/// sections as the caps, stitched and oriented. A side between parallel lines of different
+/// lengths (a tapered duct) is a planar trapezoid, which the skin would make a bilinear
+/// B-spline surface. `None` for any other loft, or where the kernel does not prove a section
+/// closed, a side's lines apart (more than 1e-9) or its fourth corner on the plane of the other
+/// three (the kernel's [`path::point_off_plane_of`] at 1e-9 of its size): the skin takes it.
+fn planar_sides(
+    k: &mut Kernel,
+    counts: &[usize],
+    curves: &[KCurve],
+    cap: bool,
+) -> solidcore::Result<Option<Out<Brep>>> {
+    let &[n0, n1] = counts else {
+        return Ok(None);
+    };
+    if n0 != n1
+        || n0 < 3
+        || curves.len() != n0 + n1
+        || curves
+            .iter()
+            .any(|c| !matches!(c.kind(), CurveKind::Line(_)))
+    {
+        return Ok(None);
+    }
+    let (first, second) = curves.split_at(n0);
+    if !path::closed_loop(k, first, 1e-6)?.is_yes() || !path::closed_loop(k, second, 1e-6)?.is_yes()
+    {
+        return Ok(None);
+    }
+    let (mut bottom, mut top) = (Vec::new(), Vec::new());
+    for c in first {
+        bottom.push(c.ends(k)?.start);
+    }
+    for c in second {
+        top.push(c.ends(k)?.start);
+    }
+    let corner = |pts: &[Point3], i: usize| pts.get(i % n0).copied();
+    for i in 0..n0 {
+        let (Some(a0), Some(a1), Some(b0), Some(b1)) = (
+            corner(&bottom, i),
+            corner(&bottom, i + 1),
+            corner(&top, i),
+            corner(&top, i + 1),
+        ) else {
+            return Ok(None);
+        };
+        // each side's lines apart, and its fourth corner on the plane of the other three
+        let (Ok(s0), Ok(s1), Ok(s2), Ok(_)) = (
+            directed::segment_apart(a0, a1, 1e-9),
+            directed::segment_apart(a1, b1, 1e-9),
+            directed::segment_apart(b1, a0, 1e-9),
+            directed::segment_apart(b1, b0, 1e-9),
+        ) else {
+            return Ok(None);
+        };
+        let triangle = [KCurve::from(s0), KCurve::from(s1), KCurve::from(s2)];
+        if path::point_off_plane_of(k, &triangle, b0, 1e-9).ok() != Some(Verdict::No) {
+            return Ok(None);
+        }
+    }
+    let mut b = new_brep(k, USE_DEFAULT, USE_DEFAULT)?;
+    let region = b.infinite_region();
+    let tol = 1e-6;
+    let built = build_faces(&mut b, |b, fenv| -> Out<()> {
+        let mut face = |b: &mut Brep, fenv: &mut FaceBuildEnv<'_, '_>, pts: &[Point3]| -> Out<()> {
+            let mut edges = Vec::new();
+            for (i, &p) in pts.iter().enumerate() {
+                let q = pts.get(i + 1).or_else(|| pts.first()).copied().unwrap_or(p);
+                edges.push(KCurve::from(called(Line::create_line_segment(
+                    3, p, q, None,
+                ))?));
+            }
+            called(create_planar_face_with_3d_curves(
+                k, b, region, &edges, tol, fenv,
+            ))
+            .map(|_| ())
+        };
+        if cap {
+            face(b, fenv, &bottom)?;
+            face(b, fenv, &top)?;
+        }
+        for i in 0..n0 {
+            let (Some(a0), Some(a1), Some(b0), Some(b1)) = (
+                corner(&bottom, i),
+                corner(&bottom, i + 1),
+                corner(&top, i),
+                corner(&top, i + 1),
+            ) else {
+                return Err(Error::Argument);
+            };
+            face(b, fenv, &[a0, a1, b1, b0])?;
+        }
+        Ok(())
+    });
+    if let Err(e) = built {
+        return Ok(Some(Err(e)));
+    }
+    if let Err(e) = stitch_and_orient(k, &mut b, &StitchAndOrientOptions::default()) {
+        return Ok(Some(Err(status(e))));
+    }
+    b.refresh_cached_topology();
+    finish(k, b, if cap { Expect::SOLID } else { Expect::FACES }).map(Some)
 }
 
 /// Whether a loft section (its plane's normal and its middle) faces back from the section

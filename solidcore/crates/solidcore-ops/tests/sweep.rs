@@ -1597,3 +1597,27 @@ fn a_curved_section_lofts_to_a_point_as_a_cone() {
     assert_eq!(faces(&half), 4, "the base, two ruled walls and a triangle");
     assert!(rel(half.volume(1e-8).unwrap(), 125.0 * PI / 3.0) < 1e-7);
 }
+
+/// A tapered duct of squares lofts with flat sides: six faces, every one a plane (the skin would
+/// make the sides bilinear B-spline surfaces), and the frustum's volume.
+#[test]
+fn a_loft_of_two_squares_has_planar_sides() {
+    rig_fixes();
+    let b = loft(
+        &[square(0.0, 0.0, 20.0, 0.0), square(5.0, 5.0, 10.0, 10.0)],
+        1,
+        true,
+    )
+    .unwrap();
+    assert_eq!(faces(&b), 6);
+    let (record, _) = b.to_record().unwrap();
+    assert!(
+        record.faces.iter().all(|f| matches!(
+            f.surface,
+            solidcore_record::brep::Surface::Plane { .. }
+                | solidcore_record::brep::Surface::PlaneThrough { .. }
+        )),
+        "every face a plane"
+    );
+    assert!(rel(b.volume(1e-8).unwrap(), 7000.0 / 3.0) < 1e-9);
+}
