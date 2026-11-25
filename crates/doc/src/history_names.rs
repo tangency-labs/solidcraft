@@ -191,11 +191,8 @@ fn split_pieces(mut names: Names, parents: &[(String, bool)], pieces: &[Option<S
     let worked_out = std::cell::OnceCell::new();
     for (name, same) in renamed.into_iter().filter(|(_, same)| same.len() > 1) {
         let at: &Vec<Vec3> = worked_out.get_or_init(centres);
-        let order = if at.len() == faces.len() {
-            crate::naming::along_spread(same.iter().filter_map(|i| Some((*i, *at.get(*i)?))).collect())
-        } else {
-            same
-        };
+        let order =
+            if at.len() == faces.len() { crate::naming::along_spread(same.iter().filter_map(|i| Some((*i, *at.get(*i)?))).collect()) } else { same };
         for (k, i) in order.into_iter().enumerate() {
             if let Some(slot) = faces.get_mut(i) {
                 *slot = format!("{name}#{}", k + 1);
