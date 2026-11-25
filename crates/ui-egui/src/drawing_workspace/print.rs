@@ -38,9 +38,16 @@ fn private_folder() -> std::io::Result<std::path::PathBuf> {
         let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let stamp = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map_or(0, |d| d.subsec_nanos());
         let folder = base.join(format!("SolidCraft print {}-{n}-{stamp:x}", std::process::id()));
-        let mut builder = std::fs::DirBuilder::new();
+        // Only Unix sets the folder's mode, so only Unix needs a mutable builder (an unused `mut`
+        // fails the Windows lint).
         #[cfg(unix)]
-        std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+        let builder = {
+            let mut builder = std::fs::DirBuilder::new();
+            std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+            builder
+        };
+        #[cfg(not(unix))]
+        let builder = std::fs::DirBuilder::new();
         match builder.create(&folder) {
             Ok(()) => return Ok(folder),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,

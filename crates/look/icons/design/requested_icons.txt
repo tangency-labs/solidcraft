@@ -34,6 +34,7 @@ c_collinear	false
 c_concentric	false
 c_equal	false
 c_fix	false
+c_horizontal	false
 c_hv	false
 c_midpoint	false
 c_parallel	false
@@ -42,6 +43,7 @@ c_polygon	false
 c_smooth	false
 c_symmetry	false
 c_tangent	false
+c_vertical	false
 cam	false
 camera	false
 canvas	false
@@ -60,6 +62,7 @@ circle_tt	false
 circle_ttt	false
 close	false
 coil	false
+collision_auto	false
 colored_components	false
 combine	false
 compare	false
@@ -173,11 +176,17 @@ flat	false
 fold	false
 folder	false
 frame_member	false
+frame_plate	false
+frame_trim	false
 gear	false
 graph	false
 grid	false
 ground	false
 ground_shadow	false
+gusset	false
+gusset_side_center	false
+gusset_side_negative	false
+gusset_side_positive	false
 help	false
 hem	false
 hole	false
@@ -206,6 +215,7 @@ material	false
 measure	false
 mesh_body	false
 mesh_export	false
+mesh_reduce	false
 min_radius	false
 mirror	false
 motion_link	false
@@ -228,7 +238,9 @@ panel_reset_height	false
 params	false
 paste	false
 path_flange	false
+pattern_center	false
 pattern_circ	false
+pattern_flip	false
 pattern_path	false
 pattern_rect	false
 perforate	false
@@ -280,6 +292,7 @@ reach	false
 rect	false
 rect3	false
 rect_center	false
+rect_edge_center	false
 rect_rounded	false
 redo	false
 refold	false
@@ -301,11 +314,18 @@ scale	false
 screw	false
 section	false
 select	false
+select_bodies	false
+select_components	false
+select_faces_edges	false
+select_features	false
+select_parts	false
+select_sketch	false
 send	false
 settings	false
 settings_profile	false
 sheet	false
 sheet_rules	false
+sheet_tab	false
 shell	false
 shield	false
 silhouette	false
@@ -372,6 +392,7 @@ svg	false
 sweep	false
 text	false
 thread	false
+timeline_2d	false
 timeline_play	false
 timeline_stop	false
 torus	false
@@ -382,6 +403,7 @@ unfold	false
 update	false
 warning	false
 web	false
+window_other	false
 ws_design	false
 ws_drawing	false
 ws_render	false

@@ -187,7 +187,7 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
                     .backing_on_hover_text(solidcraft_ui_text::tr("color.hex_help"));
                 publish("color:hex", &response);
                 if response.changed()
-                    && let Some((value, alpha)) = parse_hex(&hex.draft)
+                    && let Some((value, alpha)) = solidcraft_color::hex::parse(&hex.draft)
                     && (opacity.is_some() || alpha.is_none_or(|a| a == 255))
                 {
                     accepted_mixed = mixed;
@@ -339,12 +339,12 @@ impl HexEdit {
     }
 
     fn set(&mut self, rgb: [u8; 3], opacity: Option<f64>) {
-        let [r, g, b] = rgb;
-        self.accepted = format!("#{r:02x}{g:02x}{b:02x}");
-        if self.alpha {
+        self.accepted = if self.alpha {
             let a = (opacity.unwrap_or(1.0).clamp(0.0, 1.0) * 255.0).round() as u8;
-            self.accepted.push_str(&format!("{a:02x}"));
-        }
+            solidcraft_color::hex::format_alpha(rgb, a)
+        } else {
+            solidcraft_color::hex::format(rgb)
+        };
         self.draft.clone_from(&self.accepted);
         self.rgb = rgb;
         self.opacity = opacity;
@@ -359,15 +359,6 @@ impl HexEdit {
             self.set(rgb, opacity);
         }
     }
-}
-
-fn parse_hex(text: &str) -> Option<([u8; 3], Option<u8>)> {
-    let digits = text.strip_prefix('#')?;
-    if !matches!(digits.len(), 6 | 8) || !digits.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return None;
-    }
-    let byte = |at: usize| digits.get(at..at + 2).and_then(|value| u8::from_str_radix(value, 16).ok());
-    Some(([byte(0)?, byte(2)?, byte(4)?], if digits.len() == 8 { Some(byte(6)?) } else { None }))
 }
 
 /// How a channel number edits: its range `0..=max`, the step of its step buttons, the drag
@@ -541,7 +532,7 @@ fn recent_row(ui: &mut Ui, width: f32) -> Option<[u8; 3]> {
                 stroke,
                 egui::StrokeKind::Inside,
             );
-            let hex = format!("#{r:02x}{g:02x}{b:02x}");
+            let hex = solidcraft_color::hex::format([r, g, b]);
             response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &hex));
             publish(&format!("color:recent:{slot}"), &response);
             let response = response.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(&hex);

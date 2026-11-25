@@ -49,10 +49,36 @@ pub struct Level {
 /// Triangles with an index out of range or a point not finite are left out; an empty or oversized
 /// mesh ([`MAX_TRIANGLES`]) has no levels.
 pub fn levels(positions: &[Vec3], triangles: &[[u32; 3]], targets: &[usize]) -> Vec<Level> {
+    make_levels(positions, triangles, targets, WeldOrder::Positions)
+}
+
+/// Simplify indexed facets as if their positions were stored once per corner in facet order.
+/// Weld each referenced source position once, keeping the facet order's vertex IDs so equally
+/// costly collapses give the same result as on expanded facets.
+pub fn levels_from_indexed_facets(
+    positions: &[Vec3],
+    triangles: &[[u32; 3]],
+    targets: &[usize],
+) -> Vec<Level> {
+    make_levels(positions, triangles, targets, WeldOrder::Facets)
+}
+
+#[derive(Clone, Copy)]
+enum WeldOrder {
+    Positions,
+    Facets,
+}
+
+fn make_levels(
+    positions: &[Vec3],
+    triangles: &[[u32; 3]],
+    targets: &[usize],
+    order: WeldOrder,
+) -> Vec<Level> {
     if triangles.is_empty() || triangles.len() > MAX_TRIANGLES {
         return Vec::new();
     }
-    let Some((mut m, source_vertices)) = Collapser::new(positions, triangles) else {
+    let Some((mut m, source_vertices)) = Collapser::new(positions, triangles, order) else {
         return Vec::new();
     };
     let Some(original) = Surface::new(positions, source_vertices, &m.tris) else {
@@ -332,7 +358,11 @@ struct Collapser {
 }
 
 impl Collapser {
-    fn new(positions: &[Vec3], triangles: &[[u32; 3]]) -> Option<(Collapser, Vec<u32>)> {
+    fn new(
+        positions: &[Vec3],
+        triangles: &[[u32; 3]],
+        order: WeldOrder,
+    ) -> Option<(Collapser, Vec<u32>)> {
         // Weld corners at the same position.
         let mut index = crate::hash::BitsMap::default();
         // Estimate unique corners from the faces: a closed triangular surface typically has
@@ -342,11 +372,9 @@ impl Collapser {
             .ok()?;
         let mut remap = crate::with_room(positions.len())?;
         let mut source_vertices = Vec::new();
-        // The input's triangle indices are u32, so any positions after this range are unused.
-        for (source, p) in (0..=u32::MAX).zip(positions) {
+        let mut weld = |source: u32, p: &Vec3| {
             if !p.is_finite() {
-                remap.push(None);
-                continue;
+                return None;
             }
             let next = u32::try_from(source_vertices.len()).ok()?;
             let key = [
@@ -354,10 +382,32 @@ impl Collapser {
                 (p.y + 0.0).to_bits(),
                 (p.z + 0.0).to_bits(),
             ];
-            remap.push(Some(*index.entry(key).or_insert_with(|| {
+            Some(*index.entry(key).or_insert_with(|| {
                 source_vertices.push(source);
                 next
-            })));
+            }))
+        };
+        match order {
+            WeldOrder::Positions => {
+                // The input's indices are u32, so positions after this range are unused.
+                for (source, p) in (0..=u32::MAX).zip(positions) {
+                    remap.push(weld(source, p));
+                }
+            }
+            WeldOrder::Facets => {
+                remap.resize(positions.len(), None);
+                for &[a, b, c] in triangles {
+                    if a.max(b).max(c) as usize >= positions.len() {
+                        continue;
+                    }
+                    for source in [a, b, c] {
+                        let slot = remap.get_mut(source as usize)?;
+                        if slot.is_none() {
+                            *slot = weld(source, positions.get(source as usize)?);
+                        }
+                    }
+                }
+            }
         }
         drop(index);
         // Proven: capacity of allocated `triangles`' length, with the same element type.
