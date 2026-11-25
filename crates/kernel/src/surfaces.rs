@@ -1092,6 +1092,11 @@ pub fn extrude_sheet_tapered(plane: &Plane, regions: &[Region2], corners: &[crat
         let made = solid.history().ok_or_else(|| failed("surface extrude: the tapered solid has no history"))?;
         let is_cap = |f: &FaceProv| f.origins.iter().any(|o| matches!(o, FaceOrigin::Cap { .. }));
         let walls: Vec<(usize, bool)> = made.faces.iter().enumerate().filter(|(_, f)| !is_cap(f)).map(|(i, _)| (i, false)).collect();
+        // A solid stands on its start cap: with none found the caps are not known, and the
+        // faces would not be the walls alone.
+        if walls.is_empty() || walls.len() == made.faces.len() {
+            return Err(failed("surface extrude: the walls of the tapered solid could not be told from its caps"));
+        }
         let c = Parts::of(solid.record(), &walls)?.canonical()?;
         // Each wall as the solid's history has it, its segments numbered through the regions.
         let through = |o: &FaceOrigin| match *o {
