@@ -607,6 +607,11 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             let points: Vec<[[f64; 3]; 2]> = pairs.iter().map(|[a, b]| [[a.x, a.y, a.z], [b.x, b.y, b.z]]).collect();
             let i = body_at(st, body, &picks)?;
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
+            // The sheets are built in the solid's frame and placed with this feature's component,
+            // so the solid must be in it, as a reduced mesh's source must.
+            if doc.model_body_component(&mb) != f.component {
+                return Err(DocError::Invalid("Midsurface: activate the solid's component before building its midsurface".into()));
+            }
             let defaults = mid::Options::default();
             let opts = mid::Options { min_thickness: min, max_thickness: max, min_aspect: min_aspect.unwrap_or(defaults.min_aspect), ..defaults };
             let analysis = mid::analyze(&mb.body, &opts)?;

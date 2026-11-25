@@ -4229,6 +4229,25 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
                 reads.all = true;
             }
         }
+        // A Midsurface carries its source's offset into the sheets it builds, unless a sheet has
+        // a placement of its own: both are read, as a reduced mesh reads them.
+        FeatureKind::SurfaceMidsurface { body, .. } => {
+            match body {
+                Some(name) => reads.placed_body(st, name),
+                // The body is found by the picked points, wherever it is placed.
+                None => reads.all = true,
+            }
+            let base = f.body_names.first().map(|n| n.trim()).filter(|n| !n.is_empty());
+            match base {
+                Some(base) => doc
+                    .body_offsets
+                    .iter()
+                    .filter(|(name, _)| f.body_names.contains(name) || name.strip_prefix(base).is_some_and(|rest| rest.starts_with(" (")))
+                    .for_each(|entry| serde_json::to_string(&entry).unwrap_or_default().hash(&mut h)),
+                // Numbered `BodyN` sheets: any body's placement may be one of theirs.
+                None => serde_json::to_string(&doc.body_offsets).unwrap_or_default().hash(&mut h),
+            }
+        }
         // A component's envelope bounds what is placed inside it, where it stands in its frame:
         // moving a part inside it builds it again, moving the component does not.
         FeatureKind::BoundingSolid { contents: true, .. } => return contents_digest(doc, f, st),

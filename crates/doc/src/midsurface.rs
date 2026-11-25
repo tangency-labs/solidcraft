@@ -157,10 +157,12 @@ pub struct Analysis {
     pub faces: usize,
     /// The slack the distances were decided with (mm): two thicknesses closer than this are one.
     pub tolerance: f64,
-    /// The smallest distance (mm) between two faces facing each other across material past the
-    /// largest thickness looked for: the thinnest wall the analysis saw but left out. A suggested
-    /// limit stays short of it.
-    pub beyond: Option<f64>,
+    /// The distances (mm) between two faces facing each other across material past the largest
+    /// thickness looked for, thinnest first: the walls the analysis saw but left out. A suggested
+    /// limit stays short of the first one it can tell apart from its cluster. Only those a cluster
+    /// could still take as its own (within 1% and twice the slack of the limit plus the slack) are
+    /// all kept, and the first past them: no cluster can tell a thicker one apart before it.
+    pub beyond: Vec<f64>,
 }
 
 /// What every pairing step looks at: the body, a query on its record, the options and the
@@ -186,6 +188,24 @@ struct Nearest {
 
 fn nearer(slot: &mut Option<f64>, gap: f64) {
     *slot = Some(slot.map_or(gap, |x| x.min(gap)));
+}
+
+/// Records a wall `gap` thick past the analysis's limit in `beyond` (sorted, thinnest first).
+/// Every cluster lies within the limit plus the slack, so a wall past `past` (1% and twice the
+/// slack beyond that) is told apart from each of them: of those only the thinnest is kept. Those
+/// up to `past` are all kept, as some clusters can tell them apart and others cannot.
+fn note_beyond(beyond: &mut Vec<f64>, gap: f64, past: f64) {
+    if gap > past {
+        match beyond.last_mut() {
+            Some(last) if *last > past => *last = last.min(gap),
+            _ => beyond.push(gap),
+        }
+        return;
+    }
+    let at = beyond.partition_point(|t| *t < gap);
+    if beyond.get(at) != Some(&gap) {
+        beyond.insert(at, gap);
+    }
 }
 
 /// A planar face as the analysis sees it.
@@ -369,6 +389,79 @@ fn round_between(look: &Look, rounds: &Rounds, faces: [usize; 2], chart: &Region
     Ok(None)
 }
 
+/// What lies inside the round wall between faces `faces` (radii `inner` and `outer` about
+/// `cylinder`'s axis), of any surface: a void or another face the sheet would span, as a note for
+/// review; `None` when the wall is clear. Any other face has edges there: an exact point of an
+/// edge strictly between the two radii (more than a margin from each) and well within the wall (the
+/// kernel finds the nearest points of both faces a thickness apart through it, and through it moved
+/// a quarter of the thickness along the axis or round it) is one. The edges of the two faces
+/// and of every face bordering them are the wall's rims and bores, not inside it. An edge or a
+/// point the kernel cannot read leaves the wall unchecked, which is said too.
+fn edge_in_round_wall(look: &Look, faces: [usize; 2], outer_face: usize, cylinder: &CylinderFace, inner: f64, outer: f64) -> Option<String> {
+    let Look { body, q, tol, .. } = *look;
+    let inner_face = if faces[0] == outer_face { faces[1] } else { faces[0] };
+    let margin = (tol * 100.0).min((outer - inner) * 0.25);
+    let shell = Wall::Round { axis_point: cylinder.axis_point, axis: cylinder.axis, inner: inner + margin, outer: outer - margin };
+    let mut near: Vec<usize> = faces.to_vec();
+    for f in faces {
+        for e in face_edges(q, f) {
+            near.extend(q.edge_faces(e));
+        }
+    }
+    let unchecked =
+        |what: String| Some(format!("unchecked: {what} could not be tested for whether it lies inside the round wall of faces {faces:?}"));
+    let Some(axis) = vec3(cylinder.axis).normalized() else { return unchecked("its axis".to_string()) };
+    let nudge = (outer - inner) * 0.25;
+    let reach = outer - inner + tol;
+    // Inside the wall, the nearest points of the two faces lie on one line through the point,
+    // the wall's thickness apart: past the wall's end (beside it) they are its rims, and farther.
+    // The outer face's nearest point when the point is inside; `Err` when the kernel cannot tell.
+    let within = |p: Vec3| -> std::result::Result<Option<Vec3>, ()> {
+        let on_outer = body.point_lies_on_face(outer_face, p, reach).map_err(|_| ())?;
+        let on_inner = body.point_lies_on_face(inner_face, p, reach).map_err(|_| ())?;
+        Ok(on_outer.zip(on_inner).filter(|(o, i)| p.dist(*o) + p.dist(*i) <= outer - inner + tol).map(|(o, _)| o))
+    };
+    for e in 0..q.record().edges.len() {
+        if q.edge_faces(e).into_iter().any(|g| near.contains(&g)) {
+            continue;
+        }
+        let Some([t0, t1]) = q.edge_interval(e) else { return unchecked(format!("edge {e}")) };
+        for k in 0..=8 {
+            let Some((p, _)) = q.edge_at(e, t0 + (t1 - t0) * (f64::from(k) / 8.0)) else { return unchecked(format!("edge {e}")) };
+            match ms::wall_holds(&shell, &[array(p)], 0.0) {
+                Ok(false) => continue,
+                Ok(true) => {}
+                Err(_) => return unchecked(format!("edge {e}")),
+            }
+            let o = match within(p) {
+                Ok(Some(o)) => o,
+                Ok(None) => continue,
+                Err(()) => return unchecked(format!("edge {e}")),
+            };
+            // Well inside, not on the wall's end or its sides: moved a quarter of the thickness
+            // along the axis or round it, either way, the point is still inside.
+            let Some(round) = axis.cross(o - p).normalized() else { return unchecked(format!("edge {e}")) };
+            let mut all = true;
+            for d in [axis, round] {
+                for moved in [p + d * nudge, p - d * nudge] {
+                    match within(moved) {
+                        Ok(Some(_)) => {}
+                        Ok(None) => all = false,
+                        Err(()) => return unchecked(format!("edge {e}")),
+                    }
+                }
+            }
+            if all {
+                return Some(format!(
+                    "blocked: an edge of the body runs inside the round wall of faces {faces:?} at ({:.3}, {:.3}, {:.3}): a void or another face lies between them",
+                    p.x, p.y, p.z
+                ));
+            }
+        }
+    }
+    None
+}
+
 /// A chart region's extent: its x range and its y range.
 fn extent(r: &Region2, tol: f64) -> Option<([f64; 2], [f64; 2])> {
     let poly = r.outer.polyline(tol);
@@ -455,6 +548,8 @@ fn round_pair(
                 notes.push(format!(
                     "blocked: face {g}, round at radius {r:.3} on the same axis, lies between radii {inner:.3} and {outer:.3}: the two faces may be separate walls with a gap between"
                 ));
+            } else if let Some(note) = edge_in_round_wall(look, faces, outer_face, &a.cylinder, inner, outer) {
+                notes.push(note);
             }
             if !aligned {
                 notes.push(format!(
@@ -558,11 +653,13 @@ pub fn analyze(body: &Body, opts: &Options) -> Result<Analysis> {
 
     let mut pairs: Vec<Pair> = Vec::new();
     let mut nearest: Vec<Nearest> = vec![Nearest::default(); n];
-    let mut beyond: Option<f64> = None;
+    let mut beyond: Vec<f64> = Vec::new();
+    // Past this, a wall is told apart from every cluster (see `thickness_clusters`).
+    let past = (opts.max_thickness + tol) * 1.01 + 1e-6 + 2.0 * tol;
     // Records, for faces `f` and `g`, a face looking back `gap` away that made no pair.
     let mut missed = |f: usize, g: usize, gap: f64| {
         if gap > opts.max_thickness + tol {
-            nearer(&mut beyond, gap);
+            note_beyond(&mut beyond, gap, past);
         }
         for slot in [f, g] {
             if let Some(near) = nearest.get_mut(slot) {
@@ -1014,6 +1111,32 @@ fn hole_size(h: &Loop2, tol: f64) -> f64 {
     pts.iter().enumerate().flat_map(|(i, p)| pts.iter().skip(i + 1).map(move |q| p.dist(*q))).fold(0.0, f64::max)
 }
 
+/// Whether `build` would fill a hole of a round wall's outer face `outer_face`: one no wider than
+/// its size to fill below, as [`hole_size`] fills a flat hole. A drilled hole's outline is a curve
+/// no chart loop holds, so each loop of the face is measured on its exact edges (the largest
+/// distance between two of their points, never more than the outline's length on the face): when
+/// every loop is wider than the size, so is every hole, and none is filled. Otherwise, or when a
+/// loop cannot be read, true: the build refuses rather than carry a hole it was asked to fill.
+fn round_hole_filled(body: &Body, outer_face: usize, build: &Build) -> bool {
+    let q = Query::new(body.record());
+    let Some(face) = q.record().faces.get(outer_face) else { return true };
+    let below = build.suppress_holes_below;
+    face.loops.iter().any(|l| {
+        let Bounds::Edges { edges } = l else { return true };
+        let mut points: Vec<Vec3> = Vec::new();
+        for u in edges {
+            let e = u.edge as usize;
+            let Some([t0, t1]) = q.edge_interval(e) else { return true };
+            for k in 0..=8 {
+                let Some((p, _)) = q.edge_at(e, t0 + (t1 - t0) * (f64::from(k) / 8.0)) else { return true };
+                points.push(p);
+            }
+        }
+        // Wider than `below` as soon as two points are farther apart.
+        !points.iter().enumerate().any(|(i, a)| points.iter().skip(i + 1).any(|b| a.dist(*b) > below))
+    })
+}
+
 /// The mid-sheets of `pairs` (a choice among an [`Analysis`]'s pairs), joined: where a solid edge
 /// joins faces of two different pairs and lies along one of the sheets' edges, that edge is moved
 /// onto the line the two halfway planes meet in (the sheet grows at an inside corner, and is
@@ -1041,8 +1164,9 @@ pub fn sheets_with(body: &Body, pairs: &[Pair], build: &Build) -> Result<Vec<She
             if !round.whole {
                 continue;
             }
-            // The offset carries every hole of the outer face: holes cannot be filled over yet.
-            if round.holes > 0 && (!build.carry_holes || build.suppress_holes_below > 0.0) {
+            // The offset carries every hole of the outer face: holes cannot be filled over yet. A
+            // size to fill below that every hole is wider than fills none of them.
+            if round.holes > 0 && (!build.carry_holes || (build.suppress_holes_below > 0.0 && round_hole_filled(body, round.outer_face, build))) {
                 return Err(bad(format!(
                     "the round wall of faces {:?} has {} holes, and holes in a round wall cannot be filled over yet: build it with holes carried and none suppressed, or leave the pair out",
                     p.faces, round.holes
@@ -1402,7 +1526,7 @@ pub fn thickness_clusters(analysis: &Analysis) -> Vec<Cluster> {
             .pairs
             .iter()
             .map(|p| p.thickness)
-            .chain(analysis.beyond)
+            .chain(analysis.beyond.iter().copied())
             .filter(|t| *t > c.thickness * 1.01 + 1e-6 && *t > c.up_to + 2.0 * slack)
             .min_by(f64::total_cmp);
         c.suggested_limit = next.map_or(own, |n| own.min(0.5 * (c.up_to + n)));
@@ -2131,11 +2255,36 @@ mod tests {
         let part = union(&cuboid([0.0, 0.0, 0.0], [40.0, 30.0, 2.0]), &cuboid([100.0, 0.0, 0.0], [140.0, 30.0, 2.5]));
         let a = analyze(&part, &opts(2.1)).unwrap();
         assert!(a.pairs.len() == 1 && (a.pairs[0].thickness - 2.0).abs() < 1e-9, "{:?}", a.pairs);
-        assert!(a.beyond.is_some_and(|t| (t - 2.5).abs() < 1e-9), "{:?}", a.beyond);
+        // 2.5 is past 2.1 by more than 1% and twice the slack: the 30 and 40 mm walls (the
+        // plates' sides) lie past it and are not kept.
+        assert!(a.beyond.len() == 1 && (a.beyond[0] - 2.5).abs() < 1e-9, "{:?}", a.beyond);
         let c = thickness_clusters(&a);
         assert!(c.len() == 1 && (c[0].suggested_limit - 2.25).abs() < 1e-9, "{c:?}");
         let again = analyze(&part, &opts(c[0].suggested_limit)).unwrap();
         assert!(again.pairs.len() == 1 && (again.pairs[0].thickness - 2.0).abs() < 1e-9, "{:?}", again.pairs);
+    }
+
+    #[test]
+    fn a_suggested_limit_looks_past_a_wall_no_limit_tells_apart_from_its_cluster() {
+        // Three plates 40 x 30, 2, 2.01 and 2.5 thick, analysed up to 2.005 with a slack of
+        // 0.001: the 2 mm plate is the only pair; 2.01 and 2.5 lie past the limit. 2.01 is within
+        // 1% of 2 (2.02), so no limit parts it from the cluster: the limit stops at the middle to
+        // the next one, (2 + 2.5) / 2 = 2.25, not at 2 x 1.5 = 3, which would take the 2.5 wall.
+        let plates = union(
+            &union(&cuboid([0.0, 0.0, 0.0], [40.0, 30.0, 2.0]), &cuboid([100.0, 0.0, 0.0], [140.0, 30.0, 2.01])),
+            &cuboid([200.0, 0.0, 0.0], [240.0, 30.0, 2.5]),
+        );
+        let scan = |max: f64| Options { tolerance: 0.001, ..opts(max) };
+        let a = analyze(&plates, &scan(2.005)).unwrap();
+        assert!(a.pairs.len() == 1 && (a.pairs[0].thickness - 2.0).abs() < 1e-9, "{:?}", a.pairs);
+        // Kept: 2.01 (a cluster up to 2.006 could still take it) and the first wall past
+        // 2.006 x 1.01 + 0.002 = 2.0281, the 2.5.
+        assert!(a.beyond.len() == 2 && (a.beyond[0] - 2.01).abs() < 1e-9 && (a.beyond[1] - 2.5).abs() < 1e-9, "{:?}", a.beyond);
+        let c = thickness_clusters(&a);
+        assert!(c.len() == 1 && (c[0].suggested_limit - 2.25).abs() < 1e-9, "{c:?}");
+        // Scanned with it (walls up to 2.251), the 2.5 plate is still left out.
+        let again = analyze(&plates, &scan(c[0].suggested_limit)).unwrap();
+        assert!(!again.pairs.is_empty() && again.pairs.iter().all(|p| p.thickness < 2.1), "{:?}", again.pairs);
     }
 
     #[test]
@@ -2340,6 +2489,11 @@ mod tests {
         assert!(sheets_with(&part, &round, &Build { carry_holes: false, suppress_holes_below: 0.0 }).is_err(), "{round:?}");
         assert!(sheets_with(&part, &round, &Build { carry_holes: true, suppress_holes_below: 5.0 }).is_err());
         assert!(sheets_with(&part, &round, &Build::default()).is_ok());
+        // Each hole is about 2 wide on the outer face (the drill's diameter, along the axis and
+        // round it): a size to fill below of 0.01 fills none of them, so the wall is built as
+        // with none asked for; 2.5 would fill them, and is refused.
+        assert!(sheets_with(&part, &round, &Build { carry_holes: true, suppress_holes_below: 0.01 }).is_ok());
+        assert!(sheets_with(&part, &round, &Build { carry_holes: true, suppress_holes_below: 2.5 }).is_err());
     }
 
     #[test]
@@ -2548,6 +2702,24 @@ mod tests {
         // Accepted anyway, it is not built.
         let s = sheets(&part, &a.pairs).unwrap();
         assert!(!s.iter().any(|x| x.faces == round[0].faces), "{s:?}");
+    }
+
+    #[test]
+    fn a_cavity_closed_inside_a_tubes_wall_needs_a_decision() {
+        // The tube of radii 8 and 10, 50 long, with a closed box-shaped void inside its wall:
+        // x -0.4..0.4, y 8.6..9.4, z 20..30 (its corners lie 8.6 to 9.41 from the axis, all
+        // inside). Neither face's outline or openings change, and its faces are flat, so no
+        // round face lies between the two; its edges do: the pair needs a decision.
+        let void = cuboid([-0.4, 8.6, 20.0], [0.4, 9.4, 30.0]);
+        let part = solidcraft_kernel::boolean(&tube(8.0, 10.0, 0.0, 50.0), &void, BoolOp::Cut).unwrap().unwrap();
+        let a = analyze(&part, &opts(5.0)).unwrap();
+        let round: Vec<&Pair> = a.pairs.iter().filter(|p| p.is_round()).collect();
+        assert_eq!(round.len(), 1, "{:?}", a.pairs);
+        assert_eq!(round[0].confidence, Confidence::Review, "{:?}", round[0]);
+        assert!(round[0].notes.iter().any(|n| n.starts_with("blocked")), "{:?}", round[0]);
+        // The same tube without the void is one wall, built without a decision.
+        let clear = analyze(&tube(8.0, 10.0, 0.0, 50.0), &opts(5.0)).unwrap();
+        assert!(clear.pairs.iter().any(|p| p.is_round() && p.confidence == Confidence::High), "{:?}", clear.pairs);
     }
 
     #[test]

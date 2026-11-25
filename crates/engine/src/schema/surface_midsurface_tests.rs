@@ -187,6 +187,22 @@ fn a_placed_plates_midsurface_is_where_the_plate_is() {
     ] {
         assert!((got - want).abs() < 1e-6, "{sheet:?} against {plate:?}");
     }
+    // The plate moved on to 200 along x (only its offset changes): the midsurface is built again
+    // and goes with it, 100 further, not left where the plate was.
+    s.doc_mut().body_offsets.insert("Plate".into(), solidcraft_doc::rigid(Vec3::new(200.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+    s.refresh();
+    let world = s.world_state().unwrap();
+    let bounds = |n: &str| world.bodies.iter().find(|b| b.definition_name() == n).map(|b| b.mesh().bounds()).unwrap_or_else(|| panic!("{n}"));
+    let (moved, again) = (bounds("Plate"), bounds(&name));
+    assert!((moved.min.x - plate.min.x - 100.0).abs() < 1e-6, "{moved:?} against {plate:?}");
+    assert!((again.min.x - moved.min.x).abs() < 1e-6 && (again.max.x - moved.max.x).abs() < 1e-6, "{again:?} against {moved:?}");
+    // From the root, whose frame is not the part's, the plate's midsurface is refused, as a
+    // reduced mesh is: its sheets would be placed by the root, away from the plate.
+    s.execute("component.activate", &json!({"component": "root"})).unwrap_or_else(|e| panic!("{e}"));
+    let before = s.doc.features.len();
+    let error = s.execute("surface.midsurface", &json!({"body": "Plate", "max_thickness": "5 mm"})).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(error.contains("activate the solid's component"), "{error}");
+    assert_eq!(s.doc.features.len(), before);
 }
 
 #[test]
