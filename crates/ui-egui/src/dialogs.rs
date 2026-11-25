@@ -11140,11 +11140,7 @@ mod refused_ok_tests {
         for (input, (index, point)) in dialog.inputs.iter_mut().zip(corner_join_face_hits(&app)) {
             input.items = vec![Sel::Face { body: body.clone(), index, point }];
         }
-        for (mode, overlap, expected) in [
-            (0, "", "butt"),
-            (1, "1 mm", "partial_overlap"),
-            (1, "", "full_overlap"),
-        ] {
+        for (mode, overlap, expected) in [(0, "", "butt"), (1, "1 mm", "partial_overlap"), (1, "", "full_overlap")] {
             if let Kind::Sheet(crate::dialogs_sheet::Sm::CornerJoin { kind, overlap: value, .. }) = &mut dialog.kind {
                 *kind = mode;
                 *value = overlap.into();
@@ -11207,11 +11203,7 @@ mod refused_ok_tests {
                 for (input, source) in dialog.inputs.iter_mut().zip(order) {
                     input.items = vec![Sel::Face { body: body.name.clone(), index: local_hits[source].0, point: points[source] }];
                 }
-                for (mode, overlap, expected_kind) in [
-                    (0, "", "butt"),
-                    (1, "1 mm", "partial_overlap"),
-                    (1, "", "full_overlap"),
-                ] {
+                for (mode, overlap, expected_kind) in [(0, "", "butt"), (1, "1 mm", "partial_overlap"), (1, "", "full_overlap")] {
                     let Kind::Sheet(crate::dialogs_sheet::Sm::CornerJoin { kind, overlap: value, .. }) = &mut dialog.kind else {
                         panic!("the command has a corner form")
                     };
@@ -11317,11 +11309,7 @@ mod refused_ok_tests {
         for key in ["corners", "edges", "height", "angle", "height_from"] {
             assert_eq!(edit["params"][key], params[key], "reopened {key}");
         }
-        for (mode, overlap, kind) in [
-            (0, "", "butt"),
-            (1, "1 mm + 0.25 mm", "partial_overlap"),
-            (1, "", "full_overlap"),
-        ] {
+        for (mode, overlap, kind) in [(0, "", "butt"), (1, "1 mm + 0.25 mm", "partial_overlap"), (1, "", "full_overlap")] {
             let Kind::Sheet(crate::dialogs_sheet::Sm::Flange { corners, .. }) = &mut reopened.kind else {
                 panic!("the feature retains its flange form")
             };
