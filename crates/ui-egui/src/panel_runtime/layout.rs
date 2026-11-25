@@ -270,6 +270,8 @@ pub struct HostMetrics {
     /// joins compact cards; resize handles retain their own positive width.
     pub gap: f32,
     pub sash_width: f32,
+    /// Docked sashes draw `sash_width` but grab this wide; zero grabs only what is drawn.
+    pub docked_grab_width: f32,
     pub control_extent: f32,
     pub tab_min_width: f32,
     /// Single-row Wide composition threshold, bounded by the shared contract.
@@ -277,6 +279,8 @@ pub struct HostMetrics {
     pub inline_title_width: f32,
     pub min_viewport: Size,
 }
+
+pub(super) const DOCKED_GRAB_WIDTH: f32 = 8.0;
 
 impl Default for HostMetrics {
     fn default() -> Self {
@@ -287,6 +291,7 @@ impl Default for HostMetrics {
             footer_height: t.form_footer_height,
             gap: t.space_4,
             sash_width: t.space_4,
+            docked_grab_width: 0.0,
             control_extent: t.control_height,
             tab_min_width: t.control_height * 2.0,
             inline_max_height: (t.control_height * 2.0 + t.space_4).min(88.0),
@@ -314,6 +319,9 @@ impl HostMetrics {
         }
         if !self.gap.is_finite() || !(0.0..=256.0).contains(&self.gap) {
             return Err(error(Rule::Bounds, "invalid host gap"));
+        }
+        if !self.docked_grab_width.is_finite() || !(0.0..=DOCKED_GRAB_WIDTH).contains(&self.docked_grab_width) {
+            return Err(error(Rule::Bounds, "invalid docked grab width"));
         }
         if !self.inline_max_height.is_finite() || !(0.0..=88.0).contains(&self.inline_max_height) {
             return Err(error(Rule::Bounds, "invalid inline row threshold"));
@@ -642,6 +650,8 @@ pub struct HostControl {
     pub bounds: LogicalRect,
     pub role: InputRole,
     pub accessible_name: String,
+    /// What a handle draws; `bounds` is the grab area around it.
+    pub ink: LogicalRect,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -831,7 +841,8 @@ impl HostLayout {
             return Err(error(Rule::Bounds, "render viewport must fill its domain"));
         }
         for bounds in &self.input {
-            if !self.painted.iter().any(|paint| paint.contains_rect(*bounds)) {
+            let grab = self.controls.iter().any(|control| control.bounds == *bounds && control.bounds != control.ink);
+            if !grab && !self.painted.iter().any(|paint| paint.contains_rect(*bounds)) {
                 return Err(error(Rule::Bounds, "host input outside paint"));
             }
         }
@@ -845,7 +856,10 @@ impl HostLayout {
             if !targets.insert(&control.target) {
                 return Err(error(Rule::DuplicateId, "duplicate typed host target"));
             }
-            if !self.painted.iter().any(|paint| paint.contains_rect(control.bounds)) {
+            if !self.capacity.contains_rect(control.bounds)
+                || !control.bounds.contains_rect(control.ink)
+                || !self.painted.iter().any(|paint| paint.contains_rect(control.ink))
+            {
                 return Err(error(Rule::Bounds, "host control outside paint"));
             }
         }
@@ -1613,9 +1627,10 @@ fn append_sashes(out: &mut HostLayout, proposed: &Layout) -> PanelResult<()> {
                     out.painted.push(bounds);
                     out.occlusion.push(bounds);
                     out.input.push(bounds);
-                    add_control(
+                    add_grab_control(
                         out,
                         HostPointerTarget::Sash { first: first.clone(), second: second.clone() },
+                        centre_widen(bounds, out.metrics.docked_grab_width),
                         bounds,
                         InputRole::Sash,
                         "ui.panel_host.sash",
@@ -1628,8 +1643,31 @@ fn append_sashes(out: &mut HostLayout, proposed: &Layout) -> PanelResult<()> {
 }
 
 fn add_control(out: &mut HostLayout, target: HostPointerTarget, bounds: LogicalRect, role: InputRole, name: &str) {
-    if let Some(bounds) = intersect_rect(bounds, out.capacity) {
-        out.controls.push(HostControl { target, bounds, role, accessible_name: name.into() });
+    add_grab_control(out, target, bounds, bounds, role, name);
+}
+
+/// A handle grabs `grab` and draws `ink`. Grab beyond the painted card still
+/// consumes the pointer, so hit-testing and input regions agree.
+fn add_grab_control(out: &mut HostLayout, target: HostPointerTarget, grab: LogicalRect, ink: LogicalRect, role: InputRole, name: &str) {
+    if let Some(bounds) = intersect_rect(grab, out.capacity) {
+        let ink = intersect_rect(ink, bounds).unwrap_or(bounds);
+        if grab != ink && !out.painted.iter().any(|paint| paint.contains_rect(bounds)) {
+            out.input.push(bounds);
+            out.occlusion.push(bounds);
+        }
+        out.controls.push(HostControl { target, bounds, role, accessible_name: name.into(), ink });
+    }
+}
+
+/// Widen a thin handle across its short axis, centred. A sash may only reach
+/// into the cards by less than their content inset.
+fn centre_widen(ink: LogicalRect, grab: f32) -> LogicalRect {
+    if ink.size.width <= ink.size.height {
+        let width = ink.size.width.max(grab);
+        rect(ink.origin.x - (width - ink.size.width) / 2.0, ink.origin.y, width, ink.size.height)
+    } else {
+        let height = ink.size.height.max(grab);
+        rect(ink.origin.x, ink.origin.y - (height - ink.size.height) / 2.0, ink.size.width, height)
     }
 }
 

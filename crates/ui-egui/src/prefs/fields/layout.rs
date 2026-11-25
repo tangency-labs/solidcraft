@@ -167,6 +167,8 @@ macro_rules! layout_preferences {
             /// While a dialog or a sketch is open, OK and Cancel in the view's top right corner, with the
             /// axis view moved down below them (#6709). Off by default.
             view_confirm_corner: bool = false, PAGE_LAYOUT;
+            /// On: docked sashes grab wider than they draw. Off (the default): they grab only the drawn sash.
+            wide_panel_grab: bool = false, PAGE_LAYOUT;
             /// Windows only: while the window is dragged by its title bar, nothing is drawn, so the window
             /// follows the pointer smoothly; animations and progress pause and the picture catches up when
             /// the drag ends (#13991). Off (the default): the window keeps drawing during the drag and

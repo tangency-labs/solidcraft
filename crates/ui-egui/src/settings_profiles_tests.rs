@@ -40,7 +40,7 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     // Test change: show_design_view_switcher, the setting the owner asked for, is a portable key.
     assert_eq!(
         keys.len(),
-        109,
+        110,
         "include document browser visibility and sizing, the repeated-shortcut preference and the browser scroll wheel preferences among the current portable settings"
     );
     for key in [
@@ -915,6 +915,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "viewport_status_summary",
         "viewport_theme",
         "wheel_zoom_speed",
+        "wide_panel_grab",
         "zoom_reverse",
         "zoom_stop_at_model",
         "zoom_to_cursor",
@@ -923,7 +924,8 @@ fn profile_keys_cover_the_current_portable_preferences() {
     actual.sort_unstable();
     // Test change: one more portable key, show_design_view_switcher, the setting the owner asked for.
     // Test change: one more portable key, nav_button_map (what each mouse button drags).
-    assert_eq!(expected.len(), 109);
+    // Test change: one more portable key, wide_panel_grab (the drawn-width sash grab).
+    assert_eq!(expected.len(), 110);
     assert_eq!(actual, expected);
 }
 

@@ -270,8 +270,17 @@ pub fn panel_host_disclosure(
 }
 
 /// The owner supplies the controlled extent and axis; clipping or scrolling
-/// the sash must not change its accessible value or orientation.
-pub fn panel_host_sash(ui: &mut egui::Ui, id: egui::Id, bounds: egui::Rect, name: &str, horizontal: bool, extent: f32) -> egui::Response {
+/// the sash must not change its accessible value or orientation. `bounds` is
+/// the grab area; only `ink` is drawn.
+pub fn panel_host_sash(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    bounds: egui::Rect,
+    ink: egui::Rect,
+    name: &str,
+    horizontal: bool,
+    extent: f32,
+) -> egui::Response {
     let t = Tokens::get();
     let response = ui.interact(bounds, id, egui::Sense::click_and_drag());
     if response.has_focus() {
@@ -293,7 +302,7 @@ pub fn panel_host_sash(ui: &mut egui::Ui, id: egui::Id, bounds: egui::Rect, name
         node.set_numeric_value(f64::from(extent));
     });
     if response.hovered() || response.has_focus() || response.dragged() {
-        ui.painter().rect_filled(bounds.intersect(ui.clip_rect()), t.radius_sm, t.form_primary);
+        ui.painter().rect_filled(ink.intersect(ui.clip_rect()), t.radius_sm, t.form_primary);
     }
     if response.hovered() {
         ui.ctx().set_cursor_icon(if horizontal { egui::CursorIcon::ResizeVertical } else { egui::CursorIcon::ResizeHorizontal });
