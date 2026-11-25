@@ -850,7 +850,8 @@ impl Document {
                 // away from the current plane. Verify geometric continuity: this face
                 // is the offset's output only if a recorded pick point lies at that
                 // distance from its plane, AND the projected point falls inside the
-                // face (its normal is parallel to the offset face's normal).
+                // face (bounding circle from area/centroid), AND the face's normal is
+                // parallel to itself (the offset moves along the normal, never flips it).
                 for face_pick in faces {
                     let pick_point: solidcore_record::Vec3 = (*face_pick).into();
                     let signed_dist = (pick_point - plane.origin).dot(plane.normal());
@@ -866,7 +867,8 @@ impl Document {
                     {
                         let centroid_2d = solidcore_record::Vec2::new(info.centroid.dot(plane.x), info.centroid.dot(plane.y));
                         let radius = (info.area / std::f64::consts::PI).sqrt();
-                        if (local_2d - centroid_2d).len() <= radius + tolerance {
+                        if (local_2d - centroid_2d).len() <= radius + tolerance && body.body.face_normals_are_parallel(index, index).unwrap_or(false)
+                        {
                             return Some(FaceCertificate::Lineage);
                         }
                     }

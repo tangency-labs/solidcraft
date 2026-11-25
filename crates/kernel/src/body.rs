@@ -767,6 +767,13 @@ impl Body {
         }
     }
 
+    /// Whether the plane normals of two faces of this body are parallel (same or
+    /// opposite direction). Returns `false` when either face is not planar or has no normal.
+    pub fn face_normals_are_parallel(&self, face_a: usize, face_b: usize) -> Result<bool> {
+        let (body, order) = self.ops_body().ok_or_else(|| KernelError::Invalid("body has no solidcore ops representation".into()))?;
+        body.face_normals_are_parallel(order, face_a, face_b).map_err(|e| KernelError::Failed(e.to_string()))
+    }
+
     /// Certify the two caps of a body built by [`crate::cylinder`]. Its wall stays uncertified.
     pub fn with_cylinder_certificate(mut self, producer: u64) -> Result<Self> {
         if producer == 0 {
