@@ -4385,6 +4385,26 @@ mod tests {
     }
 
     #[test]
+    fn saved_sections_round_trip_and_an_old_design_has_none() {
+        use solidcore_record::Vec3;
+        let mut doc = Document::new("Sections");
+        assert!(!String::from_utf8_lossy(&crate::write_design(&doc).unwrap()).contains("saved_sections"), "none saved, nothing written");
+        let plane = solidcraft_doc::SavedSectionPlane { id: 1, origin: Vec3::new(0.0, 15.0, 0.0), normal: Vec3::Y, hidden: false };
+        doc.saved_sections.push(solidcraft_doc::SavedSection { name: "Wall".into(), planes: vec![plane.clone()], hatch: true });
+        doc.saved_sections.push(solidcraft_doc::SavedSection {
+            name: "Hidden".into(),
+            planes: vec![solidcraft_doc::SavedSectionPlane { hidden: true, ..plane }],
+            hatch: false,
+        });
+        let back = crate::read_design(&crate::write_design(&doc).unwrap()).unwrap();
+        assert_eq!(back.saved_sections, doc.saved_sections);
+        assert_eq!(crate::read_design(&write_design_container(&doc).unwrap()).unwrap().saved_sections, doc.saved_sections);
+        // A design written before sections could be saved opens with none.
+        let old = Document::new("Old");
+        assert!(crate::read_design(&crate::write_design(&old).unwrap()).unwrap().saved_sections.is_empty());
+    }
+
+    #[test]
     fn metadata_round_trip_preserves_new_and_existing_fields() {
         let mut doc = Document::new("Empty");
         doc.units = "in".into();

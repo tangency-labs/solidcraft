@@ -1,0 +1,50 @@
+{
+  "en": {
+    "ui.send_copy_keep": "Keep in a folder",
+    "ui.send_copy_folder": "Folder",
+    "ui.send_copy_choose": "Choose…",
+    "ui.send_copy_replace": "Replace file",
+    "ui.send_copy_no_folder": "Choose the folder to keep the file in, or turn that off",
+    "ui.sent_to_slicer_saved": "Sent to {slicer}, saved as {path}"
+  },
+  "ar": {
+    "ui.send_copy_keep": "الاحتفاظ في مجلد",
+    "ui.send_copy_folder": "المجلد",
+    "ui.send_copy_choose": "اختيار…",
+    "ui.send_copy_replace": "استبدال الملف",
+    "ui.send_copy_no_folder": "اختر المجلد لحفظ الملف فيه، أو ألغِ هذا الخيار",
+    "ui.sent_to_slicer_saved": "أُرسل إلى {slicer} وحُفظ باسم {path}"
+  },
+  "he": {
+    "ui.send_copy_keep": "שמירה בתיקייה",
+    "ui.send_copy_folder": "תיקייה",
+    "ui.send_copy_choose": "בחירה…",
+    "ui.send_copy_replace": "החלפת הקובץ",
+    "ui.send_copy_no_folder": "בחרו תיקייה לשמירת הקובץ, או כבו את האפשרות",
+    "ui.sent_to_slicer_saved": "נשלח אל {slicer}, נשמר בשם {path}"
+  },
+  "ja": {
+    "ui.send_copy_keep": "フォルダに保存",
+    "ui.send_copy_folder": "フォルダ",
+    "ui.send_copy_choose": "選択…",
+    "ui.send_copy_replace": "ファイルを置換",
+    "ui.send_copy_no_folder": "保存先のフォルダを選ぶか、この設定をオフにしてください",
+    "ui.sent_to_slicer_saved": "{slicer} に送信し、{path} として保存しました"
+  },
+  "vi": {
+    "ui.send_copy_keep": "Giữ trong thư mục",
+    "ui.send_copy_folder": "Thư mục",
+    "ui.send_copy_choose": "Chọn…",
+    "ui.send_copy_replace": "Thay thế tệp",
+    "ui.send_copy_no_folder": "Chọn thư mục để giữ tệp, hoặc tắt tùy chọn này",
+    "ui.sent_to_slicer_saved": "Đã gửi tới {slicer}, lưu tại {path}"
+  },
+  "zh": {
+    "ui.send_copy_keep": "保存到文件夹",
+    "ui.send_copy_folder": "文件夹",
+    "ui.send_copy_choose": "选择…",
+    "ui.send_copy_replace": "替换文件",
+    "ui.send_copy_no_folder": "请选择保存文件的文件夹，或关闭此选项",
+    "ui.sent_to_slicer_saved": "已发送到 {slicer}，保存为 {path}"
+  }
+}
