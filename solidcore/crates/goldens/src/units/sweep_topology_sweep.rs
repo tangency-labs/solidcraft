@@ -217,16 +217,22 @@ fn service_object(
         ),
     }
 }
+/// A B-rep id that names no B-rep of the fixture model: the caller's target names a null
+/// entity (`SweepFailure::NullTarget`, status `SM_ERR_NULL_POINTER`, the status of the null
+/// pointer it replaced).
+fn no_brep(operation: &'static str) -> SolidError {
+    solidcore::error::Failure::new(operation, solidcore::error::sweep::SweepFailure::NullTarget).into_error()
+}
 impl SweepAccess for Model {
     fn brep(&self, id: BrepId) -> Result<&Brep> {
         self.b
             .get(id.index() as usize)
-            .ok_or_else(|| SolidError::port_invariant("runner", "no B-rep for the id"))
+            .ok_or_else(|| no_brep("runner"))
     }
     fn brep_mut(&mut self, id: BrepId) -> Result<&mut Brep> {
         self.b
             .get_mut(id.index() as usize)
-            .ok_or_else(|| SolidError::port_invariant("runner", "no B-rep for the id"))
+            .ok_or_else(|| no_brep("runner"))
     }
     fn kernel(&self, _id: BrepId) -> Result<&Kernel> {
         Ok(&self.k)
@@ -247,7 +253,7 @@ impl SweepAccess for Model {
         let brep = self
             .b
             .get_mut(id.index() as usize)
-            .ok_or_else(|| SolidError::port_invariant("sweep test model", "no B-rep slot for the id"))?;
+            .ok_or_else(|| no_brep("sweep test model"))?;
         let face_objects =
             |face: FaceId| service_object(id, solidcore::error::EntityRef::Face(face));
         let key_of = |entity| service_object(id, entity);
@@ -284,14 +290,14 @@ impl SweepAccess for Model {
         let (left, right) = self
             .b
             .split_at_mut_checked(si.max(di))
-            .ok_or_else(|| SolidError::port_invariant("sweep test model", "no B-rep slot for the id"))?;
+            .ok_or_else(|| no_brep("sweep test model"))?;
         let (src, dst) = if si < di {
             (left.get_mut(si), right.first_mut())
         } else {
             (right.first_mut(), left.get_mut(di))
         };
-        let src = src.ok_or_else(|| SolidError::port_invariant("sweep test model", "no B-rep slot for the source id"))?;
-        let dst = dst.ok_or_else(|| SolidError::port_invariant("sweep test model", "no B-rep slot for the target id"))?;
+        let src = src.ok_or_else(|| no_brep("sweep test model"))?;
+        let dst = dst.ok_or_else(|| no_brep("sweep test model"))?;
         let face_objects =
             |face: FaceId| service_object(destination, solidcore::error::EntityRef::Face(face));
         let key_of = |entity| service_object(destination, entity);
@@ -311,7 +317,7 @@ impl SweepAccess for Model {
         let brep = self
             .b
             .get_mut(id.index() as usize)
-            .ok_or_else(|| SolidError::port_invariant("sweep test model", "no B-rep slot for the id"))?;
+            .ok_or_else(|| no_brep("sweep test model"))?;
         let key_of = |entity| service_object(id, entity);
         let mut env = solidcore::topology::edge::NotifyEnv {
             records: &mut self.records,

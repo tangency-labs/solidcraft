@@ -4221,8 +4221,8 @@ mod tests {
         );
         // errors without a record are returned as they are
         assert_eq!(
-            SolidError::failed_routine("blend::op", SM_ERR).or_at(at_edge),
-            SolidError::failed_routine("blend::op", SM_ERR)
+            SolidError::invalid_input("blend::op", "x").or_at(at_edge),
+            SolidError::invalid_input("blend::op", "x")
         );
         // the decisions that read a failure's entity read the untyped entity, which `or_at`
         // never writes

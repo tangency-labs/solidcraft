@@ -539,7 +539,7 @@ mod tests {
             ErrorKind::InvalidInput
         );
         assert_eq!(
-            SolidError::failed_routine("geom::op", SM_ERR).geom_failure(),
+            SolidError::invalid_input("geom::op", "x").geom_failure(),
             None
         );
     }

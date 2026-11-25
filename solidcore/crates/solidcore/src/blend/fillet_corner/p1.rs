@@ -4235,7 +4235,7 @@ mod tests {
             assert_eq!(re_solved(Err(passed.clone()), sm_err), Err(passed));
         }
         // an error without a record has no cause to keep (no caller passes one)
-        let bare = SolidError::failed_routine(OP_CONST_RAD, crate::error::SM_ERR);
+        let bare = SolidError::invalid_input(OP_CONST_RAD, "x");
         assert_eq!(
             keeping_cause(
                 bare.clone(),
