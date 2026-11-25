@@ -46,6 +46,7 @@ mod control_joint_pose;
 mod control_params;
 pub mod control_switch;
 pub mod crash_ui;
+mod cut_bodies;
 pub mod deferred;
 pub mod delete;
 pub mod design_properties;
@@ -70,6 +71,7 @@ pub mod dialogs_move;
 pub mod dialogs_part_size;
 pub mod dialogs_parts;
 pub mod dialogs_plastic;
+pub mod dialogs_pulley;
 pub mod dialogs_rotate_member;
 pub mod dialogs_save_mesh;
 pub mod dialogs_sheet;
@@ -90,6 +92,7 @@ pub mod easyprint_ui;
 pub mod edit_clipboard;
 pub mod edit_in_place;
 mod feature_edit;
+mod finish_field;
 #[cfg(test)]
 mod font_literals_tests;
 pub mod fonts;
@@ -689,6 +692,16 @@ pub struct WgpuBuilt {
     msaa_fallback: bool,
 }
 
+/// The portable preferences last built for a save ([`SolveApp::try_prefs`]), with what they
+/// were built from.
+pub(crate) struct PortablePrefs {
+    layout: Option<Value>,
+    inputs: panel_runtime::PortableInputs,
+    portable: Option<Value>,
+    /// How many times they have been built (a reused build does not count).
+    pub(crate) builds: u64,
+}
+
 pub struct SolveApp {
     /// Common panel foundation, internal opt-in; stays on the app across document tabs.
     pub(crate) panel_runtime: Option<panel_runtime::AppPanelRuntime>,
@@ -1069,6 +1082,10 @@ pub struct SolveApp {
     pub(crate) open_meshing_next: bool,
     /// How long each frame takes on the window thread, by phase.
     pub(crate) frame_watch: frame_watch::Watch,
+    /// The panel layout the last portable preferences were built from, and that result: the
+    /// host's auto-save (eframe's 30 s `App::save`) otherwise decodes every retained command
+    /// record again on the window thread, which took ~0.9 s on a large design.
+    pub(crate) portable_prefs: std::sync::Mutex<Option<PortablePrefs>>,
     /// The other open designs (tabs).
     pub docs: documents::Documents,
     /// Where the control channel's design events go ([`control::publish_design`]): the shared
@@ -1305,6 +1322,7 @@ impl SolveApp {
             safe_graphics_next: false,
             frame_ms: 0.0,
             frame_rate: frame_rate::FrameRate::default(),
+            portable_prefs: std::sync::Mutex::new(None),
             operations: operations::Panel::default(),
             synthetic: Vec::new(),
             synthetic_mods: egui::Modifiers::default(),
@@ -1534,7 +1552,23 @@ impl SolveApp {
     /// Portable preferences for storage. On refusal the host retains its stored panel record.
     pub fn try_prefs(&self) -> Result<String, String> {
         let layout = prefs::held_panel_layout(self).unwrap_or_else(|| panel_runtime::preferences_value(self));
-        let portable = panel_runtime::portable_preferences_value(self, layout).map_err(solidcraft_engine::panels::commands::error_text)?;
+        // Rebuilding decodes every retained command record in the layout, which is expensive and
+        // only necessary when the layout changed: an auto-save with the same layout reuses it.
+        // Keyed on every input of the conversion (recovery can keep a saved record, and panels
+        // can register), so a reused build is the one a fresh conversion would make.
+        let inputs = panel_runtime::portable_inputs(self);
+        let mut cache = self.portable_prefs.lock().unwrap_or_else(|e| e.into_inner());
+        let portable = match cache.as_ref().filter(|c| c.layout == layout && c.inputs == inputs) {
+            Some(c) => c.portable.clone(),
+            None => {
+                let portable =
+                    panel_runtime::portable_preferences_value(self, layout.clone()).map_err(solidcraft_engine::panels::commands::error_text)?;
+                let builds = cache.as_ref().map_or(0, |c| c.builds) + 1;
+                *cache = Some(PortablePrefs { layout, inputs, portable: portable.clone(), builds });
+                portable
+            }
+        };
+        drop(cache);
         Ok(self.prefs_with_panel_layout(portable))
     }
 
@@ -1740,7 +1774,7 @@ impl SolveApp {
         crate::sketch_view::sync(self)?;
         self.sketch_view_named = params.get("view").is_some_and(|view| !view.is_null());
         let finished_sketch = crate::sketch_view::prepare_edit(self, id, &params)?;
-        if matches!(id, "sketch.create" | "sketch.edit") {
+        if matches!(id, "sketch.create" | "sketch.create3d" | "sketch.edit") {
             let explicit = match params.get("view") {
                 None | Some(Value::Null) => None,
                 Some(value) => Some(value.as_u64().ok_or_else(|| "view must be an unsigned integer identifying an open Model view".to_string())?),
@@ -1937,6 +1971,11 @@ impl SolveApp {
         // A grant taken back here that the shared store still holds is not taken back: say so.
         let r = match r {
             Ok(v) if matches!(id.to_ascii_lowercase().as_str(), "plugin.install" | "plugin.remove" | "plugin.revoke") => {
+                if id.eq_ignore_ascii_case("plugin.remove")
+                    && let Some(plugin) = v.get("id").and_then(Value::as_str)
+                {
+                    plugin_menu::forget_options(self, plugin);
+                }
                 self.plugin_themes.signature = None;
                 let saved = plugins::persist_grants(self);
                 plugin_slots::invalidate(self);
@@ -2417,6 +2456,55 @@ impl SolveApp {
         }
     }
 
+    /// The innermost linked component on a placement's path: the placement's own component, or
+    /// the nearest one above it that is linked to a file.
+    fn linked_component_on(&self, path: &[u64]) -> Option<u64> {
+        (1..=path.len()).rev().find_map(|n| {
+            let placement = self.session.occurrence_placement(path.get(..n)?).ok()?;
+            self.session.doc.links.contains_key(&placement.component).then_some(placement.component)
+        })
+    }
+
+    /// Break the link of each linked component among what is selected: a selected placement, or
+    /// a body, face, edge or vertex picked in the view, stands for the innermost linked
+    /// component on its path (a linked component inside one that is not linked is found, where
+    /// Ground's outermost placement would be the one around it), and a component picked in the
+    /// Browser for itself. Its bodies stay, and it no longer follows its file. The status line
+    /// says which links were broken, as nothing else on the screen changes. With no linked
+    /// component among them it says what to pick.
+    fn break_links_of_selected_components(&mut self) {
+        let frames = self.session.doc.body_frames(&self.session.model.state());
+        let mut components: Vec<u64> = Vec::new();
+        for sel in &self.session.selection {
+            use solidcraft_engine::Sel;
+            let path = match sel {
+                Sel::Occurrence { path } => Some(path.clone()),
+                Sel::Body { name: body } | Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } => {
+                    frames.iter().find(|frame| frame.0 == *body).map(|frame| frame.2.clone())
+                }
+                _ => None,
+            };
+            components.extend(path.and_then(|path| self.linked_component_on(&path)));
+        }
+        components.extend(self.tree.picked_components.iter().copied());
+        let mut seen = std::collections::BTreeSet::new();
+        components.retain(|component| self.session.doc.links.contains_key(component) && seen.insert(*component));
+        if components.is_empty() {
+            self.set_status(self.tr("ui.break_link_select_first"), false);
+            return;
+        }
+        let mut broken: Vec<String> = Vec::new();
+        for component in components {
+            let name = self.session.doc.components.iter().find(|c| c.id == component).map(|c| c.name.clone()).unwrap_or_default();
+            if let Err(why) = self.run("component.break_link", json!({ "component": component })) {
+                self.set_status(why, true);
+                return;
+            }
+            broken.push(name);
+        }
+        self.set_status(solidcraft_ui_text::format("ui.break_link_done", &[("name", &broken.join(", "))]), false);
+    }
+
     /// Ground (or, when every one is already grounded, unground) the selected placements, the
     /// placements owning the bodies or faces picked in the view, and the components picked in the
     /// Browser, the way the Browser's Ground row toggles one. With
@@ -2479,6 +2567,7 @@ impl SolveApp {
         // A tool can be started outside the frame's scope (a direct `start`, a shortcut in
         // `logic`): build its hint in the user's language, not the thread default.
         let _language = solidcraft_ui_text::scope(&self.preferences.language);
+        self.viewport.edit_dimensions = None;
         if solidcraft_engine::panels::commands::is_command(id) {
             if let Err(why) = self.run(id, json!({})) {
                 self.set_status(why, true);
@@ -2715,6 +2804,13 @@ impl SolveApp {
             self.ground_selected_occurrences();
             return;
         }
+        // The ribbon's Break Link acts on the linked components among what is selected, as
+        // Ground does on the placements. It used to run with no component and the engine
+        // answered "`component` must be a component id or name".
+        if id == "component.break_link" {
+            self.break_links_of_selected_components();
+            return;
+        }
         if render_workspace::start_interactive(self, id) {
             return;
         }
@@ -2871,6 +2967,9 @@ impl SolveApp {
         if id == "sketch.construction" {
             sketch_palette::toggle_construction(self);
             return;
+        }
+        if id == "doc.open" {
+            self.file_load.home_at_start = self.home.open;
         }
         dim_view::cancel();
         self.tool = None;
@@ -3132,8 +3231,25 @@ impl SolveApp {
             self.dialog = Some(d);
             return;
         }
+        // 3D Sketch has no plane to pick (#19426): the sketch opens at once with 3D Line running
+        // in it. The view stays as it is, as there is no plane to turn to.
+        if id == "sketch.create3d" {
+            if self.run(id, json!({})).is_ok() {
+                // A person started it, so an empty one goes when it finishes, as after Create Sketch.
+                self.session.mark_sketch_entered_by_person();
+                self.start("sketch.line3d");
+                if self.tool.as_ref().is_some_and(|tool| tool.cmd == "sketch.line3d") {
+                    let hint = self.tr("sketch.hint.create3d").to_owned();
+                    self.set_tool_hint(hint);
+                }
+            } else {
+                self.restore_command_tab();
+            }
+            return;
+        }
         if let Some(mut t) = tools::Tool::for_command(id) {
             t.classic = self.preferences.construction_line_classic;
+            t.arc_modes = self.preferences.sketch_arc_tangent_snap;
             if t.classic && solidcraft_engine::cmd::construction_line_mode(id).is_some() {
                 // The classic switch starts at Construction, whatever the palette chose last.
                 t.line_type = 3;
@@ -3906,6 +4022,7 @@ impl SolveApp {
     /// Open `path` as [`Self::open_path_async`] does, for a caller that has more to do once the
     /// design is in (the web app's design links, #10198): the receiver gets `{"ok": true, ...}`
     /// when it is, or `{"ok": false, "error"}`; it is dropped unanswered when the load is.
+    /// Importer refusals also include `plugin_error` with `kind`, `plugin` and `reason`.
     pub fn open_path_answered(&mut self, path: &str) -> std::sync::mpsc::Receiver<Value> {
         let (tx, rx) = std::sync::mpsc::channel();
         let mut request = file_load::Request::new(path, file_load::Kind::Open);
@@ -3930,6 +4047,8 @@ impl SolveApp {
         self.pick_open(|app, path| {
             if let Some(path) = path {
                 app.open_chosen_file(&path);
+            } else {
+                app.file_load.home_at_start = false;
             }
         });
     }
@@ -4746,6 +4865,13 @@ impl SolveApp {
         let host = self.view_windows.current_window();
         let opening_host = self.view_windows.opening_host(Some(host));
         plugins::tick(self, ui.ctx(), false);
+        // The folders the user allowed linked files to be read from (Preferences, General): an importer
+        // plugin's link outside its design's folder is read only from one of them. The user's own
+        // setting, never the design's.
+        let allowed: Vec<std::path::PathBuf> = self.preferences.linked_file_folders.iter().map(std::path::PathBuf::from).collect();
+        if self.session.plugin_state.link_folders != allowed {
+            self.session.plugin_state.link_folders = allowed;
+        }
         documents::give_up_renames_of_other_designs(self);
         params_dialog::install_expressions(ui.ctx());
         ui_kit::set_viewport_half_height(ui.ctx(), self.cam.half_height());
@@ -4882,6 +5008,7 @@ impl SolveApp {
                 // The unit of an imported mesh is asked on the screen the import starts: the
                 // start page asks it too, or the file would wait for an answer nobody sees (#15598).
                 mesh_units::show(self, ui.ctx());
+                file_load::show_refusal(self, ui.ctx());
                 return;
             }
         }
@@ -4912,6 +5039,7 @@ impl SolveApp {
         plugin_menu::show(self, ui.ctx());
         stand_up::show(self, ui.ctx());
         prefs_notice::show(self, ui.ctx());
+        file_load::show_refusal(self, ui.ctx());
         context_menu::show(self, ui.ctx());
         mouse_gesture::show(self, ui.ctx());
         delete::show(self, ui.ctx());
@@ -4960,14 +5088,12 @@ impl SolveApp {
             dim_view::set_model_drawn(Vec::new());
             let id = self.docs.views.active().id;
             drawing_sheet_page::show_view(self, ui, id);
-            view_tiles::single_sketch_chrome(self, ui);
         } else if drawing_workspace::active(self) {
             if dialogs_sheet::flat_active(self) {
                 viewport::show(self, ui);
             } else {
                 dim_view::set_model_drawn(Vec::new());
                 drawing_workspace::show(self, ui);
-                view_tiles::single_sketch_chrome(self, ui);
             }
         } else if view_window_drag::unanchored(self, ui.ctx(), self.docs.views.active().id) {
             self.viewport.rect = Some(ui.max_rect());

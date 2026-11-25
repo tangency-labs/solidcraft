@@ -67,6 +67,7 @@
 
 mod bead;
 mod chart;
+mod contour;
 mod flange_profile;
 mod flat;
 mod fold;
@@ -84,6 +85,7 @@ pub use bead::{
     BeadRefusal, BeadSection, FormEdge, FormFace, FormSurface, CREASE_TOL, MIN_BEAD_RADIUS,
     MIN_BEND_RISE,
 };
+pub use contour::{offset_contour, ContourRefusal};
 pub use flange_profile::{
     anchor_past_outer_sharp, edge_fractions, profile_frame, profile_tilt, shift_along, ProfileFrame,
 };

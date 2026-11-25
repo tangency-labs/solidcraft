@@ -105,6 +105,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("contact.list", "List Contact Sets", crate::checked!("contact.list", list_sets))
         .icon("list")
         .noundo()
+        .read_only()
         .doc_only()
         .contract(&CONTACT_NONE_CONTRACT)
         .output(output_schema_for::<ContactSets>)
@@ -212,6 +213,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("motion.list", "List Motion Studies", crate::checked!("motion.list", list_studies))
         .icon("list")
         .noundo()
+        .read_only()
         .contract(&STUDY_LIST_CONTRACT)
         .output(output_schema_for::<MotionStudies>),
     CommandSpec::new("motion.delete", "Delete Motion Study", crate::checked!("motion.delete", delete_study))
@@ -238,6 +240,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("explode.list", "List Exploded Views", crate::checked!("explode.list", explode_list))
         .icon("list")
         .noundo()
+        .read_only()
         .contract(&EXPLODE_LIST_CONTRACT)
         .output(output_schema_for::<ExplodeViews>),
     CommandSpec::new("explode.delete", "Delete Exploded View", crate::checked!("explode.delete", explode_delete))

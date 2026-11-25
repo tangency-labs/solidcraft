@@ -54,5 +54,12 @@
     "ui.plugin_panel_empty": "尚无行。",
     "ui.plugin_panel_newer": "此面板需要更新版本的 SolidCraft。",
     "ui.plugin_panel_selection": "选择"
+  },
+  "fr": {
+    "plugin_install.panel": "Panneau : {title}",
+    "ui.plugin_panel_badge": "Plugiciel",
+    "ui.plugin_panel_empty": "Aucune ligne pour le moment.",
+    "ui.plugin_panel_newer": "Ce panneau nécessite une version plus récente de SolidCraft.",
+    "ui.plugin_panel_selection": "Sélection"
   }
 }
