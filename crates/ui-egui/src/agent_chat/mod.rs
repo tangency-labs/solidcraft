@@ -116,6 +116,16 @@ impl State {
             State::Failed => "ui.agent_chat_state_failed",
         })
     }
+    /// Whether the header offers Stop: only while a turn (or the start of the agent) can be
+    /// stopped. An idle, connected agent has nothing to stop.
+    fn shows_stop(self) -> bool {
+        matches!(self, State::Starting | State::Busy)
+    }
+    /// Whether the agent's own sign-in label is shown: only when it needs a login. An agent that
+    /// is connected and signed in may still report a stale "not logged in" label.
+    fn shows_auth_status(self) -> bool {
+        self == State::NeedsAuth
+    }
     fn running(self) -> bool {
         matches!(self, State::Starting | State::Ready | State::Busy | State::NeedsAuth)
     }
@@ -456,6 +466,29 @@ struct ModelRevert {
     saved: Option<String>,
 }
 
+/// A switch that starts on (`#[derive(Default)]` would start it off). Read and set it through `*`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OnByDefault(pub bool);
+
+impl Default for OnByDefault {
+    fn default() -> Self {
+        Self(true)
+    }
+}
+
+impl std::ops::Deref for OnByDefault {
+    type Target = bool;
+    fn deref(&self) -> &bool {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for OnByDefault {
+    fn deref_mut(&mut self) -> &mut bool {
+        &mut self.0
+    }
+}
+
 #[derive(Default)]
 pub struct AgentChat {
     /// The panel is shown (View menu, the application bar's chat button, Ctrl+Shift+A).
@@ -477,8 +510,8 @@ pub struct AgentChat {
     documents: bool,
     /// Send a picture of the view with the next message.
     pub attach_view: bool,
-    /// Send what is selected in the model with the next message.
-    pub attach_selection: bool,
+    /// Send what is selected in the model with the next message. On unless turned off.
+    pub attach_selection: OnByDefault,
     /// How many things the current selection is by clicks, kept while the selection and the design
     /// stay as they are: (the selection, the design's address, the count).
     selected_count: Option<(Vec<solidcraft_engine::Sel>, usize, usize)>,
@@ -1674,6 +1707,10 @@ pub(crate) fn lit<'a>(
 
 /// How many things the selection is, counting what was clicked (the two halves of a rim are one).
 pub fn selected_count(app: &mut SolveApp) -> usize {
+    // A whole-body selection counts the bodies it covers (they come and go with Hide and Show).
+    if app.session.all_bodies_selected() {
+        return app.session.selected_count().unwrap_or(0);
+    }
     let doc = Arc::as_ptr(&app.session.doc) as usize;
     if let Some((selection, at, count)) = &app.agent_chat.selected_count
         && *at == doc
@@ -1770,7 +1807,7 @@ pub fn send(app: &mut SolveApp, ctx: &egui::Context, text: String) {
     // The selection is read now, when the user sends, not when a queued message finally goes.
     // What was picked goes first, then what is selected (without what was picked twice).
     let (text, mut context) = place_pills(&mut app.agent_chat, text);
-    if app.agent_chat.attach_selection {
+    if *app.agent_chat.attach_selection {
         let mut selected = context::describe_selection(&mut app.session);
         // A pick that is also selected stays one item, under its pill, marked as attached too.
         for item in &mut context.items {
@@ -2163,7 +2200,7 @@ fn decline_all(app: &mut SolveApp, why: &str) {
 
 /// Allow or deny a held request.
 pub fn approve(app: &mut SolveApp, id: u64, allow: bool) {
-    approve_with(app, id, allow, "the user declined it");
+    approve_with(app, id, allow, "the user declined this call");
 }
 
 /// Allow a held request and remember to allow its tool for this agent from now on.
@@ -2239,7 +2276,7 @@ fn approve_with(app: &mut SolveApp, id: u64, allow: bool, why: &str) {
     if allow {
         app.control_held.push_back(h.req);
     } else {
-        let _ = h.req.reply.send(json!({"ok": false, "error": format!("not run: {why}")}));
+        let _ = h.req.reply.send(json!({"ok": false, "error": format!("{} {why}", solidcraft_control::NOT_RUN)}));
     }
 }
 
@@ -3036,7 +3073,7 @@ pub fn control(app: &mut SolveApp, ctx: &egui::Context, p: &Value) -> Result<Val
         app.agent_chat.attach_view = a;
     }
     if let Some(a) = p.get("attach_selection").and_then(Value::as_bool) {
-        app.agent_chat.attach_selection = a;
+        *app.agent_chat.attach_selection = a;
     }
     if p.get("pick").and_then(Value::as_bool) == Some(true) {
         start_pick(app, p.get("pick_at").and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok()));

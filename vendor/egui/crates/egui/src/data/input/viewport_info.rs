@@ -84,6 +84,13 @@ pub struct ViewportInfo {
     /// Not all platforms support this.
     /// On platforms that don't, this will be `None` or `Some(false)`.
     pub occluded: Option<bool>,
+
+    /// The native window this viewport is shown in, when the integration knows it: the window
+    /// handle (`HWND`) on Windows, `None` elsewhere.
+    ///
+    /// SolidCraft: code that answers the system for a window (its hit test, say) is given this
+    /// handle by the system, and finds what the viewport laid out by it.
+    pub native_window: Option<u64>,
 }
 
 impl ViewportInfo {
@@ -130,6 +137,7 @@ impl ViewportInfo {
             fullscreen: self.fullscreen,
             focused: self.focused,
             occluded: self.occluded,
+            native_window: self.native_window,
         }
     }
 
@@ -147,6 +155,7 @@ impl ViewportInfo {
             fullscreen,
             focused,
             occluded,
+            native_window,
         } = self;
 
         crate::Grid::new("viewport_info").show(ui, |ui| {
@@ -196,6 +205,10 @@ impl ViewportInfo {
 
             ui.label("Occluded:");
             ui.label(opt_as_str(occluded));
+            ui.end_row();
+
+            ui.label("Native window:");
+            ui.label(opt_as_str(native_window));
             ui.end_row();
 
             let visible = self.visible();

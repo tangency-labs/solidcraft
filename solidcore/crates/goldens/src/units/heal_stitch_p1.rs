@@ -295,7 +295,7 @@ pub(crate) fn own_brep(
 ///
 /// As [`own_brep`], and when the box cannot be built.
 pub(crate) fn own_unit_box(origin: [f64; 3]) -> Result<Brep, HarnessError> {
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     own_brep(
         &mut k,
         &StitchBrep::Box {
@@ -1028,7 +1028,7 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
 
 fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
     // one context for the build, the resolution and the op, as the shim's
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let mut b = match own_brep(&mut k, &i.brep)? {
         Ok(b) => b,
         Err(o) => return Ok(o),
@@ -1262,7 +1262,6 @@ impl UnitDiff for Runner {
 /// reports nothing. Each moved tolerance is located and set against what its entity needs.
 #[cfg(test)]
 mod wr56_certificates {
-    use solidcore::kernel::Kernel;
     use solidcore::topology::brep::validation;
 
     fn stitched(runner: &dyn crate::UnitDiff, name: &str, moved: &[(f64, f64)]) -> Vec<String> {
@@ -1270,7 +1269,7 @@ mod wr56_certificates {
         let _ = crate::certify::take_kept();
         runner.run_rust(&case).expect("rust");
         let mut b = crate::certify::take_kept().expect("the op's B-rep");
-        let mut k = Kernel::default();
+        let mut k = crate::runner_kernel();
         let (edges, vertices) = crate::certify::tolerance_covers(&k, &b);
         let mut failures = Vec::new();
         for e in &edges {

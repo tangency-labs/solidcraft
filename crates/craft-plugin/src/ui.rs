@@ -14,6 +14,7 @@ pub const MAX_PANEL_BYTES: usize = 1024 * 1024;
 pub const MAX_ROWS: usize = 100_000;
 pub const MAX_CHART_SERIES: usize = 8;
 pub const MAX_CHART_POINTS: usize = 20_000;
+pub const MAX_TABLE_ROW_INDENT: usize = 8;
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

@@ -153,6 +153,47 @@ pub(crate) fn ref_form(v: &Value) -> std::result::Result<RefForm<'_>, String> {
     Err(format!("cannot project {v}"))
 }
 
+/// The body an edge point without one means, in `st`, the model as the sketch projects from it
+/// (bodies where they are placed): the one body with an edge there, found on the exact curves
+/// within Fillet's reach and grouped as Fillet groups them. A point on edges of two bodies is
+/// refused, naming them, as Fillet refuses it, so the sketch never silently follows the first
+/// body (#20504). No body with an edge there: none, and the design decides as before.
+fn edge_owner(st: &solidcraft_doc::ModelState, at: Vec3) -> Result<String> {
+    let mut near: Vec<(f64, &str)> = Vec::new();
+    for b in st.bodies.iter().filter(|b| !b.body.is_mesh()) {
+        let reach = super::features::edge_reach(b.body.size());
+        let Ok(bb) = b.body.exact_bounds() else { continue };
+        let off = |lo: f64, v: f64, hi: f64| v < lo - reach || v > hi + reach;
+        if off(bb.min.x, at.x, bb.max.x) || off(bb.min.y, at.y, bb.max.y) || off(bb.min.z, at.z, bb.max.z) {
+            continue;
+        }
+        let d =
+            (0..b.body.record().edges.len()).filter_map(|i| super::features::edge_foot(&b.body, i, at).map(|(d, _)| d)).fold(f64::INFINITY, f64::min);
+        if d <= reach {
+            near.push((d, b.name.as_str()));
+        }
+    }
+    let d_min = near.iter().map(|(d, _)| *d).fold(f64::INFINITY, f64::min);
+    let mut names: Vec<String> = Vec::new();
+    for (_, name) in near.iter().filter(|(d, _)| *d <= 2.0 * d_min + 1e-3) {
+        if !names.iter().any(|n| n == name) {
+            names.push((*name).to_string());
+        }
+    }
+    match names.as_slice() {
+        [] => Ok(String::new()),
+        [one] => Ok(one.clone()),
+        _ => Err(EngineError::Other(format!(
+            "[{}, {}, {}] lies on edges of {} bodies, {}: name the one to project with `body`",
+            at.x,
+            at.y,
+            at.z,
+            names.len(),
+            super::features::and_list(&names, super::features::NAMED_BODIES)
+        ))),
+    }
+}
+
 /// Parse one reference.
 fn source(s: &Session, v: &Value, cmd: &str) -> Result<LinkSource> {
     match ref_form(v).map_err(|why| bad(cmd, why))? {
@@ -332,6 +373,23 @@ fn rename_link_body(source: &mut LinkSource, renames: &std::collections::HashMap
     }
 }
 
+/// What a 3D constraint of sketch `id` is resolved against (#10616): the parameter values, the
+/// model before the sketch in the frame its links resolve in, and the sketch's plane.
+pub(super) fn wire_context(
+    s: &Session,
+    id: u64,
+    named: &[&str],
+) -> Option<(std::collections::BTreeMap<String, solidcraft_doc::expr::Value>, solidcraft_doc::ModelState, Plane, (u64, solidcraft_doc::Mat))> {
+    let doc = placed_candidate(s, &s.doc);
+    let (vals, _) = doc.param_values();
+    let before = s.model.state_before(id);
+    let mut bodies = super::sketch_store::read(&doc, id).ok()?.linked_bodies();
+    bodies.extend_from_slice(named);
+    let st = state_for_sketch(s, &doc, id, &before, &bodies).ok()?.into_owned();
+    let plane = sketch_plane(&doc, id, &st).ok()?;
+    Some((vals, st, plane, sketch_frame(s, &doc, id)?))
+}
+
 /// Keep candidate feature edits while overlaying uncommitted occurrence placements.
 fn placed_candidate<'a>(s: &Session, doc: &'a Document) -> std::borrow::Cow<'a, Document> {
     if s.pending_moves.is_empty() {
@@ -373,7 +431,9 @@ fn sketch_frame(s: &Session, doc: &Document, id: u64) -> Option<(u64, solidcraft
 /// edit's solve the other side to keep. A sketch that does not solve that way keeps its stored
 /// geometry, with the links moved.
 pub(super) fn refresh(s: &Session, doc: &Document, id: u64, sk: &mut Sketch) -> Vec<String> {
-    if sk.links.is_empty() {
+    // A 3D sketch's curves may be held to its 2D geometry and to model planes (#10616): their
+    // places are refreshed with the links.
+    if sk.links.is_empty() && sk.wires.is_empty() {
         return Vec::new();
     }
     #[cfg(test)]
@@ -388,7 +448,7 @@ pub(super) fn refresh(s: &Session, doc: &Document, id: u64, sk: &mut Sketch) -> 
         solidcraft_doc::FeatureKind::Sketch { plane, .. } => super::sketch::face::anchor(plane),
         _ => None,
     });
-    let named: Vec<&str> = sk.links.iter().flat_map(|l| l.source.bodies()).collect();
+    let named = sk.linked_bodies();
     let Ok(st) = state_for_sketch(s, &doc, id, &st, &named) else {
         return vec!["lost face attachment; reattach explicitly".into()];
     };
@@ -480,6 +540,10 @@ fn add_link_unless_present(
     let st = s.model.state_before(id);
     // The model as the sketch's component sees it.
     let st = state_for_sketch(s, &doc, id, &st, &src.bodies())?;
+    let src = match src {
+        LinkSource::Edge { body, at } if body.is_empty() => LinkSource::Edge { body: edge_owner(&st, at)?, at },
+        src => src,
+    };
     let plane = sketch_plane(&doc, id, &st)?;
     let frame = sketch_frame(s, &doc, id);
     let r = resolve_at(&doc, &vals, &st, &plane, kind, &src, frame.as_ref())?;

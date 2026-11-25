@@ -133,15 +133,18 @@ notifications.
 
 Handlers run on the command worker, away from the window thread, with their own
 budget: at most 1,000,000 fuel, 16 MiB memory, 512 KiB stack and 100 ms execution time, further
-limited by their requested budgets. They may refresh caches or panel data.
+limited by their requested budgets. They may refresh caches.
 Editing, file writes and starting jobs are refused with existing typed permission
 errors. A failure is shown in Preferences › Plugins and never fails the action
 that triggered the notification. Each invocation uses a fresh guest instance.
 Handler results use the existing 1 MiB JSON reply limit; retained panel data is
 limited to 16 MiB in total. Exceeding either limit reports a typed limit error.
 
-A handler of a plugin that declares `ui@0.1` may refresh that plugin's panel data with
-`ui.set-data` (see Docked panels below).
+A handler cannot refresh its plugin's docked panel yet. It runs on a scratch copy of the
+session, so a `ui.set-data` call it makes does not reach the open panel; only the handler's JSON
+reply is kept (up to the limits above), and no panel reads it. Until the panel contract lands
+(#19516, phase 3 of RFC 0015), give the panel a Refresh button whose entry reads the design and
+calls `ui.set-data`, as the entries a panel runs do (see Docked panels below).
 
 ## Classifying points and reading surface normals
 
@@ -804,10 +807,21 @@ component's own imports and exports, and serves the frozen 0.1 WIT
 (`crates/craft-plugin/wit-0.1/plugin.wit`) to those. A component that names a version the host does
 not run, or two versions at once, is refused before any of its code runs.
 
+`shaders@0.1` lets a plugin draw the 3D view's background with a WGSL shader the host checks,
+wraps and limits; it needs no runtime. See [plugin shaders](plugin-shaders.md) and
+[RFC 0015, amendment 1](rfcs/0015-plugin-ui-workspaces.md#amendment-1-shaders).
+
+`shaders@0.2` adds tints, which colour the ribbon's icons, its button blocks and the panels each
+frame, and settings sliders for shaders. See [plugin shaders](plugin-shaders.md#tints).
+It also adds panel shaders, which draw every see-through panel's background from what is behind
+it. See [plugin panels](plugin-panels.md).
+
 ## Docked panels
 
 Add `"ui@0.1"` alongside `"commands@0.2"`, declare `runtime.ui`, and target `panel-plugin` in
-`crates/craft-plugin/wit/plugin.wit`. The `ui` and `ui-provider` records follow
+`crates/craft-plugin/wit/plugin.wit`. The `panel-plugin` world includes `command-plugin`, bringing
+`storage`, `forms` and `design-state` to panel plugins. Plugins that also provide a dialog field hook
+can target `panel-dialog-plugin`, which adds `export dialog-provider`. The `ui` and `ui-provider` records follow
 [RFC 0015 section 1](rfcs/0015-plugin-ui-workspaces.md#1-panels). The manifest declarations are
 listed during installation. The component's `ui-provider.describe` must return those declarations.
 The host owns the controls, theme, docking and plugin badge; plugins ship data and layouts.
@@ -843,11 +857,14 @@ no forms.
 
 The component updates cells with `ui.set-data`, for example `/jobs/0/id` = `text("op1")` and
 `/jobs/0/name` = `text("Pocket")`. Values are typed scalars, with lengths in mm and angles in
-degrees. Slash paths identify cells; no JSON arrays cross the UI WIT interface. Successful calls
-merge into the panel once per frame. A failing entry discards its updates. `clear-data` replaces
-the panel data with an empty set; `show-panel` requests visibility in the current workspace.
-Calling `show-panel(true)` again reopens a panel the user closed. Closing a panel keeps the
-other workspaces' placements and does not cancel a command already running.
+degrees. Slash paths identify cells; no JSON arrays cross the UI WIT interface. A table row may
+carry an optional `indent` integer (0, 1, 2, …, capped at 8), for example `/jobs/0/indent` =
+`integer(1)`. The host indents the row's first cell to display nested data before dedicated tree
+widgets. Rows without an `indent` entry remain un-indented. Successful calls merge into the
+panel once per frame. A failing entry discards its updates. `clear-data` replaces the panel data
+with an empty set; `show-panel` requests visibility in the current workspace. Calling
+`show-panel(true)` again reopens a panel the user closed. Closing a panel keeps the other
+workspaces' placements and does not cancel a command already running.
 
 The phase 2 host draws groups, tabs, splits, forms, buttons, toolbars, lists, tables, text,
 progress and empty states. Trees, charts and newer widget versions show a placeholder.
@@ -868,6 +885,14 @@ refused with a typed error. Traps, missing permissions, failed commands, limits
 and invalid manifest fields return structured errors (see Errors below). Phase 2 adds importers
 and exporters (below) and the author tools (`plugin check` and `plugin test`, below); browser
 execution follows.
+
+A `file` or `doc` command names a file in a granted folder by the grant's name, the `name` the manifest gives that folder in `runtime.permissions.files`: `grant:<name>/<path>` (for example `{"path": "grant:exports/part.step"}`), so a plugin never needs the folder's absolute path. After the name come plain names only (no `..`, `.`, root or drive). A name the command may not use is refused before it runs; any command but an input reader such as `file.insert_step` needs a folder granted for reading and writing. Replies name the file by its full path.
+
+With `doc` granted, `doc.info` tells a plugin which design it runs on: `path` (null until first
+saved), `read_only`, `unsaved`, `disk` (`{len, modified_ns}`, `modified_ns` a decimal string) and
+`document_id`. These describe the user's design when the call started, before the plugin's own
+changes. The run still works on a copy with no file: `document.inspect` gives no `path` there, and
+`file.save` without a `path` is refused.
 
 ## Plugins as tools for agents
 

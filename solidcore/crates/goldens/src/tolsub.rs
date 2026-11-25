@@ -37,7 +37,7 @@ pub(crate) fn active() -> bool {
 }
 
 #[cfg(test)]
-mod replay;
+pub(crate) mod replay;
 
 /// Runs `f` with the kept-trim cover's raises (tangency-labs/solidcraft#19295) put back on
 /// every read it makes: each raised edge and vertex holds its tolerance before the cover,

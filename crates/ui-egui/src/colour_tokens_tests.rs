@@ -146,6 +146,8 @@ fn analysis_colours_reach_the_shader_in_its_order() {
 /// hold none at all.
 const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("gpu.rs", 1, "the white tint that shows the background picture as it is"),
+    ("plugin_shaders.rs", 1, "the white tint that shows a plugin's background as its shader drew it"),
+    ("plugin_tint.rs", 1, "the white tint that shows a plugin's panel tint as its shader answered it"),
     ("navigation.rs", 1, "the navigator's face shading, made from a token"),
     ("drawing_sheet_page.rs", 2, "the drawing sheet moves toward white, else black, to stand off the backdrop"),
     ("canvas.rs", 3, "white rings around manipulator handles"),
@@ -176,7 +178,7 @@ const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("view_tiles.rs", 2, "the black shadows under a view card and the name pill: a shadow is black at an opacity in every theme"),
     ("workspace.rs", 1, "the view kinds' icon strokes, drawn on the Tabs board: a fixed palette per kind in each theme"),
     ("links.rs", 1, "the link pills' white ink on the brand fills"),
-    ("ui_kit/icons/mod.rs", 1, "the white tint that carries an icon image's opacity"),
+    ("ui_kit/icons/mod.rs", 3, "the white tint carrying an icon's opacity, greyscale, and a pixel's brightness for a plugin tint"),
     ("ui_kit/icons/svg.rs", 1, "an icon colour role's value: the installed set's own palette data"),
     ("ui_kit/menu.rs", 1, "a menu entry's swatch: the colour is document data"),
 ];

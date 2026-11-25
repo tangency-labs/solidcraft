@@ -823,6 +823,17 @@ pub struct SketchView {
     pub three_d: bool,
 }
 
+/// Where a sketch's 2D geometry lies for its 3D curves ([`Sketch::frame`]): derived from the
+/// model each time the sketch's links are refreshed, so two sketches compare equal whatever it is.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SketchFrame(pub Option<solidcore_record::Plane>);
+
+impl PartialEq for SketchFrame {
+    fn eq(&self, _: &SketchFrame) -> bool {
+        true
+    }
+}
+
 /// A 2D sketch. Point 0 is always the fixed sketch origin (id `origin`).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Sketch {
@@ -855,6 +866,11 @@ pub struct Sketch {
     /// joint deleted stays deleted.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub wires_joined: bool,
+    /// The plane the 2D geometry lies on, in the drawn 3D curves' component coordinates, as the
+    /// document last resolved it (#10616): a 3D point on a 2D point or curve is placed through it.
+    /// Not saved; set when the sketch's links are refreshed.
+    #[serde(skip)]
+    pub frame: SketchFrame,
     /// Curves drawn from formulas (#8352): the fit point splines they place, with their formulas.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub equations: Vec<crate::equation::EquationCurve>,
@@ -864,6 +880,35 @@ pub struct Sketch {
     /// Display options (Sketch Palette).
     #[serde(default, skip_serializing_if = "is_default_view")]
     pub view: SketchView,
+}
+
+impl Sketch {
+    /// Everything of the sketch a numerical solve's residuals can read besides its constraints
+    /// (which a solve reads through its residual blocks, with the values it is solving for), as
+    /// text that tells any two such states apart: for remembering the solver's runs
+    /// (`solver::lm_memo`). Every field is named, so a new one has to be decided on here.
+    pub(crate) fn solve_fingerprint(&self) -> String {
+        let Sketch {
+            points,
+            curves,
+            constraints: _,
+            patterns,
+            links,
+            offsets,
+            freeform_offsets,
+            freeform_chain_offsets,
+            wires,
+            wire_constraints,
+            wires_joined,
+            equations,
+            counters: _,
+            view: _,
+            frame,
+        } = self;
+        format!(
+            "{points:?}{curves:?}{patterns:?}{links:?}{offsets:?}{freeform_offsets:?}{freeform_chain_offsets:?}{wires:?}{wire_constraints:?}{wires_joined:?}{equations:?}{frame:?}"
+        )
+    }
 }
 
 fn is_default_view(v: &SketchView) -> bool {
@@ -877,6 +922,15 @@ impl Default for Sketch {
 }
 
 impl Sketch {
+    /// Bodies read by projected geometry and by 3D constraints held to model faces.
+    pub fn linked_bodies(&self) -> Vec<&str> {
+        self.links
+            .iter()
+            .flat_map(|link| link.source.bodies())
+            .chain(self.wire_constraints.iter().filter_map(|c| c.kind.model_plane()).flat_map(|plane| plane.source.bodies()))
+            .collect()
+    }
+
     pub fn new() -> Self {
         Sketch {
             points: vec![SPoint { id: "origin".into(), pos: Vec2::ZERO, fixed: true, link: None, exprs: None, construction: false }],
@@ -890,6 +944,7 @@ impl Sketch {
             wires: Vec::new(),
             wire_constraints: Vec::new(),
             wires_joined: false,
+            frame: SketchFrame(None),
             equations: Vec::new(),
             counters: Default::default(),
             view: SketchView::default(),
@@ -2700,7 +2755,12 @@ impl Sketch {
             return Some(i);
         }
         let (cid, role) = r.rsplit_once('.')?;
-        let c = self.curves.get(self.curve_index(cid)?)?;
+        Self::curve_point(self.curves.get(self.curve_index(cid)?)?, role)
+    }
+
+    /// The point a role (`start`, `end`, `center`, `major` or `apex`) names on a curve. A reversed
+    /// curve swaps its start and end, so they keep their as-drawn meaning.
+    pub(crate) fn curve_point(c: &Curve, role: &str) -> Option<usize> {
         let role = match (role, c.reversed) {
             ("start", true) => "end",
             ("end", true) => "start",

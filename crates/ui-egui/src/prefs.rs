@@ -744,6 +744,17 @@ pub enum HistorySketches {
     UnderFeature,
 }
 
+/// How unsuppressing an upstream feature in the 2D Timeline affects downstream dependents.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Timeline2dUnsuppressMode {
+    /// Restore each downstream feature's original suppression state (features separately suppressed remain suppressed).
+    #[default]
+    RestoreState,
+    /// Unsuppress all downstream features that depend on the upstream feature.
+    UnsuppressAll,
+}
+
 /// How a section hatches the faces it cuts (Preferences: "Section hatch").
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -2371,7 +2382,11 @@ fn save_graphics(app: &SolveApp) {
         let path = std::path::Path::new(path);
         let result = (|| {
             let mut graphics = read_graphics_settings(path)?;
-            graphics["msaa"] = json!(app.preferences.msaa);
+            // A saved `msaa` is a level someone chose, which the software renderer draws instead
+            // of its 1x (#3321): saving the window system or adapter doesn't choose the default.
+            if graphics.get("msaa").is_some() || app.preferences.msaa != Prefs::default().msaa {
+                graphics["msaa"] = json!(app.preferences.msaa);
+            }
             graphics["window_system"] = json!(app.preferences.window_system);
             graphics["adapter"] = json!(app.preferences.graphics_adapter);
             solidcraft_engine::io::safe_write::write_atomic(path, graphics.to_string().as_bytes(), false).map_err(|error| error.to_string())
@@ -3813,6 +3828,9 @@ fn limit_disabled_plugins(mut p: Prefs) -> Prefs {
     for grants in p.plugin_grants.values_mut() {
         grants.folders.sort_by(|a, b| a.name.cmp(&b.name));
     }
+    // Each installed shader has at most four sliders; a hand-edited file keeps a bounded few.
+    p.shader_settings.retain(|key, value| key.len() <= 200 && value.is_finite());
+    p.shader_settings = std::mem::take(&mut p.shader_settings).into_iter().take(crate::plugins::MAX_DISABLED * 4).collect();
     p.disabled_plugins.retain(|id| crate::plugins::valid_id(id));
     if p.disabled_plugins.len() > crate::plugins::MAX_DISABLED {
         p.disabled_plugins = p.disabled_plugins.into_iter().take(crate::plugins::MAX_DISABLED).collect();
@@ -4922,12 +4940,25 @@ mod tests {
             ("browser_rows_start_closed", "prefs.browser_rows_start_closed"),
             ("browser_eye_left", "prefs.browser_eye_left"),
             ("browser_body_features", "prefs.browser_body_features"),
+            ("history_folder_kind_icon", "prefs.history_folder_kind_icon"),
+            ("history_steps_component", "prefs.history_steps_component"),
+            ("history_last_stops_at_component", "prefs.history_last_stops_at_component"),
+            ("feature_menus_act_on_selection", "prefs.feature_menus_act_on_selection"),
+            ("sketch_tab_always", "prefs.sketch_tab_always"),
+            ("persistent_ribbon_pressed", "prefs.layout_page.active_commands"),
+            ("ribbon_reveal", "prefs.ribbon_reveal"),
+            ("ribbon_tabs_only", "prefs.ribbon_tabs_only"),
+            ("ribbon_menus_skip_pinned", "prefs.layout_page.pinned_menus"),
+            ("ribbon_menus_follow_hover", "prefs.layout_page.hover_panel_menus"),
+            ("pinned_constraints_in_grid", "prefs.pinned_constraints_in_grid"),
         ];
-        for width in [1600, 1100, 960, 800, 640] {
+        // A fractional display scale (#16542) as well as whole points.
+        for (width, scale) in [(1600, 1.0), (1500, 1.75), (1100, 1.0), (960, 1.25), (800, 1.0), (640, 1.5)] {
             let mut h = crate::scenario::Harness::new();
             h.app.preferences.language = "en".into();
             h.app.home.open = false;
             h.call("ui.resize", json!({"width":width,"height":1100}));
+            h.ctx.set_pixels_per_point(scale);
             h.call("ui.prefs", json!({"open":"Layout"}));
             h.frames(20);
             let body = crate::scenario::rect_of("prefs:page_body").unwrap();
@@ -4953,6 +4984,59 @@ mod tests {
                     });
                 }
                 assert!(text_found, "{key} shows its label \"{label}\" at {width}");
+            }
+        }
+    }
+
+    /// #16542: the Layout page's checkboxes line up in even columns, a group each for the
+    /// History, the Browser and the toolbar, instead of wrapping like words: two columns in a
+    /// wide window, one in a narrow one.
+    #[test]
+    fn layout_page_checkboxes_line_up_in_columns() {
+        let groups: [&[&str]; 3] = [
+            &[
+                "history_play_button",
+                "history_group_joints",
+                "history_bar_groups",
+                "history_origin_bodies",
+                "history_folder_kind_icon",
+                "history_steps_component",
+                "history_last_stops_at_component",
+                "feature_menus_act_on_selection",
+            ],
+            &["browser_components_open", "browser_rows_start_closed", "browser_eye_left", "browser_body_features"],
+            &[
+                "sketch_tab_always",
+                "persistent_ribbon_pressed",
+                "ribbon_reveal",
+                "ribbon_tabs_only",
+                "ribbon_menus_skip_pinned",
+                "ribbon_menus_follow_hover",
+                "pinned_constraints_in_grid",
+            ],
+        ];
+        for (width, columns) in [(1600, 2), (960, 2), (480, 1)] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.preferences.language = "en".into();
+            h.app.home.open = false;
+            h.call("ui.resize", json!({"width":width,"height":1100}));
+            h.call("ui.prefs", json!({"open":"Layout"}));
+            h.frames(20);
+            for group in groups {
+                let rects: Vec<egui::Rect> = group.iter().map(|key| crate::scenario::rect_of(&format!("prefs:{key}")).unwrap()).collect();
+                let (first, second) = (rects[0], rects[1]);
+                for (i, (key, rect)) in group.iter().zip(&rects).enumerate() {
+                    let column = if i % columns == 0 { first } else { second };
+                    assert!((rect.left() - column.left()).abs() < 0.5, "{key} at {width} starts at its column's edge: {rect:?} vs {column:?}");
+                    if i % columns != 0 {
+                        assert!((rect.top() - rects[i - 1].top()).abs() < 0.5, "{key} at {width} shares its row: {rect:?}");
+                    }
+                }
+                if columns == 2 {
+                    assert!(second.left() > first.right(), "{} at {width}: a second column, right of the first", group[1]);
+                } else {
+                    assert!(second.top() > first.bottom(), "{} at {width}: one column, under the first box", group[1]);
+                }
             }
         }
     }
@@ -6648,6 +6732,7 @@ mod tests {
             ("feature_menus_act_on_selection", json!(false), PAGE_LAYOUT),
             ("history_group_joints", json!(true), PAGE_LAYOUT),
             ("history_bar_groups", json!(true), PAGE_LAYOUT),
+            ("timeline_2d", json!(true), PAGE_LAYOUT),
             ("color_vision", json!("protan"), PAGE_APPEARANCE),
             ("viewport_theme", json!("light"), PAGE_APPEARANCE),
             ("viewport_background", json!([255, 255, 255]), PAGE_APPEARANCE),
@@ -9437,6 +9522,17 @@ mod tests {
         let out = h.call("ui.prefs", json!({"button": "cancel"}));
         assert_eq!(out["result"]["window_system"], "wayland", "Cancel takes the change back");
         assert_eq!(saved()["window_system"], "wayland", "and the file with it");
+
+        // No anti-aliasing level saved: the window system doesn't save the default as a chosen
+        // one, which the software renderer would then draw (#3321). A chosen level is saved.
+        std::fs::write(&path, r#"{"backend":"vulkan"}"#).unwrap();
+        h.call("ui.prefs", json!({"window_system": "x11"}));
+        assert_eq!(saved()["window_system"], "x11");
+        assert!(saved().get("msaa").is_none(), "{}", saved());
+        h.call("ui.prefs", json!({"msaa": 2}));
+        assert_eq!(saved()["msaa"], 2);
+        h.call("ui.prefs", json!({"msaa": 4}));
+        assert_eq!(saved()["msaa"], 4, "a saved level follows the choice back to the default");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
