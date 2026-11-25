@@ -2309,7 +2309,7 @@ pub fn margin_line(ring: &[Vec2], by: f64, hole: bool) -> Option<Vec<Vec2>> {
         let len = d.length();
         (len > 1e-12).then(|| Vec2::new(-d.y / len * side, d.x / len * side))
     };
-    let mut out = Vec::with_capacity(n);
+    let mut out = Vec::new();
     for i in 0..n {
         let (prev, here, next) = (at(i + n - 1), at(i), at(i + 1));
         let (Some(a), Some(b)) = (normal(prev, here), normal(here, next)) else {
