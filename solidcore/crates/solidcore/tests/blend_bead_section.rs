@@ -1947,6 +1947,117 @@ fn a_stitch_too_deep_names_the_least_depth_of_its_spans() {
     }
 }
 
+/// The section of the trough of [`trough`], a cubic Bezier's control points from the root:
+/// flat at the root (its first three points in line) and tighter towards its end.
+const TROUGH: [(f64, f64); 4] = [(0.0, 0.0), (4.0, 0.0), (8.0, 0.0), (8.0, 4.0)];
+
+/// The trough's section at the Bezier's parameter `t`.
+fn trough_at(t: f64) -> (f64, f64) {
+    let s = 1.0 - t;
+    let w = [s * s * s, 3.0 * s * s * t, 3.0 * s * t * t, t * t * t];
+    TROUGH
+        .iter()
+        .zip(w)
+        .fold((0.0, 0.0), |(x, y), (p, w)| (x + w * p.0, y + w * p.1))
+}
+
+/// A plate standing in a trough, swept `LENGTH` along z: the plate's face is the plane x = 0
+/// above the root at the origin, the trough's the section `TROUGH` swept, curving up towards
+/// the bead. The body and a point on the joint's edge.
+fn trough(k: &mut Kernel) -> (Brep, [f64; 3]) {
+    use solidcore::primitive::api_curves::create_curve;
+    let p = |(x, y): (f64, f64)| Point3::new(x, y, 0.0);
+    let line = |a, b| Curve::from(create_line_segment(p(a), p(b)).unwrap());
+    let [root, c1, c2, end] = TROUGH;
+    let curves = [
+        line(root, (0.0, 40.0)),
+        line((0.0, 40.0), (-ARM, 40.0)),
+        line((-ARM, 40.0), (-ARM, -ARM)),
+        line((-ARM, -ARM), (18.0, -ARM)),
+        line((18.0, -ARM), (18.0, end.1)),
+        line((18.0, end.1), end),
+        Curve::from(create_curve(&[p(end), p(c2), p(c1), p(root)]).unwrap()),
+    ];
+    let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
+    let b = create_linear_sweep(k, &refs, Vec3::new(0.0, 0.0, 1.0), LENGTH, true).unwrap();
+    (b, [0.0, 0.0, LENGTH / 2.0])
+}
+
+/// The sagitta of the concave arc through the feet `a` and `b` and the point `p` of a
+/// support's section in the trough's plane (`p` on the root's side of the chord).
+fn arc_through(a: (f64, f64), b: (f64, f64), p: (f64, f64)) -> f64 {
+    let c = (b.0 - a.0).hypot(b.1 - a.1);
+    let along = ((b.0 - a.0) / c, (b.1 - a.1) / c);
+    let q = (p.0 - (a.0 + b.0) / 2.0, p.1 - (a.1 + b.1) / 2.0);
+    let (x, y) = (
+        q.0 * along.0 + q.1 * along.1,
+        (q.0 * along.1 - q.1 * along.0).abs(),
+    );
+    let depth = (c * c / 4.0 - x * x - y * y) / (2.0 * y);
+    (c * c / 4.0 + depth * depth).sqrt() - depth
+}
+
+/// For the legs `on_trough` and `on_plate` in the trough's plane: the largest concave sagitta
+/// whose arc stays off both sections between the root and the feet, from 4096 points of each
+/// and one a ten-millionth short of each foot (the arc tangent there); and the sagitta of the
+/// arc tangent to the trough at its foot alone.
+fn trough_bound(on_trough: f64, on_plate: f64) -> (f64, f64) {
+    // the Bezier's parameter at the trough's foot: its distance from the root grows with it
+    let (mut lo, mut hi) = (0.0_f64, 1.0_f64);
+    for _ in 0..60 {
+        let t = 0.5 * (lo + hi);
+        let (x, y) = trough_at(t);
+        if x.hypot(y) < on_trough {
+            lo = t;
+        } else {
+            hi = t;
+        }
+    }
+    let (a, b) = (trough_at(lo), (0.0, on_plate));
+    let mut least = arc_through(a, b, TROUGH[0]);
+    for i in (1..4096).map(|i| f64::from(i) / 4096.0).chain([1.0 - 1e-7]) {
+        least = least
+            .min(arc_through(a, b, trough_at(lo * i)))
+            .min(arc_through(a, b, (0.0, on_plate * i)));
+    }
+    (least, arc_through(a, b, trough_at(lo * (1.0 - 1e-7))))
+}
+
+/// A concave arc is bounded along the leg, not at its foot alone: where a support curves
+/// towards the bead more tightly near the foot than the arc does, the arc tangent to the face
+/// at the foot comes back into the support between the foot and the root. In the trough (flat
+/// at the root, tighter towards the foot of a leg of 8) with a leg of 1.5 on the plate, the
+/// sagitta that fits is the bound along the trough's section, more than a fifth below the
+/// tangent arc's; with the legs the other way round it is the tangent arc's at the plate.
+#[test]
+fn a_concave_arc_is_bounded_along_the_leg_on_a_support_that_tightens_towards_its_foot() {
+    use solidcore::blend::foot_blend::FootBlend;
+    let mut k = kernel();
+    let (mut b, at) = trough(&mut k);
+    let joint = pick(&k, &b, at);
+    let (deep, tangent) = trough_bound(8.0, 1.5);
+    let (shallow, _) = trough_bound(1.5, 8.0);
+    println!("along the leg {deep}, shallow {shallow}");
+    let mut got: Vec<f64> = edge::faces(&b, joint, None)
+        .unwrap()
+        .into_iter()
+        .map(|face| {
+            let blend = FootBlend::of_edge(&k, &mut b, joint, Some(face)).unwrap();
+            blend.sagitta_that_fits(&k, [1.5, 8.0], -1.0, &[]).unwrap()
+        })
+        .collect();
+    got.sort_by(f64::total_cmp);
+    println!("the sagittas that fit {got:?}");
+    assert_eq!(got.len(), 2);
+    for (got, want) in got.iter().zip([shallow, deep]) {
+        assert!(
+            *got >= want * (1.0 - 1e-4) && *got <= want * 1.002,
+            "{got} {want}"
+        );
+    }
+    assert!(deep < 0.85 * tangent, "{deep} {tangent}");
+}
+
 /// A sagitta too large for several joints of one call is refused with the smallest sagitta
 /// that fits over all of them, whichever joint comes first: two branches of different size on
 /// one main tube, each joint alone naming its own depth, both together no more than the least

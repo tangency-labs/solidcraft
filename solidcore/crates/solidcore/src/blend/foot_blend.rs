@@ -73,6 +73,11 @@ fn defect(why: &'static str) -> SolidError {
 /// The most Newton steps a foot takes.
 const NEWTON_STEPS: usize = 40;
 
+/// The points along each leg at which a concave arc is checked against its support's section
+/// ([`FootBlend::clearance_bound`]): on a section whose curvature grows fourfold from the root
+/// to the foot, 16 put the bound within a thousandth of the one from 4096.
+const ALONG_LEG: u32 = 16;
+
 /// The most halvings the search for a leg that fits takes: they take a leg of 1e6 down to well
 /// under the bracket's stop, `1e-7 (1 + hi)` with `hi` its upper end; past a leg of about
 /// `1e-7 * 2^64` they end first.
@@ -696,7 +701,10 @@ impl FootBlend {
     /// concave, `(c / 2) tan((pi - max(beta_i)) / 2)` convex
     /// ([`crate::surface::procedural_blend::bead::sagitta_bound`]), `c` the chord and `beta_i`
     /// the angle at foot `i` between the chord and the face's direction back towards the root
-    /// in the station's plane.
+    /// in the station's plane. Concave, no more than [`FootBlend::clearance_bound`] either:
+    /// the angle at the foot only says that the arc leaves the foot off the face, and a
+    /// support that curves towards the bead more tightly near its foot than the arc does
+    /// comes back into the arc between the foot and the root.
     ///
     /// # Errors
     ///
@@ -720,7 +728,64 @@ impl FootBlend {
             let c = other - foot;
             *toe = c.cross(d).length().atan2(c.dot(d));
         }
-        Ok(sagitta_bound(b.distance(a), toes, sagitta))
+        let bound = sagitta_bound(b.distance(a), toes, sagitta);
+        if sagitta < 0.0 {
+            return Ok(bound.min(self.clearance_bound(k, s)?));
+        }
+        Ok(bound)
+    }
+
+    /// The largest concave sagitta at the station `s` whose arc stays off the supports between
+    /// the root and the feet, sampled: the least sagitta of the arcs through both feet and a
+    /// point of a support's section, over the root and `ALONG_LEG - 1` points of each section
+    /// at even distances from the root up to the foot (each a foot at a shorter leg; one not
+    /// found is left out). The supports' sections lie on the root's side of the chord, and an
+    /// arc deeper than the one through a point of them has that point inside its circle. As
+    /// the point nears a foot the arc through it nears the one tangent to the face there,
+    /// [`FootBlend::station_bound`]'s. Infinite where the root lies on the chord's line.
+    ///
+    /// # Errors
+    ///
+    /// Those of the evaluations.
+    fn clearance_bound(&self, k: &Kernel, s: &FootStation) -> Result<f64> {
+        let [a, b] = s.feet;
+        let chord = b - a;
+        let c = chord.length();
+        let Ok(along) = chord.unitize() else {
+            return Ok(f64::INFINITY);
+        };
+        let middle = a + chord * 0.5;
+        // towards the root, square to the chord
+        let to_root = s.root - middle;
+        let Ok(up) = (to_root - along * to_root.dot(along)).unitize() else {
+            return Ok(f64::INFINITY);
+        };
+        let through = |p: Point3| {
+            let q = p - middle;
+            let (x, y) = (q.dot(along), q.dot(up));
+            if y <= 0.0 {
+                // across the chord from the root: between the feet even the chord cuts it
+                return if x.abs() < 0.5 * c {
+                    0.0
+                } else {
+                    f64::INFINITY
+                };
+            }
+            // the circle through the feet and p: its centre `depth` beyond the chord
+            let depth = (0.25 * c * c - x * x - y * y) / (2.0 * y);
+            (0.25 * c * c + depth * depth).sqrt() - depth
+        };
+        let mut least = through(s.root);
+        for (i, foot) in s.feet.iter().enumerate() {
+            let leg = foot.distance(s.root);
+            for j in 1..ALONG_LEG {
+                let z = leg * f64::from(j) / f64::from(ALONG_LEG);
+                if let Ok((p, _, _)) = self.foot(k, i, s.root, s.tangent, z, Some(s))? {
+                    least = least.min(through(p));
+                }
+            }
+        }
+        Ok(least)
     }
 }
 

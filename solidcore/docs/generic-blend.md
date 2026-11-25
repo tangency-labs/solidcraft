@@ -105,7 +105,13 @@ it for h < 0 (concave); the chord is h = 0. This is a weld bead's section
 which the chord leaves the faces, a concave arc stays off the faces below (c/2) tan(min βi / 2) and
 a convex one below (c/2) tan((π − max βi) / 2) (`BeadDefinition::bound`); a convex arc past
 (c/2) tan((π/2 − max βi) / 2) leans back over its toe (`BeadDefinition::overhang_bound`). Between
-planes along a straight edge it is a circular cylinder, an exact class (§4).
+planes along a straight edge it is a circular cylinder, an exact class (§4). The concave bound
+holds where the faces' sections are straight or circular. A face that curves towards the bead
+more tightly near its toe than the arc does comes back into the arc between the toe and the edge
+though the arc leaves the toe off the face, so the foot blend also keeps a concave arc no deeper
+than the arc through both toes and a point of a face's section, over the edge and 15 points of
+each face's section between the edge and the toe (`FootBlend::clearance_bound`): sampled along
+the leg, as the stations are along the joint.
 
 **The circle (n = 1)** is the default round. It is stored as an exact rational circle: the rational
 quadratic arc with middle weight cos(θ/2), θ the angle between the contact normals [6, 7]. It is
@@ -329,7 +335,7 @@ that predates it can take a bead for a chamfer (as one that predates `ChamferRec
 |---|---|---|---|
 | a toe on its face's surface but off the face (classified on the face, at least 32 stations; a foot past a periodic support's seam moved into its domain first) | `NoRoomReason::LegPastFace` | `FilletTooLarge` | the largest leg on that side whose toes stay on the face, halved down (until the bracket is 1e-7 (1 + its upper end) wide); 0 where it is below the smallest leg the body builds (eight times its tolerance) |
 | no point of the face at the leg on its side (the face turns away or ends within the leg) | `NoRoomReason::NoToeAtLeg` | `FilletTooLarge` | the largest leg on that side that finds its toes over the whole weld, halved down the same way; 0 below the smallest leg the body builds |
-| the arc would cut into a face at a station | `NoRoomReason::BeadCutsFace` | `FilletTooLarge` | the least of the stations' bounds, (c/2) tan(min βᵢ/2) concave, a hair below it: over the whole weld and over every joint of the call, naming the joint whose fit it is; the toes of every joint are checked on their faces before it, so a retry at it is not refused for a toe off its face |
+| the arc would cut into a face at a station | `NoRoomReason::BeadCutsFace` | `FilletTooLarge` | the least of the stations' bounds, (c/2) tan(min βᵢ/2) concave and no more than the bound along the legs (§2, `FootBlend::clearance_bound`), a hair below it: over the whole weld and over every joint of the call, naming the joint whose fit it is; the toes of every joint are checked on their faces before it, so a retry at it is not refused for a toe off its face |
 | Newton does not converge from either start | `StationDidNotConverge` | a defect | none |
 | the feet between two stations not proved after the halvings | `NotCertified` (`NoToeAtLeg` with its leg fit where the equations are near singular at an end: the toes on the leg's circle meet there) | `NotWithinTolerance` | none (the fit where `NoToeAtLeg`) |
 | the net does not hold the tolerance after its refinements | `SkinPastStationCap` | `NotWithinTolerance` | none |
