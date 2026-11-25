@@ -27,6 +27,31 @@ pub fn whole_profile_selection_from_value(value: &Value) -> Result<ProfileSel> {
     serde_json::from_value(value.clone()).map_err(|_| invalid())
 }
 
+/// Validate a text profile reference (`text_regions`: the letters of whole sketch texts) before
+/// decoding it.
+pub fn text_regions_selection_from_value(value: &Value) -> Result<ProfileSel> {
+    validate_text_reference(value)?;
+    serde_json::from_value(value.clone()).map_err(|_| invalid())
+}
+
+fn validate_text_reference(value: &Value) -> Result<()> {
+    exact_keys(value, &["type", "links"])?;
+    if value.get("type").and_then(Value::as_str) != Some("text_regions") {
+        return Err(invalid());
+    }
+    let links = value.get("links").and_then(Value::as_array).ok_or_else(invalid)?;
+    if links.is_empty() || links.len() > 128 {
+        return Err(invalid());
+    }
+    let mut seen = BTreeSet::new();
+    for link in links {
+        if !seen.insert(id(link)?) {
+            return Err(invalid());
+        }
+    }
+    Ok(())
+}
+
 fn validate_whole_reference(value: &Value) -> Result<()> {
     exact_keys(value, &["type", "profiles"])?;
     if value.get("type").and_then(Value::as_str) != Some("whole_boundaries") {
@@ -185,6 +210,9 @@ pub(crate) fn validate_raw(value: &Value) -> Result<()> {
     fn references(value: &Value) -> Result<()> {
         if value.get("type").and_then(Value::as_str) == Some("whole_boundaries") {
             return validate_whole_reference(value);
+        }
+        if value.get("type").and_then(Value::as_str) == Some("text_regions") {
+            return validate_text_reference(value);
         }
         if value.get("type").and_then(Value::as_str) == Some("offset_boundaries") {
             exact_keys(value, &["type", "associations"])?;

@@ -59,6 +59,7 @@ pub mod hole_reference;
 pub mod ids;
 pub mod import_defects;
 mod inline_params;
+pub use format_offsets::text_regions_selection_from_value;
 pub use format_offsets::whole_profile_selection_from_value;
 pub use inline_params::Defined;
 pub mod joints;

@@ -204,6 +204,10 @@ pub enum ProfileSel {
     WholeBoundaries { profiles: Vec<WholeProfileBoundary> },
     /// The profile containing each sketch point.
     Points { points: Vec<Vec2> },
+    /// Every letter of these sketch texts (their links), counters left open: found again from the
+    /// text on every evaluation, so the pick follows new words (#727). A letter that other curves
+    /// of the sketch cut into is an error, never a guess.
+    TextRegions { links: Vec<String> },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]

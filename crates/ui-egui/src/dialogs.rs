@@ -8118,7 +8118,7 @@ pub(crate) fn profile_indices(ss: &solidcraft_engine::doc::SolvedSketch, sel: &P
     let mut indices: Vec<usize> = match sel {
         ProfileSel::All => (0..ps.len()).collect(),
         ProfileSel::Indices { indices } => indices.iter().copied().filter(|i| *i < ps.len()).collect(),
-        ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. } => {
+        ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. } | ProfileSel::TextRegions { .. } => {
             solidcraft_engine::doc::profile_selection_indices(ss, sel).unwrap_or_default()
         }
         ProfileSel::Curves { loops } => loops

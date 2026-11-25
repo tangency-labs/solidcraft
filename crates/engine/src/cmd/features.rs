@@ -493,7 +493,10 @@ fn extrude_base(s: &Session, p: &Value) -> Option<(Vec3, Vec3)> {
         ProfileSel::All => ps.first()?.region.interior_point(),
         ProfileSel::Indices { indices } => ps.get(*indices.first()?)?.region.interior_point(),
         ProfileSel::Points { points } => *points.first()?,
-        selection @ (ProfileSel::Curves { .. } | ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. }) => {
+        selection @ (ProfileSel::Curves { .. }
+        | ProfileSel::OffsetBoundaries { .. }
+        | ProfileSel::WholeBoundaries { .. }
+        | ProfileSel::TextRegions { .. }) => {
             let indices = solidcraft_doc::profile_selection_indices(ss, &selection).ok()?;
             ps.get(*indices.first()?)?.region.interior_point()
         }
@@ -783,7 +786,7 @@ pub(super) fn stable_profiles(s: &Session, kind: &mut FeatureKind, exact: bool) 
                 *sel = selection;
                 continue;
             }
-            ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. } => {
+            ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. } | ProfileSel::TextRegions { .. } => {
                 // Explicit identities retain the caller's semantics. Validate through the
                 // same resolver as recomputation, including reserved-role precedence.
                 solidcraft_doc::profile_selection_indices(ss, sel)?;
@@ -912,6 +915,9 @@ pub(crate) fn profiles(p: &Value, cmd: &str) -> Result<ProfileSel> {
         Value::Object(fields) => {
             if fields.get("type").and_then(Value::as_str) == Some("whole_boundaries") {
                 return solidcraft_doc::whole_profile_selection_from_value(v).map_err(|error| bad(cmd, error.to_string()));
+            }
+            if fields.get("type").and_then(Value::as_str) == Some("text_regions") {
+                return solidcraft_doc::text_regions_selection_from_value(v).map_err(|error| bad(cmd, error.to_string()));
             }
             if !fields.contains_key("offset_boundaries") && fields.get("type").and_then(Value::as_str) != Some("offset_boundaries") {
                 return Err(bad(

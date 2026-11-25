@@ -191,6 +191,7 @@ pub use profiles::find_profiles_checked;
 pub use profiles::merge_regions;
 pub use profiles::profile_at_point;
 pub use profiles::profile_by_curves;
+pub use profiles::text_counters;
 pub use profiles::without_text_counters;
 pub use profiles3d::Profile3D;
 pub use profiles3d::find_planar_3d_profiles;

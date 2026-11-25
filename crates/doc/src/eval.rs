@@ -5747,7 +5747,7 @@ pub fn select_profiles(ss: &SolvedSketch, sel: &ProfileSel) -> Result<Vec<Region
         }
         // A curve loop that no longer bounds a profile exactly falls back to the best match; the
         // feature's warning says so (`profile_fallback_notes`).
-        ProfileSel::Curves { .. } | ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. } => {
+        ProfileSel::Curves { .. } | ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. } | ProfileSel::TextRegions { .. } => {
             crate::profile_selection_indices_lenient(ss, sel)?
                 .0
                 .into_iter()
