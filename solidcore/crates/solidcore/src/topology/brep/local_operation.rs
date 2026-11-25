@@ -3895,7 +3895,7 @@ mod tests {
                 assert!(reports.add_unique_delete_duplicate(report(t, owner)));
             }
             validation::BrepCheck {
-                pointers_status: crate::error::SM_SUCCESS,
+                pointers: validation::PointerCheck::Passed,
                 pointer_reports: AssertArray::new(),
                 assert_valid: Some(tests.is_empty()),
                 reports,
