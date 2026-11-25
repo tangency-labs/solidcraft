@@ -1036,9 +1036,8 @@ pub struct FlatPatternParams {
     #[serde(default)]
     pub body: Option<String>,
     /// Return compact outlines and cut-outs instead of duplicate point lists. Default: false.
-    #[serde(default, deserialize_with = "present")]
-    #[schemars(with = "bool")]
-    pub summary: Option<bool>,
+    #[serde(default)]
+    pub summary: bool,
 }
 
 /// Export a sheet's bend table: a row per bend, in mm and degrees, with the rule and the bend's
