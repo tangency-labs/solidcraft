@@ -1128,7 +1128,9 @@ fn cell_grid_mode_cut_by_default_and_raised_adds_the_cells() {
     let mut cut = Dialog::for_command(&h.app, "solid.cell_grid").unwrap();
     cut.inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
     let before = volume(&mut h);
-    let [(id, p)] = apply_commands(&h.app, &cut).unwrap().try_into().unwrap() else { panic!() };
+    let commands = apply_commands(&h.app, &cut).unwrap();
+    assert_eq!(commands.len(), 1, "one command");
+    let (id, p) = commands[0].clone();
     h.app.run(&id, p).unwrap();
     assert!(volume(&mut h) < before, "a cut removes material");
     // Edit Feature shows a raised feature as Raised.
