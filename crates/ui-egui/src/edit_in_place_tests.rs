@@ -460,25 +460,16 @@ fn finish_editing_is_a_model_tab_button_only_while_a_part_is_edited_in_place() {
 
 #[test]
 fn finish_editing_stays_reachable_with_plugins_at_every_window_width() {
+    use crate::plugin_menu::tests::{entry, listed};
+
     let mut f = assembly("ribbon-plugins");
     let mut h = crate::scenario::Harness::new();
     h.app = std::mem::replace(&mut f.app, SolveApp::new(Session::default(), Default::default()));
     h.app.home.open = false;
     h.app.plugin_menu.loaded = true;
-    h.app.plugin_menu.listed = vec![crate::plugin_menu::Listed {
-        id: "gears".into(),
-        name: "Gears".into(),
-        version: "0.1.0".into(),
-        description: String::new(),
-        path: String::new(),
-        disabled: false,
-        approval: String::new(),
-        groups: Default::default(),
-        entries: vec![serde_json::from_value(json!({"name":"spur", "effect":"edit", "input_schema":{"type":"object"}})).unwrap()],
-        images: Default::default(),
-        swatches: Default::default(),
-        shaders: Default::default(),
-    }];
+    let mut gears = listed("gears", vec![entry("spur", "edit", json!([]))]);
+    gears.name = "Gears".into();
+    h.app.plugin_menu.listed = vec![gears];
     double_click_component(&mut h.app, json!({"component": f.plate}));
     settle(&mut h.app);
     for enabled in [false, true] {

@@ -79,6 +79,7 @@ pub mod dimension;
 pub mod fields;
 mod fill;
 pub mod fold;
+pub mod hatch;
 pub mod image;
 pub mod line_maths;
 pub mod measure;
