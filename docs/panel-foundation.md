@@ -2,8 +2,8 @@
 
 The public contracts are `solidcraft_engine::panels` and
 `solidcraft_ui_egui::panel_runtime`. The shared host presents Browser, History,
-Assistant, Sketch Options, Bill of Materials and the Render Scene Browser, Library,
-Inspector and Shots. Feature editors remain draggable cards and Assistant retains
+Assistant, Sketch Options, Bill of Materials, the Parts library and the Render Scene
+Browser, Library, Inspector and Shots. Feature editors remain draggable cards and Assistant retains
 its own native window. Synthetic controllers exercise the host contract in tests.
 
 ## Production content integration
