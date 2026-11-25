@@ -338,3 +338,16 @@ fn a_logo_travels_in_a_template_file() {
     assert_eq!(shows(&s), bytes, "the older .json template");
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// A photo stored turned, with an EXIF orientation, replies the size it shows at, as every viewer
+/// shows it (#19106): quarter turns, mirrored or not, swap its sides; a half turn and none don't.
+#[test]
+fn a_turned_photo_replies_its_shown_size() {
+    let (mut s, sheet) = drawing();
+    for (turn, as_png, pixels) in [(6, false, [16, 32]), (5, false, [16, 32]), (8, true, [16, 32]), (3, false, [32, 16]), (1, true, [32, 16])] {
+        let (dir, file) = on_disk(&format!("turned-{turn}-{as_png}"), &crate::drawing_pictures::tests::photo(turn, as_png));
+        let reply = s.execute(ADD, &json!({"sheet": sheet, "file": file, "rect_mm": RECT})).unwrap();
+        assert_eq!(reply["pixels"], json!(pixels), "orientation {turn}: {reply}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}

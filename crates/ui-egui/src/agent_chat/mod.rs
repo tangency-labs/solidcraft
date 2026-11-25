@@ -203,7 +203,7 @@ fn decode_picture(bytes: &[u8]) -> Option<egui::ColorImage> {
     limits.max_image_height = Some(20_000);
     limits.max_alloc = Some(1 << 30);
     reader.limits(limits);
-    let rgba = solidcraft_engine::upright_image::decode_upright(reader).ok()?.0.to_rgba8();
+    let rgba = solidcraft_engine::render::image_orientation::decode_upright(reader).ok()?.0.to_rgba8();
     let size = [usize::try_from(rgba.width()).ok()?, usize::try_from(rgba.height()).ok()?];
     Some(egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw()))
 }

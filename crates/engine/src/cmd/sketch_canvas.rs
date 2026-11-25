@@ -3,8 +3,9 @@
 use serde_json::{Value, json};
 use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_doc::PlaneRef;
-use solidcraft_doc::canvas::{Canvas, CanvasAnchor, MAX_CANVAS_BYTES, image_info};
+use solidcraft_doc::canvas::{Canvas, CanvasAnchor, MAX_CANVAS_BYTES};
 use solidcraft_geom::prelude::*;
+use solidcraft_render::image_orientation::{header, shown};
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, num, str_, vec2};
@@ -122,7 +123,7 @@ pub(crate) fn place(s: &mut Session, p: &Value, cmd: &str, decal: bool, mut byte
         };
         bytes = super::canvas_svg::rasterize(&bytes, side).map_err(|e| bad(cmd, e))?;
     }
-    let (format, pixels) = image_info(&bytes).ok_or_else(|| bad(cmd, "only PNG, JPEG and SVG images can be inserted"))?;
+    let file = header(&bytes).ok_or_else(|| bad(cmd, "only PNG, JPEG and SVG images can be inserted"))?;
     let mut plane = super::sketch::plane_ref_numbers(s, p, cmd)?;
     let base = match &plane {
         PlaneRef::Offset { base, .. } => base.as_ref(),
@@ -164,9 +165,11 @@ pub(crate) fn place(s: &mut Session, p: &Value, cmd: &str, decal: bool, mut byte
     doc.canvases.push(Canvas {
         id,
         name: name.clone(),
-        format: format.into(),
+        format: file.format.into(),
         data: bytes.into(),
-        pixels,
+        pixels: file.stored,
+        // A photo stored on its side shows upright, as every viewer shows it (#19112).
+        orientation: file.orientation,
         plane,
         center,
         width,
@@ -193,6 +196,7 @@ pub(crate) fn place(s: &mut Session, p: &Value, cmd: &str, decal: bool, mut byte
     } else {
         None
     };
+    let pixels = shown(file.stored, file.orientation);
     canvas_reply(cmd, CanvasPlaced { canvas: id, name, pixels, frame, param_warnings: Vec::new() })
 }
 
@@ -1331,6 +1335,61 @@ mod tests {
         assert!(c.bytes().starts_with(b"\x89PNG\r\n\x1a\n"));
         for resolution in [json!(0), json!(5000), json!("big")] {
             assert!(s.execute("canvas.decal", &json!({"path": svg, "face": [20, 15, 10], "resolution": resolution})).is_err(), "{resolution}");
+        }
+    }
+
+    /// A photo stored on its side with an EXIF orientation shows upright on a canvas and on a decal
+    /// (#19112): it replies the size it shows at and is shaped by it, as every viewer shows it, and
+    /// it is saved with the turn it shows by. A half turn keeps its shape; a photo with no turn saves
+    /// no field.
+    #[test]
+    fn a_turned_photo_canvas_or_decal_shows_upright_at_its_shape() {
+        use crate::drawing_pictures::tests::photo;
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 200, "width": 120, "height": 10})).unwrap();
+        for (command, place) in [("canvas.insert", json!({"plane": "XY"})), ("canvas.decal", json!({"face": [50, 60, 10]}))] {
+            // The photo is 32 x 16 as stored: 60 mm wide, it is 30 mm high as stored and 120 turned.
+            for (turn, as_png, pixels, height) in
+                [(6, false, [16, 32], 120.0), (8, true, [16, 32], 120.0), (3, false, [32, 16], 30.0), (1, true, [32, 16], 30.0)]
+            {
+                let mut p = place.clone();
+                p["path"] = json!(image_file(&photo(turn, as_png)));
+                p["width"] = json!(60);
+                let r = s.execute(command, &p).unwrap();
+                assert_eq!(r["pixels"], json!(pixels), "{command}, orientation {turn}: {r}");
+                let c = s.doc.canvases.last().unwrap();
+                assert!((c.height() - height).abs() < 1e-9, "{command}, orientation {turn}: {} mm high", c.height());
+                let saved = serde_json::to_value(c).unwrap();
+                assert_eq!(saved.get("orientation"), (turn != 1).then(|| json!(turn)).as_ref(), "{command}, orientation {turn}: {saved}");
+            }
+        }
+    }
+
+    /// A design saved before #19112 has no orientation on its canvases: a photo stored on its side
+    /// shows as stored, at the shape it was saved with, and is saved again without one, so the
+    /// design opens looking exactly as it did. A value outside 1 to 8 shows it as stored too.
+    #[test]
+    fn an_older_designs_turned_photo_canvas_opens_unchanged() {
+        let mut s = Session::default();
+        let file = image_file(&crate::drawing_pictures::tests::photo(6, false));
+        s.execute("canvas.insert", &json!({"path": file, "plane": "XY", "width": 60})).unwrap();
+        let bytes = s.doc.canvases[0].data.clone();
+        for (older, why) in [(None, "saved before"), (Some(json!(9)), "out of range"), (Some(json!(0)), "out of range")] {
+            let mut design: serde_json::Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+            let canvas = design["canvases"][0].as_object_mut().unwrap();
+            canvas.remove("orientation");
+            if let Some(value) = &older {
+                canvas.insert("orientation".into(), value.clone());
+            }
+            let mut opened = solidcraft_doc::Document::from_json(&design.to_string()).unwrap();
+            opened.canvases[0].data = bytes.clone();
+            let c = &opened.canvases[0];
+            assert_eq!(c.pixels, [32, 16], "{why}");
+            assert!((c.height() - 30.0).abs() < 1e-9, "{why}: as stored, {} mm high", c.height());
+            if older.is_none() {
+                let saved = serde_json::to_value(c).unwrap();
+                assert!(saved.get("orientation").is_none(), "saved again as it was: {saved}");
+            }
         }
     }
 }

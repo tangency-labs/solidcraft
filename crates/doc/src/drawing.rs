@@ -49,7 +49,7 @@
 //! [`Drawing::from_json`] reads a drawing in this order: at most [`MAX_DRAWING_BYTES`] of text,
 //! the family's format check, every number in range, the upgrade, the typed record with its views,
 //! dimensions, balloons, images and notes by id, then [`Drawing::validate`] and each image's file
-//! ([`Drawing::check_image_files`]); [`Drawing::from_value`] the same from the format check on.
+//! ([`Drawing::read_image_files`]); [`Drawing::from_value`] the same from the format check on.
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
@@ -550,7 +550,7 @@ impl Drawing {
         d.patterns.sort_by_key(|record| record.id);
         d.symbols.put_in_order();
         d.validate().map_err(damaged)?;
-        d.check_image_files().map_err(damaged)?;
+        d.read_image_files().map_err(damaged)?;
         Ok(d)
     }
 

@@ -3,8 +3,9 @@
 //!
 //! - Only PNG and JPEG, told by their bytes, and only whole files. The size is read from the
 //!   header and refused over [`MAX_IMAGE_PIXELS`] before anything is decoded.
-//! - An EXIF orientation is applied, so a photo stands as every viewer shows it. Colour profiles
-//!   are not read: the pixels are taken as sRGB, as browsers take an untagged image.
+//! - An EXIF orientation is applied, so a photo stands as every viewer shows it. It is read by
+//!   [`crate::image_orientation`], as a drawing reads the file's size, so the two always agree.
+//!   Colour profiles are not read: the pixels are taken as sRGB, as browsers take an untagged image.
 //! - Each pixel of the grid is the average of the image under the part of that pixel inside the
 //!   rectangle (a box filter), in linear light with alpha premultiplied: a shrunk logo keeps its
 //!   edges and gains no dark fringe. Pixels of the grid wholly outside the rectangle (a picture's
@@ -12,17 +13,18 @@
 
 use std::io::Cursor;
 
-use image::{DynamicImage, ImageDecoder, ImageReader};
+use image::{ImageDecoder, ImageReader};
 use solidcraft_color::srgb::{decode8, encode8};
 use solidcraft_geom::Aabb2;
 use solidcraft_geom::paper::MAX_IMAGE_PIXELS;
 use solidcraft_geom::pixel_grid::{GridWindow, PixelGrid};
 
+use crate::image_orientation;
 use crate::texture_input::is_whole;
 
 #[cfg(test)]
 #[path = "sheet_image_tests.rs"]
-mod tests;
+pub(crate) mod tests;
 
 /// An image file's pixels: straight-alpha sRGB RGBA, top row first.
 #[derive(Clone, Debug, PartialEq)]
@@ -47,7 +49,7 @@ impl SheetImage {
             return Err("not a whole PNG or JPEG file".into());
         };
         let decoded = std::panic::catch_unwind(|| {
-            let mut decoder = ImageReader::with_format(Cursor::new(bytes), format).into_decoder().map_err(|e| e.to_string())?;
+            let decoder = ImageReader::with_format(Cursor::new(bytes), format).into_decoder().map_err(|e| e.to_string())?;
             let (width, height) = decoder.dimensions();
             if u64::from(width) * u64::from(height) > MAX_IMAGE_PIXELS {
                 return Err(format!("an image of {width} × {height} pixels: at most {} megapixels", MAX_IMAGE_PIXELS / 1_000_000));
@@ -56,9 +58,7 @@ impl SheetImage {
             if decoder.total_bytes() > MAX_IMAGE_PIXELS * 4 {
                 return Err(format!("an image of {width} × {height} pixels takes over {} MB to decode", MAX_IMAGE_PIXELS * 4 / 1_000_000));
             }
-            let orientation = decoder.orientation().map_err(|e| e.to_string())?;
-            let mut image = DynamicImage::from_decoder(decoder).map_err(|e| e.to_string())?;
-            image.apply_orientation(orientation);
+            let (image, _) = image_orientation::upright(decoder).map_err(|e| e.to_string())?;
             let rgba = image.into_rgba8();
             Ok(SheetImage { width: rgba.width(), height: rgba.height(), rgba: rgba.into_raw() })
         });

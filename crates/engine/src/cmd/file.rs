@@ -3409,8 +3409,7 @@ fn shown_decals(doc: &solidcraft_doc::Document, st: &solidcraft_doc::ModelState,
     let (vals, _) = doc.param_values();
     let mut decals = Vec::new();
     for c in doc.canvases.iter().filter(|c| c.visible) {
-        let image = c.bytes().to_vec();
-        if image.is_empty() {
+        if c.bytes().is_empty() {
             warnings.push(format!("decal `{}`: its image is damaged: left out", c.name));
             continue;
         }
@@ -3429,9 +3428,31 @@ fn shown_decals(doc: &solidcraft_doc::Document, st: &solidcraft_doc::ModelState,
         if c.opacity < 1.0 {
             warnings.push(format!("decal `{}` is partly transparent in SolidCraft: exported opaque", c.name));
         }
+        let image = exported_image(c, warnings);
         decals.push(ShownDecal { name: c.name.clone(), component: c.component, corners, image });
     }
     decals
+}
+
+/// `c`'s picture as an export writes it: its own bytes, or, when its orientation turns or mirrors
+/// it, the pixels as it shows them, as a PNG. A reader that ignores the EXIF tag would show the
+/// bytes on their side on a quad of the shape SolidCraft shows (#19112). The picture is read under
+/// the limits the view reads it with (`image::load_from_memory`'s defaults), so a picture the view
+/// shows is exported upright. One that can't be turned is written as stored, with a warning.
+fn exported_image(c: &solidcraft_doc::canvas::Canvas, warnings: &mut Vec<String>) -> Vec<u8> {
+    let bytes = c.bytes();
+    if !(2..=8).contains(&c.orientation) {
+        return bytes.to_vec();
+    }
+    let turned = super::canvas_sketch::shown_picture(bytes, c.orientation, image::Limits::default()).and_then(|shown| {
+        let mut png = std::io::Cursor::new(Vec::new());
+        shown.write_to(&mut png, image::ImageFormat::Png)?;
+        Ok(png.into_inner())
+    });
+    turned.unwrap_or_else(|e| {
+        warnings.push(format!("decal `{}`: its picture can't be turned upright ({e}): written as stored, on its side", c.name));
+        bytes.to_vec()
+    })
 }
 
 /// What an export through cadmpeg writes beyond the bodies: OpenUSD's physics, a render setup's

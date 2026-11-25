@@ -61,7 +61,6 @@ pub mod status_details;
 pub mod status_items;
 pub mod timing;
 pub mod title_block_text;
-pub mod upright_image;
 #[cfg(feature = "usage-stats")]
 pub mod usage;
 pub mod view;

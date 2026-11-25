@@ -456,3 +456,25 @@ fn images_and_logos_are_set_aside_for_an_older_release_and_read_back() {
     let bare = read(&record).unwrap();
     assert!(bare.images.is_empty() && logo(&bare, 0).is_none());
 }
+
+/// A photo that stores its pixels turned says so in its EXIF orientation: its record keeps the size
+/// the file stores, and saves nothing more, so older drawings read as they were; it shows turned
+/// (#19106), as read back as when it was added.
+#[test]
+fn a_turned_files_record_keeps_its_stored_size_and_shows_turned() {
+    let tiff = [&b"MM\0\x2a\0\0\0\x08\0\x01\x01\x12\0\x03\0\0\0\x01\0\x06"[..], &[0; 6]].concat();
+    let app1 = [&[0xFF, 0xE1, 0, 34][..], b"Exif\0\0", &tiff].concat();
+    let bytes = [&jpeg(600, 400)[..2], &app1, &jpeg(600, 400)[2..]].concat();
+    let (d, image, _) = pictured(&bytes);
+    let record = &file(&d)["images"][0];
+    let keys: Vec<&str> = record.as_object().unwrap().keys().map(String::as_str).collect();
+    assert_eq!(keys, ["data", "format", "id", "pixels"], "{record}");
+    let saved = crate::blob::collecting_parts(|| d.to_json()).0.unwrap();
+    let read = reopen(&d);
+    assert_eq!(read, d);
+    assert_eq!(crate::blob::collecting_parts(|| read.to_json()).0.unwrap(), saved);
+    let found = read.images.by_id(image).unwrap();
+    assert_eq!((found.pixels, found.shown_pixels()), ([600, 400], [400, 600]));
+    let (plain, image, _) = pictured(&jpeg(600, 400));
+    assert_eq!(plain.images.by_id(image).map(|i| i.shown_pixels()), Some([600, 400]));
+}

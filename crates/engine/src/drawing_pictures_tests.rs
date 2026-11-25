@@ -32,6 +32,34 @@ pub(crate) fn png(w: u32, h: u32) -> Vec<u8> {
 const RED: [u8; 4] = [255, 0, 0, 255];
 const BLUE: [u8; 4] = [0, 0, 255, 255];
 
+/// The colours of [`photo`]'s stored quarters: top-left, top-right, bottom-left, bottom-right.
+pub(crate) const QUARTERS: [[u8; 3]; 4] = [[255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 0]];
+
+/// A photo of 32 by 16 pixels in [`QUARTERS`] as it is stored, with EXIF orientation `turn`: a JPEG,
+/// or a PNG with an `eXIf` chunk (#19106).
+pub(crate) fn photo(turn: u16, as_png: bool) -> Vec<u8> {
+    use image::ImageEncoder;
+    let quarter = |x: u32, y: u32| QUARTERS[usize::from(y >= 8) * 2 + usize::from(x >= 16)];
+    let rgb: Vec<u8> = (0..16).flat_map(|y| (0..32).flat_map(move |x| quarter(x, y))).collect();
+    // A big-endian TIFF block whose IFD0 has one entry: Orientation (0x0112), SHORT, 1 value.
+    let exif = [b"MM\0\x2a\0\0\0\x08\0\x01\x01\x12\0\x03\0\0\0\x01".as_slice(), &turn.to_be_bytes(), &[0; 6]].concat();
+    let mut out = Vec::new();
+    if as_png {
+        let mut encoder = png::Encoder::new(&mut out, 32, 16);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_chunk(png::chunk::ChunkType(*b"eXIf"), &exif).unwrap();
+        writer.write_image_data(&rgb).unwrap();
+        writer.finish().unwrap();
+    } else {
+        let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 95);
+        encoder.set_exif_metadata(exif).unwrap();
+        encoder.write_image(&rgb, 32, 16, image::ExtendedColorType::Rgb8).unwrap();
+    }
+    out
+}
+
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
     s.execute(id, &p).unwrap()
 }
@@ -349,6 +377,28 @@ fn the_scene_holds_a_logo_with_or_without_its_cache() {
     let cached = crate::drawing_scene::extract(&mut s, sheet).unwrap();
     assert_eq!(block_group(&cached.scene), block_group(&built.scene));
     assert!(matches!(block_group(&cached.scene).items[0], Item::Picture(_)));
+}
+
+/// A photo stored on its side with EXIF orientation 6 is a portrait logo (#19106): in the legal owner's
+/// value box, 9.15 mm high, it is half that wide, centred on x = 270.0875, and its stored bottom-left
+/// quarter shows at the top left.
+#[test]
+fn a_turned_photo_logo_fits_its_cell_upright() {
+    let folder = Folder::new("logo-turned");
+    let (mut s, sheet) = with_a_block();
+    logo(&mut s, &folder, &photo(6, true), "legal_owner");
+    let d = s.drawing("test").unwrap().clone();
+    let items = logo_items(&d, sheet);
+    let [Item::Picture(picture)] = items.as_slice() else { panic!("{items:?}") };
+    let want = Aabb2 { min: Vec2::new(270.0875 - 2.2875, 45.175), max: Vec2::new(270.0875 + 2.2875, 54.325) };
+    assert!(picture.rect.min.dist(want.min) < 1e-9 && picture.rect.max.dist(want.max) < 1e-9, "{:?}", picture.rect);
+
+    let (grid, window) = whole(picture);
+    let rows = Provider::new(&d, sheet).unwrap().rows(picture.source, &grid, window).unwrap();
+    let columns = (window.x1 - window.x0) as usize;
+    let rgb = |pixel: usize| [rows[pixel * 4], rows[pixel * 4 + 1], rows[pixel * 4 + 2]];
+    let last_row = rows.len() / 4 - columns;
+    assert_eq!([rgb(0), rgb(columns - 1), rgb(last_row), rgb(last_row + columns - 1)], [QUARTERS[2], QUARTERS[0], QUARTERS[3], QUARTERS[1]]);
 }
 
 /// A logo change rebuilds the title block without losing a view's centre line, and the provider and

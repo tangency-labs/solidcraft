@@ -3274,6 +3274,7 @@ mod tests {
             format: "png".into(),
             data: b"original image bytes".into(),
             pixels: [1, 1],
+            orientation: 1,
             plane: solidcraft_doc::PlaneRef::Origin { name: "XY".into() },
             center: Vec2::new(0.0, 0.0),
             width: 10.0,

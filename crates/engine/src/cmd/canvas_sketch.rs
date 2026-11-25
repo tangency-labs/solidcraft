@@ -52,7 +52,7 @@ fn to_sketch(s: &mut Session, p: &Value) -> Result<Value> {
             format!("the canvas image is {iw} x {ih} pixels; tracing reads at most 40 megapixels, so scale the picture down first"),
         ));
     }
-    let (w, h, ink) = load(bytes).ok_or_else(|| bad(cmd, "the canvas image cannot be read"))?;
+    let (w, h, ink) = load(bytes, canvas.orientation).ok_or_else(|| bad(cmd, "the canvas image cannot be read"))?;
     let opts = Opts { threshold: otsu(&ink), ..Opts::default() };
     let loops = trace(&ink, w, h, &opts);
     if loops.is_empty() {
@@ -142,14 +142,27 @@ fn pick(s: &Session, p: &Value, cmd: &str) -> Result<Canvas> {
     })
 }
 
-/// Ink (0 background … 1 drawing) at working resolution, row-major. The decoder is limited to
-/// `MAX_PIXELS` too, whatever the header said.
-fn load(bytes: &[u8]) -> Option<(usize, usize, Vec<f64>)> {
-    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format().ok()?;
+/// A canvas's picture `bytes` decoded under `limits` and turned by its `orientation`, as the canvas
+/// shows it (#19112); an error when it can't be read under them or isn't a PNG or JPEG, the only
+/// pictures a canvas holds. Tracing and the exports read a canvas's picture through this: tracing
+/// at most `MAX_PIXELS`, whatever the header said, and the exports what the view reads.
+pub(crate) fn shown_picture(bytes: &[u8], orientation: u8, limits: image::Limits) -> image::ImageResult<image::DynamicImage> {
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format()?;
+    if !matches!(reader.format(), Some(image::ImageFormat::Png | image::ImageFormat::Jpeg)) {
+        return Err(image::ImageError::Unsupported(image::error::ImageFormatHint::Unknown.into()));
+    }
+    reader.limits(limits);
+    let mut img = reader.decode()?;
+    solidcraft_render::image_orientation::turn(&mut img, orientation);
+    Ok(img)
+}
+
+/// Ink (0 background … 1 drawing) at working resolution, row-major, as the canvas shows it
+/// ([`shown_picture`], at most `MAX_PIXELS`).
+fn load(bytes: &[u8], orientation: u8) -> Option<(usize, usize, Vec<f64>)> {
     let mut limits = image::Limits::default();
     limits.max_alloc = Some(MAX_PIXELS * 4 + (1 << 20));
-    reader.limits(limits);
-    let img = reader.decode().ok()?.to_rgba8();
+    let img = shown_picture(bytes, orientation, limits).ok()?.to_rgba8();
     let (iw, ih) = img.dimensions();
     if iw == 0 || ih == 0 {
         return None;
@@ -608,8 +621,8 @@ mod tests {
     use crate::Session;
     use crate::tests::image_file;
 
-    /// A white 200x100 PNG with a black ring (outer r 40, inner r 15) and a black square.
-    fn picture() -> String {
+    /// A white 200x100 picture with a black ring (outer r 40, inner r 15) and a black square.
+    fn drawing() -> image::RgbaImage {
         let mut img = image::RgbaImage::from_pixel(200, 100, image::Rgba([255, 255, 255, 255]));
         for (x, y, px) in img.enumerate_pixels_mut() {
             let d = ((x as f64 - 50.0).powi(2) + (y as f64 - 50.0).powi(2)).sqrt();
@@ -617,8 +630,13 @@ mod tests {
                 *px = image::Rgba([0, 0, 0, 255]);
             }
         }
+        img
+    }
+
+    /// [`drawing`] as a PNG file.
+    fn picture() -> String {
         let mut out = std::io::Cursor::new(Vec::new());
-        img.write_to(&mut out, image::ImageFormat::Png).unwrap();
+        drawing().write_to(&mut out, image::ImageFormat::Png).unwrap();
         image_file(&out.into_inner())
     }
 
@@ -657,5 +675,35 @@ mod tests {
         let e = s.execute("canvas.to_sketch", &json!({})).unwrap_err().to_string();
         assert!(e.contains("40 megapixels"), "{e}");
         assert!(s.doc.features.is_empty(), "nothing is added");
+    }
+
+    /// A picture stored on its side with an EXIF orientation is traced as its canvas shows it,
+    /// upright (#19112): [`drawing`] stored 200 x 100 with orientation 6 shows 100 x 200, the ring
+    /// above the square, so the outlines run taller than wide.
+    #[test]
+    fn a_turned_picture_is_traced_as_its_canvas_shows_it() {
+        let img = drawing();
+        let mut out = Vec::new();
+        let mut encoder = png::Encoder::new(&mut out, img.width(), img.height());
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        // A big-endian TIFF block whose IFD0 has one entry: Orientation (0x0112) = 6.
+        let exif = [b"MM\0\x2a\0\0\0\x08\0\x01\x01\x12\0\x03\0\0\0\x01\0\x06".as_slice(), &[0; 6]].concat();
+        writer.write_chunk(png::chunk::ChunkType(*b"eXIf"), &exif).unwrap();
+        writer.write_image_data(img.as_raw()).unwrap();
+        writer.finish().unwrap();
+        let mut s = Session::default();
+        s.execute("canvas.insert", &json!({"path": image_file(&out), "plane": "XY", "width": 50})).unwrap();
+        let r = s.execute("canvas.to_sketch", &json!({})).unwrap();
+        assert_eq!((&r["outlines"], &r["holes"]), (&json!(2), &json!(1)), "{r}");
+        let ss = s.model.state().sketch(r["sketch"].as_u64().unwrap()).unwrap().clone();
+        let span = |along: fn(&solidcore_record::Vec2) -> f64| {
+            let values: Vec<f64> = ss.sketch.points.iter().map(|p| along(&p.pos)).collect();
+            values.iter().copied().fold(f64::NEG_INFINITY, f64::max) - values.iter().copied().fold(f64::INFINITY, f64::min)
+        };
+        let (wide, high) = (span(|p| p.x), span(|p| p.y));
+        // 80 by 170 pixels of drawing at 0.5 mm a pixel.
+        assert!(high > 1.5 * wide, "upright: {wide} mm wide, {high} mm high");
     }
 }
