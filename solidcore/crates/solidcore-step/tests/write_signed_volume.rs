@@ -1190,11 +1190,7 @@ fn an_inside_out_torus_is_written_right_side_out_and_reads_back() {
     assert!(!solid.sheet && solid.turned.is_empty(), "read back turned faces over: {:?} {:?}", solid.turned, solid.notes);
     let mut back = to_kernel_body(&mut kernel, &solid.brep, false).unwrap();
     let check = check_brep(&mut kernel, &mut back, CheckLevel::Level2).unwrap();
-    assert_eq!(
-        check.pointers,
-        solidcore::topology::brep::validation::PointerCheck::Passed,
-        "pointers"
-    );
+    assert_eq!(check.pointers, solidcore::topology::brep::validation::PointerCheck::Passed, "pointers");
     assert_eq!(check.assert_valid, Some(true), "{:?}", check.reports);
     let back_volume = brep_volume_default(&kernel, &mut back, 1e-9).unwrap();
     assert!((back_volume - expected).abs() <= 1e-9 * expected, "read-back volume {back_volume}, expected {expected}");
