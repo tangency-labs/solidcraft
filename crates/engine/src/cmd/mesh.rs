@@ -259,7 +259,7 @@ fn section_stack(s: &mut Session, p: &Value) -> Result<Value> {
     let (vals, _) = s.doc.param_values();
     let plane = s.doc.resolve_plane_in(&vals, &base, 0, s.active_component, Some(state.as_ref())).map_err(|e| bad(cmd, e.to_string()))?;
     let v3 = |v: solidcore_record::Vec3| [v.x, v.y, v.z];
-    let reach = solidcore_ops::affine::span_along(v3(bounds.min), v3(bounds.max), v3(plane.origin), v3(plane.normal()))
+    let reach = solidcraft_kernel::services::affine::span_along(v3(bounds.min), v3(bounds.max), v3(plane.origin), v3(plane.normal()))
         .map_err(|_| bad(cmd, "the mesh body's reach along the plane's normal is not a finite length"))?;
     let from = length(s, p, "from", cmd)?.unwrap_or(reach[0]);
     let to = length(s, p, "to", cmd)?.unwrap_or(reach[1]);
