@@ -5527,22 +5527,52 @@ fn a_cut_across_a_free_form_rim_keeps_its_curves() {
     assert!(rel(v, t2_volume_from_flat(&f)) < 3e-4, "volume {v} vs the flat's {}", t2_volume_from_flat(&f));
 }
 
-/// A sharp corner in the zone stays refused, by name: the material beside it wouldn't hang from
-/// anything. A fold clear of it, on the same outline, folds. Where the lines run smoothly into the
-/// arc is no corner.
+/// A stepped end, the fold line drawn across all of it, wraps its corners onto the bend, at the
+/// step and clear of it; the remote arc stays exact in the flat.
 #[test]
-fn a_corner_of_a_curved_outline_in_the_zone_is_named() {
+fn a_corner_of_a_curved_outline_in_the_zone_folds() {
     let stepped = vec![
         ("sketch.line", json!({"points": [[0, 50], [-20, 50], [-20, 30], [-60, 30], [-60, -30], [-20, -30], [-20, -50], [0, -50]]})),
         ("sketch.arc.three_point", json!({"start": [0, -50], "through": [50, 0], "end": [0, 50]})),
     ];
-    let mut s = Session::default();
-    t2_curved_blank(&mut s, &stepped, "0.4");
-    match s.execute("sheet.fold", &json!({"points": [[-20, -200, 2], [-20, 200, 2]], "fixed": [40, 0, 2]})) {
-        Ok(v) => panic!("the zone holds the corners at x = -20: {v}"),
-        Err(e) => assert!(e.to_string().contains("corner of the sheet's outline"), "{e}"),
+    for x in [-20, 0] {
+        let mut s = Session::default();
+        t2_curved_blank(&mut s, &stepped, "0.5");
+        let flat_volume = volume(&mut s);
+        run(&mut s, "sheet.fold", json!({"points": [[x, -200, 2], [x, 200, 2]], "fixed": [40, 0, 2]}));
+        let body = &s.model.state().bodies[0].body;
+        assert!(body.validity().is_empty() && body.shell_count() == 1, "x = {x}: {:?}", body.validity());
+        assert!(rel(volume(&mut s), flat_volume) < 3e-4);
+        run(&mut s, "sheet.unfold", json!({}));
+        assert!(rel(volume(&mut s), flat_volume) < 3e-4);
     }
-    run(&mut s, "sheet.fold", json!({"points": [[0, -200, 2], [0, 200, 2]], "fixed": [40, 0, 2]}));
+}
+
+/// A fold through a small notch on its line: the zone takes in the notch's corners, which the
+/// line is drawn across, and wraps them onto the bend. A 40 x 20 plate with a 2 x 4 notch, folded
+/// through the notch at 72, 90 and 108 degrees both ways, keeps its volume and flat area.
+#[test]
+fn a_fold_wraps_an_outline_notch_inside_its_bend_zone() {
+    for deg in [72.0_f64, 90.0, 108.0] {
+        for flip in [false, true] {
+            let mut s = Session::default();
+            run(&mut s, "sheet.manage_rules", json!({"name": "AL2", "thickness": 2, "k_factor": 0.5, "bend_radius": 1, "active": true}));
+            run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Blank"}));
+            run(
+                &mut s,
+                "sketch.line",
+                json!({"points": [[0, 0], [40, 0], [40, 20], [21, 20], [21, 16], [19, 16], [19, 20], [0, 20]], "closed": true}),
+            );
+            run(&mut s, "sketch.finish", json!({}));
+            run(&mut s, "sheet.flange", json!({"sketch": "Blank"}));
+            run(&mut s, "sheet.fold", json!({"points": [[20, -1, 2], [20, 21, 2]], "angle": deg, "radius": 1, "flip": flip, "fixed": [0, 10, 2]}));
+            let body = &s.model.state().bodies[0].body;
+            assert!(body.validity().is_empty() && body.shell_count() == 1, "{deg} deg, flip {flip}: {:?}", body.validity());
+            let (v, a) = (volume(&mut s), flat_area(&flat(&mut s)));
+            assert!((v / (792.0 * 2.0) - 1.0).abs() < 1e-4, "{deg} deg, flip {flip}: volume {v}");
+            assert!((a - 792.0).abs() < 1e-6, "{deg} deg, flip {flip}: flat area {a}");
+        }
+    }
 }
 
 /// A circle or an ellipse cut out across a fold that crosses slanted edges, before the fold or in

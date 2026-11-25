@@ -89,6 +89,7 @@ pub use construct_auto::is_construct_tool;
 pub use design_link::LinkProblem;
 pub use design_link::LinkState;
 pub use drawing_dimension::preview_scene as drawing_dimension_preview;
+pub(crate) use drawing_sketch::refuse_outside_drawing;
 pub use drawing_ui::pending_icon as drawing_pending_icon;
 pub(crate) use edit::pick_mode;
 pub(crate) use face::FaceRefForm;
@@ -99,6 +100,7 @@ pub use features::auto_operation;
 pub(crate) use features::axis_dir_form;
 pub(crate) use features::axis_expr_form;
 pub(crate) use features::axis_line_object;
+pub(crate) use features::axis_param;
 pub use features::clearance_diameter;
 pub use features::clearance_sizes;
 pub(crate) use features::edge_ref_form;
@@ -118,6 +120,7 @@ pub(crate) use features_more::MAX_SKETCH_ID;
 pub(crate) use features_more::SidePoint;
 pub(crate) use features_more::SketchFrameId;
 pub(crate) use features_more::axes_mask;
+pub(crate) use features_more::coil_placed_edge;
 pub(crate) use features_more::side_point;
 pub(crate) use features_more::sketch_frame_id;
 pub(crate) use file::GEOMETRY_MESSAGE;
@@ -133,6 +136,7 @@ pub use file::runs_plugin_importer;
 pub(crate) use file::up_form;
 pub(crate) use file::usable_path;
 pub use file::use_import_cache_dir;
+pub use frame::member_section_view;
 pub(crate) use inspect::color_param;
 pub use join_pieces::Addition;
 pub use join_pieces::addition;
@@ -286,6 +290,7 @@ mod sketch_equation;
 mod sketch_freeform;
 mod sketch_import;
 mod sketch_inspect;
+mod sketch_links;
 mod sketch_modify;
 mod sketch_project;
 pub(crate) use sketch_project::MAX_PROJECTED_ENTITIES;
@@ -603,6 +608,18 @@ pub fn not_in_sketch(s: &Session) -> std::result::Result<(), String> {
 
 /// Every command, in toolbar order.
 pub fn command_specs() -> Vec<&'static CommandSpec> {
+    all_command_specs().to_vec()
+}
+
+/// Every command, in toolbar order, gathered once: the window looks commands up by id many
+/// times a frame (its buttons, menus and shortcuts), and gathering them from every module each
+/// time was most of what a lookup cost.
+fn all_command_specs() -> &'static [&'static CommandSpec] {
+    static ALL: std::sync::OnceLock<Vec<&'static CommandSpec>> = std::sync::OnceLock::new();
+    ALL.get_or_init(gather_command_specs)
+}
+
+fn gather_command_specs() -> Vec<&'static CommandSpec> {
     let mut v: Vec<&'static CommandSpec> = Vec::new();
     v.extend(sketch::COMMANDS.iter());
     v.extend(sketch_create::COMMANDS.iter());
@@ -624,6 +641,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(surface_match::COMMANDS.iter());
     v.extend(sketch_modify::COMMANDS.iter());
     v.extend(sketch_project::COMMANDS.iter());
+    v.extend(sketch_links::COMMANDS.iter());
     v.extend(features::COMMANDS.iter());
     v.extend(features_more::COMMANDS.iter());
     v.extend(cell_grid::COMMANDS.iter());
@@ -716,9 +734,17 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
 /// classification, a host's check) decides on the id this returns, never the id as sent, so it
 /// and the engine cannot disagree about which command a request runs.
 pub fn find_command(id: &str) -> Option<&'static CommandSpec> {
+    static BY_ID: std::sync::OnceLock<std::collections::HashMap<&'static str, &'static CommandSpec>> = std::sync::OnceLock::new();
     let id = normalize_command_id(id)?;
-    let all = command_specs();
-    all.iter().find(|c| c.id == id).or_else(|| all.iter().find(|c| c.id.eq_ignore_ascii_case(id))).copied()
+    let by_id = BY_ID.get_or_init(|| {
+        let mut by_id = std::collections::HashMap::new();
+        // The first command of an id wins, as a search in toolbar order finds it.
+        for c in all_command_specs() {
+            by_id.entry(c.id).or_insert(*c);
+        }
+        by_id
+    });
+    by_id.get(id).copied().or_else(|| all_command_specs().iter().find(|c| c.id.eq_ignore_ascii_case(id)).copied())
 }
 
 /// Whether two ids use common alternative verbs in the same namespace. This only ranks

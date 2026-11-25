@@ -134,6 +134,57 @@ fn pasted_sketch_reference_uses_a_sources_pending_placement() {
 }
 
 #[test]
+fn a_singly_placed_bodys_projections_keep_following_pending_moves() {
+    for reference in [json!({"edge":[25,0,10]}), json!({"face":[25,5,10]}), json!({"vertex":[20,0,10]}), json!({})] {
+        for explicit_path in [false, true] {
+            let mut s = Session::default();
+            let part = run(&mut s, "component.create", json!({"name":"SourcePart","grounded":false}));
+            let occurrence = part["occurrence"].as_u64().unwrap();
+            run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"SourceBody"}));
+            run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[20,0,0]}));
+            run(&mut s, "component.activate", json!({"component":0}));
+            let sketch = run(&mut s, "sketch.create", json!({"plane":"XY","name":"Receiver"}))["sketch"].as_u64().unwrap();
+            let mut picked = reference.clone();
+            picked["body"] = json!("SourceBody");
+            if explicit_path {
+                picked["path"] = json!([occurrence]);
+            }
+            let result = run(&mut s, "sketch.project", json!({"refs":[picked]}));
+            let link = result["links"][0]["link"].as_str().unwrap().to_string();
+            assert!(s.doc.sketch(sketch).unwrap().link(&link).unwrap().placement.is_none(), "{picked}");
+            run(&mut s, "sketch.finish", json!({}));
+            let points = |s: &Session| {
+                let mut current = s.doc.sketch(sketch).unwrap().clone();
+                let warnings = super::refresh(s, &s.doc, sketch, &mut current);
+                assert!(warnings.is_empty(), "{picked}: {warnings:?}");
+                assert!(!current.link(&link).unwrap().lost, "{picked}");
+                current.link_points(&link).into_iter().map(|point| (current.points[point].id.clone(), current.points[point].pos)).collect::<Vec<_>>()
+            };
+            let before = points(&s);
+            assert!(!before.is_empty(), "{picked}");
+            run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[0,7,0],"capture":false}));
+            assert!(!s.pending_moves.is_empty());
+            let pending = points(&s);
+            assert_eq!(before.len(), pending.len());
+            for ((old_id, old), (new_id, new)) in before.iter().zip(&pending) {
+                assert_eq!(old_id, new_id, "pending motion preserves point identity: {picked}");
+                assert!((new.x - old.x).abs() < 1e-6 && (new.y - old.y - 7.0).abs() < 1e-6, "{picked}: {old:?} -> {new:?}");
+            }
+            run(&mut s, "component.capture_position", json!({}));
+            let opened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+            for current in [&s, &opened] {
+                let captured = points(current);
+                assert_eq!(pending.len(), captured.len());
+                for ((old_id, old), (new_id, new)) in pending.iter().zip(captured) {
+                    assert_eq!(old_id, &new_id);
+                    assert!(old.dist(new) < 1e-6, "capture and reopen retain the pending position: {picked}: {old:?} -> {new:?}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn manual_projection_captures_the_requested_coincident_body_producer() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Control","name":"ControlFeature"}));
@@ -3397,6 +3448,80 @@ fn a_projected_face_saves_its_edge_names_and_a_design_without_them_builds_as_bef
     assert!(before.plane.to_world(center.pos).dist(panel_corner(95.)) < 1e-6);
 }
 
+/// The named-edge correspondence of #18711 also belongs to a picked occurrence. Freezing
+/// holds that reading, resuming follows the parameter, and repair records the new source's
+/// names without losing the circle's corner constraint.
+#[test]
+fn a_picked_panels_named_edges_survive_parameter_moves_freeze_and_repair() {
+    let mut s = Session::default();
+    let a = run(&mut s, "component.create", json!({"name":"A","grounded":false}));
+    let a1 = a["occurrence"].as_u64().unwrap();
+    leaning_panel(&mut s);
+    let a2 = run(&mut s, "occurrence.copy", json!({"occurrence":a1}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "occurrence.move", json!({"occurrence":a2,"translate":[1000,0,0]}));
+    run(&mut s, "component.activate", json!({"component":0}));
+    run(&mut s, "component.create", json!({"name":"B"}));
+    let sketch = run(&mut s, "sketch.create", json!({"plane":"XY","offset":200,"project_edges":false}))["sketch"].as_u64().unwrap();
+    let link = run(&mut s, "sketch.project", json!({"refs":[{"body":"Panel","face":[996,149,118],"path":[a2]}]}))["links"][0]["link"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let sk = s.doc.sketch(sketch).unwrap();
+    let names = sk.link(&link).unwrap().curve_edges.clone();
+    assert_eq!(names.len(), 4);
+    assert!(names.iter().all(|n| !n.is_empty()));
+    let curve_ids: Vec<_> = sk.link_curves(&link).iter().map(|c| sk.curves[*c].id.clone()).collect();
+    let corner = panel_corner(95.) + solidcore_record::Vec3::new(1000., 0., 0.);
+    let corner = sk
+        .points
+        .iter()
+        .find(|p| p.link.as_deref() == Some(&link) && p.pos.dist(solidcore_record::Vec2::new(corner.x, corner.y)) < 1e-6)
+        .unwrap()
+        .id
+        .clone();
+    let circle = ids(&run(&mut s, "sketch.circle.center", json!({"center":[990,290],"radius":5}))["curves"])[0].clone();
+    run(&mut s, "sketch.constraint.coincident", json!({"a":format!("{circle}.center"),"b":corner}));
+    run(&mut s, "sketch.dimension", json!({"entities":[circle],"value":10}));
+
+    let check = |s: &Session, degrees: f64, x: f64, source: u64| {
+        let st = s.model.state();
+        let ss = st.sketch(sketch).unwrap();
+        let sk = &ss.sketch;
+        let l = sk.link(&link).unwrap();
+        assert!(!l.lost);
+        assert_eq!(l.placement.as_ref().unwrap().source, vec![source]);
+        assert_eq!(l.curve_edges, names);
+        assert_eq!(sk.link_curves(&link).iter().map(|c| sk.curves[*c].id.clone()).collect::<Vec<_>>(), curve_ids);
+        assert_eq!(sk.constraints.len(), 2);
+        let center = sk.points.iter().find(|p| p.id == format!("{circle}.center")).unwrap();
+        let expected = panel_corner(degrees) + solidcore_record::Vec3::new(x, 0., 0.);
+        let actual = ss.plane.to_world(center.pos);
+        assert!((actual.x - expected.x).abs() < 1e-6 && (actual.y - expected.y).abs() < 1e-6, "{actual:?} != {expected:?}");
+        assert!(s.model.result(sketch).and_then(|r| r.warning.clone()).is_none());
+    };
+    check(&s, 95., 1000., a2);
+    run(&mut s, "sketch.freeze_link", json!({"link":link}));
+    run(&mut s, "parameters.change", json!({"name":"A","expression":"85 deg"}));
+    check(&s, 95., 1000., a2);
+    run(&mut s, "sketch.resume_link", json!({"link":link}));
+    check(&s, 85., 1000., a2);
+    run(&mut s, "occurrence.move", json!({"occurrence":a1,"translate":[50,0,0]}));
+    check(&s, 85., 1000., a2);
+    run(&mut s, "occurrence.move", json!({"occurrence":a2,"translate":[20,0,0]}));
+    run(&mut s, "sketch.update_references", json!({}));
+    check(&s, 85., 1020., a2);
+    // Repair onto the other copy while both still exist. The new reading must retain names
+    // in the old curves' resulting order, so a subsequent parameter move keeps the corner.
+    run(&mut s, "sketch.edit", json!({"sketch":sketch}));
+    let repaired = run(&mut s, "sketch.repair_link", json!({"link":link,"ref":{"body":"Panel","face":[65,149,118],"path":[a1]}}));
+    assert_eq!(repaired["rebuilt"], false);
+    check(&s, 85., 50., a1);
+    run(&mut s, "parameters.change", json!({"name":"A","expression":"92 deg"}));
+    check(&s, 92., 50., a1);
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    check(&reopened, 92., 50., a1);
+}
+
 /// A sphere's outline from above is its equator: one circle and one profile. Flat triangles beside
 /// the equator can tip the other way from the sphere, and their edges must not join the outline.
 #[test]
@@ -3900,10 +4025,15 @@ fn a_second_placements_face_and_edge_project_where_it_is_placed() {
     let copy = s.doc.occurrences.iter().map(|o| o.id).find(|id| *id != first).unwrap();
     run(&mut s, "occurrence.move", json!({"occurrence":copy,"translate":[0,15,0],"capture":true}));
     check(&s, 15.0);
-    // Renaming the part or the body renames the copy ("Base (Housing:2)"): the links follow it.
+    // Renaming the part or the body: the links follow it. A link keeps the copy by its placement,
+    // so it names the body by its own name and the copy by its occurrence.
     run(&mut s, "component.rename", json!({"component":part["component"],"name":"Housing"}));
     run(&mut s, "body.rename", json!({"body":"Block","name":"Base"}));
-    assert!(s.model.state().sketch(sketches[0]).unwrap().sketch.links.iter().all(|l| l.source.bodies() == ["Base (Housing:2)"]));
+    let state = s.model.state();
+    for l in &state.sketch(sketches[0]).unwrap().sketch.links {
+        assert_eq!(l.source.bodies(), ["Base"], "{l:?}");
+        assert_eq!(l.placement.as_ref().map(|p| p.source.clone()), Some(vec![copy]), "{l:?}");
+    }
     check(&s, 15.0);
     check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()), 15.0);
 }
@@ -4513,6 +4643,174 @@ fn a_rectangle_with_sides_on_the_projected_face_outline_is_picked_by_its_own_cur
         let want = (far[0] - corner[0]) * (far[1] - corner[1]) * 5.0;
         assert!((volume - want).abs() < 1e-6 * want, "{sides_on_outline} sides on the outline: {volume} vs {want}");
     }
+}
+
+/// A 40 × 30 × 10 box and a sketch on its top face with the face projected. Returns the
+/// session, the sketch, the projected top edge along y = 0 and the projected corner (40, 0).
+fn projected_top() -> (Session, u64, String, String) {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":10,"body_name":"B"}));
+    let id = run(&mut s, "sketch.create", json!({"plane":"XY","offset":10}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.project", json!({"refs":[{"body":"B","face":[5,5,10]}]}));
+    let sk = s.doc.sketch(id).unwrap();
+    let edge = sk
+        .curves
+        .iter()
+        .enumerate()
+        .find(|(i, c)| {
+            c.link.is_some()
+                && matches!(sk.curve_link_geom(*i), Some(solidcraft_sketch::LinkGeom::Line(a, b)) if a.y.abs() < 1e-9 && b.y.abs() < 1e-9)
+        })
+        .unwrap()
+        .1
+        .id
+        .clone();
+    let corner = sk.points.iter().find(|p| p.link.is_some() && (p.pos.x - 40.0).abs() < 1e-9 && p.pos.y.abs() < 1e-9).unwrap().id.clone();
+    (s, id, edge, corner)
+}
+
+#[test]
+fn constraints_on_a_projection_survive_a_rebuild_of_its_source() {
+    let (mut s, id, edge, corner) = projected_top();
+    run(&mut s, "sketch.point", json!({"point":[12,3],"id":"on_edge"}));
+    run(&mut s, "sketch.point", json!({"point":[38,2],"id":"at_corner"}));
+    let kept = run(&mut s, "sketch.constraint.coincident", json!({"a":"on_edge","b":edge}))["constraint"].as_str().unwrap().to_string();
+    let lost = run(&mut s, "sketch.constraint.coincident", json!({"a":"at_corner","b":corner}))["constraint"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    // A chamfer on the corner's vertical edge, moved before the sketch: the face changes shape.
+    let chamfer = run(&mut s, "solid.chamfer", json!({"edges":[[40,0,5]],"distance":2}))["feature"].as_u64().unwrap();
+    let at = s.doc.features.iter().position(|f| f.id == id).unwrap();
+    run(&mut s, "timeline.reorder", json!({"feature":chamfer,"position":at}));
+    let state = s.model.state();
+    let sk = &state.sketch(id).unwrap().sketch;
+    assert!(sk.constraints.iter().any(|c| c.id == kept), "the point stays on the shortened edge");
+    assert!(!sk.constraints.iter().any(|c| c.id == lost), "the corner is gone");
+    let p = sk.point(sk.point_index("on_edge").unwrap()).unwrap();
+    assert!(p.y.abs() < 1e-6, "{p:?}");
+    let warning = s.model.result(id).and_then(|r| r.warning.clone()).unwrap_or_default();
+    assert!(warning.contains(&lost) && warning.contains("removed 1 constraint"), "{warning}");
+}
+
+#[test]
+fn consistent_projection_constraints_keep_main_default_and_allow_explicit_refusal() {
+    for coincident in [false, true] {
+        for policy in [None, Some("keep"), Some("refuse")] {
+            let (mut s, id, edge, corner) = projected_top();
+            let mut params = if coincident { json!({"a":corner,"b":edge}) } else { json!({"line":edge,"mode":"horizontal"}) };
+            if let Some(policy) = policy {
+                params["if_redundant"] = json!(policy);
+            }
+            let cmd = if coincident { "sketch.constraint.coincident" } else { "sketch.constraint.horizontal_vertical" };
+            let before = serde_json::to_value(s.doc.sketch(id).unwrap()).unwrap();
+            let count = s.doc.sketch(id).unwrap().constraints.len();
+            let result = s.execute(cmd, &params);
+            if policy == Some("refuse") {
+                let error = result.unwrap_err().to_string();
+                assert!(error.contains("only between projections"), "{cmd}: {error}");
+                assert_eq!(serde_json::to_value(s.doc.sketch(id).unwrap()).unwrap(), before, "refusal leaves the sketch unchanged");
+            } else {
+                let result = result.unwrap_or_else(|e| panic!("{cmd} {params}: {e}"));
+                assert_eq!(result["redundant"], true, "{cmd}: {result}");
+                assert_eq!(s.doc.sketch(id).unwrap().constraints.len(), count + 1);
+                assert!(s.doc.sketch(id).unwrap().constraints.iter().any(|c| c.id == result["constraint"].as_str().unwrap()));
+                let after = serde_json::to_value(s.doc.sketch(id).unwrap()).unwrap();
+                assert_eq!(after["points"], before["points"], "redundancy does not move projected points");
+                assert_eq!(after["curves"], before["curves"], "redundancy does not alter projected curves");
+                assert_eq!(after["links"], before["links"]);
+            }
+        }
+    }
+}
+
+#[test]
+fn conflicting_projection_constraints_are_refused_with_default_keep_and_explicit_refuse() {
+    for coincident in [false, true] {
+        for policy in [None, Some("keep"), Some("refuse")] {
+            let (mut s, id, edge, corner) = projected_top();
+            let other = s
+                .doc
+                .sketch(id)
+                .unwrap()
+                .points
+                .iter()
+                .find(|p| p.link.is_some() && p.pos.x.abs() < 1e-9 && (p.pos.y - 30.0).abs() < 1e-9)
+                .unwrap()
+                .id
+                .clone();
+            let mut params = if coincident { json!({"a":corner,"b":other}) } else { json!({"line":edge,"mode":"vertical"}) };
+            if let Some(policy) = policy {
+                params["if_redundant"] = json!(policy);
+            }
+            let cmd = if coincident { "sketch.constraint.coincident" } else { "sketch.constraint.horizontal_vertical" };
+            let before = serde_json::to_value(s.doc.sketch(id).unwrap()).unwrap();
+            let error = s.execute(cmd, &params).unwrap_err().to_string();
+            if policy == Some("refuse") {
+                assert!(error.contains("only between projections"), "{cmd}: {error}");
+            } else {
+                assert!(error.contains("conflict"), "{cmd}: {error}");
+            }
+            assert_eq!(serde_json::to_value(s.doc.sketch(id).unwrap()).unwrap(), before, "conflict leaves geometry, links and constraints unchanged");
+        }
+    }
+}
+
+#[test]
+fn projection_and_fixed_point_coincidence_preserves_default_keep_but_refuses_conflicts() {
+    for conflict in [false, true] {
+        for refuse in [false, true] {
+            let (mut s, id, _, corner) = projected_top();
+            run(&mut s, "sketch.point", json!({"point":if conflict { [5,5] } else { [40,0] },"id":"fixed","connect":false}));
+            run(&mut s, "sketch.constraint.fix", json!({"entity":"fixed"}));
+            let before = serde_json::to_value(s.doc.sketch(id).unwrap()).unwrap();
+            let count = s.doc.sketch(id).unwrap().constraints.len();
+            let mut params = json!({"a":corner,"b":"fixed"});
+            if refuse {
+                params["if_redundant"] = json!("refuse");
+            }
+            let result = s.execute("sketch.constraint.coincident", &params);
+            if conflict || refuse {
+                let error = result.unwrap_err().to_string();
+                assert!(error.contains(if refuse { "only between projections" } else { "conflict" }), "{error}");
+                assert_eq!(serde_json::to_value(s.doc.sketch(id).unwrap()).unwrap(), before);
+            } else {
+                let result = result.unwrap();
+                assert_eq!(result["redundant"], true, "{result}");
+                assert_eq!(s.doc.sketch(id).unwrap().constraints.len(), count + 1);
+                assert!(s.doc.sketch(id).unwrap().constraints.iter().any(|c| c.id == result["constraint"].as_str().unwrap()));
+                let after = serde_json::to_value(s.doc.sketch(id).unwrap()).unwrap();
+                assert_eq!(after["points"], before["points"]);
+                assert_eq!(after["curves"], before["curves"]);
+                assert_eq!(after["links"], before["links"]);
+            }
+        }
+    }
+}
+
+#[test]
+fn constraints_only_between_projections_are_explained_when_refusal_is_requested() {
+    let (mut s, id, edge, corner) = projected_top();
+    let count = s.doc.sketch(id).unwrap().constraints.len();
+    // The opposite corner: no line joins it to `corner`.
+    let other = s
+        .doc
+        .sketch(id)
+        .unwrap()
+        .points
+        .iter()
+        .find(|p| p.link.is_some() && p.pos.x.abs() < 1e-9 && (p.pos.y - 30.0).abs() < 1e-9)
+        .unwrap()
+        .id
+        .clone();
+    let e = s.execute("sketch.constraint.coincident", &json!({"a":corner,"b":other,"if_redundant":"refuse"})).unwrap_err().to_string();
+    assert!(e.contains("only between projections"), "{e}");
+    let r = run(&mut s, "sketch.constraint.fix", json!({"entity":edge}));
+    assert!(r["result"]["note"].as_str().is_some_and(|n| n.contains("always fixed")), "{r}");
+    let e = s.execute("sketch.dimension", &json!({"entities":[edge]})).unwrap_err().to_string();
+    assert!(e.contains("only projected geometry") && !e.contains("conflicts with k"), "{e}");
+    assert_eq!(s.doc.sketch(id).unwrap().constraints.len(), count);
+    let r = run(&mut s, "sketch.dimension", json!({"entities":[edge],"if_redundant":"driven"}));
+    assert_eq!(r["driven"], true, "{r}");
+    assert!((r["measured"].as_f64().unwrap() - 40.0).abs() < 1e-6, "{r}");
 }
 
 /// A cylinder's side face projected along a direction across its axis is the rectangle its rims
