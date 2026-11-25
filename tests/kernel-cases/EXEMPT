@@ -503,6 +503,7 @@ sketch.slot.center_point          2D sketch only (the sketch solver and engine t
 sketch.snap                       2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.solve                      2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.spline.control_knots       2D sketch only (crates/engine/src/cmd/sketch_knots_tests.rs: the 33-point non-uniform example draws as exact Bezier spans and extrudes to a closed body); no new kernel operation
+sketch.spline.control_polygon     2D sketch only (crates/engine/src/cmd/sketch_create.rs: blend_tests::spline_control_polygon_constraints_move_the_real_control_points); no kernel operation
 sketch.spline.fit_tolerance       2D sketch only (crates/engine/src/cmd/sketch_fit_tolerance_tests.rs: the 800-point contour fits within the tolerance and a closed contour extrudes to its body); no new kernel operation
 sketch.spline.handles             2D sketch only (crates/engine/src/cmd/sketch_create.rs: fit_spline_handles_are_visible_lines_and_accept_existing_constraints); no kernel operation
 sketch.spline.insert_point        2D sketch only (the sketch solver and engine tests); no kernel operation

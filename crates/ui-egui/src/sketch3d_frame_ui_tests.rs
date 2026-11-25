@@ -748,17 +748,30 @@ fn control_point_spline_tool_leaves_the_plane_in_a_3d_sketch() {
     click_world(&mut h, &on_plane, 1e-3);
     assert_eq!(h.app.tool.as_ref().map(|t| t.pts.len()), Some(3), "the planar tool took the clicks");
     h.step(&json!({"key": "Escape"})).unwrap();
-    {
+    let planar_curves = {
+        use solidcraft_engine::sketch::CurveKind;
+
         let state = crate::open_meshing::session_world(&h.app.session);
         let sk = &state.sketch(sketch).unwrap().sketch;
         assert!(sk.wires.is_empty(), "no 3D curve from clicks on the plane");
-        assert_eq!(sk.curves.len(), 1, "{:?}", h.app.status.as_ref().map(|s| &s.0));
-        assert!(
-            matches!(&sk.curves[0].kind, solidcraft_engine::sketch::CurveKind::Spline { control: true, degree: 3, pts, .. } if pts.len() == 3),
-            "{:?}",
-            sk.curves[0].kind
-        );
-    }
+        let (polygon, curves): (Vec<_>, Vec<_>) = sk.curves.iter().partition(|curve| curve.spline_control_polygon_of.is_some());
+        let [spline] = curves.as_slice() else {
+            panic!("expected one planar spline, got {curves:?}");
+        };
+        let CurveKind::Spline { control: true, degree: 3, pts, .. } = &spline.kind else {
+            panic!("expected a cubic control point spline, got {:?}", spline.kind);
+        };
+        assert_eq!(pts.len(), on_plane.len());
+        assert_eq!(polygon.len(), pts.len() - 1);
+        assert!(polygon.iter().all(|side| side.construction && side.spline_control_polygon_of.as_deref() == Some(spline.id.as_str())));
+        for pair in pts.windows(2) {
+            assert!(
+                polygon.iter().any(|side| matches!(side.kind, CurveKind::Line { a, b } if [a, b] == pair || [b, a] == pair)),
+                "missing control polygon side joining {pair:?}"
+            );
+        }
+        sk.curves.clone()
+    };
     assert!(h.app.tool.as_ref().is_some_and(|t| t.cmd == "sketch.spline.control_point"), "the tool stays for the next curve");
     h.app.status = None;
     // Two clicks on the plane, then one on a box vertex above it: the curve leaves the plane, and
@@ -769,7 +782,7 @@ fn control_point_spline_tool_leaves_the_plane_in_a_3d_sketch() {
     h.step(&json!({"key": "Escape"})).unwrap();
     let state = crate::open_meshing::session_world(&h.app.session);
     let sk = &state.sketch(sketch).unwrap().sketch;
-    assert_eq!(sk.curves.len(), 1, "no second curve on the plane");
+    assert_eq!(sk.curves, planar_curves, "the off-plane spline leaves the planar curves unchanged");
     assert_eq!(sk.wires.len(), 1, "{:?}", h.app.status.as_ref().map(|s| &s.0));
     let w = &sk.wires[0];
     assert_eq!(w.control.map(|c| c.degree), Some(3));

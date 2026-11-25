@@ -821,8 +821,10 @@ fn validate_sketch_sizes(value: &Value) -> Result<()> {
                         }
                     }
                 }
-                if curve.get("spline_handle_of").and_then(Value::as_str).is_some_and(|id| id.len() > 512) {
-                    return Err(invalid());
+                for key in ["spline_handle_of", "spline_control_polygon_of"] {
+                    if curve.get(key).and_then(Value::as_str).is_some_and(|id| id.len() > 512) {
+                        return Err(invalid());
+                    }
                 }
             }
         }

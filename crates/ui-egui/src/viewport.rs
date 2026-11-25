@@ -4979,9 +4979,6 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, options: PickOptions<'_>) -
     {
         let mut mids = Near::new(all);
         for (i, curve) in ss.sketch.curves.iter().enumerate() {
-            if curve.spline_handle_of.is_some() {
-                continue;
-            }
             if !solidcraft_engine::view::sketch_curve_visible(&ss.sketch, i) {
                 continue;
             }
@@ -15831,6 +15828,25 @@ mod tests {
         hover_frame(app, ctx, events);
         assert_ne!(app.cam, before, "the device must keep moving the camera");
         assert!(app.viewport.device_motion.is_none());
+    }
+
+    #[test]
+    fn control_polygon_midpoints_follow_visibility() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let drawn = h.app.run("sketch.spline.control_point", json!({"points":[[0,0],[0,30],[40,30],[40,0]]})).unwrap();
+        let sides = h.app.run("sketch.spline.control_polygon", json!({"curve":drawn["curves"][0]})).unwrap();
+        let side = sides["curves"][1].as_str().unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.call("ui.view", json!({"view":"fit"}));
+        h.frames(3);
+        let proj = projection(&h.app, h.app.viewport.rect.unwrap());
+        let at = proj.to_screen(Vec3::new(20.0, 30.0, 0.0)).unwrap();
+        let picks_midpoint =
+            |app: &mut SolveApp| pick_cached(app, &proj, at).iter().any(|hit| matches!(hit, Hit::SketchMidpoint { id, .. } if id == side));
+        assert!(picks_midpoint(&mut h.app));
+        h.app.run("sketch.options", json!({"show_control_polygons":false})).unwrap();
+        assert!(!picks_midpoint(&mut h.app));
     }
 
     #[test]

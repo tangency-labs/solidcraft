@@ -427,7 +427,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&OPTIONS_CONTRACT)
         .output(output_schema_for::<OptionsResult>)
         .params(
-        "sketch?: id|name (default active); any of show_profile, show_points, show_dimensions, show_constraints, show_projected, show_construction, grid, snap, slice, sketch_3d: bool. Returns them all",
+        "sketch?: id|name (default active); any of show_profile, show_points, show_dimensions, show_constraints, show_projected, show_construction, show_control_polygons, grid, snap, slice, sketch_3d: bool. Returns them all",
     ),
     CommandSpec::new("sketch.chain", "Chain", crate::checked!("sketch.chain", chain_cmd)).in_sketch_part().icon("chain")
         .enabled(in_sketch)
@@ -5078,6 +5078,9 @@ fn construction(s: &mut Session, p: &Value) -> Result<Value> {
         let all_construction = cs.iter().all(|c| sk.curves.get(*c).is_some_and(|c| c.construction))
             && ps.iter().all(|q| *q == 0 || sk.points.get(*q).is_some_and(|q| q.construction));
         let to = want.unwrap_or(!all_construction);
+        if !to && cs.iter().any(|&curve| sk.is_control_polygon_segment(curve)) {
+            return Err(bad(cmd, "control polygon segments stay construction lines"));
+        }
         let mut n = 0;
         for c in cs {
             if let Some(cu) = sk.curves.get_mut(c)
@@ -5457,6 +5460,7 @@ fn options_of(v: &solidcraft_sketch::SketchView) -> SketchOptions {
         show_constraints: !v.hide_constraints,
         show_projected: !v.hide_projected,
         show_construction: !v.hide_construction,
+        show_control_polygons: !v.hide_control_polygons,
         grid: !v.hide_grid,
         snap: !v.no_snap,
         slice: v.slice,
@@ -5473,6 +5477,7 @@ fn sketch_options(s: &mut Session, p: &Value) -> Result<Value> {
         "show_constraints",
         "show_projected",
         "show_construction",
+        "show_control_polygons",
         "grid",
         "snap",
         "slice",
@@ -5505,6 +5510,7 @@ fn sketch_options(s: &mut Session, p: &Value) -> Result<Value> {
         put("show_constraints", &mut v.hide_constraints, true);
         put("show_projected", &mut v.hide_projected, true);
         put("show_construction", &mut v.hide_construction, true);
+        put("show_control_polygons", &mut v.hide_control_polygons, true);
         put("grid", &mut v.hide_grid, true);
         put("snap", &mut v.no_snap, true);
         put("slice", &mut v.slice, false);
