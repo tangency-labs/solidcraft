@@ -131,10 +131,18 @@ click in the sketch to place a point. Existing toolbar customizations are kept; 
 Lines and polylines (L), rectangles (two-point R, three-point, centre), circles (centre C,
 two-point, three-point, tangent), arcs (three-point, centre, tangent), polygons, slots, ellipses,
 fit-point and control-point splines, conics, points and text. **Construction** (X) turns curves
-into reference geometry that doesn't form profiles. Modify tools include trim (T), extend, break,
+into reference geometry that doesn't form profiles. It switches selected points too: a
+construction point is drawn as an open square and a Hole from the whole sketch leaves it out.
+A Hole already made keeps its sites. Preferences › Sketch › *X switches selected points to construction* (on by default) controls this: off, points are left out and X with only points selected switches the drawing mode, as it always has. Modify tools include trim (T), extend, break,
 fillet, chamfer, offset (O), mirror, patterns, move/copy and scale. With trim on, click a
 piece to remove it, or press and drag a path across several pieces: the ones it crosses light up
-and all go when you let go, in one undo step (`sketch.trim.path`). Fillet and chamfer take
+and all go when you let go, in one undo step (`sketch.trim.path`). Fillet also rounds a corner
+where a conic or a non-periodic control-point spline meets a line, an arc, a conic or another
+such spline: the curve is cut back exactly to the
+tangent point and keeps its id. A spline keeps its degree and its knots past the cut. Such a
+corner cannot stay as a virtual sharp corner, so a corner that a dimension measures to is refused
+there, and so is a constraint that holds something on the cut curve. Fit-point splines are not
+supported yet. Chamfer stays on lines. Fillet and chamfer take
 several corners at once: pick the corners, set the size once, and every corner is rounded or
 cut alike in one undo step.
 
@@ -288,6 +296,91 @@ plane was lost as well: it then names the projections it lost. Shown in the brow
 timeline marker, the sketch draws its last geometry too; its profiles and edges can't be picked
 or used by a new feature until it builds again.
 
+Picking a face projects every loop of its boundary, holes included; picking an edge projects
+that edge only. Projected curves and points are drawn in the projected colour (lost ones in
+the lost colour), and dashed when switched to construction with **Normal/Construction**: then
+they bound no profile but stay linked and keep following their source.
+
+**Constraining to the model.** Projected geometry is fixed where its source puts it, so
+constrain and dimension the sketch's own geometry to it. The constraint tools and Dimension
+take a model edge or vertex directly. Turn on **Projection display and picking** in
+the Project tool's options panel to also pick another sketch's curve directly: the click projects it into
+the sketch first (the status line says so) and uses the projection. This option also gives
+projected points their projection or lost colors, groups Break Link with the projection's
+actions, and lists projections under their sketch in the browser and history.
+It is off by default and lasts for the current app session only. It is not a Preferences setting.
+With it off, the previous menu, picking and row layout remain. Opening a saved design does not enable it.
+A consistent constraint only between projections is kept and reported as redundant, as on
+other fixed geometry. Commands can request `if_redundant: "refuse"` to refuse it instead.
+A conflicting constraint is always refused. A dimension on projected geometry alone can
+only be driven, and Fix says projected geometry is fixed already. When a source changes shape
+(a fillet or chamfer added before the sketch), the projection is made again and its curves and
+points keep their ids wherever the new geometry continues the old (a shortened edge on the same
+line, a hole of the same size), so the constraints and dimensions on them stay; those on
+geometry that is gone, such as a corner cut away, are removed and the sketch's warning names
+them.
+
+**Projecting from another part.** Geometry picked on another component is read from the exact
+placement it was picked on: an edge of the second copy of a part (`A:2`) follows `A:2` when
+it is moved or turned, and moving `A:1` changes nothing. The projection is worked out in the
+placement of the sketch's own component it was made in (the active one when the sketch's
+component is active), so moving the sketch's component moves it the other way, moving both
+together leaves it as it is, and a sketch made in a second copy of its component (`B:2`)
+keeps that view when the design is saved and opened again. Scripts give the placement as an
+occurrence path: `sketch.project {refs: [{edge: [x,y,z], body: "Plate", path: [occurrence
+ids]}]}` (the browser's instance names, such as `Plate (A:2)`, work too). With `strict_occurrence_references: true`, a sketch cannot project another copy of its own
+component or a part inside that copy. A sketch of a part placed more than once then needs
+an explicit `path`. The input defaults to false on `sketch.project`, `sketch.intersect` and
+`sketch.include_3d`: ambiguous sketches and other placements of the receiving component
+keep main's ordinary links. Own-sketch and later-timeline references remain refused.
+**Projection display and picking** sends the strict input and the displayed copy's path;
+command callers can choose it explicitly. Whatever the sketch is constrained to and the features
+built on it are rebuilt with it.
+
+A curve or point of another component's sketch is the exception when that component is placed
+once: the projection keeps the place it had relative to the sketch's component when it was
+made, so joint motion carries the two parts together. A sketch of a component placed more than
+once is read from the placement its `path` names, as body geometry is.
+
+Body geometry from a part placed only once keeps following uncaptured moves while its
+projection is refreshed, as before. Projections from repeated placements follow captured
+positions: a move kept pending (`occurrence.move` with `capture: false`) is not followed until
+it is captured. With **Projection display and picking** enabled, each projection is listed
+under its sketch in the browser and history, with the placement it reads and its state (lost,
+frozen, pending). Its eye hides it without changing the sketch (it still bounds profiles), and
+its menu offers:
+
+- **Update References** (`sketch.update_references {sketch?, capture?, files?}`) reads every
+  projection where its source is now, solves and stores the sketch and rebuilds what follows,
+  reporting each projection changed, unchanged, frozen or lost and any feature that failed.
+  `capture: true` first captures the pending moves of the placements it reads; `files: true`
+  first runs **Update Links** for each linked design, and reports a design whose file cannot
+  be read as unavailable while its bodies stay usable.
+- **Freeze Link** (`sketch.freeze_link`) keeps the projection as it is until **Resume Link**
+  (`sketch.resume_link`).
+- **Remove Projection** (`sketch.remove_link`) deletes the projection's curves and points and
+  the constraints on them; **Break Link** keeps them as ordinary geometry instead. Deleting
+  some of a projected face's curves breaks the remaining link by default. With
+  `preserve_projection_link: true`, Delete keeps identifiable remaining edges linked.
+  Both `sketch.delete` and `selection.delete` take this input, including dry runs.
+  **Projection display and picking** sends true; it is off by default. The projection remembers the
+  source edges they came from by name, so exactly those stay deleted when it is updated, the
+  part moves or the face is resized. Where the deleted curves can't be told apart that way (part
+  of a source edge, one of edges told apart only by number such as half a hole, or a projection
+  not made of a face's edges: a silhouette, a section, a mesh body's face), the curves left are
+  broken off where they are, as Break Link does, and keep their construction setting; the
+  command's `broken_links` says which and why. If a deleted member's source edge no longer exists,
+  the projection is reported lost and keeps its last geometry until it is repaired or removed.
+
+A projection whose source is gone keeps the last geometry it was stored with (Update
+References stores it) and says it is lost; it is never moved onto another copy of the part
+or a nearby edge. **Repair Link…** in a lost projection's menu (while its sketch is edited)
+starts a pick: the edge, face or vertex clicked next becomes its source
+(`sketch.repair_link {link, ref}`), keeping its curve ids and the constraints on them when the
+new geometry has the same shape. `sketch.references` lists every projection with its source,
+placements and status; `stale` means the model already shows the projection where its source
+is now and only the stored sketch is behind (editing the sketch or Update References stores it).
+
 A sketch on a construction plane built from the model (through a sketch line, through three
 points, midway between two faces…) projects, intersects, includes and holds text like a sketch
 on any other plane, and its links follow when a parameter moves that plane.
@@ -341,6 +434,15 @@ While drawing a fit spline, click its starting point after three distinct sample
 it smoothly. Right-click finishes an ordinary natural fit. Offset accepts both ellipse
 handles and dense fitted curves; the second click sets the side and distance from the curve.
 
+**Fit Spline Within Tolerance** turns a contour of many points into one smooth spline: give
+the points (2 to 10000, plain coordinates, in order along the contour) and a tolerance
+(default 0.01 mm), and it fits the spline through as few of the points as keep every point
+within it, reporting the deviation it reached (`sketch.spline.fit_tolerance` from scripts and
+agents). Use it for a contour that comes from a computation — a traced outline, a scanned
+section or a generated shape — which is past the 500 points a fit point spline takes. When
+even 500 spline points cannot reach the tolerance it refuses, naming the deviation reached:
+the points may be too rough for a smooth spline, or the tolerance too tight.
+
 **Equation Curve** draws a curve from formulas instead of clicks: x(t) and y(t) over a range of
 t, or y = f(x) over a range of x, using the design's parameters. [Equation curves](equation-curves.md)
 walks through it step by step, with pictures and examples (a line, a parabola, a wave, a circle,
@@ -371,7 +473,15 @@ keeps the alignment: the new point gets a Horizontal or Vertical constraint with
 point it lined up with, in the shape's undo step, unless the sketch already sets it. With the
 preference off, drawing lines up only with the previous point, one axis at a time.
 
-Enable **3D Sketch** in the Sketch Palette to draw lines, fit splines and points off the plane.
+Enable **3D Sketch** in the Sketch Palette to draw lines, arcs, splines and points off the plane.
+
+A 3D sketch has two kinds of spline. **3D Spline** passes through every point you click.
+**3D Control Point Spline** starts on the first point you click and ends on the last; the points
+between are control points that pull the curve towards them without lying on it. A dashed
+polygon joins the control points. Drag a control point to reshape the curve, as you drag a fit
+point: the curve stays smooth along its whole length. The Control Point Spline tool on the Sketch
+tab draws the same curve when a click leaves the sketch plane. Pipe, Sweep and Loft follow either
+kind of spline as a path or a rail.
 
 Enable **Select 3D sketch curve points** in **Preferences > Sketch** to show and select drawn
 3D curve points as construction references after finishing the sketch. This option is off by default.
@@ -386,7 +496,8 @@ they do not create associative links to the source points.
 New 3D geometry follows its sketch's component placement, including the selected occurrence
 and pending position changes. Click a drawn fit point to show its move triad; its arrows move
 along world X, Y and Z. Scripts also supply world coordinates to `sketch.line3d`,
-`sketch.spline3d`, `sketch.point3d` and `sketch.move3d`. Activate the desired occurrence before
+`sketch.arc3d`, `sketch.spline3d`, `sketch.spline3d.control_point`, `sketch.point3d` and
+`sketch.move3d`. Activate the desired occurrence before
 editing an explicit sketch belonging to a component with multiple placements.
 
 Older drawn or detached 3D wires keep their saved world positions. Included and surface-linked
@@ -398,14 +509,15 @@ fresh link once the source is available; their stored point values are preserved
 
 **Horizontal/Vertical** accepts a click on a line or clicks on two distinct sketch points,
 including the origin, endpoints and circle centres. For two points, it chooses horizontal
-or vertical alignment from their current positions. Hold **Shift** near a line's midpoint to
-highlight and select it as either point. The midpoint follows both endpoints as the line moves,
-resizes or rotates. Two line midpoints can also be aligned. Hovering and the first pick are
-only previews; Esc cancels them without changing the sketch. Accepting the second pick reuses
-or creates a sketch point with an ordinary Midpoint constraint, then adds the H/V constraint
-in one undo step. Both constraints can be selected and deleted independently; deleting either
-keeps the point. After a fillet or chamfer, its Midpoint constraint refers to the original full
-side, retained as construction geometry, just like a manually constrained midpoint.
+or vertical alignment from their current positions. With a point already picked, a click on a
+line's midpoint takes that midpoint, the way the line's ends are taken. Hold **Shift** near a
+line's midpoint to highlight and select it as either point. The midpoint follows both endpoints
+as the line moves, resizes or rotates. Two line midpoints can also be aligned. Hovering and the
+first pick are only previews; Esc cancels them without changing the sketch. Accepting the second
+pick reuses or creates a sketch point with an ordinary Midpoint constraint, then adds the H/V
+constraint in one undo step. Both constraints can be selected and deleted independently; deleting
+either keeps the point. After a fillet or chamfer, its Midpoint constraint refers to the original
+full side, retained as construction geometry, just like a manually constrained midpoint.
 
 Scripts use the same command, with a midpoint reference in the `points` array:
 
@@ -580,6 +692,12 @@ shared tool window. Click an input to change it; click a selected object again o
 it to remove it. Each input has its own Clear button. Source inputs show a count, and single
 references identify the chosen mirror line, direction, or centre. Box selection also works
 while the window is open. Sketch modify tools take geometry from the sketch being edited.
+
+A click inside a closed profile adds the curves of its outline to the entities. A shape drawn
+inside that profile is a profile of its own: click inside it to add it too. So a click between
+two nested rectangles picks the outer rectangle alone. To have the click also pick the shapes
+inside the profile, as earlier versions did, turn on **Preferences > Sketch > A click inside a
+profile also picks the shapes inside it**.
 
 If your preselection includes exactly one straight construction line of the active sketch,
 opening Mirror uses it as **Mirror line**, keeping your selected entities. Other construction

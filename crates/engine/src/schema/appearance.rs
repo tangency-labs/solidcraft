@@ -520,6 +520,42 @@ impl JsonSchema for ChainTarget {
     }
 }
 
+/// `appearance.chain` takes one parameter: the body, face or component whose look chain to read.
+/// This is the same target `appearance.copy` and `appearance.pick_up` take; reading a chain changes
+/// nothing, so unlike the pick-up it has no ask-the-UI form.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct AppearanceChainParams {
+    /// The body, face or component whose look chain to read.
+    pub target: ChainTarget,
+}
+
+/// One level of a target's look chain and what is assigned there. The four levels are always
+/// reported, in precedence order, so a caller can see which assignment wins and which are empty.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ChainStep {
+    /// The level: `face`, `body`, `component` or `material`.
+    pub step: String,
+    /// The look assigned at this level, `null` when nothing is. A component's `material` step is
+    /// the common default look of the bodies it owns directly, `null` when they differ or there are
+    /// none.
+    pub look: Option<LookReply>,
+}
+
+/// What a chain request answers: the four levels in precedence order and the one that decides what
+/// the target shows. Nothing is written to the design. Imported paint is a display fallback outside
+/// these four steps, so a target with no look anywhere answers with four empty steps.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct AppearanceChainResult {
+    /// The four levels, in precedence order: face, body, component, material.
+    pub steps: Vec<ChainStep>,
+    /// Which step decides the target's look, `null` when none of them does.
+    pub active: Option<String>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// `appearance.copy` takes one parameter, the `appearance.chain` target whose look goes into the
 /// session's look clipboard. Unlike `appearance.pick_up`, which asks the UI to sample one, this call
 /// has no form without a target.
@@ -757,6 +793,28 @@ pub struct AppearanceReplaceResult {
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+/// `appearance.paste` takes the targets of `appearance.assign` and no look of its own: it applies
+/// what `appearance.copy` put in the session's look clipboard. Naming a look here (`appearance`,
+/// `color`, `opacity`, `name` or `pbr`) is refused rather than dropped in silence, and the reply is
+/// the same object `appearance.assign` answers with.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct AppearancePasteParams {
+    /// Bodies, by name (a placed copy's name, `KB (K:2)`, means the body it shows).
+    #[serde(default)]
+    pub bodies: Option<StringList>,
+    /// Faces, by a point on each, at most 10000.
+    #[serde(default)]
+    pub faces: Option<FaceSpots>,
+    /// The body the `faces` points are on, for points that don't name one. Default: the
+    /// nearest body with a face there.
+    #[serde(default)]
+    pub body: Option<String>,
+    /// Components, by name or id, or a placement's name (`K:2`).
+    #[serde(default)]
+    pub components: Option<StringList>,
 }
 
 #[cfg(test)]
