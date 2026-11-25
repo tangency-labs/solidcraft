@@ -1182,19 +1182,41 @@ fn x_param(s: &Session, v: &Value, component: u64, inv: &solidcraft_doc::Mat, cm
     }
 }
 
-/// The round end of a cylindrical face of the occurrence's bodies centred at `pick`: a point on
-/// its axis there, pointing out of that end (as picking its circular edge gives).
+/// The round end of a cylindrical or conical face of the occurrence's bodies centred at `pick`: a
+/// point on its axis there, pointing out of that end (as picking its circular edge gives).
 fn circle_centre(s: &Session, occurrence: u64, pick: Vec3) -> Option<Snap> {
     let component = if occurrence == 0 { 0 } else { s.doc.occurrences.iter().find(|o| o.id == occurrence)?.component };
     let st = s.model.state();
-    let c = st
-        .bodies
-        .iter()
-        .filter(|b| s.doc.model_body_component(b) == component)
-        .find_map(|b| solidcraft_doc::kernel::cylinder_end_at(&b.body, pick))?;
-    let along = (pick - c.axis_point).dot(c.axis);
-    let (at, dir) = if (along - c.start).abs() <= (c.end - along).abs() { (c.start, -1.0) } else { (c.end, 1.0) };
-    Some(Snap::Point { point: c.axis_point + c.axis * at, z: Some(c.axis * dir), x: None })
+    if let Some(c) =
+        st.bodies.iter().filter(|b| s.doc.model_body_component(b) == component).find_map(|b| solidcraft_doc::kernel::cylinder_end_at(&b.body, pick))
+    {
+        let along = (pick - c.axis_point).dot(c.axis);
+        let (at, dir) = if (along - c.start).abs() <= (c.end - along).abs() { (c.start, -1.0) } else { (c.end, 1.0) };
+        return Some(Snap::Point { point: c.axis_point + c.axis * at, z: Some(c.axis * dir), x: None });
+    }
+    let mut best: Option<(f64, Vec3, Vec3)> = None;
+    for b in st.bodies.iter().filter(|b| s.doc.model_body_component(b) == component && !b.body.is_mesh()) {
+        let size = b.body.size();
+        let tol = (size * 1e-3).max(1e-3);
+        let rim_tol = (size * 1e-6).max(1e-6);
+        for f in 0..b.body.face_count() {
+            let Some((c, half_angle)) = solidcraft_doc::kernel::cone_face(&b.body, f) else { continue };
+            let tan_h = half_angle.tan();
+            let v = pick - c.axis_point;
+            let along = v.dot(c.axis);
+            let radial = (v - c.axis * along).len();
+            for (at, dir) in [(c.start, -1.0), (c.end, 1.0)] {
+                if at * tan_h <= rim_tol || (dir < 0.0 && (c.end - c.start).abs() <= rim_tol) {
+                    continue;
+                }
+                let off = radial + (along - at).abs();
+                if off <= tol && best.is_none_or(|(bo, ..)| off < bo) {
+                    best = Some((off, c.axis_point + c.axis * at, c.axis * dir));
+                }
+            }
+        }
+    }
+    best.map(|(_, point, z)| Snap::Point { point, z: Some(z), x: None })
 }
 
 pub(crate) fn joint_id(s: &Session, v: Option<&Value>, cmd: &str) -> Result<u64> {
