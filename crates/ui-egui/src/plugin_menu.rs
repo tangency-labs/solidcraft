@@ -4,8 +4,9 @@
 //! plugins). "Install plugin…" comes first, then one row per command of each installed plugin
 //! that is turned on in Preferences › Plugins, labelled by [`command_title`]. A plugin with more
 //! than one command gets a submenu named after the plugin. The Model tab of the ribbon has a
-//! Plugins group with one button per command ([`ribbon_buttons`]). A plugin turned off shows in
-//! neither place, and nothing opens or runs until the user picks one specific command.
+//! Plugins group with individual commands or explicitly declared menus ([`ribbon_buttons`]).
+//! A plugin turned off shows in neither place, and nothing opens or runs until the user picks
+//! one specific command.
 //!
 //! Choosing an entry opens a dialog built from its `input_schema`: a number field, a whole number
 //! field, a checkbox, a dropdown, a text field or a selection field per property. A selection
@@ -40,6 +41,7 @@ const LAST_REPORT: &str = "last_import_report";
 
 /// The start of a plugin command's ribbon button id: `plugin_entry:<plugin id>:<entry name>`.
 pub(crate) const RIBBON_PREFIX: &str = "plugin_entry:";
+pub(crate) const RIBBON_GROUP_PREFIX: &str = "plugin_group:";
 
 /// The menu's state, and the open entry dialog.
 #[derive(Default)]
@@ -56,6 +58,10 @@ pub(crate) struct State {
     /// `listed` has been read since the plugins last changed: by the background discovery, which
     /// the ribbon and menus wait for rather than reading the plugin folders themselves.
     pub(crate) loaded: bool,
+    /// The explicit ribbon group's menu, or the complete Plugins menu when absent.
+    ribbon_group: Option<String>,
+    /// Clicking the group's button again is handled by its toggle, not as an outside click.
+    ribbon_group_anchor: Option<egui::Rect>,
     /// The open entry dialogs, oldest first: each plugin entry has its own, with its own window,
     /// title and field values, so several can be open at once.
     pub(crate) dialogs: Vec<EntryDialog>,
@@ -141,6 +147,12 @@ pub(crate) struct Field {
     pub(crate) images: Vec<String>,
     /// Optional package raster per option, including partially illustrated lists.
     pub(crate) swatches: Vec<Option<String>>,
+    /// Optional larger `x-solidcraft-image` path per option. A loaded picture wins over the
+    /// option's swatch; the swatch stays as the fallback when the picture does not load.
+    pub(crate) pictures: Vec<Option<String>>,
+    /// Whether an option names a larger `x-solidcraft-image`: the list then shows a big picture of
+    /// the highlighted option.
+    pub(crate) pictured: bool,
     conditions: FieldConditions,
     order: usize,
     pub(crate) visible: bool,
@@ -326,6 +338,8 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
     let default = p.get("default");
     let mut images = Vec::new();
     let mut swatches = Vec::new();
+    let mut pictures = Vec::new();
+    let mut pictured = false;
     let (kind, input) = match kind {
         "number" if !choice => {
             // `exclusiveMinimum` as a number (draft 6+); a boolean beside `minimum` (draft 4).
@@ -369,7 +383,7 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
         }
         "boolean" => (Kind::Boolean, Input::Boolean(default.and_then(Value::as_bool).unwrap_or(false))),
         "string" if choice => {
-            let (values, titles, pictures) = choices(p)?;
+            let (values, titles, listed) = choices(p)?;
             // A finite choice still obeys the string's original bounds. Directory fields keep
             // their text/picker path and grant checks rather than becoming dropdowns.
             if text("format").as_deref() == Some("directory")
@@ -381,14 +395,23 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
             {
                 return None;
             }
-            images = pictures;
-            swatches = p
+            images = listed;
+            let named = |key: &str| -> Vec<Option<String>> {
+                p.get("oneOf")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .map(|option| option.get(key).and_then(Value::as_str).map(str::to_owned))
+                    .collect()
+            };
+            swatches = named(solidcraft_engine::plugin::swatches::KEY);
+            pictures = named(solidcraft_engine::plugin::swatches::IMAGE_KEY);
+            pictured = p
                 .get("oneOf")
                 .and_then(Value::as_array)
                 .into_iter()
                 .flatten()
-                .map(|option| option.get(solidcraft_engine::plugin::swatches::KEY).and_then(Value::as_str).map(str::to_owned))
-                .collect();
+                .any(|option| option.get(solidcraft_engine::plugin::swatches::IMAGE_KEY).is_some());
             let chosen = default.and_then(Value::as_str).and_then(|d| values.iter().position(|o| o == d));
             (Kind::Choice { values, titles }, Input::Choice(chosen))
         }
@@ -411,6 +434,8 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
             font,
             images,
             swatches,
+            pictures,
+            pictured,
             conditions: Default::default(),
             order: 0,
             visible: true,
@@ -490,6 +515,8 @@ fn selection_field(key: &str, p: &Map<String, Value>, required: bool) -> Option<
             font: false,
             images: Vec::new(),
             swatches: Vec::new(),
+            pictures: Vec::new(),
+            pictured: false,
             conditions: Default::default(),
             order: 0,
             visible: true,
@@ -557,6 +584,7 @@ fn choices(p: &Map<String, Value>) -> Option<(Vec<String>, Vec<String>, Vec<Stri
                             | "x-solidcraft-when"
                             | crate::plugin_images::KEY
                             | solidcraft_engine::plugin::swatches::KEY
+                            | solidcraft_engine::plugin::swatches::IMAGE_KEY
                     )
                 }) {
                     return None;
@@ -827,28 +855,48 @@ pub(crate) fn shown(app: &SolveApp, plugin: &Listed) -> bool {
     crate::plugins::enabled(app, &plugin.id)
 }
 
-/// One plugin command's button in the ribbon's Plugins group.
+/// A command or an explicitly declared menu in the ribbon's Plugins group.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RibbonButton {
-    /// `plugin_entry:<plugin id>:<entry name>`.
+    /// `plugin_entry:<plugin id>:<entry name>` or `plugin_group:<plugin id>:<index>`.
     pub(crate) id: String,
-    /// The label under the button: the entry's `ribbon` slot name, else its [`command_title`].
+    /// The group's declared label, or the entry's `ribbon` slot name, else its [`command_title`].
     pub(crate) label: String,
     /// Its accessible name and hover text: the plugin's name, and the command's when it differs.
     pub(crate) name: String,
-    /// The command's icon ([`command_icon`]).
+    /// The group's package icon, or the command's icon ([`command_icon`]).
     pub(crate) icon: String,
 }
 
-/// The ribbon's Plugins group: one button per command of each plugin that is turned on, in the
-/// menu's order. Empty on the web build, which runs no plugins.
+/// A saved individual pin always keeps the entry accessible as its own button. Toolbar layouts
+/// store namespaced command ids; accept the Model Plugins button id too.
+fn individually_pinned(app: &SolveApp, plugin: &Listed, entry: &solidcraft_engine::plugin::Entry) -> bool {
+    let command = format!("{}.{}", plugin.id, entry.name);
+    let button = format!("{RIBBON_PREFIX}{}:{}", plugin.id, entry.name);
+    app.toolbar_custom.panels.values().any(|ids| ids.iter().any(|id| *id == command || *id == button))
+}
+
+/// Explicit menus replace only their own entries. Without declarations, the menu's original
+/// order, labels and individual buttons are preserved. Empty on the web build.
 pub(crate) fn ribbon_buttons(app: &SolveApp) -> Vec<RibbonButton> {
     if cfg!(target_arch = "wasm32") {
         return Vec::new();
     }
     let mut buttons = Vec::new();
     for plugin in app.plugin_menu.listed.iter().filter(|p| shown(app, p)) {
+        for (index, group) in plugin.ribbon_groups.iter().enumerate() {
+            let icon = group.icon.as_ref().and_then(|path| plugin.images.get(path)).map_or(crate::plugin_images::GENERIC, String::as_str);
+            buttons.push(RibbonButton {
+                id: format!("{RIBBON_GROUP_PREFIX}{}:{index}", plugin.id),
+                label: group.label.trim().to_owned(),
+                name: format!("{}: {}", plugin.name, group.label.trim()),
+                icon: icon.to_owned(),
+            });
+        }
         for entry in &plugin.entries {
+            if plugin.ribbon_groups.iter().any(|group| group.entries.contains(&entry.name)) && !individually_pinned(app, plugin, entry) {
+                continue;
+            }
             let title = command_title(plugin, entry);
             let name = if title == plugin.name { title.clone() } else { format!("{}: {title}", plugin.name) };
             buttons.push(RibbonButton {
@@ -860,6 +908,57 @@ pub(crate) fn ribbon_buttons(app: &SolveApp) -> Vec<RibbonButton> {
         }
     }
     buttons
+}
+
+/// Resolve a group id against the current inventory, so removed or disabled plugins cannot open.
+fn ribbon_group<'a>(app: &'a SolveApp, id: &str) -> Option<(usize, &'a solidcraft_engine::plugin::RibbonGroup)> {
+    let (plugin, index) = id.strip_prefix(RIBBON_GROUP_PREFIX)?.split_once(':')?;
+    let index = index.parse::<usize>().ok()?;
+    let (p, plugin) = app.plugin_menu.listed.iter().enumerate().find(|(_, p)| p.id == plugin && shown(app, p))?;
+    Some((p, plugin.ribbon_groups.get(index)?))
+}
+
+/// The group's rows reuse the Plugins menu actions and dialog path, in declared order.
+fn ribbon_group_rows(app: &SolveApp, id: &str) -> Vec<crate::app_bar::FileRow> {
+    use crate::app_bar::{FileItem, FileRow};
+    let Some((p, group)) = ribbon_group(app, id) else { return Vec::new() };
+    let Some(plugin) = app.plugin_menu.listed.get(p) else { return Vec::new() };
+    group
+        .entries
+        .iter()
+        .filter_map(|name| {
+            let (e, entry) = plugin.entries.iter().enumerate().find(|(_, entry)| entry.name == *name)?;
+            Some(FileRow::Item(FileItem {
+                id: format!("entry:{p}:{e}"),
+                label: command_title(plugin, entry),
+                key: String::new(),
+                icon: command_icon(plugin, entry).to_owned(),
+                enabled: true,
+            }))
+        })
+        .collect()
+}
+
+/// Clicking either half of a declared group button opens only that group's menu, below it.
+pub(crate) fn toggle_ribbon_group(app: &mut SolveApp, ctx: &egui::Context, id: &str, rect: egui::Rect) -> bool {
+    if !id.starts_with(RIBBON_GROUP_PREFIX) {
+        return false;
+    }
+    if ribbon_group(app, id).is_none() {
+        return true;
+    }
+    let state = &mut app.plugin_menu;
+    state.open = !state.open || state.ribbon_group.as_deref() != Some(id);
+    state.ribbon_group = Some(id.to_owned());
+    state.ribbon_group_anchor = Some(rect);
+    state.opened_pass = ctx.cumulative_pass_nr();
+    state.x = rect.left();
+    state.y = Some(rect.bottom());
+    ctx.data_mut(|d| {
+        d.insert_temp(egui::Id::unique("sc_file_menu"), false);
+        d.remove::<egui::Id>(egui::Id::unique("sc_panel_open"));
+    });
+    true
 }
 
 /// Read the installed plugins now when no discovery has listed them since they last changed. For
@@ -947,7 +1046,9 @@ pub(crate) fn rows(app: &SolveApp) -> Vec<crate::app_bar::FileRow> {
 /// close it.
 pub(crate) fn toggle(app: &mut SolveApp, ctx: &egui::Context, rect: egui::Rect) {
     let state = &mut app.plugin_menu;
-    state.open = !state.open;
+    state.open = !state.open || state.ribbon_group.is_some();
+    state.ribbon_group = None;
+    state.ribbon_group_anchor = None;
     state.opened_pass = ctx.cumulative_pass_nr();
     state.x = rect.left();
     state.y = None;
@@ -1006,9 +1107,18 @@ pub(crate) fn menu(app: &mut SolveApp, ctx: &egui::Context) {
     if !app.plugin_menu.open {
         return;
     }
-    let rows = rows(app);
+    let rows = match &app.plugin_menu.ribbon_group {
+        Some(id) => ribbon_group_rows(app, id),
+        None => rows(app),
+    };
+    if rows.is_empty() {
+        app.plugin_menu.open = false;
+        return;
+    }
     let at = egui::pos2(app.plugin_menu.x, app.plugin_menu.y.unwrap_or(crate::app_bar::HEIGHT));
-    let just_opened = app.plugin_menu.opened_pass == ctx.cumulative_pass_nr();
+    let over_group_button =
+        app.plugin_menu.ribbon_group_anchor.is_some_and(|rect| ctx.input(|i| i.pointer.hover_pos().is_some_and(|p| rect.contains(p))));
+    let just_opened = app.plugin_menu.opened_pass == ctx.cumulative_pass_nr() || over_group_button;
     let out = crate::app_bar::file_menu(ctx, &rows, at, egui::Id::unique("sc_plugins_area"), just_opened);
     if out.close {
         app.plugin_menu.open = false;
@@ -2915,15 +3025,20 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, plugin: &Listed, field: &Field, 
                         .collect::<Option<Vec<&str>>>()
                 })
                 .flatten();
-            let swatches = plugin.swatches.get();
-            if swatches.is_none() && field.swatches.iter().any(Option::is_some) {
+            let artwork = plugin.swatches.get();
+            if artwork.is_none() && field.swatches.iter().chain(&field.pictures).any(Option::is_some) {
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
             }
             // The picker uses visible indices; the form and plugin always use schema indices.
             let tiles: Vec<_> = field
                 .available
                 .iter()
-                .map(|i| field.swatches.get(*i).and_then(Option::as_ref).and_then(|rel| swatches?.get(rel)).map(|image| image.texture(ui.ctx())))
+                .map(|i| {
+                    // The loaded picture, else the loaded swatch, each judged by its own limits.
+                    let picture = field.pictures.get(*i).and_then(Option::as_ref).and_then(|rel| artwork?.pictures.get(rel));
+                    let swatch = field.swatches.get(*i).and_then(Option::as_ref).and_then(|rel| artwork?.swatches.get(rel));
+                    picture.or(swatch).map(|image| image.texture(ui.ctx()))
+                })
                 .collect();
             if tiles.iter().any(Option::is_some) {
                 let titles: Vec<String> = field.available.iter().filter_map(|i| titles.get(*i).cloned()).collect();
@@ -2934,7 +3049,13 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, plugin: &Listed, field: &Field, 
                         ui,
                         &id,
                         &mut selected,
-                        ui_kit::SwatchPicker { titles: &titles, textures: &tiles, choose: &choose, search_hint: app.tr("ui.plugin_swatch_search") },
+                        ui_kit::SwatchPicker {
+                            titles: &titles,
+                            textures: &tiles,
+                            choose: &choose,
+                            search_hint: app.tr("ui.plugin_swatch_search"),
+                            preview: field.pictured,
+                        },
                     )
                 });
                 if selected != before_selected {

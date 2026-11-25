@@ -70,6 +70,7 @@ pub mod dialogs_move;
 pub mod dialogs_part_size;
 pub mod dialogs_parts;
 pub mod dialogs_plastic;
+pub mod dialogs_pulley;
 pub mod dialogs_rotate_member;
 pub mod dialogs_save_mesh;
 pub mod dialogs_sheet;
@@ -90,6 +91,7 @@ pub mod easyprint_ui;
 pub mod edit_clipboard;
 pub mod edit_in_place;
 mod feature_edit;
+mod finish_field;
 #[cfg(test)]
 mod font_literals_tests;
 pub mod fonts;

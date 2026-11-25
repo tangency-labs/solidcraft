@@ -1072,6 +1072,24 @@ impl SpaceMouseGhost {
     pub const ALL: [Self; 3] = [Self::LeftViewport, Self::RightViewport, Self::LeftWindow];
 }
 
+/// What the 3D mouse's cap moves (Preferences: "Motion model").
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpaceMouseMotion {
+    /// The cap holds the model: push it right and the model goes right, tilt it and the model
+    /// tilts the same way. How the 3D mouse has always moved the view.
+    #[default]
+    Object,
+    /// The cap holds the camera, which looks at the point the view turns around: push it right and
+    /// the camera goes right, so the model goes left; tilt it forward and the camera rises over the
+    /// model. Every axis moves the other way from `Object`.
+    TargetCamera,
+}
+
+impl SpaceMouseMotion {
+    pub const ALL: [Self; 2] = [Self::Object, Self::TargetCamera];
+}
+
 impl SpaceMouseDriver {
     pub const ALL: [Self; 3] = [Self::Automatic, Self::Spacenavd, Self::Direct];
 
@@ -1338,6 +1356,45 @@ impl MiddleDoubleClick {
 
     pub fn label(self) -> &'static str {
         Self::ALL.iter().find(|(m, _, _)| *m == self).map_or("Home", |(_, _, l)| l)
+    }
+}
+
+/// The key that turns a mouse orbit drag into the other orbit style (`free_orbit_key`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FreeOrbitKey {
+    Off,
+    Alt,
+    Ctrl,
+}
+
+impl FreeOrbitKey {
+    pub const ALL: &[(FreeOrbitKey, &str)] = &[(FreeOrbitKey::Off, "none"), (FreeOrbitKey::Alt, "alt"), (FreeOrbitKey::Ctrl, "ctrl")];
+
+    /// The preference's setting (no key for an unknown one).
+    pub fn of(app: &SolveApp) -> FreeOrbitKey {
+        Self::parse(&app.preferences.free_orbit_key).unwrap_or(FreeOrbitKey::Off)
+    }
+
+    pub fn parse(id: &str) -> Option<FreeOrbitKey> {
+        Self::ALL.iter().find(|(_, i)| *i == id).map(|(k, _)| *k)
+    }
+
+    /// Whether this key is down in `mods` (Ctrl is Cmd on macOS). No key is never held.
+    pub fn held(self, mods: Modifiers) -> bool {
+        match self {
+            FreeOrbitKey::Off => false,
+            FreeOrbitKey::Alt => mods.alt,
+            FreeOrbitKey::Ctrl => mods.ctrl || mods.command,
+        }
+    }
+
+    /// `mods` with this key let go.
+    pub fn released(self, mods: Modifiers) -> Modifiers {
+        match self {
+            FreeOrbitKey::Off => mods,
+            FreeOrbitKey::Alt => Modifiers { alt: false, ..mods },
+            FreeOrbitKey::Ctrl => Modifiers { ctrl: false, command: false, ..mods },
+        }
     }
 }
 
@@ -2838,6 +2895,7 @@ pub fn restore_space_mouse_defaults(app: &mut SolveApp) {
     p.space_mouse_ghost_position = d.space_mouse_ghost_position;
     p.space_mouse_in_view = d.space_mouse_in_view;
     p.space_mouse_model_pivot = d.space_mouse_model_pivot;
+    p.space_mouse_motion = d.space_mouse_motion;
     p.space_mouse_sketch_orbit = d.space_mouse_sketch_orbit;
 }
 
@@ -4243,6 +4301,9 @@ fn prepare_preferences(
     }
     if !SUPERSAMPLING.contains(&new.supersampling) {
         return Err("`supersampling` must be 1 (off), 1.5 or 2".into());
+    }
+    if FreeOrbitKey::parse(&new.free_orbit_key).is_none() {
+        return Err("`free_orbit_key` must be none, alt or ctrl".into());
     }
     if MiddleDoubleClick::parse(&new.middle_double_click).is_none() {
         return Err("`middle_double_click` must be home, fit or off".into());
@@ -5721,6 +5782,7 @@ mod tests {
         p.space_mouse_ghost_position = SpaceMouseGhost::LeftWindow;
         p.space_mouse_in_view = true;
         p.space_mouse_model_pivot = true;
+        p.space_mouse_motion = SpaceMouseMotion::TargetCamera;
         p.space_mouse_sketch_orbit = true;
         let before = h.app.preferences.clone();
         let camera = h.app.cam;
@@ -5734,6 +5796,7 @@ mod tests {
         assert_eq!((p.space_mouse_axis_speed, p.space_mouse_axis_source), (d.space_mouse_axis_speed, d.space_mouse_axis_source));
         assert_eq!((p.space_mouse_ghost_position, p.space_mouse_in_view), (d.space_mouse_ghost_position, d.space_mouse_in_view));
         assert_eq!((p.space_mouse_model_pivot, p.space_mouse_sketch_orbit), (d.space_mouse_model_pivot, d.space_mouse_sketch_orbit));
+        assert_eq!(p.space_mouse_motion, d.space_mouse_motion);
         // Kept: the calibration (dead zone too), the buttons, the offered set, never, enabled, the rest of the page.
         assert_eq!(p.space_mouse_calibrations, before.space_mouse_calibrations);
         assert_eq!(p.space_mouse_buttons, before.space_mouse_buttons);
@@ -5743,6 +5806,20 @@ mod tests {
         assert_eq!(h.app.cam, camera);
         // And it asks first: the real button only arms it (see cancelling_the_restore_question_changes_nothing).
         assert!(!h.app.space_mouse.restore_pending);
+    }
+
+    /// The 3D mouse's motion model is a choice of two: Object (the default, as before) moves the
+    /// model the way the cap goes, Target camera moves the camera that way.
+    #[test]
+    fn the_3d_mouse_motion_model_is_object_or_target_camera() {
+        let mut h = changed_3d_mouse_settings(None);
+        assert_eq!(h.app.preferences.space_mouse_motion, SpaceMouseMotion::Object, "object is the default");
+        scroll_to_and_click(&mut h, "prefs:3d_mouse_motion_model_target_camera");
+        assert_eq!(h.app.preferences.space_mouse_motion, SpaceMouseMotion::TargetCamera, "target camera is opt-in");
+        scroll_to_and_click(&mut h, "prefs:3d_mouse_motion_model_object");
+        assert_eq!(h.app.preferences.space_mouse_motion, SpaceMouseMotion::Object, "object again");
+        let saved = serde_json::to_value(Prefs { space_mouse_motion: SpaceMouseMotion::TargetCamera, ..Default::default() }).unwrap_or_default();
+        assert_eq!(saved["space_mouse_motion"], "target_camera", "saved by a stable name");
     }
 
     /// The 3D mouse's orbit is a choice of two: Classic turns around the view's centre, Traced
