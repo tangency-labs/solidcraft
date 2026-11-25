@@ -871,6 +871,38 @@ pub fn tab_surfaces_enabled() -> bool {
     PUBLISHED.get().is_some_and(|p| p.environment == Environment::current() && p.tab_surfaces)
 }
 
+/// A kind of line on a drawing sheet that has its own screen colour (#18989): its place in
+/// [`Tokens::paper_lines`] and [`Tokens::paper_dark_lines`]. The visible edges are the sheet's ink.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PaperLine {
+    /// Hidden lines.
+    Hidden,
+    /// Centre lines and centre marks.
+    Centre,
+    /// Dimension lines, extension lines and arrows.
+    Dimension,
+    /// Dimension text.
+    DimensionText,
+    /// Note text and leaders.
+    Note,
+}
+
+impl PaperLine {
+    /// Every kind, in the order of the sets.
+    pub const ALL: [PaperLine; 5] = [PaperLine::Hidden, PaperLine::Centre, PaperLine::Dimension, PaperLine::DimensionText, PaperLine::Note];
+
+    /// Its place in a set ([`Tokens::paper_lines`]).
+    pub const fn index(self) -> usize {
+        self as usize
+    }
+
+    /// Whether it is text, which needs more contrast with its paper than a line (WCAG 1.4.3 and
+    /// 1.4.11).
+    pub const fn is_text(self) -> bool {
+        matches!(self, PaperLine::DimensionText | PaperLine::Note)
+    }
+}
+
 /// Colour vision modes (#778): a second set of values for the colours that carry a meaning, for
 /// a weak or missing red (protan), green (deutan) or blue (tritan) sense. Not a filter: Off gives
 /// back the theme's colours unchanged. Protan and Deutan share one red-green table, measured
@@ -1348,6 +1380,15 @@ pub struct Tokens {
     pub paper_prussian_blue_ink: Color32,
     pub paper_dark: Color32,
     pub paper_dark_ink: Color32,
+    /// Colours for each kind of line on a drawing sheet, beside its ink (which draws the visible
+    /// edges), in [`PaperLine`] order (#18989): on a white sheet (also the print colours) and on a
+    /// dark one. A blueprint or Prussian blue sheet keeps its one white ink, as a real blueprint
+    /// does. Each colour stays apart from the others and from the ink for normal vision and for
+    /// every colour vision mode, so no mode changes them, and reads on its paper (WCAG: 3:1 for a
+    /// line, 4.5:1 for text). The line types still carry the meaning: a colour is extra help (D26
+    /// of #13159).
+    pub paper_lines: [Color32; 5],
+    pub paper_dark_lines: [Color32; 5],
     /// Interference: the clash fill, before its shading.
     pub interference: Color32,
     /// Curvature Comb: the envelope through the teeth tips (purple) and the teeth, the scaled
@@ -1801,6 +1842,30 @@ mod tests {
                 assert!(ratio >= 1.5, "isoparm {ratio:.2} on the viewport background {background:?}");
             }
         }
+    }
+
+    /// Each kind of line on a drawing sheet (#18989) reads on its paper in both bases and every
+    /// colour vision mode (WCAG: 3:1 for a line, 4.5:1 for text), as the sheet's ink does, and no
+    /// mode changes them: they are measured apart for every eye in `colour_vision_tests`.
+    #[test]
+    fn each_kind_of_sheet_line_reads_on_its_paper() {
+        for dark in [false, true] {
+            for mode in ColorVision::ALL {
+                let t = Tokens::themed(dark, mode);
+                let sheets = [("white", t.paper_white, t.paper_ink, t.paper_lines), ("dark", t.paper_dark, t.paper_dark_ink, t.paper_dark_lines)];
+                for (sheet, paper, ink, lines) in sheets {
+                    assert!(contrast_ratio(ink, paper) >= 4.5, "{sheet}: the ink");
+                    for kind in PaperLine::ALL {
+                        let colour = lines[kind.index()];
+                        let (ratio, least) = (contrast_ratio(colour, paper), if kind.is_text() { 4.5 } else { 3.0 });
+                        assert!(colour.a() == 255 && ratio >= least, "{sheet}, dark {dark}, {mode:?}: {kind:?} {ratio:.2} < {least}");
+                    }
+                }
+                let base = if dark { Tokens::dark() } else { Tokens::light() };
+                assert_eq!([t.paper_lines, t.paper_dark_lines], [base.paper_lines, base.paper_dark_lines], "{mode:?} leaves them as they are");
+            }
+        }
+        assert_eq!(PaperLine::ALL.map(PaperLine::index), [0, 1, 2, 3, 4]);
     }
 
     #[test]

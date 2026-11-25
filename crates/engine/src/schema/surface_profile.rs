@@ -24,7 +24,7 @@ use super::types::{
 pub struct SurfaceExtrudeParams {
     /// How far: the length one way; with `direction: symmetric`, the total (per side with
     /// `convention: legacy_per_side`); with `distance2`, the first side's length. Required
-    /// unless `to` is given.
+    /// unless `to` or `to_next` is given.
     #[serde(default)]
     pub distance: Option<LengthExpr>,
     /// The sketch, by id or name. Default: the active sketch, else the last one.
@@ -76,6 +76,11 @@ pub struct SurfaceExtrudeParams {
     /// How far past `to` to go: to a point or a flat face square to the extrusion only.
     #[serde(default)]
     pub to_offset: Option<LengthExpr>,
+    /// To Next: each wall runs on, one way as `direction` says, until it first meets a solid or
+    /// surface body (its faces as they are). Takes no `distance`, `distance2`, `to` or
+    /// `to_offset`.
+    #[serde(default)]
+    pub to_next: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }

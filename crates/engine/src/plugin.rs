@@ -4,8 +4,8 @@ use crate::{EngineError, Result, Session};
 pub use craft_plugin::ui;
 pub use craft_plugin::{
     API, DesignToken, Effect, Entry, EntryKind, FileGrant, HostError, HostLimits, Limits, LossItem, LossReport, LossSeverity, MAX_APPROVED_FUEL,
-    MAX_COMPONENT_BYTES, MAX_JSON_BYTES, MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RuntimeManifest, UiSlot, check_input, conditions, dialog,
-    directory_read_fields, images, shader, swatches, theme, valid_id,
+    MAX_COMPONENT_BYTES, MAX_JSON_BYTES, MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RibbonGroup, RuntimeManifest, UiSlot, check_input, conditions,
+    dialog, directory_read_fields, images, shader, swatches, theme, valid_icon_path, valid_id,
 };
 use craft_plugin::{CommandSchema, PluginHost};
 use serde_json::{Value, json};
@@ -501,6 +501,7 @@ fn update_dialog_with_schema(
             evaluation: None,
             forms: Vec::new(),
             form_source: None,
+            messages: Vec::new(),
             user_data: None,
         };
         let (_, result) = craft_plugin_wasm::dialog_fields(
@@ -616,6 +617,7 @@ fn run_package(
             evaluation: None,
             forms: Vec::new(),
             form_source: Some((package.manifest.id.clone(), rt.entries.clone())),
+            messages: Vec::new(),
             user_data: None,
         };
         let approved = host.granted_folders();
@@ -652,6 +654,7 @@ fn run_package(
             sketch_exits: host.sketch_exits,
             view: host.view,
             param_warnings: vec![],
+            messages: host.messages,
         })
     }
     #[cfg(not(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64"))))]
@@ -712,6 +715,7 @@ pub struct SolidCraftHost {
     evaluation: Option<Box<Session>>,
     forms: Vec<crate::schema::plugin::FormRequest>,
     form_source: Option<(String, Vec<Entry>)>,
+    messages: Vec<crate::schema::plugin::PluginMessage>,
     /// User settings staged for this call; never copied into a document or undo snapshot.
     user_data: Option<user_storage::Pending>,
 }
@@ -1058,9 +1062,14 @@ impl PluginHost for SolidCraftHost {
         grant_covers(&self.input_folders, path, false)
     }
     fn log(&mut self, message: &str) {
+        self.log_level(craft_plugin::LogLevel::Info, message);
+    }
+    fn log_level(&mut self, level: craft_plugin::LogLevel, message: &str) {
+        let clean: String = message.chars().filter(|c| !c.is_control()).collect();
         if let Some(s) = self.transaction.as_mut() {
-            s.echo(format!("plugin: {}", message.chars().filter(|c| !c.is_control()).collect::<String>()));
+            s.echo(format!("plugin: {clean}"));
         }
+        self.messages.push(crate::schema::plugin::PluginMessage { level, message: clean });
     }
     fn progress(&mut self, fraction: f32, message: &str) {
         solidcraft_doc::progress::item(Some((message, (fraction.clamp(0., 1.) * 100.) as usize, 100)));

@@ -3173,6 +3173,109 @@ fn trim_dialog_takes_curves_several_keep_points_and_another_surface() {
     assert_eq!(counts, [1, 0, 1, 1, 1]);
 }
 
+/// Extend's Extent Type takes To Object (#16537): the window adds the To Object input, which
+/// takes a face or a plane, and OK extends the edge up to it. Editing the feature again shows
+/// To Object with the pick, and Distance replaces it.
+#[test]
+fn extend_dialog_goes_up_to_a_picked_face_or_plane() {
+    // A flat sheet from x = 5 to x = 20 (y 0..10) on XY, and a box whose near face is at x = 30.
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"F"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[5,0],"p1":[20,10]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("surface.patch", json!({"sketch":"F","body_name":"Sheet"})).unwrap();
+    h.app.run("solid.box", json!({"corner":[30,-5,-5],"length":5,"width":20,"height":10,"body_name":"Block"})).unwrap();
+    h.frames(4);
+    let x_span = |h: &crate::scenario::Harness| {
+        let b = solidcraft_engine::kernel::measure(&h.app.session.world_state().unwrap().body("Sheet").unwrap().body).unwrap().bbox;
+        (b.min.x, b.max.x)
+    };
+    let to_object = |h: &crate::scenario::Harness| {
+        matches!(&h.app.dialog, Some(Dialog { kind: Kind::Surface(crate::dialogs_surface::Surf::Extend { to_object: true, .. }), .. }))
+    };
+    let up_to = |h: &crate::scenario::Harness| match h.app.session.doc.features.last().map(|f| &f.kind) {
+        Some(solidcraft_engine::doc::FeatureKind::SurfaceExtend { up_to, .. }) => up_to.clone(),
+        _ => panic!("the last feature is an extend"),
+    };
+    let open = |h: &mut crate::scenario::Harness, edge: Vec3| {
+        h.app.session.selection = vec![crate::dialogs::edge_sel(&h.app.session, edge).expect("the sheet's edge")];
+        h.app.start("surface.extend");
+        h.frames(2);
+    };
+    let choose = |h: &mut crate::scenario::Harness, extent: &str| {
+        h.step(&json!({"click": {"handle": "dialog:Extent Type"}})).unwrap();
+        h.step(&json!({"click": {"handle": format!("dialog:Extent Type:{extent}")}})).unwrap();
+        h.frames(2);
+    };
+
+    // The edge at x = 20 up to the box's face at x = 30.
+    open(&mut h, Vec3::new(20.0, 5.0, 0.0));
+    assert!(!to_object(&h), "a new Extend starts with Distance");
+    choose(&mut h, "To Object");
+    assert!(to_object(&h));
+    let face = crate::dialogs::face_sel_on(&h.app.session, Some("Block"), Vec3::new(30.0, 5.0, 0.0)).expect("the box's face");
+    assert!(crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).is_err(), "To Object needs a pick");
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        assert_eq!(d.active_input().unwrap().label, "To Object", "the To Object input takes the next pick");
+        let active = d.active;
+        d.inputs[active].items = vec![face];
+    }
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    assert!(matches!(up_to(&h), Some(solidcraft_engine::doc::ExtendTo::Face(t)) if t.body.as_ref() == "Block"));
+    let (lo, hi) = x_span(&h);
+    assert!((lo - 5.0).abs() < 1e-6 && (hi - 30.0).abs() < 1e-6, "the sheet runs from 5 to 30: {lo} to {hi}");
+
+    // Editing it shows To Object with the face; Distance (4 mm) replaces it: 20 + 4 = 24.
+    let name = h.app.session.doc.features.last().unwrap().name.clone();
+    h.step(&json!({"call":"ui.editFeature","params":{"feature": name}})).unwrap();
+    h.frames(4);
+    assert!(to_object(&h), "editing shows To Object");
+    let picked = h.app.dialog.as_ref().unwrap().inputs.iter().find(|i| i.label == "To Object").map(|i| i.items.len());
+    assert_eq!(picked, Some(1), "with the face picked");
+    // A target the window can't show as a pick is kept unseen; Distance drops it, so going back
+    // to To Object needs a new pick rather than bringing the old target back.
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.extra.insert("up_to".into(), json!({"body": "Block", "point": [30.0, 5.0, 0.0]}));
+        for i in d.inputs.iter_mut().filter(|i| i.label == "To Object") {
+            i.items.clear();
+        }
+    }
+    assert!(crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).is_ok(), "the kept target stands in for the pick");
+    choose(&mut h, "Distance");
+    choose(&mut h, "To Object");
+    assert!(crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).is_err(), "Distance dropped the kept target");
+    choose(&mut h, "Distance");
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        assert!(d.inputs.iter().all(|i| i.label != "To Object"), "Distance takes the To Object input away");
+        if let Kind::Surface(crate::dialogs_surface::Surf::Extend { distance, .. }) = &mut d.kind {
+            *distance = "4 mm".into();
+        }
+    }
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    assert_eq!(up_to(&h), None);
+    let (_, hi) = x_span(&h);
+    assert!((hi - 24.0).abs() < 1e-6, "the sheet ends at 24: {hi}");
+
+    // The edge at x = 5 up to the YZ plane (x = 0).
+    open(&mut h, Vec3::new(5.0, 5.0, 0.0));
+    choose(&mut h, "To Object");
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        let active = d.active;
+        d.inputs[active].items = vec![Sel::Plane { name: "YZ".into() }];
+    }
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    assert!(matches!(up_to(&h), Some(solidcraft_engine::doc::ExtendTo::Plane(_))));
+    let (lo, hi) = x_span(&h);
+    assert!(lo.abs() < 1e-6 && (hi - 24.0).abs() < 1e-6, "the sheet runs from 0 to 24: {lo} to {hi}");
+}
+
 /// A trim whose curves are projected along the surface's normal is made by a script (the
 /// dialog has no control for it). Edit Feature keeps the choice: the dialog sends
 /// `direction: "face_normal"` again, so OK does not turn the trim into a sweep along the
@@ -3551,6 +3654,61 @@ fn split_body_panel_sends_picked_faces_or_the_whole_surface_body() {
     assert!(matches!(d.kind, Kind::Split { sheet: 1 }));
     let refilled = d.inputs.iter().find(|inp| inp.label == SPLIT_TOOL_FACES).map(|inp| inp.items.clone()).unwrap_or_default();
     assert!(matches!(refilled.as_slice(), [Sel::Face { index, .. }] if *index == second_index), "{refilled:?}");
+    crate::dialogs::run_dialog(&mut app, &d).unwrap();
+    app.editing_state = None;
+    assert!(app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", app.session.model.results);
+    assert!(parts(volumes(&app)), "{:?}", volumes(&app));
+}
+
+/// #13303: with "Whole surface body", the Split Body panel takes more surface bodies, picked
+/// several at once. A 10 mm cube from (0, 0, 5), and flat surfaces at x = 3 (the tool), x = 8
+/// and y = 6, each 20 mm high across it. A face picked on the tool's own body is not sent again.
+/// The cube splits into slabs 3, 5 and 2 mm wide along x, each cut 6 and 4 mm along y, 10 mm
+/// high: 180, 120, 300, 200, 120 and 80 mm³.
+/// Editing the split shows the choice and the other bodies again, and running it keeps the parts.
+#[test]
+fn split_body_panel_sends_several_whole_surface_bodies() {
+    use crate::dialogs::{Kind, SPLIT_TOOL_BODIES};
+    let mut app = app_with(json!([
+        {"command": "solid.box", "params": {"corner": [0, 0, 5], "length": 10, "width": 10, "height": 10, "body_name": "Cube"}}
+    ]));
+    for (name, a, b) in [("AtX3", [3, -5], [3, 15]), ("AtX8", [8, -5], [8, 15]), ("AtY6", [-5, 6], [15, 6])] {
+        app.session.execute("sketch.create", &json!({"plane": "XY", "name": name})).unwrap();
+        let curves = app.session.execute("sketch.line", &json!({"points": [a, b]})).unwrap()["created"]["curves"].clone();
+        app.session.execute("sketch.finish", &json!({})).unwrap();
+        app.session.execute("surface.extrude", &json!({"sketch": name, "curves": curves, "distance": 20, "body_name": name})).unwrap();
+    }
+    let point = Vec3::new(3.0, 2.0, 10.0);
+    let tool = {
+        let st = app.session.model.state();
+        let index = solidcraft_engine::doc::appearance::face_index_at(st.body("AtX3").unwrap(), point).unwrap();
+        Sel::Face { body: "AtX3".into(), index, point }
+    };
+    let volumes = |app: &SolveApp| {
+        let state = app.session.model.state();
+        let mut v: Vec<f64> =
+            state.bodies.iter().filter(|b| b.name.starts_with("Cube")).map(|b| solidcraft_engine::kernel::measure(&b.body).unwrap().volume).collect();
+        v.sort_by(f64::total_cmp);
+        v
+    };
+    let want = [80.0, 120.0, 120.0, 180.0, 200.0, 300.0];
+    let parts = |v: Vec<f64>| v.len() == want.len() && v.iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-6);
+
+    let mut d = start(&mut app, vec![Sel::Body { name: "Cube".into() }, tool.clone()], "solid.split_body");
+    d.kind = Kind::Split { sheet: 2 };
+    let mut more = crate::selection::SelInput::new(SPLIT_TOOL_BODIES, crate::selection::BODIES, true);
+    more.items = vec![Sel::Body { name: "AtX8".into() }, tool, Sel::Body { name: "AtY6".into() }];
+    d.inputs.push(more);
+    let (command, p) = apply_commands(&app, &d).unwrap().remove(0);
+    assert_eq!((p["tool_sheet"].as_str(), &p["tool_bodies"]), (Some("body"), &json!(["AtX8", "AtY6"])), "{p}");
+    let split = app.session.execute(&command, &p).unwrap()["feature"].as_u64().unwrap();
+    assert!(parts(volumes(&app)), "{:?}", volumes(&app));
+
+    app.edit_feature(split);
+    let d = app.dialog.take().unwrap();
+    assert!(matches!(d.kind, Kind::Split { sheet: 2 }));
+    let refilled = d.inputs.iter().find(|inp| inp.label == SPLIT_TOOL_BODIES).map(|inp| inp.items.clone()).unwrap_or_default();
+    assert_eq!(refilled, vec![Sel::Body { name: "AtX8".into() }, Sel::Body { name: "AtY6".into() }]);
     crate::dialogs::run_dialog(&mut app, &d).unwrap();
     app.editing_state = None;
     assert!(app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", app.session.model.results);
@@ -4036,6 +4194,53 @@ fn plane_at_angle_previews_the_tilted_plane_when_edited() {
     }
     wait_feature_preview(&mut h);
     assert_ne!(h.app.preview.key, first, "a new angle redraws the preview");
+}
+
+/// Plane at Angle's preview carries a handle that turns the plane about its axis, and the angle
+/// box reads the angle the drag writes and stays for typing an exact value (#17290).
+#[test]
+fn plane_at_angle_drags_the_preview_handle() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.start("construct.plane.at_angle");
+    h.frames(2);
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        assert!(matches!(d.kind, Kind::AnglePlane { .. }), "{:?}", d.kind);
+        d.inputs[0].items = vec![Sel::Plane { name: "XY".into() }];
+        d.inputs[1].items = vec![Sel::Axis { name: "X".into() }];
+        if let Kind::AnglePlane { angle, .. } = &mut d.kind {
+            *angle = "0 deg".into();
+        }
+    }
+    h.frames(4);
+    // The handle stands on the preview square's edge, ten millimetres from the plane's origin
+    // along the edge the X axis does not run through. Dragging it to (0, 0, 10) turns the
+    // plane through ninety degrees about the X axis.
+    h.step(&json!({"drag":[{"handle":"angle_plane"},{"world":[0,0,10]}]})).unwrap();
+    let Some(d) = h.app.dialog.as_ref() else { panic!("the dialog stays open") };
+    let Kind::AnglePlane { angle, .. } = &d.kind else { panic!("{:?}", d.kind) };
+    assert_eq!(angle, "90 deg", "the drag wrote the angle");
+    // The drag ends with the pointer released over the view, which the dialog reads as a pick:
+    // the plane and the axis the command needs go back in, as a user would put them.
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.inputs[0].items = vec![Sel::Plane { name: "XY".into() }];
+        d.inputs[1].items = vec![Sel::Axis { name: "X".into() }];
+    }
+    // The command the dialog sends takes that angle, and the plane turns with it.
+    let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands[0].1["angle"], "90 deg", "the command takes the dragged angle");
+    let (cmd, params) = commands.into_iter().next().unwrap();
+    h.app.dialog = None;
+    let id = h.app.run(&cmd, params).unwrap()["feature"].as_u64().unwrap();
+    let plane = solidcraft_engine::view::construction_planes(&h.app.session)
+        .into_iter()
+        .find(|(fid, _, _)| *fid == id)
+        .map(|(_, _, pl)| pl)
+        .expect("the plane");
+    let normal = plane.normal();
+    assert!(normal.x.abs() < 1e-6 && (normal.y + 1.0).abs() < 1e-6 && normal.z.abs() < 1e-6, "the plane stands turned: {plane:?}");
 }
 
 /// #2474, #2494: every construct tool asks for what it needs. Started from the toolbar with

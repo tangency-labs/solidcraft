@@ -129,7 +129,7 @@ fn equation_curve_window_draws_and_reopens_on_its_formulas() {
     h.settle();
     let Some(Kind::SketchModify(Mod::Equation { form, y, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("no equation window") };
     *form = 1;
-    *y = "10 + 2 * sin(x / 4)".into();
+    *y = "sin(90)".into();
     h.settle();
     h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
     h.settle();
@@ -137,7 +137,7 @@ fn equation_curve_window_draws_and_reopens_on_its_formulas() {
     let sid = h.app.session.active_sketch.unwrap();
     let sk = h.app.session.doc.sketch(sid).unwrap().clone();
     let eq = sk.equations.first().cloned().expect("an equation curve");
-    assert_eq!((eq.x.as_deref(), eq.y.as_str(), eq.end.as_str()), (None, "10 + 2 * sin(x / 4)", "2 * pi"));
+    assert_eq!((eq.x.as_deref(), eq.y.as_str(), eq.end.as_str()), (None, "sin(90)", "360"));
     h.app.session.selection = vec![Sel::SketchCurve { id: eq.curve.clone(), sketch: None }];
     assert!(crate::sketch_modify_ui::selected_equation(&h.app).is_some());
     assert!(crate::sketch_modify_ui::edit_equation(&mut h.app, &eq.curve));
@@ -145,7 +145,7 @@ fn equation_curve_window_draws_and_reopens_on_its_formulas() {
     let Some(Kind::SketchModify(Mod::Equation { form, y, end, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) else {
         panic!("no equation window")
     };
-    assert_eq!((*form, y.as_str()), (1, "10 + 2 * sin(x / 4)"));
+    assert_eq!((*form, y.as_str()), (1, "sin(90)"));
     *end = "20".into();
     let curves = sk.curves.len();
     h.settle();

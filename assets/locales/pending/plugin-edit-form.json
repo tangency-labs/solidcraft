@@ -22,5 +22,8 @@
   },
   "zh": {
     "ui.plugin_edit_unset": "取消设置"
+  },
+  "fr": {
+    "ui.plugin_edit_unset": "Effacer la valeur"
   }
 }
