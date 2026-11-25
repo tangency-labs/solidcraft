@@ -200,6 +200,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("joint.list", "List Joints", crate::checked!("joint.list", list))
         .icon("list")
         .noundo()
+        .read_only()
         .contract(&LIST_CONTRACT)
         .output(output_schema_for::<ListJointsResult>)
         .params(
@@ -347,12 +348,19 @@ fn set_recoupled(doc: &mut Document, changed: Recoupled) {
 /// Re-solve the joints, keeping the `held` values (the ones being driven, mapped to the values
 /// they move from) where loops are closed.
 pub fn resolve_holding(s: &mut Session, held: &joints::Held) -> joints::Solution {
-    resolve_with_analysis(s, held, joints::Analysis::DegreesOfFreedom)
+    resolve_with_analysis(s, held, joints::Analysis::DegreesOfFreedom, true)
 }
 
 /// Contact and loop-search trials need placements and conflicts, not a DOF report.
 pub(super) fn place_holding(s: &mut Session, held: &joints::Held) -> joints::Solution {
-    resolve_with_analysis(s, held, joints::Analysis::Placement)
+    resolve_with_analysis(s, held, joints::Analysis::Placement, false)
+}
+
+/// Re-solve after an uncaptured reach or revert without shifting captured occurrence baselines.
+fn resolve_uncaptured(s: &mut Session, analysis: joints::Analysis) -> joints::Solution {
+    reexpress(s);
+    recouple(s);
+    resolve_with_analysis(s, &BTreeMap::new(), analysis, false)
 }
 
 fn solution(s: &Session, held: &joints::Held, analysis: joints::Analysis) -> joints::Solution {
@@ -363,22 +371,28 @@ fn solution(s: &Session, held: &joints::Held, analysis: joints::Analysis) -> joi
 
 /// Applies the solve. A part it moves loses its move not captured, which would hide where the
 /// joints put it; an exploded view's placement stays shown.
-fn resolve_with_analysis(s: &mut Session, held: &joints::Held, analysis: joints::Analysis) -> joints::Solution {
+fn resolve_with_analysis(s: &mut Session, held: &joints::Held, analysis: joints::Analysis, adjust_base: bool) -> joints::Solution {
     let sol = solution(s, held, analysis);
     if !sol.world.is_empty() {
         let mut next = (*s.doc).clone();
         if next.apply_joint_solution(&sol) {
-            let moved: BTreeSet<u64> = next
-                .occurrences
-                .iter()
-                .zip(&s.doc.occurrences)
-                .filter(|(n, o)| n.id != o.id || n.transform != o.transform)
-                .map(|(n, _)| n.id)
-                .collect();
+            let mut moved = BTreeSet::new();
+            for (n, o) in next.occurrences.iter_mut().zip(&s.doc.occurrences) {
+                if n.id == o.id && n.transform != o.transform {
+                    if adjust_base {
+                        let next_transform = n.transform;
+                        n.adjust_base_for_direct_move(&o.transform, &next_transform);
+                    }
+                    moved.insert(n.id);
+                } else if n.id != o.id {
+                    moved.insert(n.id);
+                }
+            }
             *s.doc_mut() = next;
             s.revision += 1;
             let exploded = &s.exploded;
             s.pending_moves.retain(|id, m| !moved.contains(id) || exploded.get(id) == Some(m));
+            s.pending_move_records.retain(|r| !moved.contains(&r.occurrence));
         }
     }
     sol
@@ -1268,19 +1282,41 @@ fn x_param(s: &Session, v: &Value, component: u64, inv: &solidcraft_doc::Mat, cm
     }
 }
 
-/// The round end of a cylindrical face of the occurrence's bodies centred at `pick`: a point on
-/// its axis there, pointing out of that end (as picking its circular edge gives).
+/// The round end of a cylindrical or conical face of the occurrence's bodies centred at `pick`: a
+/// point on its axis there, pointing out of that end (as picking its circular edge gives).
 fn circle_centre(s: &Session, occurrence: u64, pick: Vec3) -> Option<Snap> {
     let component = if occurrence == 0 { 0 } else { s.doc.occurrences.iter().find(|o| o.id == occurrence)?.component };
     let st = s.model.state();
-    let c = st
-        .bodies
-        .iter()
-        .filter(|b| s.doc.model_body_component(b) == component)
-        .find_map(|b| solidcraft_doc::kernel::cylinder_end_at(&b.body, pick))?;
-    let along = (pick - c.axis_point).dot(c.axis);
-    let (at, dir) = if (along - c.start).abs() <= (c.end - along).abs() { (c.start, -1.0) } else { (c.end, 1.0) };
-    Some(Snap::Point { point: c.axis_point + c.axis * at, z: Some(c.axis * dir), x: None })
+    if let Some(c) =
+        st.bodies.iter().filter(|b| s.doc.model_body_component(b) == component).find_map(|b| solidcraft_doc::kernel::cylinder_end_at(&b.body, pick))
+    {
+        let along = (pick - c.axis_point).dot(c.axis);
+        let (at, dir) = if (along - c.start).abs() <= (c.end - along).abs() { (c.start, -1.0) } else { (c.end, 1.0) };
+        return Some(Snap::Point { point: c.axis_point + c.axis * at, z: Some(c.axis * dir), x: None });
+    }
+    let mut best: Option<(f64, Vec3, Vec3)> = None;
+    for b in st.bodies.iter().filter(|b| s.doc.model_body_component(b) == component && !b.body.is_mesh()) {
+        let size = b.body.size();
+        let tol = (size * 1e-3).max(1e-3);
+        let rim_tol = (size * 1e-6).max(1e-6);
+        for f in 0..b.body.face_count() {
+            let Some((c, half_angle)) = solidcraft_doc::kernel::cone_face(&b.body, f) else { continue };
+            let tan_h = half_angle.tan();
+            let v = pick - c.axis_point;
+            let along = v.dot(c.axis);
+            let radial = (v - c.axis * along).len();
+            for (at, dir) in [(c.start, -1.0), (c.end, 1.0)] {
+                if at * tan_h <= rim_tol || (dir < 0.0 && (c.end - c.start).abs() <= rim_tol) {
+                    continue;
+                }
+                let off = radial + (along - at).abs();
+                if off <= tol && best.is_none_or(|(bo, ..)| off < bo) {
+                    best = Some((off, c.axis_point + c.axis * at, c.axis * dir));
+                }
+            }
+        }
+    }
+    best.map(|(_, point, z)| Snap::Point { point, z: Some(z), x: None })
 }
 
 pub(crate) fn joint_id(s: &Session, v: Option<&Value>, cmd: &str) -> Result<u64> {
@@ -1806,6 +1842,8 @@ fn new_joint(s: &mut Session, p: &Value, kind: JointKind, a: JointOrigin, b: Joi
         },
         offset_xy,
         captured: None,
+        base_values: None,
+        base_exprs: Vec::new(),
         constraint: None,
         dynamics: Vec::new(),
     };
@@ -1865,6 +1903,8 @@ fn as_built(s: &mut Session, p: &Value) -> Result<Value> {
         exprs: JointExprs { limits: limit_exprs(p), ..Default::default() },
         offset_xy: [0.0; 2],
         captured: None,
+        base_values: None,
+        base_exprs: Vec::new(),
         constraint: None,
         dynamics: Vec::new(),
     };
@@ -1944,6 +1984,17 @@ fn drive(s: &mut Session, p: &Value) -> Result<Value> {
     // (#9742). A joint in a motion link still carries its value to the joints it drives.
     let hold = joint.suppressed && !active.assembly.links.iter().any(|l| l.a == id || l.b == id);
     drop(active);
+    let before_vals: Vec<(u64, Vec<f64>, Vec<Option<String>>)> = if hold {
+        Vec::new()
+    } else {
+        s.doc
+            .assembly
+            .joints
+            .iter()
+            .filter(|j| j.kind != JointKind::Rigid && (j.captured.is_none() || j.base_values.is_none()))
+            .map(|j| (j.id, j.values.clone(), crate::normalize_joint_exprs(&j.exprs.values, j.kind.dofs().len())))
+            .collect()
+    };
     let before = super::motion::positions(s);
     let r = if hold {
         json!({"stopped_by_contact": null, "stopped_by_loop": null})
@@ -1965,6 +2016,19 @@ fn drive(s: &mut Session, p: &Value) -> Result<Value> {
             super::motion::drive_joint(s, id, q, given, stop_at_budget)?
         }
     };
+    if !hold {
+        let mut pending = std::mem::take(&mut s.pending_joint_bases);
+        for (jid, old_vals, old_exprs) in before_vals {
+            if let Some(j) = s.doc.assembly.joints.iter().find(|j| j.id == jid) {
+                let dofs = j.kind.dofs().len();
+                let cur_exprs = crate::normalize_joint_exprs(&j.exprs.values, dofs);
+                if j.values != old_vals || cur_exprs != old_exprs {
+                    pending.entry(jid).or_insert((old_vals, old_exprs));
+                }
+            }
+        }
+        s.pending_joint_bases = pending;
+    }
     let sol = solution(s, &BTreeMap::new(), response_analysis(p));
     // How motion stopped, as `motion::drive_with_contact` says: an object, or null.
     let stop = |key: &str| r.get(key).filter(|v| v.is_object()).cloned();
@@ -2096,6 +2160,14 @@ fn reach(s: &mut Session, p: &Value) -> Result<Value> {
         Some(Value::Array(a)) if a.len() <= MAX_REACH_JOINTS => a.iter().map(|v| start_values(s, v, cmd)).collect::<Result<Vec<_>>>()?,
         Some(_) => return Err(bad(cmd, format!("`from` must be a list of {{joint, values}}, at most {MAX_REACH_JOINTS}"))),
     };
+    let before_vals: Vec<(u64, Vec<f64>, Vec<Option<String>>)> = s
+        .doc
+        .assembly
+        .joints
+        .iter()
+        .filter(|j| j.kind != JointKind::Rigid && (j.captured.is_none() || j.base_values.is_none()))
+        .map(|j| (j.id, j.values.clone(), crate::normalize_joint_exprs(&j.exprs.values, j.kind.dofs().len())))
+        .collect();
     let before = super::motion::positions(s);
     // Only the joints that start elsewhere than the design has them: a `from` that names where
     // they are already changes nothing (and so adds no undo step).
@@ -2150,9 +2222,20 @@ fn reach(s: &mut Session, p: &Value) -> Result<Value> {
         Err(_) => joints::Reached::default(),
     };
     // Loops closed again from there, and where it ended up.
-    let sol = if response_analysis(p) == joints::Analysis::Placement { place(s) } else { resolve(s) };
+    let sol = resolve_uncaptured(s, response_analysis(p));
     // That solve placed every occurrence for this model: the refresh after the command keeps it.
     s.joints_placed();
+    let mut pending = std::mem::take(&mut s.pending_joint_bases);
+    for (jid, old_vals, old_exprs) in before_vals {
+        if let Some(j) = s.doc.assembly.joints.iter().find(|j| j.id == jid) {
+            let dofs = j.kind.dofs().len();
+            let cur_exprs = crate::normalize_joint_exprs(&j.exprs.values, dofs);
+            if j.values != old_vals || cur_exprs != old_exprs {
+                pending.entry(jid).or_insert((old_vals, old_exprs));
+            }
+        }
+    }
+    s.pending_joint_bases = pending;
     let t = joints::occurrence_world(&s.doc, occ);
     let got = solidcraft_doc::apply_point(&t, at);
     let mut there = got.dist(to) <= joints::REACH_TOL;
@@ -2865,6 +2948,21 @@ pub(super) fn edit_joint(s: &mut Session, p: &Value, plain: bool) -> Result<Valu
                 j.exprs.set_limit(i, [None, None]);
             }
         }
+        if k == JointKind::Rigid {
+            j.base_values = None;
+            j.base_exprs.clear();
+        } else {
+            if let Some(base) = &mut j.base_values {
+                base.resize(k.dofs().len(), 0.0);
+            }
+            j.base_exprs.truncate(k.dofs().len());
+            for (i, slot) in j.base_exprs.iter_mut().enumerate() {
+                if was.is_angle(i) != k.is_angle(i) {
+                    *slot = None;
+                }
+            }
+            j.base_exprs = crate::normalize_joint_exprs(&j.base_exprs, k.dofs().len());
+        }
     }
     if let Some(x) = offset_x {
         j.offset_xy[0] = x;
@@ -2945,6 +3043,9 @@ pub(super) fn edit_joint(s: &mut Session, p: &Value, plain: bool) -> Result<Valu
     let reseat = !alignment_only
         && !tilt_only
         && (kind.is_some() || offset.is_some() || offset_x.is_some() || offset_y.is_some() || angle.is_some() || p.get("flip").is_some() || sides);
+    if reseat || kind.is_some() {
+        s.pending_joint_bases.remove(&id);
+    }
     if reseat {
         let edited = s.doc.assembly.joints.iter().find(|j| j.id == id).filter(|j| j.starts_where_it_is()).cloned();
         if let Some(q) = edited.and_then(|j| joints::relation_values(&s.doc, &s.model.state(), &j))
@@ -3199,25 +3300,43 @@ pub(in crate::cmd) fn capture_values(s: &mut Session) -> usize {
     n
 }
 
-/// Revert Position: every joint with a captured position goes back to it, clamped to its limits.
-/// A joint with none (a design from before captured joint values) keeps its values. The values
-/// put back drop their expressions, as `joint.drive` does. Returns how many joints went back.
+/// Revert Position: every joint with a captured position (or pre-capture driven baseline in
+/// `pending_joint_bases`) goes back to it, clamped to its limits. Returns how many joints went back.
 pub(in crate::cmd) fn revert_values(s: &mut Session) -> usize {
-    if !s.doc.assembly.joints.iter().any(|j| j.captured.is_some() && j.kind != JointKind::Rigid) {
+    let mut pending = std::mem::take(&mut s.pending_joint_bases);
+    let has_captured = s.doc.assembly.joints.iter().any(|j| j.captured.is_some() && j.kind != JointKind::Rigid);
+    if !has_captured && pending.is_empty() {
         return 0;
     }
+    let resolved_exprs: BTreeMap<u64, Vec<Option<String>>> = if s.doc.has_capture_position_timeline() {
+        s.model.resolved_joints().iter().map(|(&id, cj)| (id, cj.exprs.clone())).collect()
+    } else {
+        BTreeMap::new()
+    };
     let mut n = 0;
     for j in s.doc_mut().assembly.joints.iter_mut().filter(|j| j.kind != JointKind::Rigid) {
-        let Some(mut q) = j.captured.clone() else { continue };
-        q.resize(j.kind.dofs().len(), 0.0);
-        joints::clamp(j, &mut q);
-        j.values = q;
-        for i in 0..j.kind.dofs().len() {
-            j.exprs.set_value(i, None);
+        let dofs = j.kind.dofs().len();
+        if let Some(mut q) = j.captured.clone() {
+            pending.remove(&j.id);
+            q.resize(dofs, 0.0);
+            joints::clamp(j, &mut q);
+            j.values = q;
+            let exprs = resolved_exprs.get(&j.id);
+            for i in 0..dofs {
+                j.exprs.set_value(i, exprs.and_then(|e| e.get(i)).and_then(|e| e.clone()));
+            }
+            n += 1;
+        } else if let Some((mut q, base_exprs)) = pending.remove(&j.id) {
+            q.resize(dofs, 0.0);
+            joints::clamp(j, &mut q);
+            j.values = q;
+            for i in 0..dofs {
+                j.exprs.set_value(i, base_exprs.get(i).and_then(|e| e.clone()));
+            }
+            n += 1;
         }
-        n += 1;
     }
-    resolve(s);
+    resolve_uncaptured(s, joints::Analysis::DegreesOfFreedom);
     n
 }
 

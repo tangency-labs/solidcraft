@@ -213,6 +213,14 @@ chosen instances. A new Emboss without an explicit face infers a unique eligible
 select the face when the target is ambiguous. Older saved features without a face retain their
 planar placement.
 
+**Offset X**, **Offset Y** and **Angle** in the Emboss dialog place the profiles on the face
+without editing the sketch. The offsets move them along the sketch's own x and y; the angle turns
+them counter-clockwise in the sketch, about the middle of the box round the picked profiles, and
+the offsets are not turned with them. On a cylinder wall an offset along the direction the sketch
+runs round the wall slides the profiles round it by that arc length, and one along the axis slides
+them along it. Each takes an expression, so a parameter can drive it; an empty field leaves the
+profiles where the sketch has them. The profiles must still lie wholly on the face once placed.
+
 A **Hole** with **Single** placement can also sit at distances from up to two straight edges of
 its face. After picking the face, click **Reference 1** and pick an edge, then pick a second one
 into **Reference 2**. Each edge gets a **Distance** row, measured from where you picked; the
@@ -367,6 +375,13 @@ Scripts use `inspect.section`: a `plane` replaces the section, `add: true` adds 
 plane ids, `folder: false` and `folder: true` hide and show the Analysis folder, and `clear: true`
 removes them all. `offset` moves the cut against the plane's normal,
 so a positive offset cuts more away; `at` is a world coordinate on a named plane's axis.
+
+A design can keep several named sections and switch between them. In the Section Analysis
+dialog, **Saved sections** lists them: click one to show it in place of the section on show,
+type a name and press **Save as…** to keep the section on show, **Rename** or **×** to rename or
+delete one. They are saved with the design. Scripts use `inspect.section.save` (`name`),
+`inspect.section.show` and `inspect.section.delete` (each by `section`),
+`inspect.section.rename` (`section` and the new `name`) and `inspect.section.list`.
 
 ## Comparing two bodies
 

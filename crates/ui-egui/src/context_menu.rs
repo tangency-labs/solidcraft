@@ -854,6 +854,7 @@ fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let find = if rule.many { json!({"feature": id, "features": targets}) } else { json!({"feature": id}) };
     let one = |item: Item| rule.one(item);
     let profile = act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({"sketch": sketch.map(|s| s.0)})).on(sketch.is_some());
+    let profile = crate::timeline::naming_profile_sketch(app, profile, sketch.map(|s| s.0));
     let dimensions = act("ui.editDimensions", "Edit Dimensions", "dimension").with(json!({"sketch": sketch.map(|s| s.0)})).on(sketch.is_some());
     let mut items = vec![
         one(act("ui.editFeature", "Edit Feature", "edit").with(json!({"feature":id})).on(exists)),
@@ -1038,7 +1039,8 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
             v.push(cmd(app, "occurrence.move", "Move"));
         }
         v.push(act("ui.editFeature", "Edit Feature", "edit").with(json!({ "feature": feature })).on(feature.is_some()));
-        v.push(act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({ "sketch": sketch })).on(sketch.is_some()));
+        let profile = act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({ "sketch": sketch })).on(sketch.is_some());
+        v.push(crate::timeline::naming_profile_sketch(app, profile, sketch));
         v.push(act("ui.editDimensions", "Edit Dimensions", "dimension").with(json!({ "sketch": sketch })).on(sketch.is_some()));
         v.push(act("ui.lookAt", "Look At", "lookat").on(sel.iter().any(|s| planar(&s))));
         let marked = matches!(sel, [Sel::Face { body, index, .. }] if crate::print_face_ui::is_print_face(app, body, *index));
@@ -1580,7 +1582,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     if !edits {
         v.push(activate.clone());
     }
-    if id != 0 && doc.links.get(&id).is_some_and(|link| link.step_names.is_none()) {
+    if id != 0 && doc.links.get(&id).is_some_and(|link| link.is_design()) {
         v.push(act("ui.editInPlace", "Edit in Place", "edit").with(json!({ "component": id })));
         v.push(act("ui.openLinkedDesign", "Open Linked Design", "open").with(json!({ "component": id })));
     }
@@ -1592,7 +1594,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
         let oid = occ.map(|o| o.id).unwrap_or(0);
         let movable = !grounded && occ.is_some() && app.session.held_by_rigid_group(oid).is_none();
         v.push(act("ui.moveOccurrence", "Move/Copy", "move").key("M").with(json!({ "occurrence": oid })).on(movable));
-        let moved = !app.session.pending_moves.is_empty();
+        let moved = app.session.moved_uncaptured();
         let joints = &app.session.doc.assembly.joints;
         let mut placement = vec![
             cmd(app, "occurrence.ground", if grounded { "Unground" } else { "Ground" }).with(json!({ "occurrence": oid, "grounded": !grounded })),
@@ -1600,8 +1602,9 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
             // Capture Position also saves the joints' values, and Revert Position puts them back.
             cmd(app, "component.capture_position", "Capture Position")
                 .on(moved || joints.iter().any(|j| j.kind != solidcraft_engine::doc::joints::JointKind::Rigid)),
-            cmd(app, "component.revert_position", "Revert Position")
-                .on(moved || joints.iter().any(|j| j.captured.is_some() && j.kind != solidcraft_engine::doc::joints::JointKind::Rigid)),
+            cmd(app, "component.revert_position", "Revert Position").on(moved
+                || app.session.uncaptured_joint_count() > 0
+                || joints.iter().any(|j| j.captured.is_some() && j.kind != solidcraft_engine::doc::joints::JointKind::Rigid)),
         ];
         // An imported assembly moves as one until its rigid group is released.
         if app.session.contents_held(id) {
@@ -1614,7 +1617,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     if id == 0 {
         own.push(cmd(app, "component.from_bodies", "Create Components from Bodies").with(json!({ "bodies": names })).on(!bodies.is_empty()));
     }
-    if doc.links.get(&id).is_some_and(|link| link.step_names.is_none()) {
+    if doc.links.get(&id).is_some_and(|link| link.is_design()) {
         own.push(act("ui.relinkSource", "Relink Source (All Instances)…", "update").with(json!({"component": id})));
         own.push(cmd(app, "component.break_link", "Break Link").with(json!({ "component": id })));
         own.push(act("ui.relinkSourceNames", "Relink Source and Use Its Names…", "update").with(json!({"component": id})));
@@ -1944,6 +1947,11 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
         .collect();
     if !lines.is_empty() {
         v.push(cmd(app, "sketch.infinite", "Infinite Line").with(json!({ "curves": lines })));
+    }
+    // #20317: lines joined end to end on one straight line become one. The whole selection goes,
+    // so an arc in it is refused rather than left out.
+    if lines.len() >= 2 {
+        v.push(cmd(app, "sketch.merge_lines", "Merge Lines").with(json!({ "curves": curves })));
     }
     // Projected geometry: the whole projection, or just the selected members (Delete).
     let links = selected_links(&ss.sketch, &ents);

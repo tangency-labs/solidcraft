@@ -826,6 +826,13 @@ pub struct Joint {
     /// files from before captured joint values: such a joint keeps its values on Revert Position.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub captured: Option<Vec<f64>>,
+    /// Baseline DOF values before timeline `CapturePosition` features are applied.
+    /// `None` in legacy designs and for joints never captured or overridden by `CapturePosition`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_values: Option<Vec<f64>>,
+    /// Baseline DOF expressions before timeline `CapturePosition` features are applied.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub base_exprs: Vec<Option<String>>,
     /// The assembly constraint it was made as; `None` for a joint made as a joint.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub constraint: Option<Constraint>,
@@ -1290,6 +1297,13 @@ impl Assembly {
                     }
                 }
             }
+            for (i, e) in j.base_exprs.iter().enumerate() {
+                if let Some(e) = e
+                    && x.value(i) != Some(e.as_str())
+                {
+                    out.push((j.id, format!("{} (before capture)", j.kind.dofs().get(i).copied().unwrap_or("value")), e.as_str()));
+                }
+            }
         }
         for l in &self.links {
             for s in l.coupling.as_ref().map(Coupling::sizes).unwrap_or_default() {
@@ -1321,6 +1335,7 @@ impl Assembly {
             out.extend(x.angle.as_mut());
             out.extend(x.values.iter_mut().flatten());
             out.extend(x.limits.iter_mut().flatten().flatten());
+            out.extend(j.base_exprs.iter_mut().flatten());
         }
         for l in &mut self.links {
             for s in l.coupling.as_mut().map(Coupling::sizes_mut).unwrap_or_default() {
@@ -1741,11 +1756,16 @@ fn round_of(doc: &Document, st: &ModelState, o: &JointOrigin) -> Result<face::Ro
                 ((v - c.axis * v.dot(c.axis)).len() - c.radius).abs()
             };
             off(a).total_cmp(&off(b))
-        })
-        .ok_or_else(|| DocError::Invalid("joint origin: no cylindrical face there".into()))?;
-    let s = (pick - cyl.axis_point).dot(cyl.axis);
-    let (at, dir) = if (s - cyl.start).abs() <= (cyl.end - s).abs() { (cyl.start, -1.0) } else { (cyl.end, 1.0) };
-    Ok(face::Round { cylinder: cyl, centre: cyl.axis_point + cyl.axis * at, z: cyl.axis * dir })
+        });
+    if let Some(cyl) = cyl {
+        let s = (pick - cyl.axis_point).dot(cyl.axis);
+        let (at, dir) = if (s - cyl.start).abs() <= (cyl.end - s).abs() { (cyl.start, -1.0) } else { (cyl.end, 1.0) };
+        return Ok(face::Round { cylinder: cyl, centre: cyl.axis_point + cyl.axis * at, z: cyl.axis * dir });
+    }
+    if let Some(r) = face::cone_round_at(doc, st, comp, pick) {
+        return Ok(r);
+    }
+    Err(DocError::Invalid("joint origin: no cylindrical face there".into()))
 }
 
 /// The cylindrical face of a circle-centre snap (component coordinates).
@@ -3644,6 +3664,8 @@ mod tests {
                 exprs: Default::default(),
                 offset_xy: [0.0; 2],
                 captured: None,
+                base_values: None,
+                base_exprs: Vec::new(),
                 constraint: None,
                 dynamics: Vec::new(),
             })
@@ -3771,6 +3793,7 @@ mod tests {
             parent,
             name: format!("O{id}"),
             transform: IDENTITY,
+            base_transform: None,
             grounded: false,
             bom_type: None,
             expressed_moves: Vec::new(),
@@ -3808,6 +3831,7 @@ mod tests {
             parent,
             name: format!("O{id}"),
             transform: IDENTITY,
+            base_transform: None,
             grounded: false,
             expressed_moves: Vec::new(),
             bom_type: None,
