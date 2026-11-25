@@ -496,6 +496,24 @@ impl Transform {
         Some([x, y])
     }
 
+    /// Not upstream: the axes `x` and `y` of a frame whose normal runs along `d`: `y` is `v` with
+    /// its part along `d` taken out, made unit, and `x = y × d`, an exact cross product of the two
+    /// unit axes (no turn, so no `cos(π/2)` left in it); `x × y` then runs along `d`. `None` when a
+    /// coordinate is not finite, `d` has no length, or no part of `v` is left square to `d` past
+    /// the rounding of taking its part along `d` out (64 ulps of `v`'s length).
+    #[must_use]
+    pub fn frame_axes(d: Vec3, v: Vec3) -> Option<[Vec3; 2]> {
+        if !(finite3(d) && finite3(v)) {
+            return None;
+        }
+        let (_, d) = d.length_and_unit()?;
+        let (square, y) = (v - d * v.dot(d)).length_and_unit()?;
+        if square <= 64.0 * f64::EPSILON * v.length() {
+            return None;
+        }
+        Some([y.cross(d), y])
+    }
+
     /// Carry a plane's axes by a rigid motion, preserving its UV scales and orthogonality.
     /// Source axes square to the same dot-product rounding as the plane constructor are
     /// reconstructed as an orthogonal pair after the move. Genuinely skew axes keep their

@@ -71,6 +71,19 @@ pub fn orthonormal_axes(x: [f64; 3], y: [f64; 3]) -> Result<[[f64; 3]; 2]> {
     Ok([[x.x, x.y, x.z], [y.x, y.y, y.z]])
 }
 
+/// The axes `x` and `y` of a frame whose normal runs along `d`, through the kernel's
+/// [`Transform::frame_axes`]: `y` is `v` with its part along `d` taken out, made unit, and
+/// `x = y × d`, an exact cross product of two unit axes (no turn, so no `cos(π/2)` left in it);
+/// `x × y` then runs along `d`.
+///
+/// # Errors
+/// [`Error::Argument`] for a number not finite, a `d` of no length, or a `v` along `d`: no part of
+/// it is left square to `d` past the rounding of taking its part along `d` out.
+pub fn frame_axes(d: [f64; 3], v: [f64; 3]) -> Result<[[f64; 3]; 2]> {
+    let [x, y] = Transform::frame_axes(vec3(d), vec3(v)).ok_or(Error::Argument)?;
+    Ok([[x.x, x.y, x.z], [y.x, y.y, y.z]])
+}
+
 /// A plane's axes `x` and `y` with the coordinates smaller than `noise` dropped, each unit
 /// again, through [`Transform::axis_squared_frame`]: a flat face's plane, tilted only by
 /// rounding, made exactly square to the world axes it lies along. `None` when the kernel finds
@@ -308,6 +321,22 @@ pub fn same_sense(direction: [f64; 3], like: [f64; 3]) -> Option<[f64; 3]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A frame's axes along a direction: `y` keeps the part of `v` square to `d`, `x = y × d`;
+    /// a `v` along `d` or a `d` of no length is refused.
+    #[test]
+    fn frame_axes_take_v_square_to_d_and_cross_them() {
+        assert_eq!(
+            frame_axes([0.0, 0.0, 2.0], [0.0, 3.0, 5.0]).unwrap(),
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+        );
+        assert_eq!(
+            frame_axes([0.0, 0.0, -1.0], [0.0, 1.0, 0.0]).unwrap(),
+            [[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+        );
+        assert!(frame_axes([0.0, 0.0, 1.0], [0.0, 0.0, 3.0]).is_err());
+        assert!(frame_axes([0.0, 0.0, 0.0], [0.0, 1.0, 0.0]).is_err());
+    }
 
     /// A face's plane tilted by rounding comes back square to the axes; one tilted for real
     /// keeps its axes; parallel axes give `None`.

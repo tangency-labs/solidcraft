@@ -926,6 +926,119 @@ pub fn face_straying(k: &Kernel, b: &Brep, f: FaceId, d: Vec3) -> Option<f64> {
     Some(wall_error(surface, d, size, &mut 262_144_usize, false)? + definition)
 }
 
+/// What a face gives towards the direction a set of faces runs straight along
+/// ([`straight_candidates`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum FaceRun {
+    /// A plane label, by its unit normal (either sense).
+    Plane(Vec3),
+    /// A cylinder label, by its unit axis (either sense).
+    Axis(Vec3),
+    /// Another surface, or none: it may still run straight along a direction
+    /// ([`face_straying`]), but gives none.
+    Other,
+}
+
+/// [`FaceRun`] of face `f` of `b`, from its surface's label.
+#[must_use]
+pub fn face_run(b: &Brep, f: FaceId) -> FaceRun {
+    let Some(surface) = b.face(f).ok().and_then(|face| face.surface.as_ref()) else {
+        return FaceRun::Other;
+    };
+    if let Some((_, n)) = plane_of(surface) {
+        return FaceRun::Plane(n);
+    }
+    if let Some((_, a, _)) = cylinder_of(surface) {
+        return FaceRun::Axis(a);
+    }
+    FaceRun::Other
+}
+
+/// Where a candidate of [`straight_candidates`] comes from: indices into its `runs`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StraightBy {
+    /// The cross product of two plane normals.
+    Planes(usize, usize),
+    /// A cylinder's axis.
+    Axis(usize),
+}
+
+/// The longest cross product of two unit plane normals that is still taken for parallel: the
+/// normals `plane_of` gives are unit within 1e-12, so each is off its exact direction by at most
+/// 1e-12 plus its rounding, and their cross product by at most twice that plus its own rounding
+/// (a few ulps of 1). A longer one proves the planes are not parallel.
+const PARALLEL: f64 = 2.0 * 1e-12 + 8.0 * f64::EPSILON;
+
+/// The directions faces with `runs` may run straight along, best first, each a unit vector in a
+/// canonical sense (its largest component positive, the first of equal ones), with where it comes
+/// from:
+/// - the cross product of the two plane normals furthest from parallel, when one pair is proved
+///   not parallel (`PARALLEL`): two planes that both run along a direction fix it exactly;
+/// - then each cylinder axis, in a canonical order, the same axes once.
+///
+/// Each normal and axis is taken in its canonical sense and the runs in a canonical order (by
+/// their values; equal values by index), so neither the runs' order nor their senses change
+/// which direction comes first. Nothing here proves a face straight along a candidate; a caller
+/// checks each face with [`face_straying`]. Empty when no plane pair is proved apart and no face
+/// is a cylinder.
+#[must_use]
+pub fn straight_candidates(runs: &[FaceRun]) -> Vec<(Vec3, StraightBy)> {
+    let mut planes: Vec<(Vec3, usize)> = Vec::new();
+    let mut axes: Vec<(Vec3, usize)> = Vec::new();
+    for (i, run) in runs.iter().enumerate() {
+        match *run {
+            FaceRun::Plane(n) => planes.push((canonical(n), i)),
+            FaceRun::Axis(a) => axes.push((canonical(a), i)),
+            FaceRun::Other => {}
+        }
+    }
+    let by_value = |a: &(Vec3, usize), b: &(Vec3, usize)| {
+        let (p, q) = (a.0, b.0);
+        p.x.total_cmp(&q.x)
+            .then(p.y.total_cmp(&q.y))
+            .then(p.z.total_cmp(&q.z))
+            .then(a.1.cmp(&b.1))
+    };
+    planes.sort_by(by_value);
+    axes.sort_by(by_value);
+    let mut out = Vec::new();
+    let mut best: Option<(f64, Vec3, StraightBy)> = None;
+    for (i, &(n, a)) in planes.iter().enumerate() {
+        for &(m, b) in planes.iter().skip(i + 1) {
+            let Some((s, d)) = n.cross(m).length_and_unit() else {
+                continue;
+            };
+            if s > PARALLEL && best.is_none_or(|(t, ..)| s > t) {
+                best = Some((s, d, StraightBy::Planes(a, b)));
+            }
+        }
+    }
+    if let Some((_, d, by)) = best {
+        out.push((canonical(d), by));
+    }
+    for &(a, i) in &axes {
+        if !out.iter().any(|&(d, _)| d == a) {
+            out.push((a, StraightBy::Axis(i)));
+        }
+    }
+    out
+}
+
+/// `v` in its canonical sense: its largest component positive (the first of equal ones).
+fn canonical(v: Vec3) -> Vec3 {
+    let mut lead = v.x;
+    for c in [v.y, v.z] {
+        if c.abs() > lead.abs() {
+            lead = c;
+        }
+    }
+    if lead < 0.0 {
+        -v
+    } else {
+        v
+    }
+}
+
 /// The size a body's tolerances scale with: the diagonal of its vertices' box (at least 1).
 pub(crate) fn body_size(b: &Brep) -> Option<f64> {
     let mut lo = [f64::INFINITY; 3];
@@ -1161,5 +1274,56 @@ mod tests {
             area: Interval::enclosing(800.0, 1e-8).unwrap(),
         };
         assert!(separated_material(&[doubled], 1e-6, &mut 16_000_000).is_none());
+    }
+}
+
+#[cfg(test)]
+mod straight_tests {
+    use super::*;
+
+    fn v(x: f64, y: f64, z: f64) -> Vec3 {
+        Vec3::new(x, y, z)
+    }
+
+    /// Two planes that are not parallel give their cross product first, whatever the order and
+    /// sense of the runs; a cylinder's axis comes after (once); parallel planes alone give nothing.
+    #[test]
+    fn a_plane_pair_comes_before_an_axis_in_any_order_and_sense() {
+        let runs = [
+            FaceRun::Plane(v(1.0, 0.0, 0.0)),
+            FaceRun::Other,
+            FaceRun::Plane(v(0.0, 1.0, 0.0)),
+            FaceRun::Axis(v(0.0, 0.0, -1.0)),
+        ];
+        let got = straight_candidates(&runs);
+        // the axis is the pair's direction, so it is not listed again
+        assert_eq!(
+            got,
+            vec![(v(0.0, 0.0, 1.0), StraightBy::Planes(2, 0))],
+            "{got:?}"
+        );
+        let flipped = [
+            FaceRun::Axis(v(0.0, 0.0, 1.0)),
+            FaceRun::Plane(v(0.0, -1.0, 0.0)),
+            FaceRun::Plane(v(-1.0, 0.0, 0.0)),
+        ];
+        let got = straight_candidates(&flipped);
+        assert_eq!(got.first().map(|c| c.0), Some(v(0.0, 0.0, 1.0)), "{got:?}");
+        // parallel planes and a cylinder: the cylinder's axis
+        let round = [
+            FaceRun::Plane(v(0.0, 1.0, 0.0)),
+            FaceRun::Axis(v(0.0, 0.0, -1.0)),
+            FaceRun::Plane(v(0.0, -1.0, 0.0)),
+        ];
+        assert_eq!(
+            straight_candidates(&round),
+            vec![(v(0.0, 0.0, 1.0), StraightBy::Axis(1))]
+        );
+        // parallel planes only: nothing
+        let flat = [
+            FaceRun::Plane(v(0.0, 1.0, 0.0)),
+            FaceRun::Plane(v(0.0, 1.0, 1e-13)),
+        ];
+        assert!(straight_candidates(&flat).is_empty());
     }
 }
