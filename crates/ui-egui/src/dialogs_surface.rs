@@ -275,7 +275,10 @@ fn inputs(k: &Surf) -> Vec<SelInput> {
             vec![SelInput::new("Curves", CURVES | EDGES, true).chains(), SelInput::new("Cross curves", CURVES | EDGES, true).chains()]
         }
         Surf::Patch { .. } => {
-            vec![SelInput::new("Boundary", PROFILES | CURVES | EDGES, true).chains(), SelInput::new("Pass through", VERTICES | FACES | SNAP_POINTS, true)]
+            vec![
+                SelInput::new("Boundary", PROFILES | CURVES | EDGES, true).chains(),
+                SelInput::new("Pass through", VERTICES | FACES | SNAP_POINTS, true),
+            ]
         }
         Surf::Unstitch => vec![SelInput::new("Body, or faces to take out", BODIES | FACES, true)],
         Surf::ReverseNormal => vec![SelInput::new("Surface, or faces to turn over", BODIES | FACES, true)],

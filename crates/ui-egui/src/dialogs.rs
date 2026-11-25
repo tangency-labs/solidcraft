@@ -10035,7 +10035,20 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     }
                     d
                 }
-                PatternKind::Path { path_sketch, path, path_body, path_edges, count, spacing, extent, flip, orient, start: at, start_fraction, .. } => {
+                PatternKind::Path {
+                    path_sketch,
+                    path,
+                    path_body,
+                    path_edges,
+                    count,
+                    spacing,
+                    extent,
+                    flip,
+                    orient,
+                    start: at,
+                    start_fraction,
+                    ..
+                } => {
                     let mut d = start("solid.pattern.path")?;
                     let (at, fraction) = match (start_fraction, at) {
                         (Some(f), _) => (f.to_string(), true),
