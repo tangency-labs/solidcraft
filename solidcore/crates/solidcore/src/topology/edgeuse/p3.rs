@@ -188,9 +188,9 @@ fn vec_status<T>(r: Result<T>) -> Result<T> {
 /// would raise its edge's tolerance is fitted again at ([`refit_raising_trim`]).
 const REFIT_SHARE: f64 = 1e-3;
 
-/// Not upstream (tangency-labs/solidcore#3399): the share of the first trim's distance a refit
-/// trim must lie within to replace it ([`refit_raising_trim`]): a trim whose fit error adds
-/// less than 1% to its distance keeps its first fit.
+/// Not upstream (tangency-labs/solidcore#3399): the share of the first trim's raise a refit
+/// trim's raise must lie within to replace it ([`refit_raising_trim`]): a trim whose fit error
+/// adds less than 1% to the raise keeps its first fit.
 const REFIT_GAIN: f64 = 0.99;
 
 /// What `SmSurface::DropCurve` produced.
@@ -1833,21 +1833,22 @@ pub fn get_or_create_uv_trim_curve(
 
 /// Not upstream (tangency-labs/solidcore#3399): while a boolean's cleanup tests two faces for
 /// a cover that grows no tolerance (`Caches::refit_raising_trims`), `created`, the new trim of
-/// `eu`, or the same trim fitted again at [`REFIT_SHARE`] of the fit tolerance where that one lies within
-/// [`REFIT_GAIN`] of `created`'s distance from the edge, when `created` lies far enough from
-/// the edge to raise its tolerance (`SetUVTrimCurve` raises a tolerance below twice the
-/// distance). The drop's fit error (up to the fit tolerance, the edge's own) is part of that
-/// distance, and the edge is raised to cover the trim, not the curve it was fitted from: a
-/// line dropped onto a cylinder at 4e-5 gave a trim 2.7e-5 from the line where the line is
-/// 2.5e-5 from the cylinder, and raised the edge and its two vertices to 5.4e-5 instead of
-/// 5.0e-5. A validate-only pass raises nothing (`Kernel::with_held_trim_raise`,
-/// `bValidateOnly`), so it fits once. A refit not kept (it fails, or it is not that much
-/// closer) leaves `created`, and the edge and its vertices at the tolerances they had: a drop
-/// at a larger tolerance raises them.
+/// `eu`, or the same trim fitted again at [`REFIT_SHARE`] of the fit tolerance where the raise
+/// it gives its edge ([`trim_raise_distance`]) is within [`REFIT_GAIN`] of `created`'s, when
+/// `created` lies far enough from the edge to raise its tolerance (`SetUVTrimCurve` raises a
+/// tolerance below twice the distance). The drop's fit error (up to the fit tolerance, the
+/// edge's own) is part of that distance, and the edge is raised to cover the trim, not the
+/// curve it was fitted from: a line dropped onto a cylinder at 4e-5 gave a trim 2.7e-5 from
+/// the line where the line is 2.5e-5 from the cylinder, and raised the edge and its two
+/// vertices to 5.4e-5 instead of 5.0e-5. A validate-only pass raises nothing
+/// (`Kernel::with_held_trim_raise`, `bValidateOnly`), so it fits once. The refit leaves the
+/// edge and its vertices at the tolerances they had (a drop at a larger tolerance raises
+/// them); the caller raises them for the trim kept.
 ///
 /// # Errors
 ///
-/// Those of [`fit_tolerance`]; the hard statuses of [`create_uv_trim_curve`].
+/// Those of [`fit_tolerance`] and [`trim_raise_distance`]; the hard statuses of
+/// [`create_uv_trim_curve`].
 fn refit_raising_trim(
     k: &Kernel,
     b: &mut Brep,
@@ -1879,16 +1880,22 @@ fn refit_raising_trim(
         None,
         Some(fit),
     ))?;
-    if let Some(t) = tight {
-        if t.max_dist_to_surf <= REFIT_GAIN * created.max_dist_to_surf {
-            return Ok(t);
-        }
-    }
     crate::topology::edge::set_tolerance(b, e, edge_tol, false, false)?;
     for (v, t) in held {
         crate::topology::vertex::set_tolerance(b, v, t, false, false)?;
     }
-    Ok(created)
+    let Some(tight) = tight else {
+        return Ok(created);
+    };
+    // (each judged by the raise it would give, [`trim_raise_distance`], not by its sampled
+    // distance alone: a proved bound past twice that distance raises to the bound)
+    let first = trim_raise_distance(k, b, eu, &created.curve, created.max_dist_to_surf)?;
+    let refit = trim_raise_distance(k, b, eu, &tight.curve, tight.max_dist_to_surf)?;
+    Ok(if refit <= REFIT_GAIN * first {
+        tight
+    } else {
+        created
+    })
 }
 
 /// Not upstream (#18162, #18009): the distance `SetUVTrimCurve` raises an edge's tolerance to
