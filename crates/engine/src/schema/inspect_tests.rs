@@ -929,3 +929,101 @@ fn classify_points_refuses_hostile_inputs_in_every_check_mode() {
         assert_eq!(s.doc, before);
     }
 }
+
+/// An assembly inventory lists placements, not just definitions (#21797). The three boxes'
+/// names, bounds and 6000 mm3 volumes follow from their authored sizes and transforms.
+#[test]
+fn document_inspection_lists_every_body_placement_without_changing_the_design() {
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let part = run(&mut s, "component.create", json!({"name":"Part", "grounded":false}));
+    run(&mut s, "solid.box", json!({"corner":[0,0,0], "length":10, "width":20, "height":30, "body_name":"Box", "name":"MadeBox"}));
+    run(&mut s, "sketch.create", json!({"plane":"XY", "name":"Datum"}));
+    run(&mut s, "sketch.circle.center", json!({"center":[1,2], "radius":1}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "component.activate", json!({"component":0}));
+    let second = run(&mut s, "occurrence.copy", json!({"component":part["component"], "translate":[40,0,0]}))["occurrence"].clone();
+    let third = run(&mut s, "occurrence.copy", json!({"component":part["component"], "translate":[0,50,0]}))["occurrence"].clone();
+    run(&mut s, "component.activate", json!({"component":part["component"], "occurrence":part["occurrence"], "path":[part["occurrence"]]}));
+    run(&mut s, "select.set", json!({"items":[{"type":"body", "name":"Box"}]}));
+    let names = json!(["Box", "Box (Part:2)", "Box (Part:3)"]);
+    let check_boxes = |rows: &Value, expected: &[(&str, [f64; 3], [f64; 3])]| {
+        let rows = rows.as_array().unwrap();
+        assert_eq!(rows.len(), 3, "{rows:?}");
+        for (name, min, max) in expected {
+            let row = rows.iter().find(|b| b["name"] == *name).unwrap();
+            assert_eq!(row["closed"], true, "{row}");
+            assert!((row["volume_mm3"].as_f64().unwrap() - 6000.0).abs() < 1e-6, "{row}");
+            for k in 0..3 {
+                assert!((row["bbox"]["min"][k].as_f64().unwrap() - min[k]).abs() < 1e-6, "{row}");
+                assert!((row["bbox"]["max"][k].as_f64().unwrap() - max[k]).abs() < 1e-6, "{row}");
+            }
+        }
+        assert!((rows.iter().map(|b| b["volume_mm3"].as_f64().unwrap()).sum::<f64>() - 18000.0).abs() < 1e-6);
+    };
+    let state = |s: &Session| {
+        json!({"revision":s.revision, "undo":s.undo.len(), "redo":s.redo.len(), "dirty":s.is_dirty(),
+        "marker":s.doc.marker, "selection":&s.selection, "active_component":s.active_component,
+        "active_sketch":s.active_sketch, "active_path":&s.active_occurrence_path, "pending_moves":&s.pending_moves})
+    };
+    *s.world_cache.lock().unwrap() = None;
+    for measure in [false, true] {
+        let omitted = run(&mut s, "document.inspect", json!({"bodies":false, "measure":measure}));
+        assert!(omitted.get("bodies").is_none());
+        assert!(s.world_cache.lock().unwrap().is_none(), "omitting bodies must leave placements cold");
+    }
+    let before = state(&s);
+    let doc = s.doc.clone();
+    let model = s.model.state();
+    let full = run(&mut s, "document.inspect", json!({"measure":true}));
+    matches::<DocumentInspectResult>("document.inspect", &full, false);
+    check_boxes(
+        &full["bodies"],
+        &[
+            ("Box", [0.0, 0.0, 0.0], [10.0, 20.0, 30.0]),
+            ("Box (Part:2)", [40.0, 0.0, 0.0], [50.0, 20.0, 30.0]),
+            ("Box (Part:3)", [0.0, 50.0, 0.0], [10.0, 70.0, 30.0]),
+        ],
+    );
+    assert_eq!(full["sketches"].as_array().unwrap().len(), 1, "the sketch definition is not repeated");
+    assert_eq!(full["sketches"][0]["name"], "Datum");
+    assert_eq!(full["timeline"].as_array().unwrap().len(), 2, "the two authored features are not repeated");
+    for measure in [false, true] {
+        let named = run(&mut s, "document.inspect", json!({"bodies":"names", "measure":measure}));
+        matches::<DocumentInspectResult>("document.inspect", &named, false);
+        assert_eq!(named["bodies"], names);
+        let absent = run(&mut s, "document.inspect", json!({"bodies":false, "measure":measure}));
+        assert!(absent.get("bodies").is_none());
+        for reply in [&named, &absent] {
+            for key in ["params", "sketches", "timeline", "marker", "selection", "undo", "redo", "revision", "dirty"] {
+                assert_eq!(reply[key], full[key], "{key}: {reply}");
+            }
+        }
+    }
+    let listed = run(&mut s, "document.inspect", json!({"measure":false}));
+    assert_eq!(listed["bodies"].as_array().unwrap().iter().map(|b| b["name"].clone()).collect::<Vec<_>>(), names.as_array().unwrap().clone());
+    assert!(listed["bodies"].as_array().unwrap().iter().all(|b| b.get("volume_mm3").is_none()));
+    assert_eq!(state(&s), before);
+    assert!(std::sync::Arc::ptr_eq(&doc, &s.doc) && std::sync::Arc::ptr_eq(&model, &s.model.state()));
+
+    // Visibility and an uncaptured quarter-turn/translation belong to a placement, not its definition.
+    run(&mut s, "browser.visibility", json!({"paths":[[second]], "visible":false}));
+    run(&mut s, "occurrence.move", json!({"occurrence":third, "to_matrix":[[0,-1,0,0],[1,0,0,50],[0,0,1,7]], "capture":false}));
+    let before = state(&s);
+    let doc = s.doc.clone();
+    let moved = run(&mut s, "document.inspect", json!({"measure":true}));
+    check_boxes(
+        &moved["bodies"],
+        &[
+            ("Box", [0.0, 0.0, 0.0], [10.0, 20.0, 30.0]),
+            ("Box (Part:2)", [40.0, 0.0, 0.0], [50.0, 20.0, 30.0]),
+            ("Box (Part:3)", [-20.0, 50.0, 7.0], [0.0, 60.0, 37.0]),
+        ],
+    );
+    for b in moved["bodies"].as_array().unwrap() {
+        assert_eq!(b["visible"], b["name"] != "Box (Part:2)", "{b}");
+    }
+    assert_eq!(moved["sketches"], full["sketches"]);
+    assert_eq!(moved["timeline"], full["timeline"]);
+    assert_eq!(state(&s), before);
+    assert!(std::sync::Arc::ptr_eq(&doc, &s.doc));
+}
