@@ -29,6 +29,7 @@ pub mod context;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod discover;
 pub mod gate;
+mod hole_review;
 mod markdown;
 mod markdown_view;
 mod panel;
@@ -52,6 +53,8 @@ use context::Context;
 use crate::{ControlRequest, SolveApp};
 use backend::{ChatBackend, Event, PermissionOption, PromptPart, ToolStatus};
 use solidcraft_ui_text::{format as trf, tr};
+
+pub(crate) const HOLE_REVIEW_COMMAND: &str = hole_review::COMMAND;
 
 pub(crate) use panel::finish_shared;
 pub(crate) use panel::owns_keyboard_input;
@@ -427,6 +430,7 @@ struct Held {
     id: u64,
     req: ControlRequest,
     since: f64,
+    review: Option<hole_review::Review>,
 }
 
 /// Starts the chat's own control endpoint for the agent's MCP server (the desktop host provides
@@ -2222,6 +2226,12 @@ pub fn cancel(app: &mut SolveApp) {
 /// Ask the agent to stop the message it is on and decline what waits for approval.
 fn interrupt(app: &mut SolveApp) {
     decline_all(app, "the user stopped the message");
+    for request in app.control_held.iter().filter(|request| request.design_guard.is_some()) {
+        request.ticket.cancel();
+    }
+    if let Some(job) = &app.control_job {
+        job.cancel_reviewed_edit();
+    }
     if let Some(b) = app.agent_chat.backend.as_mut() {
         b.cancel();
     }
@@ -2241,11 +2251,18 @@ fn decline_all(app: &mut SolveApp, why: &str) {
 
 /// Allow or deny a held request.
 pub fn approve(app: &mut SolveApp, id: u64, allow: bool) {
+    if allow && app.agent_chat.held.iter().any(|held| held.id == id && held.review.is_some()) {
+        apply_hole_review(app, id);
+        return;
+    }
     approve_with(app, id, allow, "the user declined this call");
 }
 
 /// Allow a held request and remember to allow its tool for this agent from now on.
 pub fn approve_always(app: &mut SolveApp, id: u64) {
+    if app.agent_chat.held.iter().any(|held| held.id == id && held.review.is_some()) {
+        return;
+    }
     let tool = app.agent_chat.items.iter().find_map(|i| match i {
         Item::Approval { id: x, tool, .. } if *x == id => Some(tool.clone()),
         _ => None,
@@ -2442,6 +2459,74 @@ pub fn undo_changes(app: &mut SolveApp, index: usize) {
     }
 }
 
+/// The pending proposal's native command, if it still belongs to the design being shown.
+pub(crate) fn hole_review_commands(app: &mut SolveApp) -> Option<Vec<(String, Value)>> {
+    let review = app.agent_chat.held.iter().find_map(|held| held.review.as_ref())?;
+    if !matches_review_document(&mut app.session, &review.document) {
+        return None;
+    }
+    Some(vec![("solid.hole".into(), review.params()?)])
+}
+
+pub(crate) fn matches_review_document(session: &mut solidcraft_engine::Session, guard: &solidcraft_control::DesignGuard) -> bool {
+    guard.document_id == session.document_id && guard.session_revision == session.revision && guard.design_revision == session.design_revision()
+}
+
+fn hole_review_state(app: &mut SolveApp) -> Option<Result<bool, String>> {
+    app.agent_chat.held.iter().find_map(|held| held.review.as_ref())?;
+    let Some(commands) = hole_review_commands(app) else { return Some(Err(tr("ui.agent_hole_review_invalid").to_owned())) };
+    Some(crate::preview::hole_review_state(app, &commands))
+}
+
+fn apply_hole_review(app: &mut SolveApp, id: u64) {
+    if !matches!(hole_review_state(app), Some(Ok(true))) {
+        return;
+    }
+    let limit = app.preferences.agent_chat_turn_limit;
+    let Some(turn) = app.agent_chat.turn.as_mut() else { return };
+    if limit > 0 && turn.changes >= limit.clamp(1, 1000) {
+        approve_with(app, id, false, "this message reached its limit on design changes");
+        return;
+    }
+    let Some(held) = app.agent_chat.held.iter_mut().find(|held| held.id == id) else { return };
+    let Some(review) = held.review.as_ref() else { return };
+    let Some(params) = review.params() else { return };
+    held.req.design_guard = Some(review.document.clone());
+    held.req.params["command"] = json!("solid.hole");
+    if let Some(request) = held.req.params.as_object_mut() {
+        request.remove("id");
+    }
+    held.req.params["params"] = params;
+    // The person has just reviewed the cut in the viewport. Dispatch it directly so
+    // the cursor does not replay the operation or replace the trusted request.
+    held.req.params["animate"] = json!(false);
+    turn.changes += 1;
+    approve_with(app, id, true, "");
+}
+
+fn hold_hole_review(app: &mut SolveApp, req: ControlRequest) {
+    let result = if app.agent_chat.stopped || app.agent_chat.steering || req.ticket.is_cancelled() {
+        Err("the message or the request was stopped".into())
+    } else if app.agent_chat.held.iter().any(|held| held.review.is_some()) {
+        Err("another Hole proposal is already waiting for review".into())
+    } else {
+        hole_review::Review::new(app, &req.params["params"])
+    };
+    match result {
+        Ok(review) => {
+            let chat = &mut app.agent_chat;
+            chat.next_approval += 1;
+            let id = chat.next_approval;
+            let tool = HOLE_REVIEW_COMMAND.to_owned();
+            chat.push(Item::Approval { id, title: tr("ui.agent_hole_review_title").to_owned(), tool, answer: None });
+            chat.held.push(Held { id, req, since: crate::now_ms(), review: Some(review) });
+        }
+        Err(error) => {
+            let _ = req.reply.send(json!({"ok": false, "error": format!("{} {error}", solidcraft_control::NOT_RUN)}));
+        }
+    }
+}
+
 /// The requests the agent's tools sent through the chat's endpoint: each one passes the gate.
 fn pump_tools(app: &mut SolveApp) {
     let Some(rx) = app.agent_chat.tools_rx.take() else { return };
@@ -2453,12 +2538,16 @@ fn pump_tools(app: &mut SolveApp) {
         let refuse = |req: ControlRequest, e: String| {
             let _ = req.reply.send(json!({"ok": false, "error": e}));
         };
-        if let Err(error) = crate::plugins::normalize_request(&app.session, &req.method, &mut req.params) {
-            refuse(req, error);
-            continue;
+        let review = req.method == "engine.execute"
+            && req.params.get("command").or_else(|| req.params.get("id")).and_then(Value::as_str) == Some(HOLE_REVIEW_COMMAND);
+        if !review {
+            if let Err(error) = crate::plugins::normalize_request(&app.session, &req.method, &mut req.params) {
+                refuse(req, error);
+                continue;
+            }
+            // What runs after the gate is what the gate decided on: the registered command ids.
+            gate::canonicalize(&req.method, &mut req.params);
         }
-        // What runs after the gate is what the gate decided on: the registered command ids.
-        gate::canonicalize(&req.method, &mut req.params);
         let undo_len = app.session.undo.len();
         let Some(turn) = app.agent_chat.turn.as_mut() else {
             refuse(req, "the agent chat has no message in progress".into());
@@ -2482,6 +2571,12 @@ fn pump_tools(app: &mut SolveApp) {
                     }
                 }
             }
+        }
+        // Explicit review is a held, in-app-only action. It does not inherit the
+        // permission setting or an Always allow answer for a normal Hole.
+        if review {
+            hold_hole_review(app, req);
+            continue;
         }
         let undo_left = undo_len.saturating_sub(turn.start_undo.get::<UndoMark>().map_or(0, |m| m.depth));
         // The permission mode (the agent's own, else the global one) and "always allow" answers.
@@ -2528,7 +2623,7 @@ fn pump_tools(app: &mut SolveApp) {
                 chat.next_approval += 1;
                 let id = chat.next_approval;
                 chat.push(Item::Approval { id, title, tool, answer: None });
-                chat.held.push(Held { id, req, since: crate::now_ms() });
+                chat.held.push(Held { id, req, since: crate::now_ms(), review: None });
             }
             gate::Verdict::Refuse(e) => {
                 app.agent_chat.notice(trf("ui.agent_chat_refused", &[("reason", &e)]), false);
@@ -2541,9 +2636,27 @@ fn pump_tools(app: &mut SolveApp) {
     app.agent_chat.tools_rx = Some(rx);
     // Questions nobody answered: the agent stopped waiting long ago.
     let now = crate::now_ms();
-    let stale: Vec<u64> = app.agent_chat.held.iter().filter(|h| now - h.since > APPROVAL_TIMEOUT_MS).map(|h| h.id).collect();
-    for id in stale {
-        approve_with(app, id, false, "nobody answered in time");
+    let chat = &app.agent_chat;
+    let session = &mut app.session;
+    let stale: Vec<_> = chat
+        .held
+        .iter()
+        .filter_map(|held| {
+            if let Some(review) = &held.review
+                && !matches_review_document(session, &review.document)
+            {
+                Some((held.id, "the design changed before the Hole proposal was applied"))
+            } else if held.review.is_some() && held.req.ticket.is_cancelled() {
+                Some((held.id, "the agent cancelled this call"))
+            } else if now - held.since > APPROVAL_TIMEOUT_MS {
+                Some((held.id, "nobody answered in time"))
+            } else {
+                None
+            }
+        })
+        .collect();
+    for (id, why) in stale {
+        approve_with(app, id, false, why);
     }
 }
 

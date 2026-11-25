@@ -751,6 +751,9 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     }
     // A plugin command's dialog: its run, on a scratch session without the plugin's grants.
     let plugin = crate::plugin_menu::preview_commands(app);
+    let review_commands =
+        if hole_review_model_view(app) && app.dialog.is_none() && app.tool.is_none() { crate::agent_chat::hole_review_commands(app) } else { None };
+    let mut review = false;
     let mut cmds = match app.dialog.as_ref().filter(|d| d.previews() && d.preview_enabled).map(|d| crate::dialogs::preview_commands(app, d)) {
         Some(Ok(c)) if !c.is_empty() => c,
         _ if plugin.is_some() => plugin.as_ref().map(|(_, _, c)| c.clone()).unwrap_or_default(),
@@ -758,6 +761,10 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
         // A parameter being edited in Change Parameters.
         _ if app.params.as_ref().and_then(|p| p.preview_commands()).is_some() => {
             app.params.as_ref().and_then(|p| p.preview_commands()).unwrap_or_default()
+        }
+        _ if review_commands.is_some() => {
+            review = true;
+            review_commands.unwrap_or_default()
         }
         // No dialog, or inputs still missing: nothing to preview, and a pick waiting for one is
         // not checked (`settle_pick` drops it).
@@ -802,7 +809,11 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     let tool = as_new_body(&cmds).is_some();
     // What poses the preview, and the design it was computed against: a reader of the pose knows
     // what posed it and which design it belongs to.
-    let source = app.dialog.as_ref().filter(|d| d.previews() && d.preview_enabled).and_then(|d| d.command());
+    let source = if review {
+        Some(crate::agent_chat::HOLE_REVIEW_COMMAND)
+    } else {
+        app.dialog.as_ref().filter(|d| d.previews() && d.preview_enabled).and_then(|d| d.command())
+    };
     let revision = app.session.design_revision();
     let pv = &mut app.preview;
     pv.set_source(source, revision);
@@ -846,6 +857,37 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
         ctx.request_repaint_after(std::time::Duration::from_millis(16));
     }
     crate::dialogs_frame::settle_pick(app);
+}
+
+fn hole_review_model_view(app: &SolveApp) -> bool {
+    !app.home.open
+        && app.docs.views.active().kind == solidcraft_views::ViewKind::Model
+        && !crate::render_workspace::active(app)
+        && !crate::drawing_workspace::active(app)
+}
+
+/// Whether the current proposal has a preview for these exact inputs, rather than a
+/// previously computed cut that is still drawn while a new one is being calculated.
+pub(crate) fn hole_review_state(app: &SolveApp, commands: &[(String, Value)]) -> Result<bool, String> {
+    let preview = &app.preview;
+    if !hole_review_model_view(app) {
+        return Err(solidcraft_ui_text::tr("ui.agent_hole_review_model_view").to_owned());
+    }
+    if app.dialog.is_some() || app.tool.is_some() {
+        return Err(solidcraft_ui_text::tr("ui.agent_hole_review_busy").to_owned());
+    }
+    if preview.source != Some(crate::agent_chat::HOLE_REVIEW_COMMAND)
+        || preview.shown_key != Some(job_key(commands, app.session.revision, colors(app)))
+    {
+        return Ok(false);
+    }
+    if let Some(error) = &preview.error {
+        return Err(error.clone());
+    }
+    if preview.replaced.is_empty() {
+        return Err(solidcraft_ui_text::tr("ui.agent_hole_review_no_cut").to_owned());
+    }
+    Ok(preview.active)
 }
 
 /// What tells one preview computation from another: its commands, the document revision they

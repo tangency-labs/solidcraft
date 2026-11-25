@@ -10,6 +10,14 @@ use serde_json::{Value, json};
 
 pub type ControlResponse = Value;
 
+/// Design state and editing context a person saw when approving an edit.
+#[derive(Clone)]
+pub struct DesignGuard {
+    pub document_id: String,
+    pub design_revision: u64,
+    pub session_revision: u64,
+}
+
 pub struct ControlRequest {
     pub method: String,
     pub params: Value,
@@ -19,6 +27,9 @@ pub struct ControlRequest {
     /// Chat requests already admitted by the gate may outlive a tab switch. This turn's
     /// validity follows them through queues, computation and cursor animation.
     pub chat_turn: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    /// A reviewed edit may only land on the design and revision it was previewed on.
+    /// This is set by the host after approval, never taken from wire parameters.
+    pub design_guard: Option<DesignGuard>,
     /// Identity of the authenticated TCP connection, if any. The server holds the only strong
     /// reference. Compare with `ptr_eq` and check `strong_count` without upgrading it.
     pub connection: Option<std::sync::Weak<()>>,
@@ -41,6 +52,7 @@ impl ControlRequest {
                 reply: tx,
                 started: Default::default(),
                 chat_turn: None,
+                design_guard: None,
                 connection: None,
                 ticket: Default::default(),
                 serial,

@@ -5145,7 +5145,7 @@ impl SolveApp {
             // Held requests go first, in order, once nothing makes them wait.
             let held = if waits || shot_waits { None } else { self.control_held.pop_front() };
             let Some(mut req) = held.or_else(|| rx.as_ref().and_then(|rx| rx.try_recv().ok())) else { break };
-            if req.refuse_cancelled_chat() {
+            if req.refuse_cancelled_chat() || self.reject_stale_review(&req) {
                 continue;
             }
             // A Plugins-menu run is for the design its dialog was opened on (`plugin_menu`).
@@ -5203,9 +5203,21 @@ impl SolveApp {
         self.control_rx = rx;
     }
 
+    fn reject_stale_review(&mut self, req: &ControlRequest) -> bool {
+        let Some(guard) = &req.design_guard else { return false };
+        if agent_chat::matches_review_document(&mut self.session, guard) {
+            return false;
+        }
+        let _ = req.reply.send(json!({
+            "ok": false,
+            "error": format!("{} the design changed after the edit was reviewed", solidcraft_control::NOT_RUN)
+        }));
+        true
+    }
+
     /// Run a control request here, now, and reply (or queue the screenshot it asks for).
     pub(crate) fn run_control(&mut self, ctx: &egui::Context, req: ControlRequest) {
-        if req.refuse_cancelled_chat() {
+        if req.refuse_cancelled_chat() || self.reject_stale_review(&req) {
             return;
         }
         if req.method == control_joint_drive::METHOD {

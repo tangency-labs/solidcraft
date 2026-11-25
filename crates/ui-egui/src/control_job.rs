@@ -270,6 +270,13 @@ pub struct ControlJob {
 }
 
 impl ControlJob {
+    /// Stop a reviewed edit that the Assistant already handed to the background worker.
+    pub(crate) fn cancel_reviewed_edit(&self) {
+        if self.req.design_guard.is_some() {
+            self.req.ticket.cancel();
+        }
+    }
+
     fn poll(&self) -> Option<Option<Value>> {
         match self.done.try_recv() {
             Ok(r) => Some(r),

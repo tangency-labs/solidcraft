@@ -509,6 +509,152 @@ fn a_messages_changes_undo_as_one_step() {
     assert!(matches!(app.agent_chat.items[n], Item::Changes { undone: true, .. }));
 }
 
+fn hole_proposal(diameter: f64) -> Value {
+    json!({
+        "command": HOLE_REVIEW_COMMAND,
+        "params": {"target": "Plate", "position": [20, 20, 5], "diameter": diameter, "depth": 5},
+        "param_check": "strict",
+    })
+}
+
+fn plate_in_a_turn() -> (SolveApp, Sender<ControlRequest>) {
+    let (mut app, tx) = app_in_a_turn();
+    app.run("solid.box", json!({"length": 50, "width": 40, "height": 5, "corner": [0, 0, 0], "body_name": "Plate"})).unwrap();
+    app.home.open = false;
+    app.agent_chat.turn = None;
+    start_turn(&mut app, "propose a hole".into(), false, None, Vec::new());
+    (app, tx)
+}
+
+fn settle_hole_preview(app: &mut SolveApp) {
+    let ctx = crate::fonts::test_context();
+    crate::preview::update(app, &ctx);
+    app.preview.wait_for_worker();
+    crate::preview::update(app, &ctx);
+}
+
+#[test]
+fn a_hole_review_applies_the_latest_preview_only_once() {
+    let (mut app, tx) = plate_in_a_turn();
+    app.preferences.ai_permissions = agents::Mode::All;
+    let before = app.session.doc.clone();
+    let undo = app.session.undo.len();
+    let dirty = app.session.is_dirty();
+    let selection = app.session.selection.clone();
+    let reply = ask(&tx, "engine.execute", hole_proposal(6.0));
+    frame(&mut app);
+    let id = app.agent_chat.held[0].id;
+    approve_always(&mut app, id);
+    approve(&mut app, id, true);
+    assert!(reply.try_recv().is_err(), "approval cannot skip the preview");
+    settle_hole_preview(&mut app);
+    assert_eq!(hole_review_state(&mut app), Some(Ok(true)));
+    assert!(app.preview.effective_replaced().iter().any(|name| name == "Plate"), "the native cut is shown");
+    app.home.open = true;
+    approve(&mut app, id, true);
+    assert_eq!(app.agent_chat.held.len(), 1, "Apply needs the model view");
+    app.home.open = false;
+    let updated = hole_review::Review::new(&mut app, &hole_proposal(8.0)["params"]).unwrap();
+    app.agent_chat.held[0].review = Some(updated);
+    approve(&mut app, id, true);
+    assert_eq!(app.agent_chat.held.len(), 1, "the old viewport preview cannot approve changed values");
+    settle_hole_preview(&mut app);
+    assert_eq!(hole_review_state(&mut app), Some(Ok(true)));
+    assert!(Arc::ptr_eq(&before, &app.session.doc));
+    assert_eq!(app.session.undo.len(), undo);
+    assert_eq!(app.session.is_dirty(), dirty);
+    assert_eq!(app.session.selection, selection);
+    approve(&mut app, id, true);
+    approve(&mut app, id, true);
+    frame(&mut app);
+    let result = reply.recv_timeout(std::time::Duration::from_secs(30)).unwrap();
+    assert_eq!(result["ok"], true, "{result}");
+    assert_eq!(result["param_check"], "strict", "{result}");
+    let measure = app.run("inspect.measure", json!({})).unwrap();
+    let actual = measure["total"]["volume_mm3"].as_f64().unwrap();
+    let expected = 50.0 * 40.0 * 5.0 - std::f64::consts::PI * 4.0 * 4.0 * 5.0;
+    assert!((actual - expected).abs() < 1.0, "{actual} vs {expected}");
+    app.agent_chat.on_event(Event::TurnEnded { reason: String::new() });
+    end_turn(&mut app);
+    assert_eq!(app.session.undo.len(), undo + 1);
+    let n = app.agent_chat.items.iter().rposition(|item| matches!(item, Item::Changes { steps: 1, .. })).unwrap();
+    undo_changes(&mut app, n);
+    assert!(Arc::ptr_eq(&before, &app.session.doc));
+}
+
+#[test]
+fn a_hole_review_refuses_batch_cancelled_and_stale_requests() {
+    let (mut app, tx) = plate_in_a_turn();
+    let before = app.session.doc.clone();
+    let batch = ask(&tx, "engine.batch", json!({"commands": [boxed(55.0), hole_proposal(6.0)]}));
+    frame(&mut app);
+    assert_ne!(batch.recv_timeout(std::time::Duration::from_secs(5)).unwrap()["ok"], true);
+    assert!(Arc::ptr_eq(&before, &app.session.doc));
+
+    let invalid = ask(&tx, "engine.execute", hole_proposal(-6.0));
+    frame(&mut app);
+    assert_ne!(invalid.recv_timeout(std::time::Duration::from_secs(5)).unwrap()["ok"], true);
+    assert!(app.agent_chat.held.is_empty());
+
+    let cancelled = ask(&tx, "engine.execute", hole_proposal(6.0));
+    frame(&mut app);
+    let id = app.agent_chat.held[0].id;
+    settle_hole_preview(&mut app);
+    approve(&mut app, id, false);
+    settle_hole_preview(&mut app);
+    assert!(!app.preview.active);
+    assert_ne!(cancelled.recv_timeout(std::time::Duration::from_secs(5)).unwrap()["ok"], true);
+    assert!(Arc::ptr_eq(&before, &app.session.doc));
+
+    let stopped = ask(&tx, "engine.execute", hole_proposal(6.0));
+    frame(&mut app);
+    let id = app.agent_chat.held[0].id;
+    settle_hole_preview(&mut app);
+    approve(&mut app, id, true);
+    cancel(&mut app);
+    frame(&mut app);
+    assert_ne!(stopped.recv_timeout(std::time::Duration::from_secs(5)).unwrap()["ok"], true);
+    assert!(Arc::ptr_eq(&before, &app.session.doc), "Stop cancels the approved but queued cut");
+    let late = ask(&tx, "engine.execute", hole_proposal(6.0));
+    frame(&mut app);
+    assert_ne!(late.recv_timeout(std::time::Duration::from_secs(5)).unwrap()["ok"], true);
+    assert!(app.agent_chat.held.is_empty());
+    end_turn(&mut app);
+    start_turn(&mut app, "propose a different hole".into(), false, None, Vec::new());
+
+    let stale = ask(&tx, "engine.execute", hole_proposal(6.0));
+    frame(&mut app);
+    let id = app.agent_chat.held[0].id;
+    settle_hole_preview(&mut app);
+    approve(&mut app, id, true);
+    app.run("solid.box", boxed(55.0)["params"].clone()).unwrap();
+    let after_user_edit = app.session.doc.clone();
+    frame(&mut app);
+    let result = stale.recv_timeout(std::time::Duration::from_secs(30)).unwrap();
+    assert!(result["error"].as_str().is_some_and(|error| error.contains("design changed")), "{result}");
+    assert!(Arc::ptr_eq(&after_user_edit, &app.session.doc), "the approved cut does not land on the changed model");
+}
+
+#[test]
+fn a_hole_review_cannot_apply_after_the_active_component_changes() {
+    let (mut app, tx) = plate_in_a_turn();
+    app.run("component.create", json!({"name": "Other", "activate": false})).unwrap();
+    let reply = ask(&tx, "engine.execute", hole_proposal(6.0));
+    frame(&mut app);
+    let id = app.agent_chat.held[0].id;
+    settle_hole_preview(&mut app);
+    assert_eq!(hole_review_state(&mut app), Some(Ok(true)));
+    approve(&mut app, id, true);
+    let before = app.session.doc.clone();
+    let design_revision = app.session.design_revision();
+    app.run("component.activate", json!({"component": "Other"})).unwrap();
+    assert_eq!(app.session.design_revision(), design_revision, "only the editing context changed");
+    frame(&mut app);
+    let result = reply.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+    assert!(result["error"].as_str().is_some_and(|error| error.contains("design changed")), "{result}");
+    assert!(Arc::ptr_eq(&before, &app.session.doc));
+}
+
 /// The conversation knows a design by its revision: the very design the host gave it, never an
 /// equal copy, and only the host's own type gets the design back (#13438).
 #[test]

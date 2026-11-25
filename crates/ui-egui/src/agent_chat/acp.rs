@@ -245,6 +245,10 @@ measure or inspect_design. Before building anything beyond one primitive, read `
 SKILL.md has the workflow, its reference.md the command shapes and this version's traps), work the numbers out first, and after \
 each stage compare `measure` with them. Prefer one `batch` over many small calls. Saving, opening or exporting files waits for the user's approval in \
 the chat, and each message allows a limited number of changes. Don't use shell or file tools: work through the SolidCraft tools. \
+For a simple Hole whose placement is uncertain, or if the user asks to review it before applying, use execute with command `assistant.review_hole` \
+and params {target: exact body name, position: [x,y,z] on its face, diameter, depth?}. All numbers are in millimetres; omit depth for through all. \
+Call it on its own. It waits for the person to review the cut in the model or cancel. The result of an applied review is the actual Hole result; \
+do not drill it again or bypass a cancellation. Use the normal `solid.hole` for fully specified edits without review. \
 On a drawing, make section views and their section lines with `drawing.view.section`, and dimensions with \
 `drawing.dimension.add` or `drawing.dimension.from_model`, never with free sketch lines or text notes: those do not move with their \
 view, cannot be selected as section lines or dimensions, and do not update the model. If a drawing object has no command, say so \

@@ -23,6 +23,7 @@ pub use effect::Effect;
 pub use request::ControlRequest;
 pub use request::ControlResponse;
 pub use request::DOCUMENT_WATCH;
+pub use request::DesignGuard;
 pub use request::DocumentWatch;
 pub use request::Subscriber;
 pub use request::cancelled_chat_response;

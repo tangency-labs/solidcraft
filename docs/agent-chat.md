@@ -470,6 +470,13 @@ load servers you configured for them:
 - **One undo per message:** everything the agent changes while answering one message becomes
   a single undo step, named after your message. The conversation shows *N changes, one undo
   step* with **Undo these changes** while nothing else has happened since.
+- **Review a hole before cutting:** ask the Assistant to propose a simple hole on an existing
+  body and show it before applying. The review card lets you adjust the position, diameter and
+  depth in millimetres. Leave depth empty for a through hole. The viewport shows the proposed
+  cut without changing the design. **Apply** uses the values shown in the preview, and **Cancel**
+  dismisses the proposal. Changes to the design or a switch to another tab invalidate the review.
+  The Assistant requests this with a standalone `execute` call for `assistant.review_hole`, with
+  `{target, position: [x,y,z], diameter, depth?}`. It returns the ordinary Hole result after Apply.
 - **Tool cards:** each tool call shows as a card with its state; click it to see what it returned.
 - **Formatted text:** the agent's answers show as Markdown: headings, lists, quotes, tables, code
   blocks (with **Copy**), bold, italic, `code` and links (web links only; each link is a button
