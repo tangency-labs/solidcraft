@@ -503,16 +503,16 @@ fn bore_floor(st: &ModelState, id: u64, at: Vec3, dir: Vec3, r: f64, depth: Opti
             // it. Only a face of no known surface is told by where its spot is: the wall at the
             // radius (a facet of a curved face lies inside it by its sag, so this is a fallback).
             let across = match spot.surface {
-                Some(FaceSurface::Cylinder { axis, radius, .. }) if cosine(axis, dir).abs() > 1.0 - 1e-6 => {
+                Some(FaceSurface::Cylinder { axis, radius, .. }) if cosine(Vec3::from(axis), dir).abs() > 1.0 - 1e-6 => {
                     changed |= (radius - r).abs() > 1e-4 * (1.0 + r);
                     false
                 }
-                Some(FaceSurface::Plane { normal, .. }) if cosine(normal, dir).abs() > 1.0 - 1e-6 => {
+                Some(FaceSurface::Plane { normal, .. }) if cosine(Vec3::from(normal), dir).abs() > 1.0 - 1e-6 => {
                     // A flat floor lies at the depth (a drill point's cone, below it, isn't checked).
                     changed |= depth.is_some_and(|d| (along - d).abs() > 1e-4 * (1.0 + d));
                     true
                 }
-                Some(FaceSurface::Cone { axis, .. }) if cosine(axis, dir).abs() > 1.0 - 1e-6 => true,
+                Some(FaceSurface::Cone { axis, .. }) if cosine(Vec3::from(axis), dir).abs() > 1.0 - 1e-6 => true,
                 _ => off < r * 0.999 - 1e-6,
             };
             if across {
