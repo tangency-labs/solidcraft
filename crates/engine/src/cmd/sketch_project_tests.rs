@@ -4514,3 +4514,40 @@ fn a_rectangle_with_sides_on_the_projected_face_outline_is_picked_by_its_own_cur
         assert!((volume - want).abs() < 1e-6 * want, "{sides_on_outline} sides on the outline: {volume} vs {want}");
     }
 }
+
+/// A cylinder's side face projected along a direction across its axis is the rectangle its rims
+/// and silhouettes bound: the rims seen edge-on gave two lines with nothing between them, and the
+/// link was marked lost for crossing boundaries (#21295).
+#[test]
+fn a_cylinders_side_face_projected_across_its_axis_is_its_outline() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 15}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": "30 mm", "operation": "new_body"}));
+    run(&mut s, "component.create", json!({"activate": true}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ"}));
+    let r = run(&mut s, "sketch.project", json!({"refs": [{"body": "Body1", "face": [15, 0, 15]}], "projection_link": true}));
+    assert_eq!(r["links"][0]["curves"].as_array().map(Vec::len), Some(4), "the rims and the sides, at once: {r}");
+    let si = inspect(&mut s);
+    let links = si["links"].as_array().unwrap();
+    assert!(links.iter().all(|l| l["lost"] != json!(true)), "{r} {si}");
+    assert_eq!(si["profiles"].as_array().unwrap().len(), 1, "{si}");
+    // Its corners, at x = ±15 and z 0 and 30 (the sketch's y may run either way along Z).
+    let mut corners: Vec<[f64; 2]> = si["points"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|p| p["link"].is_string())
+        .map(|p| [p["at"][0].as_f64().unwrap(), p["at"][1].as_f64().unwrap().abs()])
+        .collect();
+    corners.sort_by(|a, b| a[0].total_cmp(&b[0]).then(a[1].total_cmp(&b[1])));
+    corners.dedup_by(|a, b| (a[0] - b[0]).abs() < 1e-9 && (a[1] - b[1]).abs() < 1e-9);
+    assert_eq!(corners.len(), 4, "{corners:?}");
+    for (p, want) in corners.iter().zip([[-15.0, 0.0], [-15.0, 30.0], [15.0, 0.0], [15.0, 30.0]]) {
+        assert!((p[0] - want[0]).abs() < 1e-9 && (p[1] - want[1]).abs() < 1e-9, "{corners:?}");
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    let timeline = run(&mut s, "document.inspect", json!({}))["timeline"].clone();
+    assert!(timeline.as_array().unwrap().iter().all(|e| e.get("warning").is_none_or(Value::is_null)), "{timeline}");
+}
