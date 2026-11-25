@@ -2669,12 +2669,14 @@ impl Session {
         // is the one it had at the geometry the design opened with, before an edit moves it.
         whole.pin_dropped_link_names();
         let link_pins = self.dropped_link_pins(&whole);
-        let pins: Vec<(u64, Vec<String>)> = whole
+        let pins: Vec<(u64, Vec<String>, bool)> = whole
             .doc
             .features
             .iter()
-            .filter(|f| self.doc.feature(f.id).is_some_and(|mine| mine.body_names != f.body_names))
-            .map(|f| (f.id, f.body_names.clone()))
+            .filter(|f| {
+                self.doc.feature(f.id).is_some_and(|mine| mine.body_names != f.body_names || mine.pattern_names_in_order != f.pattern_names_in_order)
+            })
+            .map(|f| (f.id, f.body_names.clone(), f.pattern_names_in_order))
             .collect();
         let reserve: Vec<String> = whole.doc.reserved_body_names.difference(&self.doc.reserved_body_names).cloned().collect();
         if pins.is_empty() && reserve.is_empty() && link_pins.is_empty() {
@@ -2682,12 +2684,13 @@ impl Session {
         }
         // As `pin_body_names` stores names: the bodies keep the names they have, so no result
         // changes and none is evaluated again.
-        let renamed: Vec<u64> = pins.iter().map(|(id, _)| *id).chain(link_pins.iter().map(|(id, ..)| *id)).collect();
+        let renamed: Vec<u64> = pins.iter().map(|(id, _, _)| *id).chain(link_pins.iter().map(|(id, ..)| *id)).collect();
         let keep = self.model.pinned_prefix(&self.doc, &renamed);
         let doc = self.doc_mut();
-        for (id, names) in pins {
+        for (id, names, in_order) in pins {
             if let Some(f) = doc.feature_mut(id) {
                 f.body_names = names;
+                f.pattern_names_in_order = in_order;
             }
         }
         store_link_names(doc, link_pins);
