@@ -1042,7 +1042,8 @@ impl Body {
 
     /// Exact current planar surface for an explicitly fixed snapshot, without source lineage: the
     /// face's plane as the face faces (out of the material in a closed shell). A plane surface,
-    /// or a B-spline face the kernel finds flat ([`Body::flat_spline_face`], #14346).
+    /// or a face whose surface may be flat and the kernel finds flat ([`Body::flat_spline_face`]).
+    /// Curved kinds are never planar, so a New Sketch hover never needs the mesh for them.
     pub fn planar_face(&self, index: usize) -> Option<solidcore_record::Plane> {
         let face = self.record.faces.get(index)?;
         let (o, u, v) = match &face.surface {
@@ -1051,8 +1052,12 @@ impl Body {
                 let o = v3(*origin);
                 (o, v3(*u_point) - o, v3(*v_point) - o)
             }
-            Surface::Spline { .. } | Surface::RationalSpline { .. } => return self.flat_spline_face(index),
-            _ => return None,
+            Surface::Spline { .. } | Surface::RationalSpline { .. } | Surface::Blend { .. } | Surface::PlacedRevolution { .. } => {
+                return self.flat_spline_face(index);
+            }
+            Surface::Cylinder { .. } | Surface::Cone { .. } | Surface::Sphere { .. } | Surface::Torus { .. } | Surface::BallPatch { .. } => {
+                return None;
+            }
         };
         let v = if self.face_forward(index) { v } else { -v };
         solidcore_record::Plane::new(o, u, v)
