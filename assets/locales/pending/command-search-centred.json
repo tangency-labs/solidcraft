@@ -1,6 +1,6 @@
 {
   "en": {
-    "prefs.command_search_centred": "Open Search commands in the middle of the view",
+    "prefs.command_search_centred": "Open Search commands centered",
     "prefs.command_search_centred_note": "The search shortcut opens Search commands centered over the view instead of in the ribbon's top-right corner. Running a command or pressing Esc closes it."
   },
   "ar": {
@@ -8,7 +8,7 @@
     "prefs.command_search_centred_note": "يفتح اختصار البحث «البحث في الأوامر» في منتصف العرض بدلاً من الزاوية العلوية اليمنى للشريط. يُغلق عند تشغيل أمر أو الضغط على Esc."
   },
   "de": {
-    "prefs.command_search_centred": "Befehle suchen in der Mitte der Ansicht öffnen",
+    "prefs.command_search_centred": "Befehle suchen zentriert öffnen",
     "prefs.command_search_centred_note": "Das Tastenkürzel für die Suche öffnet Befehle suchen mittig über der Ansicht statt in der rechten oberen Ecke des Menübands. Ein gestarteter Befehl oder Esc schließt sie."
   },
   "he": {
