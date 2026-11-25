@@ -4650,7 +4650,7 @@ fn surface_groups_match_comparing_every_pair_and_preparing_can_be_cancelled() {
 fn the_chord_grid_finds_what_a_scan_of_every_chord_finds() {
     // The plate's top face: 16 circles and a square, thousands of chords.
     let def = prepare(&holed_plate(4, 10., 3., 2.), &Options::default()).unwrap();
-    let trim = &def.faces[1].trim;
+    let trim = def.faces[1].trim();
     assert!(trim.chords.len() > 1000);
     let (lo, hi) = (trim.lo, trim.hi);
     let mut checked = [0usize; 2];
@@ -5454,6 +5454,421 @@ fn a_traced_rim_is_drawn_on_the_true_intersection_or_refused() {
         ),
         "{off:?}"
     );
+}
+
+/// The visible and hidden stretches of edge `edge` of placement `placement` seen from `eye`,
+/// sampled every `step` millimetres, with every placement's faces hiding.
+fn seen_pieces(
+    defs: &[Prepared],
+    scene: &[Placement],
+    placement: usize,
+    edge: usize,
+    eye: occlusion::Eye,
+    step: f64,
+) -> occlusion::EdgePieces {
+    let defs: Vec<&Prepared> = defs.iter().collect();
+    let occluders =
+        occlusion::Occluders::new(&defs, scene, &vec![true; scene.len()], &never).unwrap();
+    occluders
+        .edge_pieces(placement, edge, eye, &|_| step, &never)
+        .unwrap()
+}
+
+/// Total parameter length of some ranges.
+fn spanned(ranges: &[[f64; 2]]) -> f64 {
+    ranges.iter().map(|r| r[1] - r[0]).sum()
+}
+
+#[test]
+fn a_box_in_front_hides_the_middle_of_an_edge_from_an_interactive_view_and_is_seen_whole() {
+    let back = prepare(&cuboid([0.; 3], [1.; 3]), &Options::default()).unwrap();
+    let front = prepare(
+        &cuboid([0.5, -2., 0.25], [1.5, -1., 0.75]),
+        &Options::default(),
+    )
+    .unwrap();
+    let defs = [back, front];
+    let scene = [identity(0, [0.; 3]), identity(1, [0.; 3])];
+    // Looking along +y, from far away and from an eye in line with the edge.
+    // From the eye the front box's near face (y = -2, z from 0.25 to 0.75) covers 50/48 as much
+    // of the edge (at y = 0) about the eye's height.
+    let wide = 0.25 * 50. / 48.;
+    for (eye, half) in [
+        (occlusion::Eye::Along(Vec3::new(0., 1., 0.)), 0.25),
+        (occlusion::Eye::At(Vec3::new(1., -50., 0.5)), wide),
+    ] {
+        // Edge 9 of the back box runs from (1,0,0) to (1,0,1): its parameter is z.
+        let back = seen_pieces(&defs, &scene, 0, 9, eye, 0.01);
+        assert_eq!(back.hidden.len(), 1, "{eye:?}: {back:?}");
+        let [a, b] = back.hidden[0];
+        assert!(
+            (a - (0.5 - half)).abs() < 1e-3 && (b - (0.5 + half)).abs() < 1e-3,
+            "{eye:?}: {back:?}"
+        );
+        assert!(
+            back.visible.len() == 2 && (spanned(&back.visible) - (1. - 2. * half)).abs() < 1e-3,
+            "{eye:?}: {back:?}"
+        );
+        // The front box's edges on its face toward the viewer (y = -2): 0, 2, 8 and 9.
+        for edge in [0, 2, 8, 9] {
+            let front = seen_pieces(&defs, &scene, 1, edge, eye, 0.01);
+            assert!(
+                front.hidden.is_empty() && front.visible == vec![[0., 1.]],
+                "{eye:?}, edge {edge}: {front:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn an_edge_just_under_another_bodys_face_is_hidden() {
+    // A part whose top lies 0.4 mm under a wider panel, seen from above.
+    let part = prepare(&cuboid([0., 0., 0.], [10., 10., 1.]), &Options::default()).unwrap();
+    let panel = prepare(
+        &cuboid([-5., -5., 1.4], [15., 15., 2.4]),
+        &Options::default(),
+    )
+    .unwrap();
+    let defs = [part, panel];
+    let scene = [identity(0, [0.; 3]), identity(1, [0.; 3])];
+    let d = Vec3::new(0.3, 0.2, -1.);
+    // The part's edges round its top face: 2, 3, 6 and 7.
+    for edge in [2, 3, 6, 7] {
+        let got = seen_pieces(&defs, &scene, 0, edge, occlusion::Eye::Along(d), 0.05);
+        assert!(
+            got.visible.is_empty() && got.hidden == vec![[0., 1.]],
+            "edge {edge}: {got:?}"
+        );
+    }
+    // Without the panel they are seen.
+    let alone = seen_pieces(
+        &defs[..1],
+        &scene[..1],
+        0,
+        3,
+        occlusion::Eye::Along(d),
+        0.05,
+    );
+    assert!(alone.hidden.is_empty(), "{alone:?}");
+}
+
+#[test]
+fn an_edge_behind_a_small_round_face_of_its_own_body_is_hidden_to_its_silhouette() {
+    // A rod of radius 2 seen from slightly above: its own exact round side hides the far half of
+    // its bottom circle (edge 0, angle 0 to 2π, the far half from 0 to π), however finely the
+    // side would be drawn.
+    let rod = prepare(&cylinder(2., 10.), &Options::default()).unwrap();
+    let defs = [rod];
+    let scene = [identity(0, [0.; 3])];
+    let pi = std::f64::consts::PI;
+    for eye in [
+        occlusion::Eye::Along(Vec3::new(0., 1., -0.3)),
+        occlusion::Eye::At(Vec3::new(0., -200., 60.)),
+    ] {
+        let got = seen_pieces(&defs, &scene, 0, 0, eye, 0.02);
+        assert_eq!(got.hidden.len(), 1, "{eye:?}: {got:?}");
+        let [a, b] = got.hidden[0];
+        // Near the silhouette the side is less than the touch tolerance above the circle.
+        assert!(
+            a > 0. && a < 0.05 * pi && b < pi && b > 0.95 * pi,
+            "{eye:?}: {got:?}"
+        );
+        assert!(spanned(&got.visible) > pi, "{eye:?}: {got:?}");
+    }
+}
+
+#[test]
+fn an_edge_resting_on_another_bodys_face_is_seen() {
+    // A small block sunk 5 µm into a plate, seen from above at an angle: its bottom edges toward
+    // the viewer lie on the plate's top face and are drawn; those behind it are hidden by the
+    // block itself.
+    let plate = prepare(
+        &cuboid([-10., -10., -1.], [10., 10., 0.]),
+        &Options::default(),
+    )
+    .unwrap();
+    let block = prepare(
+        &cuboid([0., 0., -0.005], [2., 2., 1.995]),
+        &Options::default(),
+    )
+    .unwrap();
+    let defs = [plate, block];
+    let scene = [identity(0, [0.; 3]), identity(1, [0.; 3])];
+    let d = Vec3::new(1., 1., -1.);
+    for eye in [
+        occlusion::Eye::Along(d),
+        occlusion::Eye::At(Vec3::new(-40., -40., 40.)),
+    ] {
+        // Bottom edges 0 (y = 0) and 4 (x = 0) face the viewer.
+        for edge in [0, 4] {
+            let got = seen_pieces(&defs, &scene, 1, edge, eye, 0.01);
+            assert!(
+                got.hidden.is_empty() && got.visible == vec![[0., 1.]],
+                "{eye:?}, edge {edge}: {got:?}"
+            );
+        }
+        // Bottom edges 1 (y = 2) and 5 (x = 2) are behind the block, all but their near ends.
+        for edge in [1, 5] {
+            let got = seen_pieces(&defs, &scene, 1, edge, eye, 0.01);
+            assert!(spanned(&got.hidden) > 0.95, "{eye:?}, edge {edge}: {got:?}");
+        }
+    }
+}
+
+#[test]
+fn an_edge_just_behind_a_round_seen_edge_on_is_hidden() {
+    // A rod of radius 2 seen from the side (along +y) and a block 3 mm behind it whose edge lies
+    // a hundredth of a micrometre inside the rod's outline: the rod's side is seen almost edge on
+    // there, so the edge is barely under the side's tangent plane, but it is 1.6 mm from the side
+    // itself and hidden by it along its whole length.
+    let rod = prepare(&cylinder(2., 10.), &Options::default()).unwrap();
+    let block = prepare(
+        &cuboid([-1.99999, 3., 1.], [-0.99999, 4., 9.]),
+        &Options::default(),
+    )
+    .unwrap();
+    let defs = [rod, block];
+    let scene = [identity(0, [0.; 3]), identity(1, [0.; 3])];
+    for eye in [
+        occlusion::Eye::Along(Vec3::new(0., 1., 0.)),
+        occlusion::Eye::At(Vec3::new(-1.99999, -400., 5.)),
+    ] {
+        // Edge 8 of the block joins corners 0 (-1.99999, 3, 1) and 4 (-1.99999, 3, 9).
+        let got = seen_pieces(&defs, &scene, 1, 8, eye, 0.05);
+        assert!(
+            got.visible.is_empty() && got.hidden == vec![[0., 1.]],
+            "{eye:?}: {got:?}"
+        );
+    }
+}
+
+#[test]
+fn an_edge_shows_through_a_slit_narrower_than_its_samples_between_two_bodies() {
+    // An edge 10 mm long behind two blocks with a 0.2 mm slit between them (x from 5.6 to 5.8),
+    // sampled every millimetre: no sample falls in the slit, but its neighbours are hidden by
+    // different faces, so the slit is looked for and the edge shows through it.
+    let back = prepare(&cuboid([0., 0., 0.], [10., 1., 1.]), &Options::default()).unwrap();
+    let left = prepare(
+        &cuboid([-1., -3., -1.], [5.6, -2., 2.]),
+        &Options::default(),
+    )
+    .unwrap();
+    let right = prepare(
+        &cuboid([5.8, -3., -1.], [11., -2., 2.]),
+        &Options::default(),
+    )
+    .unwrap();
+    let defs = [back, left, right];
+    let scene = [
+        identity(0, [0.; 3]),
+        identity(1, [0.; 3]),
+        identity(2, [0.; 3]),
+    ];
+    // Edge 0 of the back block runs from (0,0,0) to (10,0,0): its parameter is x / 10.
+    let got = seen_pieces(
+        &defs,
+        &scene,
+        0,
+        0,
+        occlusion::Eye::Along(Vec3::new(0., 1., 0.)),
+        1.0,
+    );
+    assert_eq!(got.visible.len(), 1, "{got:?}");
+    let [a, b] = got.visible[0];
+    assert!(
+        (a - 0.56).abs() < 0.003 && (b - 0.58).abs() < 0.003,
+        "{got:?}"
+    );
+}
+
+/// The spline ray test looks for hits only in the grid cells whose grown boxes the ray crosses,
+/// and starts Newton where the ray meets a cell's corners. Against crossings found by bisection
+/// along rays straight down, slanted and nearly grazing over a wavy quintic patch, it misses none,
+/// repeats none, and every hit it gives lies on the patch where the ray is.
+#[test]
+fn the_spline_ray_test_finds_every_crossing_of_a_wavy_patch() {
+    // A quintic Bezier patch over x, y in [-20, 20] (x and y even in u and v), waving by 6 mm.
+    let n = 6;
+    let points: Vec<Vec<[f64; 3]>> = (0..n)
+        .map(|i| {
+            (0..n)
+                .map(|j| {
+                    let (x, y) = (-20. + 8. * i as f64, -20. + 8. * j as f64);
+                    [x, y, 6. * (1.3 * i as f64).sin() * (1.1 * j as f64).cos()]
+                })
+                .collect()
+        })
+        .collect();
+    let knots = [vec![0.; n], vec![1.; n]].concat();
+    let label = Surface::Spline {
+        u_knots: knots.clone(),
+        v_knots: knots,
+        points,
+    }
+    .label();
+    let s = S3::of_face(&k::Face {
+        surface: label,
+        nurbs: None,
+        domain: [[0., 1.]; 2],
+        loops: Vec::new(),
+    })
+    .unwrap();
+    // How far a point is above the patch, or None off it.
+    let above = |p: Vec3| {
+        let (u, v) = ((p.x + 20.) / 40., (p.y + 20.) / 40.);
+        ((0. ..=1.).contains(&u) && (0. ..=1.).contains(&v)).then(|| p.z - s.point([u, v]).z)
+    };
+    let (mut rays, mut crossings) = (0, 0);
+    for slope in [0., 0.4, 1.5, 5.0] {
+        for turn in 0..6 {
+            let a = f64::from(turn) * 1.05 + 0.2;
+            let Some(d) = Vec3::new(slope * a.cos(), slope * a.sin(), -1.).normalized() else {
+                continue;
+            };
+            for cx in [-17.5, -9.3, -0.7, 6.1, 14.9] {
+                for cy in [-16.2, -5.5, 2.3, 11.8, 18.6] {
+                    let p0 = Vec3::new(cx, cy, 0.) - d * 40.;
+                    let at = |lam: f64| p0 + d * lam;
+                    let mut hits = Vec::new();
+                    s.ray(p0, d, [0., 400.], &mut hits);
+                    for (k, h) in hits.iter().enumerate() {
+                        assert!(
+                            s.point(h.uv).dist(at(h.lam)) < 1e-6,
+                            "a hit off the patch: {h:?} along {d:?} from {p0:?}"
+                        );
+                        assert!(
+                            !hits
+                                .iter()
+                                .take(k)
+                                .any(|g| (g.lam - h.lam).abs() <= 1e-7 * (1. + h.lam)),
+                            "a repeated hit: {hits:?}"
+                        );
+                    }
+                    // Crossings by bisection between samples 0.05 mm apart along the ray, leaving
+                    // out rays that cross at a grazing angle or at the patch's border, where a
+                    // crossing is a matter of rounding.
+                    let step = 0.05;
+                    let (mut prev, mut roots, mut unclear) =
+                        (None::<(f64, f64)>, Vec::new(), false);
+                    for k in 0..=4_000 {
+                        let lam = f64::from(k) * step;
+                        let Some(v) = above(at(lam)) else {
+                            prev = None;
+                            continue;
+                        };
+                        if let Some((l0, v0)) = prev {
+                            if v0.signum() != v.signum() {
+                                let (mut lo, mut hi) = (l0, lam);
+                                for _ in 0..60 {
+                                    let mid = 0.5 * (lo + hi);
+                                    if above(at(mid)).is_some_and(|m| m.signum() == v0.signum()) {
+                                        lo = mid;
+                                    } else {
+                                        hi = mid;
+                                    }
+                                }
+                                let p = at(lo);
+                                unclear |= (v - v0).abs() / step < 0.05
+                                    || 20. - p.x.abs().max(p.y.abs()) < 1e-3;
+                                roots.push(lo);
+                            }
+                        }
+                        prev = Some((lam, v));
+                    }
+                    if unclear {
+                        continue;
+                    }
+                    rays += 1;
+                    for r in roots {
+                        crossings += 1;
+                        assert!(
+                            hits.iter().any(|h| (h.lam - r).abs() < 1e-6 * (1. + r)),
+                            "the crossing at {r} along {d:?} from {p0:?} is missed: {hits:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        rays > 500 && crossings > 500,
+        "{rays} rays, {crossings} crossings checked"
+    );
+}
+
+#[test]
+fn a_plane_face_hides_a_straight_edge_whole_at_once_but_not_across_its_hole() {
+    // A 10 mm plate 1 mm thick with a hole of radius 3 at (5, 5), seen from above, over two bars
+    // 2 mm below it whose top edges (edge 3, along x from 1 to 9) lie under the plate.
+    let plate = prepare(&holed_plate(1, 10., 3., 1.), &Options::default()).unwrap();
+    let solid = prepare(&cuboid([1., 0., -3.], [9., 1., -2.]), &Options::default()).unwrap();
+    let holed = prepare(&cuboid([1., 4., -3.], [9., 5., -2.]), &Options::default()).unwrap();
+    let defs = [plate, solid, holed];
+    let scene = [
+        identity(0, [0.; 3]),
+        identity(1, [0.; 3]),
+        identity(2, [0.; 3]),
+    ];
+    for eye in [
+        occlusion::Eye::Along(Vec3::new(0., 0., -1.)),
+        occlusion::Eye::At(Vec3::new(5., 3., 400.)),
+    ] {
+        // Under the plate away from the hole (y = 1): hidden whole, found from a few rays.
+        let under = seen_pieces(&defs, &scene, 1, 3, eye, 0.05);
+        assert!(
+            under.visible.is_empty() && under.hidden == vec![[0., 1.]],
+            "{eye:?}: {under:?}"
+        );
+        assert!(under.covered > 0 && under.rays < 16, "{eye:?}: {under:?}");
+        // Under the hole (y = 5): its ends are hidden by the same face, yet it shows through the
+        // hole, from x = 2 to 8 (2 ± a hair seen from the eye), and nothing is covered across it.
+        let across = seen_pieces(&defs, &scene, 2, 3, eye, 0.05);
+        assert_eq!(across.visible.len(), 1, "{eye:?}: {across:?}");
+        let [a, b] = across.visible[0];
+        assert!(
+            (a - 0.125).abs() < 0.01 && (b - 0.875).abs() < 0.01,
+            "{eye:?}: {across:?}"
+        );
+    }
+}
+
+#[test]
+fn a_body_prepared_lazily_hides_edges_exactly_as_one_prepared_whole() {
+    // The holed plate over a bar, and the rod: plane, cylinder and holed faces, their trims built
+    // up front or on the first ray that reaches them.
+    let lazy = Options {
+        lazy: true,
+        ..Options::default()
+    };
+    let bodies = [
+        holed_plate(1, 10., 3., 1.),
+        cuboid([1., 4., -3.], [9., 5., -2.]),
+        cylinder(2., 10.),
+    ];
+    let eager: Vec<Prepared> = bodies
+        .iter()
+        .map(|b| prepare(b, &Options::default()).unwrap())
+        .collect();
+    let later: Vec<Prepared> = bodies.iter().map(|b| prepare(b, &lazy).unwrap()).collect();
+    let scene = [
+        identity(0, [0.; 3]),
+        identity(1, [0.; 3]),
+        identity(2, [20., 0., 0.]),
+    ];
+    for eye in [
+        occlusion::Eye::Along(Vec3::new(0., 0.3, -1.)),
+        occlusion::Eye::At(Vec3::new(5., -60., 80.)),
+    ] {
+        for (placement, edge) in [(1, 3), (2, 0), (2, 1)] {
+            let a = seen_pieces(&eager, &scene, placement, edge, eye, 0.05);
+            let b = seen_pieces(&later, &scene, placement, edge, eye, 0.05);
+            assert_eq!(
+                (a.visible, a.hidden),
+                (b.visible, b.hidden),
+                "{eye:?}, placement {placement} edge {edge}"
+            );
+        }
+    }
 }
 
 /// Turned `a` radians about Z, standing at `t`.

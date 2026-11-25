@@ -260,6 +260,50 @@ fn lift(x: f64, near: f64, p: Option<f64>) -> f64 {
     }
 }
 
+/// The box of a face's boundary sampled as [`build`] samples it, without mapping it into the
+/// surface's chart (which is what building a trim costs).
+pub(crate) fn boundary_box(face: &Face, edges: &[C3], per_break: usize) -> (Vec3, Vec3) {
+    let (mut lo, mut hi) = (
+        Vec3::new(f64::MAX, f64::MAX, f64::MAX),
+        Vec3::new(f64::MIN, f64::MIN, f64::MIN),
+    );
+    for u in uses(face) {
+        let Some(c) = edges.get(u.edge as usize) else {
+            continue;
+        };
+        let b = c.breaks();
+        for w in b.windows(2) {
+            let (Some(t0), Some(t1)) = (w.first(), w.get(1)) else {
+                continue;
+            };
+            for i in 0..=per_break {
+                let p = c.at(t0 + (t1 - t0) * i as f64 / per_break as f64);
+                lo = lo.min(p);
+                hi = hi.max(p);
+            }
+        }
+    }
+    (lo, hi)
+}
+
+impl Trim {
+    /// A trim that classifies nothing, for `why`.
+    pub(crate) fn refused(why: &'static str) -> Trim {
+        Trim {
+            segs: Vec::new(),
+            period: [None, None],
+            inside: None,
+            chords: Vec::new(),
+            chord_error: 0.,
+            lo: Vec3::new(f64::MAX, f64::MAX, f64::MAX),
+            hi: Vec3::new(f64::MIN, f64::MIN, f64::MIN),
+            unsupported: Some(why),
+            index: None,
+            grid: None,
+        }
+    }
+}
+
 pub(crate) fn build(face: &Face, edges: &[C3], surface: &S3, per_break: usize) -> Trim {
     let period = surface.periods();
     let mut segs = Vec::new();
@@ -521,6 +565,58 @@ impl Trim {
         }))
     }
 
+    /// Whether the 3D segment `a`–`b` stays farther than `tol` from every boundary chord (both on
+    /// the face's surface: with one end inside, the whole segment then is). `None` when the
+    /// segment crosses more of the chord grid than is worth walking.
+    pub fn segment_clear(&self, a: Vec3, b: Vec3, tol: f64) -> Option<bool> {
+        let Some(grid) = self.grid.as_ref() else {
+            return Some(
+                self.chords
+                    .iter()
+                    .all(|(c, d)| segment_distance(a, b, *c, *d) > tol),
+            );
+        };
+        // The chords in the cells about the segment, step by step along it.
+        let steps = (a.dist(b) / grid.cell).ceil();
+        if !(steps <= SEGMENT_STEPS) {
+            return None;
+        }
+        let steps = (steps as usize).max(1);
+        let w = tol * (1. + 1e-6);
+        let t = Vec3::new(w, w, w);
+        let mut near: Vec<u32> = Vec::new();
+        for k in 0..steps {
+            let (p, q) = (
+                a.lerp(b, k as f64 / steps as f64),
+                a.lerp(b, (k + 1) as f64 / steps as f64),
+            );
+            let (c0, c1) = (grid.cell_of(p.min(q) - t), grid.cell_of(p.max(q) + t));
+            for x in c0[0]..=c1[0] {
+                for y in c0[1]..=c1[1] {
+                    for z in c0[2]..=c1[2] {
+                        let key = grid.key([x, y, z]);
+                        let first = grid.entries.partition_point(|e| e.0 < key);
+                        near.extend(
+                            grid.entries
+                                .get(first..)
+                                .unwrap_or_default()
+                                .iter()
+                                .take_while(|e| e.0 == key)
+                                .map(|e| e.1),
+                        );
+                    }
+                }
+            }
+        }
+        near.sort_unstable();
+        near.dedup();
+        Some(
+            near.iter()
+                .filter_map(|i| self.chords.get(*i as usize))
+                .all(|(c, d)| segment_distance(a, b, *c, *d) > tol),
+        )
+    }
+
     /// Whether a 3D point is within `tol` of the sampled boundary: the boundary's box first,
     /// then the chords around the point (all of them for a short boundary or a wide `tol`).
     pub fn near(&self, p: Vec3, tol: f64) -> bool {
@@ -540,4 +636,43 @@ impl Trim {
                 .any(|(a, b)| p.dist_to_segment(*a, *b) <= tol),
         }
     }
+}
+
+/// Most grid cells' lengths [`Trim::segment_clear`] walks along a segment.
+const SEGMENT_STEPS: f64 = 1024.;
+
+/// The distance between segments `p1`–`q1` and `p2`–`q2` (closest points by clamping each
+/// parameter in turn, as in Ericson's Real-Time Collision Detection, 5.1.9).
+fn segment_distance(p1: Vec3, q1: Vec3, p2: Vec3, q2: Vec3) -> f64 {
+    let (d1, d2, r) = (q1 - p1, q2 - p2, p1 - p2);
+    let (a, e, f) = (d1.dot(d1), d2.dot(d2), d2.dot(r));
+    let tiny = 1e-300;
+    let (s, t) = if a <= tiny && e <= tiny {
+        (0., 0.)
+    } else if a <= tiny {
+        (0., (f / e).clamp(0., 1.))
+    } else {
+        let c = d1.dot(r);
+        if e <= tiny {
+            ((-c / a).clamp(0., 1.), 0.)
+        } else {
+            let b = d1.dot(d2);
+            let den = a * e - b * b;
+            let mut s = if den > tiny {
+                ((b * f - c * e) / den).clamp(0., 1.)
+            } else {
+                0.
+            };
+            let mut t = (b * s + f) / e;
+            if t < 0. {
+                t = 0.;
+                s = (-c / a).clamp(0., 1.);
+            } else if t > 1. {
+                t = 1.;
+                s = ((b - c) / a).clamp(0., 1.);
+            }
+            (s, t)
+        }
+    };
+    (p1 + d1 * s).dist(p2 + d2 * t)
 }

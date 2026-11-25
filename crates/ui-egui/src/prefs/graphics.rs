@@ -158,6 +158,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::scenario::publish_target("prefs:dark_parts_shading", response.rect);
             let response = setting::viewport_material_finish(app, ui).backing_on_hover_text(app.tr("prefs.viewport_material_finish_help"));
             crate::scenario::publish_target("prefs:viewport_material_finish", response.rect);
+            let response = setting::exact_hidden_edges(app, ui).backing_on_hover_text(app.tr("prefs.exact_hidden_edges_help"));
+            crate::scenario::publish_target("prefs:exact_hidden_edges", response.rect);
         });
         ui_kit::settings_section(ui, "current_view", app.tr("prefs.graphics_page.current_view"), |ui| {
             ui_kit::settings_badge(ui, app.tr("prefs.graphics_page.view_bar"), false);

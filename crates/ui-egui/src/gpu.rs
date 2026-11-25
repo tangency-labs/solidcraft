@@ -8,10 +8,10 @@ use std::sync::{Arc, Mutex};
 
 use egui_wgpu::wgpu;
 pub use solidcraft_viewport_gpu::view::{
-    AccessMap, BlockBuilder, BlockBytes, BlockTris, DrawStats, DrawStatsHandle, Frame, GpuImage, GpuScene, GpuTarget, INSTANCE_SIZE, InstanceLook,
-    InstancedMesh, LINE_SIZE, LOD_PX, LitEdges, MAX_MOTIONS, MAX_PALETTE, Material, MotionRows, Motions, MovingLayer, PBR_SIZE, Palette,
-    PaletteIndex, PlannedBody, Renderer, SHARED_SIZE, SceneBlock, SceneSlot, SharedEdges, SharedTris, TRI_SIZE, TriClass, UNMOVED_SLOT, UploadError,
-    extend_runs, level_for, lifted_width, lit_line_style, placement_scale, runs_within, supersampled_size,
+    AccessMap, BlockBuilder, BlockBytes, BlockTris, DrawStats, DrawStatsHandle, EdgeLayer, Frame, GpuImage, GpuScene, GpuTarget, INSTANCE_SIZE,
+    InstanceLook, InstancedMesh, LINE_SIZE, LOD_PX, LitEdges, MAX_MOTIONS, MAX_PALETTE, Material, MotionRows, Motions, MovingLayer, PBR_SIZE,
+    Palette, PaletteIndex, PlannedBody, Renderer, ReplacedLines, SHARED_SIZE, SceneBlock, SceneSlot, SharedEdges, SharedTris, TRI_SIZE, TriClass,
+    UNMOVED_SLOT, UploadError, extend_runs, level_for, lifted_width, lit_line_style, placement_scale, runs_within, supersampled_size,
 };
 
 /// The part of a picture (as texture coordinates) that `rect` shows in a window `window`: the
@@ -777,6 +777,8 @@ fn offscreen(
         selection_tint: [0.0; 3],
         hatch: Default::default(),
         moving: moving.map(|(scene, transform)| MovingLayer { key: 1, slot: Arc::new(Mutex::new(Some(scene))), transform }),
+        edge_layer: None,
+        edge_layer_fade: 1.0,
         motions: Default::default(),
         ground: None,
     });
@@ -1166,6 +1168,9 @@ mod tests {
             // Refinement uses wall time and can change the scene between fixed-time frames.
             // These fixtures check blur caching against stable display geometry.
             app.viewport.suspend_refinement = true;
+            // The exact edge layer is worked out off the thread once the view stands still and
+            // fades in over wall time, which changes the source between frames too.
+            app.preferences.exact_hidden_edges = false;
             app.cam.distance = 110.0;
             app.cam.target = solidcore_record::Vec3::new(20.0, 15.0, 12.5);
             let window = GpuTarget { format, depth: None, samples: 1, tess: false, oit: false, edges: false };

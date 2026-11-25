@@ -1,0 +1,34 @@
+{
+  "en": {
+    "prefs.exact_hidden_edges": "Exact hidden edges",
+    "prefs.exact_hidden_edges_help": "In the shaded views with edges, once the view stands still, which edges are behind faces is worked out from the exact faces, so no hidden edge shows through. Off: edges are drawn as before"
+  },
+  "ar": {
+    "prefs.exact_hidden_edges": "حواف مخفية دقيقة",
+    "prefs.exact_hidden_edges_help": "في العروض المظللة مع الحواف، بعد توقف العرض، تُحدَّد الحواف الواقعة خلف الأوجه من الأوجه الدقيقة، فلا تظهر أي حافة مخفية. عند الإيقاف: تُرسم الحواف كما كان من قبل"
+  },
+  "de": {
+    "prefs.exact_hidden_edges": "Exakt verdeckte Kanten",
+    "prefs.exact_hidden_edges_help": "In den schattierten Ansichten mit Kanten wird, sobald die Ansicht stillsteht, aus den exakten Flächen bestimmt, welche Kanten hinter Flächen liegen, sodass keine verdeckte Kante durchscheint. Aus: Kanten werden wie bisher gezeichnet"
+  },
+  "he": {
+    "prefs.exact_hidden_edges": "קצוות נסתרים מדויקים",
+    "prefs.exact_hidden_edges_help": "בתצוגות המוצללות עם קצוות, כשהתצוגה עומדת במקום, נקבע מהפאות המדויקות אילו קצוות נמצאים מאחורי פאות, כך שאף קצה נסתר לא נראה דרכן. כבוי: הקצוות משורטטים כמו קודם"
+  },
+  "ja": {
+    "prefs.exact_hidden_edges": "正確な隠れエッジ",
+    "prefs.exact_hidden_edges_help": "エッジ付きシェーディング表示で、ビューが静止すると、どのエッジが面の裏にあるかを正確な面から求め、隠れたエッジが透けて見えないようにします。オフ：従来どおりエッジを描画します"
+  },
+  "ko": {
+    "prefs.exact_hidden_edges": "정확한 숨은 모서리",
+    "prefs.exact_hidden_edges_help": "모서리가 있는 음영 보기에서 보기가 멈추면 어떤 모서리가 면 뒤에 있는지 정확한 면으로 계산하여 숨은 모서리가 비쳐 보이지 않게 합니다. 끄기: 이전처럼 모서리를 그립니다"
+  },
+  "vi": {
+    "prefs.exact_hidden_edges": "Cạnh khuất chính xác",
+    "prefs.exact_hidden_edges_help": "Trong các kiểu xem tô bóng có cạnh, khi khung nhìn đứng yên, các cạnh nằm sau mặt được xác định từ các mặt chính xác, nên không cạnh khuất nào lộ ra. Tắt: các cạnh được vẽ như trước"
+  },
+  "zh": {
+    "prefs.exact_hidden_edges": "精确隐藏边",
+    "prefs.exact_hidden_edges_help": "在带边线的着色视图中，视图静止后，根据精确面确定哪些边位于面后方，使隐藏的边不会透出。关闭：按以前的方式绘制边"
+  }
+}

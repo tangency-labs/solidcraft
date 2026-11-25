@@ -742,6 +742,21 @@ fn a_pbr_appearance_reaches_the_model_palette_and_the_finish_preference_the_shad
     assert_eq!(sky(&app), [0.0, 0.0, 1.0, 0.0], "off: shaded flat, as before");
 }
 
+/// Exact hidden edges are on by default, and older preferences get them too (a changed default).
+/// The preference turns them off by name, which leaves the edges to the GPU's depth test alone, as
+/// before.
+#[test]
+fn exact_hidden_edges_follow_their_preference() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    assert!(app.preferences.exact_hidden_edges, "on by default");
+    assert_eq!(crate::exact_edges::enabled(&app.preferences), !cfg!(target_arch = "wasm32"));
+    let old: crate::prefs::Prefs = serde_json::from_value(json!({"msaa": 4})).unwrap();
+    assert!(old.exact_hidden_edges, "older preferences get them too (a changed default)");
+    let out = crate::prefs::set(&mut app, &json!({"exact_hidden_edges": false})).unwrap();
+    assert_eq!(out["exact_hidden_edges"], false);
+    assert!(!crate::exact_edges::enabled(&app.preferences), "off: edges drawn as before");
+}
+
 /// A part holding 40 x 20 x 10 blocks `Block` (from rectangle `Base`) and `Block2` (at x = 60),
 /// and sketch Outline on a construction plane 30 off XZ projecting both front faces beside a circle;
 /// then the block's front side drawn again, so its face takes a new name and Outline fails for
