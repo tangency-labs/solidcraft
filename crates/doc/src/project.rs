@@ -3035,9 +3035,9 @@ fn extruded_along(rec: &solidcore_record::brep::Brep, f: usize, n: Vec3) -> bool
 /// the kernel cannot read exactly here: the mesh's outline is traced
 /// then ([`silhouette`]).
 ///
-/// [`hlr::silhouettes`]: solidcraft_geom::hlr::silhouettes
+/// [`hlr::silhouettes`]: solidcraft_kernel::hlr::silhouettes
 fn exact_silhouette_traced(body: &crate::ModelBody, plane: &Plane) -> Option<Vec<LinkGeom>> {
-    use solidcraft_geom::hlr;
+    use solidcraft_kernel::hlr;
     if body.body.is_mesh() {
         return None;
     }
@@ -3140,7 +3140,7 @@ fn piece_ends(g: &LinkGeom) -> Option<[Vec2; 2]> {
 /// this face's edges nowhere. `geom` as it is when it has no open end, the face is planar or
 /// meshed, or the kernel cannot trace its silhouette exactly.
 fn closed_by_silhouettes(body: &crate::ModelBody, plane: &Plane, face: usize, geom: Vec<LinkGeom>) -> Vec<LinkGeom> {
-    use solidcraft_geom::hlr;
+    use solidcraft_kernel::hlr;
     let size = body.body.size().max(1e-9);
     let tol = size * 1e-6;
     let ends: Vec<Vec2> = geom.iter().filter_map(piece_ends).flatten().collect();

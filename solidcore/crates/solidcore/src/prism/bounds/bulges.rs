@@ -6,9 +6,9 @@ use crate::geom::certified::next_up;
 use crate::math::Vec2;
 use crate::prism::recognition::RecognitionVector;
 
-use crate::prism::path_export::{PathRefusal, Vertex, MAX_PATH_ITEMS};
-type DxfVertex = Vertex<Vec2>;
-use super::Bounds as DxfGeometryBounds;
+use crate::prism::arc_conversion::{PathRefusal, Vertex, MAX_PATH_ITEMS};
+type Vertex2 = Vertex<Vec2>;
+use super::Bounds;
 type Result<T> = std::result::Result<T, PathRefusal>;
 
 const MAX_WORK: usize = 64 << 20;
@@ -145,7 +145,7 @@ impl Interval {
     }
 }
 
-fn supporting_arc(from: DxfVertex, to: Vec2) -> Result<DxfGeometryBounds> {
+fn supporting_arc(from: Vertex2, to: Vec2) -> Result<Bounds> {
     let (x0, y0) = (Interval::exact(from.at.x)?, Interval::exact(from.at.y)?);
     let (x1, y1) = (Interval::exact(to.x)?, Interval::exact(to.y)?);
     let b = Interval::exact(from.bulge)?;
@@ -171,14 +171,14 @@ fn supporting_arc(from: DxfVertex, to: Vec2) -> Result<DxfGeometryBounds> {
     let radius = Interval::exact(radius)?;
     let x = cx.sub(radius)?.hull(cx.add(radius)?)?;
     let y = cy.sub(radius)?.hull(cy.add(radius)?)?;
-    DxfGeometryBounds::new(Vec2::new(x.lo, y.lo), Vec2::new(x.hi, y.hi))
+    Bounds::new(Vec2::new(x.lo, y.lo), Vec2::new(x.hi, y.hi))
 }
 
-fn edge(from: DxfVertex, to: Vec2) -> Result<DxfGeometryBounds> {
+fn edge(from: Vertex2, to: Vec2) -> Result<Bounds> {
     if from.at == to && from.bulge != 0.0 {
         return Err(invalid("zero chord cannot carry a nonzero bulge"));
     }
-    let endpoints = DxfGeometryBounds::new(
+    let endpoints = Bounds::new(
         Vec2::new(from.at.x.min(to.x), from.at.y.min(to.y)),
         Vec2::new(from.at.x.max(to.x), from.at.y.max(to.y)),
     )?;
@@ -191,8 +191,8 @@ fn edge(from: DxfVertex, to: Vec2) -> Result<DxfGeometryBounds> {
     Ok(union(endpoints, support))
 }
 
-fn union(a: DxfGeometryBounds, b: DxfGeometryBounds) -> DxfGeometryBounds {
-    DxfGeometryBounds {
+fn union(a: Bounds, b: Bounds) -> Bounds {
+    Bounds {
         min: Vec2::new(a.min.x.min(b.min.x), a.min.y.min(b.min.y)),
         max: Vec2::new(a.max.x.max(b.max.x), a.max.y.max(b.max.y)),
     }
@@ -204,11 +204,11 @@ fn union(a: DxfGeometryBounds, b: DxfGeometryBounds) -> DxfGeometryBounds {
 /// cost cumulatively across the file; passing a fresh per-entity cap is not a
 /// whole-file budget. No hidden caller or model/variant adoption is assumed.
 pub fn bounds(
-    vertices: &[DxfVertex],
+    vertices: &[Vertex2],
     closed: bool,
     max_vertices: usize,
     max_work: usize,
-) -> Result<DxfGeometryBounds> {
+) -> Result<Bounds> {
     let count = vertices.len();
     if !(2..=max_vertices.min(MAX_PATH_ITEMS)).contains(&count) {
         return Err(invalid(
