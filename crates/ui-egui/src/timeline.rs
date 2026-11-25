@@ -292,6 +292,19 @@ impl TimelineKind {
     }
 }
 
+/// What an Edit Profile Sketch button or menu entry says on hover: the sketch it opens, by the
+/// name the Browser shows it under (#20405).
+pub(crate) fn profile_sketch_tip(app: &SolveApp, sketch: u64) -> Option<String> {
+    let name = crate::i18n::tr_name(&app.session.doc.feature(sketch)?.name);
+    Some(solidcraft_ui_text::format("browser.edit_profile_sketch_of", &[("sketch", &name)]))
+}
+
+/// An Edit Profile Sketch entry that names its sketch on hover. A reason the entry is off, set
+/// after this, takes the hover's place.
+pub(crate) fn naming_profile_sketch(app: &SolveApp, item: Item, sketch: Option<u64>) -> Item {
+    Item { tip: sketch.and_then(|sketch| profile_sketch_tip(app, sketch)), ..item }
+}
+
 /// The History menus' edit item, label and icon: a sketch says Edit Sketch, as its Browser row
 /// does (#14366); both open the same editor.
 pub(crate) fn edit_label(kind: TimelineKind) -> (&'static str, &'static str) {
@@ -653,7 +666,8 @@ pub(crate) fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
         v.extend(redefine);
     }
     if let Some(sketch) = TimelineKind::of(&feature.kind).profile_sketch() {
-        v.push(rule.one(Item::action("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({ "sketch": sketch.0 }))));
+        let item = Item::action("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({ "sketch": sketch.0 }));
+        v.push(rule.one(naming_profile_sketch(app, item, Some(sketch.0))));
         v.push(rule.one(Item::action("ui.editDimensions", "Edit Dimensions", "dimension").with(json!({ "sketch": sketch.0 }))));
     }
     // Its own message, not a literal: no catalog held the literal, so the item stayed English
