@@ -411,7 +411,7 @@ fn jumps(periods: [Option<f64>; 2], l: &[(u32, bool)], pcs: &[Curve2]) -> R<Vec<
 /// # Errors
 /// A use whose pcurve cannot be evaluated at its ends.
 fn install(periods: [Option<f64>; 2], l: &[(u32, bool)], pcs: &mut [Curve2], k: usize, again: Curve2) -> R<bool> {
-    let kept = pcs.clone();
+    let kept = pcs.to_vec();
     let was = jumps(periods, l, pcs)?;
     let Some(slot) = pcs.get_mut(k) else { return Ok(false) };
     *slot = again;
