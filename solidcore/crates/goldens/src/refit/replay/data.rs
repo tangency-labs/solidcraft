@@ -13,12 +13,18 @@
 //! are no longer the refit run of main's line and their entries are deleted; their rows
 //! are checked in `units::blend_fillet_executive_p3::end_to_end::wr459_sphere_rows`.
 //!
+//! WR-732's retirement (#18934: while the body is edited, a B-rep ray builds each face's
+//! tree against its current trims) moves the mass of those four rows as well, through the
+//! fillet's own classifications (by up to 1.7e-10 of the area); their entries stay deleted.
+//! `tests/wr493_moved_rows_are_classified` classifies their moved mass entries against a
+//! certified enclosure.
+//!
 //! The `blend.fillet_executive_p3` hashes are of those lines without the
 //! `fillet_point_step` key, which recorded the retired step latch (#18916); every other
 //! value is the line's.
 //!
 //! The drop tracer's clamped-sliver rule (a span whose clamped UV image is one point within
-//! the drop's tolerances is left out) moves the ten `sphere_diff_3cylinders` rows
+//! the drop's tolerances is left out, #21353) moves the ten `sphere_diff_3cylinders` rows
 //! (`stubs4-delete-edge` `e1`, `e2`, `e4`, `e5`, `sweep4` `e30` and `all`, `sweep5` `e29`) in
 //! their `mass_properties` only, so the hashes of the six listed here (WR-459's retirement
 //! took out the `e1`/`e4` rows) are of the refit run with that rule;

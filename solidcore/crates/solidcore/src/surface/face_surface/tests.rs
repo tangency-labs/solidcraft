@@ -1,6 +1,7 @@
 use super::*;
 use crate::eval::{Curve, Frame};
 use crate::geom::vector2d::Point2;
+use crate::surface::from_parameters::plane_axes_square;
 use core::f64::consts::PI;
 
 fn k() -> Kernel {
