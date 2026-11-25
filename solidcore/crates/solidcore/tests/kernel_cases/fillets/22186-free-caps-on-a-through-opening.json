@@ -1,0 +1,84 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b0": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b0"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  -11.0,
+                  41.0,
+                  11.0
+                ],
+                [
+                  -11.0,
+                  -11.0,
+                  11.0
+                ]
+              ],
+              "index": 49
+            }
+          ],
+          "points": [
+            [
+              -11.0,
+              15.0,
+              11.0
+            ]
+          ],
+          "tolerance": 5.002249843789051
+        },
+        "kind": "round",
+        "sizes": [
+          2.0
+        ],
+        "turn": "auto"
+      }
+    }
+  ],
+  "case": "22186-free-caps-on-a-through-opening",
+  "expected": {
+    "body_count": 1,
+    "method": "The outer body is a 58 by 40 by 37 mm cuboid plus the radius-6 offset (face slabs, twelve quarter-cylinders, eight sphere octants). Subtract a 58 by 37 by 52 mm through opening; the R2 adds a 52 mm prism of area 4-pi.",
+    "outcome": "solid",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#22186"
+    ],
+    "tolerance": {
+      "abs_mm": 0.001
+    },
+    "volume_mm3": 61817.55616269359,
+    "what": "A translated 70 by 52 by 49 mm rounded housing, cut through both openings; a single R2 leaves a free end patch at each opening."
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "records": "22186-free-caps-on-a-through-opening.bodies.json.gz",
+  "result": [
+    {
+      "made": "b1"
+    }
+  ],
+  "sources": [
+    "tangency-labs/solidcraft#22186"
+  ],
+  "ungraded": [],
+  "what": "A translated 70 by 52 by 49 mm rounded housing, cut through both openings; a single R2 leaves a free end patch at each opening.",
+  "why_not": []
+}
