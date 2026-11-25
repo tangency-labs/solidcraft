@@ -17,17 +17,21 @@
 use solidcore::boolean::api_brep::{self as sm, Boolean2dOutcome};
 use solidcore::boolean::merge::MergeOptions;
 use solidcore::boolean::operand_tolerances::matched_tolerances;
+use solidcore::error::boolean::BooleanFailure;
+use solidcore::error::topology::TopologyFailure;
+use solidcore::error::Reason;
 use solidcore::geom::a_object::BooleanOperation;
 use solidcore::kernel::Kernel;
 use solidcore::primitive::primitive_creation::p1::Boolean2d;
+use solidcore::topology::api_files::rebuild_native;
 use solidcore::topology::brep::p3::brep_copy;
 use solidcore::topology::brep::validation::update_tolerances_after_boolean;
-use solidcore::Brep;
 use solidcore::Result as KernelResult;
+use solidcore::{Brep, SolidError};
 
 use crate::body::{finish_under, Body, Contract, Expect, Outward, Proof};
 use crate::measure::{locate_points, Located};
-use crate::session::run_taking;
+use crate::session::{read_locked, run_on, run_taking};
 use crate::{Error, Result};
 
 /// Which boolean.
@@ -171,6 +175,86 @@ pub fn boolean_with(a: Body, b: Body, op: BooleanOp, contract: Contract) -> Resu
         })
     })?;
     result(d, Ok(None))
+}
+
+/// Union copies of two bodies under [`Contract::Closed`]. For a failed radial search at a
+/// shared edge between solid operands, retry in reverse order and, if needed, with rebuilt native
+/// operands. The inputs and the attributes that carry their provenance are kept.
+pub fn union_copies(a: &Body, b: &Body) -> Result<Option<Body>> {
+    let inputs = [("a", a), ("b", b)];
+    if inputs.iter().any(|(_, body)| body.is_poisoned()) {
+        return Err(Error::Internal(
+            "SmApiBoolean: the body was left unfinished by an earlier panic".into(),
+        ));
+    }
+    let d = run_on("SmApiBoolean", &inputs, |k| {
+        let ca = read_locked(a, |a| brep_copy(k, a))?;
+        let cb = read_locked(b, |b| brep_copy(k, b))?;
+        let mut operands = [(ca, Proof::default()), (cb, Proof::default())];
+        let expect = expect_of(k, &mut operands, Contract::Closed)?;
+        let [(ca, _), (cb, _)] = operands;
+        let first = union_pair(k, ca, cb, expect, Contract::Closed);
+        let Err(original) = first else { return first };
+        if !expect.solid() || !radial_sector_failure(&original) {
+            return Err(original);
+        }
+
+        // The merge copies faces into its first operand. Its radial search can succeed in
+        // the other direction at the same shared edge.
+        let cb = read_locked(b, |b| brep_copy(k, b))?;
+        let ca = read_locked(a, |a| brep_copy(k, a))?;
+        let reverse = union_pair(k, cb, ca, expect, Contract::Proved);
+        if matches!(
+            reverse,
+            Ok(Done::Body(..)) | Err(SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })
+        ) || reverse
+            .as_ref()
+            .is_err_and(|e| e.root_cause().is_not_certified())
+        {
+            return reverse;
+        }
+        let rebuilt = (|| {
+            let cb = read_locked(b, |b| rebuild_native(k, b))?;
+            let ca = read_locked(a, |a| rebuild_native(k, a))?;
+            union_pair(k, cb, ca, expect, Contract::Proved)
+        })();
+        match rebuilt {
+            done @ (Ok(Done::Body(..))
+            | Err(SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })) => done,
+            Err(e) if e.root_cause().is_not_certified() => Err(e),
+            _ => Err(original),
+        }
+    })?;
+    result(d, Ok(None))
+}
+
+fn radial_sector_failure(error: &SolidError) -> bool {
+    error.failure().is_some_and(|failure| {
+        failure.operation == "boolean::merge::p2::make_faceuse"
+            && matches!(
+                failure.reason,
+                Reason::Boolean(BooleanFailure::NoRadialEdgeUse)
+            )
+            && error.root_cause().failure().is_some_and(|cause| {
+                matches!(
+                    cause.reason,
+                    Reason::Topology(TopologyFailure::NoRadialCandidate)
+                )
+            })
+    })
+}
+
+fn union_pair(
+    k: &mut Kernel,
+    mut a: Brep,
+    mut b: Brep,
+    expect: Expect,
+    contract: Contract,
+) -> KernelResult<Done> {
+    matched_tolerances(k, &mut a, &mut b)?;
+    let mut r = sm::boolean_union(k, a, b)?;
+    after_boolean(k, &mut r)?;
+    finished(k, r, expect, contract)
 }
 
 /// Each operand's vertices with a copy of the other operand, which the boolean consumes, and

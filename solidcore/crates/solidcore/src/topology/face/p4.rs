@@ -11,6 +11,7 @@
 //! | [`edges`]                                    | `SmFace::GetEdges`                           |
 //! | [`vertices`]                                 | `SmFace::GetVertices`                        |
 //! | [`upward_loopuses`]                          | `SmFace::GetUpwardLoopuses`                  |
+//! | [`has_loopuses`]                             | (solidcore) `GetUpwardLoopuses` not empty    |
 //! | [`upward_vertexuses`]                        | `SmFace::GetUpwardVertexuses`                |
 //! | [`upward_edgeuses`]                          | `SmFace::GetUpwardEdgeuses`                  |
 //! | [`is_connected_to`]                          | `SmFace::IsConnectedTo`                      |
@@ -48,7 +49,10 @@
 //!   every handle naming `surface` ([`SurfaceCache::map_handles`]: the line solve
 //!   reads only node classes, boxes and the cache surface), its `sm_IsPointValid`
 //!   runs the trimmed cache's `PointTest` (a face classification,
-//!   [`TrimSrfCache::point_test_in`]), and `SmFace::PointClassify` of the single values gets the trimmed cache
+//!   [`TrimSrfCache::point_test_in`]), its coincidence check's point solve (a line that may
+//!   lie on the surface) runs the fast drop's trim test on the face
+//!   (`live_face_fast_drop_test`; upstream's surface reaches its face through `GetFace`),
+//!   and `SmFace::PointClassify` of the single values gets the trimmed cache
 //!   itself (upstream finds it on the surface). The held variant and
 //!   `sm_FaceClassifyUVLine` classify without it. `SmFace::PointClassify` gets the face's tolerance
 //!   options as `query.face_p2`'s callers pass them; its status is ignored as
@@ -91,7 +95,10 @@
 //!   `SetProps_Stage2` keeps in the face properties hold the handles only: a later
 //!   caller that resolves their curves needs the curves of the `SeamCheck`.
 //!   `SplitAtSeam`'s merges (`merge_seam_intervals`) rebuild them from the face's
-//!   surface as this function builds them.
+//!   surface as this function builds them. Not upstream (tangency-labs/solidcraft#11574):
+//!   a native cone's seam meets the face's edges as its ruling ([`Surface::seam_ruling`],
+//!   the seam parameter for parameter), which the classification intersects in the seam's
+//!   place ([`ClassGeometry::intersect_curve`]); everything else reads the seam itself.
 //! - **[`BrepSeamObjects`] as merge objects.** Over `&mut Brep`
 //!   ([`BrepSeamObjects::for_merge`]) they are the [`MergeIntervalBrep`] of
 //!   `SplitAtSeam`'s `MergeIntervals`: its edits notify into the objects' own empty
@@ -112,7 +119,12 @@
 //! - **`GetLoopCrossings`** (`intersect.curve_class_p4`) returns its touch lists, which
 //!   `HasSeamProblem` stores in the face properties' U or V lists; its status is ignored
 //!   as upstream (an ignored error leaves both lists empty, as its own initialisation
-//!   does).
+//!   does). Not upstream (tangency-labs/solidcraft#11574): it runs only when something
+//!   reads the lists. Properties `HasSeamProblem` makes for itself and drops
+//!   (`FaceProps::touch_lists_read` false) are read only by its doubly periodic cases, so
+//!   on a surface periodic in one direction the classification leaves them empty. The
+//!   lists change no classification and no seam verdict there. With
+//!   `Kernel::memoize_curve_caches` off they are collected anyway.
 
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::Curve;
@@ -138,6 +150,7 @@ use crate::math::{Point3, Vec3};
 use crate::math::{BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::profile::profile_scope;
 use crate::query::face::p2::{
     curve_on_classify_mut, face_cache_tree, face_surface_cache, point_classify, BrepCacheFace,
     CurveOnClassifyBrep, CurveOnClassifyCache, CurveOnClassifyObjects, FaceBrep, FaceSurfaceCache,
@@ -174,6 +187,7 @@ const fn must_propagate(e: &SolidError) -> bool {
         e,
         SolidError::Unported { .. }
             | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }
             | SolidError::NotFound { .. }
@@ -285,6 +299,21 @@ pub fn upward_loopuses(
     tgt_loops: Option<&[LoopId]>,
 ) -> Result<Vec<LoopuseId>> {
     selected_loopuses(b, f, tgt_loops_only, tgt_loops)
+}
+
+/// Whether face `f` has loop uses ([`upward_loopuses`] of all loops is not empty):
+/// whether it has trim boundaries. A trimmed surface cache's point test classifies a
+/// solution only on such a face; a face without loop uses keeps every solution. It
+/// reads the face use's list in place (the point test asks it per solution).
+///
+/// # Errors
+///
+/// Those of [`upward_loopuses`].
+pub fn has_loopuses(b: &Brep, f: FaceId) -> Result<bool> {
+    match b.face(f)?.faceuse {
+        Some(fu) => Ok(!b.faceuse(fu)?.loopuses.is_empty()),
+        None => Ok(false),
+    }
 }
 
 /// `GetUpwardVertexuses`: the vertex uses of each selected loop use
@@ -567,6 +596,9 @@ struct FaceLineCache<'b, O> {
     /// The face surface's cache, once fetched; given back to the surface after the
     /// solve.
     trim: Option<FaceSurfaceCache>,
+    /// Whether the fast drop's trim test runs, once decided
+    /// ([`crate::intersect::point_class::live_face_fast_drop_test`]).
+    fast_drop_on: Option<bool>,
 }
 
 impl<O: SolutionObject> FaceSolveCache<O> for FaceLineCache<'_, O> {
@@ -604,6 +636,30 @@ impl<O: SolutionObject> FaceSolveCache<O> for FaceLineCache<'_, O> {
             None,
         )?;
         Ok(ok)
+    }
+
+    fn fast_drop_test(&mut self, k: &Kernel, uv: Point2, src_tol: f64) -> Result<bool> {
+        // the test runs as the cache the solve holds says (the face's surface has no cache
+        // to look at while the solve holds it)
+        if self.fast_drop_on.is_none() {
+            if let Some(lease) = &self.trim {
+                let base = lease.cache.base();
+                self.fast_drop_on = Some(
+                    !self.b.is_surface_owner_cleared(self.f)
+                        && lease.trimmed
+                        && base.point_test_enabled
+                        && !base.face_was_modified,
+                );
+            }
+        }
+        crate::intersect::point_class::live_face_fast_drop_test(
+            k,
+            self.b,
+            self.f,
+            &mut self.fast_drop_on,
+            uv,
+            src_tol,
+        )
     }
 }
 
@@ -659,6 +715,7 @@ fn global_line_intersect_with<O: SolutionObject>(
             f,
             surface,
             trim: None,
+            fast_drop_on: None,
         };
         let solutions = face_surface.global_line_intersect_built(
             k,
@@ -1420,6 +1477,9 @@ struct WithSeam<'a, R, O> {
     inner: R,
     seam: Option<(O, &'a Curve)>,
     seam_uv: Option<(O, &'a Curve)>,
+    /// Not upstream: the seam's ruling ([`Surface::seam_ruling`]), which the edge
+    /// intersection takes in the seam's place ([`ClassGeometry::intersect_curve`]).
+    seam_ruling: Option<&'a Curve>,
 }
 
 impl<R: core::ops::Deref, O: ClassObject> ClassGeometry<O> for WithSeam<'_, R, O>
@@ -1433,6 +1493,12 @@ where
             }
         }
         self.inner.curve(o)
+    }
+    fn intersect_curve(&self, o: O) -> Option<&Curve> {
+        match (self.seam, self.seam_ruling) {
+            (Some((h, _)), Some(ruling)) if h == o => Some(ruling),
+            _ => self.inner.intersect_curve(o),
+        }
     }
     fn surface(&self, o: O) -> Option<&Surface> {
         self.inner.surface(o)
@@ -1617,6 +1683,7 @@ pub(crate) fn merge_seam_intervals<O: LoopObject>(
         seam_uv: seam
             .as_ref()
             .and_then(|(uv, _)| O::temporary(ui, ClassObjectKind::Curve).map(|h| (h, uv))),
+        seam_ruling: None,
     };
     Ok(c.merge_intervals_mut_with_partial(k, &mut objects, vertices_only))
 }
@@ -1745,13 +1812,17 @@ fn classify_seam<O: LoopObject, M: CurveOnClassifyBrep<O>>(
     outer_loop_only: bool,
     loops: &[LoopId],
     props: &mut FaceProps<O>,
+    touches_read: bool,
 ) -> Result<(CurveClassification<O>, bool, bool, bool, SeamCurves, bool)> {
-    // Build SeamConst curve
-    let seam = objects
+    profile_scope!(k, "topology::face::classify_seam");
+    // Build SeamConst curve, and its ruling on a cone (`Surface::seam_ruling`)
+    let surface = objects
         .classify_surface(f)?
-        .ok_or_else(|| null("HasSeamProblem: face without surface"))?
+        .ok_or_else(|| null("HasSeamProblem: face without surface"))?;
+    let seam = surface
         .create_seam_curve(k, dir, periodic)?
         .ok_or_else(|| null("HasSeamProblem: periodic surface without seam curve"))?;
+    let ruling = surface.seam_ruling(k, dir, &seam)?;
     let seam_uv = seam.uv_curve().clone();
     let interval = seam.natural_interval();
     let seam = Curve::from(seam);
@@ -1770,6 +1841,7 @@ fn classify_seam<O: LoopObject, M: CurveOnClassifyBrep<O>>(
         inner: objects,
         seam: Some((seam_h, &seam)),
         seam_uv: Some((seam_uv_h, &seam_uv)),
+        seam_ruling: ruling.as_ref(),
     };
 
     // build Seam classification object (owning the curve, edge not modified)
@@ -1792,8 +1864,12 @@ fn classify_seam<O: LoopObject, M: CurveOnClassifyBrep<O>>(
         _ => {}
     }
 
-    // How many times is the Seam crossed by loop
-    get_loop_crossings(k, &objects, &class, loops, props, dir)?;
+    // How many times is the Seam crossed by loop (the touch lists, for a reader of them:
+    // `has_seam_problem_mut`'s `touches_read`)
+    if touches_read {
+        profile_scope!(k, "topology::face::seam_loop_crossings");
+        get_loop_crossings(k, &objects, &class, loops, props, dir)?;
+    }
 
     let mut boundary = None;
     let mut checked = Vec::new();
@@ -2285,6 +2361,9 @@ pub fn has_seam_problem_mut<O: LoopObject, M: CurveOnClassifyBrep<O>>(
         p
     } else {
         local_props = FaceProps::new();
+        // made for this call and dropped after it: nothing reads its touch lists past
+        // this call's own doubly periodic cases (`touches_read` below)
+        local_props.touch_lists_read = false;
         &mut local_props
     };
     if props.prop_stage < PropStage::Stage2A {
@@ -2348,6 +2427,15 @@ pub fn has_seam_problem_mut<O: LoopObject, M: CurveOnClassifyBrep<O>>(
 
     // arrive here when HasSeamProblems() is called from SetProps_Stage2
 
+    // Not upstream: the seams' touch lists are read by the doubly periodic cases below and
+    // by the properties' later stages (`LoopProps::set_props`, stage 3's loop
+    // classification). Properties made for this call alone reach neither, unless the
+    // surface is doubly periodic by the flags used below.
+    // (a shortcut that never changes a result: with `Kernel::memoize_curve_caches` off the
+    // lists are collected anyway, to check that)
+    let touches_read =
+        !k.memoize_curve_caches || props.touch_lists_read || (periodic_u && periodic_v);
+
     // periodic in U
     if periodic_u {
         let (class, crossed, missing, near_miss, curves, boundary_touches) = classify_seam(
@@ -2360,6 +2448,7 @@ pub fn has_seam_problem_mut<O: LoopObject, M: CurveOnClassifyBrep<O>>(
             outer_loop_only,
             &loops,
             props,
+            touches_read,
         )?;
         out.class_u = class;
         out.seam_u = Some(curves);
@@ -2379,6 +2468,7 @@ pub fn has_seam_problem_mut<O: LoopObject, M: CurveOnClassifyBrep<O>>(
             outer_loop_only,
             &loops,
             props,
+            touches_read,
         )?;
         out.class_v = class;
         out.seam_v = Some(curves);
@@ -3524,5 +3614,84 @@ mod tests {
             .start
             .set_class_object(PointClassType::Vertex, Some(vertex));
         assert!(touches_seam_boundary(&objects, &class, &[touch(0)], &mut excludes).unwrap());
+    }
+
+    /// The face surface's handle in the line solve of
+    /// [`a_line_lying_on_a_cylinders_side_is_its_range_not_a_failure`]: its natural (u, v) domain.
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    struct SideHandle(Extent2d);
+
+    impl SolutionObject for SideHandle {
+        fn kind(&self) -> crate::geom::solution_array::ObjectKind {
+            crate::geom::solution_array::ObjectKind::Surface
+        }
+        fn natural_uv_domain(&self) -> Option<Extent2d> {
+            Some(self.0)
+        }
+    }
+
+    /// A line lying on a face's surface (a ruling of a cylinder's side, here through (3, 4) on the
+    /// radius-5 cylinder about +Z, z 0..10, and on its seam through (5, 0)) is the surface's range
+    /// solution, which the face then keeps where it classifies to the face. The surface's
+    /// coincidence check solves for a point on the face's own surface, whose face it reaches
+    /// through the caller holding the face, as upstream's surface reaches its face: the answer is
+    /// no single place (no `SingleValue`) and never a failure of the face binding.
+    #[test]
+    fn a_line_lying_on_a_cylinders_side_is_its_range_not_a_failure() {
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_cylinder(&mut k, Point3::ZERO, 5.0, 10.0)
+                .unwrap();
+        let side = crate::topology::brep::p1::faces(&b, None)
+            .unwrap()
+            .into_iter()
+            .find(|f| {
+                matches!(
+                    crate::topology::face::surface(&b, *f)
+                        .unwrap()
+                        .map(Surface::kind),
+                    Some(crate::surface::surface::SurfaceKind::Cone(_))
+                )
+            })
+            .unwrap();
+        let s = crate::topology::face::surface(&b, side).unwrap().unwrap();
+        let handle = SideHandle(s.natural_uv_domain_with_nurb(&k).unwrap());
+        let domain = crate::topology::face::uv_domain(&b, side).unwrap();
+        let tol = crate::topology::face::tolerance(&b, side).unwrap();
+        for through in [Point3::new(3.0, 4.0, 5.0), Point3::new(5.0, 0.0, 5.0)] {
+            let solutions = global_line_intersect(
+                &k,
+                &mut b,
+                side,
+                handle,
+                &domain,
+                through,
+                Vec3::Z,
+                None,
+                false,
+                tol,
+            );
+            let solutions = match solutions {
+                Ok(s) => s,
+                Err(e) => panic!("through {through:?}: {e:?}"),
+            };
+            // a ruling on the seam is also the face's boundary edge: the face solve may leave
+            // it to the edge solves, so only a ruling inside the face must be the range
+            assert!(
+                through.y == 0.0
+                    || solutions
+                        .as_slice()
+                        .iter()
+                        .any(|s| s.solution_type == SolutionType::RangeOfValues),
+                "through {through:?}: the ruling must come back as a range: {solutions:?}"
+            );
+            assert!(
+                solutions
+                    .as_slice()
+                    .iter()
+                    .all(|s| s.solution_type != SolutionType::SingleValue),
+                "through {through:?}: {solutions:?}"
+            );
+        }
     }
 }

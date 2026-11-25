@@ -14,9 +14,13 @@
 //! do not establish a constant kept domain and therefore name no size here. Interior
 //! witnesses must clear every incident selected planar straight-edge chamfer strip;
 //! unsupported moving corners name no size. All clearance products use expansions.
+//! The width event itself is compared exactly but read through the rounding of the feet's
+//! own coordinates (`gamma(32)` of their size): bands that meet to that rounding do not
+//! overlap, and a gap proved under the widths by more than it does.
 
 mod family;
 mod interval;
+mod opposing;
 
 use super::SolverObject;
 use crate::blend::fillet_executive::FitKind;
@@ -65,6 +69,7 @@ struct ContactWitness {
 struct Band {
     edge: EdgeId,
     face: FaceId,
+    other_face: Option<FaceId>,
     curve: Curve,
     interval: Extent1d,
     plane_normal: Vec3,
@@ -209,12 +214,17 @@ fn band(target: &Brep, solver: &SolverObject, rail: usize) -> Result<Option<Band
     if !(width.is_finite() && width > 0.0 && inward_offset.is_finite() && inward_offset != 0.0) {
         return Err(SolidError::invalid_input(OP, "invalid constant band width"));
     }
+    let other_face = match base.edgeuse(other_rail)? {
+        Some(other_use) => eu::face(target, other_use)?,
+        None => None,
+    };
     let edge = eu::edge(target, use_)?.ok_or_else(|| missing(BandInput::BlendedEdge))?;
     let curve = edge::evaluation_curve(target, edge)?
         .ok_or_else(|| missing(BandInput::BlendedEdgeCurve))?;
     Ok(Some(Band {
         edge,
         face,
+        other_face,
         curve,
         interval: edge::interval(target, edge)?,
         plane_normal,
@@ -239,33 +249,74 @@ pub(super) fn supports(
     Ok(a.face == b.face)
 }
 
-/// Select only native parallel lines whose infinite-line separation is already
-/// less than the requested total width. This necessary overlap condition avoids
-/// corner reconstruction and curve solves for unrelated or separated pairs.
-pub(super) fn parallel_overlap_candidate(
+/// Precomputed straight-line band data cached once per `(solver, face)` before
+/// the pair loop in `geometry_bands_clear_other_rails`. The exact-parallel
+/// fields require only a native straight line on the shared planar face (no
+/// plane-tilt gate), while `opposing` holds the additional geometry for
+/// non-parallel opposing pairs.
+#[derive(Clone, Copy)]
+pub(super) struct PreparedBand {
+    face: FaceId,
+    line_point: Point3,
+    line_vector: Vec3,
+    width: f64,
+    opposing: Option<opposing::PreparedOpposing>,
+}
+
+/// Prepare one straight planar chamfer band on `face`, if `solver` has one.
+/// Cached once per `(solver, face)` before the pair loop so candidate pruning
+/// performs no surface drops or topology queries per pair.
+pub(super) fn prepare_straight_band(
+    k: &Kernel,
     target: &Brep,
-    a: &SolverObject,
-    b: &SolverObject,
-    rail_a: usize,
-    rail_b: usize,
-) -> Result<bool> {
-    let (Some(a), Some(b)) = (band(target, a, rail_a)?, band(target, b, rail_b)?) else {
-        return Ok(false);
-    };
+    solver: &SolverObject,
+    face: FaceId,
+    blended: &[EdgeId],
+) -> Result<Option<PreparedBand>> {
+    for rail in 0..2 {
+        let Some(use_) = solver.base().edgeuse(rail)? else {
+            continue;
+        };
+        if eu::face(target, use_)? != Some(face) {
+            continue;
+        }
+        let Some(b) = band(target, solver, rail)? else {
+            return Ok(None);
+        };
+        let CurveKind::Line(line) = b.curve.kind() else {
+            return Ok(None);
+        };
+        let opposing = opposing::prepare(k, target, &b, blended)?;
+        return Ok(Some(PreparedBand {
+            face: b.face,
+            line_point: line.line_point(),
+            line_vector: line.line_vector(),
+            width: b.width,
+            opposing,
+        }));
+    }
+    Ok(None)
+}
+
+/// Select prepared straight-line pairs whose bands can overlap at the requested
+/// widths: either exact parallel lines whose infinite-line separation is under
+/// the total width, or non-parallel opposing straight lines whose bisector
+/// reaches a scale under 1. This necessary condition runs in O(1) without
+/// surface drops or corner reconstruction.
+pub(super) fn overlap_candidate(a: &PreparedBand, b: &PreparedBand) -> Result<bool> {
     if a.face != b.face {
         return Ok(false);
     }
-    let (CurveKind::Line(line_a), CurveKind::Line(line_b)) = (a.curve.kind(), b.curve.kind())
-    else {
-        return Ok(false);
-    };
-    let tangent = line_a.line_vector();
-    let parallel = exact::cross(tangent, line_b.line_vector())
+    let tangent = a.line_vector;
+    let parallel = exact::cross(tangent, b.line_vector)
         .ok_or_else(|| SolidError::invalid_input(OP, "line directions outside exact range"))?;
     if !parallel.iter().all(|component| exact::is_zero(component)) {
-        return Ok(false);
+        let (Some(oa), Some(ob)) = (a.opposing.as_ref(), b.opposing.as_ref()) else {
+            return Ok(false);
+        };
+        return Ok(opposing::overlap_candidate_prepared(oa, ob));
     }
-    let (pa, pb) = (line_a.line_point(), line_b.line_point());
+    let (pa, pb) = (a.line_point, b.line_point);
     let [dx, dy, dz] = [
         interval::sub(&[pb.x], &[pa.x])?,
         interval::sub(&[pb.y], &[pa.y])?,
@@ -527,11 +578,32 @@ fn closest_feet(
     }))
 }
 
+/// Whether a gap (its exact square, `gap_squared`) is under `widths` (exactly `exact_widths`)
+/// by more than `rounding`: `gap < widths - rounding`. For a rounding below the widths that
+/// is `gap^2 - widths^2 < -(2 widths - rounding) rounding`, compared exactly. A rounding
+/// that reaches the widths leaves no gap proved under them: at such a size the coordinates
+/// do not tell the two bands apart.
+fn gap_proved_under(
+    gap_squared: &[f64],
+    exact_widths: &[f64],
+    widths: f64,
+    rounding: f64,
+) -> Result<bool> {
+    if rounding.is_nan() || rounding >= widths {
+        return Ok(false);
+    }
+    let slack = interval::mul(&[2.0 * widths - rounding], &[rounding])?;
+    Ok(exact::sign(&interval::add(
+        &interval::sub(gap_squared, &interval::mul(exact_widths, exact_widths)?)?,
+        &slack,
+    )?) < 0)
+}
+
 /// Construct the retained normal contact and classify its closed width event.
 /// The witness location is retained for the caller's trimmed-face classification.
 pub(super) fn retained_contact(
     k: &Kernel,
-    target: &Brep,
+    target: &mut Brep,
     a: &SolverObject,
     b: &SolverObject,
     rails: [usize; 2],
@@ -545,6 +617,13 @@ pub(super) fn retained_contact(
     };
     if a.face != b.face {
         return Ok(None);
+    }
+    if let (CurveKind::Line(line_a), CurveKind::Line(line_b)) = (a.curve.kind(), b.curve.kind()) {
+        let cross = exact::cross(line_a.line_vector(), line_b.line_vector())
+            .ok_or_else(|| SolidError::invalid_input(OP, "line directions outside exact range"))?;
+        if !cross.iter().all(|component| exact::is_zero(component)) {
+            return opposing::retained_contact(k, target, &a, &b, blended, corners, as_scale);
+        }
     }
     let tolerance = edge::tolerance(target, a.edge)?.max(edge::tolerance(target, b.edge)?);
     let Some(closest) = closest_feet(k, target, &a, &b, tolerance, blended, corners)? else {
@@ -592,10 +671,16 @@ pub(super) fn retained_contact(
         gap_squared = interval::add(&gap_squared, &interval::mul(&delta, &delta)?)?;
     }
     let exact_widths = interval::add(&[a.width], &[b.width])?;
-    let overlapping = exact::sign(&interval::sub(
-        &gap_squared,
-        &interval::mul(&exact_widths, &exact_widths)?,
-    )?) < 0;
+    // The feet are the model's own points, each coordinate a few roundings off the designed
+    // one: a face meant 2 wide measured 1.9999999999999991 between an edge a cut left at
+    // z = 6.000000000000001 and one at 8 (#20450), and two 1 mm bands that exactly meet on it
+    // read as overlapping by 9e-16. The bands overlap only when the gap is proved under
+    // their widths by more than those roundings can account for, as a contact is read
+    // ([`crate::geom::tol::within_contact_tol`]): `gamma(32)` of the largest coordinate
+    // involved.
+    let size = foot_a.max_dimension().max(foot_b.max_dimension()) + widths;
+    let rounding = crate::nurbs::math::gamma(32) * size;
+    let overlapping = gap_proved_under(&gap_squared, &exact_widths, widths, rounding)?;
     let rho = a
         .offsets
         .first()
@@ -651,4 +736,63 @@ pub(super) fn contact(
     }
     contact.at = crate::topology::face::p2::calculate_an_internal_point(k, target, contact.face)?;
     Ok(Some(contact))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `gap < widths - rounding`, for a gap `g` and two widths of 1.
+    fn proved(g: f64, rounding: f64) -> bool {
+        let squared = interval::mul(&[g], &[g]).unwrap();
+        let widths = interval::add(&[1.0], &[1.0]).unwrap();
+        gap_proved_under(&squared, &widths, 2.0, rounding).unwrap()
+    }
+
+    /// Two bands overlap when the gap is under their widths by more than the rounding of the
+    /// coordinates it was measured on, and not otherwise: an exact meeting, the 9e-16
+    /// shortfall of #20450 and a shortfall of exactly the rounding are no overlap; one past
+    /// it is. A rounding that reaches the widths (coordinates near 2e15 for widths of 2)
+    /// proves no overlap, whatever the gap.
+    #[test]
+    fn a_gap_is_under_the_widths_only_past_its_rounding() {
+        let rounding = crate::nurbs::math::gamma(32) * 10.0;
+        assert!(!proved(2.0, rounding));
+        assert!(!proved(1.999_999_999_999_999_1, rounding));
+        assert!(!proved(2.0 - rounding, rounding));
+        assert!(proved(2.0 - 4.0 * rounding, rounding));
+        assert!(proved(1.98, rounding));
+        // with no rounding the comparison is the exact one
+        assert!(!proved(2.0, 0.0));
+        assert!(proved(1.999_999_999_999_999_1, 0.0));
+        for rounding in [2.0, 2.5, 3.0, 5.0, f64::INFINITY, f64::NAN] {
+            for g in [1e-9, 0.5, 1.0, 1.9, 2.0, 3.0] {
+                assert!(!proved(g, rounding), "{g} {rounding}");
+            }
+        }
+    }
+
+    #[test]
+    fn exact_parallel_overlap_candidate_ignores_non_parallel_opposing_tilt_gate() {
+        let face = FaceId::from_index(1);
+        // Parallel lines with a tiny Z tilt (`1e-11`) that leaves `opposing: None`
+        // still pass the exact-parallel overlap candidate check when separated by
+        // less than `w_a + w_b`.
+        let dir = Vec3::new(1.0, 0.0, 1e-11);
+        let a = PreparedBand {
+            face,
+            line_point: Point3::new(0.0, 0.0, 0.0),
+            line_vector: dir,
+            width: 1.5,
+            opposing: None,
+        };
+        let b = PreparedBand {
+            face,
+            line_point: Point3::new(0.0, 2.0, 0.0),
+            line_vector: dir,
+            width: 1.5,
+            opposing: None,
+        };
+        assert!(overlap_candidate(&a, &b).unwrap());
+    }
 }

@@ -658,7 +658,14 @@ fn trims(flat: View, n_edgeuses: usize) -> Res<Vec<Option<b::Curve2>>> {
 /// that of an end is that end, and the end spans left without length go with their control
 /// points. Farther is an error naming the end, as is (worded apart) an interval of at most
 /// `SM_EFF_ZERO` (10⁻¹², SMLib's absolute knot resolution: no trim fits on it).
-fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f64; 2], on_edge: &dyn Fn(f64, f64) -> bool) -> Res<b::Curve2> {
+fn mapped(
+    trim: &b::Curve2,
+    same: bool,
+    [scale, offset]: [f64; 2],
+    [t0, t1]: [f64; 2],
+    on_edge: &dyn Fn(f64, f64) -> bool,
+    carried_along_edge: &dyn Fn(&b::Curve2) -> bool,
+) -> Res<b::Curve2> {
     fn along<T: Clone>(knots: &[f64], points: &[T], same: bool) -> (Vec<f64>, Vec<T>) {
         if same {
             return (knots.to_vec(), points.to_vec());
@@ -697,6 +704,8 @@ fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f6
         [scale, offset]: [f64; 2],
         [t0, t1]: [f64; 2],
         on_edge: &dyn Fn(f64, f64) -> bool,
+        carried_along_edge: &dyn Fn(&b::Curve2) -> bool,
+        build: &dyn Fn(&[f64], &[T]) -> b::Curve2,
     ) -> Res<(Vec<f64>, Vec<T>)> {
         let mut k: Vec<f64> = k.into_iter().map(|t| scale * t + offset).collect();
         let n = points.len();
@@ -720,6 +729,22 @@ fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f6
             return Err(invalid(format!("{}: the edge's interval is no longer than SMLib's knot resolution (1e-12)", trim_on())));
         }
         let (Some(s0), Some(s1)) = (end(a, t0), end(z, t1)) else {
+            // SMLib gives the trim of an edge that runs further off its face than it tolerates
+            // on the unit interval, whatever the edge's own parameter is (it reports it as
+            // having no length): the same position along the edge, so the knots are carried
+            // onto its interval, the ends exactly.
+            // Only where each end that is not the edge's is far from it (a quarter of the interval,
+            // as for `end`: a rounding or a point within tolerance short of it is refused as
+            // before), and the edge is not a micro edge, whose [0, 1] trim stays refused. The
+            // carried trim is then checked against the edge ([`along_edge`]): a [0, 1] trim that is
+            // not the edge's own unit trim is refused as before.
+            let far = |x: f64, t: f64| end(x, t).is_some() || (x - t).abs() >= 0.25 * (t1 - t0).abs();
+            if a == 0.0 && z == 1.0 && t1 - t0 > 1e-6 && far(a, t0) && far(z, t1) {
+                let carried: Vec<f64> = k.iter().map(|x| t0 * (1.0 - *x) + t1 * *x).collect();
+                if carried_along_edge(&build(&carried, &points)) {
+                    return Ok((carried, points));
+                }
+            }
             // Which ends: more than a rounding apart and not one point of the edge.
             let off: Vec<String> = [("start", a, t0), ("end", z, t1)]
                 .into_iter()
@@ -758,14 +783,36 @@ fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f6
     Ok(match trim {
         b::Curve2::Spline { knots, points } => {
             let (k, points) = along(knots, points, same);
-            let (knots, points) = map(k, points, [scale, offset], [t0, t1], on_edge)?;
+            let build = |knots: &[f64], points: &[[f64; 2]]| b::Curve2::Spline { knots: knots.to_vec(), points: points.to_vec() };
+            let (knots, points) = map(k, points, [scale, offset], [t0, t1], on_edge, carried_along_edge, &build)?;
             b::Curve2::Spline { knots, points }
         }
         b::Curve2::RationalSpline { knots, homogeneous } => {
             let (k, homogeneous) = along(knots, homogeneous, same);
-            let (knots, homogeneous) = map(k, homogeneous, [scale, offset], [t0, t1], on_edge)?;
+            let build =
+                |knots: &[f64], homogeneous: &[[f64; 3]]| b::Curve2::RationalSpline { knots: knots.to_vec(), homogeneous: homogeneous.to_vec() };
+            let (knots, homogeneous) = map(k, homogeneous, [scale, offset], [t0, t1], on_edge, carried_along_edge, &build)?;
             b::Curve2::RationalSpline { knots, homogeneous }
         }
+    })
+}
+
+/// Whether `trim`, on the edge's interval, lies along the edge: at its ends and four interior
+/// parameters, evenly spaced, the face's `surface` at the trim's point is the edge `curve`'s point
+/// at the same parameter, within `reach` (the edge's tolerance). False where any of them cannot be
+/// evaluated.
+fn along_edge(trim: &b::Curve2, surface: &b::Surface, curve: &b::Curve, [t0, t1]: [f64; 2], reach: f64) -> bool {
+    const STEPS: u8 = 5;
+    let ts: Vec<f64> = (0..=STEPS).map(|i| if i == STEPS { t1 } else { t0 + (t1 - t0) * f64::from(i) / f64::from(STEPS) }).collect();
+    let Some(uvs) = ts.iter().map(|t| solidcore_ops::pcurve::eval(trim, *t)).collect::<Option<Vec<_>>>() else {
+        return false;
+    };
+    let Some(on_face) = solidcore_ops::pcurve::surface_points(surface, &uvs) else {
+        return false;
+    };
+    ts.iter().zip(&on_face).all(|(t, p)| match point3(curve, *t) {
+        Some(q) => (0..3).map(|c| (p[c] - q[c]).powi(2)).sum::<f64>().sqrt() <= reach,
+        None => false,
     })
 }
 
@@ -965,7 +1012,8 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
                             (Some(p), Some(q)) => (0..3).map(|c| (p[c] - q[c]).powi(2)).sum::<f64>().sqrt() <= reach,
                             _ => false,
                         };
-                        Some(mapped(trim, same, map, edge.interval, &on_edge)?)
+                        let carried_along_edge = |carried: &b::Curve2| along_edge(carried, params, curve, edge.interval, reach);
+                        Some(mapped(trim, same, map, edge.interval, &on_edge, &carried_along_edge)?)
                     }
                     _ => None,
                 });

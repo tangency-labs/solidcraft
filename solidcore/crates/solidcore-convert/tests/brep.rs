@@ -17,8 +17,9 @@ use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::primitive::api_primitives as primitives;
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+use solidcore::topology::integrity;
 use solidcore::{Brep, Vec3};
-use solidcore_convert::brep::{to_kernel, to_record, Order, Unsupported};
+use solidcore_convert::brep::{to_kernel, to_kernel_body, to_record, Order, Unsupported};
 use solidcore_record::brep::{
     Brep as Record, Curve, Curve2, Edge, EdgeUseRef, Face, Loop, OrientedEdge, OrientedFace,
     Region, Shell, Surface, Vertex, VERSION,
@@ -41,7 +42,11 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 
 fn valid(k: &mut Kernel, b: &mut Brep) {
     let c = check_brep(k, b, CheckLevel::Level2).unwrap();
-    assert_eq!(c.pointers_status, 1000, "pointers");
+    assert_eq!(
+        c.pointers,
+        solidcore::topology::brep::validation::PointerCheck::Passed,
+        "pointers"
+    );
     assert_eq!(
         c.assert_valid,
         Some(true),
@@ -487,6 +492,20 @@ fn an_untrusted_record_is_healed_into_the_same_body() {
     assert!(is_manifold_solid(&b).unwrap());
     assert!((volume(&k, &mut b) - 8.0).abs() < 1e-9);
     valid(&mut k, &mut b);
+}
+
+/// A body built from a record has its cached topology current (each face's shell, each loop's
+/// edges), so the integrity check passes with no refresh by the caller, from either entry point
+/// and whether or not the record is healed (solidcore#3257: every STEP import failed it).
+#[test]
+fn a_built_body_passes_the_integrity_check_as_it_comes() {
+    for trusted in [true, false] {
+        let mut k = kernel();
+        let b = to_kernel_body(&mut k, &cube(10.0), trusted).unwrap();
+        integrity::check(&b).unwrap_or_else(|e| panic!("to_kernel_body, trusted {trusted}: {e:?}"));
+        let (b, _) = to_kernel(&mut k, &cube(10.0), trusted).unwrap();
+        integrity::check(&b).unwrap_or_else(|e| panic!("to_kernel, trusted {trusted}: {e:?}"));
+    }
 }
 
 /// A closed polyhedron record whose faces lie on axis planes: each a cycle of `corners`

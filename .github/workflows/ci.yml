@@ -40,6 +40,8 @@
 # advisories): solidcore/ is outside the workspace, so the workspace's cargo-deny never sees it.
 # The kernel rig (kernel-rig.yml, called as a reusable workflow) runs on approved pull requests and
 # merge groups, for the rig areas the diff reaches, and `ci` requires it.
+# On a pull request every job that builds or tests merges the PR onto today's main right after the
+# checkout (.github/actions/merge-main), not GitHub's refs/pull/N/merge, which can be hours old.
 # Cross-compilation is opt-in through Run workflow; release builds remain in release.yml.
 # The release gate (release-gate.yml) calls this workflow (workflow_call) as a Run workflow with
 # cross-compilation on.
@@ -71,7 +73,12 @@ on:
   merge_group:
   push:
     # develop: the SMLib kernel's trunk until it merges into main (its PRs land there).
-    branches: [main, develop]
+    # batch/**: Tickets' merge batches (docs/repo-management.md in tangency-labs/tickets). A batch
+    # branch is main (or the batch below it) plus one merge per pull request; its run is the merge
+    # queue's run: every job below treats a push to batch/** as a merge group. It has to be a push
+    # run, not Run workflow: GitHub counts only a push run's `ci` toward main's required check when
+    # the batch's tip is pushed to main.
+    branches: [main, develop, "batch/**"]
   schedule:
     - cron: "17 6 * * *"
   workflow_dispatch:
@@ -118,6 +125,7 @@ jobs:
     timeout-minutes: ${{ vars.CI_RUNNER && 60 || 20 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - uses: dtolnay/rust-toolchain@1.99.1
       - name: Install advisory scanner
         run: cargo install cargo-deny --version 0.20.2 --locked
@@ -160,6 +168,8 @@ jobs:
       solidcore: ${{ steps.paths.outputs.solidcore }}
       # The passing run a merge of main carries forward (its URL), when this push is only that.
       carried: ${{ steps.paths.outputs.carried }}
+      # A batch branch's base (where it leaves main), for the jobs that read a merge group's base.
+      batch_base: ${{ steps.paths.outputs.batch_base }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -167,13 +177,14 @@ jobs:
       - id: paths
         name: Detect code and CI changes
         env:
-          EVENT_NAME: ${{ github.event_name }}
+          # A push to a batch branch (Tickets' merge batches) runs as a merge group.
+          EVENT_NAME: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/batch/')) && 'merge_group' || github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PUSH_SHA: ${{ github.sha }}
           BEFORE_SHA: ${{ github.event.before }}
           GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
-          GROUP_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+          GROUP_HEAD_SHA: ${{ github.event.merge_group.head_sha || github.sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           RENDER_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'render-tests') }}
@@ -201,13 +212,15 @@ jobs:
           }
           # Whether the NUL-separated paths in $1 (the diff $2) reach what the Windows D3D12 jobs
           # exercise: the GPU crate and its shaders, the app and its startup, the viewport's wgpu
-          # glue, the vendored egui and kernel, their scripts, the control server (its refusals,
-          # #10967), or a lockfile change that moves the graphics stack (wgpu, naga, egui, winit,
-          # windows). Pull requests and merge groups share it.
+          # glue, the vendored egui, winit (its Windows event loop builds only there) and kernel,
+          # the title bar's hit test (the window chrome and the app bar's title-bar module, which
+          # the app's Windows-only window procedure answers from), their scripts, the control
+          # server (its refusals, #10967), or a lockfile change that moves the graphics stack
+          # (wgpu, naga, egui, winit, windows). Pull requests and merge groups share it.
           windows_paths() {
             while IFS= read -r -d '' path; do
               case "$path" in
-                crates/gpu/*|apps/solidcraft/*|crates/ui-egui/src/gpu.rs|vendor/egui/*|solidcore/*|crates/control/src/server.rs) windows=true ;;
+                crates/gpu/*|crates/ui-kit/src/window_chrome*|crates/ui-egui/src/titlebar.rs|vendor/winit/*|apps/solidcraft/*|crates/ui-egui/src/gpu.rs|vendor/egui/*|solidcore/*|crates/control/src/server.rs) windows=true ;;
                 tools/windows-*.ps1|.github/workflows/ci.yml|rust-toolchain*|.cargo/*) windows=true ;;
               esac
             done < "$1"
@@ -269,10 +282,14 @@ jobs:
             fi
           }
           # Opt-in for a big render change: a pull request labelled render-tests, or a merge group
-          # holding one (its pull requests are the (#N) of its squash commits), runs them whatever
-          # the paths say.
+          # holding one, runs them whatever the paths say. The group's pull requests are its
+          # first-parent commits: "Merge pull request #N from ..." merge commits, or "<title> (#N)"
+          # (squash commits, or merge commits titled from the pull request), or "Merge #N: <title>"
+          # (Tickets' merge batches). A pull request's own
+          # commits are off the first-parent line, so an issue number in one of them is not read.
           group_has_render_label() {
-            for pr in $(git log --format=%s "$1" | grep -o '(#[0-9]*)$' | tr -d '(#)'); do
+            for pr in $(git log --first-parent --format=%s "$1" \
+              | sed -nE 's/^Merge pull request #([0-9]+) .*/\1/p; s/^Merge #([0-9]+): .*/\1/p; s/.*\(#([0-9]+)\)$/\1/p'); do
               if gh api "repos/$REPO/issues/$pr" --jq '.labels[].name' | grep -qx render-tests; then
                 return 0
               fi
@@ -297,14 +314,20 @@ jobs:
               fi
               echo "solidcore=$solidcore for $BEFORE_SHA..$PUSH_SHA"
             fi
-            # The queue lands the very commit its merge_group run tested. If that run passed,
-            # testing the push again proves nothing new; otherwise (a merge that skipped the
-            # queue, or the API cannot answer) test everything.
+            # The queue lands the very commit its merge_group run tested (Tickets' batches: the very
+            # commit their batch/** push run tested). If that run passed, testing the push again
+            # proves nothing new; otherwise (a merge that skipped the queue, or the API cannot
+            # answer) test everything.
             # The API through curl and grep, which every runner image has.
             if [ -z "$cache_key" ]; then
               tested=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
                 "https://api.github.com/repos/$REPO/actions/workflows/ci.yml/runs?event=merge_group&head_sha=$PUSH_SHA&status=success&per_page=1" \
                 | grep -o '"total_count": *[0-9]*' | grep -o '[0-9]*$' || echo 0)
+              if [ "${tested:-0}" -eq 0 ]; then
+                tested=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+                  "https://api.github.com/repos/$REPO/actions/workflows/ci.yml/runs?event=push&head_sha=$PUSH_SHA&status=success&per_page=100" \
+                  | grep -c '"head_branch": *"batch/' || echo 0)
+              fi
             fi
             if [ -n "$cache_key" ]; then
               echo "$BEFORE_SHA..$PUSH_SHA changes a cache key ($cache_key): running the build jobs to save their caches."
@@ -332,6 +355,12 @@ jobs:
             fi
           elif [ "$EVENT_NAME" = merge_group ]; then
             native=true
+            # A batch branch has no merge_group payload: its base is where it leaves main, so the
+            # diff is every pull request in it (and in any batch below it that has not landed yet).
+            if [ -z "$GROUP_BASE_SHA" ]; then
+              GROUP_BASE_SHA=$(git merge-base origin/main "$GROUP_HEAD_SHA") || GROUP_BASE_SHA=
+              batch_base=$GROUP_BASE_SHA
+            fi
             # Windows (about 16 runner-minutes) only for a group that changes what it exercises;
             # the nightly runs it whatever changed. A group that can't be compared runs it.
             if git diff --no-renames --name-only -z "$GROUP_BASE_SHA...$GROUP_HEAD_SHA" > "$RUNNER_TEMP/ci-paths"; then
@@ -437,6 +466,7 @@ jobs:
             echo "wasm=$wasm"
             echo "solidcore=$solidcore"
             echo "carried=$carried"
+            echo "batch_base=${batch_base:-}"
             echo "full=$full"
             echo "quick=$quick"
             echo "packages=$packages"
@@ -449,6 +479,11 @@ jobs:
     timeout-minutes: ${{ vars.CI_RUNNER && 75 || 25 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        # Two commits: `cargo xtask app-geometry` (and its workspace test) judges what HEAD adds to
+        # HEAD~1, the code a pull request or merge-queue group lands on.
+        with:
+          fetch-depth: 2
+      - uses: ./.github/actions/merge-main
       - uses: dtolnay/rust-toolchain@1.99.1
         with:
           components: rustfmt
@@ -483,6 +518,10 @@ jobs:
         run: |
           cargo xtask mesh-decisions
           cargo test -p xtask mesh_decisions --locked
+      - name: Apps compute no geometry
+        run: |
+          cargo xtask app-geometry
+          cargo test -p xtask app_geometry --locked
       - name: Agent router and skills cite real files
         run: |
           cargo xtask skills
@@ -521,6 +560,7 @@ jobs:
     timeout-minutes: ${{ vars.CI_RUNNER && 90 || 30 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
       - uses: dtolnay/rust-toolchain@1.99.1
@@ -539,6 +579,7 @@ jobs:
     timeout-minutes: ${{ vars.CI_RUNNER && 90 || 30 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - uses: dtolnay/rust-toolchain@1.99.1
         with:
           components: clippy
@@ -556,6 +597,28 @@ jobs:
           scope=(--workspace)
           if [ "$FULL" != true ]; then scope=(); for p in $PACKAGES; do scope+=(-p "$p"); done; fi
           cargo clippy "${scope[@]}" --all-targets --profile ci --locked -- -D warnings
+
+  shared-crates:
+    name: Shared crates build on their own
+    needs: changes
+    # The shared crates must build on their own, without the rest of the workspace: that is
+    # what makes them movable to their own repository (#12935). The check builds them in a
+    # scratch workspace, so it compiles the kernel and the UI stack again: it is a build, not
+    # a static check, and it belongs in the heavy lane.
+    if: needs.changes.outputs.native == 'true'
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}
+    timeout-minutes: ${{ vars.CI_RUNNER && 90 || 30 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
+      - uses: dtolnay/rust-toolchain@1.99.1
+      # Main saves the cache; every other run restores it, read-only.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: native-shared
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+      - name: Shared crates build on their own
+        run: cargo xtask shared
 
   build-tests:
     name: Build tests
@@ -642,6 +705,11 @@ jobs:
       # The same for the shared viewport crate's own GPU tests, which read no SolidCraft variable.
       VIEWPORT_TEST_GPU: software
       VIEWPORT_TEST_REQUIRE_GPU: "1"
+      # The test threads' stack, as `cargo xtask test` and `cargo xtask ci` give it (TEST_STACK in
+      # xtask/src/test.rs). nextest starts tests with std's 2 MiB, and the ui-egui tests that build
+      # the app harness need just under that (the app is hundreds of kilobytes, held in several
+      # frames), so a few of them overflowed it on some runs.
+      RUST_MIN_STACK: "8388608"
       ACTION_MATRIX_JOBS: "12"
       CARGO_INCREMENTAL: "0"
       RUSTC_WRAPPER: sccache
@@ -649,6 +717,11 @@ jobs:
       SCCACHE_CACHE_SIZE: 20G
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        # Two commits: `cargo xtask app-geometry` (and its workspace test) judges what HEAD adds to
+        # HEAD~1, the code a pull request or merge-queue group lands on.
+        with:
+          fetch-depth: 2
+      - uses: ./.github/actions/merge-main
       - name: Install a software Vulkan driver (lavapipe)
         run: |
           sudo apt-get update
@@ -690,6 +763,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           FULL: ${{ needs.changes.outputs.full }}
           PACKAGES: ${{ needs.changes.outputs.packages }}
+          GPU_SHARDS: ${{ needs.changes.outputs.gpu }}
         run: |
           # Pull requests skip the heavy tests (default-filter in .config/nextest.toml); `default()`
           # below is that filter, so a pull request still runs only what it ran before.
@@ -711,13 +785,19 @@ jobs:
           if [ "$FULL" != true ]; then scope=(); for p in $PACKAGES; do scope+=(-p "$p"); done; fi
           # The GPU path tracer's tests run in their own job (GPU path tests): one at a time, they
           # took about 36 of this job's 45 minutes.
+          excluded='package(=solidcraft-gpu) & test(/^path::/)'
+          # Preserve render-only shard activation. When those shards do not run, native tests
+          # still cover the UI renderer; its gpu-path group keeps pipeline creation serial.
+          if [ "$GPU_SHARDS" = true ]; then
+            excluded="($excluded) | (package(=solidcraft-ui-egui) & test(=render_workspace::tests::progressive_image_controls_route_to_the_registered_host))"
+          fi
           # A failed test does not fail the step by itself: the tests known to fail today
           # (tests/KNOWN_FAILING_TESTS) may fail, any other fails it, and so does a listed test
           # that passes. nextest's exit code 100 is "tests failed"; any other is its own error
           # (a build error, a bad filter) and fails the step at once.
           status=0
           cargo nextest run "${scope[@]}" --cargo-profile ci --locked --profile ci --no-tests=pass \
-            --ignore-default-filter -E "($base) & not (package(=solidcraft-gpu) & test(/^path::/))" || status=$?
+            --ignore-default-filter -E "($base) & not ($excluded)" || status=$?
           if [ "$status" -ne 0 ] && [ "$status" -ne 100 ]; then exit "$status"; fi
           cargo xtask known-failing --junit "$junit"
       # Every command label needs an English catalog entry (#8542). The label table is the CLI's
@@ -779,6 +859,11 @@ jobs:
       # The same for the shared viewport crate's own GPU tests, which read no SolidCraft variable.
       VIEWPORT_TEST_GPU: software
       VIEWPORT_TEST_REQUIRE_GPU: "1"
+      # The test threads' stack, as `cargo xtask test` and `cargo xtask ci` give it (TEST_STACK in
+      # xtask/src/test.rs). nextest starts tests with std's 2 MiB, and the ui-egui tests that build
+      # the app harness need just under that (the app is hundreds of kilobytes, held in several
+      # frames), so a few of them overflowed it on some runs.
+      RUST_MIN_STACK: "8388608"
       # lavapipe's own shader cache (below).
       MESA_SHADER_CACHE_DIR: /home/runner/.cache/mesa-gpu
       CARGO_INCREMENTAL: "0"
@@ -787,6 +872,7 @@ jobs:
       SCCACHE_CACHE_SIZE: 20G
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - name: Install a software Vulkan driver (lavapipe)
         run: |
           sudo apt-get update
@@ -850,6 +936,8 @@ jobs:
       - name: Run one shard of the GPU path tests
         env:
           SHARD: ${{ matrix.shard }}
+          FULL: ${{ needs.changes.outputs.full }}
+          PACKAGES: ${{ needs.changes.outputs.packages }}
         run: |
           # None of these is in the default filter (the heavy tests), so pull requests, the merge
           # queue, main and nightly all run every one of them, as before. `count` deals the tests
@@ -857,9 +945,17 @@ jobs:
           # Graded against tests/KNOWN_FAILING_TESTS, as in Native Linux tests.
           junit=${CARGO_TARGET_DIR:-target}/nextest/ci/junit.xml
           rm -f "$junit"
+          # A UI-only change needs its progressive renderer, not the unrelated GPU crate tests.
+          scope=(-p solidcraft-gpu -p solidcraft-ui-egui)
+          if [ "$FULL" != true ]; then
+            scope=()
+            for p in $PACKAGES; do
+              case "$p" in solidcraft-gpu|solidcraft-ui-egui) scope+=(-p "$p") ;; esac
+            done
+          fi
           status=0
-          cargo nextest run -p solidcraft-gpu --cargo-profile ci --locked --profile ci --no-tests=pass \
-            --ignore-default-filter -E 'test(/^path::/)' --partition "count:$SHARD/4" || status=$?
+          cargo nextest run "${scope[@]}" --lib --cargo-profile ci --locked --profile ci --no-tests=pass \
+            --ignore-default-filter -E '(package(=solidcraft-gpu) & test(/^path::/)) | (package(=solidcraft-ui-egui) & test(=render_workspace::tests::progressive_image_controls_route_to_the_registered_host))' --partition "count:$SHARD/4" || status=$?
           if [ "$status" -ne 0 ] && [ "$status" -ne 100 ]; then exit "$status"; fi
           cargo xtask known-failing --junit "$junit"
       - name: Compiler cache statistics
@@ -978,6 +1074,7 @@ jobs:
       SCCACHE_CACHE_SIZE: 20G
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
       - uses: dtolnay/rust-toolchain@1.99.1
@@ -1043,6 +1140,7 @@ jobs:
       SCCACHE_CACHE_SIZE: 20G
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
       - uses: dtolnay/rust-toolchain@1.99.1
@@ -1105,6 +1203,7 @@ jobs:
       VIEWPORT_TEST_REQUIRE_GPU: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - uses: dtolnay/rust-toolchain@1.99.1
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -1131,6 +1230,7 @@ jobs:
     timeout-minutes: ${{ vars.CI_RUNNER_WINDOWS && 135 || 45 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - uses: dtolnay/rust-toolchain@1.99.1
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -1159,6 +1259,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: windows-app
@@ -1182,9 +1283,13 @@ jobs:
     needs: changes
     if: >-
       ${{ !cancelled() && needs.changes.result == 'success' && (github.event_name == 'merge_group' ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/batch/')) ||
       (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'approved-for-ci') &&
       needs.changes.outputs.carried == '')) }}
     uses: ./.github/workflows/kernel-rig.yml
+    with:
+      # A batch branch: grade the areas its diff from main reaches, as for a merge group.
+      batch_base: ${{ needs.changes.outputs.batch_base }}
     permissions:
       contents: read
 
@@ -1199,6 +1304,7 @@ jobs:
     timeout-minutes: ${{ vars.CI_RUNNER && 90 || 40 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - uses: dtolnay/rust-toolchain@1.99.1
         with:
           targets: wasm32-unknown-unknown
@@ -1225,7 +1331,7 @@ jobs:
     # commit's real run instead: the merge queue reads `ci` from the newest run of a commit, so a
     # run without a passing `ci` would block a pull request that passed (#1850, #3182, #3252).
     name: ci
-    needs: [changes, checks, quick-compile, clippy, build-tests, tests, gpu-path-tests, doc-tests, oracle, windows-fxc, windows-build, windows-startup, dependency-advisories, wasm, solidcore, solidcore-tests, solidcore-standalone, kernel-rig, no-usage-stats]
+    needs: [changes, checks, quick-compile, clippy, shared-crates, build-tests, tests, gpu-path-tests, doc-tests, oracle, windows-fxc, windows-build, windows-startup, dependency-advisories, wasm, solidcore, solidcore-tests, solidcore-standalone, kernel-rig, no-usage-stats]
     if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ${{ vars.CI_RUNNER || 'blacksmith-2vcpu-ubuntu-2404' }}
     permissions:
@@ -1294,6 +1400,8 @@ jobs:
           ORACLE_RUN: ${{ needs.changes.outputs.oracle }}
           DOCTESTS: ${{ needs.changes.outputs.doctests }}
           CLIPPY: ${{ needs.clippy.result }}
+          # The shared crates build on their own: that job runs with the native flag, like Clippy.
+          SHARED: ${{ needs.shared-crates.result }}
           BUILD: ${{ needs.build-tests.result }}
           EVENT_NAME: ${{ github.event_name }}
           TESTS: ${{ needs.tests.result }}
@@ -1315,8 +1423,8 @@ jobs:
           # The same condition as the kernel-rig job's `if` (after Select checks passed, which is
           # tested first).
           RIG_RUN: >-
-            ${{ github.event_name == 'merge_group' || (github.event_name == 'pull_request' &&
-            contains(github.event.pull_request.labels.*.name, 'approved-for-ci') && needs.changes.outputs.carried == '') }}
+            ${{ github.event_name == 'merge_group' || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/batch/')) ||
+            (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'approved-for-ci') && needs.changes.outputs.carried == '') }}
           RIG: ${{ needs.kernel-rig.result }}
           NO_USAGE_STATS: ${{ needs.no-usage-stats.result }}
         run: |
@@ -1328,6 +1436,7 @@ jobs:
           fi
           if [ "$NATIVE" = true ]; then
             test "$CLIPPY" = success
+            test "$SHARED" = success
             # The archive for the action matrix and property tests exists nightly and by hand only.
             if [ "$EVENT_NAME" = schedule ] || [ "$EVENT_NAME" = workflow_dispatch ]; then
               test "$BUILD" = success
@@ -1387,6 +1496,7 @@ jobs:
     timeout-minutes: ${{ vars.CI_RUNNER && 90 || 30 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - uses: dtolnay/rust-toolchain@1.99.1
         with:
           targets: wasm32-unknown-unknown
@@ -1416,6 +1526,7 @@ jobs:
       CARGO_INCREMENTAL: 0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - name: Export solidcore/ alone
         run: |
           mkdir -p "$RUNNER_TEMP/sc"
@@ -1465,9 +1576,10 @@ jobs:
       CARGO_INCREMENTAL: 0
       # Tests that read upstream/TestFiles fail instead of skipping when it is missing.
       SOLIDCORE_REQUIRE_UPSTREAM: "1"
-      BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+      BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || needs.changes.outputs.batch_base }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - name: Toolchain (solidcore/rust-toolchain.toml)
         run: rustup show active-toolchain || rustup toolchain install
       # Main saves the cache; every other run restores it, read-only.
@@ -1617,6 +1729,7 @@ jobs:
       CARGO_INCREMENTAL: 0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - name: Toolchain (solidcore/rust-toolchain.toml)
         run: rustup show active-toolchain || rustup toolchain install
       # Main saves the cache; every other run restores it, read-only.
@@ -1656,6 +1769,7 @@ jobs:
       SOLIDCORE_REQUIRE_UPSTREAM: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - name: Toolchain (solidcore/rust-toolchain.toml)
         run: rustup show active-toolchain || rustup toolchain install
       - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
@@ -1699,6 +1813,7 @@ jobs:
       SOLIDCORE_REQUIRE_UPSTREAM: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - name: Toolchain (solidcore/rust-toolchain.toml)
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2

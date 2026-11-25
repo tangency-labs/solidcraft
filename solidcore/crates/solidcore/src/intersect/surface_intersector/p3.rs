@@ -100,7 +100,7 @@ use crate::blend::blend_corner::on_face::{bezier_pieces, pieces_rounding, Hom};
 use crate::blend::fillet_standard_solver::p1::FilletLaw;
 use crate::curve::curve::Curve;
 use crate::error::intersect::IntersectFailure;
-use crate::error::{passed_on, Failure, Result, SolidError};
+use crate::error::{Failure, Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -124,7 +124,7 @@ use crate::surface::surface::p2::surface_cache;
 use crate::surface::surface::p2::TsectCurveType;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::surface::surface_cache::face_context::FaceQueries;
-use crate::surface::surface_cache::SurfaceCache;
+use crate::surface::surface_cache::{SolveModes, SurfaceCache};
 use crate::topology::ObjectHandle;
 
 use super::p1::{
@@ -423,9 +423,10 @@ impl SurfaceIntersector<'_> {
 
     /// [`SurfaceIntersector::find_boundary_start_points`] with the given surface
     /// caches: `caches[0]` of the first surface, `caches[1]` (or `caches[0]` when only
-    /// one is given, as for a self intersection) of the second. Only their iso boundary
-    /// curves are used; their `process_boundary_curves` flags are set for the call and
-    /// restored on every exit (`SmTemporaryChangeValue`).
+    /// one is given, as for a self intersection) of the second. Their iso boundary
+    /// curves are used, and the boundary curve solves on them run with boundary curve
+    /// processing on (upstream sets the caches' flag for the call,
+    /// `SmTemporaryChangeValue`); the caches keep their flags.
     ///
     /// # Errors
     ///
@@ -459,39 +460,55 @@ impl SurfaceIntersector<'_> {
         out: &mut TsectCurves,
         queries: Option<&dyn FaceQueries<O>>,
     ) -> Result<()> {
+        // Turn on boundary curve processing to force LocalSolve to look for drop
+        // points on boundary curves: the solves run with it on, each cache's point
+        // testing as it is (the caches keep their flags).
+        // (without a cache the body fails before any solve: its modes are not read)
+        let boundary_on = |c: &SurfaceCache<O>| SolveModes {
+            process_boundary_curves: true,
+            ..c.solve_modes()
+        };
+        let first = caches.first().map_or(
+            SolveModes {
+                point_test_enabled: false,
+                process_boundary_curves: true,
+            },
+            boundary_on,
+        );
+        let second = caches.get(1).map_or(first, boundary_on);
+        self.find_boundary_start_points_under(
+            k,
+            caches,
+            [first, second],
+            intersection_box,
+            out,
+            queries,
+        )
+    }
+
+    /// [`SurfaceIntersector::find_boundary_start_points_with_queries`] whose solves
+    /// on `caches[i]` run in `modes[i]` (indexed as the caches are), not in the
+    /// caches' own modes; the caches keep their flags.
+    ///
+    /// # Errors
+    ///
+    /// As [`SurfaceIntersector::find_boundary_start_points_with_queries`].
+    #[allow(clippy::too_many_lines)]
+    pub(crate) fn find_boundary_start_points_under<O: Copy + PartialEq>(
+        &mut self,
+        k: &Kernel,
+        caches: &mut [SurfaceCache<O>],
+        modes: [SolveModes; 2],
+        intersection_box: &Extent3d,
+        out: &mut TsectCurves,
+        queries: Option<&dyn FaceQueries<O>>,
+    ) -> Result<()> {
         if caches.is_empty() {
             return Err(SolidError::intersect(
                 OP_FBSP,
                 IntersectFailure::NoSurfaceCaches,
             ));
         }
-
-        // Turn on boundary curve processing to force LocalSolve to look for drop
-        // points on boundary curves (restored on every exit, last change first).
-        let saved: Vec<bool> = caches
-            .iter()
-            .take(2)
-            .map(|c| c.process_boundary_curves)
-            .collect();
-        for c in caches.iter_mut().take(2) {
-            c.process_boundary_curves = true;
-        }
-        let r = self.find_boundary_start_points_body(k, caches, intersection_box, out, queries);
-        for (c, s) in caches.iter_mut().zip(saved).rev() {
-            c.process_boundary_curves = s;
-        }
-        r
-    }
-
-    #[allow(clippy::too_many_lines)]
-    fn find_boundary_start_points_body<O: Copy + PartialEq>(
-        &mut self,
-        k: &Kernel,
-        caches: &mut [SurfaceCache<O>],
-        intersection_box: &Extent3d,
-        out: &mut TsectCurves,
-        queries: Option<&dyn FaceQueries<O>>,
-    ) -> Result<()> {
         let mut work = BoundaryWork::default();
         self.deferred_touching.clear();
         // sIntervals keeps its values from surface to surface (SetMinMax failures)
@@ -516,14 +533,13 @@ impl SurfaceIntersector<'_> {
             let cache = cache_mut(caches, l_srf)?;
             let iso = cache.iso_boundary_curves(k, &domain, self.this_approx_tol_3d / 3.0)?;
 
-            // add the intervals of the iso curves (statuses ignored, passed on with
-            // `ssi_proto_topology_statuses_pass_on`, fork bcc6f01)
-            let pass = k.fixes.ssi_proto_topology_statuses_pass_on;
+            // add the intervals of the iso curves (statuses ignored upstream, passed on
+            // as the fork does, bcc6f01)
             for (ii, ivl) in intervals.iter_mut().enumerate() {
                 if ii % 2 == 1 {
-                    let _ = passed_on(ivl.set_min_max(domain.min().x, domain.max().x), pass)?;
+                    ivl.set_min_max(domain.min().x, domain.max().x)?;
                 } else {
-                    let _ = passed_on(ivl.set_min_max(domain.min().y, domain.max().y), pass)?;
+                    ivl.set_min_max(domain.min().y, domain.max().y)?;
                 }
             }
 
@@ -572,11 +588,19 @@ impl SurfaceIntersector<'_> {
                 } else {
                     // on OtherSurface's cache: upstream's GlobalCurveIntersect fetches
                     // that same cache (smsurf_GetSurfaceCache) and solves on its tree
-                    let other_cache = cache_ref(caches, 1 - l_srf)?;
+                    let other_index = (1 - l_srf).min(caches.len() - 1);
+                    let other_cache = cache_ref(caches, other_index)?;
+                    let [first_modes, second_modes] = modes;
+                    let other_modes = if other_index == 0 {
+                        first_modes
+                    } else {
+                        second_modes
+                    };
                     surface_global_curve_intersect(
                         k,
                         self.surface(other),
                         other_cache,
+                        other_modes,
                         &other_domain,
                         &tgt_curve,
                         &bsc_ivl,
@@ -671,9 +695,8 @@ impl SurfaceIntersector<'_> {
                             let mut uv_ivl2 =
                                 Extent1d::from_min_max(par(&sol.start, 0), par(&sol.end, 0));
                             uv_ivl2.expand_absolute(ivl_size * EFF_ZERO_SQRT);
-                            // (status ignored, passed on with the flag)
-                            uv_ivl2 = passed_on(uv_ivl2.intersect(&tgt.natural_interval()), pass)?
-                                .unwrap_or_default();
+                            // (status ignored upstream, passed on as the fork does)
+                            uv_ivl2 = uv_ivl2.intersect(&tgt.natural_interval())?;
 
                             // use the better end unless the start is on a boundary
                             if sol.start.solution_value > sol.end.solution_value
@@ -750,10 +773,7 @@ impl SurfaceIntersector<'_> {
         // Add the surface-edge crossings last (statuses ignored)
         for p in core::mem::take(&mut work.edge_crossings) {
             let id = self.alloc_point(p);
-            ignored(passed_on(
-                self.add_start_point(k, id),
-                k.fixes.ssi_proto_topology_statuses_pass_on,
-            )?)?;
+            self.add_start_point(k, id)?;
         }
 
         // make degenerate curves of the touching points
@@ -952,20 +972,17 @@ impl SurfaceIntersector<'_> {
         out: &TsectCurves,
         work: &mut BoundaryWork,
     ) -> Result<()> {
-        // boundary curve point (status ignored: an uninitialised point)
-        let pt = ignored(passed_on(
-            tgt.evaluate(k, par(&sol.start, 0), 1, true, true),
-            k.fixes.ssi_proto_topology_statuses_pass_on,
-        )?)?
-        .and_then(|v| v.first().copied())
-        .unwrap_or(Vec3::UNDEF);
+        // boundary curve point (status ignored upstream, an uninitialised point;
+        // passed on as the fork does, bcc6f01)
+        let pt = tgt
+            .evaluate(k, par(&sol.start, 0), 1, true, true)?
+            .first()
+            .copied()
+            .unwrap_or(Vec3::UNDEF);
 
-        // Set bIsDegenerate = TRUE: a degenerate point xsect curve (status ignored)
-        let is_degenerate = ignored(passed_on(
-            self.classify_boundary_start_point_intersection(k, &tsp),
-            k.fixes.ssi_proto_topology_statuses_pass_on,
-        )?)?
-        .unwrap_or(false);
+        // Set bIsDegenerate = TRUE: a degenerate point xsect curve (status ignored
+        // upstream, passed on as the fork does)
+        let is_degenerate = self.classify_boundary_start_point_intersection(k, &tsp)?;
 
         // when a degenerate point not on an output curve yet: classify it at the end
         if is_degenerate && !self.is_point_on_curve(k, tsp.crv_pos(), &out.curves_3d, None)? {
@@ -988,12 +1005,10 @@ impl SurfaceIntersector<'_> {
                 // a crossing on the other surface's edge: added last
                 work.edge_crossings.push(tsp);
             } else {
-                // add the point to the list of start points (status ignored)
+                // add the point to the list of start points (status ignored upstream,
+                // passed on as the fork does)
                 let id = self.alloc_point(tsp);
-                ignored(passed_on(
-                    self.add_start_point(k, id),
-                    k.fixes.ssi_proto_topology_statuses_pass_on,
-                )?)?;
+                self.add_start_point(k, id)?;
             }
         }
         Ok(())
@@ -2046,6 +2061,10 @@ impl<O: Copy + PartialEq> FaceQueries<SolveObject> for TrimmedFaceContext<'_, O>
         self.queries.face_zone_tol_3d(self.face)
     }
 
+    fn face_has_loopuses(&self, _: SolveObject) -> Result<bool> {
+        self.queries.face_has_loopuses(self.face)
+    }
+
     fn face_point_classify(
         &self,
         k: &Kernel,
@@ -2082,13 +2101,15 @@ impl<O: Copy + PartialEq> FaceQueries<SolveObject> for TrimmedFaceContext<'_, O>
 /// upstream runs on the surface's one cache: here on a copy of `cache` (the
 /// intersector's cache of `surface`; its handles, which name only the surface, become
 /// the [`SolveObject`] of the surface; a cache naming no surface cannot serve the leaf
-/// solves, so the solve then builds its own). The solutions, `[t, u, v]` each (their
-/// objects and nodes are not kept).
+/// solves, so the solve then builds its own, in its own modes). The solve on the copy
+/// runs in `modes`. The solutions, `[t, u, v]` each (their objects and nodes are not
+/// kept).
 #[allow(clippy::too_many_arguments)]
 fn surface_global_curve_intersect<O: Copy + PartialEq>(
     k: &Kernel,
     surface: &Surface,
     cache: &SurfaceCache<O>,
+    modes: SolveModes,
     domain: &Extent2d,
     curve: &Curve,
     interval: &Extent1d,
@@ -2114,11 +2135,12 @@ fn surface_global_curve_intersect<O: Copy + PartialEq>(
     };
     let found = if let Some(mut face_context) = face_context {
         let mut solve_cache = cache.map_handles(|_| Ok(surface_object))?;
-        surface.global_curve_intersect_with_context::<SolveObject>(
+        surface.global_curve_intersect_from::<SolveObject>(
             k,
             [Some(curve_object), Some(surface_object)],
             Some(&mut solve_cache),
-            &mut face_context,
+            Some(&mut face_context),
+            Some(modes),
             domain,
             curve,
             interval,
@@ -2126,10 +2148,12 @@ fn surface_global_curve_intersect<O: Copy + PartialEq>(
         )?
     } else if cache.surface_handle().is_some() {
         let mut solve_cache = cache.map_handles(|_| Ok(surface_object))?;
-        surface.global_curve_intersect_in::<SolveObject>(
+        surface.global_curve_intersect_from::<SolveObject>(
             k,
             [Some(curve_object), Some(surface_object)],
             Some(&mut solve_cache),
+            None,
+            Some(modes),
             domain,
             curve,
             interval,
@@ -2670,6 +2694,69 @@ mod tests {
             .is_err());
         assert!(out.curves_3d.is_empty());
         assert!(si.start_points().is_empty());
+    }
+
+    /// The boundary solves run in the modes the caller gives, not in the caches' flags,
+    /// and leave the caches' flags as built: overriding caches with point testing on and
+    /// boundary curve processing off finds what caches holding the override do.
+    #[test]
+    fn boundary_solves_run_in_the_given_modes_and_leave_the_cache_flags() {
+        let k = Kernel::default();
+        let (a, b) = two_planes();
+        let all = Extent3d::from_bounds(-10.0, -10.0, -10.0, 10.0, 10.0, 10.0);
+        let caches_with = |modes: SolveModes| {
+            [(&a, SrfIndex::First), (&b, SrfIndex::Second)]
+                .map(|(s, i)| {
+                    let mut c = surface_cache::<SrfIndex>(&k, s, Some(i)).expect("cache");
+                    c.point_test_enabled = modes.point_test_enabled;
+                    c.process_boundary_curves = modes.process_boundary_curves;
+                    c
+                })
+                .to_vec()
+        };
+        let found = |si: &SurfaceIntersector<'_>, out: &TsectCurves| {
+            let points: Vec<String> = si
+                .start_points()
+                .iter()
+                .map(|&id| format!("{:?}", si.point(id).expect("point")))
+                .collect();
+            (points, format!("{out:?}"))
+        };
+        let built = SolveModes {
+            point_test_enabled: true,
+            process_boundary_curves: false,
+        };
+        let boundary = SolveModes {
+            point_test_enabled: false,
+            process_boundary_curves: true,
+        };
+
+        // the override, over caches built with other flags
+        let mut caches = caches_with(built);
+        let mut si = intersector(&k, &a, &b);
+        let mut out = TsectCurves::default();
+        si.find_boundary_start_points_under(&k, &mut caches, [boundary; 2], &all, &mut out, None)
+            .expect("boundary start points");
+        assert!(caches.iter().all(|c| c.solve_modes() == built));
+        let overridden = found(&si, &out);
+        assert!(!overridden.0.is_empty());
+
+        // the same solves on caches that hold the override's flags themselves
+        let mut caches = caches_with(boundary);
+        let mut si = intersector(&k, &a, &b);
+        let mut out = TsectCurves::default();
+        si.find_boundary_start_points_with_caches(&k, &mut caches, &all, &mut out)
+            .expect("boundary start points");
+        assert!(caches.iter().all(|c| c.solve_modes() == boundary));
+        assert_eq!(found(&si, &out), overridden);
+
+        // and the public entry turns boundary curve processing on for its solves only
+        let mut caches = caches_with(built);
+        let mut si = intersector(&k, &a, &b);
+        let mut out = TsectCurves::default();
+        si.find_boundary_start_points_with_caches(&k, &mut caches, &all, &mut out)
+            .expect("boundary start points");
+        assert!(caches.iter().all(|c| c.solve_modes() == built));
     }
 
     /// A boundary curve whose trim to the domain ends at a knot just inside it is

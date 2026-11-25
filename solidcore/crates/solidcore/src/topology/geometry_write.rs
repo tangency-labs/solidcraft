@@ -44,6 +44,7 @@
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::tangent_field::TangentFieldCurve;
+use crate::error::topology::TopologyFailure;
 use crate::error::{ignore_status, Result, SolidError};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::surface::ball_patch::BallPatch;
@@ -483,9 +484,10 @@ fn write_surf_of_revolution(
     }
 
     // the generator curve (upstream dereferences a null one)
-    let gen = r.gen_curve.as_ref().ok_or_else(|| {
-        SolidError::topology_missing(OP_WRITE, "the surface of revolution's generator curve")
-    })?;
+    let gen = r
+        .gen_curve
+        .as_ref()
+        .ok_or_else(|| SolidError::topology(OP_WRITE, TopologyFailure::SurfaceWithoutGenerator))?;
     if ascii {
         db.out_str(" SmSurfOfRevolution->GenCurve \n");
     }
@@ -546,9 +548,10 @@ fn write_surf_of_extrusion(
     }
 
     // the generator curve (upstream dereferences a null one)
-    let gen = e.gen_curve.as_ref().ok_or_else(|| {
-        SolidError::topology_missing(OP_WRITE, "the surface of extrusion's generator curve")
-    })?;
+    let gen = e
+        .gen_curve
+        .as_ref()
+        .ok_or_else(|| SolidError::topology(OP_WRITE, TopologyFailure::SurfaceWithoutGenerator))?;
     if ascii {
         db.out_str(" SmSurfOfExtrusion->GenCurve \n");
     }
