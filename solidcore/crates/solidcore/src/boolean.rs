@@ -6,4 +6,5 @@
 
 pub mod api_brep;
 pub mod merge;
+pub mod operand_tolerances;
 pub mod topology_intersector;

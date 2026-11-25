@@ -238,15 +238,14 @@ fn issue_398_closed_shell() {
     ));
 }
 
-/// The open-top shell with `shell_edges_on_analytics_exact` (WR-545) on as well, as the
-/// SolidCraft rig runs shell/1525: `make_edges_on_analytics_exact` intersects the result's
+/// The open-top shell, as the SolidCraft rig runs shell/1525, checked on the exact edges the
+/// shell now always ends with (WR-545): `make_edges_on_analytics_exact` intersects the result's
 /// face-owned surfaces through its face services (the fork reaches each face through
 /// `SmSurface::GetFace`); without them it failed with `Unported(topology.face_p2)`. The
 /// fork (tangency-labs/smlib 68fb9162) gives 51 faces, V = 13701.7343.
 #[test]
 fn issue_398_open_top_shell_with_edges_on_analytics_exact() {
     let (mut k, b) = part_with(true);
-    k.fixes.shell_edges_on_analytics_exact = true;
     let mut got = shell_of(&mut k, b, true).unwrap();
     assert!(brep_is_manifold_solid(&got).unwrap());
     let v = volume(&k, &mut got).unwrap();
@@ -257,13 +256,19 @@ fn issue_398_open_top_shell_with_edges_on_analytics_exact() {
     assert_eq!(got.face_list().len(), 51);
     let want = closed_form(Some(30.0));
     assert!((v - want).abs() <= 1e-6 * want, "{v} vs {want}");
-    // 1.9e-10 above the closed form since #2890 (precise properties integrate from the
+    // It was 1.9e-10 above the closed form from #2890 (precise properties integrate from the
     // trims' base; 13701.73421803366, 2.4e-9 above, before): the offset's face extensions
     // are exact (the source bit for bit, no least squares fit or knot removal moving a
     // face's own part); it was 13701.73449509504 (2.3e-8 above) on the fitted extensions,
-    // 13701.735330849975 (8.4e-8 above) with the flag off
-    let pinned = 13701.734187900483;
-    assert!((v - pinned).abs() <= 1e-9 * pinned, "{v} vs {pinned}");
+    // 13701.735330849975 (8.4e-8 above) with the flag off. With the rims' chamfer stored as
+    // its cone (WR-572, unconditional since its flag was retired) the offset corner cones
+    // meet the cavity floor in their exact circles (tangency-labs/solidcraft#16587, asserted
+    // by `issue_398_open_top_shell_floor_meets_the_corner_cones_in_exact_circles`), so the
+    // body is the closed form's: that test integrates it to within 1e-10 of the closed form at
+    // accuracy 1e-12. At this test's accuracy (1e-6) it reads 13701.734183222, 1.5e-10 below
+    // (integration error). Pinned to the closed form with the earlier pin's 1e-9 band, not to
+    // a measurement.
+    assert!((v - want).abs() <= 1e-9 * want, "{v} vs {want}");
 }
 
 /// Narrows the open-top failure: the shell after each step of the recipe, open at the
@@ -334,9 +339,7 @@ fn issue_398_open_top_shell_floor_meets_the_corner_cones_in_exact_circles() {
     use std::f64::consts::{PI, SQRT_2};
     let mut k = Kernel::default();
     k.fixes.fillet_chamfer_cone_on_arc = true;
-    k.fixes.fillet_chamfer_cone_stored_as_cone = true;
     let b = part(&mut k);
-    k.fixes.shell_edges_on_analytics_exact = true;
     let mut got = shell_of(&mut k, b, true).unwrap();
     assert!(brep_is_manifold_solid(&got).unwrap());
     let floor = planar_faces_at(&k, &got, 2, 2.0);

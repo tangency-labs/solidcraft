@@ -1,18 +1,20 @@
 //! Whether a face of a body is a prism's planar cap: the kernel's
 //! [`solidcore::geom::plane_height::is_square_plane_at`] on records' numbers. Ops converts.
+//! The same for a point or a planar face on a plane ([`is_point_on_plane`],
+//! [`is_face_on_plane`], #16864).
 //!
 //! And whether a prism cut at a face of a target is kept ([`prism_part`]): the cap tests on
 //! the part's planar faces, and the section's edges on the target's face, each curve lying on
 //! the face's surface and inside its trim by the kernel's
 //! [`solidcore::topology::face::curve_on::curve_lies_on_face`] (#16713).
 
-use solidcore::geom::plane_height::is_square_plane_at;
+use solidcore::geom::plane_height::{is_face_on_plane_at, is_point_at, is_square_plane_at};
 use solidcore::geom::vector3d::Vec3;
 use solidcore::topology::face::curve_on::curve_lies_on_face;
 
 use crate::body::Body;
 use crate::order::{self, Order};
-use crate::session::with_body;
+use crate::session::{read_body, with_body};
 use crate::{Error, Result};
 
 fn vec(p: [f64; 3]) -> Vec3 {
@@ -39,6 +41,28 @@ pub fn is_square_plane_at_height(
         height,
         tol,
     )
+}
+
+/// Whether `point` lies within `tol` of the plane `normal · x = height` (`normal` unit; the
+/// kernel's [`is_point_at`]).
+#[must_use]
+pub fn is_point_on_plane(point: [f64; 3], normal: [f64; 3], height: f64, tol: f64) -> bool {
+    is_point_at(vec(point), vec(normal), height, tol)
+}
+
+/// Whether a planar face with unit normal `face_normal` and boundary corners `corners` lies on
+/// the plane `normal · x = height` within `tol`: facing the same way, every corner on it (the
+/// kernel's [`is_face_on_plane_at`]).
+#[must_use]
+pub fn is_face_on_plane(
+    face_normal: [f64; 3],
+    corners: &[[f64; 3]],
+    normal: [f64; 3],
+    height: f64,
+    tol: f64,
+) -> bool {
+    let corners: Vec<Vec3> = corners.iter().map(|p| vec(*p)).collect();
+    is_face_on_plane_at(vec(face_normal), &corners, vec(normal), height, tol)
 }
 
 /// A planar face of a part: a point on it and its unit normal.
@@ -107,7 +131,7 @@ pub fn edges_lie_on_face(
         .iter()
         .map(|e| order::edge(part_order, *e))
         .collect::<Result<Vec<_>>>()?;
-    let curves = with_body("section_curves", part, |_, b| {
+    let curves = read_body("section_curves", part, |_, b| {
         let mut out = Vec::new();
         for e in &ids {
             let data = b.edge(*e)?;

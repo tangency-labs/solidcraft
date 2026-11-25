@@ -127,6 +127,7 @@ use crate::curve::curve::p2::{
     at, evaluate_continuity, is_kind_of as curve_is_kind_of, Curve, CurveEvaluate, KnotsWithStatus,
     BSPLINE_CURVE_TYPE, CRV_IN_VOLUME_TYPE,
 };
+use crate::error::curve::{CurveEdit, CurveFailure};
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
@@ -678,7 +679,6 @@ impl CrvInVolume {
     /// points forward along it, else from the other side.
     fn volume_derivs(
         &self,
-        k: &Kernel,
         crv: &[Vec3],
         n: usize,
         from_left: bool,
@@ -692,7 +692,6 @@ impl CrvInVolume {
             if t.z > 0.0 { from_left } else { !from_left },
         ];
         let opts = EvalOptions {
-            fixes: k.fixes,
             from_left: sides,
             non_zero_tangents,
             ..EvalOptions::default()
@@ -734,13 +733,13 @@ impl CrvInVolume {
             .evaluate(k, t, n_eval, from_left, non_zero_tangents)?;
 
         // Volume Evaluate / Map - with fewer derivatives while the volume can't
-        let mut vol = self.volume_derivs(k, &crv, n_eval, from_left, non_zero_tangents);
+        let mut vol = self.volume_derivs(&crv, n_eval, from_left, non_zero_tangents);
         while let Err(e) = &vol {
             if e.is_unported_or_cancelled() || n_eval == 0 {
                 break;
             }
             n_eval -= 1;
-            vol = self.volume_derivs(k, &crv, n_eval, from_left, non_zero_tangents);
+            vol = self.volume_derivs(&crv, n_eval, from_left, non_zero_tangents);
         }
         let vol = vol?;
 
@@ -901,7 +900,11 @@ impl CrvInVolume {
             self.in_param_space,
         ) {
             Ok(classes) => classes,
-            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
+            Err(
+                e @ (SolidError::Unported { .. }
+                | SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }),
+            ) => return Err(e),
             Err(e) => {
                 let status = Err(e);
                 return Ok((
@@ -1116,10 +1119,7 @@ impl CrvInVolume {
     fn fill_mults(&self, knots: &[f64], mults: &mut [usize]) -> Result<()> {
         // check state - cached breaks and conts are current
         if self.need_breaks || self.breaks.len() != self.conts.len() {
-            return Err(SolidError::curve_failed(
-                OP_MULTS,
-                "the cached breaks and continuities are not current",
-            ));
+            return Err(SolidError::curve(OP_MULTS, CurveFailure::BreaksNotCurrent));
         }
 
         let mut bi = 0usize;
@@ -1144,9 +1144,9 @@ impl CrvInVolume {
 
             // error condition - ran out of breaks to search
             if bi >= self.breaks.len() {
-                return Err(SolidError::curve_failed(
+                return Err(SolidError::curve(
                     OP_MULTS,
-                    "a knot matched no cached break",
+                    CurveFailure::KnotPastBreaks { knot: param },
                 ));
             }
 
@@ -1160,9 +1160,9 @@ impl CrvInVolume {
                 SolidError::invalid_input(OP_MULTS, "more knots matched than continuities")
             })?;
             if cont == ContinuityType::Undefined {
-                return Err(SolidError::curve_failed(
+                return Err(SolidError::curve(
                     OP_MULTS,
-                    "a cached continuity is undefined",
+                    CurveFailure::ContinuityUndefined { at: param },
                 ));
             }
 
@@ -1331,9 +1331,11 @@ impl CrvInVolume {
     ) -> Result<Extent1d> {
         // Don't own curve can not reverse parameterization
         if !self.owns_curve() {
-            return Err(SolidError::curve_failed(
+            return Err(SolidError::curve(
                 OP,
-                "a curve that does not own its base curve cannot be reparametrised",
+                CurveFailure::BaseCurveNotOwned {
+                    edit: CurveEdit::Reparametrise,
+                },
             ));
         }
         self.curve.reverse_parameterization(k, old_interval)
@@ -1364,9 +1366,11 @@ impl CrvInVolume {
     ) -> Result<()> {
         // Don't own curve can not trim the curve
         if !self.owns_curve() {
-            return Err(SolidError::curve_failed(
+            return Err(SolidError::curve(
                 OP,
-                "a curve that does not own its base curve cannot be trimmed",
+                CurveFailure::BaseCurveNotOwned {
+                    edit: CurveEdit::Trim,
+                },
             ));
         }
 
@@ -1694,7 +1698,43 @@ mod tests {
         // 0.5 is break 2, G1 -> 2
         assert_eq!(c.generate_mults(&[0.1, 0.5]).unwrap(), vec![0, 2]);
         // past the last break
-        assert!(c.generate_mults(&[2.0]).is_err());
+        let err = c.generate_mults(&[2.0]).unwrap_err();
+        assert_eq!(
+            err.curve_failure(),
+            Some(&CurveFailure::KnotPastBreaks { knot: 2.0 })
+        );
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR)
+        );
+        // a cache marked out of date, and one loaded with an undefined continuity
+        let mut stale = cached(3);
+        stale.set_breaks_cache(
+            true,
+            vec![0.0, 1.0],
+            vec![ContinuityType::Discontinuous, ContinuityType::Discontinuous],
+        );
+        assert_eq!(
+            stale.generate_mults(&[0.0]).unwrap_err().curve_failure(),
+            Some(&CurveFailure::BreaksNotCurrent)
+        );
+        let mut undefined = cached(3);
+        undefined.set_breaks_cache(
+            false,
+            vec![0.0, 0.5, 1.0],
+            vec![
+                ContinuityType::Discontinuous,
+                ContinuityType::Undefined,
+                ContinuityType::Discontinuous,
+            ],
+        );
+        assert_eq!(
+            undefined
+                .generate_mults(&[0.5])
+                .unwrap_err()
+                .curve_failure(),
+            Some(&CurveFailure::ContinuityUndefined { at: 0.5 })
+        );
         let k = &Kernel::default();
         let (kn, m) = c
             .knots_ref(k, Some(&Extent1d::from_min_max(0.2, 0.6)))
@@ -1729,8 +1769,25 @@ mod tests {
         c.trim(&k, &mut ivl, TrimMode::Notify).unwrap();
         assert!(c.need_breaks() && c.breaks().is_empty());
         let mut d = cached(0);
-        assert!(d.trim(&k, &mut ivl, TrimMode::Notify).is_err());
-        assert!(d.reverse_parameterization(&k, &ivl).is_err());
+        let err = d.trim(&k, &mut ivl, TrimMode::Notify).unwrap_err();
+        assert_eq!(
+            err.curve_failure(),
+            Some(&CurveFailure::BaseCurveNotOwned {
+                edit: CurveEdit::Trim
+            })
+        );
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR)
+        );
+        assert_eq!(
+            d.reverse_parameterization(&k, &ivl)
+                .unwrap_err()
+                .curve_failure(),
+            Some(&CurveFailure::BaseCurveNotOwned {
+                edit: CurveEdit::Reparametrise
+            })
+        );
         let (min, conts) = cached(3).continuities_at(&k, &[0.0, 1.0], 0.5).unwrap();
         assert_eq!(min, ContinuityType::CInfinity);
         assert_eq!(conts.len(), 2);
@@ -1866,13 +1923,23 @@ mod tests {
         // Uncached curve (`need_breaks == true`) -> `SM_ERR`.
         let uncached = civ(3);
         let unc_fix = uncached.generate_mults(&[0.0]);
-        assert!(unc_fix.is_err());
+        assert_eq!(
+            unc_fix.unwrap_err().curve_failure(),
+            Some(&CurveFailure::BreaksNotCurrent)
+        );
 
         // Mismatched cache lengths -> `SM_ERR`, and empty `mults` on `knots_ref`.
         let mut mismatch = civ(3);
         mismatch.set_breaks_cache(false, vec![0.0, 1.0], vec![ContinuityType::C1]);
-        let mis_res = mismatch.generate_mults(&[0.0]);
-        assert!(mis_res.is_err());
+        let mis_res = mismatch.generate_mults(&[0.0]).unwrap_err();
+        assert_eq!(
+            mis_res.curve_failure(),
+            Some(&CurveFailure::BreaksNotCurrent)
+        );
+        assert_eq!(
+            crate::error::upstream_status(&mis_res),
+            Some(crate::error::SM_ERR)
+        );
         let (m_kn, m_mu) = mismatch.knots_ref(&k, None).unwrap();
         assert_eq!(m_kn, vec![0.0, 1.0]);
         assert!(m_mu.is_empty());
@@ -1880,7 +1947,10 @@ mod tests {
         // Parameter past the last break -> `SM_ERR`.
         let ok_cached = cached(3);
         let past_fix = ok_cached.generate_mults(&[0.5, 1.5]);
-        assert!(past_fix.is_err());
+        assert_eq!(
+            past_fix.unwrap_err().curve_failure(),
+            Some(&CurveFailure::KnotPastBreaks { knot: 1.5 })
+        );
 
         // `Undefined` continuity at `bi = 2`: `conts[2]` is checked and fails
         // (`knots_ref` keeps partial mults).
@@ -1894,7 +1964,10 @@ mod tests {
         undef.set_breaks_cache(false, vec![0.0, 0.25, 0.5, 1.0], u_conts);
         let sub_q = [0.25, 0.5];
         let u_err = undef.generate_mults(&sub_q);
-        assert!(u_err.is_err());
+        assert_eq!(
+            u_err.unwrap_err().curve_failure(),
+            Some(&CurveFailure::ContinuityUndefined { at: 0.5 })
+        );
         let u_one = undef.generate_mults(&[0.25]).unwrap();
         assert_eq!(u_one, vec![1]);
         let sub_ivl = Extent1d::from_min_max(0.2, 0.6);

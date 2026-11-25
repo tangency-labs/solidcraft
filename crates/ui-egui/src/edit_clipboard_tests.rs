@@ -338,9 +338,9 @@ fn contribution_linked_design_clipboard_crosses_tabs_reuses_links_and_undoes_onc
         assert_eq!(app.session.doc.occurrences.len(), n);
         assert_eq!(app.session.undo.len(), n);
         assert!(app.session.doc.occurrences.iter().all(|o| !o.grounded));
-        assert!(app.tree.occurrence_move.is_some());
+        assert!(crate::dialogs_move::moving(&app).is_some(), "Move/Copy opens on the pasted component");
     }
-    app.tree.occurrence_move = None;
+    crate::dialogs::cancel(&mut app);
     app.run("edit.undo", json!({})).unwrap();
     assert_eq!(app.session.doc.occurrences.len(), 1);
     app.run("edit.undo", json!({})).unwrap();
@@ -353,25 +353,26 @@ fn contribution_linked_design_clipboard_crosses_tabs_reuses_links_and_undoes_onc
 }
 
 #[test]
-fn contribution_occurrence_move_panel_belongs_to_its_document() {
+fn contribution_move_copy_of_a_pasted_component_stays_with_its_document() {
     let file = ContributionPart::new();
     let mut app = contribution_saved_part(&file);
     assert!(super::copy(&mut app));
     crate::documents::open_tab(&mut app, solidcraft_engine::Session::default()).unwrap();
     assert!(super::paste(&mut app, None));
-    let id = app.tree.occurrence_move.as_ref().unwrap().occurrence;
-    app.run("occurrence.move", json!({"occurrence":id,"translate":[10,0,0],"capture":false})).unwrap();
-    let pending = app.session.pending_moves.clone();
+    let path = crate::dialogs_move::moving(&app).expect("Move/Copy opens on the pasted component");
     crate::documents::switch(&mut app, 0);
-    assert!(app.tree.occurrence_move.is_none());
+    assert!(crate::dialogs_move::moving(&app).is_none(), "the other design shows no Move/Copy of it");
     assert!(app.session.doc.occurrences.is_empty());
     crate::documents::switch(&mut app, 1);
-    assert_eq!(app.tree.occurrence_move.as_ref().unwrap().occurrence, id);
-    assert_eq!(app.session.pending_moves, pending);
+    assert!(app.session.doc.occurrences.iter().any(|o| path.last() == Some(&o.id)));
+    assert!(app.session.pending_moves.is_empty(), "nothing moves before OK");
+    if app.preferences.keep_work_on_tab_switch {
+        assert_eq!(crate::dialogs_move::moving(&app), Some(path));
+    }
 }
 
 #[test]
-fn contribution_linked_paste_uses_the_pointer_and_pending_numeric_move() {
+fn contribution_linked_paste_uses_the_pointer_and_a_numeric_move() {
     use solidcore_record::Vec3;
     let file = ContributionPart::new();
     let mut h = crate::scenario::Harness::new();
@@ -387,28 +388,30 @@ fn contribution_linked_paste_uses_the_pointer_and_pending_numeric_move() {
     let undo = h.app.session.undo.len();
     assert!(super::paste(&mut h.app, Some(at)));
     h.frames(3);
-    let path = h.app.tree.occurrence_move.as_ref().unwrap().path.clone();
+    let path = crate::dialogs_move::moving(&h.app).expect("Move/Copy opens on the pasted component");
     let initial = solidcraft_engine::doc::apply_point(&h.app.session.occurrence_placement(&path).unwrap().world, Vec3::ZERO);
     assert!((initial - pointed).len() < 1e-5, "{initial:?}");
     assert_eq!(h.app.session.undo.len(), undo + 1);
     let camera = h.app.cam;
-    let field = h.call("ui.at", json!({"handle":"occurrence-move:distance:0"}));
-    h.call("ui.click", json!({"x":field["result"][0],"y":field["result"][1],"double":true}));
+    if let Some(crate::dialogs::Kind::Move { x, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *x = "12 mm".into();
+    }
     h.frames(2);
-    h.step(&json!({"key":"A","cmd":true})).unwrap();
-    h.step(&json!({"text":"12"})).unwrap();
-    h.step(&json!({"key":"Enter"})).unwrap();
-    h.frames(3);
+    h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none());
     let moved = solidcraft_engine::doc::apply_point(&h.app.session.occurrence_placement(&path).unwrap().world, Vec3::ZERO);
-    assert!(moved.x > initial.x + 10., "numeric move must retain the pasted occurrence: {initial:?} -> {moved:?}");
+    assert!((moved.x - initial.x - 12.).abs() < 1e-5, "numeric move must retain the pasted occurrence: {initial:?} -> {moved:?}");
+    assert!(h.app.session.pending_moves.is_empty(), "Capture All Positions is ticked at first");
     assert_eq!(h.app.cam, camera, "numeric editing does not move the camera");
-    let movement = h.app.tree.occurrence_move.as_ref().unwrap();
-    assert!((movement.translate[0] - (moved.x - initial.x)).abs() < 1e-5);
-    assert_eq!(h.app.session.undo.len(), undo + 1, "pending movement does not split the initial paste undo");
-    h.app.run("edit.undo", json!({})).unwrap();
+    for _ in 0..3 {
+        if h.app.session.doc.links.is_empty() {
+            break;
+        }
+        h.app.run("edit.undo", json!({})).unwrap();
+    }
     h.frames(3);
-    assert!(h.app.session.doc.links.is_empty());
-    assert!(h.app.tree.occurrence_move.is_none());
+    assert!(h.app.session.doc.links.is_empty(), "undo takes back the move and then the paste");
     crate::documents::switch(&mut h.app, 0);
     assert_eq!(h.app.session.doc.features.len(), 1, "source geometry stays untouched");
 }

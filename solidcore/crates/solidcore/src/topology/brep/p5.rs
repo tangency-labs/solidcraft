@@ -65,10 +65,12 @@
 //! Debug drawing/assertions are omitted. No recursion is introduced.
 //! `DeleteTopologicalVertex` leaves the vertex in place (the routine's silent `SM_ERR`)
 //! for an edge curve that is not of an `SmBSplineCurve` kind, where upstream dereferences
-//! the null cast (WR-598, the fork's tangency-labs/smlib@829b982); joining a curve on a
-//! B-spline-kind surface along a constant-u or constant-v UV line as that iso curve is
-//! opt-in (`Kernel::fixes.delete_vertex_joins_seam_iso_curve`). A line joined through
-//! the `SmBSplineCurve` join gets its NURB made first, as `GetOrCreateGwNurbPointer` does.
+//! the null cast (WR-598, the fork's tangency-labs/smlib@829b982), except a curve on a
+//! B-spline-kind surface along an exactly constant-u or constant-v UV line (the fork took a
+//! drift up to `EFF_ZERO` of the domain), which is joined as that iso curve; on a
+//! procedural blend (which evaluates its definition, not its net) only while the net's
+//! certified bound is within the joined edge's tolerance. A line joined through the `SmBSplineCurve` join gets its
+//! NURB made first, as `GetOrCreateGwNurbPointer` does.
 //! Not upstream (#15718): once [`remove_topological_edges_and_vertices`] has deleted its
 //! topological vertices, each surviving edge on a line and its vertices grow to the
 //! certified gaps the joins left between the line's ends and the vertices
@@ -77,9 +79,14 @@
 //! completes the merged face's seam (`HasSeamProblem`, then `SplitAtSeam`:
 //! [`crate::topology::face::p1::complete_merged_face_seam`]), as the boolean cleanup does
 //! under WR-599: a merged face on a periodic surface keeps its seam whatever the fix set.
+//! Not upstream (#18166): [`stitch_and_orient`] keeps each edge its stitch raised covering
+//! the faces it holds no trim on across the orientation, which rewrites their surfaces
+//! (`StitchRaises`). Not upstream (#20373): after the orientation each edge the stitch
+//! joined covers its UV trims as the B-rep ends with them.
 
 use crate::curve::curve::Curve;
-use crate::error::{Result, SolidError};
+use crate::error::topology::TopologyFailure;
+use crate::error::{Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::context::{MarkLock, ALL_MARKS};
 use crate::geom::extent1d::Extent1d;
@@ -96,7 +103,10 @@ use crate::topology::brep::p1::SetRegionVoidType;
 use crate::topology::brep::p2 as brep_p2;
 use crate::topology::face::p4 as face_p4;
 use crate::topology::VertexuseId;
-use crate::topology::{vertex, Brep, EdgeId, FaceId, LoopId, RegionId, ShellId, VertexId};
+use crate::topology::{
+    vertex, Brep, EdgeId, FaceId, FaceuseId, LoopId, RegionId, ShellId, VertexId,
+};
+use std::collections::BTreeMap;
 
 /// A pending topology allocation with attributes borrowed from a database reader.
 /// On failure/drop, detaches each attribute with native `bDoNotDelete = TRUE`
@@ -220,9 +230,75 @@ fn require_editing(enabled: bool) -> Result<()> {
     if enabled {
         Ok(())
     } else {
-        Err(SolidError::topology_failed(OP, "editing is not enabled"))
+        Err(SolidError::topology(OP, TopologyFailure::EditingDisabled))
     }
 }
+
+/// A named cause of this module's operation.
+#[track_caller]
+fn named(failure: TopologyFailure) -> SolidError {
+    Failure::new(OP, failure).into_error()
+}
+
+/// A defect ([`TopologyFailure::Defect`]) with the status `SM_ERR` of the `SER` it
+/// replaces.
+#[track_caller]
+fn defect(why: &'static str) -> SolidError {
+    named(TopologyFailure::Defect { why })
+}
+
+/// A defect of the B-rep's own links ([`TopologyFailure::Defect`]), `why` saying which link
+/// is missing, with the status `SM_ERR_NULL_POINTER` of the `NER` it replaces.
+#[track_caller]
+fn broken_link(why: &'static str) -> SolidError {
+    Failure::new(OP, TopologyFailure::Defect { why })
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+}
+
+/// `failure`, with the error a step before it ignored as its cause when there is one
+/// (`docs/failure-codes-and-reproduction.md` §6, rule 6).
+#[track_caller]
+fn caused(failure: TopologyFailure, ignored: Option<SolidError>) -> SolidError {
+    let f = Failure::new(OP, failure);
+    match ignored {
+        Some(e) => f.caused_by(e),
+        None => f,
+    }
+    .into_error()
+}
+
+/// [`crate::error::ignored`], keeping the first error it ignores in `first` (to be the
+/// cause of the failure that follows, [`caused`]).
+fn ignored_keeping<T>(r: Result<T>, first: &mut Option<SolidError>) -> Result<Option<T>> {
+    match r {
+        Ok(v) => Ok(Some(v)),
+        Err(e) => {
+            crate::error::ignored(Err::<T, _>(e.clone()))?;
+            first.get_or_insert(e);
+            Ok(None)
+        }
+    }
+}
+
+/// Why a shell has no region.
+const SHELL_NO_REGION: &str =
+    "a shell has no region, though the kernel puts every shell of a B-rep in a region";
+/// Why a vertex use has no vertex.
+const VU_NO_V: &str =
+    "a vertex use has no vertex, though the kernel makes every vertex use on its vertex";
+/// Why the deleted edge has no far vertex.
+const NO_FAR_VERTEX: &str = "the deleted edge has no vertex at its far end, though it is one of \
+     the vertex's two edges and the kernel makes every edge with a vertex use at each end";
+/// Why a face has no face use on a side.
+const FACE_NO_FU: &str =
+    "a face has no face use on one side, though the kernel makes every face with its two";
+/// Why a face `surface_owners` listed has no surface.
+const SURFACE_OWNER_NO_SURFACE: &str =
+    "a face surface_owners listed has no surface, though it lists only faces with a surface";
+/// Why a face use has no shell.
+const FU_NO_SHELL: &str =
+    "a face use has no shell, though the kernel puts every face use of a B-rep in a shell";
 
 /// The position, tolerance and temporary-edge length threshold calculated before
 /// `CombineCoincidentVertices` modifies topology (`SM_USE_OLDTOL`).
@@ -308,7 +384,7 @@ pub fn combine_with_notifications(
             combine_with_notifications(k, b, survivor, deleted, deleted_edge, Some(env))
         });
     };
-    let mut notifications = Some(env);
+    let mut notifications = Some(&mut *env);
     *deleted_edge = None;
     let target = coincident_vertex_target(b, survivor, deleted)?;
     let edges = vertex::edges(b, survivor, None)?;
@@ -330,33 +406,18 @@ pub fn combine_with_notifications(
             true,
             true,
         ))?;
-        crate::error::ignore_status(crate::error::passed_on(
-            delete_vertex(k, b, deleted, notifications.as_deref_mut()),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        delete_vertex(k, b, deleted, notifications.as_deref_mut())?;
         return Ok(());
     } else if edges.is_empty() {
         let first_uses = vertex::vertexuses(b, survivor)?;
         let last_uses = vertex::vertexuses(b, deleted)?;
         for vu in first_uses {
-            crate::error::ignore_status(crate::error::passed_on(
-                remove_vertexuse(b, survivor, vu),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
-            crate::error::ignore_status(crate::error::passed_on(
-                post_insert_vertexuse(b, deleted, vu),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            remove_vertexuse(b, survivor, vu)?;
+            post_insert_vertexuse(b, deleted, vu)?;
         }
         for vu in last_uses {
-            crate::error::ignore_status(crate::error::passed_on(
-                remove_vertexuse(b, deleted, vu),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
-            crate::error::ignore_status(crate::error::passed_on(
-                post_insert_vertexuse(b, survivor, vu),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            remove_vertexuse(b, deleted, vu)?;
+            post_insert_vertexuse(b, survivor, vu)?;
         }
         // Upstream ignores Notify's status here.
         crate::error::ignore_status(notify_merge(
@@ -374,10 +435,7 @@ pub fn combine_with_notifications(
             true,
             true,
         ))?;
-        crate::error::ignore_status(crate::error::passed_on(
-            delete_vertex(k, b, deleted, notifications.as_deref_mut()),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        delete_vertex(k, b, deleted, notifications.as_deref_mut())?;
         return Ok(());
     }
     let mut common = None;
@@ -402,16 +460,12 @@ pub fn combine_with_notifications(
             .curve
             .as_ref()
             .ok_or_else(|| SolidError::invalid_input(OP, "common edge without curve"))?;
-        let length = crate::error::ignored(crate::error::passed_on(
-            curve.length_with_zone_tol(
-                k,
-                &record.interval,
-                target.tolerance,
-                Some(record.tolerance),
-            ),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?
-        .unwrap_or(0.0);
+        let length = curve.length_with_zone_tol(
+            k,
+            &record.interval,
+            target.tolerance,
+            Some(record.tolerance),
+        )?;
         if length > target.minimum_edge_length {
             // Retain a long common edge; GlueVertices will close it.
             common = None;
@@ -435,10 +489,7 @@ pub fn combine_with_notifications(
                         crate::topology::VertexuseOwner::Loopuse(_)
                     )
                 {
-                    return Err(SolidError::topology_failed(
-                        OP,
-                        "the vertices share a face the survivor bounds as a loop vertex",
-                    ));
+                    return Err(named(TopologyFailure::VertexLoopInSharedFace));
                 }
             }
             let start = b.vertex(survivor)?.point;
@@ -476,19 +527,16 @@ pub fn combine_with_notifications(
     if let Some(edge) = common {
         squeeze_edge(k, b, notifications.as_deref_mut(), edge, survivor)?;
     } else {
-        crate::error::ignore_status(crate::error::passed_on(
-            glue_with_notifications(
-                k,
-                b,
-                Some(survivor),
-                Some(deleted),
-                None,
-                notifications.as_deref_mut(),
-            ),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        glue_with_notifications(
+            k,
+            b,
+            Some(survivor),
+            Some(deleted),
+            None,
+            notifications.as_deref_mut(),
+        )?;
     }
-    set_vertex_point(k, b, survivor, target.point, notifications.as_deref_mut())?;
+    set_vertex_point(k, b, survivor, target.point, notifications)?;
     crate::error::ignore_status(vertex::set_tolerance(
         b,
         survivor,
@@ -496,8 +544,6 @@ pub fn combine_with_notifications(
         true,
         true,
     ))?;
-    let env = notifications
-        .ok_or_else(|| SolidError::topology_missing(OP, "the edit-notification environment"))?;
     crate::topology::brep::p1::update_vertex_edge_intervals(k, b, env, survivor)
 }
 
@@ -597,9 +643,9 @@ fn squeeze_edge(
 
 fn remove_vertexuse(b: &mut Brep, vertex: VertexId, vu: VertexuseId) -> Result<()> {
     if b.vertexuse(vu)?.vertex != Some(vertex) {
-        return Err(SolidError::topology_failed(
-            OP,
-            "the vertex use is not on the vertex",
+        return Err(defect(
+            "the vertex use to move is not on the vertex, though every caller took it from \
+             that vertex's list or a shell of it",
         ));
     }
     let index = b
@@ -608,7 +654,10 @@ fn remove_vertexuse(b: &mut Brep, vertex: VertexId, vu: VertexuseId) -> Result<(
         .iter()
         .position(|&id| id == vu)
         .ok_or_else(|| {
-            SolidError::topology_failed(OP, "the vertex does not list the vertex use")
+            defect(
+                "the vertex does not list a vertex use linked to it, though the kernel lists \
+                 every vertex use on the vertex it links it to",
+            )
         })?;
     b.vertex_mut(vertex)?.vertexuses.remove(index);
     b.vertexuse_mut(vu)?.vertex = None;
@@ -618,9 +667,9 @@ fn remove_vertexuse(b: &mut Brep, vertex: VertexId, vu: VertexuseId) -> Result<(
 fn post_insert_vertexuse(b: &mut Brep, vertex: VertexId, vu: VertexuseId) -> Result<()> {
     b.vertex(vertex)?;
     if b.vertexuse(vu)?.vertex.is_some() {
-        return Err(SolidError::topology_failed(
-            OP,
-            "the vertex use is already on a vertex",
+        return Err(defect(
+            "the vertex use to move is still on a vertex, though every caller has just \
+             removed it from its vertex",
         ));
     }
     b.vertex_mut(vertex)?.vertexuses.push(vu);
@@ -694,9 +743,11 @@ fn create_wire_edge_from_curve_in(
 ) -> Result<EdgeId> {
     let start = curve.evaluate_point(k, interval.min())?;
     let end = curve.evaluate_point(k, interval.max())?;
-    let region = b
-        .infinite_region()
-        .ok_or_else(|| SolidError::topology_missing(OP, "the B-rep's infinite region"))?;
+    let region = b.infinite_region().ok_or_else(|| {
+        Failure::new(OP, TopologyFailure::NoInfiniteRegion)
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
+    })?;
     let (first, edge, last) = with_p3_notifications(k, b, Some(&mut *env), |k, b, env| {
         let (_, first) = make_shell_vertex(b, region, start, env)?;
         let (edge, last) = make_wire_edge_vertex(
@@ -713,10 +764,7 @@ fn create_wire_edge_from_curve_in(
         Ok((first, edge, last))
     })?;
     if start.distance(end) < b.tolerance() {
-        crate::error::ignore_status(crate::error::passed_on(
-            glue_with_notifications(k, b, Some(first), Some(last), None, Some(&mut *env)),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        glue_with_notifications(k, b, Some(first), Some(last), None, Some(&mut *env))?;
     }
     Ok(edge)
 }
@@ -798,16 +846,32 @@ pub(crate) fn delete_topological_vertex_joining(
             delete_topological_vertex_joining(k, b, editing_enabled, vertex, edge, Some(env))
         });
     };
-    let mut notifications = Some(env);
     require_editing(editing_enabled)?;
-    crate::error::ignore_status(notify_pre_edit(k, b, notifications.as_deref_mut()))?;
-    let vertex = vertex.ok_or_else(|| SolidError::topology_missing(OP, "the vertex to delete"))?;
+    crate::error::ignore_status(notify_pre_edit(k, b, Some(env)))?;
+    let vertex = vertex.ok_or_else(|| named(TopologyFailure::NoVertexGiven))?;
+    let join = prepare_vertex_join(k, b, vertex, edge)?;
+    apply_vertex_join(k, b, vertex, join, env)
+}
+
+/// The surviving edge either extends its own curve or takes the joined curve.
+struct VertexJoin {
+    survivor: EdgeId,
+    deleted: EdgeId,
+    curve: Option<Curve>,
+    interval: Extent1d,
+}
+
+fn prepare_vertex_join(
+    k: &Kernel,
+    b: &Brep,
+    vertex: VertexId,
+    edge: Option<EdgeId>,
+) -> Result<VertexJoin> {
     let edges = vertex::edges(b, vertex, None)?;
     let [first, last] = edges.as_slice() else {
-        return Err(SolidError::topology_failed(
-            OP,
-            "the vertex is not on exactly two edges",
-        ));
+        return Err(named(TopologyFailure::VertexNotOnTwoEdges {
+            edges: edges.len(),
+        }));
     };
     let deleted = if let Some(edge) = edge {
         edge
@@ -825,10 +889,7 @@ pub(crate) fn delete_topological_vertex_joining(
         }
     };
     if deleted != *first && deleted != *last {
-        return Err(SolidError::topology_failed(
-            OP,
-            "the edge to delete is not on the vertex",
-        ));
+        return Err(named(TopologyFailure::EdgeNotOnVertex));
     }
     let survivor = if *first == deleted { *last } else { *first };
     let join_survivor = crate::topology::edge::start_vertex(b, survivor)? != Some(vertex);
@@ -852,123 +913,91 @@ pub(crate) fn delete_topological_vertex_joining(
         let survivor_range = survive_curve.natural_interval();
         // The native overload defaults bSnapToEnds to TRUE. Its additional-work
         // output is unused by this caller.
-        let coincidence = crate::error::ignored(crate::error::passed_on(
-            delete_curve.global_coincidence_checker::<JoinCurve>(
-                k,
-                &deleted_range,
-                &survive_curve,
-                &survivor_range,
-                0.001,
-                true,
-                [
-                    Some(JoinCurve::Deleted(deleted_range)),
-                    Some(JoinCurve::Survivor(survivor_range)),
-                ],
-            ),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
-        if let Some(coincidence) = coincidence {
-            if let [solution] = coincidence.solutions.as_slice() {
-                if solution.solution_type
-                    == crate::geom::solution_array::SolutionType::RangeOfValues
-                {
-                    let ds0 = *solution.start.parameters.first().ok_or_else(|| {
-                        SolidError::topology_failed(
-                            OP,
-                            "the overlap has no start parameter on the deleted edge",
-                        )
-                    })?;
-                    let ds1 = *solution.end.parameters.first().ok_or_else(|| {
-                        SolidError::topology_failed(
-                            OP,
-                            "the overlap has no end parameter on the deleted edge",
-                        )
-                    })?;
-                    let ss0 = *solution.start.parameters.get(1).ok_or_else(|| {
-                        SolidError::topology_failed(
-                            OP,
-                            "the overlap has no start parameter on the surviving edge",
-                        )
-                    })?;
-                    let ss1 = *solution.end.parameters.get(1).ok_or_else(|| {
-                        SolidError::topology_failed(
-                            OP,
-                            "the overlap has no end parameter on the surviving edge",
-                        )
-                    })?;
-                    if (ds1 - ds0) * (ss1 - ss0) > 0.0 {
-                        let far = if join_deleted {
-                            deleted_interval.min()
-                        } else {
-                            deleted_interval.max()
-                        };
-                        if survivor_range.contains_value(far, crate::math::EFF_ZERO) {
-                            let far_vertex =
-                                crate::topology::edge::other_vertex(b, deleted, Some(vertex))?
-                                    .ok_or_else(|| {
-                                        SolidError::topology_missing(
-                                            OP,
-                                            "the deleted edge's far vertex",
-                                        )
-                                    })?;
-                            let point = b.vertex(far_vertex)?.point;
-                            // Native ignores EvaluatePoint's status. Its defined
-                            // SM_UNDEF_DOUBLE sentinel remains explicit when an ordinary evaluation fails.
-                            let evaluated = crate::error::ignored(crate::error::passed_on(
-                                survive_curve.evaluate_point(k, far),
-                                k.fixes.brep_edit_statuses_pass_on,
-                            )?)?
-                            .unwrap_or(Vec3::UNDEF);
-                            if evaluated.closer_than(max_gap, point) {
-                                same_geometry = true;
-                            }
+        let coincidence = delete_curve.global_coincidence_checker::<JoinCurve>(
+            k,
+            &deleted_range,
+            &survive_curve,
+            &survivor_range,
+            0.001,
+            true,
+            [
+                Some(JoinCurve::Deleted(deleted_range)),
+                Some(JoinCurve::Survivor(survivor_range)),
+            ],
+        )?;
+        if let [solution] = coincidence.solutions.as_slice() {
+            if solution.solution_type == crate::geom::solution_array::SolutionType::RangeOfValues {
+                // each end's parameters on the deleted and the surviving curve
+                let [ds0, ss0, ..] = solution.start.parameters;
+                let [ds1, ss1, ..] = solution.end.parameters;
+                if (ds1 - ds0) * (ss1 - ss0) > 0.0 {
+                    let far = if join_deleted {
+                        deleted_interval.min()
+                    } else {
+                        deleted_interval.max()
+                    };
+                    if survivor_range.contains_value(far, crate::math::EFF_ZERO) {
+                        let far_vertex =
+                            crate::topology::edge::other_vertex(b, deleted, Some(vertex))?
+                                .ok_or_else(|| broken_link(NO_FAR_VERTEX))?;
+                        let point = b.vertex(far_vertex)?.point;
+                        // Native ignores EvaluatePoint's status (SM_UNDEF_DOUBLE on
+                        // failure); it is passed on here (WR-658).
+                        let evaluated = survive_curve.evaluate_point(k, far)?;
+                        if evaluated.closer_than(max_gap, point) {
+                            same_geometry = true;
                         }
                     }
                 }
             }
         }
     }
-    if same_geometry {
+    let (curve, interval) = if same_geometry {
         let far = if join_survivor {
             deleted_interval.max()
         } else {
             deleted_interval.min()
         };
-        b.edge_mut(survivor)?.interval.add_value(far);
+        let mut interval = survivor_interval;
+        interval.add_value(far);
+        (None, interval)
     } else {
         // Upstream casts each copy to `SmBSplineCurve` and calls `Trim` through the
         // result unchecked, so an edge curve of another kind (an `SmCrvOnSurf`) is a null
         // dereference (WR-598). Here such a curve is not joined: the routine's silent
-        // error, with nothing changed yet (the fork's tangency-labs/smlib@829b982).
-        // `Kernel::fixes.delete_vertex_joins_seam_iso_curve` also joins a curve on a
-        // B-spline surface along a constant-u or constant-v UV line as that iso curve.
-        let Some(mut deleted_copy) = exact_bspline_of_edge(k, b, deleted, deleted_interval)? else {
-            return Err(SolidError::topology_failed(
-                OP,
-                "the deleted edge's curve has no exact B-spline form",
-            ));
-        };
-        let Some(mut surviving_copy) = exact_bspline_of_edge(k, b, survivor, survivor_interval)?
+        // error, with nothing changed yet (the fork's tangency-labs/smlib@829b982). A curve
+        // on a B-spline surface along a constant-u or constant-v UV line is joined as that
+        // iso curve. The joined edge is the survivor, with its tolerance.
+        let joined_tolerance = b.edge(survivor)?.tolerance;
+        let Some(mut deleted_copy) =
+            exact_bspline_of_edge(k, b, deleted, deleted_interval, joined_tolerance)?
         else {
-            return Err(SolidError::topology_failed(
-                OP,
-                "the surviving edge's curve has no exact B-spline form",
-            ));
+            return Err(named(TopologyFailure::EdgeCurveNotJoinable {
+                entity: Some(crate::error::EntityRef::Edge(deleted)),
+            }));
         };
-        if crate::error::ignored(join_copied_curves(
-            k,
-            &mut surviving_copy,
-            join_survivor,
-            &mut deleted_copy,
-            join_deleted,
-            max_gap,
-        ))?
+        let Some(mut surviving_copy) =
+            exact_bspline_of_edge(k, b, survivor, survivor_interval, joined_tolerance)?
+        else {
+            return Err(named(TopologyFailure::EdgeCurveNotJoinable {
+                entity: Some(crate::error::EntityRef::Edge(survivor)),
+            }));
+        };
+        let mut join_failure = None;
+        if ignored_keeping(
+            join_copied_curves(
+                k,
+                &mut surviving_copy,
+                join_survivor,
+                &mut deleted_copy,
+                join_deleted,
+                max_gap,
+            ),
+            &mut join_failure,
+        )?
         .is_none()
         {
-            return Err(SolidError::topology_failed(
-                OP,
-                "the edges' curves could not be joined",
-            ));
+            return Err(caused(TopologyFailure::CurvesNotJoined, join_failure));
         }
         remove_join_knot(&mut surviving_copy, b.vertex(vertex)?.point, max_gap)?;
         if let Some(analytic) =
@@ -976,47 +1005,111 @@ pub(crate) fn delete_topological_vertex_joining(
         {
             surviving_copy = analytic;
         }
-        set_joined_edge_curve(k, b, survivor, None, true, notifications.as_deref_mut())?;
         let interval = surviving_copy.natural_interval();
-        set_joined_edge_curve(
-            k,
-            b,
-            survivor,
-            Some(surviving_copy),
-            true,
-            notifications.as_deref_mut(),
-        )?;
-        b.edge_mut(survivor)?.interval = interval;
-        set_edge_curve_owner(b, survivor, notifications.as_deref_mut())?;
+        (Some(surviving_copy), interval)
+    };
+    Ok(VertexJoin {
+        survivor,
+        deleted,
+        curve,
+        interval,
+    })
+}
+
+fn apply_vertex_join(
+    k: &mut Kernel,
+    b: &mut Brep,
+    vertex: VertexId,
+    join: VertexJoin,
+    env: &mut EditNotifyEnv<'_>,
+) -> Result<EdgeId> {
+    let VertexJoin {
+        survivor,
+        deleted,
+        curve,
+        interval,
+    } = join;
+    if let Some(curve) = curve {
+        set_joined_edge_curve(k, b, survivor, None, true, Some(env))?;
+        set_joined_edge_curve(k, b, survivor, Some(curve), true, Some(env))?;
+        crate::topology::edge::set_interval(b, survivor, &interval)?;
+        set_edge_curve_owner(b, survivor, Some(env))?;
+    } else {
+        crate::topology::edge::set_interval(b, survivor, &interval)?;
     }
     for eu in crate::topology::edge::edgeuses(b, survivor, None, None)? {
         let eu = b.edgeuse_mut(eu)?;
         eu.uv_trim_curve = None;
         eu.drop_curve_fail = None;
     }
-    crate::error::ignore_status(notify_edge_merge(
-        k,
-        b,
-        survivor,
-        deleted,
-        notifications.as_deref_mut(),
-    ))?;
+    crate::error::ignore_status(notify_edge_merge(k, b, survivor, deleted, Some(env)))?;
     let surviving_vertex = crate::topology::edge::other_vertex(b, deleted, Some(vertex))?
-        .ok_or_else(|| SolidError::topology_missing(OP, "the deleted edge's far vertex"))?;
-    squeeze_edge(
-        k,
-        b,
-        notifications.as_deref_mut(),
-        deleted,
-        surviving_vertex,
-    )?;
-    crate::error::ignore_status(notify_edge_pre_edit(k, b, survivor, notifications))?;
+        .ok_or_else(|| broken_link(NO_FAR_VERTEX))?;
+    squeeze_edge(k, b, Some(env), deleted, surviving_vertex)?;
+    crate::error::ignore_status(notify_edge_pre_edit(k, b, survivor, Some(env)))?;
     if !crate::topology::edge::is_wire(b, survivor)? {
         for eu in crate::topology::edge::edgeuses(b, survivor, None, None)? {
             get_or_create_uv_trim_curve(k, b, eu)?;
         }
     }
     Ok(survivor)
+}
+
+/// A constructed rim can keep its join only if remaking its UV trims and covering the
+/// final line both fit its existing tolerances. `false` rolls the entire rim edit back.
+fn join_vertex_without_growth(
+    k: &mut Kernel,
+    b: &mut Brep,
+    vertex: VertexId,
+    env: &mut EditNotifyEnv<'_>,
+) -> Result<bool> {
+    let Some(join) = crate::error::ignored(prepare_vertex_join(k, b, vertex, None))? else {
+        return Ok(true);
+    };
+    let budget = b.edge(join.survivor)?.tolerance;
+    crate::error::ignore_status(notify_pre_edit(k, b, Some(env)))?;
+    let e = apply_vertex_join(k, b, vertex, join, env)?;
+    let edge = b.edge(e)?;
+    // Dropping a trim may widen the edge (and its vertices) or change its interval.
+    if !bound_within_tolerance(edge.tolerance, budget) {
+        return Ok(false);
+    }
+    let Some(ends) = joined_line_ends(k, edge_curve(b, e)?, edge.interval)? else {
+        return Ok(true);
+    };
+    let (Some(a), Some(z)) = (
+        crate::topology::edge::start_vertex(b, e)?,
+        crate::topology::edge::end_vertex(b, e)?,
+    ) else {
+        return Ok(false);
+    };
+    for v in [a, z] {
+        let v = b.vertex(v)?;
+        let (gap, needed) = joined_line_end_gaps(k, v.point, ends);
+        if !(gap <= budget && needed <= v.tolerance) {
+            return Ok(false);
+        }
+    }
+    Ok(a != z)
+}
+
+fn joined_line_ends(k: &Kernel, curve: &Curve, interval: Extent1d) -> Result<Option<[Point3; 2]>> {
+    if !matches!(curve.kind(), crate::curve::curve::CurveKind::Line(_)) {
+        return Ok(None);
+    }
+    Ok(Some([
+        curve.evaluate_point(k, interval.min())?,
+        curve.evaluate_point(k, interval.max())?,
+    ]))
+}
+
+/// The outward-rounded distance an edge must cover, and the vertex tolerance that covers it.
+fn joined_line_end_gaps(k: &Kernel, point: Point3, ends: [Point3; 2]) -> (f64, f64) {
+    let rounded = |q: Point3| {
+        point.distance(q) + crate::nurbs::math::gamma(8) * (point.length() + q.length())
+    };
+    let gap = rounded(ends[0]).min(rounded(ends[1]));
+    (gap, crate::geom::tol::zone_tol3d(k, 2.0 * gap))
 }
 
 /// Not upstream (#15718): an edge that took over a deleted topological vertex's two edges
@@ -1040,7 +1133,6 @@ pub(crate) fn delete_topological_vertex_joining(
 /// nothing is grown then; those of the topology walks and the curve evaluations.
 pub(crate) fn cover_joined_line_gaps(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
     use crate::boolean::topology_intersector::p1::{first_reaching, Growth};
-    use crate::curve::curve::CurveKind;
     use crate::nurbs::math::gamma;
     if !b.edge_list().contains(&e) {
         return Ok(());
@@ -1049,13 +1141,9 @@ pub(crate) fn cover_joined_line_gaps(k: &Kernel, b: &mut Brep, e: EdgeId) -> Res
     let Some(curve) = ed.curve.as_ref() else {
         return Ok(());
     };
-    if !matches!(curve.kind(), CurveKind::Line(_)) {
+    let Some(ends) = joined_line_ends(k, curve, ed.interval)? else {
         return Ok(());
-    }
-    let ends = [
-        curve.evaluate_point(k, ed.interval.min())?,
-        curve.evaluate_point(k, ed.interval.max())?,
-    ];
+    };
     let edge_tolerance = ed.tolerance;
     let (Some(start), Some(end)) = (
         crate::topology::edge::start_vertex(b, e)?,
@@ -1066,14 +1154,12 @@ pub(crate) fn cover_joined_line_gaps(k: &Kernel, b: &mut Brep, e: EdgeId) -> Res
     if start == end {
         return Ok(());
     }
-    let rounded = |p: Vec3, q: Vec3| p.distance(q) + gamma(8) * (p.length() + q.length());
     let mut grow = Vec::new();
     let mut edge_gap: f64 = 0.0;
     for v in [start, end] {
         let point = b.vertex(v)?.point;
-        let gap = rounded(point, ends[0]).min(rounded(point, ends[1]));
+        let (gap, tolerance) = joined_line_end_gaps(k, point, ends);
         edge_gap = edge_gap.max(gap);
-        let tolerance = crate::geom::tol::zone_tol3d(k, 2.0 * gap);
         if tolerance > b.vertex(v)?.tolerance {
             grow.push((v, point, tolerance));
         }
@@ -1106,7 +1192,7 @@ pub(crate) fn cover_joined_line_gaps(k: &Kernel, b: &mut Brep, e: EdgeId) -> Res
     if let Some((v, needed, fits_below)) = first_reaching(&growths) {
         return Err(SolidError::topology_at(
             OP,
-            crate::error::topology::TopologyFailure::JoinedVertexReaches { needed, fits_below },
+            TopologyFailure::JoinedVertexReaches { needed, fits_below },
             crate::EntityRef::Vertex(v),
         ));
     }
@@ -1120,16 +1206,19 @@ pub(crate) fn cover_joined_line_gaps(k: &Kernel, b: &mut Brep, e: EdgeId) -> Res
 /// The edge's curve as a B-spline over the edge's interval, running the curve's way, to
 /// join it with its neighbour (the fork's `sm_ExactBSplineOfEdge`, tangency-labs/smlib@829b982):
 /// a curve of an `SmBSplineCurve` kind (lines and conics included) copied and trimmed, as
-/// upstream does. Any other curve is `None`; upstream dereferences the null cast instead
-/// (WR-598). With `Kernel::fixes.delete_vertex_joins_seam_iso_curve`, a curve on a
-/// B-spline-kind surface whose UV curve is a line of constant u or v (the seam an
-/// extrusion leaves on its wall) is that surface's iso curve over the stretch, which is
-/// the same curve exactly.
-fn exact_bspline_of_edge(
+/// upstream does. A curve on a B-spline-kind surface whose UV curve is a line of exactly
+/// constant u or v (the seam an extrusion leaves on its wall) is that surface's iso
+/// curve over the stretch, which is the same curve exactly (WR-598); on a procedural
+/// blend, which evaluates its definition rather than its net, only while the net's
+/// certified bound is within `tolerance`, the joined edge's. Any other curve is `None`;
+/// upstream dereferences the null cast instead. Import seam completion also uses this
+/// extraction at tolerance zero, then maps the iso's parameter back onto its edge interval.
+pub(crate) fn exact_bspline_of_edge(
     k: &Kernel,
     b: &Brep,
     edge: EdgeId,
     interval: Extent1d,
+    tolerance: f64,
 ) -> Result<Option<Curve>> {
     use crate::curve::curve::p2::{BSPLINE_CURVE_TYPE, LINE_TYPE};
     use crate::curve::curve::CurveKind;
@@ -1145,9 +1234,6 @@ fn exact_bspline_of_edge(
         )?;
         return Ok(Some(copy));
     }
-    if !k.fixes.delete_vertex_joins_seam_iso_curve {
-        return Ok(None);
-    }
     let CurveKind::CrvOnSurf(cos) = curve.kind() else {
         return Ok(None);
     };
@@ -1159,19 +1245,32 @@ fn exact_bspline_of_edge(
     if !surface.is_kind_of(crate::surface::surface::p2::B_SPLINE_SURFACE_TYPE)? {
         return Ok(None);
     }
+    // The iso curve is cut from the surface's net. A curve on a surface evaluates what the
+    // surface evaluates: a procedural blend its definition S (`Surface::evaluate` reads the
+    // net only inside a `NetScope`), every other B-spline kind its net, a screw sweep's
+    // wall and a blend face kept beside a B-spline net included (`SurfaceKind::BSpline`).
+    // On a net the iso curve is the edge's curve exactly. On a procedural blend it lies
+    // within the net's certified bound `|B - S| <= bound` of the edge, so it is joined only
+    // while that bound is within the joined edge's tolerance; the tolerance is never
+    // widened to admit it.
+    if let crate::surface::surface::SurfaceKind::ProceduralBlend(blend) = surface.kind() {
+        if !bound_within_tolerance(blend.def.bound, tolerance) {
+            return Ok(None);
+        }
+    }
     let a = uv_curve.evaluate_point(k, interval.min())?;
     let bb = uv_curve.evaluate_point(k, interval.max())?;
-    let dom = surface.natural_uv_domain_with_nurb(k)?;
-    let zero_u = crate::math::EFF_ZERO * dom.u_interval().length();
-    let zero_v = crate::math::EFF_ZERO * dom.v_interval().length();
-    let (iso, iso_value, from, to) = if (a.x - bb.x).abs() <= zero_u {
+    // Only an exactly constant coordinate makes the iso curve the edge's curve: a UV
+    // line that drifts by du moves up to |dS/du| du in space, which nothing here bounds
+    // (the fork accepted a drift of EFF_ZERO times the domain's length).
+    let (iso, iso_value, from, to) = if a.x == bb.x {
         (
             crate::nurbs::b_spline_surface::SurfParamType::U,
             a.x,
             a.y,
             bb.y,
         )
-    } else if (a.y - bb.y).abs() <= zero_v {
+    } else if a.y == bb.y {
         (
             crate::nurbs::b_spline_surface::SurfParamType::V,
             a.y,
@@ -1206,11 +1305,21 @@ fn exact_bspline_of_edge(
     Ok(Some(iso_curve))
 }
 
+/// Whether a net's certified distance `bound` from its definition is within `tolerance`
+/// (WR-598's join on a procedural blend). Both are compared as they are: the bound is
+/// already an outward-rounded enclosure, and `<=` on two finite doubles is exact. A NaN
+/// on either side is not within.
+fn bound_within_tolerance(bound: f64, tolerance: f64) -> bool {
+    bound
+        .partial_cmp(&tolerance)
+        .is_some_and(std::cmp::Ordering::is_le)
+}
+
 fn edge_curve(b: &Brep, edge: EdgeId) -> Result<&Curve> {
     b.edge(edge)?
         .curve
         .as_ref()
-        .ok_or_else(|| SolidError::topology_missing(OP, "the edge's curve"))
+        .ok_or_else(|| named(TopologyFailure::EdgeWithoutCurve))
 }
 
 /// An evaluation copy of the edge's curve carrying the edge's tolerance
@@ -1444,9 +1553,9 @@ fn bspline_curve_base_mut(curve: &mut Curve) -> Result<&mut BSplineCurve> {
         CurveKind::Ellipse(ellipse) => Ok(ellipse.base_mut()),
         CurveKind::Hyperbola(hyperbola) => Ok(hyperbola.base_mut()),
         CurveKind::Parabola(parabola) => Ok(parabola.base_mut()),
-        _ => Err(SolidError::topology_missing(
-            OP,
-            "the curve's B-spline form",
+        _ => Err(broken_link(
+            "a curve the join takes is of no B-spline kind, though both are copies that \
+             exact_bspline_of_edge made of B-spline kinds",
         )),
     }
 }
@@ -1512,11 +1621,12 @@ pub(super) fn set_edge_curve_owner(
                 (env.key_of)(entity)
             }
         };
-        let curve = b
-            .edge_mut(edge)?
-            .curve
-            .as_mut()
-            .ok_or_else(|| SolidError::topology_missing(OP, "the edge's curve"))?;
+        let curve = b.edge_mut(edge)?.curve.as_mut().ok_or_else(|| {
+            broken_link(
+                "the edge has no curve to own, though both callers have just set one on it \
+                 (set_joined_edge_curve with a curve)",
+            )
+        })?;
         let _ = curve.set_owner(Some(owner), Some(brep));
         b.set_geometry_owner_key(crate::error::EntityRef::Edge(edge), Some(owner));
         Ok(())
@@ -1563,8 +1673,8 @@ fn get_or_create_uv_trim_curve(
 ///
 /// # Errors
 ///
-/// Those of both callees; [`SolidError::InvalidInput`] when no region is found
-/// (upstream's `NER`).
+/// Those of both callees; [`TopologyFailure::InfiniteRegionNotFound`] with upstream's
+/// null-pointer status when no region is found (upstream's `NER`).
 pub fn find_and_set_infinite_region(
     k: &mut Kernel,
     b: &mut Brep,
@@ -1574,7 +1684,7 @@ pub fn find_and_set_infinite_region(
     bbox: Option<&Extent3d>,
 ) -> Result<()> {
     let region = crate::topology::brep::p9::find_infinite_region(k, b, query, shell, bbox)?
-        .ok_or_else(|| SolidError::topology_missing(OP, "the infinite region"))?;
+        .ok_or_else(|| named(TopologyFailure::InfiniteRegionNotFound))?;
     if let Some(shell) = shell {
         if shell_is_faceuse_shell(b, shell)? {
             void_setting = SetRegionVoidType::InfiniteRegionSwap;
@@ -1651,25 +1761,17 @@ fn glue_with_notification_identity(
             glue_with_notification_identity(k, b, survivor, deleted, wire_edges, Some(env), body)
         });
     };
-    let mut notifications = Some(env);
     if survivor == deleted {
         return Ok(());
     }
-    let survivor =
-        survivor.ok_or_else(|| SolidError::topology_missing(OP, "the surviving vertex"))?;
-    let deleted =
-        deleted.ok_or_else(|| SolidError::topology_missing(OP, "the vertex to glue away"))?;
-    crate::error::ignore_status(notify_pre_edit_with_body(
-        k,
-        b,
-        notifications.as_deref_mut(),
-        body,
-    ))?;
+    let survivor = survivor.ok_or_else(|| named(TopologyFailure::NoVertexGiven))?;
+    let deleted = deleted.ok_or_else(|| named(TopologyFailure::NoVertexGiven))?;
+    crate::error::ignore_status(notify_pre_edit_with_body(k, b, Some(&mut *env), body))?;
     crate::error::ignore_status(notify_vertex_pre_edit_with_body(
         k,
         b,
         survivor,
-        notifications.as_deref_mut(),
+        Some(&mut *env),
         body,
     ))?;
     crate::error::ignore_status(notify_merge_with_body(
@@ -1677,7 +1779,7 @@ fn glue_with_notification_identity(
         b,
         survivor,
         deleted,
-        notifications.as_deref_mut(),
+        Some(&mut *env),
         body,
     ))?;
     for face in vertex::faces(b, deleted)? {
@@ -1685,7 +1787,7 @@ fn glue_with_notification_identity(
             k,
             b,
             face,
-            notifications.as_deref_mut(),
+            Some(&mut *env),
             body,
         ))?;
     }
@@ -1707,44 +1809,43 @@ fn glue_with_notification_identity(
             }
         }
     }
-    let (first, last) = pair.ok_or_else(|| {
-        SolidError::topology_missing(OP, "a pair of shells in one region holding both vertices")
-    })?;
+    let (first, last) = pair.ok_or_else(|| named(TopologyFailure::VerticesShareNoRegion))?;
     let mut first = Some(first);
     let radius = distance + b.vertex(deleted)?.tolerance;
     if radius > b.vertex(survivor)?.tolerance {
         crate::error::ignore_status(vertex::set_tolerance(b, survivor, radius, true, true))?;
     }
     if vertex::is_shell_vertex(b, deleted)? {
-        delete_vertex(k, b, deleted, notifications)?;
+        delete_vertex(k, b, deleted, Some(env))?;
         return Ok(());
     }
-    if vertex::is_shell_vertex(b, survivor)? {
-        let vu = vertex::primary_vertexuse(b, survivor)?
-            .ok_or_else(|| SolidError::topology_missing(OP, "the surviving vertex's vertex use"))?;
-        let crate::topology::VertexuseOwner::Shell(shell) = b.vertexuse(vu)?.owner else {
-            return Err(SolidError::topology_failed(
-                OP,
-                "the surviving shell vertex's vertex use is not owned by a shell",
-            ));
-        };
-        let shell =
-            shell.ok_or_else(|| SolidError::topology_missing(OP, "the vertex use's shell"))?;
+    // `IsShellVertex`: the primary vertex use is owned by a shell
+    let shell_vertexuse_of_survivor = match vertex::primary_vertexuse(b, survivor)? {
+        Some(vu) => match b.vertexuse(vu)?.owner {
+            crate::topology::VertexuseOwner::Shell(shell) => Some((vu, shell)),
+            _ => None,
+        },
+        None => None,
+    };
+    if let Some((vu, shell)) = shell_vertexuse_of_survivor {
+        let shell = shell.ok_or_else(|| {
+            broken_link(
+                "a shell's vertex use names no shell, though the kernel makes a shell vertex's \
+                 vertex use in its shell",
+            )
+        })?;
         if shell_vertexuse(b, shell)? != Some(vu) {
-            return Err(SolidError::topology_failed(
-                OP,
-                "the shell's vertex use is not the surviving vertex's",
+            return Err(defect(
+                "the vertex shell does not hold its vertex's vertex use, though the kernel \
+                 makes a vertex shell with its vertex use",
             ));
         }
         let region = b
             .shell(shell)?
             .region
-            .ok_or_else(|| SolidError::topology_missing(OP, "the shell's region"))?;
-        crate::error::ignore_status(crate::error::passed_on(
-            remove_region_shell(b, region, shell),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
-        destroy_shell(k, b, notifications.as_deref_mut(), shell)?;
+            .ok_or_else(|| broken_link(SHELL_NO_REGION))?;
+        remove_region_shell(b, region, shell)?;
+        destroy_shell(k, b, &mut *env, shell)?;
         first = None;
         remove_vertexuse(b, survivor, vu)?;
         destroy_topology_record(b, crate::error::EntityRef::Vertexuse(vu))?;
@@ -1781,11 +1882,8 @@ fn glue_with_notification_identity(
             let vertex = b
                 .vertexuse(vu)?
                 .vertex
-                .ok_or_else(|| SolidError::topology_missing(OP, "the shell vertex use's vertex"))?;
-            crate::error::ignore_status(crate::error::passed_on(
-                remove_vertexuse(b, vertex, vu),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+                .ok_or_else(|| broken_link(VU_NO_V))?;
+            remove_vertexuse(b, vertex, vu)?;
             clear_shell_list(b, last)?;
             destroy_topology_record(b, crate::error::EntityRef::Vertexuse(vu))?;
         } else {
@@ -1794,12 +1892,9 @@ fn glue_with_notification_identity(
         let region = b
             .shell(last)?
             .region
-            .ok_or_else(|| SolidError::topology_missing(OP, "the shell's region"))?;
-        crate::error::ignore_status(crate::error::passed_on(
-            remove_region_shell(b, region, last),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
-        destroy_shell(k, b, notifications.as_deref_mut(), last)?;
+            .ok_or_else(|| broken_link(SHELL_NO_REGION))?;
+        remove_region_shell(b, region, last)?;
+        destroy_shell(k, b, &mut *env, last)?;
     }
     // WR-607: join the other regions' pairs as well.
     for (surv, del, other_wires) in others {
@@ -1807,9 +1902,9 @@ fn glue_with_notification_identity(
         let region = b
             .shell(del)?
             .region
-            .ok_or_else(|| SolidError::topology_missing(OP, "the shell's region"))?;
+            .ok_or_else(|| broken_link(SHELL_NO_REGION))?;
         remove_region_shell(b, region, del)?;
-        destroy_shell(k, b, notifications.as_deref_mut(), del)?;
+        destroy_shell(k, b, &mut *env, del)?;
     }
     Ok(())
 }
@@ -1947,11 +2042,9 @@ fn remove_region_shell(b: &mut Brep, region: RegionId, shell: ShellId) -> Result
 fn destroy_shell(
     k: &mut Kernel,
     b: &mut Brep,
-    env: Option<&mut EditNotifyEnv<'_>>,
+    env: &mut EditNotifyEnv<'_>,
     shell: ShellId,
 ) -> Result<()> {
-    let env =
-        env.ok_or_else(|| SolidError::topology_missing(OP, "the edit-notification environment"))?;
     crate::topology::shell::destroy(k, b, shell, env)
 }
 
@@ -2176,7 +2269,7 @@ pub(crate) fn make_edge_with_backend<B: FaceEdgeBackend>(
     output: &mut B::Output,
 ) -> Result<()> {
     require_editing(editing_enabled)?;
-    let f = face.ok_or_else(|| SolidError::topology_missing(OP, "the face"))?;
+    let f = face.ok_or_else(|| named(TopologyFailure::NoFaceGiven))?;
     b.validate_face(f)?;
     *output = B::Output::default();
     let (t_start, t_end, end_orientation) = if orientation == OrientType::Opposite {
@@ -2197,9 +2290,9 @@ pub(crate) fn make_edge_with_backend<B: FaceEdgeBackend>(
             false,
         )?
         .ok_or_else(|| {
-            SolidError::topology_missing(
+            SolidError::topology(
                 NO_VERTEX_SECTOR_OP,
-                "a vertex sector at the curve's start",
+                TopologyFailure::NoVertexSector { at_end: false },
             )
         })?;
     let last = b
@@ -2215,7 +2308,10 @@ pub(crate) fn make_edge_with_backend<B: FaceEdgeBackend>(
             false,
         )?
         .ok_or_else(|| {
-            SolidError::topology_missing(NO_VERTEX_SECTOR_OP, "a vertex sector at the curve's end")
+            SolidError::topology(
+                NO_VERTEX_SECTOR_OP,
+                TopologyFailure::NoVertexSector { at_end: true },
+            )
         })?;
     b.insert(
         f,
@@ -2323,7 +2419,7 @@ pub(crate) fn find_vertex_sector(
     all_sectors: bool,
 ) -> Result<Option<VertexuseId>> {
     // NER(cpVertex)
-    let vertex = v.ok_or_else(|| SolidError::topology_missing(OP, "the vertex"))?;
+    let vertex = v.ok_or_else(|| named(TopologyFailure::NoVertexGiven))?;
     let sector = face_p4::find_vertex_sector(
         k,
         b,
@@ -2421,10 +2517,7 @@ fn make_manifold_in(
 ) -> Result<()> {
     // The temporary editing change has no lasting effect on this early return.
     if regions_to_keep.is_some_and(<[RegionId]>::is_empty) {
-        return Err(SolidError::topology_failed(
-            OP,
-            "no regions to keep were given",
-        ));
+        return Err(named(TopologyFailure::NoRegionsToKeepGiven));
     }
     let previous = set_editing_enabled(b, true);
     let result = (|| {
@@ -2439,21 +2532,18 @@ fn make_manifold_in(
             all
         };
         if regions.is_empty() {
-            return Err(SolidError::topology_failed(
-                OP,
-                "the B-rep has no finite region to keep",
-            ));
+            return Err(named(TopologyFailure::NoFiniteRegion));
         }
         for face in brep_faces(b)? {
             let (first, last) = face_shells(b, face)?;
             let r1 = b
                 .shell(first)?
                 .region
-                .ok_or_else(|| SolidError::topology_missing(OP, "the first shell's region"))?;
+                .ok_or_else(|| broken_link(SHELL_NO_REGION))?;
             let r2 = b
                 .shell(last)?
                 .region
-                .ok_or_else(|| SolidError::topology_missing(OP, "the second shell's region"))?;
+                .ok_or_else(|| broken_link(SHELL_NO_REGION))?;
             let keep1 = regions.contains(&r1);
             let keep2 = regions.contains(&r2);
             if r1 != r2 && (keep1 != keep2 || (keep_interior_faces && keep1)) {
@@ -2483,6 +2573,74 @@ fn make_manifold_in(
     result
 }
 
+/// (not upstream, #18570) Whether each region of `b` is void, read from its faces: in a
+/// solid every face has material on one side and void on the other, so the flags
+/// alternate across faces, starting from the infinite region (void). A region of a
+/// hollowed body that only the cavity's faces bound is void; one that faces reach from
+/// the outside in one step is material. Regions no face reaches are left out. `None`
+/// where there is no infinite region, or where the faces do not alternate: a face with
+/// one region on both sides, or two regions a face divides that would both be void or
+/// both material.
+///
+/// # Errors
+///
+/// Those of the face, face use and shell queries.
+pub(crate) fn alternating_void_flags(b: &Brep) -> Result<Option<BTreeMap<RegionId, bool>>> {
+    let Some(infinite) = b.infinite_region() else {
+        return Ok(None);
+    };
+    let mut across: BTreeMap<RegionId, Vec<RegionId>> = BTreeMap::new();
+    for face in brep_faces(b)? {
+        let (first, last) = face_shells(b, face)?;
+        let (Some(r1), Some(r2)) = (b.shell(first)?.region, b.shell(last)?.region) else {
+            return Ok(None);
+        };
+        if r1 == r2 {
+            return Ok(None);
+        }
+        across.entry(r1).or_default().push(r2);
+        across.entry(r2).or_default().push(r1);
+    }
+    let mut void = BTreeMap::from([(infinite, true)]);
+    let mut todo = vec![infinite];
+    while let Some(region) = todo.pop() {
+        let flag = void.get(&region).copied().unwrap_or(true);
+        for &next in across.get(&region).map_or(&[][..], Vec::as_slice) {
+            match void.get(&next) {
+                Some(&other) if other == flag => return Ok(None),
+                Some(_) => {}
+                None => {
+                    void.insert(next, !flag);
+                    todo.push(next);
+                }
+            }
+        }
+    }
+    Ok(Some(void))
+}
+
+/// (not upstream, #18570) Sets each region's void flag as [`alternating_void_flags`]
+/// reads it, where it reads one; a region it does not reach, and every region where it
+/// reads none, keeps its flag. Whether any flag changed.
+///
+/// # Errors
+///
+/// Those of [`alternating_void_flags`].
+pub(crate) fn set_alternating_void_flags(b: &mut Brep) -> Result<bool> {
+    let Some(flags) = alternating_void_flags(b)? else {
+        return Ok(false);
+    };
+    let mut changed = false;
+    for (region, is_void) in flags {
+        let value = i32::from(is_void);
+        if b.region(region)?.is_void() != value {
+            b.region_mut(region)?.set_is_void(value);
+            changed = true;
+        }
+    }
+    Ok(changed)
+}
+
 /// Sets `m_bEditingEnabled`, returning the previous value.
 fn set_editing_enabled(b: &mut Brep, enabled: bool) -> bool {
     let previous = b.editing_enabled();
@@ -2504,15 +2662,15 @@ pub(super) fn brep_vertices(b: &Brep) -> Result<Vec<VertexId>> {
 }
 fn face_shells(b: &Brep, face: FaceId) -> Result<(ShellId, ShellId)> {
     let (a, z) = crate::topology::face::p2::faceuses(b, face)?;
-    let a = a.ok_or_else(|| SolidError::topology_missing(OP, "the face's first face use"))?;
-    let z = z.ok_or_else(|| SolidError::topology_missing(OP, "the face's second face use"))?;
+    let a = a.ok_or_else(|| broken_link(FACE_NO_FU))?;
+    let z = z.ok_or_else(|| broken_link(FACE_NO_FU))?;
     Ok((
         b.faceuse(a)?
             .shell
-            .ok_or_else(|| SolidError::topology_missing(OP, "the first face use's shell"))?,
+            .ok_or_else(|| broken_link(FU_NO_SHELL))?,
         b.faceuse(z)?
             .shell
-            .ok_or_else(|| SolidError::topology_missing(OP, "the second face use's shell"))?,
+            .ok_or_else(|| broken_link(FU_NO_SHELL))?,
     ))
 }
 /// `SmBrep::DeleteFace(face, bDeleteEdgesVertices, bDoRegionNesting, NULL,
@@ -2567,42 +2725,112 @@ pub fn remove_topological_with_notifications(
             remove_topological_with_notifications(k, b, keep_edges, keep_vertices, Some(env))
         });
     };
-    let mut notifications = Some(env);
+    remove_topological_in(k, b, keep_edges, keep_vertices, None, env).map(drop)
+}
+
+/// Removes only the named redundant joins and their vertices. A local extension
+/// must leave the trims and isolated loop vertices of unrelated faces in place.
+pub(crate) fn remove_topological_joins(
+    k: &mut Kernel,
+    b: &mut Brep,
+    edges: &[EdgeId],
+    vertices: &[VertexId],
+) -> Result<()> {
+    if edges.is_empty() && vertices.is_empty() {
+        return Ok(());
+    }
+    // A missing trim can also be created on another edge of the face while testing a
+    // rim or completing a seam. A refusal restores the geometry, topology and attributes
+    // together, after the edit has returned its notification records to the body.
+    let edge_budgets: Vec<_> = b.edges().iter().map(|(e, r)| (e, r.tolerance)).collect();
+    let vertex_budgets: Vec<_> = b.vertices().iter().map(|(v, r)| (v, r.tolerance)).collect();
+    b.with_rollback_untouched(
+        |b| {
+            let fits = plain_edit(k, b, |k, b, env| {
+                remove_topological_in(k, b, None, None, Some((edges, vertices)), env)
+            })?;
+            Ok(fits
+                && edge_budgets
+                    .iter()
+                    .all(|&(e, t)| b.edges().get(e).is_none_or(|r| r.tolerance <= t))
+                && vertex_budgets
+                    .iter()
+                    .all(|&(v, t)| b.vertices().get(v).is_none_or(|r| r.tolerance <= t)))
+        },
+        |result| matches!(result, Ok(true)),
+    )
+    .map(drop)
+}
+
+fn remove_topological_in(
+    k: &mut Kernel,
+    b: &mut Brep,
+    keep_edges: Option<&[EdgeId]>,
+    keep_vertices: Option<&[VertexId]>,
+    joins: Option<(&[EdgeId], &[VertexId])>,
+    env: &mut EditNotifyEnv<'_>,
+) -> Result<bool> {
     let previous = set_editing_enabled(b, true);
     let mut joined = Vec::new();
     let result = (|| {
-        for edge in brep_edges(b)? {
+        let edges = match joins {
+            Some((edges, _)) => edges.to_vec(),
+            None => brep_edges(b)?,
+        };
+        for edge in edges {
             // An edge of the list a seam completion below removed is gone.
             if b.edge(edge).is_err() {
                 continue;
             }
-            // IsTopological can expand a surface even when this edge is on the
-            // keep list. Do not move the keep-list test before this call.
-            let Some(topological) =
-                crate::error::ignored(crate::topology::edge::is_topological(k, b, edge, 1.0))?
-            else {
+            // Not upstream (#17616): an edge on the keep list stays, so it is not tested.
+            // IsTopological's coverage test expands the covering face's surface in place
+            // and drops that face's UV trims, leaving its UV domain on the old
+            // parameterisation; only the merge below sets the domain anew. Upstream tests
+            // first, and the face of a kept edge keeps the expanded surface under its old
+            // domain: on two bends of one cylinder its trims dropped off the domain.
+            if keep_edges.is_some_and(|keep| keep.contains(&edge)) {
+                continue;
+            }
+            // A constructed join already lies on its support. Keep the two faces
+            // separate if covering them would require either tolerance to grow.
+            let topological = if joins.is_some() {
+                crate::topology::edge::is_topological_without_growth(k, b, edge)
+            } else {
+                crate::topology::edge::is_topological(k, b, edge, 1.0)
+            };
+            let Some(topological) = crate::error::ignored(topological)? else {
                 continue;
             };
             if !topological.is_topological {
                 continue;
             }
-            if keep_edges.is_some_and(|keep| keep.contains(&edge)) {
-                continue;
-            }
+            // is_topological finds only a manifold edge (four edge uses) topological, with
+            // the face to keep, after reading both faces and their surfaces
             let keep = topological.surf_to_keep.ok_or_else(|| {
-                SolidError::topology_missing(OP, "the face whose surface is kept")
+                broken_link(
+                    "is_topological found the edge topological without the face to keep, \
+                     though it names that face whenever it finds an edge topological",
+                )
             })?;
             let edgeuses = crate::topology::edge::edgeuses(b, edge, None, None)?;
-            let first = *edgeuses
-                .first()
-                .ok_or_else(|| SolidError::topology_failed(OP, "the edge has no edge uses"))?;
-            let third = *edgeuses.get(2).ok_or_else(|| {
-                SolidError::topology_failed(OP, "the edge has fewer than three edge uses")
+            let [first, _, third, ..] = *edgeuses.as_slice() else {
+                return Err(defect(
+                    "an edge is_topological found topological has fewer than three edge uses, \
+                     though it finds only an edge with four topological",
+                ));
+            };
+            let face0 = crate::topology::edgeuse::p1::face(b, first)?.ok_or_else(|| {
+                broken_link(
+                    "an edge use of a topological edge has no face, though is_topological \
+                     has just read the faces of both",
+                )
             })?;
-            let face0 = crate::topology::edgeuse::p1::face(b, first)?
-                .ok_or_else(|| SolidError::topology_missing(OP, "the first edge use's face"))?;
-            let face1 = crate::topology::edgeuse::p1::face(b, third)?
-                .ok_or_else(|| SolidError::topology_missing(OP, "the third edge use's face"))?;
+            let face1 = crate::topology::edgeuse::p1::face(b, third)?.ok_or_else(|| {
+                broken_link(
+                    "an edge use of a topological edge has no face, though is_topological \
+                     has just read the faces of both",
+                )
+            })?;
             // A face owns one surface value. Equal owner metadata on two
             // values cannot establish pointer identity.
             let same_surface = face0 == face1;
@@ -2611,18 +2839,22 @@ pub fn remove_topological_with_notifications(
                     .face(keep)?
                     .surface
                     .as_ref()
-                    .ok_or_else(|| SolidError::topology_missing(OP, "the kept face's surface"))?
+                    .ok_or_else(|| {
+                        broken_link(
+                            "the face to keep has no surface, though is_topological has just \
+                             read the surfaces of both faces",
+                        )
+                    })?
                     .natural_uv_domain_with_nurb(k)?;
                 crate::topology::face::p2::set_uv_domain(b, keep, &domain)?;
                 let tolerance = b.face(keep)?.tolerance;
-                if topological.dist_between > tolerance / 10.0 {
+                if joins.is_none() && topological.dist_between > tolerance / 10.0 {
                     set_face_tolerance(b, keep, tolerance + topological.dist_between, true, true)?;
                 }
             }
             // Return the kept surface's current owner after the deletion. Its
             // former face id can become stale when DeleteEdge merges the faces.
-            let current_face =
-                delete_edge_keep_surface(k, b, edge, keep, notifications.as_deref_mut())?;
+            let current_face = delete_edge_keep_surface(k, b, edge, keep, Some(env))?;
             let domain = topological.merged_face_domain.unwrap_or_default();
             crate::topology::face::p2::set_uv_domain(b, current_face, &domain)?;
             // (#16866) `IsTopological`'s cover may have taken in a face straddling the kept
@@ -2630,16 +2862,18 @@ pub fn remove_topological_with_notifications(
             // gets the seam a face on a periodic surface has, or its loops' UV trims jump by
             // the period and the check finds their orientation wrong. A merged face with no
             // seam crossed or missing is left as it is.
-            crate::topology::face::p1::complete_merged_face_seam(
-                k,
-                b,
-                notifications.as_deref_mut(),
-                current_face,
-            )?;
+            crate::topology::face::p1::complete_merged_face_seam(k, b, Some(env), current_face)?;
         }
-        for vertex in brep_vertices(b)? {
+        let vertices = match joins {
+            Some((_, vertices)) => vertices.to_vec(),
+            None => brep_vertices(b)?,
+        };
+        for vertex in vertices {
+            if b.vertex(vertex).is_err() {
+                continue;
+            }
             if vertex::is_loop_vertex(b, vertex)? {
-                delete_vertex(k, b, vertex, notifications.as_deref_mut())?;
+                delete_vertex(k, b, vertex, Some(env))?;
                 continue;
             }
             if crate::error::ignored(vertex::is_topological_vertex(k, b, vertex))?.unwrap_or(false)
@@ -2647,14 +2881,13 @@ pub fn remove_topological_with_notifications(
                 if keep_vertices.is_some_and(|keep| keep.contains(&vertex)) {
                     continue;
                 }
-                if let Some(survivor) = crate::error::ignored(delete_topological_vertex_joining(
-                    k,
-                    b,
-                    true,
-                    Some(vertex),
-                    None,
-                    notifications.as_deref_mut(),
-                ))? {
+                if joins.is_some() {
+                    if !join_vertex_without_growth(k, b, vertex, env)? {
+                        return Ok(false);
+                    }
+                } else if let Some(survivor) = crate::error::ignored(
+                    delete_topological_vertex_joining(k, b, true, Some(vertex), None, Some(env)),
+                )? {
                     joined.push(survivor);
                 }
             }
@@ -2662,7 +2895,7 @@ pub fn remove_topological_with_notifications(
         for e in joined {
             cover_joined_line_gaps(k, b, e)?;
         }
-        Ok(())
+        Ok(true)
     })();
     // Upstream restores in a destructor.
     set_editing_enabled(b, previous);
@@ -2697,7 +2930,10 @@ fn delete_edge_keep_surface(
         .into_iter()
         .find(|&f| b.face(f).is_ok_and(|r| r.surface.is_some()))
         .ok_or_else(|| {
-            SolidError::topology_missing(OP, "a face with a surface left after the edge deletion")
+            broken_link(
+                "no face with a surface is left after deleting the edge, though the deletion \
+                 keeps the kept surface on the face that survives",
+            )
         })
 }
 
@@ -2823,8 +3059,9 @@ pub fn initial_stitch_tolerance(brep_tolerance: f64, requested: f64) -> f64 {
     }
 }
 
-/// Stitches twice if needed, then orients surfaces. No success is manufactured
-/// from the statuses ignored upstream when a required callee is missing.
+/// Stitches twice if needed, then orients surfaces. Upstream ignores the stitch and
+/// orientation statuses; they are passed on here, as the fork does (60a8a51, WR-658), so
+/// a failed first stitch pass returns before the second pass and the orientation.
 ///
 /// The stitch passes run outside an edit of their own: the stitch's glue and squeeze
 /// helpers notify through their own kernel-context edits
@@ -2853,10 +3090,170 @@ pub fn stitch_and_orient_with_identity(
     options: &StitchAndOrientOptions,
     identity: Option<crate::query::brep::BrepIdentity<'_>>,
 ) -> Result<()> {
+    stitch_and_orient_searching(k, b, options, identity, None, true)
+}
+
+/// [`stitch_and_orient_with_identity`] of the faces of one solid, in a B-rep that held
+/// nothing else, of which `outside` is a face use on the solid's outside. The glue that
+/// closes the solid's shell makes the half of the split region that face use is in the
+/// infinite one, where upstream's fires a ray to find it
+/// ([`crate::heal::stitch::p1::Stitch::outside`]); the stitch's end searches as ever. Not
+/// upstream. The caller answers for the premise, which is why this is not an option of
+/// [`StitchAndOrientOptions`]: a B-rep that already holds a face, a wire or a loose
+/// vertex has shells the closing glue's search places, and a face use that is not on the
+/// outside names the wrong half.
+///
+/// # Errors
+///
+/// Those of [`stitch_and_orient`].
+pub(crate) fn stitch_and_orient_one_solid(
+    k: &mut Kernel,
+    b: &mut Brep,
+    options: &StitchAndOrientOptions,
+    identity: Option<crate::query::brep::BrepIdentity<'_>>,
+    outside: FaceuseId,
+) -> Result<()> {
+    stitch_and_orient_searching(k, b, options, identity, Some(outside), true)
+}
+
+/// Not upstream (#18166): the edge tolerances of a B-rep before [`stitch_and_orient`]'s
+/// stitch, to find the edges the stitch raised. The stitch covers the faces its joins give an
+/// edge when it ends ([`crate::heal::stitch::p1::Stitch::finish_joins`]); the orientation
+/// that follows reverses surfaces (`OrientTrimmedSurfaces`), on which a face's proved bound
+/// comes out a rounding apart, so each raised edge's covered trimless faces are taken before
+/// the orientation ([`crate::topology::edgeuse::p3::covered_trimless_faces`]) and kept
+/// covered after it ([`crate::topology::edgeuse::p3::keep_trimless_faces_covered`]). Each
+/// edge the stitch joined (it holds more edge uses than before, or is new with two or more)
+/// covers its UV trims after the orientation, on the trims the B-rep ends with
+/// ([`crate::topology::edgeuse::p3::cover_joined_trims`], #20373).
+struct StitchRaises(BTreeMap<EdgeId, (u64, usize)>);
+
+impl StitchRaises {
+    /// The tolerance and the number of edge uses of every edge of `b`.
+    fn before(b: &Brep) -> Self {
+        Self(
+            b.edges()
+                .iter()
+                .map(|(e, rec)| (e, (rec.tolerance.to_bits(), rec.edgeuses.len())))
+                .collect(),
+        )
+    }
+
+    /// The edges of `b` the stitch joined, holding more edge uses than
+    /// [`StitchRaises::before`] (a new edge: two or more), whatever their tolerance did, in
+    /// the B-rep's edge order: an edge the join raised (`UpdateObjectTolerance`) but no face
+    /// bound did covers its trims nowhere else, and one a face bound raised covered them on
+    /// the trims before the orientation; covering again only raises where a trim needs it.
+    fn joined(&self, b: &Brep) -> Vec<EdgeId> {
+        b.edges()
+            .iter()
+            .filter(|(e, rec)| match self.0.get(e) {
+                Some(&(_, uses)) => rec.edgeuses.len() > uses,
+                None => rec.edgeuses.len() >= 2,
+            })
+            .map(|(e, _)| e)
+            .collect()
+    }
+
+    /// The faces each edge of `b` raised since [`StitchRaises::before`] (or made since)
+    /// covers without a trim; empty where they cannot be bounded (left as upstream).
+    ///
+    /// # Errors
+    ///
+    /// The kernel's unported and cancelled statuses.
+    fn covered(&self, k: &Kernel, b: &Brep) -> Result<Vec<(EdgeId, FaceId)>> {
+        let raised: Vec<EdgeId> = b
+            .edges()
+            .iter()
+            .filter(|(e, rec)| {
+                self.0
+                    .get(e)
+                    .is_none_or(|&(was, _)| rec.tolerance > f64::from_bits(was))
+            })
+            .map(|(e, _)| e)
+            .collect();
+        Ok(
+            crate::error::ignored(crate::topology::edgeuse::p3::covered_trimless_faces(
+                k, b, &raised,
+            ))?
+            .unwrap_or_default(),
+        )
+    }
+}
+
+/// Not upstream (#18166, #20373): [`StitchRaises`]' covers after the orientation: the
+/// trimless faces of the raised edges (`covered`), then the UV trims of the joined edges
+/// (`joined`).
+///
+/// # Errors
+///
+/// The kernel's unported and cancelled statuses.
+fn keep_stitch_raises(
+    k: &Kernel,
+    b: &mut Brep,
+    covered: &[(EdgeId, FaceId)],
+    joined: &[EdgeId],
+) -> Result<()> {
+    crate::error::ignored(crate::topology::edgeuse::p3::keep_trimless_faces_covered(
+        k, b, covered,
+    ))?;
+    crate::topology::edgeuse::p3::cover_joined_trims(k, b, joined)
+}
+
+/// [`stitch_and_orient_with_identity`] of faces whose lamina edges are the body's open
+/// boundary by construction: the first pass only. Upstream runs a second pass, at ten or
+/// twenty times the first's tolerance, whenever the first leaves more than one lamina
+/// edge, and that pass squeezes out every open edge shorter than its tolerance that is
+/// lamina or wire (`squeeze_small_edges`, with `making_manifold_solid` as the primitives
+/// stitch). For the walls of an uncapped sweep the lamina edges are the profile's copies
+/// at its ends, so the first pass's count says nothing about a gap. There the second pass
+/// squeezed out a profile edge between the two tolerances, and its wall's loop was left
+/// open by the edge's length in 3D and the wall's whole width in UV. Walls whose edges lie
+/// apart by more than the first tolerance stay apart, as an open slit; the second pass
+/// glued them without covering the gap, and the check refused the sheet. Not upstream
+/// (WR-18515); the caller answers for the premise.
+///
+/// # Errors
+///
+/// Those of [`stitch_and_orient`].
+pub(crate) fn stitch_and_orient_open(
+    k: &mut Kernel,
+    b: &mut Brep,
+    options: &StitchAndOrientOptions,
+    identity: Option<crate::query::brep::BrepIdentity<'_>>,
+) -> Result<()> {
+    stitch_and_orient_searching(k, b, options, identity, None, false)
+}
+
+/// The stitch passes and the orientation; with `second_pass`, a second pass at the larger
+/// tolerance when the first leaves more than one lamina edge.
+fn stitch_and_orient_searching(
+    k: &mut Kernel,
+    b: &mut Brep,
+    options: &StitchAndOrientOptions,
+    identity: Option<crate::query::brep::BrepIdentity<'_>>,
+    outside: Option<FaceuseId>,
+    second_pass: bool,
+) -> Result<()> {
     k.check_cancelled(OP)?;
+    let raises = StitchRaises::before(b);
     let mut lamina = 0;
     let mut tolerance = initial_stitch_tolerance(b.tolerance(), options.stitch_tolerance);
-    crate::error::ignore_status(crate::error::passed_on(
+    stitch_faces(
+        k,
+        b,
+        tolerance,
+        options.allow_spine_edges,
+        &mut lamina,
+        identity,
+        outside,
+    )?;
+    if second_pass && lamina > 1 {
+        tolerance = if options.stitch_tolerance <= 0.0 {
+            tolerance * 20.0
+        } else {
+            tolerance * 10.0
+        };
         stitch_faces(
             k,
             b,
@@ -2864,41 +3261,23 @@ pub fn stitch_and_orient_with_identity(
             options.allow_spine_edges,
             &mut lamina,
             identity,
-        ),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?;
-    if lamina > 1 {
-        tolerance = if options.stitch_tolerance <= 0.0 {
-            tolerance * 20.0
-        } else {
-            tolerance * 10.0
-        };
-        crate::error::ignore_status(crate::error::passed_on(
-            stitch_faces(
-                k,
-                b,
-                tolerance,
-                options.allow_spine_edges,
-                &mut lamina,
-                identity,
-            ),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+            outside,
+        )?;
     }
+    let covered = raises.covered(k, b)?;
+    let joined = raises.joined(b);
     plain_edit(k, b, |k, b, env| {
-        crate::error::ignore_status(crate::error::passed_on(
-            orient_trimmed_surfaces(
-                k,
-                b,
-                Some(env),
-                true,
-                options.just_unify.unwrap_or(lamina > 0),
-                options.faces_to_swap.as_deref(),
-            ),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        orient_trimmed_surfaces(
+            k,
+            b,
+            Some(env),
+            true,
+            options.just_unify.unwrap_or(lamina > 0),
+            options.faces_to_swap.as_deref(),
+        )?;
         Ok(())
-    })
+    })?;
+    keep_stitch_raises(k, b, &covered, &joined)
 }
 
 /// [`stitch_and_orient`] inside the caller's edit: the stitch passes and the orientation
@@ -2919,9 +3298,24 @@ pub(crate) fn stitch_and_orient_notified(
     curve_identity: crate::topology::brep::p9::CurveIdentity<'_>,
 ) -> Result<()> {
     k.check_cancelled(OP)?;
+    let raises = StitchRaises::before(b);
     let mut lamina = 0;
     let mut tolerance = initial_stitch_tolerance(b.tolerance(), options.stitch_tolerance);
-    crate::error::ignore_status(crate::error::passed_on(
+    stitch_faces_notified(
+        k,
+        b,
+        tolerance,
+        options.allow_spine_edges,
+        &mut lamina,
+        env,
+        curve_identity,
+    )?;
+    if lamina > 1 {
+        tolerance = if options.stitch_tolerance <= 0.0 {
+            tolerance * 20.0
+        } else {
+            tolerance * 10.0
+        };
         stitch_faces_notified(
             k,
             b,
@@ -2930,40 +3324,19 @@ pub(crate) fn stitch_and_orient_notified(
             &mut lamina,
             env,
             curve_identity,
-        ),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?;
-    if lamina > 1 {
-        tolerance = if options.stitch_tolerance <= 0.0 {
-            tolerance * 20.0
-        } else {
-            tolerance * 10.0
-        };
-        crate::error::ignore_status(crate::error::passed_on(
-            stitch_faces_notified(
-                k,
-                b,
-                tolerance,
-                options.allow_spine_edges,
-                &mut lamina,
-                env,
-                curve_identity,
-            ),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        )?;
     }
-    crate::error::ignore_status(crate::error::passed_on(
-        orient_trimmed_surfaces(
-            k,
-            b,
-            Some(env),
-            true,
-            options.just_unify.unwrap_or(lamina > 0),
-            options.faces_to_swap.as_deref(),
-        ),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?;
-    Ok(())
+    let covered = raises.covered(k, b)?;
+    let joined = raises.joined(b);
+    orient_trimmed_surfaces(
+        k,
+        b,
+        Some(env),
+        true,
+        options.just_unify.unwrap_or(lamina > 0),
+        options.faces_to_swap.as_deref(),
+    )?;
+    keep_stitch_raises(k, b, &covered, &joined)
 }
 
 /// [`stitch_faces`] editing through `env` ([`stitch_and_orient_notified`]).
@@ -3003,15 +3376,27 @@ fn stitch_faces(
     allow_spine: bool,
     lamina: &mut usize,
     identity: Option<crate::query::brep::BrepIdentity<'_>>,
+    outside: Option<FaceuseId>,
 ) -> Result<()> {
-    let out = crate::topology::brep::p4::stitch_faces_with_identity(
-        k,
-        b,
-        tolerance,
-        None,
-        allow_spine,
-        identity,
-    )?;
+    let out = if let Some(outside) = outside {
+        crate::topology::brep::p4::stitch_one_solid_with_identity(
+            k,
+            b,
+            tolerance,
+            allow_spine,
+            identity,
+            outside,
+        )?
+    } else {
+        crate::topology::brep::p4::stitch_faces_with_identity(
+            k,
+            b,
+            tolerance,
+            None,
+            allow_spine,
+            identity,
+        )?
+    };
     *lamina = usize::try_from(out.lamina_edges)
         .map_err(|_| SolidError::invalid_input(OP, "lamina edge count"))?;
     Ok(())
@@ -3051,7 +3436,10 @@ fn stitch_faces_reported(
 /// independent of the stitcher's sampled acceptance test and do not feed back
 /// into the construction. A caller decides whether the returned bounds suffice.
 /// On any error the B-rep is restored, including when certification fails after
-/// earlier closures. Errors are never suppressed by legacy status flags.
+/// earlier closures. Errors are never suppressed by legacy status flags. Not upstream
+/// (#20373): the B-rep ends with [`stitch_and_orient`]'s covers after the orientation
+/// (`StitchRaises`: the raised edges' trimless faces, the joined edges' trims), which the
+/// report, of the closures only, does not list.
 ///
 /// # Errors
 ///
@@ -3075,6 +3463,7 @@ fn stitch_and_orient_reported_inner(
     b: &mut Brep,
     options: &StitchAndOrientOptions,
 ) -> Result<Vec<ClosedGap>> {
+    let raises = StitchRaises::before(b);
     let mut lamina = 0;
     let mut gaps = Vec::new();
     let mut tolerance = initial_stitch_tolerance(b.tolerance(), options.stitch_tolerance);
@@ -3101,6 +3490,8 @@ fn stitch_and_orient_reported_inner(
             &mut gaps,
         )?;
     }
+    let covered = raises.covered(k, b)?;
+    let joined = raises.joined(b);
     plain_edit(k, b, |k, b, env| {
         orient_trimmed_surfaces(
             k,
@@ -3111,6 +3502,7 @@ fn stitch_and_orient_reported_inner(
             options.faces_to_swap.as_deref(),
         )
     })?;
+    keep_stitch_raises(k, b, &covered, &joined)?;
     Ok(gaps)
 }
 
@@ -3205,11 +3597,11 @@ pub(crate) fn squeeze_face_in(
             let r1 = b
                 .shell(shell1)?
                 .region
-                .ok_or_else(|| SolidError::topology_missing(OP, "the first shell's region"))?;
+                .ok_or_else(|| broken_link(SHELL_NO_REGION))?;
             let r2 = b
                 .shell(shell2)?
                 .region
-                .ok_or_else(|| SolidError::topology_missing(OP, "the second shell's region"))?;
+                .ok_or_else(|| broken_link(SHELL_NO_REGION))?;
             let n1 = region_size(b, r1)?;
             let n2 = region_size(b, r2)?;
             let keep_first = if region_is_infinite(b, r1)? {
@@ -3239,8 +3631,9 @@ pub(crate) fn squeeze_face_in(
         stitch.edits = Some(&mut edits);
         // After face deletion, ordinary stitch failures record SM_ERR but do
         // not suppress the remaining cleanup calls or their partially filled outputs.
-        let mut failed = false;
-        let vlist_opt = crate::error::ignored(stitch.stitch_vertex_list(k, b, &mut vertices))?;
+        let mut failed = None;
+        let vlist_opt =
+            ignored_keeping(stitch.stitch_vertex_list(k, b, &mut vertices), &mut failed)?;
         let (surviving, deleted_vertices, deleted_edges) = if let Some(vlist) = vlist_opt {
             (
                 vlist.surviving.into_iter().map(Some).collect::<Vec<_>>(),
@@ -3248,31 +3641,29 @@ pub(crate) fn squeeze_face_in(
                 vlist.deleted_edges,
             )
         } else {
-            failed = true;
             (Vec::new(), Vec::new(), Vec::new())
         };
         edges.retain(|edge| !edge.is_some_and(|e| deleted_edges.contains(&e)));
         output.deleted_edges.extend_from_slice(&deleted_edges);
         vertices.clone_from(&surviving);
 
-        let split_opt = crate::error::ignored(stitch.split_edges_with_vertices(
-            k,
-            b,
-            &mut vertices,
-            &mut edges,
-        ))?;
+        let split_opt = ignored_keeping(
+            stitch.split_edges_with_vertices(k, b, &mut vertices, &mut edges),
+            &mut failed,
+        )?;
         let mut new_edges = if let Some(res) = split_opt {
             res.new_edges
         } else {
-            failed = true;
             Vec::new()
         };
 
-        let edge_opt = crate::error::ignored(stitch.stitch_edges_of_vertices(k, b, &surviving))?;
+        let edge_opt = ignored_keeping(
+            stitch.stitch_edges_of_vertices(k, b, &surviving),
+            &mut failed,
+        )?;
         let mut deleted_edges = if let Some(res) = edge_opt {
             res.deleted
         } else {
-            failed = true;
             Vec::new()
         };
 
@@ -3286,13 +3677,9 @@ pub(crate) fn squeeze_face_in(
         output.deleted_vertices.extend(deleted_vertices);
         output.deleted_edges.extend(deleted_edges);
         output.new_edges.extend(new_edges);
-        if failed {
-            Err(SolidError::topology_failed(
-                OP,
-                "stitching the face's vertices and edges failed",
-            ))
-        } else {
-            Ok(())
+        match failed {
+            Some(e) => Err(caused(TopologyFailure::FaceStitchFailed, Some(e))),
+            None => Ok(()),
         }
     })();
     result
@@ -3306,16 +3693,6 @@ fn region_size(b: &Brep, region: RegionId) -> Result<usize> {
 }
 fn region_is_infinite(b: &Brep, region: RegionId) -> Result<bool> {
     Ok(b.region(region)?.is_infinite_region(b, region))
-}
-
-#[cfg(test)]
-fn cleanup_status(result: Result<()>, failed: &mut bool) -> Result<()> {
-    // After deleting the face, every native stitch failure sets SM_ERR but
-    // continues cleanup and output appends. Only missing implementation defers.
-    if crate::error::ignored(result)?.is_none() {
-        *failed = true;
-    }
-    Ok(())
 }
 
 /// Scales about the current origin then applies the placement. The identity exit
@@ -3371,12 +3748,17 @@ fn transform_in(
             || !crate::geom::tol::are_same(s.x, s.z)
             || s.x < crate::math::EFF_ZERO
     }) {
-        crate::error::ignore_status(crate::error::passed_on(
-            turn_to_nurbs(k, b, notifications.as_deref_mut()),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        turn_to_nurbs(k, b, notifications.as_deref_mut())?;
     }
-    let mut bbox = Extent3d::new();
+    // #19910: a rigid move rounds every control point it moves, so a tolerance proved to cover
+    // a trim can fall short of it after the move by that rounding; the trims as they are
+    // before the move, to raise each edge that needs it after
+    // ([`crate::topology::edgeuse::p3::cover_moved_trims`])
+    let trims_before = if scale.is_none_or(|s| s.approx_eq(Vec3::new(1.0, 1.0, 1.0))) {
+        crate::topology::edgeuse::p3::trims_before_move(k, b, &brep_edges(b)?)?
+    } else {
+        None
+    };
     let vertices = brep_vertices(b)?;
     for &vertex in &vertices {
         let mut point = b.vertex(vertex)?.point;
@@ -3393,7 +3775,6 @@ fn transform_in(
         }
         point = placement.transform_point(point);
         set_vertex_point(k, b, vertex, point, notifications.as_deref_mut())?;
-        bbox.add_point(point);
     }
     for edge in crate::topology::brep::p1::curve_owners(b, None, &|e| {
         transform_owner_key(
@@ -3408,11 +3789,12 @@ fn transform_in(
             edge,
             notifications.as_deref_mut(),
         ))?;
-        let curve = b
-            .edge_mut(edge)?
-            .curve
-            .as_mut()
-            .ok_or_else(|| SolidError::topology_missing(OP, "the edge's curve"))?;
+        let curve = b.edge_mut(edge)?.curve.as_mut().ok_or_else(|| {
+            broken_link(
+                "an edge curve_owners listed has no curve, though it lists only edges with \
+                     a curve",
+            )
+        })?;
         curve.transform(k, placement, scale)?;
     }
     let mut rectangular: Vec<_> = brep_faces(b)?.into_iter().map(Some).collect();
@@ -3436,23 +3818,22 @@ fn transform_in(
             face,
             notifications.as_deref_mut(),
         ))?;
-        let transformed = {
-            let surface = b
-                .face_mut(face)?
-                .surface
-                .as_mut()
-                .ok_or_else(|| SolidError::topology_missing(OP, "the face's surface"))?;
-            crate::error::ignored(surface.transform(k, placement, scale))?.is_some()
-        };
-        if !transformed {
-            let surface = b
-                .face_mut(face)?
-                .surface
-                .as_mut()
-                .ok_or_else(|| SolidError::topology_missing(OP, "the face's surface"))?;
-            let base = transformed_surface_base(k, surface)?.ok_or_else(|| {
-                SolidError::topology_failed(OP, "the face's surface could not be transformed")
-            })?;
+        let mut not_transformed = None;
+        let surface = b
+            .face_mut(face)?
+            .surface
+            .as_mut()
+            .ok_or_else(|| broken_link(SURFACE_OWNER_NO_SURFACE))?;
+        if ignored_keeping(surface.transform(k, placement, scale), &mut not_transformed)?.is_none()
+        {
+            let Some(base) = transformed_surface_base(k, surface)? else {
+                return Err(caused(
+                    TopologyFailure::SurfaceNotTransformable {
+                        entity: Some(crate::error::EntityRef::Face(face)),
+                    },
+                    not_transformed,
+                ));
+            };
             replace_surface(
                 k,
                 b,
@@ -3476,62 +3857,60 @@ fn transform_in(
             swap_reflection_shells(b, face)?;
         }
     }
-    let fixes = k.fixes;
-    // WR-507 (#1520): under the opt-in fix a scale of 1 (a rotation or reflection) is no
-    // scale, and a scale s keeps each tolerance at least its own times s; upstream sets
-    // every one to the body tolerance whenever a scale is given.
+    // #20939: a scale changes every distance, and a scale that is not uniform and positive
+    // turns the geometry to NURBS with new parameters, so each edge use's cached largest
+    // edge/face gap and gap to its counter-clockwise neighbour (value and parameters) is
+    // wrong; they are cleared and measured again when next asked for. The vertex use gaps
+    // were cleared as each vertex moved. A placement alone (rotation and translation) keeps
+    // distances and parameters, so the caches stay. Upstream keeps them in every case.
+    if scale.is_some_and(|s| !s.approx_eq(Vec3::new(1.0, 1.0, 1.0))) {
+        for edge in brep_edges(b)? {
+            for eu in b.edge(edge)?.edgeuses.clone() {
+                let use_ = b.edgeuse_mut(eu)?;
+                use_.max_edge_face_gap = crate::heal::gap::EdgeFaceGap::new();
+                use_.edge_ccw_edge_gap = crate::heal::gap::EdgeEdgeGap::new();
+            }
+        }
+    }
+    if let Some(before) = trims_before {
+        crate::topology::edgeuse::p3::cover_moved_trims(k, b, &before, placement.matrix())?;
+    }
+    // WR-507 (#1520): a scale of 1 (a rotation or reflection) is no scale, and a scale s
+    // keeps each tolerance at least its own times s; upstream sets every one to the body
+    // tolerance whenever a scale is given.
     let tol_scale = scale.map_or(1.0, |s| max2(s.x.abs(), max2(s.y.abs(), s.z.abs())));
-    let scales_tolerances = if fixes.transform_scales_each_tolerance {
-        scale_tolerances && (tol_scale - 1.0).abs() > crate::math::EFF_ZERO
-    } else {
-        scale.is_some() && scale_tolerances
-    };
-    if scales_tolerances {
-        // WR-508 (#1521): under the opt-in fix the size is the scaled body's bounding box,
-        // so a body without vertices (a lone torus) is not sized from an empty box.
-        let size = if fixes.transform_model_size_from_body_box {
-            let model_box = crate::query::brep::calculate_bounding_box(
-                k,
-                &mut *b,
-                crate::query::brep::BoundingBoxOptions {
-                    approx: false,
-                    tight: false,
-                    expand_by_zone_tol_3d: false,
-                },
-            )?;
-            model_box.size().length()
-        } else {
-            bbox.size().length()
-        };
-        let zone = b.set_this_model_size_estimate(k, size);
-        crate::geom::tol::set_context_model_size_estimate(&mut k.context, size);
+    if scale_tolerances && (tol_scale - 1.0).abs() > crate::math::EFF_ZERO {
+        // WR-508 (#1521): the size is the scaled body's bounding box, so a body without
+        // vertices (a lone torus) is not sized from an empty box; upstream sizes it from
+        // its vertices alone.
+        let model_box = crate::query::brep::calculate_bounding_box(
+            k,
+            &mut *b,
+            crate::query::brep::BoundingBoxOptions {
+                approx: false,
+                tight: false,
+                expand_by_zone_tol_3d: false,
+            },
+        )?;
+        let size = model_box.size().length();
+        // (the scaled body's size is its own: upstream also stores it on the body's
+        // context, which here is every body's default)
+        let zone = b.set_this_model_size_estimate(size);
         for vertex in vertices {
-            let tol = if fixes.transform_scales_each_tolerance {
-                max2(zone, vertex::tolerance(b, vertex)? * tol_scale)
-            } else {
-                zone
-            };
+            let tol = max2(zone, vertex::tolerance(b, vertex)? * tol_scale);
             crate::error::ignore_status(vertex::set_tolerance(b, vertex, tol, false, false))?;
         }
         for edge in brep_edges(b)? {
-            let tol = if fixes.transform_scales_each_tolerance {
-                max2(zone, crate::topology::edge::tolerance(b, edge)? * tol_scale)
-            } else {
-                zone
-            };
+            let tol = max2(zone, crate::topology::edge::tolerance(b, edge)? * tol_scale);
             crate::error::ignore_status(crate::topology::edge::set_tolerance(
                 b, edge, tol, false, false,
             ))?;
         }
         for face in brep_faces(b)? {
-            let tol = if fixes.transform_scales_each_tolerance {
-                max2(
-                    zone,
-                    crate::topology::face::p2::tolerance(b, face)? * tol_scale,
-                )
-            } else {
-                zone
-            };
+            let tol = max2(
+                zone,
+                crate::topology::face::p2::tolerance(b, face)? * tol_scale,
+            );
             set_face_tolerance(b, face, tol, false, false)?;
         }
     }
@@ -3559,7 +3938,7 @@ fn turn_to_nurbs(
 ) -> Result<()> {
     with_p3_notifications(k, b, notifications, |k, b, env| {
         let key_of = env.key_of;
-        let mut selection = std::collections::BTreeMap::new();
+        let mut selection = BTreeMap::new();
         for entity in brep_faces(b)?
             .into_iter()
             .map(crate::EntityRef::Face)
@@ -3752,6 +4131,191 @@ mod tests {
             .expect("box")
     }
 
+    /// Two straight wire edges meet exactly at the origin. Extending the longer one along
+    /// the x axis misses the shorter one's far end (1, gap, 0) by at least `gap`. The
+    /// middle vertex allows the join; the surviving edge and far vertex have their own
+    /// budgets, respectively the gap and twice the gap.
+    #[test]
+    fn a_targeted_line_join_keeps_the_existing_edge_and_vertex_tolerances() {
+        use crate::curve::line::Line;
+        use crate::geom::attribute::{AttributeStore, ObjectKey};
+        use crate::topology::api_files::write_brep_to_file;
+        use crate::topology::brep_data_write::FromBrepEnv;
+        use crate::topology::edge;
+        use crate::topology::topology::NotifyRecords;
+
+        let bytes = |k: &Kernel, b: &Brep| {
+            let env = FromBrepEnv {
+                attributes: &AttributeStore::default(),
+                records: &NotifyRecords::new(),
+                key_of: &crate::topology::loopuse::notify_ref,
+                curve_key: &|_| ObjectKey(0),
+                uv_curve_key: &|_| ObjectKey(0),
+                surface_key: &|_| ObjectKey(0),
+            };
+            write_brep_to_file(k, Some(b), &env, false).unwrap()
+        };
+        let gap = 1e-4;
+        for (targeted, edge_budget, vertex_budget, joins) in [
+            (true, 0.5 * gap, 3.0 * gap, false),
+            (true, 2.0 * gap, 1.5 * gap, false),
+            (true, 2.0 * gap, 3.0 * gap, true),
+            (false, 0.5 * gap, 1.5 * gap, true),
+        ] {
+            let mut k = Kernel::default();
+            let mut b = Brep::new_with_infinite_region().unwrap();
+            let line = |a, z| {
+                let mut line = Line::from_points(a, z, 3);
+                line.ensure_nurb(None).unwrap();
+                Curve::from(line)
+            };
+            let long = line(Point3::new(-3.0, 0.0, 0.0), Point3::ZERO);
+            let interval = long.natural_interval();
+            let survivor = create_wire_edge_from_curve(&mut k, &mut b, long, interval).unwrap();
+            let middle = edge::end_vertex(&b, survivor).unwrap().unwrap();
+            let far = Point3::new(1.0, gap, 0.0);
+            let short = line(Point3::ZERO, far);
+            let short_interval = short.natural_interval();
+            let region = b.infinite_region().unwrap();
+            let (other, end) = plain_edit(&mut k, &mut b, |k, b, env| {
+                make_wire_edge_vertex(
+                    k,
+                    b,
+                    env,
+                    region,
+                    middle,
+                    short,
+                    short_interval,
+                    OrientType::Same,
+                    far,
+                )
+            })
+            .unwrap();
+            edge::set_tolerance(&mut b, survivor, edge_budget, false, true).unwrap();
+            vertex::set_tolerance(&mut b, middle, 10.0 * gap, false, false).unwrap();
+            vertex::set_tolerance(&mut b, end, vertex_budget, false, false).unwrap();
+            let original = bytes(&k, &b);
+
+            if targeted {
+                remove_topological_joins(&mut k, &mut b, &[], &[middle]).unwrap();
+            } else {
+                remove_topological_edges_and_vertices(&mut k, &mut b, None, None).unwrap();
+            }
+            assert_eq!(b.vertex(middle).is_err(), joins);
+            assert_eq!(b.edge(other).is_err(), joins);
+            if targeted {
+                assert_eq!(b.edge(survivor).unwrap().tolerance, edge_budget);
+                assert_eq!(b.vertex(end).unwrap().tolerance, vertex_budget);
+            } else {
+                assert!(b.edge(survivor).unwrap().tolerance >= gap);
+                assert!(b.vertex(end).unwrap().tolerance >= 2.0 * gap);
+            }
+            if !joins {
+                assert_eq!(bytes(&k, &b), original);
+            }
+        }
+    }
+
+    /// #20373: an edge the join itself raised (`UpdateObjectTolerance`), with
+    /// more edge uses than before the stitch, is one [`StitchRaises::joined`] gives, and
+    /// [`keep_stitch_raises`] (which the stitch runs after its orientation) covers its UV
+    /// trims and its vertices, though no face bound raised it. One of the box's line edges has a trim
+    /// moved `1e-4` off it in UV and its tolerance raised from the box's to twice that (as a
+    /// join raises it), below the moved trim's gap: the cover raises it over the gap. A
+    /// filter keeping only the joined edges whose tolerance did not rise left it uncovered.
+    #[test]
+    fn an_edge_the_join_raised_covers_its_trims() {
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::nurbs::crv_basic::Curve as NlCurve;
+        use crate::nurbs::math::{CPoint, NOW, NOZ};
+        let mut k = Kernel::default();
+        let mut b = status_box(&mut k);
+        let (e, x) = b
+            .edge_list()
+            .iter()
+            .find_map(|&e| {
+                let uses = &b.edge(e).unwrap().edgeuses;
+                let trimmed: Vec<crate::topology::EdgeuseId> = uses
+                    .iter()
+                    .copied()
+                    .filter(|&x| b.edgeuse(x).unwrap().uv_trim_curve.is_some())
+                    .collect();
+                (trimmed.len() >= 2).then(|| (e, trimmed[0]))
+            })
+            .expect("an edge trimmed on two faces");
+        let (iv, was) = {
+            let rec = b.edge(e).unwrap();
+            (rec.interval, rec.tolerance)
+        };
+        let [a, z] = [iv.min(), iv.max()].map(|t| {
+            b.edgeuse(x)
+                .unwrap()
+                .uv_trim_curve
+                .as_ref()
+                .unwrap()
+                .evaluate_point(&k, t)
+                .unwrap()
+        });
+        // Moved square to the trim, toward the middle of the plane's parameter box (a trim
+        // off the box is not bounded, and is left as upstream leaves it).
+        let f = crate::topology::edgeuse::p1::face(&b, x).unwrap().unwrap();
+        let surface = b.face(f).unwrap().surface.clone().unwrap();
+        let bx = surface.natural_uv_domain_if_built();
+        let (mx, my) = (0.5 * (bx.min.x + bx.max.x), 0.5 * (bx.min.y + bx.max.y));
+        let (nx, ny) = (a.y - z.y, z.x - a.x);
+        let len = (nx * nx + ny * ny).sqrt();
+        let toward = if (mx - a.x) * nx + (my - a.y) * ny >= 0.0 {
+            1.0
+        } else {
+            -1.0
+        };
+        let (dx, dy) = (toward * 1e-4 * nx / len, toward * 1e-4 * ny / len);
+        let pw = vec![
+            CPoint::new(a.x + dx, a.y + dy, NOZ, NOW),
+            CPoint::new(z.x + dx, z.y + dy, NOZ, NOW),
+        ];
+        let nl = NlCurve::new(pw, 1, vec![iv.min(), iv.min(), iv.max(), iv.max()]).unwrap();
+        let moved = Curve::from(BSplineCurve::from_nurb(nl, 2, false));
+        // The moved trim's gap from the edge, sampled.
+        let curve = b.edge(e).unwrap().curve.clone().unwrap();
+        let gap = (0..=16)
+            .map(|i| {
+                let t = iv.evaluate(f64::from(i) / 16.0);
+                let w = moved.evaluate_point(&k, t).unwrap();
+                let on = surface
+                    .evaluate_point(&k, crate::math::Point2::new(w.x, w.y))
+                    .unwrap();
+                curve.evaluate_point(&k, t).unwrap().distance(on)
+            })
+            .fold(0.0_f64, f64::max);
+        b.edgeuse_mut(x).unwrap().uv_trim_curve = Some(moved);
+        // The stitch's record: every other edge as it is, this one at the tolerance before
+        // and with one use fewer; then the join's raise.
+        let uses = b.edge(e).unwrap().edgeuses.len();
+        let mut raises = StitchRaises::before(&b);
+        raises.0.insert(e, (was.to_bits(), uses - 1));
+        let raised = 2.0 * was;
+        assert!(
+            raised < gap,
+            "the join's raise {raised:e} under the gap {gap:e}"
+        );
+        b.edge_mut(e).unwrap().tolerance = raised;
+        let joined = raises.joined(&b);
+        assert_eq!(joined, vec![e]);
+        keep_stitch_raises(&k, &mut b, &[], &joined).unwrap();
+        let tol = b.edge(e).unwrap().tolerance;
+        assert!(tol >= gap, "{tol:e} covers the trim's gap {gap:e}");
+        assert!(tol <= 2.0 * gap, "{tol:e} near the gap {gap:e}");
+        // (`cover_vertex_ends`: a vertex is kept at least its edges' tolerance)
+        for v in [
+            crate::topology::edge::start_vertex(&b, e).unwrap().unwrap(),
+            crate::topology::edge::end_vertex(&b, e).unwrap().unwrap(),
+        ] {
+            let vt = b.vertex(v).unwrap().tolerance;
+            assert!(vt >= tol, "vertex {} at {vt:e} under {tol:e}", v.index());
+        }
+    }
+
     /// #15718: when both ends of a joined line edge grow, each is judged against the
     /// other's grown tolerance. The box's 3-long edge on x = y = 0 has both vertices moved
     /// 0.8 off it, away from the box: each needs a tolerance of 1.6 to cover its gap, which
@@ -3790,9 +4354,10 @@ mod tests {
         let Err(SolidError::Failed(f)) = &r else {
             panic!("a refusal, got {r:?}");
         };
-        let crate::error::Reason::Topology(
-            crate::error::topology::TopologyFailure::JoinedVertexReaches { needed, fits_below },
-        ) = f.reason
+        let crate::error::Reason::Topology(TopologyFailure::JoinedVertexReaches {
+            needed,
+            fits_below,
+        }) = f.reason
         else {
             panic!("a joined vertex that reaches, got {r:?}");
         };
@@ -3805,83 +4370,145 @@ mod tests {
     }
 
     /// fork 60a8a51 (`SmBrep::StitchAndOrient`, `SER(this->StitchFaces(..))`): an edge
-    /// without curve fails the first stitch pass; with
-    /// `brep_edit_statuses_pass_on` the stitch's error reaches the caller, without it
-    /// the operation reports success.
+    /// without curve fails the first stitch pass, and the stitch's error reaches the
+    /// caller (upstream drops it and reports success).
     #[test]
     fn stitch_and_orient_passes_on_a_failed_stitch() {
-        for pass_on in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.brep_edit_statuses_pass_on = pass_on;
-            let mut b = status_box(&mut k);
-            let e = *b.edge_list().first().expect("edge");
-            b.edge_mut(e).expect("edge").curve = None;
-            let r = stitch_and_orient(&mut k, &mut b, &StitchAndOrientOptions::default());
-            if pass_on {
-                assert!(
-                    matches!(
-                        r,
-                        Err(SolidError::InvalidInput {
-                            operation: "heal::stitch::p2",
-                            ..
-                        })
-                    ),
-                    "{r:?}"
-                );
-            } else {
-                assert!(r.is_ok(), "{r:?}");
-            }
-        }
+        let mut k = Kernel::default();
+        let mut b = status_box(&mut k);
+        let e = *b.edge_list().first().expect("edge");
+        b.edge_mut(e).expect("edge").curve = None;
+        let r = stitch_and_orient(&mut k, &mut b, &StitchAndOrientOptions::default());
+        assert!(
+            matches!(
+                r,
+                Err(SolidError::InvalidInput {
+                    operation: "heal::stitch::p2",
+                    ..
+                })
+            ),
+            "{r:?}"
+        );
     }
 
     /// fork 60a8a51 (`SmBrep::FindInfiniteRegion`, `SER(CalculateBoundingBox(sBBox))`,
     /// reached from the stitch pass of `SmBrep::StitchAndOrient`): a face without
-    /// surface fails the B-rep's box. Without `brep_edit_statuses_pass_on` the region
-    /// search goes on with an empty box, its ray finds nothing (`SM_ERR`) and
-    /// `StitchAndOrient` drops that; with it the box's error reaches the caller.
+    /// surface fails the B-rep's box, and the box's error reaches the caller (upstream's
+    /// region search goes on with an empty box, its ray finds nothing (`SM_ERR`) and
+    /// `StitchAndOrient` drops that).
     #[test]
     fn stitch_and_orient_passes_on_a_failed_region_box() {
-        for pass_on in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.brep_edit_statuses_pass_on = pass_on;
-            let mut b = status_box(&mut k);
-            let f = *b.face_list().first().expect("face");
-            b.face_mut(f).expect("face").surface = None;
-            let mut lamina = 0;
-            let tolerance = initial_stitch_tolerance(b.tolerance(), 0.0);
-            let stitched = stitch_faces(
-                &mut k,
-                &mut b.clone_standing_for_self().unwrap(),
-                tolerance,
-                false,
-                &mut lamina,
-                None,
-            );
-            let r = stitch_and_orient(&mut k, &mut b, &StitchAndOrientOptions::default());
-            let box_error = |r: &Result<()>| {
-                matches!(
-                    r,
-                    Err(SolidError::InvalidInput {
-                        operation: "query::face::p1::calculate_bounding_box",
-                        ..
-                    })
-                )
-            };
-            if pass_on {
-                assert!(box_error(&stitched), "{stitched:?}");
-                assert!(box_error(&r), "{r:?}");
-            } else {
-                assert!(
-                    matches!(
-                        &stitched,
-                        Err(e) if e.operation() == "topology::brep::p9"
-                            && e.upstream_status().is_some()
-                    ),
-                    "{stitched:?}"
-                );
-                assert!(r.is_ok(), "{r:?}");
+        let mut k = Kernel::default();
+        let mut b = status_box(&mut k);
+        let f = *b.face_list().first().expect("face");
+        b.face_mut(f).expect("face").surface = None;
+        let mut lamina = 0;
+        let tolerance = initial_stitch_tolerance(b.tolerance(), 0.0);
+        let stitched = stitch_faces(
+            &mut k,
+            &mut b.clone_standing_for_self().unwrap(),
+            tolerance,
+            false,
+            &mut lamina,
+            None,
+            None,
+        );
+        let r = stitch_and_orient(&mut k, &mut b, &StitchAndOrientOptions::default());
+        let box_error = |r: &Result<()>| {
+            matches!(
+                r,
+                Err(SolidError::InvalidInput {
+                    operation: "query::face::p1::calculate_bounding_box",
+                    ..
+                })
+            )
+        };
+        assert!(box_error(&stitched), "{stitched:?}");
+        assert!(box_error(&r), "{r:?}");
+    }
+
+    /// `MakeEdgeInFace` names the end whose vertex sector it did not find, and a missing
+    /// face, keeping the null-pointer status and the no-sector operation.
+    #[test]
+    fn a_missing_sector_names_its_end() {
+        use crate::error::SM_ERR_NULL_POINTER;
+        struct Backend {
+            calls: usize,
+            miss: usize,
+        }
+        impl FaceEdgeBackend for Backend {
+            type Face = ();
+            type Vertex = ();
+            type Curve = ();
+            type UvCurve = ();
+            type Vertexuse = ();
+            type Output = ();
+            fn validate_face(&self, (): ()) -> Result<()> {
+                Ok(())
+            }
+            fn tolerance(&self) -> Result<f64> {
+                Ok(1e-6)
+            }
+            fn sector(
+                &mut self,
+                (): (),
+                _vertex: Option<()>,
+                (): &(),
+                _uv: Option<&()>,
+                _start: f64,
+                _end: f64,
+                _orientation: OrientType,
+                _tolerance: f64,
+                _all: bool,
+            ) -> Result<Option<()>> {
+                self.calls += 1;
+                Ok((self.calls != self.miss).then_some(()))
+            }
+            fn insert(
+                &mut self,
+                (): (),
+                (): (),
+                (): (),
+                (): (),
+                _uv: Option<()>,
+                _interval: Extent1d,
+                _orientation: OrientType,
+                _max_gap: f64,
+                (): &mut (),
+            ) -> Result<()> {
+                Ok(())
             }
         }
+        let run = |face: Option<()>, miss: usize| {
+            let mut backend = Backend { calls: 0, miss };
+            make_edge_with_backend(
+                &mut backend,
+                true,
+                face,
+                Some(()),
+                Some(()),
+                (),
+                None,
+                Extent1d::from_min_max(0.0, 1.0),
+                OrientType::Same,
+                1e-7,
+                &mut (),
+            )
+        };
+        for (miss, at_end) in [(1, false), (2, true)] {
+            let e = run(Some(()), miss).unwrap_err();
+            assert_eq!(
+                e.topology_failure(),
+                Some(&TopologyFailure::NoVertexSector { at_end })
+            );
+            assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+            assert!(is_no_vertex_sector(&e), "{e}");
+        }
+        run(Some(()), 0).unwrap();
+        let e = run(None, 0).unwrap_err();
+        assert_eq!(e.topology_failure(), Some(&TopologyFailure::NoFaceGiven));
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert!(!is_no_vertex_sector(&e));
     }
 
     #[test]
@@ -3973,6 +4600,78 @@ mod tests {
         }
     }
 
+    /// The caller's argument and body causes, reached through the public entry points,
+    /// keep upstream's statuses.
+    #[test]
+    fn the_callers_input_is_refused_by_cause_with_upstreams_status() {
+        use crate::error::{SM_ERR, SM_ERR_NULL_POINTER};
+        let status = |e: &SolidError| (e.topology_failure().copied(), e.upstream_status());
+        let mut k = Kernel::default();
+
+        // no regions to keep given, and a B-rep with no finite region
+        let mut b = Brep::new();
+        let e = make_manifold(&mut k, &mut b, Some(&[]), false).unwrap_err();
+        assert_eq!(
+            status(&e),
+            (Some(TopologyFailure::NoRegionsToKeepGiven), Some(SM_ERR))
+        );
+        let e = make_manifold(&mut k, &mut b, None, false).unwrap_err();
+        assert_eq!(
+            status(&e),
+            (Some(TopologyFailure::NoFiniteRegion), Some(SM_ERR))
+        );
+
+        // a B-rep without an infinite region: the null-pointer status
+        let mut b = Brep::new();
+        assert!(b.infinite_region().is_none());
+        let line = Curve::from(
+            BSplineCurve::create_line_segment(3, Point3::ZERO, Point3::new(1.0, 0.0, 0.0)).unwrap(),
+        );
+        let interval = line.natural_interval();
+        let e = create_wire_edge_from_curve(&mut k, &mut b, line, interval).unwrap_err();
+        assert_eq!(
+            status(&e),
+            (
+                Some(TopologyFailure::NoInfiniteRegion),
+                Some(SM_ERR_NULL_POINTER)
+            )
+        );
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+
+        // no vertex given, and a vertex on no edge
+        let mut b = Brep::new();
+        let v = b.add_vertex_record(Vertex::default()).unwrap();
+        let e = glue_vertices(&mut k, &mut b, Some(v), None, None).unwrap_err();
+        assert_eq!(
+            status(&e),
+            (
+                Some(TopologyFailure::NoVertexGiven),
+                Some(SM_ERR_NULL_POINTER)
+            )
+        );
+        let e = delete_topological_vertex(&mut k, &mut b, true, None, None).unwrap_err();
+        assert_eq!(
+            status(&e),
+            (
+                Some(TopologyFailure::NoVertexGiven),
+                Some(SM_ERR_NULL_POINTER)
+            )
+        );
+        let e = delete_topological_vertex(&mut k, &mut b, true, Some(v), None).unwrap_err();
+        assert_eq!(
+            status(&e),
+            (
+                Some(TopologyFailure::VertexNotOnTwoEdges { edges: 0 }),
+                Some(SM_ERR)
+            )
+        );
+        let e = delete_topological_vertex(&mut k, &mut b, false, Some(v), None).unwrap_err();
+        assert_eq!(
+            status(&e),
+            (Some(TopologyFailure::EditingDisabled), Some(SM_ERR))
+        );
+    }
+
     #[test]
     fn squeeze_cleanup_continues_after_typed_native_failures() {
         let errors = [
@@ -3986,21 +4685,33 @@ mod tests {
                 entity: None,
             },
         ];
-        let mut failed = false;
+        // every native stitch failure is kept, the first one as the cause, and the
+        // cleanup goes on; an unported callee still propagates
+        let first = errors[0].clone();
+        let mut failed = None;
         for error in errors {
-            cleanup_status(Err(error), &mut failed).unwrap();
-            assert!(failed);
+            assert_eq!(ignored_keeping(Err::<(), _>(error), &mut failed), Ok(None));
+            assert_eq!(failed.as_ref(), Some(&first));
         }
-        cleanup_status(Ok(()), &mut failed).unwrap();
-        assert!(failed);
+        assert_eq!(ignored_keeping(Ok(()), &mut failed), Ok(Some(())));
+        assert_eq!(failed.as_ref(), Some(&first));
+        let e = caused(TopologyFailure::FaceStitchFailed, failed);
+        assert_eq!(e.cause(), Some(&first));
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(
+            e.topology_failure(),
+            Some(&TopologyFailure::FaceStitchFailed)
+        );
 
-        let mut failed = false;
+        let mut failed = None;
         let missing = SolidError::unported("SmStitch::StitchVertexPairs", "heal.stitch_p2");
         assert_eq!(
-            cleanup_status(Err(missing.clone()), &mut failed),
+            ignored_keeping(Err::<(), _>(missing.clone()), &mut failed),
             Err(missing)
         );
-        assert!(!failed);
+        assert!(failed.is_none());
+        // with nothing kept, the failure has no cause
+        assert_eq!(caused(TopologyFailure::CurvesNotJoined, None).cause(), None);
     }
 
     #[test]
@@ -4009,10 +4720,14 @@ mod tests {
         let v = b.add_vertex_record(Vertex::default()).unwrap();
         let mut edge = Some(EdgeId::from_index(3));
         // With `SmBrep::DeleteVertex` (topology.brep_p4) and `Notify` ported, the
-        // isolated-vertex branch completes (upstream ignores both statuses); the
-        // deleted-edge output is still reset first.
+        // isolated-vertex branch runs; upstream ignores DeleteVertex's status and the
+        // fork passes it on (WR-658, tangency-labs/smlib 60a8a51), here its refusal on a
+        // B-rep whose editing is disabled. The deleted-edge output is still reset first.
+        let r = combine_coincident_vertices(&mut Kernel::default(), &mut b, v, v, &mut edge);
         assert!(
-            combine_coincident_vertices(&mut Kernel::default(), &mut b, v, v, &mut edge).is_ok()
+            matches!(&r, Err(e) if e.sm_status() == Some(1001)
+                && e.to_string().contains("editing is not enabled")),
+            "{r:?}"
         );
         assert!(edge.is_none());
         let mut out = SqueezedFace {
@@ -4101,81 +4816,61 @@ mod tests {
             ),
         ];
         for (name, placement, scale, wide, narrow) in cases {
-            for fixed in [true, false] {
-                let mut k = Kernel::default();
-                k.fixes.transform_scales_each_tolerance = fixed;
-                let (mut b, [wide_edge, narrow_edge], v, f) = box_with_tolerances(&mut k);
-                transform(&mut k, &mut b, &placement, Some(scale), true).unwrap();
-                let body = b.tolerance();
-                let label = format!("{name} fixed={fixed}");
-                if fixed {
-                    assert_tol(
-                        &format!("{label}: wide edge"),
-                        crate::topology::edge::tolerance(&b, wide_edge).unwrap(),
-                        wide,
-                    );
-                    assert_tol(
-                        &format!("{label}: vertex"),
-                        vertex::tolerance(&b, v).unwrap(),
-                        wide,
-                    );
-                    assert_tol(
-                        &format!("{label}: face"),
-                        crate::topology::face::p2::tolerance(&b, f).unwrap(),
-                        wide,
-                    );
-                    assert_tol(
-                        &format!("{label}: narrow edge"),
-                        crate::topology::edge::tolerance(&b, narrow_edge).unwrap(),
-                        narrow.unwrap_or(body),
-                    );
-                } else {
-                    // upstream: every edge is set to the new body tolerance
-                    assert_tol(
-                        &format!("{label}: wide edge"),
-                        crate::topology::edge::tolerance(&b, wide_edge).unwrap(),
-                        body,
-                    );
-                }
-            }
+            let mut k = Kernel::default();
+            let (mut b, [wide_edge, narrow_edge], v, f) = box_with_tolerances(&mut k);
+            transform(&mut k, &mut b, &placement, Some(scale), true).unwrap();
+            let body = b.tolerance();
+            assert_tol(
+                &format!("{name}: wide edge"),
+                crate::topology::edge::tolerance(&b, wide_edge).unwrap(),
+                wide,
+            );
+            assert_tol(
+                &format!("{name}: vertex"),
+                vertex::tolerance(&b, v).unwrap(),
+                wide,
+            );
+            assert_tol(
+                &format!("{name}: face"),
+                crate::topology::face::p2::tolerance(&b, f).unwrap(),
+                wide,
+            );
+            assert_tol(
+                &format!("{name}: narrow edge"),
+                crate::topology::edge::tolerance(&b, narrow_edge).unwrap(),
+                narrow.unwrap_or(body),
+            );
         }
     }
 
     /// WR-508 (#1521): a lone torus, which this port's `create_torus` gives a single vertex,
     /// so no vertex spans a size: upstream sizes the scaled body from that one-point vertex
-    /// box (size zero), and the model size and body tolerance come out zero. With the fix
-    /// it is sized from its bounding box, as a torus made at the scaled size is.
+    /// box (size zero), and the model size and body tolerance come out zero. The port
+    /// sizes it from its bounding box, as a torus made at the scaled size is.
     #[test]
     fn transform_sizes_a_body_without_vertices_wr508() {
         for scale in [2.0, 0.5] {
-            for fixed in [true, false] {
-                let mut k = Kernel::default();
-                k.fixes.transform_model_size_from_body_box = fixed;
-                let mut torus =
-                    crate::primitive::api_primitives::create_torus(&mut k, Point3::ZERO, 6.0, 2.0)
-                        .unwrap();
-                assert_eq!(torus.vertices().len(), 1);
-                let s = Vec3::new(scale, scale, scale);
-                transform(&mut k, &mut torus, &Axis2Placement::IDENTITY, Some(s), true).unwrap();
-                let mut direct_k = Kernel::default();
-                let direct = crate::primitive::api_primitives::create_torus(
-                    &mut direct_k,
-                    Point3::ZERO,
-                    6.0 * scale,
-                    2.0 * scale,
-                )
-                .unwrap();
-                let got = torus.tolerance();
-                if fixed {
-                    assert!(
-                        got > 0.0 && got >= direct.tolerance() * (1.0 - 1e-12),
-                        "scale {scale}: body tolerance {got:e}, direct {:e}",
-                        direct.tolerance()
-                    );
-                } else {
-                    assert_eq!(got, 0.0, "scale {scale}: upstream's empty vertex box");
-                }
-            }
+            let mut k = Kernel::default();
+            let mut torus =
+                crate::primitive::api_primitives::create_torus(&mut k, Point3::ZERO, 6.0, 2.0)
+                    .unwrap();
+            assert_eq!(torus.vertices().len(), 1);
+            let s = Vec3::new(scale, scale, scale);
+            transform(&mut k, &mut torus, &Axis2Placement::IDENTITY, Some(s), true).unwrap();
+            let mut direct_k = Kernel::default();
+            let direct = crate::primitive::api_primitives::create_torus(
+                &mut direct_k,
+                Point3::ZERO,
+                6.0 * scale,
+                2.0 * scale,
+            )
+            .unwrap();
+            let got = torus.tolerance();
+            assert!(
+                got > 0.0 && got >= direct.tolerance() * (1.0 - 1e-12),
+                "scale {scale}: body tolerance {got:e}, direct {:e}",
+                direct.tolerance()
+            );
         }
     }
 
@@ -4375,6 +5070,263 @@ mod tests {
             .chain(native_failures(NO_VERTEX_SECTOR_OP, 1006))
         {
             assert!(!is_no_vertex_sector(&other), "{other:?}");
+        }
+    }
+
+    /// A wire edge whose curve is the UV line from `uv0` to `uv1` on `surface`, and the
+    /// edge's interval.
+    fn curve_on_surface_edge(
+        k: &mut Kernel,
+        b: &mut Brep,
+        surface: crate::surface::surface::Surface,
+        uv0: Point3,
+        uv1: Point3,
+    ) -> (EdgeId, Extent1d) {
+        use crate::curve::crv_on_surf::CrvOnSurf;
+        use crate::curve::line::Line;
+        let uv = Curve::from(Line::from_points(uv0, uv1, 2));
+        let cos = Curve::from(CrvOnSurf::new(k, uv, surface, None, 2).expect("curve on surface"));
+        let ivl = cos.natural_interval();
+        let e = create_wire_edge_from_curve(k, b, cos, ivl).expect("wire edge");
+        (e, ivl)
+    }
+
+    /// WR-598 takes an iso curve only for an exactly constant UV coordinate, u or v. On
+    /// `S(u, v) = (u / EFF_ZERO, v, u v / EFF_ZERO)` over `[0, 1]^2` the UV line from
+    /// `(0, 0)` to `(EFF_ZERO / 2, 1)` drifts in u by less than `EFF_ZERO` times the domain
+    /// (the fork's test), yet its far end is `(0.5, 1, 0.5)` and the `u = 0` iso curve's
+    /// `(0, 1, 0)`: it is not converted. The exactly constant `u = 0.5` line is. The same
+    /// with u and v swapped, for the constant-v branch.
+    #[test]
+    fn wr598_only_an_exactly_constant_uv_line_is_an_iso_curve() {
+        use crate::math::EFF_ZERO;
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        let big = 1.0 / EFF_ZERO;
+        // (the varying-u surface, then its swap: S(u, v) = (u, v / EFF_ZERO, u v / EFF_ZERO))
+        for swap in [false, true] {
+            let at = |u: f64, v: f64| {
+                if swap {
+                    Point3::new(v, u, 0.0)
+                } else {
+                    Point3::new(u, v, 0.0)
+                }
+            };
+            let space = |x: f64, y: f64, z: f64| {
+                if swap {
+                    Point3::new(y, x, z)
+                } else {
+                    Point3::new(x, y, z)
+                }
+            };
+            let mut k = Kernel::default();
+            let mut b = Brep::new_with_infinite_region().expect("brep");
+            let patch = BSplineSurface::create_bilinear_surface(
+                Point3::new(0.0, 0.0, 0.0),
+                if swap {
+                    Point3::new(1.0, 0.0, 0.0)
+                } else {
+                    Point3::new(big, 0.0, 0.0)
+                },
+                if swap {
+                    Point3::new(0.0, big, 0.0)
+                } else {
+                    Point3::new(0.0, 1.0, 0.0)
+                },
+                if swap {
+                    Point3::new(1.0, big, big)
+                } else {
+                    Point3::new(big, 1.0, big)
+                },
+            )
+            .expect("patch");
+            let surface = crate::surface::surface::Surface::from(patch);
+            let (drift, drift_ivl) = curve_on_surface_edge(
+                &mut k,
+                &mut b,
+                surface.clone(),
+                at(0.0, 0.0),
+                at(EFF_ZERO / 2.0, 1.0),
+            );
+            let end = edge_curve(&b, drift)
+                .expect("curve")
+                .evaluate_point(&k, drift_ivl.max())
+                .expect("end");
+            assert!(
+                end.closer_than(1e-9, space(0.5, 1.0, 0.5)),
+                "swap {swap}: {end:?}"
+            );
+            let tol = b.edge(drift).expect("edge").tolerance;
+            let converted = exact_bspline_of_edge(&k, &b, drift, drift_ivl, tol).expect("answers");
+            assert!(converted.is_none(), "swap {swap}: {converted:?}");
+
+            let (exact, exact_ivl) =
+                curve_on_surface_edge(&mut k, &mut b, surface, at(0.5, 0.0), at(0.5, 1.0));
+            let tol = b.edge(exact).expect("edge").tolerance;
+            let iso = exact_bspline_of_edge(&k, &b, exact, exact_ivl, tol)
+                .expect("answers")
+                .expect("an iso curve");
+            let iso_end = iso
+                .evaluate_point(&k, iso.natural_interval().max())
+                .expect("end");
+            let edge_end = edge_curve(&b, exact)
+                .expect("curve")
+                .evaluate_point(&k, exact_ivl.max())
+                .expect("end");
+            // both at 5e11 scale: equal up to rounding at that scale
+            assert!(
+                iso_end.closer_than(1e-2, edge_end),
+                "swap {swap}: {iso_end:?} {edge_end:?}"
+            );
+        }
+    }
+
+    /// WR-598 on a procedural blend, which evaluates its definition S, not its net: the iso
+    /// curve is cut from the net, within the net's certified bound of S, so it is taken
+    /// only while that bound is within the joined edge's tolerance (not at half the bound,
+    /// nor at a NaN tolerance); the tolerance is not widened to admit it.
+    #[test]
+    fn wr598_iso_curve_on_a_procedural_blend_needs_its_bound_within_the_tolerance() {
+        use crate::blend::fillet_section::section::GnSectionFsg;
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::surface::procedural_blend::{BlendDefinitionInput, ProceduralBlend};
+        use crate::surface::surface::{Surface, SurfaceKind};
+        // the plane-plane round of wr698_procedural_blend_definition.rs, bound 1e-3
+        let (l, r, bound) = (10.0, 2.0, 1e-3);
+        let mut k = Kernel::default();
+        let o = Point3::new(0.0, 0.0, 0.0);
+        let bilinear = |p: [Point3; 4]| {
+            BSplineSurface::create_bilinear_surface(p[0], p[1], p[2], p[3]).expect("bilinear")
+        };
+        let line = |a: Point3, c: Point3| BSplineCurve::create_line_segment(3, a, c).expect("line");
+        let a = Surface::from(bilinear([
+            o,
+            Point3::new(l, 0.0, 0.0),
+            Point3::new(0.0, 0.0, l),
+            Point3::new(l, 0.0, l),
+        ]));
+        let c = Surface::from(bilinear([
+            o,
+            Point3::new(l, 0.0, 0.0),
+            Point3::new(0.0, l, 0.0),
+            Point3::new(l, l, 0.0),
+        ]));
+        let net = bilinear([
+            o,
+            Point3::new(1.0, 0.0, 0.0),
+            Point3::new(0.0, 1.0, 0.0),
+            Point3::new(1.0, 1.0, 0.0),
+        ]);
+        let leader = line(Point3::new(0.0, r, r), Point3::new(l, r, r));
+        let seed = line(Point3::new(0.0, r / l, 0.0), Point3::new(1.0, r / l, 0.0));
+        let input = BlendDefinitionInput {
+            supports: [&a, &c],
+            sides: [-1.0, 1.0],
+            offsets: [r, r],
+            law: None,
+            order: 2,
+            thumbweight: 0.0,
+            leader: &leader,
+            seeds: [&seed, &seed],
+            bound,
+            chamfer: None,
+        };
+        let blend = ProceduralBlend::create(&k, &net, &input, |n, w| {
+            GnSectionFsg::is_valid(n as usize, w)
+        })
+        .expect("blend");
+        let surface = Surface::from(blend);
+        assert!(matches!(surface.kind(), SurfaceKind::ProceduralBlend(_)));
+        let mut b = Brep::new_with_infinite_region().expect("brep");
+        let (e, ivl) = curve_on_surface_edge(
+            &mut k,
+            &mut b,
+            surface,
+            Point3::new(0.5, 0.0, 0.0),
+            Point3::new(0.5, 1.0, 0.0),
+        );
+        let refused = exact_bspline_of_edge(&k, &b, e, ivl, bound / 2.0).expect("answers");
+        assert!(refused.is_none(), "{refused:?}");
+        assert!(exact_bspline_of_edge(&k, &b, e, ivl, f64::NAN)
+            .expect("answers")
+            .is_none());
+        let taken = exact_bspline_of_edge(&k, &b, e, ivl, bound).expect("answers");
+        assert!(taken.is_some());
+    }
+
+    /// The bound test refuses a NaN on either side and compares two finite doubles exactly.
+    #[test]
+    fn wr598_bound_within_tolerance_refuses_nan() {
+        assert!(!bound_within_tolerance(f64::NAN, 1.0));
+        assert!(!bound_within_tolerance(1e-3, f64::NAN));
+        assert!(!bound_within_tolerance(f64::NAN, f64::NAN));
+        assert!(bound_within_tolerance(1e-3, 1e-3));
+        assert!(!bound_within_tolerance(
+            1e-3,
+            f64::from_bits(1e-3_f64.to_bits() - 1)
+        ));
+    }
+
+    /// WR-598 on a screw sweep's wall: a B-spline net that keeps its definition beside it
+    /// but evaluates the net (`SurfaceKind::BSpline`), so the net's iso curve is the curve
+    /// on the wall exactly and is taken whatever the definition's bound: refusing it would
+    /// change nothing in space.
+    #[test]
+    fn wr598_iso_curve_on_a_sweep_wall_is_the_net_s() {
+        let mut k = Kernel::default();
+        let profile: Vec<Curve> = [(4.1, 0.0), (5.0, 0.0), (5.0, 0.9), (4.1, 0.9)]
+            .iter()
+            .zip([(5.0, 0.0), (5.0, 0.9), (4.1, 0.9), (4.1, 0.0)].iter())
+            .map(|(&(ar, az), &(br, bz))| {
+                Curve::from(crate::curve::line::Line::from_points(
+                    Point3::new(ar, 0.0, az),
+                    Point3::new(br, 0.0, bz),
+                    3,
+                ))
+            })
+            .collect();
+        let body = crate::sweep::screw::screw_sweep(
+            &mut k,
+            &profile,
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(0.0, 0.0, 1.0),
+            1.0,
+            1.0,
+            1e-4,
+        )
+        .expect("screw sweep");
+        let wall = crate::topology::brep::p1::faces(&body, None)
+            .expect("faces")
+            .into_iter()
+            .find_map(|f| {
+                let s = crate::topology::face::p2::surface(&body, f).ok()??;
+                s.procedural_sweep().is_some().then(|| s.clone())
+            })
+            .expect("a wall that keeps its definition");
+        let bound = wall.procedural_definition().expect("definition").bound();
+        assert!(bound > 0.0, "{bound}");
+        let dom = wall.natural_uv_domain_with_nurb(&k).expect("domain");
+        let u = dom.u_interval().mid();
+        let (v0, v1) = (dom.v_interval().min(), dom.v_interval().max());
+        let mut b = Brep::new_with_infinite_region().expect("brep");
+        let (e, ivl) = curve_on_surface_edge(
+            &mut k,
+            &mut b,
+            wall,
+            Point3::new(u, v0, 0.0),
+            Point3::new(u, v1, 0.0),
+        );
+        let iso = exact_bspline_of_edge(&k, &b, e, ivl, bound / 2.0)
+            .expect("answers")
+            .expect("the net's iso curve");
+        let cos = edge_curve(&b, e).expect("curve");
+        let iso_ivl = iso.natural_interval();
+        for s in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            let p = iso
+                .evaluate_point(&k, iso_ivl.evaluate(s))
+                .expect("iso point");
+            let q = cos.evaluate_point(&k, ivl.evaluate(s)).expect("edge point");
+            assert!(p.closer_than(1e-9, q), "s {s}: {p:?} {q:?}");
         }
     }
 }

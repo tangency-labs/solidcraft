@@ -13,6 +13,11 @@
 //! tangency-labs/solidcraft#15108 is the same family at r5 on a 40 x 30 x 20 box: its open
 //! shell failed only with the box centred on `y = 0` (the ball extension's farthest-point
 //! angle, `surface::extend::ball`).
+//!
+//! tangency-labs/solidcraft#16983: a rib thinner than twice the wall, its top edges rounded
+//! thinner than the wall, shelled open at the bottom. The offsets of the rib's two sides
+//! cross over each other, so the offset of the rib's top and of the end faces across the
+//! rib turn inside out; the shell was refused ("an edge of its offset closes to nothing").
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -27,6 +32,7 @@ use core::f64::consts::PI;
 
 use offset_fixture::{api_shell, planar_faces_at, report, shell, volume};
 use solidcore::blend::fillet_executive::api::fillet_edges;
+use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::kernel::UpstreamFixes;
 use solidcore::math::Point3;
 use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions};
@@ -132,15 +138,11 @@ fn issue_460_closed_shell_by_round_set() {
 
 /// tangency-labs/solidcraft#15108: a 40 x 30 x 20 box centred at `c`, all twelve edges
 /// rounded r5 and shelled 2 inward with the top open, with the options SolidCraft's
-/// `smlib_shell` passes and SolidCraft's fix set: every opt-in fix but the two its backend
-/// holds back (`fixes()` less `HELD_BACK` in SolidCraft's `crates/smlib/src/core.rs`;
-/// mirrored here, as solidcore cannot depend on the app). Returns the shell's volume.
+/// `smlib_shell` passes and SolidCraft's fix set: every opt-in fix. Returns the shell's
+/// volume.
 fn shell_15108(c: [f64; 3]) -> f64 {
-    let mut fixes = UpstreamFixes::all();
-    fixes.fillet_refuse_rounds_breaking_through = false;
-    fixes.fillet_round_ends_on_outline = false;
     let mut k = Kernel {
-        fixes,
+        fixes: UpstreamFixes::all(),
         ..Kernel::default()
     };
     let corner = Point3::new(c[0] - 20.0, c[1] - 15.0, c[2] - 10.0);
@@ -198,6 +200,147 @@ fn issue_15108_open_shell_of_a_rounded_box_is_independent_of_position() {
         assert!(
             (got - shifted).abs() <= 1e-9 * shifted,
             "centre {c:?}: {got} vs {shifted} at [20, 15, 10]"
+        );
+    }
+}
+
+/// #16983: a 40 x 20 x 10 box with a 3 x 10 rib along its back face (y 0..3, z 10..20),
+/// the rib's two top edges rounded r0.75, shelled `t` inward open at the bottom, with
+/// SolidCraft's fix set (as [`shell_15108`]). Returns the shell's volume.
+fn shell_ribbed_box(t: f64) -> f64 {
+    let mut k = Kernel {
+        fixes: UpstreamFixes::all(),
+        ..Kernel::default()
+    };
+    let base = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 20.0, 10.0).unwrap();
+    let rib = create_box(&mut k, Point3::new(0.0, 0.0, 10.0), 40.0, 3.0, 10.0).unwrap();
+    let mut b = boolean_union(&mut k, base, rib).unwrap();
+    let top_edges: Vec<_> = b
+        .edges()
+        .iter()
+        .filter(|(_, e)| {
+            let c = e.curve.as_ref().unwrap();
+            let p = c.evaluate_point(&k, e.interval.min()).unwrap();
+            let q = c.evaluate_point(&k, e.interval.max()).unwrap();
+            (p.z - 20.0).abs() < 1e-9 && (q.z - 20.0).abs() < 1e-9 && (p.y - q.y).abs() < 1e-9
+        })
+        .map(|(id, _)| id)
+        .collect();
+    assert_eq!(top_edges.len(), 2, "the rib's top edges");
+    fillet_edges(&mut k, &mut b, &top_edges, 0.75, 1, 1, 1.0).unwrap();
+    let bottom = planar_faces_at(&k, &b, 2, 0.0);
+    assert_eq!(bottom.len(), 1, "the bottom face");
+    let options = ShellOptions {
+        offset: OffsetOptions {
+            distance: -t,
+            extend_convex_edges: true,
+            merge_results: true,
+        },
+        create_offset_solid: true,
+        merge_sheet_side_walls: true,
+    };
+    let mut r = api_shell(&mut k, &mut b, options, &bottom)
+        .unwrap_or_else(|e| panic!("wall {t}: the shell fails: {e:?}"));
+    solidcore::topology::integrity::check(&r).unwrap();
+    assert!(brep_is_manifold_solid(&r).unwrap(), "wall {t}");
+    // the check SolidCraft runs on every result (`CheckLevel::All`)
+    let check = check_brep(&mut k, &mut r, CheckLevel::Level2).unwrap();
+    assert!(
+        check.is_valid(),
+        "wall {t}: {:?}",
+        check.failures().collect::<Vec<_>>()
+    );
+    volume(&k, &mut r).unwrap()
+}
+
+/// #16983: walls of 1.6 and 2, thicker than half the 3 mm rib, leave the rib solid. The
+/// cavity is the box less its walls, `(40 - 2t) x (20 - 2t) x (10 - t)`: the rib's sides'
+/// offsets cross, and its rounds' offsets collapse (the wall is thicker than r0.75), so
+/// nothing of the cavity reaches into the rib. The shell is the body (the box, the rib, less
+/// the two rounds' `(1 - pi/4) r^2` over the 40 length) less that cavity.
+#[test]
+fn issue_16983_a_rib_thinner_than_two_walls_stays_solid() {
+    let body = 40.0 * 20.0 * 10.0 + 40.0 * 3.0 * 10.0 - 2.0 * (1.0 - PI / 4.0) * 0.75 * 0.75 * 40.0;
+    for t in [1.6, 2.0] {
+        let want = body - (40.0 - 2.0 * t) * (20.0 - 2.0 * t) * (10.0 - t);
+        let got = shell_ribbed_box(t);
+        assert!(
+            (got - want).abs() <= 1e-6 * want,
+            "wall {t}: {got} vs {want}"
+        );
+    }
+}
+
+/// #18801, stress corpus S0643 before its final rigid rotations: the 4 mm square
+/// bosses are narrower than twice the 2.4 mm wall and must stay solid. The input
+/// volume is 60*40*25 - 4.8*2.4*12.5 + 2*4*4*10. The mitred cavity is the inset
+/// block, 55.2*35.2*20.2, less the notch's offset intrusion, 9.6*2.4*12.5.
+/// Both directions of each boss top invert: its offset loop still has positive
+/// area, so loop orientation alone cannot identify the vanished cavity branch.
+#[test]
+fn issue_18801_closed_shell_absorbs_square_bosses() {
+    let mut k = Kernel {
+        fixes: UpstreamFixes::all(),
+        ..Kernel::default()
+    };
+    let block = create_box(&mut k, Point3::new(-30.0, -20.0, 0.0), 60.0, 40.0, 25.0).unwrap();
+    let notch = create_box(&mut k, Point3::new(-2.4, 17.6, 12.5), 4.8, 4.8, 12.5).unwrap();
+    let mut b = boolean_difference(&mut k, block, notch).unwrap();
+    for y in [-6.0, 6.0] {
+        let boss = create_box(&mut k, Point3::new(-2.0, y - 2.0, 25.0), 4.0, 4.0, 10.0).unwrap();
+        b = boolean_union(&mut k, b, boss).unwrap();
+    }
+    let input = 60.0 * 40.0 * 25.0 - 4.8 * 2.4 * 12.5 + 2.0 * 4.0 * 4.0 * 10.0;
+    assert!((volume(&k, &mut b).unwrap() - input).abs() <= 1e-6 * input);
+    let want = input - (55.2 * 35.2 * 20.2 - 9.6 * 2.4 * 12.5);
+    let mut result = shell(&mut k, b, -2.4, &[]).unwrap();
+    solidcore::topology::integrity::check(&result).unwrap();
+    assert!(brep_is_manifold_solid(&result).unwrap());
+    let check = check_brep(&mut k, &mut result, CheckLevel::Level2).unwrap();
+    assert!(
+        check.is_valid(),
+        "{:?}",
+        check.failures().collect::<Vec<_>>()
+    );
+    let got = volume(&k, &mut result).unwrap();
+    assert!((got - want).abs() <= 1e-6 * want, "{got} vs {want}");
+}
+
+/// A short, wide boss still contains cavity above the inset block: its artificial
+/// attachment plane is not an exposed face and must not be offset as a bottom.
+/// With wall 2, the block cavity is 36*26*16. A 3-wide branch contributes nothing;
+/// an 8-by-8 branch contributes (8-4)*(8-4)*height, even at height 0.5.
+/// A second 3-by-10-by-5 boss on the same support always contributes no cavity;
+/// closing its footprint must preserve the wider boss's neighboring footprint.
+#[test]
+fn issue_18801_branch_extinction_requires_crossed_exposed_planes() {
+    for (width, depth, height, extra_cavity) in [
+        (3.0, 10.0, 5.0, 0.0),
+        (8.0, 8.0, 0.5, 4.0 * 4.0 * 0.5),
+        (8.0, 8.0, 5.0, 4.0 * 4.0 * 5.0),
+    ] {
+        let mut k = Kernel::default();
+        let block = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
+        let boss = create_box(&mut k, Point3::new(16.0, 10.0, 20.0), width, depth, height).unwrap();
+        let body = boolean_union(&mut k, block, boss).unwrap();
+        let narrow = create_box(&mut k, Point3::new(3.0, 10.0, 20.0), 3.0, 10.0, 5.0).unwrap();
+        let body = boolean_union(&mut k, body, narrow).unwrap();
+        let want = 40.0 * 30.0 * 20.0 + 3.0 * 10.0 * 5.0 + width * depth * height
+            - (36.0 * 26.0 * 16.0 + extra_cavity);
+        let mut result = shell(&mut k, body, -2.0, &[])
+            .unwrap_or_else(|e| panic!("boss {width} x {depth} x {height}: {e:?}"));
+        solidcore::topology::integrity::check(&result).unwrap();
+        assert!(brep_is_manifold_solid(&result).unwrap());
+        let check = check_brep(&mut k, &mut result, CheckLevel::Level2).unwrap();
+        assert!(
+            check.is_valid(),
+            "boss {width} x {depth} x {height}: {:?}",
+            check.failures().collect::<Vec<_>>()
+        );
+        let got = volume(&k, &mut result).unwrap();
+        assert!(
+            (got - want).abs() <= 1e-6 * want,
+            "boss {width} x {depth} x {height}: {got} vs {want}"
         );
     }
 }

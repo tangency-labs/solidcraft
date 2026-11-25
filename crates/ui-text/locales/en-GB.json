@@ -1,0 +1,13 @@
+{
+  "prefs.appearance.colour_vision_help": "Changes the colours that carry a meaning: sketch states, axes, bends, analyses and icons.",
+  "prefs.appearance.viewport_colours": "3D view colours",
+  "prefs.bottom_centre": "Bottom centre",
+  "prefs.logo_theme": "Theme's colours",
+  "prefs.navigator_fit_note": "A face, corner or arrow of a navigator, or an axis of the gizmo, also looks at the middle of the model from the one distance that fits it from every side (its bounding sphere). Home uses the same zoom and centre while this is on, so views chosen after it only turn. Off: the view turns in place, keeping its target and zoom.",
+  "prefs.preview_tint_new_faces_help": "A preview of a feature that changes a body can draw the surface it adds in the preview colour. When off, the body is drawn as itself.",
+  "prefs.status_bar_note": "A thin bar along the window's bottom edge shows what is being edited, the open sketch's state in its colour and the design's units; a click on the units changes them. The sketch's state then no longer shows in the view's corner.",
+  "prefs.structure.appearance_note": "Colours, text and accessibility.",
+  "prefs.trackpad_zoom_modifier.help": "Hold only this key to zoom at the pointer with vertical scroll. Off keeps the existing scroll behaviour.",
+  "prefs.viewport_background_colour": "Colour",
+  "prefs.viewport_material_finish_help": "Bodies are lit by a soft studio: metal and glossy appearances reflect it, other bodies get a satin sheen. Off: flat shading in their colour, as before"
+}

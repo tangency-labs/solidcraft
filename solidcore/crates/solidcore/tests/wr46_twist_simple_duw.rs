@@ -6,7 +6,6 @@ use solidcore::surface::volume::{EvalOptions, Volume, VolumeKind};
 
 #[test]
 fn duw_matches_central_difference() {
-    let kernel = Kernel::default();
     // Simple evaluation is in the identity frame, without orientation or compounding.
     for period in [4.0, -4.0] {
         let twist = Volume::new(VolumeKind::Twist(TwistVolume::from_members(period, 1e-5)));
@@ -20,16 +19,7 @@ fn duw_matches_central_difference() {
                         .unwrap()[4]
                 };
                 let difference = (du(w + h) - du(w - h)) / (2.0 * h);
-                let fixed = twist
-                    .map(
-                        p,
-                        n,
-                        &EvalOptions {
-                            fixes: kernel.fixes,
-                            ..EvalOptions::default()
-                        },
-                    )
-                    .unwrap();
+                let fixed = twist.map(p, n, &EvalOptions::default()).unwrap();
                 let index = (n + 1) * (n + 1) + 1;
                 assert!(
                     (fixed[index] - difference).length() < 1e-9,

@@ -1,6 +1,6 @@
 # Design containers, version 1
 
-New designs use `.sc`; `.solidcraft` and `.solvecraft` remain supported legacy extensions. Opening detects the ZIP
+New designs use `.sc`; `.solidcraft` remains a supported legacy extension. Opening detects the ZIP
 local-header signature (`50 4b 03 04`) independently of the name; otherwise it uses
 the existing JSON design reader and migrations. Plain JSON remains a fully supported,
 self-contained input/output format. `io::write_design` keeps its JSON contract;
@@ -44,9 +44,13 @@ or `io::write_design_container_with_compression` from Rust.
 
 ## Bounds and recovery
 
-Input and individual expanded parts are capped at 256 MiB. Total declared expanded
-parts and resolved payloads are each capped at 512 MiB, including repeated references
-in the latter budget. There are at most 10,000 entries. Duplicate/ambiguous entry names,
+The file is capped at the design file limit, 256 MiB by default (on desktop it can be
+raised up to 16 GiB). An embedded STEP source (`.step`), import record (`.records`) or
+mesh (`.mesh`) may expand to the STEP and import file limit, 512 MiB by default, and
+every other part to the design file limit. All declared expanded parts together, and all
+resolved payloads with repeated references counted, are each capped at the two limits
+added, 768 MiB by default. These limits guard opening a file. A save is written in full
+whatever its size. There are at most 10,000 entries. Duplicate/ambiguous entry names,
 path traversal, ZIP64 and multi-disk packages are refused. Entries are read in memory;
 no archive paths are extracted to the filesystem. Exact part lengths and ZIP CRCs are
 checked, along with blob hashes. Hashes detect correspondence and corruption, not trust.
@@ -57,10 +61,12 @@ use the same container reader/writer; JSON export and Save As remain available.
 
 ## Provisional saved display
 
-Experimental engine saves with `preview: true` can include `cache/preview.json` and
+Saves with `preview: true` can include `cache/preview.json` and
 `cache/preview.bin` when the evaluated
-world display meshes are already warm. Ordinary saves omit this redundant display data
-to avoid extra save work; it is separate from the native B-rep cache below. Saving never triangulates a cold body for this
+world display meshes are already warm. The window's Save and Save As ask for it, so a file
+browser can show the model in 3D (Quick Look on macOS, #19328); other engine saves omit this
+redundant display data unless they ask. `cache/preview.bin` is stored Deflate-compressed. It is
+separate from the native B-rep cache below. Saving never triangulates a cold body for this
 cache. Pending occurrence moves, active sketch edits, feature errors and oversized
 previews omit it. The cache is bounded to 8 MiB, 1,024 bodies and 100,000 triangles;
 its manifest is at most 64 KiB. Body names/colours and contiguous binary mesh slices
@@ -108,8 +114,10 @@ either retain that document or fail required-part CRC/hash validation. Optional
 preview success never validates source blobs or makes a document editable. An invalid required blob still
 fails the later document read. ZIP directory scans can touch a bounded suffix of a
 stored blob; deferral means not loading or decoding the complete payload, not zero
-physical reads of its byte range. Optional cache metadata is capped at 16 MiB;
-larger metadata misses the cache and uses the normal authoritative part-size budget.
+physical reads of its byte range. Standalone previews cap `document.json` at 16 MiB.
+When opening a design with a model cache, Open can check the cache against the full
+`document.json` within the authoritative part-size budget. Open reuses those bytes
+for document validation and loading.
 
 ## Model cache
 
@@ -126,8 +134,9 @@ the final state fits.
 
 The model is the whole evaluation: every feature's result (warning, boolean
 diagnostics, whether it was skipped, its fingerprint) and the state after it
-(bodies, solved sketches, construction geometry, sheet metal bodies, threads and
-the blend records later features read), and the body check mode it was evaluated
+(bodies, solved sketches, construction geometry, sheet metal bodies, threads,
+the blend records later features read, and the bodies each body pattern left out,
+whose copies keep their stored names), and the body check mode it was evaluated
 under (`each_step`, `each_feature` or `off`): a design opened under another mode is
 evaluated again. A body made by constant-radius rounds is recorded with the edges they
 rounded and their radii, and the body they were made on (stored like any other body,
@@ -181,14 +190,16 @@ without the application's version, `.cargo/config.toml`, and the cache's own rea
 that changed none of it (the interface, the commands, other file formats, a new
 version number) opens designs from the caches the build before it wrote (#7168);
 one that changed any of it (a kernel fix, the codec, a dependency) evaluates them
-again, once, and the next save writes a cache of its own. A build of unknown source
-(a tarball without git) never reads a cache.
+again, once, and the next save writes a cache of its own. Without `git` (Docker,
+Nix, or a source archive), `build.rs` hashes those same inputs from disk; a build
+whose source cannot be read (`"unknown"`) never reads a cache.
 
 The fixed budgets of earlier caches (4,096 bodies, 100,000 faces, 64 MiB) scale
-with the design now: up to 200,000 body records, 100,000 distinct bodies, a 32 MiB
-manifest and a payload within the container's part budget (256 MiB), leaving room
-for the document. Individual bodies keep the codec's own limits. The archive-wide
-budgets (256 MiB per part, 512 MiB expanded, 10,000 entries) are unchanged.
+with the design now: up to 200,000 body records, 100,000 distinct bodies, a manifest
+of an eighth of the design file limit (32 MiB at the default limit, and never less)
+and a payload within the container's part limit (the design file limit),
+leaving room for the document. Individual bodies keep the codec's own limits. The
+archive-wide budgets in [Bounds and recovery](#bounds-and-recovery) are unchanged.
 Decoding runs under `kernel::guard` and is linear in the payload's bytes.
 
 A model whose cache would push the container past them keeps fewer states
@@ -198,13 +209,20 @@ repeat for longest), each while what it adds still fits: the bodies no state kep
 so far holds (a body is stored once however many states hold it) and the records
 of the state, those bodies, their names and sketches. Sheet bodies, like sketches, are
 written once and named by place in the states (most features leave the sheets as they were); a
-thinned cache keeps all of them. So are the tap markings (cosmetic threads): a state lists the
+thinned cache keeps all of them. Sheets made from surfaces are written the same way, in a
+list of their own (`surface_sheets`; format 9 wrote them out again in every state). So are the
+tap markings (cosmetic threads): a state lists the
 markings of every feature before it, so writing them with each state grew with the square of the
 features (400 marked cylinders: 34 of a 37 MB manifest); each marking is written once and a state
 names its markings as runs of places, and a thinned cache keeps all of them. So are the states' sketch keys (the evaluation key of each
 sketch before the state): each distinct set is written once, as the keys it sets and drops
 relative to the set written before it, and a state names its set by place; a thinned cache
-keeps all of them too. When the rest of the
+keeps all of them too. Resolved face points are also stored once per feature and distinct value,
+with each state naming its entries as sorted runs of table positions. These are the points
+found before a feature ran: a pattern or mirror of a cut needs them when the cut split its
+target face. Thinning keeps and budgets the whole table. A cache without this table is
+discarded, so opening rebuilds the points from the design's history.
+When the rest of the
 manifest (the bodies' table, the slices) then leaves too little room, the choice
 is made again within that much less, and the final state alone is always tried.
 A feature whose state is left out records none. The cache is left out (and the
@@ -308,8 +326,17 @@ PNG size/header and hashes without resolving source blobs. The Home/Recent Files
 reader tries its local picture cache, then this portable picture, then its existing
 background reconstruction. PNG decoding also has dimension and allocation limits.
 Missing, mismatched, truncated or malformed pictures are misses and never prevent
-authoritative document opening. Embedding a PNG does not install an operating-system
-file-browser thumbnail provider.
+authoritative document opening.
+
+On macOS, SolidCraft.app carries two Quick Look extensions (`apps/solidcraft-quicklook`): Finder
+shows this picture as the design's icon, and Space shows the design's saved display meshes
+(see "Provisional saved display") in a 3D view turned by dragging and zoomed by scrolling or
+pinching, or this picture when the design has none. They read the container with
+`crates/design-preview`, which has no kernel and bounds every read as the writers do; they check
+the container format, the PNG header and size and every mesh blob, but not the caches' keys or
+build: a stale picture or mesh there only shows an older look. Core Graphics scales the PNG, and
+Metal draws the meshes only when the view changes; nothing evaluates or tessellates the model.
+A design with neither cache keeps the generic icon and card.
 
 Desktop thumbnail reads seek within the file. The browser VFS supplies a bounded
 in-memory buffer instead; it avoids geometry reconstruction but does not provide

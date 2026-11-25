@@ -2,8 +2,8 @@
 //! a round of the bar/boss arc got a UV trim with coincident control points. Root cause (traced
 //! by tdamsma on #1945): `SmLocalSolveNd::SolveIt` kept the unscaled point's Jacobian for a
 //! clamped-and-scaled step, so a near-tangent SSI's end landed 1.6e-8 off and the rail trim kept
-//! a 3.1e-8 span. The fork's tangency-labs/smlib@d2757e1 fixes it; the port carries it under
-//! WR-253's `fixes.oscillating_skips_failed_guesses`, with the commit's 1-D part.
+//! a 3.1e-8 span. The fork's tangency-labs/smlib@d2757e1 fixes it; the port now applies
+//! WR-253's correction unconditionally in both local solvers.
 //!
 //! The case reached that trim only with WR-641's `fillet_through_extended_rail_end`, removed
 //! in #2500; it now runs under SolidCraft's fixes, the blend corner building both rounds,
@@ -166,14 +166,12 @@ const TOP: [Point3; 2] = [
     Point3::new(14.25957, -15.0, 10.48333),
 ];
 
-/// SolidCraft's fixes: every `UpstreamFixes` field on except `geometric_g2_continuity`, so
+/// SolidCraft's fixes: every `UpstreamFixes` field on, so
 /// both rounds are built by the blend corner, the construction kept since WR-641's `fillet_through_extended_rail_end` was removed (#2500).
 fn solidcraft_kernel() -> Kernel {
     let mut k = Kernel::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *k.fixes.flag_mut(name).unwrap() = true;
-        }
+        *k.fixes.flag_mut(name).unwrap() = true;
     }
     k
 }

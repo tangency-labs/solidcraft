@@ -182,8 +182,29 @@ pub struct OriginAxesAcrossViewResult {
     pub param_warnings: Vec<String>,
 }
 
+/// Show or hide the scale bar in the view's bottom left corner: a bar and the round length it
+/// stands for in the design's units, at the view's centre in perspective (#375). An application
+/// preference only: not saved with the design, not an undo step, and never opens a dialog.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ScaleBarParams {
+    /// True shows the scale bar, false hides it.
+    #[serde(deserialize_with = "enabled_flag")]
+    pub enabled: bool,
+}
+
+/// The accepted scale bar setting, applied by the app.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ScaleBarResult {
+    /// Whether the scale bar is shown now.
+    pub enabled: bool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// Turn the view to the command's standard orientation (front, back, left, right, top, bottom
-/// or isometric), as the view cube does, keeping the camera's target, distance, projection and
+/// or isometric), as the axes navigator does, keeping the camera's target, distance, projection and
 /// up axis. Display only: the design isn't changed and nothing is added to undo.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -246,6 +267,21 @@ pub struct RibbonTabsOnlyParams {
     pub on: Option<bool>,
 }
 
+/// `view.toolbar_reset_all`: put every toolbar tab's buttons back to their defaults (#11471).
+/// It takes no parameters.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ToolbarResetAllParams {}
+
+/// What `view.toolbar_reset_all` returns: nothing to report. The window resets its toolbar
+/// customisation; the design is not changed and nothing is added to undo.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ToolbarResetAll {
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// What `view.ribbon_tabs_only` returns: the request echoed. The window applies it to its
 /// preference; the design is not changed and nothing is added to undo.
 #[derive(Debug, Serialize, JsonSchema)]
@@ -253,6 +289,30 @@ pub struct RibbonTabsOnly {
     /// The requested state; absent when the call asked to switch.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub on: Option<bool>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// `view.browser`: show or hide the Browser tree panel, the design's tree of components, bodies
+/// and sketches. A window setting the app keeps: not saved with the design, not an undo step,
+/// and it never opens a dialog.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BrowserTreeParams {
+    /// True shows the Browser tree panel, false hides it; omitted toggles it.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub visible: Option<bool>,
+}
+
+/// What `view.browser` returns: the request echoed. The window applies it to the Browser tree
+/// panel and the design is not changed.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct BrowserTreeResult {
+    /// The requested state; absent when the call asked to toggle it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub visible: Option<bool>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -360,25 +420,25 @@ pub struct RenderFrame {
 #[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct NavigatorParams {
-    /// The navigator: signed axes, the cube, or a custom body (the cube until a body is
+    /// The navigator: signed axes, or a custom body (the signed axes until a body is
     /// chosen). Default: unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub style: Option<NavigatorStyle>,
     /// A body of the open design for the custom navigator to draw; the app keeps a snapshot of
-    /// it, so it stays when the design closes. `null`: no body (the cube again). A body over
+    /// it, so it stays when the design closes. `null`: no body (the signed axes again). A body over
     /// 10,000 triangles, or whose thinnest width is under a fifth of its widest, is refused.
     /// Default: unchanged.
     #[serde(default, deserialize_with = "nullable", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<String>")]
     pub body: Option<Option<String>>,
-    /// The custom navigator's colours: the cube's (`themed`) or the body's own appearance and
+    /// The custom navigator's colours: the theme's (`themed`) or the body's own appearance and
     /// edge colour (`modeled`). Default: unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub texture: Option<NavigatorTexture>,
-    /// The cube's orbit and roll arrows around the custom navigator. Default: unchanged.
+    /// The orbit and roll arrows around the custom navigator. Default: unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arrows: Option<bool>,
-    /// The cube's Home button beside the custom navigator. Default: unchanged.
+    /// The Home button beside the custom navigator. Default: unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub home: Option<bool>,
 }
@@ -388,7 +448,6 @@ pub struct NavigatorParams {
 #[serde(rename_all = "snake_case")]
 pub enum NavigatorStyle {
     Axes,
-    Cube,
     Custom,
 }
 
@@ -639,6 +698,8 @@ pub enum NavigateAction {
     Down,
     Clockwise,
     Counterclockwise,
+    /// Turn half a turn about the screen's vertical axis, retaining screen up.
+    TurnAround,
     /// The isometric view, framed on the whole model.
     Home,
     /// Frame the whole model.
@@ -771,7 +832,7 @@ pub struct NavigateParams {
     pub direction: Option<Vec3>,
     /// A turn without `direction`: left, right, up or down turn the view `degrees`, clockwise and
     /// counterclockwise roll it a quarter turn, home shows the isometric view framed, fit frames
-    /// the model.
+    /// the model. Turn Around turns half a turn about screen up.
     #[serde(default, deserialize_with = "navigate_action", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "NavigateAction")]
     pub action: Option<NavigateAction>,
@@ -985,6 +1046,63 @@ fn tool_required(schema: &mut Schema) {
 
 fn style_required(schema: &mut Schema) {
     require(schema, "style");
+}
+
+/// `view.fit` and `view.home` take no parameters: the first frames the model or what is selected,
+/// the second first returns the camera to its starting direction. Both are display actions the
+/// window applies in its own view (with a drawing open, its sheet): the design is not changed,
+/// nothing is added to undo, and no dialog opens. Both refuse a key they don't read, so one
+/// contract describes both calls.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct FitHomeParams {}
+
+/// What the two framing commands answer: nothing, because the window frames its own view and has
+/// nothing to report back. A call with a key either command doesn't read is refused by the command
+/// itself, so no reply carries `param_warnings`.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct FitHomeResult {}
+
+/// Which stage of the Render workspace's stage list the window shows. The names are the keys the
+/// window's own stages are kept under.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum RenderStage {
+    Look,
+    Light,
+    Frame,
+    Output,
+}
+
+impl RenderStage {
+    /// Every stage, in the order the Render window lists them.
+    pub const ALL: [Self; 4] = [Self::Look, Self::Light, Self::Frame, Self::Output];
+}
+
+reads!(render_stage_value -> RenderStage, "expected look, light, frame or output");
+
+/// `view.render_stage`: show one of the four Render stages. Per-document UI state: the design is
+/// not changed or evaluated, nothing is added to undo, and no dialog opens.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = stage_required)]
+pub struct RenderStageParams {
+    // Optional in the type and required in the schema (`stage_required`): left out, the handler
+    // refuses it with its own message.
+    /// `look`, `light`, `frame` or `output`.
+    #[serde(default, deserialize_with = "render_stage_value", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "RenderStage")]
+    pub stage: Option<RenderStage>,
+}
+
+/// What `view.render_stage` returns: the stage the window shows. The command reads its one key
+/// itself and refuses anything else, so no reply carries `param_warnings`.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RenderStageResult {
+    pub stage: RenderStage,
+}
+
+fn stage_required(schema: &mut Schema) {
+    require(schema, "stage");
 }
 
 #[cfg(test)]

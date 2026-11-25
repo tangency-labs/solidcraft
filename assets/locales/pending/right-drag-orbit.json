@@ -1,0 +1,34 @@
+{
+  "en": {
+    "nav.right_drag_orbit.help": "Right drag orbits; middle drag or Ctrl/Cmd+right drag pans; wheel zooms",
+    "nav.right_drag_orbit.label": "Right-drag orbit"
+  },
+  "ar": {
+    "nav.right_drag_orbit.help": "السحب بالزر الأيمن يدير العرض؛ السحب بالزر الأوسط أو Ctrl/Cmd مع الزر الأيمن يحرك العرض؛ عجلة الفأرة تقرب العرض وتبعده",
+    "nav.right_drag_orbit.label": "تدوير العرض بالسحب بالزر الأيمن"
+  },
+  "de": {
+    "nav.right_drag_orbit.help": "Ziehen mit der rechten Maustaste dreht die Ansicht; Ziehen mit der mittleren Maustaste oder Strg/Cmd und der rechten Maustaste verschiebt sie; das Mausrad zoomt",
+    "nav.right_drag_orbit.label": "Ansicht mit rechter Maustaste drehen"
+  },
+  "he": {
+    "nav.right_drag_orbit.help": "גרירה בלחצן הימני מסובבת את התצוגה; גרירה בלחצן האמצעי או Ctrl/Cmd עם הלחצן הימני מזיזה את התצוגה; הגלגלת מקרבת ומרחיקה",
+    "nav.right_drag_orbit.label": "סיבוב תצוגה בגרירה בלחצן הימני"
+  },
+  "ja": {
+    "nav.right_drag_orbit.help": "右ドラッグで回転、中ドラッグまたはCtrl/Cmd+右ドラッグでパン、ホイールでズーム",
+    "nav.right_drag_orbit.label": "右ドラッグで回転"
+  },
+  "ko": {
+    "nav.right_drag_orbit.help": "오른쪽 버튼 드래그로 회전, 가운데 버튼 드래그 또는 Ctrl/Cmd+오른쪽 버튼 드래그로 이동, 휠로 확대/축소",
+    "nav.right_drag_orbit.label": "오른쪽 버튼 드래그로 회전"
+  },
+  "vi": {
+    "nav.right_drag_orbit.help": "Kéo nút chuột phải để xoay; kéo nút chuột giữa hoặc Ctrl/Cmd+kéo nút chuột phải để dịch chuyển; lăn chuột để thu phóng",
+    "nav.right_drag_orbit.label": "Kéo nút chuột phải để xoay"
+  },
+  "zh": {
+    "nav.right_drag_orbit.help": "右键拖动可旋转；中键拖动或Ctrl/Cmd+右键拖动可平移；滚轮可缩放",
+    "nav.right_drag_orbit.label": "右键拖动旋转"
+  }
+}

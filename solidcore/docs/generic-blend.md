@@ -72,7 +72,12 @@ or a law r(t).
   tangent chain are one chamfer, so their rails meet: measured at the wedge of its edges between
   planes, where the sizes then hold all along, else at the narrowest wedge of their middles, moved
   up as far as unequal sizes need so that no station folds at the widest wedge, enclosed along
-  each edge. Where the wedge varies the sizes hold only where it was measured.
+  each edge. Where the wedge varies, those sizes hold at the reference wedge.
+  A smooth chain can also connect planar edges with different wedges. Each planar strip keeps
+  its requested setbacks. For equal setbacks the curved strips solve for the rolling radius
+  at each pair of support feet. The local tangent planes give the radius from their wedge and
+  the requested distance. As the normals approach those of an adjacent planar strip, both
+  constructions give the same radius and the same end chord.
 
 Every geometric quantity downstream (rails, sections, events, corner boundaries) is built from the
 same exact spine points.
@@ -83,7 +88,7 @@ The section joins the two rails. It is one of three kinds, chosen by its order n
 
 | n | section | surface |
 |---|---|---|
-| 0 | the chord | the chamfer |
+| 0 | the chord, or the circular arc over it at a sagitta h | the chamfer and the flat weld bead (h = 0), a weld bead's section (h ≠ 0) |
 | 1 | the circle of the ball between the rails | the exact canal surface, the envelope of the balls [35] |
 | 2 to 4 | the Gⁿ section | Hartmann's blend between the rails [14, 17] |
 
@@ -91,6 +96,15 @@ The section joins the two rails. It is one of three kinds, chosen by its order n
 
 *Figure 2. The section family on one cross-section, both rails set back s: chord (n = 0), circle
 (n = 1), order-2 section (n = 2, drawn without thumbweight).*
+
+**The order-0 section may bulge.** Its chord can carry a sagitta h: the circular arc between the
+rails whose middle stands h off the chord's middle, away from the edge for h > 0 (convex) and towards
+it for h < 0 (concave); the chord is h = 0. This is a weld bead's section
+(`surface::procedural_blend::bead::BeadDefinition`). With c the chord and β1, β2 the angles at
+which the chord leaves the faces, a concave arc stays off the faces below (c/2) tan(min βi / 2) and
+a convex one below (c/2) tan((π − max βi) / 2) (`BeadDefinition::bound`); a convex arc past
+(c/2) tan((π/2 − max βi) / 2) leans back over its toe (`BeadDefinition::overhang_bound`). Between
+planes along a straight edge it is a circular cylinder, an exact class (§4).
 
 **The circle (n = 1)** is the default round. It is stored as an exact rational circle: the rational
 quadratic arc with middle weight cos(θ/2), θ the angle between the contact normals [6, 7]. It is
@@ -159,11 +173,14 @@ value (a support as its NURBS form, the one its stations are solved on, labelled
 plane, cylinder, cone, sphere, torus or free; a round on a round as its own record, three deep at
 most), sides, radius or law, order, thumbweight, leader, seeds, ε, the
 map from the net's parameters, and the net, every number as stored. The record holds no maths and
-moves into `solidcore-record` as it is (`docs/layers.md`). The record keeps no analytic parameters:
-rebuilding derives a labelled support's analytic surface from its form (its corners for a plane,
-the circles of its rational quadratic rows for a surface of revolution: exact, as rational NURBS
-represent these surfaces exactly), refusing a form whose implicit equation does not vanish on it,
-coefficient by coefficient on each Bézier patch, naming the face. Rebuilding is exact, and the
+moves into `solidcore-record` as it is (`docs/layers.md`). If a labelled support has no stored analytic
+parameters, the reader derives its surface from the NURBS form. For example, it uses a plane's
+corners or the circles of a revolved surface's rational quadratic rows. A cone or cylinder can
+also store its placement, radius and semi-angle, since recovering the centre from a short arc can
+amplify rounding error. The reader verifies that the NURBS form lies on the resulting surface.
+On each Bézier patch, every coefficient of the implicit equation must vanish within rounding.
+If the writer cannot prove the analytic surface by either method, it stores the form as a free support. A corner's net and a draft's
+surfaces keep their label, which their records require. Rebuilding is exact, and the
 net is certified again (§2.4) before the round is an operand; a net not proved within ε is
 refused, naming its face. Evaluating S is a pure function of the definition: the station memo
 keys a definition by its own identity, never by a kernel's count, so kernels on other threads
@@ -230,7 +247,7 @@ root of a scalar or a small system along the trace, solved where it is well cond
 |---|---|---|
 | an end face's offset: the ball touches the end face E | End | the blend ends on E; its end curve is S ∩ E |
 | an end face tangent to F along a seam T | tangent end | the end curve built outward from P (§3.1) |
-| another spine | corner | Turn, Join, Ball or Setback (§3.2) |
+| another spine | corner | Turn, Join, Ball, Roll-over or Setback (§3.2) |
 | its face's boundary: the rail reaches a rim | overflow | the blend kept and trimmed at its crease (§3.4) |
 | a face that cannot hold the ball | fold or room | refused, naming the size that fits (§3.3, §3.5) |
 
@@ -264,6 +281,22 @@ model check accepts the s^(−1/2) curvature growth at that vertex only. Where E
 the end is refused. A round fading to nothing (its two contacts merging) is singular in the round's
 own system and is refused until its own chart is derived.
 
+**A tangent end at a touch.** The seam T may be one the model holds as a touch within its
+tolerance: an end face a hair inside or outside F's tangent plane, joined to F along one line
+([booleans.md](booleans.md) §6). P, where the rail crosses T, is then on S and λ0 off E along E's
+normal n there, and S ∩ E misses P: with E inside by δ it reaches the rail √(2δ/Δκ) along it from P,
+and with E outside it stops short of the rail. No curve from P is within the tolerance of that curve,
+and the certificate refuses one (§2.4). Where |λ0| is within what the model allows between T and E,
+the gap the edge check takes for T's tolerance and E's
+([validity-and-tolerances.md](validity-and-tolerances.md) §5.2), the end is the rib of the standoff:
+the point X of the section σ(t) of S with X + λ(t) n on E, λ(t) = λ0 (1 − ŝ^q), ŝ the section
+parameter normalised to [0, 1] and q the contact order. It passes through P, where E moved by λ0 n
+touches S and the end is a true tangent end, and it ends on S ∩ E at the far rail, so it runs between
+the two vertices the model has; q ≥ k keeps a ∝ s^(k/2) at P. Every point of it is within
+|λ(t)| ≤ |λ0| of E. It is built only where the rib of the surfaces as they are is not certified, and
+is certified as that rib is, against E moved by λ(t) n at the section t; a standoff past what the
+model allows is refused as before (`blend::fillet_geom::tangent_end_rib::Standoff`).
+
 ### 3.2 Corners
 
 One class, `SmBlendCorner`, classifies every blended vertex once and builds one of these events. It
@@ -275,8 +308,9 @@ never returns "no kind": a configuration the table does not name is a Setback.
 | **Join** | two blends meeting G1 and continuing each other, or one closed blend meeting itself G1, every other edge at the vertex tangent, its faces meeting so closely that the two balls are one within the corner's tolerance (faces meeting at an angle a put balls of radius r a distance r a apart), so an upright edge a degree or two off tangent between them makes a Turn | one shared section |
 | **Turn** | two blends sharing a face, turning at a sharp unrounded side edge (a boss base, a pocket's floor or rim; also blends meeting G1 where a side edge between their faces is sharp, such as a ruled loft's side edge at its rim), or one closed blend meeting itself at an angle (a teardrop's tip) | **Mitre** (default) or **Swept** (option) |
 | **Ball** | three equal rounds of one convexity at a vertex of three faces, the vertex not set back | the corner ball's sphere |
-| **Chamfer** | every edge at the vertex chamfered, each chamfer a plane between two planes | **Mitre** (default): the chamfer planes run on to their common point; or **Facet** (option): one plane through the rails' crossings |
-| **Setback** | everything else: unequal radii, four or more blends, mixed convexity, any corner where G2 is selected, and three equal constant rounds of one convexity between planes at a vertex set back by a given distance (marked set back with no distance, such a vertex stays the N x N corner; a marked corner beside a curved face, or one of rounds the Setback does not take, such as variable rounds or G1 rounds of mixed convexity, keeps the N x N corner's uncertified patch) | the setback hole and its certified fill: convex at a corner of one convexity, a saddle with a certified normal at a mixed one |
+| **Chamfer** | every edge at the vertex chamfered, each chamfer a plane between two planes, the chamfers of one convexity | **Mitre** (default): the chamfer planes run on to their common point; or **Facet** (option): one plane through the rails' crossings |
+| **Roll-over** | a convex round and a concave round sharing a face at the vertex, with no crossing to mitre on, every other edge at the vertex unblended | one Roll-over event runs the convex pass, then the concave pass: the convex round ends as it would alone; the concave round rolls over the convex round's surface and end face, and any overflow is trimmed at the crease (§3.4). The order is fixed by convexity, convex first, so the result does not depend on the order of selection. Every face is exact: the corner is a `Circle`-class torus where the convex round is a cylinder square to the end face, otherwise a procedural blend; the crease is certified with its pcurve (`crease.rs` of the Roll-over build). Until that build lands, this corner is refused with `CornerUnsupported` (`FilletErrorType`, from `session/trim_at_creases.rs`: "a corner's face between blends that add and blends that take off material"; `tests/fork_smlib125_open_setbacks.rs`) The second pass asked on its own also takes a concave round along the foot of a cylinder that stands through its end face (a tube above a fin's top whose root is rounded tangent into the tube): the cylinder is in B1's place, and the round has a cliff at each end (#19476). A seam of that cylinder is no event: where its vertex lies on the chain and the round has no whole section there (its rail leaves the end face at the seam's section), the pass turns the cylinder's face about its axis in its own copy, so the seam misses the chain, and gives the face its surface back afterwards, so the result's seam is on the input's ruling (#19505). |
+| **Setback** | every corner not named above: unequal radii, four or more blends, mixed convexity with every edge rounded, any corner where G2 is selected, and three equal constant rounds of one convexity between planes at a vertex set back by a given distance (marked set back with no distance, such a vertex stays the N x N corner; a marked corner of rounds the Setback does not take, such as variable rounds or G1 rounds of mixed convexity, keeps the N x N corner's uncertified patch. A marked corner beside a curved face keeps that patch too until the curved Setback is the default; the design makes it a Setback, and the curved Setback of `blend_setback/curved.rs` is that step) | the setback hole and its certified fill: convex at a corner of one convexity, a saddle with a certified normal at a mixed one |
 
 ![Plan views of the four corner kinds: mitre crease, swept torus, ball sphere patch, setback hole.](generic-blend/corner-events.svg)
 
@@ -293,9 +327,15 @@ ball's sphere. Setback: the rounds stop short and a 2n-sided hole is filled.*
   edge; the section is revolved about the side edge through the corner's turn. Between planes at a
   straight side edge this is an exact torus segment (a horn torus touching the axis at the side
   vertex), G1 to both rounds. It is the ball kept touching the side edge: the offset of an edge is a
-  cylinder about it, so the spine there is a circle and the envelope a torus [37, 6, 18, 8]. A ball
-  cannot pass a sharp concave side edge, so Swept there is refused, naming the corner radius that
-  would let it pass (R ≥ r).
+  cylinder about it, so the spine there is a circle and the envelope a torus [37, 6, 18, 8]. The
+  ball can circle the side edge only where its own side of the faces there is the wide one: a
+  concave round's ball lies in the air, a convex round's in the material, and a sharp concave
+  side edge leaves the air a narrow wedge, a convex one the material. So Swept builds where the
+  side edge and the rounds differ in convexity (a boss base's concave rounds about its convex
+  upright edge; an L's convex top rounds about its concave inner edge), and is refused where they
+  agree (a pocket rim's concave rounds at its concave corner edge; a box's convex rounds at its
+  convex corner edge), naming the corner radius that would let it pass (R ≥ r). Rounds of
+  different convexity are not swept yet.
 - **Ball.** Three equal rounds at three faces end on the corner ball's sphere [37, 6]. The corner
   face is always one rational patch exactly on the sphere, of degree (4, 2) by stereographic
   construction [8], with no analytic sphere special case: one code path.
@@ -312,7 +352,8 @@ ball's sphere. Setback: the rounds stop short and a 2n-sided hole is filled.*
   to each other and to each chamfer (at four sides, the one bilinear patch of the crossings).
   Chamfer planes so nearly coplanar
   that the points where they meet are not determined to the part's rounding are refused, naming
-  that. The corner keeps its definition: its chamfers and the points they meet in (opt-in, WR-716).
+  that. Three chamfers of both convexities between planes are refused, naming the vertex, until
+  their mitre is built. The corner keeps its definition: its chamfers and the points they meet in (opt-in, WR-716).
 - **Setback** [44, 43]. Each blend stops at a setback distance from the vertex. The hole has 2n
   sides: n profile curves (the blends' end sections) alternating with n spring curves on the faces.
   Plain trimlines that simply meet give poor shapes for unequal radii, edges far from 90° and
@@ -409,17 +450,26 @@ continued cliff face, so the rim moves down.*
 Keeping the edge instead (the ball rolling on the rim, the spine continuing as the other offset
 meeting the rim's pipe) is a possible future option, never the default.
 
-A round bigger than the wall it rolls on ends on the body's outline (#2541, opt-in
-`fillet_round_ends_on_outline`, WR-730). This applies where the round on the continued wall
-would pass inside the wall's rim, cutting into the material beyond the face it leaves. The
-ball then touches the rim and stays tangent to the face it keeps. It rolls on the surface
-tangent to it along the rim: the wall's plane turned about the rim, or its cylinder leaned
-into a cone. Where the kept face is too narrow as well, the ball touches both rims.
+A fixed-offset concave round whose rail runs into an adjoining concave wall is trimmed at its crease with
+that wall by the same construction. Every off-face run's exit and return must cross classified
+manifold edges locally concave at those parameters; whole-edge samples cannot establish this
+when a spline seam changes convexity. The end sections must fit their end faces. A run wrapping past both
+end labels is eligible only on a topologically closed edge, where those labels refer to the
+periodic seam rather than physical ends. The original round is cut on the
+adjoining wall; it is not retraced as a tangent rollover. At a fixed-offset rail crossing, support tangency
+requires the Join section-gap bound `2 o tan(a/2)` to be below the body's intersection tolerance,
+where `o` is the solver's largest absolute support offset and `a` the tangent-plane angle. The
+angular budget is also capped by the solver's angle tolerance.
 
-This is built for a lone round along a straight edge between planes, or along a circular
-edge between a plane square to its axis and a coaxial cylinder
-(`crate::blend::fillet_outline`). A round that passes the rim within the tolerance, or
-whose rail stays on its wall, is trimmed at its crease as above.
+For concave overflow the added material ends flush with the continued cliff face, keeping the
+original cliff edge, the default of T-FLEX on Parasolid [52]. A concave chamfer can touch a sharp
+rim tangentially where its planar support ends. Its strips share their section on the continued
+support. Where a rail crosses that rim into free space, the continued wall cuts the strip at the
+crease. The crease and the crossed rim edges bound the extension of the wall. A closed strip
+is divided at an interior section before cutting it at the tangent rim, so the two creases
+keep their separate parameters at the seam. The pieces are sewn together on the same surface.
+The Roll-over's second pass (§3.2) also trims its added material at the crease.
+Other concave hanging-cliff overflows remain refused. Convex overflow still moves the sharp edge.
 
 ### 3.5 Refusals name the size that fits
 
@@ -444,8 +494,12 @@ Each cause is decided from its own geometry, before the construction that it wou
 - **A collapsed offset.** A ball as wide as a face it rolls on (a cylinder or sphere of its radius,
   with the ball inside) has its offset of that face collapsed onto the axis or centre, so its centre
   is fixed. The zone it sweeps ends in a section of the ball only where the plane through an end of
-  the edge, square to it, holds that centre. A tray's seam and a cornered block's rim hold it at
-  both ends and build. The middle edge of an arc's tangent chain, rounded at its round's radius,
+  the edge, square to it, holds that centre. Where the edge ends on a side face it crosses and that
+  face holds the ball's one touch point on the other face, the round's end runs down to that point
+  on the other face's edge with the side: its rail there is a point on the face's boundary and it
+  takes the whole face, so that end is open too (a notch's floor rounded at the notch's radius,
+  ending on a curved side through the notch's axis). A tray's seam and a cornered block's rim hold
+  it at both ends and build. The middle edge of an arc's tangent chain, rounded at its round's radius,
   does not: refused, naming that radius, open. A larger ball that does not fit that face names it
   open the same way. An end where the chain runs on into another blended edge closes the zone:
   the Join there places the next round's section through the centre,
@@ -478,7 +532,9 @@ rolling ball on a surface with rational offsets along a rational rail is rationa
 degrees with the two rails as boundary are in [27], and the variable-radius cylinder and cone cases
 in [24]. A pair whose offsets happen to touch at one radius is not taken as exact unless proved for
 that radius. Between planes, the Gⁿ section is rational too (the feet are linear), and a Gⁿ section
-with rotational symmetry is that section revolved; both are stored as rational surfaces.
+with rotational symmetry is that section revolved; both are stored as rational surfaces. Between
+planes the chord is the plane through the feet, and the chord with a sagitta (§2.2) the circular
+cylinder through the feet's lines; both are exact, stored with bound 0.
 
 ## 5. Design decisions that shape behaviour
 
@@ -502,11 +558,24 @@ given.
 - **Mitre creases are graded G0.**
 - **Ball corners are one rational patch on the sphere**, box corners included.
 - **Overflow keeps the blend and moves the sharp edge**, matching the constant-radius overflow mode
-  common CAD practice offers; keeping the edge is a future option.
+  common CAD practice offers. A concave chamfer running past a tangent rim keeps the cliff edge
+  and ends flush with its continued wall (§3.4).
+- **A convex and a concave round meeting with the other edges sharp are designed to roll over,
+  convex first** (§3.2; the Roll-over build provides it, and until it lands the corner is refused with
+  `CornerUnsupported`, `session/trim_at_creases.rs`).
+  The two orders give different solids, because rounding is an opening and filleting a closing and
+  the two do not commute [37]; so the order is fixed by convexity, never by selection, and the other
+  order is never tried. Convex first is T-FLEX's documented default and NX's recorded default,
+  both on Parasolid [49, 50], and Creo's round-only transitions wrap one round around another
+  the same way [51].
 - **A boss or cut standing inside a round's band is kept** (its walls carried down to the round),
   as the "keep features" option of common practice; letting the round take it is a future option.
 - **A partly selected tangent chain** rounds exactly the selected edges and ends at the smooth vertex
-  with a real End.
+  with a real End. A vertex where the edge bends, within the tangency tolerance, is smooth. Where
+  the edge it runs on into turns towards the blend, the blend runs on past the vertex and out of the
+  part instead, ending on the end face. Not where the bend first takes that edge to the far side of
+  the blended edge continued, deeper than the face's zone tolerance: the part there stands across
+  the blend run on, which ends at the vertex (`blend_corner::end`, `run_on_leaves_the_part`).
 - **Folds are refused, never trimmed**, naming the radius.
 - **The user's geometry is never changed without consent**: no silent shrink, no auto-fit.
 - **The round is stored as its definition** with a certified net.
@@ -541,9 +610,8 @@ certificate), `fillet_solver` (the trace and the §3.3 checks), `fillet_overflow
 |---|---|
 | [#2400](https://github.com/tangency-labs/solidcore/issues/2400) | delete the old corner hierarchy |
 | [#2361](https://github.com/tangency-labs/solidcore/issues/2361) | several concave rounds at one vertex; mixed corners with every edge blended |
-| [#2343](https://github.com/tangency-labs/solidcore/issues/2343) | the Setback beside curved faces |
+| [#2343](https://github.com/tangency-labs/solidcore/issues/2343) | the Setback beside curved faces. The curved Setback is carried in steps (`blend_setback/curved.rs` is the fill; the ledge corner's Roll-over is a separate build); step 3 (the cylinder's free coefficient) and step 5 (four or more rounds, and the cone grown or placed) are queued |
 | [#2344](https://github.com/tangency-labs/solidcore/issues/2344) | the least certifying setback scale; streamed QP rows |
-| [#2345](https://github.com/tangency-labs/solidcore/issues/2345) | chamfers meeting at a vertex |
 | [#2346](https://github.com/tangency-labs/solidcore/issues/2346) | a G2 setback fill beside circular rounds |
 | [#2347](https://github.com/tangency-labs/solidcore/issues/2347) | the G2 setback fill held convex |
 | [#2348](https://github.com/tangency-labs/solidcore/issues/2348) | four blends over three faces |
@@ -563,7 +631,7 @@ The case gallery shows every fillet and chamfer case of the kernel corpus
 (`crates/solidcore/tests/kernel_cases/fillets/`) with its render and its status: passes, refused as
 the case expects, or known failing with its reason. It is the site's
 [Kernel cases page](https://tangency-labs.github.io/solidcore/cases.html), which `site/build.py`
-generates from the case entries, the renders beside them and `known_failing.json`; this page keeps
+generates from the case entries, the renders beside them and `kernel_cases_known_failing/`; this page keeps
 nothing about any case.
 
 ## 8. For contributors
@@ -614,7 +682,7 @@ is on [#2243](https://github.com/tangency-labs/solidcore/issues/2243).
 fillet and chamfer case with its state: passes, refused as expected, or known failing (with its
 reason). When a pull request makes a case pass, or turns a known failure into a correct refusal, it
 updates the case's entry (its expectation, and its `gallery_note` where the gallery needs to say
-more), its line in `known_failing.json` and its render
+more), its file in `kernel_cases_known_failing/` and its render
 (`crates/solidcore/tests/kernel_cases/<area>/<case>.jpg`) in the same pull request, never this page.
 The render shows the case's issue: the view is chosen for it (the corner, the seam, the edge's end,
 the spot refused or fixed), framed close on that region, with an inset of the whole part where it
@@ -691,3 +759,7 @@ Titles, pages or DOIs are given only where the project's reading notes record th
 46. J. Vida, R. R. Martin, T. Várady. A survey of blending methods that use parametric surfaces. *Computer-Aided Design* 26(5) (1994) 341–365. doi:10.1016/0010-4485(94)90023-X
 47. X. Ye, H. Nowacki. Ensuring compatibility of G²-continuous surface patches around a nodepoint. *Computer Aided Geometric Design* 13(9) (1996) 931–949.
 48. G. Farin. *Curves and Surfaces for CAGD: A Practical Guide*, 5th ed. Morgan Kaufmann (2002): rational Bézier patches, their convex hull and subdivision.
+49. Siemens. *NX Open .NET reference*, NX 12: `EdgeBlendBuilder` (blend order, roll-over and overflow options). https://docs.plm.automation.siemens.com/data_services/resources/nx/12/nx_api/custom/en_US/nxopen_net/class_n_x_open_1_1_features_1_1_edge_blend_builder.html; a recorded journal with the default settings: https://nxjournaling.com/node/1776
+50. Top Systems. *T-FLEX CAD 17 help*: edge blend order and blending at vertices. https://tflex.com/help/eng/T-FLEX%20CAD/17/14_edgeblend_additional_order.htm, https://tflex.com/help/eng/T-FLEX%20CAD/17/14_edgeblend_theory_order.htm
+51. PTC. *Creo Parametric 9.0 help*: round transition types. https://support.ptc.com/help/creo/creo_pma/r9.0/usascii/part_modeling/part_modeling/Round_Transition_Types.html
+52. Top Systems. *T-FLEX CAD 17 help*: overflow processing of edge blends. https://tflex.com/help/eng/T-FLEX%20CAD/17/blendedges_overflowprocessing.htm

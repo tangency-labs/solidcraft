@@ -62,14 +62,8 @@ fn slotted_square() -> Vec<Curve> {
 }
 
 /// The draft of `curves` over a height of 2 (positive degrees inward).
-fn draft(
-    tangent: bool,
-    curves: &[Curve],
-    draft_deg: f64,
-    corner: OffsetCornerType,
-) -> (Kernel, TaperExtrude) {
+fn draft(curves: &[Curve], draft_deg: f64, corner: OffsetCornerType) -> (Kernel, TaperExtrude) {
     let mut k = Kernel::new(&KernelOptions::default());
-    k.fixes.taper_tangent_corner_planes = tangent;
     let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
     let result =
         create_taper_extrude_with_corner(&mut k, &refs, 2.0, draft_deg, 3, corner).unwrap();
@@ -107,12 +101,12 @@ fn slot_volume() -> f64 {
 
 #[test]
 fn wr_571_the_wedge_tip_closes_into_a_ridge() {
-    let (k, result) = draft(false, &wedge(), 5.0, OffsetCornerType::CurveExtension);
+    let (k, result) = draft(&wedge(), 5.0, OffsetCornerType::CurveExtension);
     let (faces, v) = solid(&k, result);
     assert_eq!(faces, 6);
     assert_rel(v, WEDGE_VOLUME, 1e-8);
     // the tangent rule (lines: the same walls)
-    let (k, result) = draft(true, &wedge(), 5.0, OffsetCornerType::LinearExtension);
+    let (k, result) = draft(&wedge(), 5.0, OffsetCornerType::LinearExtension);
     let (faces, v) = solid(&k, result);
     assert_eq!(faces, 6);
     assert_rel(v, WEDGE_VOLUME, 1e-8);
@@ -120,12 +114,7 @@ fn wr_571_the_wedge_tip_closes_into_a_ridge() {
 
 #[test]
 fn wr_571_the_slot_closes_face_to_face() {
-    let (k, result) = draft(
-        false,
-        &slotted_square(),
-        -10.0,
-        OffsetCornerType::CurveExtension,
-    );
+    let (k, result) = draft(&slotted_square(), -10.0, OffsetCornerType::CurveExtension);
     let (faces, v) = solid(&k, result);
     assert_eq!(faces, 10);
     assert_rel(v, slot_volume(), 1e-8);

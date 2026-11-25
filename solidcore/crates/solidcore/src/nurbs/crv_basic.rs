@@ -120,6 +120,10 @@ use crate::nurbs::srf_basic::{Surface, WEIGHT_MAX, WEIGHT_MIN, WEIGHT_TOL};
 /// angle before giving up.
 pub const CONIC_MAX_TURNS: usize = 1 << 20;
 
+/// The angle tolerance (degrees) of [`conic_data`] (`N_CrvGetConicData`'s `angle_tol_deg`): a
+/// sweep below it, or within it of a whole turn, is built as the full turn.
+pub const CONIC_ANGLE_TOL_DEG: f64 = 1.0e-6;
+
 fn invalid(operation: &'static str, reason: &'static str) -> SolidError {
     SolidError::InvalidInput { operation, reason }
 }
@@ -233,6 +237,19 @@ impl Curve {
     #[must_use]
     pub fn array_sizes(&self) -> (usize, usize) {
         (self.n, self.m)
+    }
+
+    /// Not upstream: the same curve by definition. The degree, the indices in use, and
+    /// every control point and knot in use are equal (IEEE `==`, so a NaN anywhere
+    /// refuses; storage past the indices is not compared). Equal definitions evaluate
+    /// to the same points at every parameter, exactly.
+    #[must_use]
+    pub fn same_definition(&self, other: &Self) -> bool {
+        self.p == other.p
+            && self.n == other.n
+            && self.m == other.m
+            && self.cpts() == other.cpts()
+            && self.knots() == other.knots()
     }
 
     /// The control points in use, `Pw[0..=n]` (`N_CrvGetCPts`).
@@ -1156,7 +1173,7 @@ pub struct ConicData {
 /// than [`CONIC_MAX_TURNS`] turns (upstream loops forever when adding 360 no longer
 /// changes it).
 pub fn conic_data(ctp: ConicType, as_deg: f64, ae_deg: f64) -> Result<ConicData> {
-    let angle_tol_deg = 1.0e-6; // Don't make this too small.
+    let angle_tol_deg = CONIC_ANGLE_TOL_DEG; // Don't make this too small.
     if !as_deg.is_finite() || !ae_deg.is_finite() {
         return Err(invalid("nurbs::crv_basic::conic_data", "non-finite angle"));
     }
@@ -1341,6 +1358,21 @@ pub fn cross_bound_deriv_crv_non_rat_srf(
         }
     }
     Ok(())
+}
+
+/// Not upstream: the content digest ([`crate::geom::content`]): the control points, the
+/// degree and the knots, the storage beyond the indices in use too.
+impl crate::geom::content::Content for Curve {
+    fn content(&self, d: &mut crate::geom::content::Digest) -> Option<()> {
+        let Self { pw, n, p, u, m } = self;
+        d.tag(0xC0);
+        pw.as_slice().content(d)?;
+        d.usize(*n);
+        d.usize(*p);
+        d.f64s(u);
+        d.usize(*m);
+        Some(())
+    }
 }
 
 #[cfg(test)]

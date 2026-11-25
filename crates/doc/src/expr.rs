@@ -185,8 +185,18 @@ pub fn unit_info(u: &str) -> Option<(Kind, f64)> {
     match u.trim() {
         "" | "none" | "unitless" => Some((Kind::Unitless, 1.0)),
         "°" | "degree" | "degrees" => Some((Kind::Angle, std::f64::consts::PI / 180.0)),
-        t => UNITS.iter().find(|(n, _, _)| *n == t).map(|(_, k, s)| (*k, *s)),
+        t => {
+            let t = canonical_unit(t);
+            UNITS.iter().find(|(n, _, _)| *n == t).map(|(_, k, s)| (*k, *s))
+        }
     }
+}
+
+/// The spelling `UNITS` lists a unit under. The micro prefix is typed as the micro sign (U+00B5,
+/// what the Option key gives on a Mac) or as the Greek letter mu (U+03BC, what a Greek layout and
+/// most text on the web use): both are a micrometre.
+fn canonical_unit(name: &str) -> &str {
+    if name == "\u{3bc}m" { "\u{b5}m" } else { name }
 }
 
 /// How unit-less numbers are read: millimetres / degrees by default.
@@ -263,6 +273,8 @@ impl Value {
             _ => {
                 let hint = if k == Kind::Unitless && self.len == 1 && self.ang == 0 {
                     " (a count needs a unit-less value: divide by a length, e.g. `floor(L / (210 mm))`)"
+                } else if k == Kind::Length && self.len > 1 && self.ang == 0 {
+                    " (a length needs a 1D value: divide by a length, e.g. `(L * L) / (1 mm)`, or set the parameter's Unit to none in Parameters)"
                 } else {
                     ""
                 };
@@ -327,10 +339,20 @@ pub fn round_reported(v: f64) -> f64 {
 }
 
 fn unit(name: &str) -> Option<Value> {
+    let name = canonical_unit(name);
     UNITS.iter().find(|(n, _, _)| *n == name).map(|(_, k, s)| match k {
         Kind::Angle => Value::angle(*s),
         _ => Value::length(*s),
     })
+}
+
+const INCH_MM: f64 = 25.4;
+const FOOT_MM: f64 = 304.8;
+
+/// Whether `id` names a length unit of this size in millimetres, whatever its spelling (`in` and
+/// `inch`).
+fn is_length_unit(id: &str, mm: f64) -> bool {
+    unit(id).is_some_and(|u| u.len == 1 && u.ang == 0 && u.v == mm)
 }
 
 fn is_constant(id: &str) -> bool {
@@ -448,6 +470,17 @@ fn lex_spans(s: &str) -> Result<Vec<(Tok, usize, usize)>, DocError> {
                 i += 1;
             }
             out.push((Tok::Id(s.get(at(st)..at(i)).unwrap_or_default().to_string()), at(st), at(i)));
+            // A name with dots: a point's coordinate (`p1.x`, `l1.start.x`). The dots are part
+            // of the name, so the name is never a parameter's.
+            while cs.get(i).is_some_and(|(_, c)| *c == '.') && cs.get(i + 1).is_some_and(|(_, c)| c.is_alphabetic() || *c == '_') {
+                out.push((Tok::Op('.'), at(i), at(i + 1)));
+                i += 1;
+                let st = i;
+                while cs.get(i).is_some_and(|(_, c)| c.is_alphanumeric() || *c == '_') {
+                    i += 1;
+                }
+                out.push((Tok::Id(s.get(at(st)..at(i)).unwrap_or_default().to_string()), at(st), at(i)));
+            }
         } else if c == '°' {
             out.push((Tok::Id("deg".into()), at(i), at(i + 1)));
             i += 1;
@@ -553,7 +586,13 @@ fn lex(s: &str) -> Result<Vec<Tok>, DocError> {
 /// Is the identifier token at `i` a reference to a parameter (not a call, unit or constant)?
 fn is_reference(toks: &[Tok], i: usize, id: &str) -> bool {
     let is_call = matches!(toks.get(i + 1), Some(Tok::Op('(')));
-    !is_call && unit(id).is_none() && !is_constant(id)
+    !is_call && unit(id).is_none() && !is_constant(id) && !is_member_part(toks, i)
+}
+
+/// Is the identifier token at `i` part of a name with dots (a point's coordinate, `p1.x`)?
+/// Such a name is never a parameter's.
+fn is_member_part(toks: &[Tok], i: usize) -> bool {
+    matches!(toks.get(i + 1), Some(Tok::Op('.'))) || matches!(i.checked_sub(1).and_then(|k| toks.get(k)), Some(Tok::Op('.')))
 }
 
 /// Identifiers an expression refers to (excluding units, constants and functions).
@@ -589,6 +628,60 @@ fn scan_references(s: &str) -> Vec<String> {
         {
             out.push(id.clone());
         }
+    }
+    out
+}
+
+/// The points an expression reads the coordinate of: the point's name and the coordinate
+/// (`x` or `y`), each once. A name with dots is never a parameter's.
+pub fn point_members(s: &str) -> Vec<(String, String)> {
+    // The points are looked up on every solve, over the same expressions: the answers are kept
+    // (per thread, bounded) as [`references`] keeps its.
+    thread_local! {
+        static SEEN: std::cell::RefCell<std::collections::HashMap<String, Vec<(String, String)>>> = std::cell::RefCell::new(std::collections::HashMap::new());
+    }
+    if let Some(hit) = SEEN.with(|seen| seen.borrow().get(s).cloned()) {
+        return hit;
+    }
+    let out = scan_point_members(s);
+    SEEN.with(|seen| {
+        let mut seen = seen.borrow_mut();
+        if seen.len() >= 1 << 16 {
+            seen.clear();
+        }
+        seen.insert(s.to_string(), out.clone());
+    });
+    out
+}
+
+/// [`point_members`], worked out.
+fn scan_point_members(s: &str) -> Vec<(String, String)> {
+    let Ok(toks) = lex(s) else { return Vec::new() };
+    let mut out: Vec<(String, String)> = Vec::new();
+    let mut i = 0;
+    while i < toks.len() {
+        let Some(Tok::Id(first)) = toks.get(i).cloned() else {
+            i += 1;
+            continue;
+        };
+        let mut segments = vec![first];
+        let mut j = i + 1;
+        while matches!(toks.get(j), Some(Tok::Op('.'))) {
+            let Some(Tok::Id(next)) = toks.get(j + 1).cloned() else { break };
+            segments.push(next);
+            j += 2;
+        }
+        if segments.len() > 1 {
+            let last = segments.len() - 1;
+            let member = segments.get(last).cloned().unwrap_or_default();
+            let point = segments[..last].join(".");
+            if !out.contains(&(point.clone(), member.clone())) {
+                out.push((point, member));
+            }
+            i = j;
+            continue;
+        }
+        i += 1;
     }
     out
 }
@@ -672,6 +765,9 @@ struct Parser<'a> {
     spans: Vec<(usize, usize)>,
     pos: usize,
     lookup: &'a dyn Fn(&str) -> Result<Value, DocError>,
+    /// The coordinates of points a name with dots reads (`p1.x`), when the expression may
+    /// read them (a sketch point's expression may; a parameter's may not).
+    members: Option<&'a dyn Fn(&str, &str) -> Result<Value, DocError>>,
     depth: usize,
     defaults: Defaults,
 }
@@ -772,8 +868,10 @@ impl Parser<'_> {
                 base = mul(base, d, true)?;
             }
             if self.unit_at(self.pos) {
+                let feet = matches!(self.peek(), Some(Tok::Id(id)) if is_length_unit(id, FOOT_MM));
                 let u = self.power(false)?;
-                return mul(base, u, false);
+                let whole = mul(base, u, false)?;
+                return if feet { self.with_inches(whole) } else { Ok(whole) };
             }
         }
         if let Some(Tok::Op('^')) = self.peek() {
@@ -785,6 +883,25 @@ impl Parser<'_> {
             return pow(base, e);
         }
         Ok(base)
+    }
+    /// Feet written with inches after them (`5' 3"`, `5 ft 3 1/2 in`) are one length, as sizes are
+    /// said: 5 ft and 3 in, not their product. Anything else after the feet is left to the caller.
+    fn with_inches(&mut self, feet: Value) -> Result<Value, DocError> {
+        let start = self.pos;
+        if feet.len != 1 || feet.ang != 0 || !matches!(self.toks.get(start), Some(Tok::Num(_))) {
+            return Ok(feet);
+        }
+        let fraction = matches!((self.toks.get(start + 1), self.toks.get(start + 2)), (Some(Tok::Op('/')), Some(Tok::Num(_))));
+        if !matches!(self.toks.get(start + if fraction { 3 } else { 1 }), Some(Tok::Id(id)) if is_length_unit(id, INCH_MM)) {
+            return Ok(feet);
+        }
+        let inches = self.power(true)?;
+        if inches.len != 1 || inches.ang != 0 {
+            // `3 in^2` and the like: not inches to add.
+            self.pos = start;
+            return Ok(feet);
+        }
+        Ok(Value { v: feet.v + inches.v, ..feet })
     }
     /// Whether the operand starting at token `i` is divided by: a `/` before it, past any signs.
     fn after_division(&self, i: usize) -> bool {
@@ -833,6 +950,11 @@ impl Parser<'_> {
                     }
                     return call(&id, &args, self.defaults);
                 }
+                // A name with dots: the coordinate of a point (`p1.x`). It is read as that
+                // whatever the name is, so a point named `pi` is read like any other.
+                if matches!(self.peek(), Some(Tok::Op('.'))) {
+                    return self.coordinate(id);
+                }
                 match id.as_str() {
                     "pi" | "PI" => return Ok(Value::num(std::f64::consts::PI)),
                     _ => {}
@@ -845,6 +967,25 @@ impl Parser<'_> {
             Some(Tok::Op(c)) => Err(DocError::Expr(format!("unexpected `{c}`"))),
             None => Err(DocError::Expr("unexpected end of expression".into())),
         }
+    }
+    /// The coordinate of a point: a name with dots (`p1.x`, `l1.start.x`). The name before the
+    /// last dot is the point; the one after it is the coordinate (`x` or `y`).
+    fn coordinate(&mut self, first: String) -> Result<Value, DocError> {
+        let Some(members) = self.members else {
+            return Err(DocError::Expr("a point's coordinate is only available in a sketch point's expression".into()));
+        };
+        let mut segments = vec![first];
+        while matches!(self.peek(), Some(Tok::Op('.'))) {
+            self.pos += 1;
+            match self.next() {
+                Some(Tok::Id(next)) => segments.push(next),
+                _ => return Err(DocError::Expr("a name with dots names a point's coordinate".into())),
+            }
+        }
+        let last = segments.len().saturating_sub(1);
+        let member = segments.get(last).cloned().unwrap_or_default();
+        let point = segments[..last].join(".");
+        members(&point, &member)
     }
 }
 
@@ -922,6 +1063,16 @@ fn pow(base: Value, e: Value) -> Result<Value, DocError> {
     Ok(Value { v: base.v.powf(n), len: dims(0, base.len.saturating_mul(k), false)?, ang: dims(0, base.ang.saturating_mul(k), false)? })
 }
 
+/// The whole number of quarter turns an angle in radians is, if it is one up to rounding: `90 deg`
+/// is stored as a rounded pi/2, so its cosine came out 6.1e-17 instead of 0. Within 4 ulps of the
+/// quarter-turn count and below 1e12 quarter turns, where an ulp is still far smaller than a
+/// quarter turn; zero is not matched, as a tiny angle's sine is the angle.
+fn quarter_turns(a: f64) -> Option<i64> {
+    let q = a / std::f64::consts::FRAC_PI_2;
+    let n = q.round();
+    (n != 0.0 && n.abs() < 1e12 && (q - n).abs() <= 4.0 * f64::EPSILON * n.abs()).then_some(n as i64)
+}
+
 fn call(f: &str, args: &[Value], d: Defaults) -> Result<Value, DocError> {
     let one = || match args {
         [a] => Ok(*a),
@@ -949,9 +1100,28 @@ fn call(f: &str, args: &[Value], d: Defaults) -> Result<Value, DocError> {
     };
     let unit_fn = |x: f64, a: Value| Value { v: x, ..a };
     Ok(match f {
-        "sin" => Value::num(rad(one()?)?.sin()),
-        "cos" => Value::num(rad(one()?)?.cos()),
-        "tan" => Value::num(rad(one()?)?.tan()),
+        "sin" => {
+            let a = rad(one()?)?;
+            Value::num(match quarter_turns(a) {
+                Some(n) => [0.0, 1.0, 0.0, -1.0][n.rem_euclid(4) as usize],
+                None => a.sin(),
+            })
+        }
+        "cos" => {
+            let a = rad(one()?)?;
+            Value::num(match quarter_turns(a) {
+                Some(n) => [1.0, 0.0, -1.0, 0.0][n.rem_euclid(4) as usize],
+                None => a.cos(),
+            })
+        }
+        "tan" => {
+            let a = rad(one()?)?;
+            // Only a half turn is exact: the tangent of an odd quarter turn is not a number.
+            Value::num(match quarter_turns(a) {
+                Some(n) if n % 2 == 0 => 0.0,
+                _ => a.tan(),
+            })
+        }
         "asin" | "acos" => {
             let x = num(one()?)?;
             if !(-1.0..=1.0).contains(&x) {
@@ -1087,8 +1257,28 @@ pub fn eval_with(s: &str, lookup: &dyn Fn(&str) -> Result<Value, DocError>) -> R
     eval_with_defaults(s, lookup, Defaults::default())
 }
 
+/// Evaluate an expression whose names with dots read a point's coordinate (`p1.x`):
+/// `members` resolves the point's name and the coordinate (`x` or `y`) to its value.
+pub fn eval_with_members(
+    s: &str,
+    lookup: &dyn Fn(&str) -> Result<Value, DocError>,
+    members: &dyn Fn(&str, &str) -> Result<Value, DocError>,
+) -> Result<Value, DocError> {
+    eval_with_defaults_members(s, lookup, Some(members), Defaults::default())
+}
+
 /// Evaluate an expression reading bare numbers next to lengths / angles in `defaults`.
 pub fn eval_with_defaults(s: &str, lookup: &dyn Fn(&str) -> Result<Value, DocError>, defaults: Defaults) -> Result<Value, DocError> {
+    eval_with_defaults_members(s, lookup, None, defaults)
+}
+
+/// [`eval_with_defaults`], with the coordinates of points the expression may read.
+pub fn eval_with_defaults_members(
+    s: &str,
+    lookup: &dyn Fn(&str) -> Result<Value, DocError>,
+    members: Option<&dyn Fn(&str, &str) -> Result<Value, DocError>>,
+    defaults: Defaults,
+) -> Result<Value, DocError> {
     let (toks, spans): (Vec<Tok>, Vec<(usize, usize)>) = lex_spans(s)?.into_iter().map(|(t, a, b)| (t, (a, b))).unzip();
     if toks.is_empty() {
         if let Some((name, _)) = definition(s) {
@@ -1096,7 +1286,7 @@ pub fn eval_with_defaults(s: &str, lookup: &dyn Fn(&str) -> Result<Value, DocErr
         }
         return Err(DocError::Expr("empty expression".into()));
     }
-    let mut p = Parser { toks, spans, pos: 0, lookup, depth: 0, defaults };
+    let mut p = Parser { toks, spans, pos: 0, lookup, members, depth: 0, defaults };
     let v = p.expr()?;
     if p.pos < p.toks.len() {
         return Err(DocError::Expr(format!("unexpected input in `{s}`")));
@@ -1507,6 +1697,21 @@ mod tests {
         assert!(!e.contains("divide"), "{e}");
     }
 
+    /// A squared or higher-dimension length where a length is expected names the fix (#17257).
+    #[test]
+    fn a_squared_length_where_a_length_is_expected_says_to_divide_by_a_length() {
+        let e = ev("width * width", Kind::Length).unwrap_err().to_string();
+        assert!(
+            e.contains("expected a length, got a value in length^2")
+                && e.contains("divide by a length, e.g. `(L * L) / (1 mm)`, or set the parameter's Unit to none in Parameters"),
+            "{e}"
+        );
+        let e = ev("width ^ 3", Kind::Length).unwrap_err().to_string();
+        assert!(e.contains("expected a length, got a value in length^3") && e.contains("divide by a length"), "{e}");
+        let e = ev("45 deg", Kind::Length).unwrap_err().to_string();
+        assert!(!e.contains("divide"), "{e}");
+    }
+
     #[test]
     fn errors() {
         assert!(ev("width + ang", Kind::Length).is_err());
@@ -1686,6 +1891,19 @@ mod tests {
         }
     }
 
+    /// A micrometre typed with the Greek letter mu (U+03BC) is the same unit as with the micro sign
+    /// (U+00B5): both spell `um`.
+    #[test]
+    fn a_micrometre_is_the_same_with_either_mu() {
+        for (e, want) in [("5 \u{3bc}m", 0.005), ("5 \u{b5}m", 0.005), ("5\u{3bc}m + 1 um", 0.006), ("1 mm / 1 \u{3bc}m", 1000.0)] {
+            let v = eval_with(e, &|_| Err(DocError::Expr("no names".into()))).unwrap();
+            let got = if v.kind() == Some(Kind::Length) { v.v } else { v.to_kind(Kind::Unitless).unwrap() };
+            assert!((got - want).abs() < 1e-12, "{e}: {got}");
+        }
+        assert_eq!(unit_info("\u{3bc}m"), unit_info("um"));
+        assert_eq!(reserved_kind("\u{3bc}m"), Some("unit"));
+    }
+
     /// A reserved name is refused by saying what kind of word it is.
     #[test]
     fn a_reserved_name_is_refused_by_its_kind() {
@@ -1759,6 +1977,61 @@ mod tests {
         assert_eq!(reported_value(Value::num(4.0)), 4.0);
     }
 
+    /// `sin`, `cos` and `tan` at a whole number of quarter turns are exact: a quarter turn as radians
+    /// is a rounded pi/2, so `cos(90 deg)` was 6.1e-17 and `sin(180 deg)` 1.2e-16, and `ceil` of
+    /// either was 1.
+    #[test]
+    fn trig_at_a_quarter_turn_is_exact() {
+        let look = |_: &str| Err(DocError::Expr("no parameters".into()));
+        let val = |e: &str| eval_with(e, &look).unwrap().v;
+        for (e, want) in [
+            ("sin(0 deg)", 0.0),
+            ("sin(90 deg)", 1.0),
+            ("sin(180 deg)", 0.0),
+            ("sin(180°)", 0.0),
+            ("sin(270 deg)", -1.0),
+            ("sin(360 deg)", 0.0),
+            ("sin(-90 deg)", -1.0),
+            ("sin(-180 deg)", 0.0),
+            ("sin(180)", 0.0),
+            ("sin(1 rad * pi)", 0.0),
+            ("cos(0 deg)", 1.0),
+            ("cos(90 deg)", 0.0),
+            ("cos(180 deg)", -1.0),
+            ("cos(270 deg)", 0.0),
+            ("cos(360 deg)", 1.0),
+            ("cos(-90 deg)", 0.0),
+            ("cos(pi / 2 * 1 rad)", 0.0),
+            ("cos(1 rad * pi)", -1.0),
+            ("sin(720 deg)", 0.0),
+            ("sin(450 deg)", 1.0),
+            ("sin(36000 deg)", 0.0),
+            ("tan(0 deg)", 0.0),
+            ("tan(180 deg)", 0.0),
+            ("tan(-360 deg)", 0.0),
+            ("ceil(sin(180 deg))", 0.0),
+            ("ceil(cos(90 deg))", 0.0),
+            ("floor(sin(-180 deg))", 0.0),
+        ] {
+            assert_eq!(val(e), want, "{e}");
+        }
+        // Any other angle keeps the library result, including one a hair off a quarter turn and
+        // an angle too large for a quarter turn to be told from its neighbours.
+        for (e, x) in [
+            ("sin(30 deg)", 30f64.to_radians().sin()),
+            ("cos(60 deg)", 60f64.to_radians().cos()),
+            ("tan(45 deg)", 45f64.to_radians().tan()),
+            ("sin(180.0000001 deg)", 180.0000001f64.to_radians().sin()),
+            ("cos(89.9999 deg)", 89.9999f64.to_radians().cos()),
+            ("sin(1e-20 deg)", 1e-20f64.to_radians().sin()),
+            ("tan(90 deg)", 90f64.to_radians().tan()),
+            ("tan(270 deg)", 270f64.to_radians().tan()),
+            ("sin(1e15 deg)", 1e15f64.to_radians().sin()),
+        ] {
+            assert_eq!(val(e), x, "{e}");
+        }
+    }
+
     /// `mod` of a value by a whole-number fraction of itself is 0 even when unit conversion leaves
     /// the quotient an ulp or two off: `3 in % 1 in` is 25.39999999999999 mm without that.
     #[test]
@@ -1790,5 +2063,36 @@ mod tests {
         ] {
             assert!((rem(e) - want).abs() < 1e-9 * want.abs().max(1.0), "{e} gave {}", rem(e));
         }
+    }
+
+    #[test]
+    fn feet_and_inches_written_together_are_one_length() {
+        // `5'3"` is 5 ft 3 in, as such sizes are written; it used to multiply the two lengths.
+        let inch = 25.4;
+        for (s, inches) in [
+            ("5'3\"", 63.0),
+            ("5' 3\"", 63.0),
+            ("5 ft 3 in", 63.0),
+            ("5 ft 3 inch", 63.0),
+            ("5 ft 3 1/2 inch", 63.5),
+            ("5 ft 1/2 inch", 60.5),
+            ("5′3″", 63.0),
+            ("5' 3 1/2\"", 63.5),
+            ("5' 1/2\"", 60.5),
+            ("-5'3\"", -63.0),
+            ("2 * 5'3\"", 126.0),
+            ("5'3\" + 1\"", 64.0),
+            ("1 1/2' 6\"", 24.0),
+        ] {
+            let v = ev(s, Kind::Length).unwrap_or_else(|e| panic!("{s}: {e}"));
+            assert!((v - inches * inch).abs() < 1e-9, "{s} is {v}");
+        }
+        assert!((ev("5'3\" / 1\"", Kind::Unitless).unwrap() - 63.0).abs() < 1e-9);
+        // Unchanged: a sign between them subtracts, a bare number or another unit after the feet
+        // multiplies, and inches with a power are an area.
+        assert!((ev("5' - 3\"", Kind::Length).unwrap() - 57.0 * inch).abs() < 1e-9);
+        assert_eq!(ev("5' 3", Kind::Length).unwrap(), 5.0 * 304.8 * 3.0);
+        assert_eq!(ev("5' 3 mm", Kind::Length).ok(), None);
+        assert_eq!(eval_with("5' 3\"^2", &|_| Err(DocError::Expr(String::new()))).unwrap().len, 3);
     }
 }

@@ -34,6 +34,25 @@ reply carries its own profile while recording.
 
 # Design loading
 
+## Building for measurements: the `profiling` profile (2026-10-29, #8185)
+
+`cargo build --profile profiling -p solidcraft -p solidcraft-cli` builds `release` without
+its thin LTO and incrementally, into `target/profiling/` (run `target/profiling/solidcraft-cli`,
+not the one in `target/release/`). Iterate with it, and take the numbers a pull
+request reports with `--release`.
+
+Apple M4 Max, `main` at 9cba66c1, a private function added to one file, then the app rebuilt:
+
+| | edit in `ui-egui` | edit in `kernel` |
+|---|---:|---:|
+| `release` | 86–94 s | 127–128 s |
+| `profiling` | 3.3–3.5 s | 8.7–9.3 s |
+
+65–70 s of each `release` rebuild was the thin LTO link of the `solidcraft` binary. The cost
+when running, three alternating runs each: `bench-open` of a 1,280-body design without the
+model cache took 9.6 s of CPU time against 9.0 s (wall 3.94–5.08 s against 3.76–4.82 s), and
+`run examples/acceptance/sensor_enclosure.json` 3.4 s against 3.2–3.3 s (wall 1.40–1.42 s
+against 1.33–1.41 s): about 4–7% more CPU time.
 ## The stand-up offer waits beside the window (2026-11-12)
 
 After a STEP or IGES file opens, SolidCraft may offer to stand it up, after weighing how its
@@ -802,6 +821,37 @@ Nothing drawn changed: each state painted the same number of shapes before and a
 What remains inside the bar is one pass over the steps (about 40 ns each) and, with the groups
 on, the grouping worked out again at every frame.
 
+## A picked Move feature: each body's faces measured once (2026-11-13)
+
+A Move feature makes no body and names no faces, so the highlight of a picked or hovered one
+comes from `changed_faces`, which compares the states either side of the feature. It skipped
+the bodies a feature left alone (#14166), but a Move changes every body it moves: each was
+measured with `Body::faces` before and after, and `Body::faces` meshes the whole body. The
+highlight is built again at every hover change, and the feature's faces are asked for once for
+the selection and once more while the feature is under the pointer.
+
+Now a body's faces are measured once per geometry and tolerance (`ModelBody::faces_at`, shared
+by snapshots like its mesh), so a rebuild of the highlight meshes nothing. The same faces are
+lit: the measurements are the ones `Body::faces` gave, at the same tolerance. The Configuration
+Table's Add Column menu had the same cost: its Face Appearance list of a body's faces measured
+the body again at each frame while it was open, and now reads the joints' measurement
+(`ModelBody::joint_faces`, the same tolerance).
+
+Measured on an assembly of 103 moved bodies (imported STEP parts, 671 faces, about 1.7 million
+triangles in the design), Ryzen 5 7600X, NVIDIA GeForce RTX 5070, Windows, release build, through
+the control channel with `SOLIDCRAFT_PROFILE_FRAMES=1`. Inside one build of the highlight on
+`main`: 1554 ms in `changed_faces`, of it 1552 ms in `Body::faces`; drawing the lit faces 16 ms.
+
+| | before (`main`) | after |
+|---|---|---|
+| the pointer first comes onto the Move feature's row | 1.5 s | 1.6 s, once |
+| click the row | 3.0 s | 6 ms |
+| 25 pointer moves across the model, the feature picked | 28 s | no frame over 50 ms |
+| the pointer onto the first items of the feature's menu | 1.9 s | no frame over 50 ms |
+
+What is left: the first measurement of the moved bodies, once for each body's geometry (the
+1.6 s above), and again for the bodies a later edit of the Move makes.
+
 # Recompute performance
 
 `solidcraft-cli bench-edit <script> <param> "(<old>) * 1.02"` builds a design from its script
@@ -1098,6 +1148,39 @@ all six distance-preview regressions pass, covering intermediate geometry, exact
 convergence, unchanged document/undo, obsolete errors and setup changes. A separate regression
 checks the arrow's position on each held input frame.
 
+## Move drag preview: built once, moved on the GPU (2026-11-13)
+
+The Move preview draws the moved bodies from their own triangles, without evaluating the design.
+It still built a new scene at every change of the move: every triangle of the moved bodies
+transformed on the window thread, every triangle again as the ghost of where the bodies were,
+and the viewport uploaded the whole scene. Now the bodies are built once where they stand and
+the renderer draws them moved by one rigid motion, as it draws a component dragged with its
+triad (`MovingLayer`); the ghost is built once too and stays in the preview's own scene. A step
+of the drag builds and uploads nothing. Where the view draws no layer (no GPU, a section, an
+analysis or isocurves shown, a component moved and not captured), the bodies move differently
+from each other, or they stand more than 65.536 m from the origin along an axis (a layer keeps
+the `f32` rounding of where its bodies stand), they are built where they land as before. A
+frame that draws no layer (Ctrl held to pick through the preview, also when it is pressed
+before or let go after a free drag) makes the renderer let the scene go, so the scenes are
+built once more afterwards. A motion that turns the bodies still moves each of their drawn
+points once a step, to find the preview's extent; the ring's times below include it.
+
+Measured on a Move of 103 bodies (imported STEP parts, about 1.7 million triangles in the
+design), Ryzen 5 7600X, NVIDIA GeForce RTX 5070, Windows, release build: the triad dragged
+through the control channel (`ui.drag`), frame times taken as the gaps between frames.
+
+| Dragging the triad | `main` (`af8a0f755`) | this PR |
+|---|---|---|
+| An arrow, the distance changing at every frame: frame time (two drags of 40 steps, median of each) | 98 and 99 ms (10 fps) | 9 and 27 ms (38 to 111 fps) |
+| The same drags: worst frame | 117 and 119 ms | 33 ms |
+| The same drags: window thread per frame, median | 32 ms | 5 and 19 ms |
+| A ring, 40 steps: frame time, median and 90th percentile | 26 and 80 ms | 11 and 31 ms |
+| An arrow moved slowly (1 px a frame), 120 steps: frame time, median and 90th percentile | 8 and 78 ms | 9 and 30 ms |
+
+What is left of a frame of the drag is mostly the highlight, built again when what is under the
+pointer changes (about 16 ms with these bodies picked in the dialog). `a_move_drawn_as_a_layer_looks_as_it_did_built_where_it_lands`
+renders the preview both ways.
+
 ## Placement-only model reuse
 
 `Model::evaluate_shared(&Arc<Document>)` retains the document that produced a model and a weak
@@ -1202,3 +1285,40 @@ rounds per order, in milliseconds, the tree's time including building it:
 The order moves either walk by about 1%.
 
 Both walks return the same placements in the same order (the benchmark asserts it).
+
+## A camera move patches the model scene's changed blocks (2026-11-22)
+
+The model scene was built again after every camera move. `scene_key` hashed the display
+refinement's generation (`display_lod::Lod::generation`), and the planner bumps it whenever the
+set of drawn steps changes — its bodies' edge simplification steps, one per body, chosen from how
+many pixels per millimetre the view gives it. On an assembly, a camera move of any size flips
+some body's step, so the key changed and `publish_model_scene` built the scene again: every shown
+body's draw, its palette slots and its block, to throw away every block the block cache (#1148)
+kept. On grid100 (56,100 bodies, 276 M triangles, 3,600 blocks) the app's own frame log put
+168–180 ms of each camera move's 383 ms in "model scene"; the GPU frame is 9 ms.
+
+The published scene now keeps the draws of each of its blocks, and a change of the refinement's
+generation alone patches it: the bodies whose edge step changed have the blocks they are in
+rebuilt from those draws, keyed as a build keys them, and republished with a new patch number
+(as `publish_levels` already republishes levels) so the renderer uploads only the changed blocks.
+Nothing else in the key may have changed; a body drawn at another step draws other triangles and
+so a new block, which still builds the scene, as any other change does.
+
+`scene_rebuild_cost` (in `crates/ui-egui/src/viewport.rs`, ignored: a manual measurement on
+`SOLIDCRAFT_SCALE_DESIGN`) times the build and the patch on the same design, `ci` profile,
+Apple M2 Max, a load average of 5–18 from other work on the machine (the whole rebuild is the
+number that matters; the patch is two orders below it):
+
+| grid100 | ms |
+|---|---:|
+| whole scene, cold (first build after the open) | 2,784 |
+| whole scene, warm (what a camera move did) | 136 |
+| patch, one body's edge step changed, one block rebuilt | 1.1 |
+| patch, all 56,099 bodies' steps changed, every block rebuilt | 658 |
+
+The still picture is unchanged: the ORBIT harness on grid100 (40 frames orbiting 56,100 bodies)
+printed `painted=bf55f6f89fd7978a` both before and after, over the same 276,227,800 triangles.
+
+The harness never shows the rebuild itself (`scene_builds=0` either way): its pointer orbit does
+not let the camera rest for `REFINE_STILL_MS`, so the refinement, and with it the rebuild, only
+happens in the app when a person's camera move ends.

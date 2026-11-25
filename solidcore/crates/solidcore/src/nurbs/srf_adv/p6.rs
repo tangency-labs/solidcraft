@@ -16,6 +16,25 @@
 //!   is skinned at the trajectory parameters with C1 derivative constraints. G1
 //!   rescaling by that end's chord length would collapse its cross derivatives. Every
 //!   other piece is skinned as upstream.
+//! - Without `curZ` or an up direction, upstream takes the frame's rate at a piece's end
+//!   sections from a finite difference of the neighbouring z samples. Where a neighbour
+//!   lies past the piece's parameter range, on the next piece, the rate is instead the
+//!   projection normal method's own, `z' = -(z . x') x` from the piece's trajectory
+//!   derivatives ([`ZSource::RotationMinimizing`], #16959): along an arc whose z turns
+//!   (its plane is not square to z) next to a long line, the difference across the joint
+//!   is a fraction of the rate, the cross derivatives of the arc's skin miss the frame's
+//!   turn, and the inner rows of its net run backwards there. A difference within the
+//!   piece is upstream's, and so is one of a closed trajectory whose z vectors were
+//!   corrected to close: they also turn by the spread closing gap, which the method's
+//!   rate omits.
+//! - Not upstream (#18117): a closed trajectory's z vectors are corrected to close by
+//!   spreading the closing angle evenly along it ([`create_b_vectors_closing`]), not by
+//!   upstream's backward averages, which put the whole turn into the last few samples, and
+//!   the end sections of such a closed chain take their rate from the samples on both
+//!   sides of the closure, one central difference for both. Upstream's one-sided ends
+//!   and crowded turn left the swept surface creased across its closure (its normal
+//!   turning by about a degree there along a line swept round a closed 3D spline), so its
+//!   offsets did not meet there.
 //! - Out-params become return values (the swept surface; the patches with the center
 //!   point and normal); the `NL_STACKS` arguments have no counterpart. The optional
 //!   arguments of `N_CreateSweepScale` (`curZ`, `curS`, `tflg`, `tc`, `deg`, `dir`,
@@ -28,8 +47,8 @@
 //! - Errors are [`SolidError::Failed`] values (a [`NurbsFailure`] reason) with the upstream `NL_*_ERR` number.
 //! - `N_CreateSweepScale` ignores the status of `ST_GetRotationRateOfChange`; it can
 //!   only fail where upstream's inputs make it unreachable (a `curZ` that cannot be
-//!   differentiated where it was just evaluated, or a single frame sample), and the
-//!   Rust function returns that error. `N_FillNSidedHole` ignores the status of
+//!   differentiated where it was just evaluated, or a single frame sample of a closed
+//!   trajectory's corrected z vectors), and the Rust function returns that error. `N_FillNSidedHole` ignores the status of
 //!   `N_CrvRefine` on the computed derivative curve, as does the Rust function (the
 //!   curve stays unrefined; the refinement fails before modifying it).
 //! - Every array access is bounds checked; where upstream would index outside its
@@ -67,7 +86,7 @@ use crate::nurbs::srf_tool::p3::join;
 
 use super::p1::cross_boundary_derivs_vector_field;
 use super::p4::{
-    approx_cross_boundary_derivs, create_b_vectors, create_coons_boundary_crvs,
+    approx_cross_boundary_derivs, create_b_vectors_closing, create_coons_boundary_crvs,
     create_cross_boundary_deriv_crv, rotation_rate_of_change, sweep_cross_tangent_crv,
     CoonsBoundary, Mat3, ZSource,
 };
@@ -447,6 +466,8 @@ fn sweep_scale(
     // Frame z vectors at (sub-sampled) parameters when curZ is not given.
     let mut tt: Vec<f64> = Vec::new();
     let mut zl_vecs: Vec<Vec3> = Vec::new();
+    // (not upstream, #16959) whether a closed trajectory's z vectors were corrected to close
+    let mut closing = false;
     if cur_z.is_none() && up.is_none() {
         tt.push(at(rf(&seg_pars, 0, OP)?, 0, OP)?);
         for (ii, sp) in seg_pars.iter().enumerate() {
@@ -468,14 +489,15 @@ fn sweep_scale(
                 }
             }
         }
-        zl_vecs = create_b_vectors(cur_t, z0, &tt)?;
+        let (vecs, corrected) = create_b_vectors_closing(cur_t, z0, &tt)?;
+        zl_vecs = vecs;
+        closing = corrected;
         if let Some(trace) = trace.as_mut() {
             trace.pieces.clone_from(&seg_pars);
             trace.chain.clone_from(&tt);
             trace.start_normal = normalize(z0)?.0;
         }
     }
-    let zl_count = zl_vecs.len();
 
     // Handle trajectory interpolation (rail) and split curC if necessary.
     let mut us = 0.0;
@@ -621,22 +643,49 @@ fn sweep_scale(
             placed_at += 1;
 
             if jj == 0 || jj == np {
+                // The finite difference's neighbours in the frame chain. (Not upstream,
+                // #18117) a chain corrected to close ends on its first sample, so across the
+                // closure each end's neighbour is the other end's: both ends take one rate,
+                // and the surface meets itself there as smoothly as along it, where upstream
+                // differences each end on its own side.
+                let wrap = if closing {
+                    let last = zl_vecs.len().checked_sub(1).ok_or_else(|| oob(OP))?;
+                    let period = at(&tt, last, OP)? - at(&tt, 0, OP)?;
+                    Some((last, period))
+                } else {
+                    None
+                };
+                let prev = match (k1.checked_sub(1), wrap) {
+                    (Some(k0), _) => Some((at(&zl_vecs, k0, OP)?, at(&tt, k0, OP)?)),
+                    (None, Some((last, period))) if last > 1 => {
+                        Some((at(&zl_vecs, last - 1, OP)?, at(&tt, last - 1, OP)? - period))
+                    }
+                    (None, _) => None,
+                };
+                let next = match wrap {
+                    _ if k1 + 1 < zl_vecs.len() => {
+                        Some((at(&zl_vecs, k1 + 1, OP)?, at(&tt, k1 + 1, OP)?))
+                    }
+                    Some((last, period)) if last > 1 => {
+                        Some((at(&zl_vecs, 1, OP)?, at(&tt, 1, OP)? + period))
+                    }
+                    _ => None,
+                };
+                // (not upstream, #16959) a neighbour past this piece's parameter range
+                // lies on the next piece, whose frame can turn at another rate: there the
+                // rate is the projection normal method's own, unless the chain was
+                // corrected to close (it then also turns by the spread gap, which only
+                // the difference of the samples sees)
+                let piece = rf(&seg_pbnds, ii, OP)?;
+                let outside = |n: Option<(Vec3, f64)>| {
+                    n.is_some_and(|(_, t)| t < piece.start || t > piece.end)
+                };
+                let across = !closing && (outside(prev) || outside(next));
                 let zsrc = match (up, cur_z) {
                     (Some(up), _) => ZSource::Up(up),
                     (None, Some(cz)) => ZSource::Curve(cz),
-                    (None, None) => ZSource::Samples {
-                        z: zl,
-                        prev: if k1 > 0 {
-                            Some((at(&zl_vecs, k1 - 1, OP)?, at(&tt, k1 - 1, OP)?))
-                        } else {
-                            None
-                        },
-                        next: if k1 + 1 < zl_count {
-                            Some((at(&zl_vecs, k1 + 1, OP)?, at(&tt, k1 + 1, OP)?))
-                        } else {
-                            None
-                        },
-                    },
+                    (None, None) if across => ZSource::RotationMinimizing(zl),
+                    (None, None) => ZSource::Samples { z: zl, prev, next },
                 };
                 if jj == 0 {
                     rma1 = frame_matrix(xl, yl, zl);

@@ -175,7 +175,7 @@ impl Session {
     /// Mass, centre of mass and inertia of every occurrence and rigid group of the design, as
     /// `assembly.mass_properties` returns them (kg, mm, kg·mm²), pending moves included.
     pub fn mass_properties(&self) -> Result<AssemblyMassResult> {
-        let mut doc = (*self.doc).clone();
+        let mut doc = self.doc.active_assembly().into_owned();
         for occurrence in &mut doc.occurrences {
             if let Some(transform) = self.pending_moves.get(&occurrence.id) {
                 occurrence.transform = *transform;
@@ -209,7 +209,9 @@ pub fn assembly(doc: &Document, state: &ModelState) -> Result<AssemblyMassResult
     let index: HashMap<u64, usize> = ids.iter().enumerate().map(|(i, id)| (*id, i)).collect();
 
     let mut groups = Groups((0..ids.len()).collect());
-    let live: Vec<_> = doc.assembly.joints.iter().filter(|j| !j.suppressed).take(MAX_JOINTS).collect();
+    // A rigid group holds its parts as rigid joints would.
+    let all = doc.joints_with_rigid_groups();
+    let live: Vec<_> = all.iter().filter(|j| !j.suppressed).take(MAX_JOINTS).collect();
     let jointed: HashSet<u64> = live.iter().flat_map(|j| [j.a.occurrence, j.b.occurrence]).collect();
     for j in live.iter().filter(|j| j.kind == JointKind::Rigid) {
         if let (Some(&a), Some(&b)) = (index.get(&j.a.occurrence), index.get(&j.b.occurrence)) {
@@ -242,7 +244,7 @@ pub fn assembly(doc: &Document, state: &ModelState) -> Result<AssemblyMassResult
         if !closed {
             return Ok(Shape { closed, volume: 0.0, centroid: Vec3::ZERO, gyration: None });
         }
-        let sheet = state.sheets.iter().find(|sheet| sheet.body == body.definition_name() && !sheet.perforations.is_empty());
+        let sheet = state.surface_sheets.iter().find(|sheet| sheet.body == body.definition_name() && !sheet.perforations.is_empty());
         let (volume, centroid) = if sheet.is_some() {
             let measured = super::inspect::measure_body(body, Some(state))?;
             (measured.volume, measured.centroid)

@@ -113,7 +113,8 @@ the code runs:
 `Geometry` (level 1) and `All` (level 2, the slow geometric tests); each failed test is one line
 `<type>::Test #<n> <name>: <message>`, and warnings (`SmBrep` test 21) are not failures. Every
 operation's result in ops passes `finish` (`solidcore-ops/src/body.rs`): a result with no faces is
-`Error::Empty`, and a solid input whose result fails `is_outward_solid` is `Error::NotSolid`. A
+`Error::Empty`, and a solid input whose result fails `is_outward_solid` is
+`Error::NotSolidBecause`, naming the test it fails. A
 boolean's result is checked with `is_outward_touching_solids` instead, which allows solids that touch
 along an edge or at a vertex, and the boolean returns `None` for an empty result
 ([booleans.md](booleans.md) §3).
@@ -135,7 +136,14 @@ The tests that decide each property, by the test numbers the check reports:
 | the tolerance pass | vertex/edge and vertex/face gaps ≤ τ_v / 2, edge/face gap ≤ τ_e (`SmBrep` list 2, tests 0 to 4) | `assert_valid/brep.rs`, `validate_and_update` | 0 |
 | seams and poles | §6 | `assert_valid/face.rs`, `vertex.rs` | 0 and 2 |
 | closed shells | a region's outer shell is a closed face-use shell (Brep 10, 11), its inner shells lie inside it (Brep 12), every region is reached across face uses (Brep 18, 19) | `assert_valid/brep.rs` | 0 |
-| no coincident topology | no two vertices, edges or faces coincide (`contains_coincident_topology`) | `validation/coincidence.rs` | 0 |
+| no coincident topology on a face | no two vertices of a face coincide (Face 32), no two of its edges coincide (Face 33, 34) | `assert_valid/face.rs` | 2 |
+
+Two loops of a face share no vertex, but one loop may pass through a vertex more than once. Where
+a hole touches its face's outer boundary at one point, or two holes touch, the face's boundary
+there is one loop: along the first to the vertex, round the second and on along the first. Tests
+32, 38 and 39 compare the vertices of a loop once each and loops in pairs, so they pass it. Import
+makes a file's loops that touch at one vertex that one loop
+([import-assembly.md](import-assembly.md), `finish`).
 
 A shell is closed (`Shell::is_closed`, `topology/shell.rs`) when a face use's mate lies in another
 shell: in the radial-edge structure the two sides of a closed shell's faces belong to the shells of
@@ -203,6 +211,18 @@ before any gap is measured**, and its stored tolerance is that bound, raised to 
 where it is smaller (§5.1, invariant 5). A measured gap larger than the bound is evidence against
 the construction, not a quantity to cover (§8).
 
+A body a stitch produced is checked under `ValidityScope::Stitched` (`check_brep_scoped`, used by the
+stitch's result check only). The rule for every body is unchanged: vertex/edge and vertex/face gaps within
+half the vertex tolerance, the edge/face gap within the edge tolerance. A stitch closes a gap by giving the
+glued entity the tolerance that covers it, so a gap may exceed those and still lie inside the two zones it
+spans. The scoped check takes such a gap, up to τ_v + τ_e (vertex/edge), τ_v + τ_f (vertex/face) or
+τ_e + τ_f (edge/face), only where the tolerance ball that covers it provably reaches no topology it does
+not bound: the vertex ball by the clearance proof of Test #82 (`vertex_ball_reaches`), the edge tube by
+boxes over pairs of curve and surface pieces against every face and edge not incident to the edge or its
+end vertices (`edge_tube_reaches`, `assert_valid`'s sibling `pointers.rs`). Boxes only, never samples;
+a box that cannot be had, a piece that cannot be split or a proof that runs out of boxes leaves the gap
+reported. The explicit `validate_and_update_tolerances` repair API is unaffected.
+
 The gaps themselves are measured, not enclosed. `calc_max_edge_face_gap`
 (`topology/edgeuse/p1.rs`) takes the largest of 20 samples of the distance from C to the face's
 surface (`GapFunction::crv_srf`, `heal/gap.rs`); a vertex/face gap is the distance from the vertex to
@@ -224,6 +244,22 @@ sphere or cone has poles where a whole parameter line is one point. The B-rep ma
 - **a pole is a vertex.** A pole inside a face must be marked by a vertex (Face 24), and a trim must
   not turn along the collapsed boundary near it (Edgeuse 20, `has_dog_leg_near_pole`);
 - **a trim never jumps** across a periodic boundary (Edgeuse 7, `assert_no_periodic_jump_of`).
+
+A vertex at a shared classification boundary ends a coincident seam interval when that
+interval is on either side of the boundary. The near-miss check applies its existing local
+vertex-zone rule from both sides; a separate edge whose coincident interval runs beside the
+seam still counts as a near miss (`intersect/curve_class/p7.rs`). At a vertex, the vertex zone
+is withheld where another edge at it runs beside the seam and bounds a face that one of the
+seam's own edges bounds too: the sliver test 36 is for. An edge at the vertex beside the seam
+on other faces, such as the tip of another hole's wall touching the face's wall along the
+seam, does not withhold it.
+When dropping a curve along a seam, equivalent parameter endpoints stay on one side only when
+the two are the same 3D point (a crossing keeps the approximation bound) (`intersect/surface_drop_lib/p1.rs`).
+Subdivision drops a pending endpoint again only when the new span makes its seam branch
+ambiguous, and a failed redrop falls back to the saved endpoint
+(`intersect/surface_drop_lib/p3.rs`). Within a boundary's tolerance band, a trace whose tangent
+runs mostly across the boundary keeps that tangent; only a curve running along the boundary, or
+touching it, is flattened onto it (`surface_drop_lib/p1.rs`).
 
 The healer's seam steps (§7.2) repair the same three: `fix_move_seam` turns a face's seam away from
 its boundary, `fix_split_edges_at_seam` splits boundary edges at interior poles and then at the U and
@@ -256,7 +292,10 @@ make the UV trim curves (and adjust edge and vertex tolerances to the gaps they 
 4. Every edge whose tolerance differs from the one its gaps call for (`bad_small_zone_tol_3d` or
    `bad_large_zone_tol_3d`, either direction past `EFF_ZERO`) is re-measured with the formula of
    §5.2, its faces' largest tolerance as the floor, and set without the only-grow guard: a stored
-   tolerance larger than its gaps need shrinks.
+   tolerance larger than its gaps need shrinks. Where the formula's gain on the sampled gap would
+   take the edge to the pointer check's limit (1000 times the body's tolerance, §5.1), the edge
+   takes the certified bound of its edge/face gap instead (`curve_face_gap_bound`) when that
+   bound is under the limit; otherwise the formula stands and the check refuses the edge.
 5. Vertices the same way, the largest edge tolerance at each as the floor.
 
 The original tolerances are kept in the healer's properties (`orig_zone_tol_3d`) for the call, not
@@ -349,8 +388,8 @@ with the old tolerance and the gap.
 
 **A tube must stay clear of what it does not bound.** A tolerance region that reaches an entity the
 entity is not incident to merges topology that the body says is separate [9, 5]: an edge whose
-tube covers its own length (Edge 7), two vertices or edges that coincide within tolerance
-(`contains_coincident_topology`). Past that size the stored topology no longer has one meaning, and
+tube covers its own length (Edge 7), two vertices or edges of a face that coincide within tolerance
+(Face 32, 33, 34). Past that size the stored topology no longer has one meaning, and
 no growth is valid whatever the gap.
 
 **Where the code stands.** Today's growth paths are measured, not proved: `Fix_TolSizes` and
@@ -377,7 +416,7 @@ tolerance.
    shared vertex, a loop's endpoint gap is bounded by τ_e1 + τ_e2 + 2τ_v, provided both endpoints
    meet that same vertex within their own edge and vertex zones.
 7. No tube or ball reaches an entity it does not bound: an edge is longer than its tolerance, and no
-   two entities coincide.
+   two vertices or edges of a face coincide.
 8. A solid result is one closed manifold, valid at level 0, facing out (positive volume); a
    boolean's may be closed solids that touch along an edge or at a vertex.
 9. A constructed result's tolerances come from its certificates (§8); a measured gap past them is a
