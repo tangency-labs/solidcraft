@@ -98,6 +98,7 @@ drawing.auto_center_mark.include  a drawing: tested in crates/engine/src/drawing
 drawing.auto_center_mark.inspect  a drawing: tested in crates/engine/src/drawing_dimension_tests.rs
 drawing.auto_center_mark.set      a drawing: tested in crates/engine/src/drawing_dimension_tests.rs
 drawing.balloon.add               a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.balloon.delete            a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.balloon.edit              a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.balloon.inspect           a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.balloon.repair            a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
@@ -128,6 +129,7 @@ drawing.image.add                 a drawing: its tests in crates/engine/src/cmd/
 drawing.inspect                   a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.list                      a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.note.add                  a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.note.delete               a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.note.edit                 a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.note.inspect              a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.open                      a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
