@@ -6,7 +6,7 @@
 | Started | 2026-11-25 |
 | Apps | SolidCraft (the target list and the launch rules live in the shared plugin crate, so other Craft apps can use them) |
 | Discussion | [#22333](https://github.com/tangency-labs/solidcraft/issues/22333) |
-| Extends | [RFC 0002](0002-plugins.md) (plugins: a new `launch` permission), [RFC 0017](0017-marketplace.md) (marketplace: one amendment and one tier rule, section 7) |
+| Extends | [RFC 0002](0002-plugins.md) (plugins: a new `launch` permission), RFC 0017 (marketplace: one amendment and one tier rule, section 7), proposed in [#22332](https://github.com/tangency-labs/solidcraft/pull/22332) and not yet on main, so its file is linked there until that PR merges |
 | Related | [RFC 0015](0015-plugin-ui-workspaces.md) (where a plugin puts its button), [#16089](https://github.com/tangency-labs/solidcraft/issues/16089) (send STEP to slicers, remember the format per slicer), [#16440](https://github.com/tangency-labs/solidcraft/issues/16440) and [#17078](https://github.com/tangency-labs/solidcraft/issues/17078) (the name of the sent file), [#10980](https://github.com/tangency-labs/solidcraft/issues/10980) (open in a print server), [#21070](https://github.com/tangency-labs/solidcraft/issues/21070) (manufacturing intent and export), [#2951](https://github.com/tangency-labs/solidcraft/issues/2951) (link to Drive or S3), [#22311](https://github.com/tangency-labs/solidcraft/issues/22311) (plugin permissions) |
 
 A person should be able to click one button and have the design they have open handed to another program on the same computer: an app that uploads it to a file-sharing site, a viewer, a CAM tool, a converter. SolidCraft already does this for slicers, with a 3MF or STL file. This RFC says how to do it for any local program, in the format that program wants, and how a plugin can offer such a button without ever starting a program itself.
@@ -25,7 +25,7 @@ These are proposed here and are open for comment until the RFC is accepted.
 2. **A target is data:** a program, an argument template, and the formats it takes. Never a script SolidCraft runs on the user's behalf (section 4).
 3. **Launch is argv only, never a shell.** No `sh -c`, no `cmd /c`, no string pasted into a command line (section 4.3).
 4. **The first change needs no plugin:** a host "Send to App" the user sets up themselves (section 4).
-5. **A plugin declares targets in its manifest; the host does the export and the launch.** This needs a new `launch` permission, approved by the user once per target, shown with the exact command (section 5).
+5. **A plugin declares targets in its manifest; the host does the export and the launch.** This needs a new `launch` permission, approved by the user once per target, shown with the exact command template (section 5). Each send shows the real command (section 8).
 6. **Tiers apply.** In the marketplace, `launch` is a high-risk grant: Listed and Custom items get the second confirmation (section 7).
 7. **Nothing comes back by default.** Reporting back is opt-in, uses a one-use token, and adds no new inbound listener (section 9).
 8. **Authentication belongs to the local app, never to SolidCraft** (section 10).
@@ -38,7 +38,7 @@ These are proposed here and are open for comment until the RFC is accepted.
 **Goals**
 - One click from the open design to a local program, in a format that program accepts, including SolidCraft's own file and STEP, not only a mesh.
 - A plugin can add a "Send to <App>" button without any new power to start programs on its own.
-- The user always sees the exact command before anything runs, and nothing runs before they approve it.
+- The user sees the exact command, as a template with sample values, before approving a target, and nothing runs before they approve it. Every send then shows the actual command with its real values: before it starts when the target is set to ask each time (the default for an agent's request and for a Listed or Custom plugin's target), and in the result toast and the send history for every send. The only things that can differ between sends are the four placeholders (section 4.2).
 - Everything is a command with a schema, so an agent can list targets and send, and no programmatic call opens a dialog.
 - Existing slicer behaviour, files and settings keep working.
 
@@ -111,7 +111,7 @@ A target's template is a list of arguments, not a string. Each argument may cont
 | `{dir}` | the absolute path of the folder holding the file |
 | `{format}` | the format name, such as `step` |
 
-An unknown placeholder is refused when the target is saved. The default `["{file}"]` is exactly today's behaviour. A program that wants `--import {file}` or `--title {name} {file}` gets it.
+An unknown placeholder is refused when the target is saved. The default `["{file}"]` is exactly today's behaviour. A program that wants `--import {file}` or `--title={name} {file}` gets it.
 
 ### 4.3 The launch rules
 
@@ -119,7 +119,7 @@ These hold for every target, however it was declared.
 
 - **argv only.** The program and the arguments are passed to the operating system as a list. No shell is ever started, and no argument is built by joining strings.
 - **The program is a file, found once.** The path is made absolute and canonical at the moment the user approves the target. It must exist, be a regular executable file or an app bundle, and not be a script interpreter or a shell. Windows batch files (`.bat`, `.cmd`) are refused because the command processor re-reads their arguments.
-- **Arguments are checked when the template is saved.** An argument that could start with `-` after substitution (`{name}` at the start of an argument) is refused, so a design called `-rf` can't turn into a flag. `{file}` and `{dir}` are absolute paths and start with a separator or a drive letter.
+- **Arguments are checked when the template is saved.** An argument that starts with `{name}` is refused, because the substituted name could start with `-`, and a design called `-rf` must not turn into a flag. A value the program takes after an option is written joined to it (`--title={name}`), so the argument starts with the option, not with the placeholder. The rule applies to every target, and the example in section 5.1 follows it. A program that only accepts the name as a separate argument cannot be sent the name. `{file}` and `{dir}` are absolute paths and start with a separator or a drive letter.
 - **No environment from outside.** The program gets the user's normal environment plus the variables SolidCraft documents (section 9), and nothing a plugin chose. The working folder is the folder holding the file.
 - **Input closed.** The program's standard input is closed. Its output is read only as far as section 8 says (a short tail for the toast) and is never executed or shown as markup.
 - **Nothing runs unapproved.** A target the user added is approved by adding it. A plugin's target needs the `launch` approval (section 5). A scripted or agent call can start only an approved target, and an agent's request asks first and names the program and the command.
@@ -150,7 +150,7 @@ A plugin's manifest may list targets:
   "name": "Sync app",
   "icon": "icons/sync.svg",
   "executable": { "names": ["syncapp", "SyncApp.exe"], "bundle_id": "com.example.syncapp" },
-  "args": ["--publish", "{file}", "--title", "{name}"],
+  "args": ["--publish", "{file}", "--title={name}"],
   "formats": ["sc", "step"],
   "default_format": "sc",
   "copy_folder": "default"
@@ -171,7 +171,7 @@ and asks for the permission that covers it:
 ### 5.2 The approval
 
 - `launch` is a new permission in RFC 0002's list, with the target ids it covers. A target not listed under `launch` is ignored.
-- The approval screen shows, for each target: the target's name, **the program that was found, as a full path**, **the exact command with sample values** (`/usr/bin/syncapp --publish "/…/My part-v1.sc" --title "My part"`), the formats, and where the file is kept. The user approves each target separately and may approve fewer than the manifest asks for.
+- The approval screen shows, for each target: the target's name, **the program that was found, as a full path**, **the exact command with sample values** (`/usr/bin/syncapp --publish "/…/My part-v1.sc" --title="My part"`), the formats, and where the file is kept. The user approves each target separately and may approve fewer than the manifest asks for.
 - The approval is stored with the plugin's other approvals and is bound to the plugin's `package_hash`, and also to the resolved program path and the argument template. A changed package, a different program path or a different template asks again. A program that has moved or vanished disables the button until the user chooses it again.
 - Nothing runs at install. Nothing runs unless the user presses the button (or an agent's request is approved, as for every command that acts).
 
@@ -217,7 +217,7 @@ This RFC does not edit RFC 0017's file. Its amendments are applied by the pull r
 ## 8. Part 2: one click, and what the user sees
 
 1. **Choose the file.** The target's default format, or the one the user picked in the window. By default the file goes in the per-user send folder under a stable name (replaced on resend). If the target has a copy folder, the design is saved there with the next free `-vN` number, never overwriting anything, or one file with a stable name if the user chose Replace. The user's open design file is never touched: Send writes a copy.
-2. **Check.** The target is approved and its program still exists and is the approved one. The format is allowed. Otherwise: an error in the reply, a plain message in the window, nothing started.
+2. **Check.** The target is approved and its program still exists and is the approved one. The format is allowed. Otherwise: an error in the reply, a plain message in the window, nothing started. **Show the actual command.** A target set to ask each time (the default for an agent's request and for a target a Listed or Custom plugin declared) shows the real command here, with the real program path, file path and name, and starts only when the user confirms it. A target the user turned the question off for starts at once. In both cases the real command is in the result toast and in the send history, so the user can always see what ran.
 3. **Start.** The program is started on a background thread, so the window never waits for it. If the target says it has to be started first and waited for (the slicer case), the existing ready-wait runs.
 4. **Report.** The window shows a toast: "Sent My part to Sync app" with the file's name, and **Show in folder**, which reveals the file in the system's file manager. If the program could not start, the toast says so and keeps the file path. If the program exits while SolidCraft is still waiting for it, its **exit status** is shown: "Sync app finished" or "Sync app stopped with code 2", with, when it printed any, the last few lines of its error output as plain text (at most 2 KB, never markup, never a link). SolidCraft waits for exit for at most 30 seconds by default (the target may ask for less) and then lets go: a program that keeps running, as a sync app does, is reported as "started", which is a success.
 5. **The reply** of `file.send_to_app` carries `delivery`: `started`, `finished` (with `exit_code`), `error`, or `timeout`, in the shape slicers already use, plus the `reveal` path.
