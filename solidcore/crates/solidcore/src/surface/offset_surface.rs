@@ -1854,14 +1854,42 @@ impl OffsetSurface {
             return Ok(());
         }
 
-        // A simple evaluation on a collapsed boundary of the base (a pole): the limit from
-        // inside the domain (#13610).
-        if do_eval_simple && !use_ext && bu.cross(bv).length() < tol {
-            let across = match self.singularities & domain.point_boundaries(uv, EFF_ZERO) {
-                SS_UMIN => Some((true, 1.0)),
-                SS_UMAX => Some((true, -1.0)),
-                SS_VMIN => Some((false, 1.0)),
-                SS_VMAX => Some((false, -1.0)),
+        // A simple evaluation at a point of a collapsed boundary of the base (a pole): the
+        // limit from inside the domain (#13610), where the offset records the point as
+        // singular (one of its recorded sides passes through it). Which side is collapsed
+        // is read from the base's own derivatives, not from the record, which can name the
+        // other side at a corner: the point is on exactly one side in that parameter, and
+        // every pure derivative of the base along that side vanishes up to order hod + 1.
+        // That is what makes N and its derivatives along the side up to order hod vanish,
+        // so that N = (u - u0) G to the order the limit reads. The limit of order hod reads
+        // base derivatives of order hod + 2: a request past the evaluator's largest order
+        // keeps the path below, as does a point where both sides or neither qualify.
+        let on = domain.point_boundaries(uv, EFF_ZERO);
+        if do_eval_simple
+            && !use_ext
+            && self.singularities & on != 0
+            && hod + 2 <= crate::nurbs::math::MAX_DERIVATIVE
+            && bu.cross(bv).length() < tol
+        {
+            let mut constant_along_v = true;
+            let mut constant_along_u = true;
+            for order in 1..=hb {
+                constant_along_v &= d(0, order)?.length() < tol;
+                constant_along_u &= d(order, 0)?.length() < tol;
+            }
+            let u_side_sign = match on & (SS_UMIN | SS_UMAX) {
+                SS_UMIN if constant_along_v => Some(1.0),
+                SS_UMAX if constant_along_v => Some(-1.0),
+                _ => None,
+            };
+            let v_side_sign = match on & (SS_VMIN | SS_VMAX) {
+                SS_VMIN if constant_along_u => Some(1.0),
+                SS_VMAX if constant_along_u => Some(-1.0),
+                _ => None,
+            };
+            let across = match (u_side_sign, v_side_sign) {
+                (Some(sign), None) => Some((true, sign)),
+                (None, Some(sign)) => Some((false, sign)),
                 _ => None,
             };
             if let Some(across) = across {
@@ -3980,6 +4008,30 @@ mod tests {
     fn issue_13610_limit_at_the_pole_on_the_lower_v_side() {
         let off = dome_13610_transposed();
         assert_collapsed_limit(&off, Point2::new(0.5, 0.0), Point2::new(0.5, 1e-6));
+    }
+
+    /// At a corner the record can name the side that is not collapsed: the collapsed side is
+    /// read from the base, and the limit is the same.
+    #[test]
+    fn issue_13610_collapsed_side_at_a_corner_is_read_from_the_base() {
+        let off = dome_13610_with(&DOME_13610_ROWS, SS_VMIN);
+        assert_collapsed_limit(&off, Point2::new(0.0, 0.0), Point2::new(1e-6, 0.0));
+        let off = dome_13610_with(&DOME_13610_ROWS, SS_UMIN | SS_VMIN);
+        assert_collapsed_limit(&off, Point2::new(0.0, 0.0), Point2::new(1e-6, 0.0));
+    }
+
+    /// A third-order limit needs base derivatives of order 5, past the evaluator's largest
+    /// order: the request keeps the path it had (a success; its derivatives at the pole are
+    /// not the limits, #13610 stays open for them) instead of failing.
+    #[test]
+    fn issue_13610_third_order_request_at_a_pole_keeps_its_status() {
+        let k = &Kernel::default();
+        let off = dome_13610();
+        let uv = Point2::new(0.0, 0.5);
+        let m = off
+            .evaluate_simple(k, uv, 3, 0, flags(false, false))
+            .unwrap();
+        assert!((m[0][0] - off.evaluate_point(k, uv).unwrap()).length() < 1e-12);
     }
 
     #[test]
