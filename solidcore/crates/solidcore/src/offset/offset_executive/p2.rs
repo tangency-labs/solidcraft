@@ -2565,10 +2565,7 @@ fn shell_difference_with(
         // original on error remains in its caller slot; other may already have
         // been consumed before a late cache/inverse-transform error (p4).
         Ok(true) => present(primary.take(), OP_SHELL, DIFFERENCE_RESULT_MISSING),
-        Ok(false) => Err(SolidError::invalid_input(
-            OP_SHELL,
-            "Difference did not assign its result",
-        )),
+        Ok(false) => Err(defect(OP_SHELL, DIFFERENCE_RESULT_UNASSIGNED, SM_ERR)),
         Err(error) => Err(error),
     }
 }
@@ -3159,6 +3156,10 @@ const DIFFERENCE_OPERAND_MISSING: &str = "an operand of the shell's difference i
 const DIFFERENCE_RESULT_MISSING: &str = "the difference reported its result in its first \
                                          operand, which holds none, though it puts its result \
                                          there when it reports one";
+/// Why the difference that assigns no result is the kernel's fault.
+const DIFFERENCE_RESULT_UNASSIGNED: &str = "the shell's difference assigned no result, though \
+                                            the kernel's own Boolean is given both operands in \
+                                            place just before";
 
 /// `sm_OrderEdgeusesByBrep`: `edgeuses` ordered by `brep` (its faces, each face's
 /// two face uses, their edge uses), not by identity: the B-rep order is walked from

@@ -9942,8 +9942,9 @@ mod tests {
         }
     }
 
-    /// A local operation's creator asked for the surface of a face it was not given: the
-    /// caller's argument (`SM_ERR`); a listed face gets its listed surface.
+    /// A local operation's creator asked for the surface of a face it was not given: both
+    /// come from the executive's `build_local`, so a defect (`SM_ERR`); a listed face gets
+    /// its listed surface.
     #[test]
     fn a_local_operation_refuses_a_face_it_was_not_given() {
         let mut brep = LocalFaces {
@@ -9960,6 +9961,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(e.offset_failure(), Some(&OffsetFailure::LocalFaceNotListed));
         assert_eq!(e.upstream_status(), Some(SM_ERR));
-        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+        assert_eq!(e.kind(), crate::error::ErrorKind::StageFailed);
+        assert!(e.is_defect(), "{e}");
     }
 }

@@ -375,7 +375,8 @@ pub enum OffsetFailure {
     /// so that side's offset edge is not extended.
     LaminaEdgeOtherSide,
     /// A local operation's geometry creator was asked for the surface of a face that is not
-    /// among the faces it was given.
+    /// among the faces it was given. Both come from the executive's own `build_local`, so
+    /// this is a defect ([`ErrorKind::StageFailed`]).
     LocalFaceNotListed,
     /// A gap in an offset face's loop is longer than `tolerance`, but its two ends are both
     /// within `tolerance` of the vertex the two edge uses share, or neither is, so the gap
@@ -1101,7 +1102,6 @@ impl OffsetFailure {
             | Self::GapEndWithoutEdge { .. }
             | Self::InvalidValue(_)
             | Self::LaminaEdgeOtherSide
-            | Self::LocalFaceNotListed
             | Self::LoopGapUncertified { .. }
             | Self::LoopsCross { .. }
             | Self::LooseTangentEdge { .. }
@@ -1138,6 +1138,7 @@ impl OffsetFailure {
             | Self::WallsTouch { .. } => false,
             Self::Defect { .. }
             | Self::Inconsistent(_)
+            | Self::LocalFaceNotListed
             | Self::LoopGapEndsAmbiguous { .. }
             | Self::LoopGapPassLimit { .. }
             | Self::SplitAtEdgeEnd { .. }
@@ -1277,6 +1278,7 @@ impl OffsetFailure {
             | Self::ShellLeavesNoCavity { .. }
             | Self::WallsMeetAcross { .. } => ErrorKind::OffsetCollapses,
             Self::Defect { .. }
+            | Self::LocalFaceNotListed
             | Self::LoopGapEndsAmbiguous { .. }
             | Self::LoopGapPassLimit { .. }
             | Self::SplitAtEdgeEnd { .. }
@@ -1299,7 +1301,6 @@ impl OffsetFailure {
             | Self::FaceuseNotGiven
             | Self::FollowedBlendIncomplete
             | Self::InvalidValue(_)
-            | Self::LocalFaceNotListed
             | Self::ShellFaceNotOfBody { .. }
             | Self::ShellHasNoRegion { .. }
             | Self::ShellWallUnresolved { .. }
@@ -2398,9 +2399,9 @@ mod tests {
             ),
             (
                 O::LocalFaceNotListed,
-                ErrorKind::InvalidInput,
+                ErrorKind::StageFailed,
                 false,
-                false,
+                true,
                 true,
             ),
             (
