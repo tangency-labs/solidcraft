@@ -20,9 +20,11 @@ The body is cut by a plane square to each axis. The part beyond the plane moves 
 and the gap fills with the body's section at the plane. A shrink takes a slice out at the plane
 instead.
 
-Each axis you stretch along becomes part of one **Stretch** step on the timeline. Double-click the
-step to change it. A plain distance becomes a parameter (`stretch1`, `stretch2` and so on) when
-you click OK. Change the parameter in the Parameters window and the body follows.
+With **Edit sketch** ticked (the default), Stretch changes the sketch instead and adds no step;
+see [Edit sketch](#edit-sketch) below. When Edit sketch is off, or the sketch cannot be changed,
+each axis you stretch along becomes part of one **Stretch** step on the timeline. Double-click
+that step to change it. Its plain distances become parameters (`stretch1`, `stretch2` and so on)
+when you click OK. Change a parameter in the Parameters window and the body follows.
 
 ## The cut plane
 
@@ -49,6 +51,8 @@ Extrude that made the body instead of adding a Stretch step:
   spans the cut. A 100 mm width becomes 115 mm. When the dimension is set by a parameter, the
   parameter changes instead.
 - A stretch along the Extrude's direction adds the distance to the Extrude's depth.
+- Holes, bosses and cuts drawn beyond the cut in this body's other sketches move with the part,
+  and so do faces that later features of this body picked there. Other bodies stay where they are.
 
 The sketch then shows the new sizes, and the part rebuilds from it. Stretch checks that the
 rebuilt part is the stretched one. If it is not, for example when the sketch's other side moved

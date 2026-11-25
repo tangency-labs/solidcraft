@@ -795,13 +795,31 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     if matches!(d.kind, Kind::Stretch { .. }) {
         let faces: Vec<(usize, usize, Vec3)> =
             d.inputs.get(1).map(|i| i.items.iter().filter_map(|pick| crate::dialogs::stretch_face(app, pick)).collect()).unwrap_or_default();
-        for (axis, sign, _) in &faces {
+        // Only a face picked since the last draw sets its axis: after that the sign and the
+        // distance are the user's to change, cleared distance included.
+        let seen: Vec<String> = d
+            .extra
+            .get(STRETCH_FACES_SEEN)
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(serde_json::Value::as_str)
+            .map(str::to_string)
+            .collect();
+        let keys: Vec<String> = faces.iter().map(crate::dialogs::stretch_face_key).collect();
+        for ((axis, sign, _), key) in faces.iter().zip(&keys) {
+            if seen.contains(key) {
+                continue;
+            }
             if let Some((s, distance, _)) = d.kind.stretch_row_mut(*axis) {
                 *s = *sign;
                 if distance.trim().is_empty() {
                     *distance = crate::length_input::model(&app.session.doc, 10.0);
                 }
             }
+        }
+        if keys != seen {
+            d.extra.insert(STRETCH_FACES_SEEN.into(), serde_json::Value::from(keys));
         }
         let body = match d.inputs.first().and_then(|i| i.items.first()) {
             Some(Sel::Body { name }) => Some(name.clone()),
@@ -2357,6 +2375,10 @@ fn rotation_handle(
     }
     Some(end)
 }
+
+/// The faces picked for a Stretch's cut that have set their axis already (editor state, never
+/// sent with the command): a face sets its axis's direction once, when it is picked.
+pub(crate) const STRETCH_FACES_SEEN: &str = "stretch_faces_seen";
 
 /// An edge-on ring has two equally valid depths; retain the branch nearest the current handle.
 #[allow(clippy::too_many_arguments)]

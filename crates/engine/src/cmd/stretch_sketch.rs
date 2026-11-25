@@ -5,6 +5,8 @@
 //! parameter it names, changed the same way. Whatever does not fit is refused here, with why,
 //! and the command adds a Stretch step instead.
 
+use std::collections::HashSet;
+
 use solidcore_record::Vec2;
 use solidcraft_doc::expr::Kind;
 use solidcraft_doc::{Document, FeatureKind, ModelState, StretchDirection};
@@ -41,8 +43,11 @@ pub(super) fn changes(s: &Session, state: &ModelState, body: &str, planned: &[Pl
     let base_sketch = sketch.0;
     let normal = state.sketch(base_sketch).ok_or("the Extrude's sketch is gone")?.plane.normal();
     let exprs = s.doc.all_param_exprs();
+    let (related, sketches) = depends_on(s, state, body, made_by, feature.component, base_sketch);
     let mut doc: Document = (*s.doc).clone();
     let mut out: Vec<(String, String)> = Vec::new();
+    // Sketch points already moved by an earlier axis: a later axis adds to where they are now.
+    let mut moved: HashSet<(u64, usize)> = HashSet::new();
     for p in planned {
         let n = p.direction.vector();
         if 1.0 - n.dot(normal).abs() < 1e-9 {
@@ -62,13 +67,17 @@ pub(super) fn changes(s: &Session, state: &ModelState, body: &str, planned: &[Pl
         }
         let mut base_spanned = false;
         for f in &mut doc.features {
-            // Faces later features picked beyond the cut move with the part.
-            if f.id > made_by && !matches!(f.kind, FeatureKind::Sketch { .. }) {
+            // Faces later features picked beyond the cut move with the part. Other bodies and
+            // components, and the sketches only they use, stay as they are.
+            if f.id > made_by && related.contains(&f.id) && !matches!(f.kind, FeatureKind::Sketch { .. }) {
                 for point in f.kind.face_points_mut() {
                     if point.dot(n) > p.level {
                         *point += n * p.distance;
                     }
                 }
+            }
+            if !sketches.contains(&f.id) {
+                continue;
             }
             let FeatureKind::Sketch { sketch, .. } = &mut f.kind else { continue };
             let Some(solved) = state.sketch(f.id) else { continue };
@@ -86,9 +95,12 @@ pub(super) fn changes(s: &Session, state: &ModelState, body: &str, planned: &[Pl
             for name in spanning {
                 out.push(grown(s, &exprs, &name, p.distance)?);
             }
-            for (point, now) in sketch.points.iter_mut().zip(&solved.sketch.points) {
+            // Which side of the cut a point is on comes from the solved sketch; where it goes
+            // adds this axis's move to any move an earlier axis made.
+            for (i, (point, now)) in sketch.points.iter_mut().zip(&solved.sketch.points).enumerate() {
                 if point.link.is_none() && now.pos.dot(u) > level {
-                    point.pos = now.pos + u * p.distance;
+                    let from = if moved.insert((f.id, i)) { now.pos } else { point.pos };
+                    point.pos = from + u * p.distance;
                 }
             }
         }
@@ -105,6 +117,28 @@ pub(super) fn changes(s: &Session, state: &ModelState, body: &str, planned: &[Pl
         merged.push((name, e));
     }
     Ok((doc, merged))
+}
+
+/// The features `body` depends on after the one that made it, and the sketches they and that
+/// feature are built from. A feature belongs to the body when it is in the body's component and
+/// names it (a target, a face it picks), or names no body and makes none of its own (a join or
+/// cut on every body it meets, a pattern). Features that make or work on other bodies do not.
+fn depends_on(s: &Session, state: &ModelState, body: &str, made_by: u64, component: u64, base_sketch: u64) -> (HashSet<u64>, HashSet<u64>) {
+    let mut related = HashSet::from([made_by]);
+    let mut sketches = HashSet::from([base_sketch]);
+    for f in s.doc.features.iter().filter(|f| f.id > made_by && f.component == component) {
+        if matches!(f.kind, FeatureKind::Sketch { .. }) {
+            continue;
+        }
+        let named = f.kind.input_bodies();
+        let names_ours = named.iter().any(|b| b == body) || f.kind.face_body() == Some(body);
+        let anonymous = named.is_empty() && f.kind.face_body().is_none() && !state.bodies.iter().any(|b| b.feature == f.id);
+        if names_ours || anonymous {
+            related.insert(f.id);
+            sketches.extend(f.kind.input_sketches());
+        }
+    }
+    (related, sketches)
 }
 
 /// The parameter of `feature`'s input labelled `label`.

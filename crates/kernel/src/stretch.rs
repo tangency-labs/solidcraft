@@ -83,6 +83,42 @@ pub fn stretch(body: &Body, at: Vec3, normal: Vec3, distance: f64) -> Result<Bod
 /// The deepest band behind the plane at `level` that is a prism along `n`, as a depth: from
 /// half of what lies behind the plane, halved until it is one (a deeper band needs fewer
 /// passes). Refused, naming the face, when not even a thin band is.
+/// A point on the cut plane of one stretch along unit `normal`: `at` mm along the normal from
+/// the picked face point `from`, or with no face, from the side of `body` that stays put (its
+/// least level along the normal).
+pub fn stretch_cut(body: &Body, normal: Vec3, from: Option<Vec3>, at: f64) -> Result<Vec3> {
+    let n = normal.normalized().ok_or_else(|| KernelError::Invalid("the stretch direction has no length".into()))?;
+    let base = match from {
+        Some(face) => face.dot(n),
+        None => extent(body, n)?.0,
+    };
+    Ok(n * (base + at))
+}
+
+/// Where a straight feature on the stretched body goes (a cosmetic thread's axis): the axis
+/// through `point` along unit `axis`, used from `start` to `end` along it, after the stretch of
+/// [`stretch`] at `at` along `normal` by `distance`. Wholly beyond the cut, it moves with the
+/// part. Running along the normal across the cut, its end beyond the cut moves and its length
+/// changes with the body's. Anything else stays where it is.
+pub fn stretch_axis(point: Vec3, axis: Vec3, start: f64, end: f64, at: Vec3, normal: Vec3, distance: f64) -> (Vec3, f64, f64) {
+    let Some(n) = normal.normalized() else { return (point, start, end) };
+    let level = at.dot(n);
+    let beyond = |t: f64| (point + axis * t).dot(n) > level;
+    match (beyond(start), beyond(end)) {
+        (true, true) => (point + n * distance, start, end),
+        (false, false) => (point, start, end),
+        (start_beyond, _) => {
+            let along = axis.dot(n);
+            if (along.abs() - 1.0).abs() > SQUARE {
+                return (point, start, end);
+            }
+            // Exactly one end is beyond the cut: it moves by the distance along the normal.
+            let shift = distance * along;
+            if start_beyond { (point, start + shift, end) } else { (point, start, end + shift) }
+        }
+    }
+}
+
 fn deepest_band(body: &Body, n: Vec3, lo: f64, level: f64, size: f64, eps: f64, plane: &dyn Fn(f64) -> Result<Plane>) -> Result<f64> {
     let thinnest = (size * 1e-3).max(1e-3).min((level - lo) / 2.0);
     let mut depth = (level - lo) / 2.0;

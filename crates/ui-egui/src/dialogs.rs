@@ -175,6 +175,11 @@ pub(crate) fn stretch_face(app: &SolveApp, pick: &Sel) -> Option<(usize, usize, 
     Some((axis, usize::from(c[axis] < 0.0), *point))
 }
 
+/// What a face picked for a Stretch's cut is remembered by, once it has set its axis.
+pub(crate) fn stretch_face_key((axis, sign, p): &(usize, usize, Vec3)) -> String {
+    format!("{axis}:{sign}:{:.6}:{:.6}:{:.6}", p.x, p.y, p.z)
+}
+
 crate::dialog_descriptor::dialog_descriptors! {
     #[derive(Clone, Debug)]
     pub enum Kind {
@@ -6270,7 +6275,14 @@ fn stretch_parameter(app: &SolveApp, d: &Dialog, cmds: &mut [(String, Value)]) -
             continue;
         }
         let axis = one.get("direction").and_then(Value::as_str).and_then(solidcraft_engine::doc::StretchDirection::parse).map(|d| d.axis());
-        let kept = axis.and_then(|a| stretch_along(&saved, a)).and_then(|s| doc.param(s.distance.as_str().trim())).map(|p| p.name.clone());
+        // The axis's own parameter is changed only when no other axis of the step uses it too:
+        // a shared one would change the other axis's distance with it, so this axis gets its own.
+        let shared = |name: &str| taken.iter().any(|t| t == name) || saved.iter().filter(|s| s.distance.as_str().trim() == name).count() > 1;
+        let kept = axis
+            .and_then(|a| stretch_along(&saved, a))
+            .and_then(|s| doc.param(s.distance.as_str().trim()))
+            .map(|p| p.name.clone())
+            .filter(|name| !shared(name));
         let (command, name) = match kept {
             Some(name) => ("parameters.change", name),
             None => {
@@ -7413,6 +7425,9 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         for (k, v) in &d.extra {
             // Saved selection mode is editor state, not a command parameter.
             if matches!(d.kind, Kind::Split) && k == "split_tool_mode" {
+                continue;
+            }
+            if matches!(d.kind, Kind::Stretch { .. }) && k == crate::canvas::STRETCH_FACES_SEEN {
                 continue;
             }
             if fillet && !dense::fillet_option_applies(&d.extra, k) {
@@ -9254,6 +9269,9 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             if let Some(inp) = d.inputs.get_mut(1) {
                 inp.items = body_face_sels(s, Some(body.0.as_str()), &faces);
             }
+            // The step's faces have set their axes already: its stored directions stand.
+            let seen: Vec<String> = sels(&d, 1).iter().filter_map(|pick| stretch_face(app, pick)).map(|f| stretch_face_key(&f)).collect();
+            d.extra.insert(crate::canvas::STRETCH_FACES_SEEN.into(), json!(seen));
             d
         }
         FeatureKind::Scale { bodies, origin, .. } => {

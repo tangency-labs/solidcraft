@@ -124,3 +124,23 @@ fn a_long_stretch_is_one_valid_solid_whatever_the_distance() {
         assert_eq!(m.shells, 1);
     }
 }
+
+#[test]
+fn a_thread_axis_moves_or_grows_with_the_stretch() {
+    use crate::stretch_axis;
+    let x = Vec3::new(1.0, 0.0, 0.0);
+    let z = Vec3::new(0.0, 0.0, 1.0);
+    let cut = Vec3::new(50.0, 0.0, 0.0);
+    // Upright at x = 80, beyond the cut along X: it moves 15 with the part.
+    let (p, s, e) = stretch_axis(Vec3::new(80.0, 30.0, 0.0), z, 0.0, 10.0, cut, x, 15.0);
+    assert_eq!((p, s, e), (Vec3::new(95.0, 30.0, 0.0), 0.0, 10.0));
+    // Upright at x = 20, before the cut: it stays.
+    let (p, s, e) = stretch_axis(Vec3::new(20.0, 30.0, 0.0), z, 0.0, 10.0, cut, x, 15.0);
+    assert_eq!((p, s, e), (Vec3::new(20.0, 30.0, 0.0), 0.0, 10.0));
+    // Along X from x = 10 to x = 90, across the cut: its far end moves, so it is 15 longer.
+    let (p, s, e) = stretch_axis(Vec3::new(10.0, 30.0, 5.0), x, 0.0, 80.0, cut, x, 15.0);
+    assert_eq!((p, s, e), (Vec3::new(10.0, 30.0, 5.0), 0.0, 95.0));
+    // The same axis pointing the other way: its start is the end beyond the cut.
+    let (p, s, e) = stretch_axis(Vec3::new(90.0, 30.0, 5.0), -x, -10.0, 70.0, cut, x, 15.0);
+    assert_eq!((p, s, e), (Vec3::new(90.0, 30.0, 5.0), -25.0, 70.0));
+}

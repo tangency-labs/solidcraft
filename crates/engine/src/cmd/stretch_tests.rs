@@ -208,3 +208,66 @@ fn edit_sketch_moves_a_hole_drawn_beyond_the_cut_in_another_sketch() {
     let centre = hole.sketch.points.iter().map(|p| p.pos.x).fold(f64::NEG_INFINITY, f64::max);
     assert!((centre - 95.0).abs() < 1e-6, "{centre}");
 }
+
+/// A 100 x 60 plate held only at its bottom-left corner, so both X and Y can grow.
+fn corner_plate() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Plate"}));
+    let rect = run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]}));
+    run(&mut s, "sketch.dimension", json!({"entities": [rect["sides"]["bottom"]], "value": 100}));
+    run(&mut s, "sketch.dimension", json!({"entities": [rect["sides"]["right"]], "value": 60}));
+    run(&mut s, "sketch.constraint.fix", json!({"entity": rect["corners"]["bottom_left"], "fixed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Plate", "distance": 10, "body_name": "Plate"}));
+    s
+}
+
+#[test]
+fn edit_sketch_adds_both_axes_moves_to_a_corner_that_both_move() {
+    // X then Y in one step. A free hole centre at (80, 45) is beyond both cuts, so it moves 15
+    // along X and 10 along Y: the second axis adds to the first axis's move instead of starting
+    // again from where the point was solved.
+    let mut s = corner_plate();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Hole"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [80, 45], "radius": 5}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Hole", "distance": 10, "operation": "cut", "targets": ["Plate"]}));
+    let v = run(
+        &mut s,
+        "solid.stretch",
+        json!({"body": "Plate", "edit_sketch": true, "stretches": [
+            {"direction": "+x", "at": 50, "distance": 15},
+            {"direction": "+y", "at": 30, "distance": 10}
+        ]}),
+    );
+    assert_eq!(v["made_by"], json!("sketch"), "{v}");
+    assert_eq!(stretch_steps(&s), 0);
+    let (min, max) = plate_box(&s);
+    assert!(min.dist(Vec3::ZERO) < 1e-6 && max.dist(Vec3::new(115.0, 70.0, 10.0)) < 1e-6, "{min:?} {max:?}");
+    let st = s.model.state();
+    let hole = st.sketches.iter().find(|k| k.name == "Hole").unwrap();
+    assert!(
+        hole.sketch.points.iter().any(|p| (p.pos.x - 95.0).abs() < 1e-6 && (p.pos.y - 55.0).abs() < 1e-6),
+        "the hole centre is not at (95, 55): {:?}",
+        hole.sketch.points.iter().map(|p| p.pos).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn edit_sketch_leaves_another_bodys_sketch_alone() {
+    // A second body drawn beyond the cut, in its own sketch: stretching the plate does not move it.
+    let mut s = plate();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Other"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [80, 100], "radius": 5}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Other", "distance": 10, "body_name": "Peg"}));
+    let v = run(&mut s, "solid.stretch", json!({"body": "Plate", "direction": "+x", "at": 50, "distance": 15, "edit_sketch": true}));
+    assert_eq!(v["made_by"], json!("sketch"), "{v}");
+    assert!((plate_box(&s).1.x - 115.0).abs() < 1e-6);
+    let st = s.model.state();
+    let other = st.sketches.iter().find(|k| k.name == "Other").unwrap();
+    let centre = other.sketch.points.iter().map(|p| p.pos.x).fold(f64::NEG_INFINITY, f64::max);
+    assert!((centre - 80.0).abs() < 1e-6, "the other body's circle moved to {centre}");
+    let peg = solidcraft_kernel::measure(&st.body("Peg").unwrap().body).unwrap();
+    assert!(((peg.bbox.min.x + peg.bbox.max.x) / 2.0 - 80.0).abs() < 1e-6, "{:?}", peg.bbox);
+}

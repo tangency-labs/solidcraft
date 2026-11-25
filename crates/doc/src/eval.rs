@@ -13386,20 +13386,23 @@ fn eval_feature_kind(
                 return Err(DocError::Invalid("Stretch takes a solid, not a mesh body: convert the mesh first".into()));
             }
             let mut stretched = source.body.clone();
+            let mut cuts = Vec::with_capacity(stretches.len());
             for one in stretches {
                 let at = val(vals, &one.at, Kind::Length)?;
                 let distance = val(vals, &one.distance, Kind::Length)?;
-                // The cut is `at` along the direction from the picked face's level, or, with no
-                // face, from the side that stays put: the body's least level along the direction.
+                // The cut is `at` along the direction from the picked face, or, with no face,
+                // from the side that stays put.
                 let n = one.direction.vector();
-                let base = match &one.from {
-                    Some(face) => face.0.dot(n),
-                    None => {
-                        let bounds = stretched.exact_bounds()?;
-                        [bounds.min, bounds.max].iter().map(|c| c.dot(n)).fold(f64::INFINITY, f64::min)
-                    }
-                };
-                stretched = kernel::stretch(&stretched, n * (base + at), n, distance)?;
+                let cut = kernel::stretch_cut(&stretched, n, one.from.as_ref().map(|face| face.0), at)?;
+                stretched = kernel::stretch(&stretched, cut, n, distance)?;
+                cuts.push((cut, n, distance));
+            }
+            // The body's cosmetic threads go with it: those beyond a cut move with the part, and
+            // one running along the direction across a cut grows with the body.
+            for t in st.threads.iter_mut().filter(|t| t.body == body.0) {
+                for &(cut, n, distance) in &cuts {
+                    (t.axis_point, t.start, t.end) = kernel::stretch_axis(t.axis_point, *t.axis, t.start, t.end, cut, n, distance);
+                }
             }
             let stretched = stretched.with_color(source.body.color());
             let result = ModelBody::new(source.name.clone(), stretched, source.feature);
