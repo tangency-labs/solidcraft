@@ -52,8 +52,7 @@ pub(crate) fn no_place(t: &Tokens) -> egui::Color32 {
 /// The colour a part that is laid out is shown in where it stands now: the error colour, a
 /// little see-through.
 pub(crate) fn picked(t: &Tokens) -> egui::Color32 {
-    let [r, g, b, _] = t.error.to_srgba_unmultiplied();
-    egui::Color32::from_rgba_unmultiplied(r, g, b, 215)
+    t.error.gamma_multiply_u8(215)
 }
 
 /// Draws the sheets of the Arrange preview, when the Arrange dialog is open and its preview
