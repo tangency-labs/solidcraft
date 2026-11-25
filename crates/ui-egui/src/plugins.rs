@@ -87,6 +87,8 @@ pub struct Plugin {
     /// with the icon name it is drawn by.
     pub images: std::collections::BTreeMap<String, String>,
     pub(crate) swatches: crate::plugin_images::Swatches,
+    /// Its view backgrounds (`shaders@0.1`): the preference's key, `id/shader`, and the name.
+    pub shaders: Vec<(String, String)>,
 }
 
 /// A folder under the plugins directory that is not a plugin.
@@ -154,7 +156,47 @@ fn check(m: Manifest, folder: &str) -> Result<Plugin, String> {
         entries: Vec::new(),
         images: Default::default(),
         swatches: Default::default(),
+        shaders: Vec::new(),
     })
+}
+
+/// What a listed package's approval hash was worked out from: its manifest's bytes and its
+/// component's size and modification time.
+type ListedKey = (Vec<u8>, Option<(u64, std::time::SystemTime)>);
+
+/// A package's manifest and approval hash, as `read_package` gives them, for the listing only
+/// (Preferences, menus, ribbon slots). Hashing a large component stalls the thread that does it
+/// (#21228), so an unchanged manifest and component reuse the hash worked out before. Running a
+/// plugin never takes this path: it reads and hashes the package again (`read_package`).
+fn read_package_listed(dir: &Path, folder: &str) -> Result<(solidcraft_engine::plugin::Manifest, String), String> {
+    static LISTED: std::sync::Mutex<Option<std::collections::HashMap<std::path::PathBuf, (ListedKey, String)>>> = std::sync::Mutex::new(None);
+    let key = || -> Option<(solidcraft_engine::plugin::Manifest, ListedKey)> {
+        let bytes = std::fs::read(dir.join("plugin.json")).ok()?;
+        let manifest = solidcraft_engine::plugin::parse_manifest(&bytes, folder).ok()?;
+        let component = match &manifest.runtime {
+            Some(runtime) => {
+                let meta = std::fs::metadata(dir.join(&runtime.module)).ok()?;
+                Some((meta.len(), meta.modified().ok()?))
+            }
+            None => None,
+        };
+        Some((manifest, (bytes, component)))
+    };
+    let known = key();
+    if let Some((manifest, key)) = &known
+        && let Ok(listed) = LISTED.lock()
+        && let Some((seen, approval)) = listed.as_ref().and_then(|m| m.get(dir))
+        && seen == key
+    {
+        return Ok((manifest.clone(), approval.clone()));
+    }
+    let package = solidcraft_engine::plugin::read_package(&dir.to_string_lossy()).map_err(|e| e.to_string())?;
+    if let Some((_, key)) = known
+        && let Ok(mut listed) = LISTED.lock()
+    {
+        listed.get_or_insert_with(Default::default).insert(dir.to_path_buf(), (key, package.approval.clone()));
+    }
+    Ok((package.manifest, package.approval))
 }
 
 fn read_plugin(dir: &Path, folder: &str) -> Result<(Plugin, bool), String> {
@@ -163,11 +205,12 @@ fn read_plugin(dir: &Path, folder: &str) -> Result<(Plugin, bool), String> {
     if !meta.is_file() || meta.len() > MAX_MANIFEST_BYTES {
         return Err("plugin.json is missing or larger than 64 KiB".into());
     }
-    let package = solidcraft_engine::plugin::read_package(&dir.to_string_lossy()).map_err(|e| e.to_string())?;
-    let parsed = package.manifest;
+    let (parsed, approval) = read_package_listed(dir, folder)?;
+    let shaders = parsed.shaders.iter().map(|shader| (format!("{}/{}", parsed.id, shader.id), shader.name.clone())).collect();
     let mut plugin = check(Manifest { id: parsed.id, name: parsed.name, version: parsed.version, description: parsed.description }, folder)?;
     plugin.path = dir.to_string_lossy().into_owned();
-    plugin.approval = package.approval;
+    plugin.approval = approval;
+    plugin.shaders = shaders;
     let executable = parsed.runtime.is_some();
     if let Some(runtime) = parsed.runtime {
         plugin.entries = runtime.entries;
@@ -205,8 +248,24 @@ fn scan_packages(dir: &Path) -> (Vec<(Plugin, bool)>, Vec<Skipped>) {
     (plugins, skipped)
 }
 
+/// How many times each plugins folder was read for a listing; the tests watch it to prove that
+/// drawing frames reads nothing (#21228, #21594). Keyed by folder, as tests run side by side.
+#[cfg(test)]
+pub(crate) static INVENTORY_READS: std::sync::Mutex<std::collections::BTreeMap<std::path::PathBuf, usize>> =
+    std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+/// How many listings read `dir` so far (tests).
+#[cfg(test)]
+pub(crate) fn inventory_reads(dir: &Path) -> usize {
+    INVENTORY_READS.lock().unwrap().get(dir).copied().unwrap_or(0)
+}
+
 /// Installed and inspected packages share one reader across Preferences, menus and ribbon slots.
 pub(crate) fn inventory<'a>(dir: Option<&Path>, inspected: impl Iterator<Item = &'a String>) -> (Vec<Plugin>, Vec<Skipped>) {
+    #[cfg(test)]
+    if let Some(dir) = dir {
+        *INVENTORY_READS.lock().unwrap().entry(dir.to_path_buf()).or_default() += 1;
+    }
     let mut packages = std::collections::BTreeMap::new();
     // Explicitly inspected packages win over installed folders with the same id, as in plugin.run.
     let mut found = Vec::new();
@@ -322,7 +381,7 @@ struct JobInfo {
     key: u64,
     command: &'static str,
     subject: Option<String>,
-    started: std::time::Instant,
+    started: web_time::Instant,
 }
 
 static RUNNING_JOBS: std::sync::Mutex<Vec<JobInfo>> = std::sync::Mutex::new(Vec::new());
@@ -370,7 +429,7 @@ pub(crate) struct PackageJob {
     /// `PrefsWindow::grants_revision` when the job started.
     revision: u64,
     done: std::sync::mpsc::Receiver<PackageReply>,
-    started: std::time::Instant,
+    started: web_time::Instant,
     /// Its entry in [`RUNNING_JOBS`], removed when the job ends.
     key: u64,
 }
@@ -394,7 +453,7 @@ impl PackageJob {
         done: std::sync::mpsc::Receiver<PackageReply>,
     ) -> Self {
         let key = JOB_KEYS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let started = std::time::Instant::now();
+        let started = web_time::Instant::now();
         if let Ok(mut jobs) = RUNNING_JOBS.lock() {
             jobs.push(JobInfo { key, command, subject, started });
         }
@@ -405,10 +464,10 @@ impl PackageJob {
 /// What refuses a new install or removal while a package job runs: which, on what, for how long, and
 /// that it ends by itself.
 pub(crate) fn busy_message(app: &SolveApp) -> String {
-    busy_message_at(app, std::time::Instant::now())
+    busy_message_at(app, web_time::Instant::now())
 }
 
-fn busy_message_at(app: &SolveApp, now: std::time::Instant) -> String {
+fn busy_message_at(app: &SolveApp, now: web_time::Instant) -> String {
     let Some(job) = app.prefs_window.plugin_job.as_ref() else { return app.tr("prefs.plugin_busy").to_owned() };
     let subject = RUNNING_JOBS.lock().ok().and_then(|jobs| jobs.iter().find(|info| info.key == job.key).and_then(|info| info.subject.clone()));
     let what = match subject {
@@ -470,14 +529,15 @@ fn spawn_package(
 }
 
 /// Poll package I/O on every frame, including after Preferences closes. Tests drain deterministically.
+/// It runs in the browser too, so its clock is `web_time`: `std::time::Instant::now` panics on wasm.
 pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context, wait: bool) {
-    tick_at(app, ctx, wait, std::time::Instant::now());
+    tick_at(app, ctx, wait, web_time::Instant::now());
 }
 
 /// [`tick`] at the time `now`. A job still silent after [`PACKAGE_DEADLINE`] is abandoned: it fails
 /// like any other, and its reply, should it ever come, has nowhere to go (the job worked on a copy of
 /// the session, so nothing of it reaches this one).
-fn tick_at(app: &mut SolveApp, ctx: &egui::Context, wait: bool, now: std::time::Instant) {
+fn tick_at(app: &mut SolveApp, ctx: &egui::Context, wait: bool, now: web_time::Instant) {
     let Some(job) = app.prefs_window.plugin_job.take() else { return };
     let result = if wait {
         job.done.recv().unwrap_or_else(|e| Err(e.to_string()))
@@ -530,6 +590,9 @@ fn tick_at(app: &mut SolveApp, ctx: &egui::Context, wait: bool, now: std::time::
                 app.preferences.disabled_plugins.remove(id);
                 app.session.disabled_plugins.remove(id);
             }
+            // A removed or replaced plugin's background is read again from its folder, or not at all.
+            #[cfg(not(target_arch = "wasm32"))]
+            crate::plugin_shaders::forget(app, id);
             persist_grants(app)?;
         }
         if let PackageAction::Describe { path } = &job.action {
@@ -695,6 +758,20 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
             ui.label(solidcraft_ui_text::tr("ui.plugins_desktop"));
             return;
         };
+        let plugins = crate::plugin_slots::preferences_inventory(app, dir);
+        if plugins.is_empty() {
+            // First-time users need the package format and a way to find the guide before
+            // global host resource limits, which are rarely useful without a plugin (#18764).
+            let intro =
+                crate::ui_kit::text(ui, solidcraft_ui_text::tr("prefs.plugins_get_started"), crate::ui_kit::Text::Hint("plugins_get_started"));
+            crate::scenario::publish_rect("prefs:plugins:get_started", intro.rect);
+            let guide = ui.hyperlink_to(
+                RichText::new(solidcraft_ui_text::tr("prefs.plugins_guide")),
+                "https://github.com/tangency-labs/solidcraft/blob/main/docs/plugins.md",
+            );
+            crate::scenario::publish_target("prefs:plugins:guide", guide.rect);
+            ui.add_space(8.0);
+        }
         // Install plugin…: pick a .zip, review what it asks for, install it.
         let install = crate::ui_kit::icon_label_button(ui, solidcraft_ui_text::tr("plugin_install.menu"), "import", !busy(app), false);
         crate::scenario::publish_target("prefs:plugins:install", install.rect);
@@ -715,7 +792,6 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
             );
             ui.add_space(8.0);
         }
-        let plugins = crate::plugin_slots::preferences_inventory(app, dir);
         let skipped = crate::plugin_slots::skipped(app).to_vec();
         let query = app.prefs_window.plugin_query.clone();
         crate::ui_kit::settings_list_section(
@@ -764,7 +840,17 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
             }
         }
         ui.add_space(8.0);
-        resource_controls(app, ui);
+        let was_expanded = app.preferences.plugin_limits_expanded;
+        let advanced =
+            crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr("prefs.plugins_advanced_limits"), &mut app.preferences.plugin_limits_expanded);
+        crate::scenario::publish_target("prefs:plugins:advanced_limits", advanced.rect);
+        if was_expanded && !app.preferences.plugin_limits_expanded {
+            // Do not leave a hidden, unfinished fuel or memory change pending for Apply.
+            app.prefs_window.plugin_limit_inputs = None;
+        }
+        if app.preferences.plugin_limits_expanded {
+            resource_controls(app, ui);
+        }
         crate::ui_kit::checkbox(
             ui,
             solidcraft_ui_text::tr("prefs.plugin_remember_dialog_position"),
@@ -881,6 +967,8 @@ fn plugin_card(app: &mut SolveApp, ui: &mut egui::Ui, dir: &Path, plugin: &Plugi
             app.preferences.disabled_plugins.insert(plugin.id.clone());
         }
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    plugin_settings(app, ui, plugin, on);
     crate::scenario::publish_target(&format!("prefs:plugin:{}:remove", plugin.id), remove.rect);
     if remove.clicked() {
         app.prefs_window.plugin_remove = Some((plugin.id.clone(), plugin.name.clone()));
@@ -893,6 +981,29 @@ fn plugin_card(app: &mut SolveApp, ui: &mut egui::Ui, dir: &Path, plugin: &Plugi
     for text in texts {
         crate::ui_kit::settings_search::follow(ui, text, response.rect);
     }
+}
+
+/// The plugin's own settings, under its card. A background (`shaders@0.1`) has a switch; one
+/// background is on at a time, and only while its plugin is on.
+#[cfg(not(target_arch = "wasm32"))]
+fn plugin_settings(app: &mut SolveApp, ui: &mut egui::Ui, plugin: &Plugin, on: bool) {
+    if plugin.shaders.is_empty() {
+        return;
+    }
+    let label = app.tr("prefs.background_shader").to_owned();
+    ui.indent(("plugin_settings", &plugin.id), |ui| {
+        ui.add_enabled_ui(on, |ui| {
+            for (key, name) in &plugin.shaders {
+                let active = on && app.preferences.background_shader == *key;
+                let mut value = active;
+                let response = crate::ui_kit::checkbox(ui, &format!("{label}: {name}"), &mut value);
+                crate::scenario::publish_target(&format!("prefs:background:{key}"), response.rect);
+                if value != active {
+                    app.preferences.background_shader = if value { key.clone() } else { String::new() };
+                }
+            }
+        });
+    });
 }
 
 #[cfg(test)]
@@ -1439,6 +1550,38 @@ mod tests {
         solidcraft_theme::set_dark(previous);
     }
 
+    /// A new user's Plugins page leads with installation help. Resource controls remain
+    /// available under Advanced, and the saved preference restores their earlier layout (#18764).
+    #[test]
+    fn empty_plugins_page_leads_with_install_help_and_folds_advanced_limits() {
+        let mut h = crate::scenario::Harness::new();
+        let dir = h.dir.join("no-plugins");
+        let ctx = crate::fonts::test_context();
+        for _ in 0..3 {
+            page_frame(&mut h.app, &ctx, &dir, vec![]);
+        }
+        let help = crate::scenario::rect_of("prefs:plugins:get_started").expect("how to install a plugin");
+        let guide = crate::scenario::rect_of("prefs:plugins:guide").expect("link to plugin guide");
+        let install = crate::scenario::rect_of("prefs:plugins:install").expect("Install plugin button");
+        assert!(help.bottom() < guide.top(), "help comes before documentation");
+        assert!(guide.bottom() < install.top(), "the page leads with how to get plugins");
+        assert!(!h.app.preferences.plugin_limits_expanded);
+        assert!(h.app.prefs_window.plugin_limit_inputs.is_none(), "global resource fields start folded");
+        assert!(!dir.exists(), "looking at an empty page creates no plugin folder");
+
+        click_page(&mut h.app, &ctx, &dir, "prefs:plugins:advanced_limits");
+        assert!(h.app.preferences.plugin_limits_expanded);
+        assert!(h.app.prefs_window.plugin_limit_inputs.is_some(), "Advanced shows the old resource fields");
+
+        let mut reopened = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        reopened.load_prefs(&h.app.prefs());
+        assert!(reopened.preferences.plugin_limits_expanded, "the old layout remains a saved preference");
+        click_page(&mut h.app, &ctx, &dir, "prefs:plugins:advanced_limits");
+        assert!(!h.app.preferences.plugin_limits_expanded, "the controls can be folded again");
+        assert!(h.app.prefs_window.plugin_limit_inputs.is_none(), "folding clears hidden draft edits");
+        capture_page(&mut h.app, &dir, "plugins-get-started.png");
+    }
+
     #[test]
     fn plugin_card_actions_share_a_row_at_normal_width_and_stay_inside_narrow_cards() {
         let previous = solidcraft_theme::is_dark();
@@ -1517,6 +1660,36 @@ mod tests {
             }
         }
         solidcraft_theme::set_dark(previous);
+    }
+
+    #[test]
+    fn a_plugin_card_turns_one_background_on_at_a_time() {
+        let mut h = crate::scenario::Harness::new();
+        let dir = h.dir.join("public-plugins");
+        let sky = |id: &str, shaders: &str| {
+            format!(r#"{{"id":"{id}","name":"{id}","version":"1","description":"","capabilities":["shaders@0.1"],"shaders":[{shaders}]}}"#)
+        };
+        let shader = |id: &str| format!(r#"{{"id":"{id}","name":"{id}","kind":"background","source":"{id}.wgsl"}}"#);
+        write(&dir, "skies", &sky("skies", &format!("{},{}", shader("dusk"), shader("dawn"))));
+        write(&dir, "ripple", &sky("ripple", &shader("ripple")));
+        crate::prefs::control(&mut h.app, &serde_json::json!({"open":"Plugins"})).unwrap();
+        let ctx = crate::fonts::test_context();
+        for _ in 0..3 {
+            page_frame(&mut h.app, &ctx, &dir, vec![]);
+        }
+        click_page(&mut h.app, &ctx, &dir, "prefs:background:skies/dusk");
+        assert_eq!(h.app.preferences.background_shader, "skies/dusk");
+        click_page(&mut h.app, &ctx, &dir, "prefs:background:ripple/ripple");
+        assert_eq!(h.app.preferences.background_shader, "ripple/ripple", "turning one on turns the other off");
+        click_page(&mut h.app, &ctx, &dir, "prefs:background:ripple/ripple");
+        assert_eq!(h.app.preferences.background_shader, "", "and off again");
+        click_page(&mut h.app, &ctx, &dir, "prefs:background:skies/dawn");
+        click_page(&mut h.app, &ctx, &dir, "prefs:plugin:skies");
+        assert!(!enabled(&h.app, "skies"));
+        click_page(&mut h.app, &ctx, &dir, "prefs:background:skies/dusk");
+        assert_eq!(h.app.preferences.background_shader, "skies/dawn", "a turned-off plugin's switches do nothing");
+        crate::prefs::control(&mut h.app, &serde_json::json!({"button":"defaults"})).unwrap();
+        assert_eq!(h.app.preferences.background_shader, "", "Restore Defaults on Plugins turns it off");
     }
 
     #[test]
@@ -1683,6 +1856,25 @@ mod tests {
         assert_eq!(plugins[0].path, path, "Preferences still lists metadata-only inspected packages");
     }
 
+    /// #21228: listing the installed plugins, about once a second, reads and hashes a component
+    /// only when it changed. Same-size bytes written back with the old modification time are not
+    /// read again (the approval stays), and a component of another size is hashed again.
+    #[test]
+    fn listing_plugins_hashes_a_component_only_when_it_changed() {
+        let h = crate::scenario::Harness::new();
+        let installed = h.dir.join("installed");
+        hand_install(&package(&h, "workshop-helper"), &installed, "workshop-helper");
+        let approval = || inventory(Some(&installed), std::iter::empty()).0[0].approval.clone();
+        let first = approval();
+        let component = installed.join("workshop-helper").join("plugin.wasm");
+        let modified = std::fs::metadata(&component).unwrap().modified().unwrap();
+        std::fs::write(&component, b"\0asm\x0d\0\x01\x01").unwrap();
+        std::fs::File::options().write(true).open(&component).unwrap().set_modified(modified).unwrap();
+        assert_eq!(approval(), first, "an unchanged size and time is not read again");
+        std::fs::write(&component, b"\0asm\x0d\0\x01\0\0").unwrap();
+        assert_ne!(approval(), first, "a changed component is hashed again");
+    }
+
     #[test]
     fn ids_and_manifests_refuse_what_would_not_fit_on_the_page() {
         assert!(valid_id("a"));
@@ -1813,6 +2005,7 @@ mod tests {
             entries: Vec::new(),
             images: Default::default(),
             swatches: Default::default(),
+            shaders: Vec::new(),
             id: "ftc-frc-parts".into(),
             name: "FTC and FRC parts".into(),
             version: "0.1.0".into(),

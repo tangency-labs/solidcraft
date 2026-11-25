@@ -98,6 +98,7 @@ const AHEAD_AREAS: &[&str] = &[
     "explode",
     "expr",
     "face",
+    "frame",
     "joint",
     "material",
     "mesh",
@@ -124,6 +125,7 @@ const ANSWERED_ON_A_COPY: &[&str] = &[
     "file.export_step",
     "file.export_stl",
     "file.export_urdf",
+    "file.export_urdf_options",
     "file.save_mesh",
 ];
 
@@ -141,6 +143,10 @@ const READ_ON_A_COPY: &[&str] = &[
     "inspect.clearance",
     "inspect.interference",
     "inspect.parameter_variants",
+    // The collisions of a motion study: the study plays on a copy, and the check of a slow pair
+    // took the window thread minutes, so the window stopped answering and the app was closed
+    // as not responding (#15333).
+    "motion.interference",
     // Physical properties of a component or placement: every body of every placement (#8706).
     "component.properties",
     "occurrence.properties",

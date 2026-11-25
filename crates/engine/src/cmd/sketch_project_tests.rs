@@ -2169,6 +2169,23 @@ fn intersecting_a_semicircle_keeps_both_endpoints_fixed_and_linked() {
     }
 }
 
+#[test]
+fn intersecting_a_spline_uses_the_curve_instead_of_its_chords() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Source"}));
+    // This cubic has x = 9t and y = 27t³, so it crosses y = 1 at x = 3.
+    let spline = run(&mut s, "sketch.spline.control_point", json!({"points": [[0, 0], [3, 0], [6, 0], [9, 27]]}));
+    let curve = ids(&spline["curves"])[0].clone();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 1, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}}));
+    run(&mut s, "sketch.intersect", json!({"refs": [{"sketch": "Source", "curve": curve}]}));
+
+    let info = inspect(&mut s);
+    let points: Vec<_> = info["points"].as_array().unwrap().iter().filter(|p| !p["link"].is_null()).collect();
+    assert_eq!(points.len(), 1, "{info}");
+    assert!((points[0]["at"][0].as_f64().unwrap() - 3.0).abs() < 1e-6, "{info}");
+}
+
 /// Intersecting what was intersected before laid another point on the first each time (one spot
 /// held 11 points): the same curve or edge again is refused, as Project refuses what the sketch
 /// already shows, and something new alongside it still goes in.
@@ -3379,7 +3396,7 @@ fn against_true_outline(s: &Session, sketch: u64) -> (f64, f64) {
     let plane = solved.plane;
     let body = state.body("Plate").unwrap();
     let record = body.body.record();
-    let q = solidcore_ops::query::Query::new(record);
+    let q = solidcraft_kernel::services::query::Query::new(record);
     let mut truth: Vec<(solidcore_record::Vec2, solidcore_record::Vec2)> = Vec::new();
     // Each face's edge points, for the axial reach of its round wall.
     let mut on_face: Vec<Vec<solidcore_record::Vec3>> = vec![Vec::new(); record.faces.len()];
@@ -4365,5 +4382,91 @@ fn redefining_a_sketch_onto_a_parallel_plane_keeps_its_points_where_they_were() 
         let [x2, y2, z2] = after[id];
         assert!(z.abs() < 1e-9 && (z2 - 7.5).abs() < 1e-9, "{id}: z {z} -> {z2}");
         assert!((x2 - x).abs() < 1e-6 && (y2 - y).abs() < 1e-6, "{id}: ({x}, {y}) -> ({x2}, {y2})");
+    }
+}
+
+#[test]
+fn an_edge_point_on_edges_of_two_bodies_is_refused_unless_a_body_is_named() {
+    // #20504: A and B share the edge line x = 0, z = 10; a point on it named no body and the
+    // sketch silently followed A's 20 mm edge.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":20, "width":20, "height":10, "corner":[0,0,0], "name":"BoxA", "operation":"new", "body_name":"A"}));
+    run(&mut s, "solid.box", json!({"length":30, "width":10, "height":10, "corner":[0,0,0], "name":"BoxB", "operation":"new", "body_name":"B"}));
+    run(&mut s, "sketch.create", json!({"plane":{"face":[25,5,10]}, "project_edges":false, "name":"OnB"}));
+    let e = s.execute("sketch.project", &json!({"refs":[{"edge":[0,5,10]}]})).expect_err("a point on edges of A and B is ambiguous").to_string();
+    assert!(e.contains("lies on edges of 2 bodies") && e.contains('A') && e.contains('B') && e.contains("project"), "{e}");
+    run(&mut s, "sketch.project", json!({"refs":[{"edge":[0,5,10], "body":"B"}]}));
+    // An edge only one body has is still found without a name.
+    run(&mut s, "sketch.project", json!({"refs":[{"edge":[30,5,10]}]}));
+    let links = linked_curves(&inspect(&mut s));
+    assert_eq!(links.len(), 2, "{links:?}");
+}
+
+#[test]
+fn an_edge_point_is_owned_by_the_body_placed_there_not_one_with_the_same_local_edge() {
+    // #20504 review: two parts with the same box at their own origins, the second placed 30 mm
+    // along x. Only the first has an edge at [0, 5, 10] where they are placed, so the point is
+    // its edge, not one on edges of two bodies.
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "PartA", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [0, 0, 0], "operation": "new", "body_name": "A"}));
+    run(&mut s, "component.create", json!({"name": "PartB", "parent": "root", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [0, 0, 0], "operation": "new", "body_name": "B"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "PartB", "translate": [30, 0, 0], "capture": true}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10, "name": "Top"}));
+    run(&mut s, "sketch.project", json!({"refs": [{"edge": [0, 5, 10]}]}));
+    let links = linked_curves(&inspect(&mut s));
+    assert_eq!(links.len(), 1, "{links:?}");
+    let sk = s.doc.sketch(s.active_sketch.unwrap()).unwrap();
+    assert!(matches!(&sk.links[0].source, solidcraft_sketch::LinkSource::Edge { body, .. } if body.contains('A')), "{:?}", sk.links[0].source);
+}
+
+#[test]
+fn an_edge_point_without_a_body_keeps_the_one_body_whose_edge_it_is() {
+    // #20504 review: [0, 5, 10] lies on an edge of A and inside B's top face. B comes first and
+    // its face is as near as A's, so looking the body up by the nearest face took B and projected
+    // B's edge 5 mm away. The one body with an edge there is A.
+    let mut s = Session::default();
+    run(
+        &mut s,
+        "solid.box",
+        json!({"length": 30, "width": 20, "height": 10, "corner": [-10, 0, 0], "name": "BoxB", "operation": "new", "body_name": "B"}),
+    );
+    run(
+        &mut s,
+        "solid.box",
+        json!({"length": 20, "width": 20, "height": 10, "corner": [0, 0, 0], "name": "BoxA", "operation": "new", "body_name": "A"}),
+    );
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10, "name": "Top"}));
+    run(&mut s, "sketch.project", json!({"refs": [{"edge": [0, 5, 10]}]}));
+    let sk = s.doc.sketch(s.active_sketch.unwrap()).unwrap();
+    assert!(matches!(&sk.links[0].source, solidcraft_sketch::LinkSource::Edge { body, .. } if body == "A"), "{:?}", sk.links[0].source);
+}
+
+/// #20503: on a face sketch, a rectangle with sides on the face's projected outline is picked by
+/// its own four curves. Each piece where a drawn side lies on a projected edge was named after the
+/// projected curve only, so the drawn curves bounded no profile.
+#[test]
+fn a_rectangle_with_sides_on_the_projected_face_outline_is_picked_by_its_own_curves() {
+    for (corner, far, sides_on_outline) in [([2.0, 2.0], [10.0, 18.0], 0), ([0.0, 2.0], [10.0, 18.0], 1), ([0.0, 0.0], [10.0, 20.0], 3)] {
+        let mut s = Session::default();
+        run(
+            &mut s,
+            "solid.box",
+            json!({"length": 40, "width": 20, "height": 10, "corner": [0, 0, 0], "name": "Box1", "operation": "new", "body_name": "Plate"}),
+        );
+        run(&mut s, "sketch.create", json!({"plane": {"face": [20, 10, 10]}, "name": "Top"}));
+        let curves = run(&mut s, "sketch.rectangle.two_point", json!({"p0": corner, "p1": far}))["curves"].clone();
+        run(&mut s, "sketch.finish", json!({}));
+        s.execute(
+            "solid.extrude",
+            &json!({"sketch": "Top", "profiles": [{"curves": curves}], "distance": 5, "operation": "new", "name": "Boss", "body_name": "Boss"}),
+        )
+        .unwrap_or_else(|e| panic!("{sides_on_outline} sides on the outline: {e}"));
+        let boss = s.model.state().body("Boss").unwrap().body.clone();
+        let volume = solidcraft_kernel::measure(&boss).unwrap().volume;
+        let want = (far[0] - corner[0]) * (far[1] - corner[1]) * 5.0;
+        assert!((volume - want).abs() < 1e-6 * want, "{sides_on_outline} sides on the outline: {volume} vs {want}");
     }
 }
