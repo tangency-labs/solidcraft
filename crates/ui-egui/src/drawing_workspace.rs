@@ -57,6 +57,9 @@ pub struct State {
     /// What was selected in the other workspace when Drawing was entered (Design's selection while
     /// in Drawing, the drawing's while not): each workspace gets its own back when entered again.
     selection_away: Vec<solidcraft_engine::Sel>,
+    /// The other workspace's whole-body scope (`Session::selection_all_bodies`), kept with
+    /// `selection_away`: Design's Select All waits while in Drawing, where it would mean nothing.
+    selection_all_away: bool,
     /// The session's selection is Drawing's (else Design's).
     selection_is_drawings: bool,
     /// The sheet page's camera, zoom and drawn marks: screen only, never saved.
@@ -155,6 +158,8 @@ pub(crate) fn select_receiver(app: &mut SolveApp, drawings: bool) {
         _ => true,
     });
     app.drawing_workspace.selection_away = std::mem::replace(&mut app.session.selection, back);
+    let all_back = std::mem::take(&mut app.drawing_workspace.selection_all_away);
+    app.drawing_workspace.selection_all_away = std::mem::replace(&mut app.session.selection_all_bodies, all_back);
     focus_sheet_selection(app);
 }
 
@@ -201,6 +206,9 @@ pub(crate) struct ReceiverScope {
     model_focus: bool,
     selection: Vec<solidcraft_engine::Sel>,
     away: Vec<solidcraft_engine::Sel>,
+    /// The whole-body scopes beside `selection` and `away`.
+    all: bool,
+    all_away: bool,
     drawings: bool,
     sheet: Option<(u64, u64)>,
     page: u64,
@@ -214,6 +222,8 @@ impl ReceiverScope {
             model_focus: app.session.model_focus,
             selection: app.session.selection.clone(),
             away: app.drawing_workspace.selection_away.clone(),
+            all: app.session.selection_all_bodies,
+            all_away: app.drawing_workspace.selection_all_away,
             drawings: app.drawing_workspace.selection_is_drawings,
             sheet: app.drawing_workspace.selection_sheet,
             page: app.drawing_workspace.page_view,
@@ -229,6 +239,8 @@ impl ReceiverScope {
         app.session.model_focus = self.model_focus;
         app.session.selection = self.selection;
         app.drawing_workspace.selection_away = self.away;
+        app.session.selection_all_bodies = self.all;
+        app.drawing_workspace.selection_all_away = self.all_away;
         app.drawing_workspace.selection_is_drawings = self.drawings;
         app.drawing_workspace.selection_sheet = self.sheet;
         crate::drawing_sheet_page::activate_view(app, self.page);
@@ -1791,7 +1803,7 @@ mod tests {
 
         h.step(&json!({"key":"Escape"})).unwrap();
         h.frames(2);
-        assert!(h.app.session.selection.is_empty(), "Escape clears the selection");
+        assert!(!h.app.session.has_selection(), "Escape clears the selection");
 
         h.step(&json!({"key":"A", "cmd": true})).unwrap();
         h.frames(2);
@@ -1812,7 +1824,7 @@ mod tests {
         let left = h.app.session.drawing("drawing.inspect").unwrap();
         assert!(left.view(a).is_none() && left.view(b).is_some(), "Delete removes only the selected view");
         assert_eq!(h.app.session.undo.len(), undo + 1, "in one undo step");
-        assert!(h.app.session.selection.is_empty());
+        assert!(!h.app.session.has_selection());
 
         h.step(&json!({"key":"Z", "cmd": true})).unwrap();
         h.frames(2);
@@ -1842,7 +1854,9 @@ mod tests {
         h.frames(2);
         assert!(!placing_dimension(&h.app), "and Esc puts it down");
 
-        h.call("ui.shortcut", json!({"command": "sketch.dimension", "key": "M"}));
+        // M is now Sketch Move's default. Explicitly replace that sketch binding.
+        let bound = h.call("ui.shortcut", json!({"command": "sketch.dimension", "key": "M", "replace": true}));
+        assert!(bound["error"].is_null(), "{bound}");
         h.step(&json!({"key":"D"})).unwrap();
         h.frames(2);
         assert!(!placing_dimension(&h.app), "the old key no longer starts it");

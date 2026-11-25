@@ -382,7 +382,7 @@ fn rust(i: &Inputs, mut b: Brep, initial: [f64; 2]) -> Result<Output, HarnessErr
                     id(split.edges.map(|v| v[1])),
                     id(split.vertex),
                 ]);
-                Ok(split.status())
+                Ok(crate::output::split_edge_status(split))
             }
             5 => {
                 let face = if i.variant == 1 {
@@ -553,6 +553,7 @@ fn rust(i: &Inputs, mut b: Brep, initial: [f64; 2]) -> Result<Output, HarnessErr
         Ok(code) => {
             record.insert(0, f64::from(code));
             canon_record(&b, i.op, &mut record);
+            crate::trim_hook::observe(&mut b);
             skeleton_caches(&mut b);
             Ok(graph_reachable(&b, record))
         }

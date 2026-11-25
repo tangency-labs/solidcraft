@@ -9,18 +9,18 @@ use solidcore_record::Vec3;
 use solidcraft_sketch::CurveKind;
 
 use super::CommandSpec;
-use crate::params::{bad, bool_, str_, string_list};
+use crate::params::{bad, bool_, str_, string_list, vec3};
 use crate::schema::inspect::{
     BodiesDetail, ClassifiedPoint, ClassifyPointsParams, ClassifyPointsResult, DocumentBodies, GeometryDefect, TimelineDetail, TimelineRow,
 };
 use crate::schema::inspect::{
     BodyFailure, BodyFeaturesParams, BodyFigures, BodyListParams, BodyMeasurement, BodyName, BodyNames, BodyOutcome, BoundingBox,
-    ColoredComponentsParams, ColoredComponentsResult, CommandEntry, CommandsParams, CurveShape, DocumentBody, DocumentBodyDetail,
-    DocumentInspectParams, DocumentInspectResult, DocumentParam, DocumentRevisionParams, DocumentSketch, FaceCylinder, KernelCounts, ListedMaterial,
-    MaterialAssignParams, MaterialAssignResult, MaterialListParams, MaterialListResult, MeasureParams, MeasureResult, MeasureTotal, Measured,
-    MeasuredBodies, MeasuredBody, ModelBodyFeatures, ModelEdge, ModelEdges, ModelFace, ModelFaces, ModelThread, ModelThreads, ModelThreadsParams,
-    PointFixedBy, RevisionResult, SketchConstraint, SketchCurve, SketchInspectParams, SketchInspected, SketchPoint, SketchProfile, SketchWire,
-    SplineTangentHandle, TimelineEntry, TimelineSummary, WireArcInfo,
+    ColoredComponentsParams, ColoredComponentsResult, CommandEntry, CommandsParams, CurveShape, DiskStamp, DocInfoParams, DocInfoResult,
+    DocumentBody, DocumentBodyDetail, DocumentInspectParams, DocumentInspectResult, DocumentParam, DocumentRevisionParams, DocumentSketch,
+    FaceCylinder, KernelCounts, ListedMaterial, MaterialAssignParams, MaterialAssignResult, MaterialListParams, MaterialListResult, MeasureParams,
+    MeasureResult, MeasureTotal, Measured, MeasuredBodies, MeasuredBody, ModelBodyFeatures, ModelEdge, ModelEdges, ModelFace, ModelFaces,
+    ModelThread, ModelThreads, ModelThreadsParams, PointFixedBy, RevisionResult, SketchConstraint, SketchCurve, SketchInspectParams, SketchInspected,
+    SketchPoint, SketchProfile, SketchWire, SplineTangentHandle, TimelineEntry, TimelineSummary, WireArcInfo, WireControlInfo,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -33,6 +33,7 @@ const BODY_FEATURES_CONTRACT: TypedContract<BodyFeaturesParams> = TypedContract:
 const MEASURE_CONTRACT: TypedContract<MeasureParams> = TypedContract::new();
 const DOCUMENT_INSPECT_CONTRACT: TypedContract<DocumentInspectParams> = TypedContract::new();
 const DOCUMENT_REVISION_CONTRACT: TypedContract<DocumentRevisionParams> = TypedContract::new();
+const DOC_INFO_CONTRACT: TypedContract<DocInfoParams> = TypedContract::new();
 const SKETCH_INSPECT_CONTRACT: TypedContract<SketchInspectParams> = TypedContract::new();
 const MATERIAL_ASSIGN_CONTRACT: TypedContract<MaterialAssignParams> = TypedContract::new();
 const MATERIAL_LIST_CONTRACT: TypedContract<MaterialListParams> = TypedContract::new();
@@ -73,7 +74,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo().read_only()
         .contract(&MEASURE_CONTRACT)
         .output(output_schema_for::<MeasureResult>)
-        .params("bodies?: [names] (default all); names_only?: bool (each world body's name and its definition's, nothing measured) → closed per body; volume_mm3, center_of_mass, density_g_cm3 and mass_g only for closed, consistently oriented bodies; area, bbox and counts for all; total.open_bodies_skipped counts bodies excluded from volume/mass totals; or items: [1-2 selections] (face/edge: type, body, and point on it or index from model.faces/model.edges, or both) → length/area/volume; a face's perimeter_mm, with outer_perimeter_mm and inner_perimeter_mm on a flat face with holes; diameter, radius, circumference or arc_length/angle_deg of circles, arcs and cylinders; slot sizes; min (distance_mm, from, to), max, center_distance (centre to centre, or from an axis) and angle"),
+        .params("bodies?: [names] (default all); within?: {min:[x,y,z], max:[x,y,z]} (world mm); mode?: intersects|inside (default intersects, includes touching); names_only?: bool (each world body's name and its definition's, nothing measured) → closed per body; volume_mm3, center_of_mass, density_g_cm3 and mass_g only for closed, consistently oriented bodies; area, bbox and counts for all; total.open_bodies_skipped counts bodies excluded from volume/mass totals; or items: [1-2 selections] (face/edge: type, body, and point on it or index from model.faces/model.edges, or both) → length/area/volume; a face's perimeter_mm, with outer_perimeter_mm and inner_perimeter_mm on a flat face with holes; diameter, radius, circumference or arc_length/angle_deg of circles, arcs and cylinders; slot sizes; min (distance_mm, from, to), max, center_distance (centre to centre, or from an axis) and angle"),
     CommandSpec::new("document.inspect", "Inspect Design", crate::checked!("document.inspect", inspect))
         .icon("inspect")
         .noundo().read_only()
@@ -94,6 +95,21 @@ pub static COMMANDS: &[CommandSpec] = &[
          revision (moves whenever the design, what is hidden or a component's uncaptured position changes, \
          never on a selection or a view; from one counter for the whole run, so it never repeats). Read-only",
     ),
+    CommandSpec::new("doc.info", "Design File Info", crate::checked!("doc.info", design_file_info))
+        .any_part()
+        .doc_only()
+        .icon("inspect")
+        .noundo()
+        .read_only()
+        .contract(&DOC_INFO_CONTRACT)
+        .output(output_schema_for::<DocInfoResult>)
+        .params(
+            "→ path (the design's file; null until it is first saved), read_only (a save to its own file is refused), \
+             unsaved (changes its file does not hold, as document.inspect's dirty), disk ({len, modified_ns}: size in bytes and \
+             modification time in nanoseconds since the Unix epoch as a decimal string, when it was opened or last saved; \
+             null without a file, in the browser, or when they could not be read), \
+             document_id (as document.revision). In a plugin run: the design the run started on, as it was before the run. Read-only",
+        ),
     CommandSpec::new("sketch.inspect", "Inspect Sketch", crate::checked!("sketch.inspect", sketch_inspect))
         .at("SKETCH", "INSPECT")
         .icon("inspect")
@@ -243,7 +259,7 @@ fn measure_sheet(b: &solidcraft_doc::ModelBody, definitions: Option<&solidcraft_
     let name = b.name.clone();
     match measure_body(b, definitions) {
         Ok(m) => {
-            let closed = encloses_volume(&b.body);
+            let closed = b.is_closed();
             let outcome = BodyOutcome::Measured(BodyFigures {
                 closed,
                 volume_mm3: closed.then_some(m.volume),
@@ -289,17 +305,55 @@ impl BodyMeasurement {
     }
 }
 
+/// Parse the region before any measurement; a malformed box must never become an unfiltered query.
+fn measure_region(p: &Value, cmd: &str) -> Result<Option<(solidcraft_geom::Aabb3, bool)>> {
+    let Some(region) = p.get("within") else {
+        if p.get("mode").is_some() {
+            return Err(bad(cmd, "`mode` requires `within`"));
+        }
+        return Ok(None);
+    };
+    let min = region.get("min").and_then(vec3).ok_or_else(|| bad(cmd, "`within.min` must be a point [x, y, z]"))?;
+    let max = region.get("max").and_then(vec3).ok_or_else(|| bad(cmd, "`within.max` must be a point [x, y, z]"))?;
+    let bounds = solidcraft_geom::Aabb3 { min, max };
+    if bounds.is_empty() {
+        return Err(bad(cmd, "`within.min` must not exceed `within.max`"));
+    }
+    let inside = match p.get("mode") {
+        None => false,
+        Some(Value::String(mode)) if mode == "intersects" => false,
+        Some(Value::String(mode)) if mode == "inside" => true,
+        _ => return Err(bad(cmd, "`mode` must be intersects or inside")),
+    };
+    Ok(Some((bounds, inside)))
+}
+
 fn measure(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "inspect.measure";
     if let Some(items) = p.get("items") {
+        if p.get("within").is_some() || p.get("mode").is_some() {
+            return Err(bad(cmd, "`within` and `mode` cannot be combined with `items`"));
+        }
         return super::measure_sel::measure_items(s, items);
     }
+    let region = measure_region(p, cmd)?;
     let want = string_list(cmd, p, "bodies")?;
     let definitions = s.model.state();
     let st = s.world_state()?;
-    let selected: Vec<_> = st.bodies.iter().filter(|b| want.is_empty() || want.contains(&b.name)).collect();
+    let mut selected: Vec<_> = st.bodies.iter().filter(|b| want.is_empty() || want.contains(&b.name)).collect();
     if !want.is_empty() && selected.len() != want.len() {
         return Err(bad(cmd, "unknown body name"));
+    }
+    if let Some((region, inside)) = region {
+        let mut matches = Vec::new();
+        for body in selected {
+            let bounds = body.body.exact_bounds().map_err(|e| bad(cmd, format!("could not bound `{}`: {e}", body.name)))?;
+            let matches_region = if inside { region.contains(bounds.min) && region.contains(bounds.max) } else { region.meets(&bounds) };
+            if !bounds.is_empty() && matches_region {
+                matches.push(body);
+            }
+        }
+        selected = matches;
     }
     if bool_(p, "names_only").unwrap_or(false) {
         let bodies: Vec<_> = selected.iter().map(|b| BodyName { name: b.name.clone(), definition: b.definition_name().to_string() }).collect();
@@ -513,6 +567,7 @@ fn sketch_json(s: &Session, world: &solidcraft_doc::ModelState, id: u64) -> Opti
                 end: a.end.into(),
                 sweep_deg: solidcraft_sketch::arc_sweep(&a).to_degrees(),
             }),
+            control: w.control.map(|c| WireControlInfo { degree: c.degree, points: w.fit.iter().map(|&p| p.into()).collect() }),
         })
         .collect();
     Some(SketchInspected {
@@ -630,6 +685,27 @@ fn geometry_defects(s: &Session) -> Vec<GeometryDefect> {
         }));
     }
     out
+}
+
+impl Session {
+    /// What `doc.info` says of this session's own design (a scratch copy names its source's file).
+    pub(crate) fn doc_info(&self) -> DocInfoResult {
+        DocInfoResult {
+            path: self.path.clone().or_else(|| self.source_path.clone()),
+            read_only: self.read_only,
+            unsaved: self.is_dirty(),
+            disk: self.disk.map(|d| DiskStamp { len: d.len, modified_ns: d.modified_ns.map(|ns| ns.to_string()) }),
+            document_id: self.document_id.clone(),
+            param_warnings: Vec::new(),
+        }
+    }
+}
+
+/// `doc.info`: in a plugin run, the design the run started on as it was before the run
+/// (`AppState::caller_design`); a design the run opened itself, or any other session, answers for itself.
+fn design_file_info(s: &mut Session, _p: &Value) -> Result<Value> {
+    let info = s.plugin_state.caller_design.clone().filter(|c| c.document_id == s.document_id).unwrap_or_else(|| s.doc_info());
+    reply("doc.info", info)
 }
 
 fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
@@ -798,7 +874,7 @@ fn reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
 /// Read the existing exact classifier; face choice and normal evaluation also stay in the kernel.
 fn classify_points(s: &mut Session, p: &Value) -> Result<Value> {
     use crate::schema::FaceRef;
-    use solidcore_ops::{ClassifiedPoint as KernelPoint, PointNormalFace};
+    use solidcraft_kernel::services::{ClassifiedPoint as KernelPoint, PointNormalFace};
 
     let cmd = "inspect.classify_points";
     let args: ClassifyPointsParams = serde_json::from_value(p.clone()).map_err(|e| bad(cmd, e.to_string()))?;
@@ -998,7 +1074,7 @@ pub(super) fn appearance(s: &mut Session, p: &Value) -> Result<Value> {
                 Some(n) => st.body(n).filter(|b| on(b)).map(|b| b.name.clone()),
                 None => st.bodies.iter().filter(|b| on(b)).min_by(|a, b| dist_to(a, pt).total_cmp(&dist_to(b, pt))).map(|b| b.name.clone()),
             };
-            faces.push((body.ok_or_else(|| bad(cmd, format!("no face at {pt:?}")))?, pt));
+            faces.push((body.ok_or_else(|| bad(cmd, format!("no face at {pt}")))?, pt));
         }
     }
     let mut comps: Vec<u64> = Vec::new();

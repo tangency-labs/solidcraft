@@ -14,7 +14,6 @@ mod common;
 
 use common::{all_fixes, built, edge_at};
 use solidcore::boolean::api_brep::{boolean_difference, boolean_intersection};
-use solidcore::kernel::UpstreamFixes;
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore_ops::session;
@@ -163,24 +162,33 @@ fn a_pyramid_apex_s_four_chamfers_take_the_facet() {
     assert!(chamfer(&b, &order, &e, d, ChamferCorner::Mitre).is_err());
 }
 
-/// The Facet is the kernel's blend corner's, under its `fillet_chamfer_corner` fix: without it
-/// the Facet is refused, not built as something else; on a round it is an argument error.
+/// The blend corner's chamfer event is the only chamfer corner: with no fix turned on, the box
+/// corner's mitre and Facet are the closed forms of
+/// [`a_box_corner_s_three_chamfers_mitre_or_take_the_facet`] (the Facet once needed a fix and was
+/// refused without it).
 #[test]
-fn the_facet_without_its_fix_or_on_a_round_is_refused() {
-    session::set_thread_fixes(
-        UpstreamFixes::NAMES
-            .iter()
-            .copied()
-            .filter(|n| *n != "fillet_chamfer_corner"),
-    )
-    .unwrap();
-    let (b, order, e) = box_corner();
-    assert_eq!(
-        chamfer(&b, &order, &e, 2.0, ChamferCorner::Facet).err(),
-        Some(Error::Unsupported(
-            "the chamfered corner needs the kernel's fillet_chamfer_corner fix"
-        ))
-    );
+fn the_box_corner_s_mitre_and_facet_need_no_fix() {
+    session::set_thread_fixes(std::iter::empty()).unwrap();
+    let d = 2.0_f64;
+    let mitre = 45.0 * d * d - 3.0 * d * d * d / 4.0;
+    let facet = mitre + d * d * d / 12.0;
+    for (corner, removed, faces) in [
+        (ChamferCorner::Mitre, mitre, 9),
+        (ChamferCorner::Facet, facet, 10),
+    ] {
+        let (b, order, e) = box_corner();
+        chamfer(&b, &order, &e, d, corner).unwrap();
+        let v = b.volume(1e-10).unwrap();
+        let want = 24000.0 - removed;
+        assert!((v - want).abs() <= 1e-9 * want, "{corner:?}: {v} vs {want}");
+        assert_eq!(b.counts().unwrap()[0], faces, "{corner:?}");
+    }
+    all_fixes();
+}
+
+/// The Facet is the chamfers' corner type: on a round it is an argument error.
+#[test]
+fn the_facet_on_a_round_is_refused() {
     all_fixes();
     let (b, order, e) = box_corner();
     let r = blend_ordered(

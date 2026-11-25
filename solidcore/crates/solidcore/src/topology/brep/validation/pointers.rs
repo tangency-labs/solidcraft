@@ -25,7 +25,7 @@
 //! `ok_to_make_uv_trim_curve = FALSE`, so the `const` validation no longer stores a
 //! new UV trim curve on a neighbour that had none. The 3D evaluation, its drop onto
 //! the existing face and every status are kept.
-use super::{invalid, required, Object, Reports, ERROR, SUCCESS};
+use super::{invalid, required, Object, Reports};
 use crate::curve::curve::Curve;
 use crate::error::{EntityRef, Result};
 use crate::geom::assert_array::{AssertArray, AssertReport, ReportSpec};
@@ -359,10 +359,31 @@ fn preflight(b: &Brep, r: &mut Reports<'_>, cache: &mut Lists) -> Result<bool> {
     Ok(true)
 }
 
+/// What [`validate_pointers`] concluded about a body's topology links.
+///
+/// Ordinary failed checks are reports in the report array, not a different result: a pass
+/// that only added reports is still [`PointerCheck::Passed`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum PointerCheck {
+    /// Every required link was walked; failed checks, if any, are in the reports.
+    Passed,
+    /// A required link was missing before the walk (the preflight, or an edgeuse owned by
+    /// nothing live), or the geometric vertex exclusion failed with no report array to hold it.
+    Failed,
+    /// The walk stopped at a missing link it had just reported, before checking the rest.
+    StoppedEarly,
+}
+
+impl PointerCheck {
+    /// Whether the check passed.
+    pub fn is_passed(self) -> bool {
+        self == PointerCheck::Passed
+    }
+}
+
 /// Runs `SmBrep::ValidatePointers`, appending its failed reports in native order.
-/// `walk` skips `CheckFace`'s loop checks, as `SM_WALK` does. The returned integer
-/// preserves native `SM_SUCCESS` (1000), required-pointer failure (1001), and the
-/// early boolean return (0). Ordinary failed checks are reports, not an error status.
+/// `walk` skips `CheckFace`'s loop checks, as `SM_WALK` does. Ordinary failed checks
+/// are reports, not a failed result; see [`PointerCheck`] for what each result means.
 /// Geometric exclusion also returns failure when the caller omits the report array.
 /// `keys` supplies the caller's topology identities used by curve-owner checks.
 /// `level` is the native `SM_LEVEL_0` through `SM_LEVEL_GIVEN` (0 through 4).
@@ -373,13 +394,18 @@ pub fn validate_pointers(
     level: u8,
     walk: bool,
     keys: &dyn Fn(EntityRef) -> crate::geom::object::ObjectRef,
-) -> Result<i32> {
-    Ok(validate_pointers_excluding(k, b, reports, level, walk, keys)?.0)
+) -> Result<PointerCheck> {
+    Ok(validate_pointers_excluding(k, b, reports, level, walk, keys, true)?.0)
 }
 
 /// [`validate_pointers`], also saying whether the geometric vertex exclusion (Test #82 for a
 /// vertex at or past the ratio) failed. With a report array that failure is only a report and
 /// the status stays success; `AssertValid` needs it to agree with the reports it carries.
+///
+/// Not upstream (#21105): `repair_ends` straightens an edge curve or UV trim end that turns
+/// back on itself, as upstream's `ValidatePointers` does (`N_CrvIsNotReversed` with
+/// `Fixit = TRUE`); without it the pass leaves the curve as it is and reports the end as
+/// warning 147. [`validate_pointers`], the operation, repairs; a validity check does not.
 pub(crate) fn validate_pointers_excluding(
     k: &Kernel,
     b: &mut Brep,
@@ -387,8 +413,9 @@ pub(crate) fn validate_pointers_excluding(
     level: u8,
     walk: bool,
     keys: &dyn Fn(EntityRef) -> crate::geom::object::ObjectRef,
-) -> Result<(i32, bool)> {
-    validate_pointers_traced(k, b, reports, level, walk, keys, &mut true)
+    repair_ends: bool,
+) -> Result<(PointerCheck, bool)> {
+    validate_pointers_traced(k, b, reports, level, walk, keys, &mut true, repair_ends)
 }
 
 /// [`validate_pointers_excluding`], also clearing `faces_whole` (not upstream) when a face's
@@ -403,7 +430,8 @@ pub(crate) fn validate_pointers_traced(
     walk: bool,
     keys: &dyn Fn(EntityRef) -> crate::geom::object::ObjectRef,
     faces_whole: &mut bool,
-) -> Result<(i32, bool)> {
+    repair_ends: bool,
+) -> Result<(PointerCheck, bool)> {
     if level > 4 {
         return Err(invalid("invalid assert test level"));
     }
@@ -413,7 +441,7 @@ pub(crate) fn validate_pointers_traced(
     };
     let mut cache = Lists::new(b);
     if !preflight(b, &mut r, &mut cache)? {
-        return Ok((ERROR, false));
+        return Ok((PointerCheck::Failed, false));
     }
     r.check(
         b,
@@ -445,7 +473,7 @@ pub(crate) fn validate_pointers_traced(
             };
             if !ok {
                 r.check(b, 98, false, EntityRef::Edgeuse(eu))?;
-                return Ok((ERROR, false));
+                return Ok((PointerCheck::Failed, false));
             }
         }
     }
@@ -523,7 +551,7 @@ pub(crate) fn validate_pointers_traced(
         }
         let Some(fu) = face.faceuse else {
             r.check(b, 12, false, EntityRef::Face(f))?;
-            return Ok((0, false));
+            return Ok((PointerCheck::StoppedEarly, false));
         };
         r.check(b, 13, true, EntityRef::Faceuse(fu))?;
         r.check(
@@ -534,7 +562,7 @@ pub(crate) fn validate_pointers_traced(
         )?;
         let Some(fum) = b.faceuse(fu)?.mate else {
             r.check(b, 15, false, EntityRef::Faceuse(fu))?;
-            return Ok((0, false));
+            return Ok((PointerCheck::StoppedEarly, false));
         };
         for (i, ok, owner) in [
             (16, true, EntityRef::Faceuse(fum)),
@@ -557,11 +585,11 @@ pub(crate) fn validate_pointers_traced(
         }
         let Some(s1) = b.faceuse(fu)?.shell else {
             r.check(b, 23, false, EntityRef::Faceuse(fu))?;
-            return Ok((0, false));
+            return Ok((PointerCheck::StoppedEarly, false));
         };
         let Some(s2) = b.faceuse(fum)?.shell else {
             r.check(b, 24, false, EntityRef::Faceuse(fum))?;
-            return Ok((0, false));
+            return Ok((PointerCheck::StoppedEarly, false));
         };
         for (i, ok, s) in [
             (25, true, s1),
@@ -580,11 +608,11 @@ pub(crate) fn validate_pointers_traced(
             r.check(b, 29, loop_face == f, EntityRef::Loop(l))?;
             let Some(lu) = b.loop_(l)?.loopuse else {
                 r.check(b, 30, false, EntityRef::Loop(l))?;
-                return Ok((0, false));
+                return Ok((PointerCheck::StoppedEarly, false));
             };
             let Some(lum) = b.loopuse(lu)?.mate else {
                 r.check(b, 31, false, EntityRef::Loop(l))?;
-                return Ok((0, false));
+                return Ok((PointerCheck::StoppedEarly, false));
             };
             for (i, owner) in [
                 (32, EntityRef::Loop(l)),
@@ -649,7 +677,7 @@ pub(crate) fn validate_pointers_traced(
                 }
                 if !matches!(b.loopuse(this)?.start, LoopuseStart::Edgeuse(Some(_))) {
                     r.check(b, missing, false, EntityRef::Loopuse(this))?;
-                    return Ok((0, false));
+                    return Ok((PointerCheck::StoppedEarly, false));
                 }
                 for eu in cache.walk(b, this)? {
                     r.check(b, offset, true, EntityRef::Edgeuse(eu))?;
@@ -698,7 +726,7 @@ pub(crate) fn validate_pointers_traced(
             r.check(b, 111, mated, EntityRef::Loopuse(lu))?;
         }
     }
-    check_edges(k, b, &mut r, &cache, keys)?;
+    check_edges(k, b, &mut r, &cache, keys, repair_ends)?;
     check_vertices(b, &mut r)?;
     for region in p1::regions(b, None)? {
         for &s in &b.region(region)?.shells {
@@ -769,7 +797,7 @@ pub(crate) fn validate_pointers_traced(
             let list = &b.faceuse(this)?.loopuses;
             let Some(&first) = list.first() else {
                 r.check(b, missing, false, EntityRef::Faceuse(this))?;
-                return Ok((0, false));
+                return Ok((PointerCheck::StoppedEarly, false));
             };
             r.check(
                 b,
@@ -835,9 +863,9 @@ pub(crate) fn validate_pointers_traced(
     r.failed |= !topology_intact;
     // Without a report array the status is the caller's only refusal signal.
     if exclusion_failed && r.array.is_none() {
-        return Ok((ERROR, true));
+        return Ok((PointerCheck::Failed, true));
     }
-    Ok((SUCCESS, exclusion_failed))
+    Ok((PointerCheck::Passed, exclusion_failed))
 }
 
 fn check_edges(
@@ -846,6 +874,7 @@ fn check_edges(
     r: &mut Reports<'_>,
     cache: &Lists,
     keys: &dyn Fn(EntityRef) -> crate::geom::object::ObjectRef,
+    repair_ends: bool,
 ) -> Result<()> {
     for e in p1::edges(b, None)? {
         r.check(b, 57, true, EntityRef::Edge(e))?;
@@ -876,12 +905,16 @@ fn check_edges(
             b.tolerance() * 0.99,
             tol,
         )?;
-        let good = match check_edge_geometry(k, b, e, cache, keys) {
-            Ok(()) => true,
+        let (good, turned_back) = match check_edge_geometry(k, b, e, cache, keys, repair_ends) {
+            Ok(turned_back) => (true, turned_back),
             Err(err) if err.is_unported_or_cancelled() => return Err(err),
-            Err(_) => false,
+            Err(_) => (false, false),
         };
         r.check(b, 61, good, EntityRef::Edge(e))?;
+        // Not upstream (#21105): an end that turns back is reported, not repaired
+        if turned_back {
+            r.warning(b, 147, EntityRef::Edge(e))?;
+        }
         let uses = b.edge(e)?.edgeuses.clone();
         r.check(b, 62, uses.len() % 2 == 0, EntityRef::Edge(e))?;
         let mut last = b.edgeuse(required(uses.last().copied())?)?.orientation;
@@ -2001,36 +2034,10 @@ fn first_fundamental_form(
 /// fork's `PassesReverseDirectionCheckOn`): a trim whose end the surface cannot
 /// evaluate is left unfixed, and a 3D curve takes the plain test.
 fn fix_reversed_on(k: &Kernel, c: &mut Curve, surface: Option<&Surface>) -> Result<()> {
-    use crate::curve::curve::CurveKind;
     let owner = c.owner();
     let edge_zone_tol_3d = c.owner_zone_tol_3d();
-    let base = match c.kind_mut() {
-        CurveKind::BSpline(base) => base,
-        CurveKind::Line(line) => {
-            if line.base().gw_nurb().is_none() {
-                line.make_nurb()?;
-            }
-            line.base_mut()
-        }
-        CurveKind::Ellipse(ellipse) => {
-            if ellipse.base().gw_nurb().is_none() {
-                ellipse.make_nurb_owned_with_edge_tol(k, owner, edge_zone_tol_3d)?;
-            }
-            ellipse.base_mut()
-        }
-        CurveKind::Hyperbola(h) => {
-            if h.base().gw_nurb().is_none() {
-                h.make_nurb(owner)?;
-            }
-            h.base_mut()
-        }
-        CurveKind::Parabola(p) => {
-            if p.base().gw_nurb().is_none() {
-                p.make_nurb(owner)?;
-            }
-            p.base_mut()
-        }
-        _ => return Ok(()),
+    let Some(base) = nurb_base(k, c, owner, edge_zone_tol_3d)? else {
+        return Ok(());
     };
     let surface = surface.filter(|_| base.dim == 2);
     let points = base.get_or_create_gw_nurb()?.cpts_mut();
@@ -2064,6 +2071,74 @@ fn fix_reversed_on(k: &Kernel, c: &mut Curve, surface: Option<&Surface>) -> Resu
         }
     }
     Ok(())
+}
+
+/// The curve base [`fix_reversed_on`] straightens, with its NURB made first where it has
+/// none (a line's, or a conic's for its owner `owner` and the owner's zone tolerance
+/// `edge_zone_tol_3d`); `None` for a curve kind it leaves as it is.
+fn nurb_base<'c>(
+    k: &Kernel,
+    c: &'c mut Curve,
+    owner: Option<crate::geom::object::ObjectRef>,
+    edge_zone_tol_3d: Option<f64>,
+) -> Result<Option<&'c mut crate::nurbs::b_spline_curve::p1::BSplineCurve>> {
+    use crate::curve::curve::CurveKind;
+    Ok(Some(match c.kind_mut() {
+        CurveKind::BSpline(base) => base,
+        CurveKind::Line(line) => {
+            if line.base().gw_nurb().is_none() {
+                line.make_nurb()?;
+            }
+            line.base_mut()
+        }
+        CurveKind::Ellipse(ellipse) => {
+            if ellipse.base().gw_nurb().is_none() {
+                ellipse.make_nurb_owned_with_edge_tol(k, owner, edge_zone_tol_3d)?;
+            }
+            ellipse.base_mut()
+        }
+        CurveKind::Hyperbola(h) => {
+            if h.base().gw_nurb().is_none() {
+                h.make_nurb(owner)?;
+            }
+            h.base_mut()
+        }
+        CurveKind::Parabola(p) => {
+            if p.base().gw_nurb().is_none() {
+                p.make_nurb(owner)?;
+            }
+            p.base_mut()
+        }
+        _ => return Ok(None),
+    }))
+}
+
+/// Not upstream (#21105): whether [`fix_reversed_on`] would straighten an end of `c`,
+/// judged without writing to it. A check reports a turned-back end instead of repairing
+/// it: the curve's own NURB is read, and a curve without one is judged on a copy given
+/// the NURB the repair would make (from `c`'s owner, which the copy does not keep).
+fn ends_turned_back(k: &Kernel, c: &Curve, surface: Option<&Surface>) -> Result<bool> {
+    use crate::curve::curve::CurveKind;
+    let base = match c.kind() {
+        CurveKind::BSpline(base) => base,
+        CurveKind::Line(line) => line.base(),
+        CurveKind::Ellipse(ellipse) => ellipse.base(),
+        CurveKind::Hyperbola(h) => h.base(),
+        CurveKind::Parabola(p) => p.base(),
+        _ => return Ok(false),
+    };
+    if let Some(nurb) = base.gw_nurb() {
+        let surface = surface.filter(|_| base.dim == 2);
+        return Ok(turned_ends(k, nurb.cpts(), surface)?.is_some_and(|t| t.contains(&true)));
+    }
+    let mut copy = c.clone();
+    let Some(base) = nurb_base(k, &mut copy, c.owner(), c.owner_zone_tol_3d())? else {
+        return Ok(false);
+    };
+    // (the dimension as `fix_reversed_on` reads it: after the NURB is made)
+    let surface = surface.filter(|_| base.dim == 2);
+    let points = base.get_or_create_gw_nurb()?.cpts();
+    Ok(turned_ends(k, points, surface)?.is_some_and(|t| t.contains(&true)))
 }
 
 /// Which ends (`[start, end]`) of the control polygon `points` turn back, as
@@ -2159,14 +2234,15 @@ fn check_edge_geometry(
     e: EdgeId,
     cache: &Lists,
     keys: &dyn Fn(EntityRef) -> crate::geom::object::ObjectRef,
-) -> Result<()> {
+    repair_ends: bool,
+) -> Result<bool> {
     let primary = required(b.edge(e)?.edgeuses.first().copied())?;
     let eu = if b.edgeuse(primary)?.orientation == OrientType::Same {
         primary
     } else {
         required(cache.mate(b, primary, false)?)?
     };
-    edge_geometry(k, b, e, eu, false, keys)
+    edge_geometry(k, b, e, eu, false, repair_ends, keys)
 }
 
 /// `SmEdge::ValidateGeometry(bFixTolerances)` (CO-PORTED by unit
@@ -2190,7 +2266,7 @@ pub(crate) fn validate_geometry(
     } else {
         required(eu1::mate(b, primary)?)?
     };
-    edge_geometry(k, b, e, eu, fix_tolerances, keys)
+    edge_geometry(k, b, e, eu, fix_tolerances, true, keys).map(|_| ())
 }
 
 /// The body of `SmEdge::ValidateGeometry(bFixTolerances)` from the edge use `eu` the
@@ -2198,27 +2274,38 @@ pub(crate) fn validate_geometry(
 /// tolerances allow, but closer than 100 vertex tolerances, grows the vertex tolerance
 /// to twice the gap instead of failing, and a UV trim curve whose interval differs from
 /// the edge's is reparameterized to it.
+///
+/// Not upstream (#21105): a curve end that turns back on itself (`N_CrvIsNotReversed`,
+/// which upstream calls with `Fixit = TRUE`) is straightened only with `repair_ends`, as
+/// upstream's `ValidateGeometry` and `ValidatePointers` do; a validity check (`repair_ends`
+/// false) leaves the curve as it is and returns whether the edge curve or a UV trim has
+/// such an end, for the check to report as a warning (upstream logs `SM_ERR_WARNING` and
+/// returns success either way).
 fn edge_geometry(
     k: &Kernel,
     b: &mut Brep,
     e: EdgeId,
     eu: EdgeuseId,
     fix_tolerances: bool,
+    repair_ends: bool,
     keys: &dyn Fn(EntityRef) -> crate::geom::object::ObjectRef,
-) -> Result<()> {
+) -> Result<bool> {
     let vu = required(b.edgeuse(eu)?.vertexuse)?;
     let start = required(b.vertexuse(vu)?.vertex)?;
     let end = required(edge::other_vertex(b, e, Some(start))?)?;
-    if reversed_needs_fix(k, required(b.edge(e)?.curve.as_ref())?, None)? {
+    let mut turned_back = false;
+    if !repair_ends {
+        turned_back |= ends_turned_back(k, required(b.edge(e)?.curve.as_ref())?, None)?;
+    } else if reversed_needs_fix(k, required(b.edge(e)?.curve.as_ref())?, None)? {
         fix_reversed(k, required(b.edge_mut(e)?.curve.as_mut())?)?;
     }
     let curve = required(b.edge(e)?.curve.as_ref())?;
     // The owner naming scheme belongs to the caller; the type and edge-owner
     // identity resolved by that caller are kept by the curve itself.
     if curve.owner() != Some(keys(EntityRef::Edge(e))) {
-        return Err(crate::SolidError::topology_failed(
+        return Err(crate::SolidError::topology(
             super::OP,
-            "the edge's curve is not owned by the edge",
+            crate::error::topology::TopologyFailure::CurveNotOwnedByEdge,
         ));
     }
     let ivl = b.edge(e)?.interval;
@@ -2232,9 +2319,12 @@ fn edge_geometry(
                 let zone = tol::zone_tol3d(k, dist * 2.0);
                 crate::topology::vertex::set_tolerance(b, v, zone, true, true)?;
             } else {
-                return Err(crate::SolidError::topology_failed(
+                return Err(crate::SolidError::topology(
                     super::OP,
-                    "the edge's end is farther from its vertex than their tolerances",
+                    crate::error::topology::TopologyFailure::EdgeEndOffVertex {
+                        distance: dist,
+                        tolerance: v_tol + b.edge(e)?.tolerance,
+                    },
                 ));
             }
         }
@@ -2281,7 +2371,9 @@ fn edge_geometry(
             }
             // not upstream (WR-406, #891): the turn judged on the face's surface
             let surface = required(b.face(f)?.surface.as_ref())?.clone_for_evaluation()?;
-            if reversed_needs_fix(k, trim, Some(&surface))? {
+            if !repair_ends {
+                turned_back |= ends_turned_back(k, trim, Some(&surface))?;
+            } else if reversed_needs_fix(k, trim, Some(&surface))? {
                 fix_reversed_on(
                     k,
                     required(b.edgeuse_mut(eu)?.uv_trim_curve.as_mut())?,
@@ -2290,7 +2382,7 @@ fn edge_geometry(
             }
         }
     }
-    Ok(())
+    Ok(turned_back)
 }
 
 #[cfg(test)]
@@ -2397,6 +2489,40 @@ mod issue_891_tests {
             ..Kernel::default()
         };
         assert!(reversed_needs_fix(&off, &trim(), Some(&plane)).unwrap());
+    }
+
+    /// A curve end off its vertex by more than the vertex's and the edge's tolerance fails
+    /// as `EdgeEndOffVertex` with that gap and that tolerance, and `fix_tolerances` does
+    /// not grow a vertex 100 tolerances or more away (review of #21132).
+    #[test]
+    fn an_edge_end_off_its_vertex_reports_the_gap_and_the_tolerance() {
+        let mut k = Kernel::default();
+        let mut b = crate::primitive::api_primitives::create_box(&mut k, Vec3::ZERO, 2.0, 3.0, 4.0)
+            .unwrap();
+        let e = b.edge_list()[0];
+        let owner = b.owner_identity(EntityRef::Edge(e));
+        let keys = move |_: EntityRef| owner;
+        validate_geometry(&k, &mut b, e, false, &keys).unwrap();
+        let v = b.edge(e).unwrap().vertices[0];
+        let tolerance = b.vertex(v).unwrap().tolerance + b.edge(e).unwrap().tolerance;
+        let gap = 0.25;
+        let moved = b.vertex(v).unwrap().point + Vec3::new(0.0, 0.0, gap);
+        b.vertex_mut(v).unwrap().point = moved;
+        for fix in [false, true] {
+            let e = validate_geometry(&k, &mut b, e, fix, &keys).unwrap_err();
+            let Some(&crate::error::topology::TopologyFailure::EdgeEndOffVertex {
+                distance,
+                tolerance: exceeded,
+            }) = e.topology_failure()
+            else {
+                panic!("{e:?}");
+            };
+            assert!((distance - gap).abs() < 1e-9, "{distance}");
+            assert_eq!(exceeded, tolerance);
+            assert!(distance > exceeded);
+            assert_eq!(e.kind(), crate::error::ErrorKind::NotWithinTolerance);
+            assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        }
     }
 
     #[test]
@@ -2765,7 +2891,7 @@ mod issue_891_tests {
 
     /// `ValidatePointers` on [`half_disc`]: its status and the arc trims' middle
     /// control points before and after.
-    fn validate_half_disc() -> (i32, Vec<Vec3>, Vec<Vec3>) {
+    fn validate_half_disc() -> (PointerCheck, Vec<Vec3>, Vec<Vec3>) {
         let mut k = Kernel::default();
         let mut b = half_disc(&mut k);
         let before = rational_trim_middles(&mut b);
@@ -2782,7 +2908,7 @@ mod issue_891_tests {
     #[test]
     fn issue_891_kernel_fix_keeps_the_exact_trim() {
         let (status, before, after) = validate_half_disc();
-        assert_eq!(status, SUCCESS);
+        assert_eq!(status, PointerCheck::Passed);
         assert_eq!(before.len(), 2);
         assert_eq!(after, before);
         assert_eq!(after[0], middle_control_point(&mut trim()));
@@ -2976,10 +3102,10 @@ mod issue_891_tests {
                 .collect()
         }
 
-        type ReversalRun = (i32, Vec<EdgeuseId>, Vec<(EdgeuseId, Vec<Vec3>)>);
+        type ReversalRun = (PointerCheck, Vec<EdgeuseId>, Vec<(EdgeuseId, Vec<Vec3>)>);
 
         struct Run {
-            status: i32,
+            status: PointerCheck,
             before: Vec<EdgeuseId>,
             after: Vec<EdgeuseId>,
             arc_before: Vec<(EdgeuseId, Vec<Vec3>)>,
@@ -3029,7 +3155,7 @@ mod issue_891_tests {
             }
 
             let no_new = run();
-            assert_eq!(no_new.status, SUCCESS);
+            assert_eq!(no_new.status, PointerCheck::Passed);
 
             // No chord trim is made, and nothing present is removed.
             assert_eq!(
@@ -3088,7 +3214,7 @@ mod issue_891_tests {
         fn wr446_all_trims_present_is_inert() {
             let (s0, t0, g0) = all_present_run();
             let (s1, t1, g1) = all_present_run();
-            assert_eq!(s0, SUCCESS);
+            assert_eq!(s0, PointerCheck::Passed);
             assert_eq!(s0, s1);
             assert_eq!(t0, t1);
             assert_eq!(g0, g1);
@@ -3104,7 +3230,7 @@ mod issue_891_tests {
             let before = b.edgeuses().iter().count();
             let mut reports = AssertArray::new();
             let status = validate_pointers(&k, &mut b, Some(&mut reports), 2, true, &key).unwrap();
-            assert_eq!(status, SUCCESS);
+            assert_eq!(status, PointerCheck::Passed);
             assert!(reports.is_empty(), "{:?}", reports.reports());
             assert!(
                 trimmed_edgeuses(&b).is_empty(),

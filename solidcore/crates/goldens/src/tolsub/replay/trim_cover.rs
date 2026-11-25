@@ -4,7 +4,12 @@
 //!
 //! The `stubs4-delete-edge-sphere_diff_3cylinders` rows' main hashes are of main's
 //! run after #18971 (a fillet's rail cut near a knot snaps onto the knot), which moves
-//! those rows apart from the cover.
+//! those rows apart from the cover. WR-732's retirement (#18934) moves
+//! `topology.brep_cutting`'s `gen0050` apart from the cover (edge 8 from 1.03e-3 to 1.48e-3
+//! and its vertices with it, vertex 32 from 5.9e-4 to 1.19e-3), so its entry is deleted. Those
+//! raises are measured, not certified: `certify::trim_tolerance` has no row for this case
+//! (edge 8's trim bound is not enclosed), and its main digest is this branch's file
+//! (`trim_tolerance_main.tsv`), which records the change without proving it.
 //!
 //! The rows #17739's vertex step moves as well (19 `blend.fillet_executive_p3` bottle
 //! rows, `corpus.parity`'s `Fillet__bolt.smb`) are replayed from [`super::DATA`], with
@@ -13,6 +18,12 @@
 //! The `blend.fillet_executive_p3` hashes are of those lines without the
 //! `fillet_point_step` key, which recorded the retired step latch (#18916); every other
 //! value is the line's.
+//!
+//! The drop tracer's clamped-sliver rule (a span whose clamped UV image is one point within
+//! the drop's tolerances is left out) moves the six `sphere_diff_3cylinders` rows here
+//! (`e2-r0.1`, `e5-r0.1`, `e5-r0.5`, `sweep4` `e30` and `all`, `sweep5` `e29`) in their
+//! `mass_properties` only, so their hashes are of the put-back run with that rule;
+//! `tests/drop_clamped_sliver_moved_mass_rows.rs` classifies each moved entry against a certified enclosure.
 
 /// The moved rows: unit, case, main's row hash.
 pub(super) static TRIM_COVER: &[(&str, &str, u64)] = &[
@@ -44,32 +55,32 @@ pub(super) static TRIM_COVER: &[(&str, &str, u64)] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1",
-        0x519f703ce178594e,
+        0xa058e2b81484fdde,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1",
-        0x900b3d0679ffb2d3,
+        0x96a1c6ee8df74e77,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5",
-        0xc87fb128a0e9c4c7,
+        0xe603baa1465a7013,
     ),
     (
         "blend.fillet_executive_p3",
         "sweep4-native-crash-sphere_diff_3cylinders-e30-r0.1",
-        0x2551a1fdc689efef,
+        0x1f3a461f12a7ab77,
     ),
     (
         "blend.fillet_executive_p3",
         "sweep4-sphere_diff_3cylinders-all-r0.1",
-        0x46b24b2fc2c8dd3f,
+        0x5f0ec1d272b7bb2f,
     ),
     (
         "blend.fillet_executive_p3",
         "sweep5-sphere_diff_3cylinders-e29-r1.0",
-        0xd6e6eb94f0d8f6e6,
+        0x579757a8a8e473fa,
     ),
     (
         "blend.fillet_removal",
@@ -269,7 +280,6 @@ pub(super) static TRIM_COVER: &[(&str, &str, u64)] = &[
         "write_bytes_file_revolution_binary",
         0xa150d2288f547d54,
     ),
-    ("topology.brep_cutting", "gen0050", 0x44c8382ce6a9c9a7),
     ("topology.brep_cutting", "gen0068", 0xb157bdeddcc948f6),
     (
         "topology.brep_local_operation",

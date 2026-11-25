@@ -25,7 +25,7 @@ use super::certificate::{
 };
 use super::definition_box::{definition_enclosable, gn_def_face_of, GnDefs};
 use super::form::{gn_form, gn_form_normalized, hermite_knots, hermite_points_sided};
-use super::series::{Ser, Trunc, VSer};
+use super::series::{Trunc, VSer};
 use super::station::{
     feet_on_knots, gn_solve_station_with, smax, surface_partials, vec3, GnStation, Nurbs,
     StationOptions,
@@ -284,10 +284,12 @@ fn solve_top(
     n: usize,
     sides: Option<[i32; 4]>,
     before: bool,
-    law: Option<&Ser<f64>>,
+    law: Option<&GnLaw<'_>>,
 ) -> Result<GnStation> {
+    let series = law_series(law, s, tr.s(), before)?;
     let opts = StationOptions {
-        law,
+        law: series.as_ref(),
+        equal_setback: law.and_then(GnLaw::equal_setback),
         top: n,
         sides,
         before,
@@ -295,6 +297,19 @@ fn solve_top(
     gn_solve_station_with(k, faces, center, s, seed, r, side, tr, tol, opts)
         .0
         .map(|(st, _)| st)
+}
+
+/// The radius used by the point solve and by the enclosure of the same station.
+pub(crate) fn section_law(
+    curve: Option<&BSplineCurve>,
+    chamfer: Option<ChamferDefinition>,
+) -> Result<Option<GnLaw<'_>>> {
+    match curve {
+        Some(curve) => Ok(Some(GnLaw::of(curve)?)),
+        None => Ok(chamfer
+            .and_then(ChamferDefinition::constant_setback)
+            .map(GnLaw::EqualSetback)),
+    }
 }
 
 /// `GetNaturalInterval` as `(min, max)`.
@@ -639,7 +654,6 @@ impl StationSystem<'_> {
         sides: Option<[i32; 4]>,
     ) -> Result<GnStation> {
         let m = self.leader.evaluate_point(s)?;
-        let law_r = law_series(self.law, s, self.tr.s(), false)?;
         let mut st = solve_top(
             k,
             self.faces,
@@ -653,7 +667,7 @@ impl StationSystem<'_> {
             self.n,
             sides,
             false,
-            law_r.as_ref(),
+            self.law,
         )?;
         if self.equal_area {
             gn_station_thumbweight(k, self.n, self.r[0] * self.r[1], &mut st)?;
@@ -667,7 +681,6 @@ impl StationSystem<'_> {
     pub(crate) fn solve_before(&self, k: &Kernel, st: &mut GnStation) -> Result<()> {
         let on = [0, 1, 2, 3].map(|q| param(st, q, 0, 0));
         let m = self.leader.evaluate_point(st.s)?;
-        let law_r = law_series(self.law, st.s, self.tr.s(), true)?;
         let mut before = solve_top(
             k,
             self.faces,
@@ -681,7 +694,7 @@ impl StationSystem<'_> {
             self.n,
             Some(st.before),
             true,
-            law_r.as_ref(),
+            self.law,
         )?;
         if self.equal_area {
             gn_station_thumbweight(k, self.n, self.r[0] * self.r[1], &mut before)?;
@@ -1416,10 +1429,7 @@ impl GnSectionFsg {
                 "a radius law is for the ball's circle",
             ));
         }
-        let gn_law = match law_round {
-            Some(l) => Some(GnLaw::of(l.law)?),
-            None => None,
-        };
+        let gn_law = section_law(law_round.map(|l| l.law), chamfer)?;
         let gn_law = gn_law.as_ref();
         let leader: &BSplineCurve = law_round.map_or(center, |l| l.leader);
         let n = self.order;
@@ -1657,29 +1667,25 @@ impl GnSectionFsg {
             // a constant ball: the station's centre on the centre line at the same offsets
             let m = leader.evaluate_point(s)?;
             let solve_tol = 1.0e-9 * smax(1.0, m.length());
-            let law_r = law_series(gn_law, s, tr.s(), false)?;
             // with a ball of a given radius or law (feet_check), a station that does not
             // solve from the solver's rails (Newton from within the tolerance of a regular
             // root converges) says the rails are not that ball's feet there (c596548)
-            let solved = solve_top(
-                k,
-                faces,
-                leader,
-                s,
-                seed,
-                r,
-                side,
-                tr,
-                solve_tol,
-                n,
-                None,
-                false,
-                law_r.as_ref(),
-            );
-            let st = match solved {
-                Ok(st) => st,
+            let series = law_series(gn_law, s, tr.s(), false)?;
+            let opts = StationOptions {
+                law: series.as_ref(),
+                equal_setback: gn_law.and_then(GnLaw::equal_setback),
+                top: n,
+                sides: None,
+                before: false,
+            };
+            let solved =
+                gn_solve_station_with(k, faces, leader, s, seed, r, side, tr, solve_tol, opts);
+            let st = match solved.0 {
+                Ok((st, _)) => st,
                 // a cancel (#2136) is not a refused ball: it ends the operation
-                Err(e @ SolidError::Cancelled { .. }) => return Err(e),
+                Err(e @ (SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })) => {
+                    return Err(e)
+                }
                 Err(_) if feet_check => return Ok(None),
                 Err(e) => return Err(e),
             };
@@ -2043,7 +2049,6 @@ impl GnSectionFsg {
                                 };
                             }
                             let tol_ds = solve_tol(ds)?;
-                            let law_r = law_series(law, ds, tr.s(), false)?;
                             let st = solve_top(
                                 k,
                                 faces,
@@ -2057,7 +2062,7 @@ impl GnSectionFsg {
                                 self.order,
                                 Some(ai_before),
                                 false,
-                                law_r.as_ref(),
+                                law,
                             )?;
                             let x = param(&st, q, 0, 0) - dk;
                             at = Some(st);
@@ -2080,7 +2085,6 @@ impl GnSectionFsg {
                             // for the span ending there (3bc54a4)
                             let on = [0, 1, 2, 3].map(|q2| param(&st, q2, 0, 0));
                             let tol_on = solve_tol(st.s)?;
-                            let law_r = law_series(law, st.s, tr.s(), false)?;
                             let mut st = solve_top(
                                 k,
                                 faces,
@@ -2094,7 +2098,7 @@ impl GnSectionFsg {
                                 self.order,
                                 Some(ai_after),
                                 false,
-                                law_r.as_ref(),
+                                law,
                             )?;
                             st.before = ai_before;
                             next.push(st);
@@ -2132,7 +2136,6 @@ impl GnSectionFsg {
             let (before, _) = feet_on_knots(k, faces, on, dir, true, partials)?;
             if other {
                 let tol_on = solve_tol(st.s)?;
-                let law_r = law_series(law, st.s, tr.s(), false)?;
                 *st = solve_top(
                     k,
                     faces,
@@ -2146,7 +2149,7 @@ impl GnSectionFsg {
                     self.order,
                     Some(after),
                     false,
-                    law_r.as_ref(),
+                    law,
                 )?;
             }
             st.before = before;
@@ -2307,21 +2310,8 @@ impl GnSectionFsg {
                     *sc = 0.5 * (param(a, c, 0, 0) + param(b, c, 0, 0));
                 }
                 let tol_mid = solve_tol(mid)?;
-                let law_r = law_series(law, mid, tr.s(), false)?;
                 let mut st = solve_top(
-                    k,
-                    faces,
-                    center,
-                    mid,
-                    seed,
-                    r,
-                    side,
-                    tr,
-                    tol_mid,
-                    n,
-                    None,
-                    false,
-                    law_r.as_ref(),
+                    k, faces, center, mid, seed, r, side, tr, tol_mid, n, None, false, law,
                 )?;
                 if equal_area {
                     gn_station_thumbweight(k, n, rr, &mut st)?;
@@ -2399,6 +2389,7 @@ impl GnSectionFsg {
         let tr = Trunc::new(0, n + 1)?;
         let opts = StationOptions {
             law: None,
+            equal_setback: None,
             top: n,
             sides: None,
             before: false,
