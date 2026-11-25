@@ -499,6 +499,10 @@ pub fn command_for(app: &SolveApp, key: &str) -> Option<&'static str> {
 /// Sketch (on the selected plane or planar face, else on the plane picked next) and the tool
 /// starts in the new sketch.
 pub fn press(app: &mut SolveApp, key: &str, repeat: bool) {
+    // While Review is on, M marks (the review's own key); off, M is Move/Copy's as ever.
+    if !repeat && crate::review_pins::take_key(app, key) {
+        return;
+    }
     if keeps_old_show_hide(app, key) {
         app.start("ui.toggle_visibility");
     } else if let Some(id) = command_for(app, key) {

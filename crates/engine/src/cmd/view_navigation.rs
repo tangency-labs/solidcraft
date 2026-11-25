@@ -126,6 +126,10 @@ CommandSpec::new("view.navigation_bar", "Navigation Bar", crate::checked!("view.
     .icon("pan").noundo().doc_only()
     .contract(&NAVIGATION_BAR_CONTRACT).output(output_schema_for::<NavigationBarResult>)
     .params("visible?: bool (omitted: toggle) → visible?; show the navigation bar (window setting)"),
+CommandSpec::new("view.review", "Review", crate::checked!("view.review", review))
+    .at("SOLID", "INSPECT").icon("review_mark").noundo().doc_only()
+    .contract(&NAVIGATION_BAR_CONTRACT).output(output_schema_for::<NavigationBarResult>)
+    .params("visible?: bool (omitted: toggle) → visible?; show the Review list and the review pins on the model, and let M mark (window setting; the markups themselves are markup.*)"),
 CommandSpec::new("view.navigator", "Custom View Navigator", crate::checked!("view.navigator", navigator))
     .icon("nav_settings").noundo().doc_only()
     .contract(&NAVIGATOR_CONTRACT).output(output_schema_for::<NavigatorParams>)
@@ -429,6 +433,9 @@ fn ground_shadow(_s: &mut Session, p: &Value) -> Result<Value> {
 }
 fn navigation_bar(_s: &mut Session, p: &Value) -> Result<Value> {
     view_toggle(p, "view.navigation_bar", "visible")
+}
+fn review(_s: &mut Session, p: &Value) -> Result<Value> {
+    view_toggle(p, "view.review", "visible")
 }
 fn parts_library(_s: &mut Session, p: &Value) -> Result<Value> {
     view_toggle(p, "view.parts_library", "visible")
@@ -807,6 +814,7 @@ mod tests {
             ("view.ground_shadow", "on"),
             ("view.navigation_bar", "visible"),
             ("view.parts_library", "visible"),
+            ("view.review", "visible"),
         ] {
             assert_eq!(s.execute(id, &json!({})).unwrap(), json!({}));
             assert_eq!(s.execute(id, &Value::Null).unwrap(), json!({}));
@@ -831,6 +839,7 @@ mod tests {
             "view.ground_shadow",
             "view.navigation_bar",
             "view.parts_library",
+            "view.review",
         ] {
             for params in [json!(true), json!(1), json!("orbit"), json!([]), json!({"unexpected":true})] {
                 assert!(s.execute(id, &params).is_err(), "{id}: {params}");

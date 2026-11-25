@@ -4486,9 +4486,11 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         drawings,
         next_component_color_index,
         plugin_data,
+        markup_images,
         linked_bodies_left_out,
     } = a;
     *plugin_data == b.plugin_data
+        && *markup_images == b.markup_images
         && *linked_bodies_left_out == b.linked_bodies_left_out
         && *render == b.render
         && *format == b.format

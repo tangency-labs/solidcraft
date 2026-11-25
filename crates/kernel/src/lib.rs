@@ -295,6 +295,7 @@ pub use curvature_comb::CombTooth;
 pub use curvature_comb::MAX_COMB_TEETH;
 pub use curvature_comb::MIN_COMB_TEETH;
 pub use curvature_comb::comb_edge_near;
+pub use curvature_comb::edge_closest_point;
 pub use curvature_comb::edge_comb;
 pub use curvature_comb::edge_distance;
 pub use curvature_comb::edge_middle;

@@ -83,6 +83,7 @@ mod legacy_dir;
 pub mod library;
 pub mod library_files;
 pub mod limits;
+pub mod markups;
 #[cfg(test)]
 mod mutate;
 mod native_cad;

@@ -312,6 +312,7 @@ pub(crate) mod refused_part;
 mod render_ui;
 pub mod render_workspace;
 pub mod resume_ui;
+mod review_pins;
 #[cfg(test)]
 mod revolve_edit_tests;
 #[cfg(test)]
@@ -796,6 +797,8 @@ pub struct SolveApp {
     pub messages: messages::Messages,
     /// An editable local issue draft and optional captured app frame.
     pub issue_report: issue_report::ReportState,
+    /// Review pins over the view (`view.review`); window state, never saved in the design.
+    pub(crate) review: review_pins::State,
     /// Problem reports on the ticket server: sign-in, sending, the offline queue.
     pub tickets: tickets::Tickets,
     /// The Crash Reports window.
@@ -1199,6 +1202,7 @@ impl SolveApp {
             help: help::HelpState::default(),
             messages: messages::Messages::default(),
             issue_report: issue_report::ReportState::default(),
+            review: review_pins::State::default(),
             tickets: tickets::Tickets::new(),
             crashes: crash_ui::CrashUi::default(),
             updater: update::Updater::default(),
@@ -2030,6 +2034,7 @@ impl SolveApp {
                         browser::close_shared_panel(self, "browser");
                     }
                 }
+                "view.review" => review_pins::set_open(self, v.get("visible").and_then(Value::as_bool)),
                 "view.next_tab" | "view.previous_tab" => documents::cycle(self, id == "view.next_tab"),
                 "view.toolbar_reset_all" => toolbar_custom::reset_all(self),
                 "view.ribbon_tabs_only" => {
@@ -2720,6 +2725,7 @@ impl SolveApp {
                 | "view.navigation_bar"
                 | "view.browser"
                 | "view.parts_library"
+                | "view.review"
                 | "view.next_tab"
                 | "view.previous_tab"
                 | "tab.view.open"
@@ -5074,9 +5080,10 @@ impl SolveApp {
     }
 
     fn collect_screenshots(&mut self, ctx: &egui::Context) {
-        let report = issue_report::pending(self);
+        let report = issue_report::pending(self) || review_pins::pending(self);
         let shots = self.shots.collect(ctx, now_ms(), report, control::save_screenshot);
         for (token, image) in shots {
+            review_pins::receive(self, token, image.clone());
             issue_report::receive(self, token, image);
         }
     }

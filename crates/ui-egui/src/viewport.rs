@@ -10925,6 +10925,8 @@ pub(crate) fn show_host_controls(app: &mut SolveApp, ui: &mut egui::Ui, rect: Re
             crate::view_angles::show(app, ui, rect);
         }
     }
+    crate::review_pins::poll(app, ui.ctx());
+    crate::review_pins::show(app, ui, rect);
     crate::navigation_bar_view::show(app, ui, rect);
 }
 

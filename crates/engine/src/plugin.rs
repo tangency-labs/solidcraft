@@ -317,7 +317,8 @@ pub fn command_group(id: &str) -> Option<&'static str> {
     match family {
         "plugin" => Some("plugin"),
         "doc" => Some("doc"),
-        "file" | "library" => Some("file"),
+        // Markups are a file beside the design, with their pictures.
+        "file" | "library" | "markup" => Some("file"),
         "settings" | "ui" | "diagnostics" => Some("app"),
         _ if FILE_COMMANDS.contains(&id) || id.starts_with("sketch.insert_") => Some("file"),
         _ => None,

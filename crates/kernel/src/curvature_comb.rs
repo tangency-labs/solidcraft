@@ -83,6 +83,25 @@ pub fn comb_edge_near(body: &Body, at: Vec3) -> Result<Option<(f64, usize)>> {
     })
 }
 
+/// The point of edge `edge` of `body` closest to `at`, exactly; `None` when the body or the edge
+/// cannot be measured.
+pub fn edge_closest_point(body: &Body, edge: usize, at: Vec3) -> Result<Option<Vec3>> {
+    body.require_brep("an edge point")?;
+    if !at.is_finite() {
+        return Err(KernelError::Invalid("the point must be finite".into()));
+    }
+    let Some(form) = body.ops_body() else { return Ok(None) };
+    let (ops, order) = &*form;
+    if edge >= body.record().edges.len() {
+        return Ok(None);
+    }
+    match ops.edge_closest_point(order, edge, [at.x, at.y, at.z]) {
+        Ok(found) => Ok(found.map(|c| Vec3::new(c.point[0], c.point[1], c.point[2])).filter(|p| p.is_finite())),
+        Err(solidcore_ops::Error::Argument) => Ok(None),
+        Err(e) => Err(KernelError::Failed(format!("edge point: {e}"))),
+    }
+}
+
 /// The exact distance from `at` to edge `edge` of `body` (its index in the body's edge order):
 /// to the edge's own curve over its interval, ends included, not to a tessellation, as
 /// [`comb_edge_near`] measures it. `None` for an edge that is a periodic face's own seam or a

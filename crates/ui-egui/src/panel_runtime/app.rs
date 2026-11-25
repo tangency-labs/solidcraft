@@ -1773,6 +1773,7 @@ impl crate::SolveApp {
         self.shell.browser = None;
         self.shell.history = None;
         self.shell.workspace_panels.clear();
+        crate::review_pins::register(self);
         self.publish_tab_accent(ui.ctx());
         crate::browser::publish_row_prefs(self, ui.ctx());
         let prepared = self.prepare_workspace_panels(ui, render_domain, true);

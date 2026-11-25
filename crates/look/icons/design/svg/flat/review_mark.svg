@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Mark for review</title>
+  <path d="M32 58C25 49 13 36 13 25A19 19 0 0 1 51 25C51 36 39 49 32 58Z" fill="none" stroke="currentColor" stroke-width="5.6" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 17L32 33M24 25L40 25" fill="none" stroke="currentColor" stroke-width="5.6" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>
