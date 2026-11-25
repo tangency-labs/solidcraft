@@ -1863,6 +1863,14 @@ impl SolveApp {
             self.status = None;
         }
         let done = self.command_completed(id, r);
+        if done.is_ok()
+            && id == "view.navigate"
+            && params.get("action").and_then(Value::as_str) == Some("turn_around")
+            && params.get("direction").is_none()
+            && params.get("motion").is_none()
+        {
+            self.cam_anim = self.cam_anim.map(Self::screen_up_turn);
+        }
         issue_report::ticket::step_params(self, id, params);
         if self.session.revision != revision {
             timeline::stop_playback(self);
@@ -4178,7 +4186,11 @@ impl SolveApp {
             };
             self.fit_waits = 0;
             if animate {
+                let screen_up_turn = self.cam_anim.as_ref().is_some_and(CameraAnim::is_screen_up_turn);
                 self.animate_to(to);
+                if screen_up_turn {
+                    self.cam_anim = self.cam_anim.map(Self::screen_up_turn);
+                }
             } else {
                 let previous = self.cam;
                 self.cam = to;
@@ -4191,6 +4203,20 @@ impl SolveApp {
             }
             ctx.request_repaint();
         }
+    }
+
+    /// Select the screen-up turn through the kernel adapter; the shared viewport owns timing.
+    fn screen_up_turn(animation: CameraAnim) -> CameraAnim {
+        if !animation.from.is_valid() || !animation.to.is_valid() || animation.from.up != animation.to.up {
+            return animation.around_screen_up(None);
+        }
+        let (_, up, back) = animation.from.basis();
+        let (_, to_up, to_back) = animation.to.basis();
+        if !matches!(solidcraft_kernel::services::measure::points_meet(up.into(), to_up.into(), 1e-9), Ok(true)) {
+            return animation.around_screen_up(None);
+        }
+        let angle = solidcraft_kernel::services::affine::signed_unit_angle(up.into(), back.into(), to_back.into()).ok();
+        animation.around_screen_up(angle)
     }
 
     /// Move the camera to `to` over half a second (ease in-out, orientation slerped).

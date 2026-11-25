@@ -85,7 +85,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             }
             apply_traced(doc, st, f, tools, *operation, &crate::plain(targets))
         }
-        FeatureKind::SurfaceTrim { body, plane, tool, keep, keep_more, curves, with, keep_with, stitch, extend } => {
+        FeatureKind::SurfaceTrim { body, plane, tool, tool_body, keep, keep_more, curves, with, keep_with, stitch, extend } => {
             let i = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
             let picks: Vec<Vec3> = std::iter::once(keep.0).chain(keep_more.iter().map(|p| p.0)).collect();
@@ -93,14 +93,32 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             if let Some(other) = with {
                 return mutual_trim(st, i, other, keeps, &crate::plain(keep_with), *stitch, *extend);
             }
-            let trimmed = match (tool, curves) {
-                (Some(t), _) => {
-                    let tb = st.body(&t.body).ok_or_else(|| DocError::Unknown(format!("body `{}`", t.body)))?;
-                    let face = crate::appearance::face_index_at(tb, t.point.0)
+            // A cutting body or tool face is used where it is shown: the model as seen from this
+            // feature's component, as Revolve's To does (a body is kept in its own component's frame).
+            let tst = if tool_body.is_some() || tool.is_some() {
+                crate::eval::state_in_frame(doc, st, f.component)?
+            } else {
+                std::borrow::Cow::Borrowed(&*st)
+            };
+            let trimmed = match (tool_body, tool, curves) {
+                (Some(name), None, None) => {
+                    if name == body {
+                        return Err(DocError::Invalid("the cutting sheet must be another body".into()));
+                    }
+                    let tb = tst.body(name).ok_or_else(|| DocError::Unknown(format!("body `{name}`")))?;
+                    kernel::trim_sheet_keep(&mb.body, &tb.body, keeps)?
+                }
+                (Some(_), _, _) => return Err(DocError::Invalid("give a cutting sheet, a tool face or curves, not several tools".into())),
+                (None, Some(t), _) => {
+                    let tb = tst.body(&t.body).ok_or_else(|| DocError::Unknown(format!("body `{}`", t.body)))?;
+                    let (_, face) = tb
+                        .body
+                        .nearest_face(t.point.0)
+                        .filter(|(distance, _)| *distance <= crate::appearance::pick_tolerance(tb))
                         .ok_or_else(|| DocError::Invalid(format!("no face of `{}` at the tool point", t.body)))?;
                     kernel::trim_keep(&mb.body, &kernel::SplitTool::Face { body: &tb.body, face }, keeps)?
                 }
-                (None, Some(c)) => {
+                (None, None, Some(c)) => {
                     let ss = st
                         .sketch(c.sketch.0)
                         .ok_or_else(|| DocError::Unknown(format!("sketch {} (it must come earlier in the timeline)", c.sketch)))?;
@@ -124,7 +142,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                         )?
                     }
                 }
-                (None, None) => {
+                (None, None, None) => {
                     kernel::trim_keep(&mb.body, &kernel::SplitTool::Plane(doc.resolve_plane_in(vals, plane, 0, f.component, Some(st))?), keeps)?
                 }
             };
