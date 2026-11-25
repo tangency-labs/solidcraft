@@ -2,8 +2,9 @@
 
 Frames and weldments (#4003) are structural members (tube, angle, channel, beam, an aluminium
 extrusion of your own) laid along the lines of a frame sketch. This page covers what has landed:
-members and their profiles, corner cuts, the weld gap, end caps, mounting plates, bolted end plates and attached gusset plates.
-Trims, welds and the cut list follow.
+members and their profiles, corner cuts, the weld gap, end caps, mounting plates, bolted end plates,
+attached gusset plates, and trimming or extending to members, planes and faces.
+Welds and the cut list follow.
 
 ## The workflow
 
@@ -17,6 +18,8 @@ Trims, welds and the cut list follow.
 3. **Add members**: **Frame Member** (WELDMENTS › CREATE, `frame.member`) makes one body per selected
    line or arc. Enable **One Continuous Member** to make a connected tangent line–arc–line run
    into one tube. Select its segments in path order. Repeat for another physical member.
+4. **Trim them**: **Trim/Extend** (WELDMENTS › MODIFY, `frame.trim`) butts members against the
+   members they meet, or trims or extends them to a plane or face (below).
 
 ```json
 {"command": "frame.member", "params": {"sketch": "Frame", "profile": {"kind": "rect_tube", "width": 40, "height": 40, "wall": 3}}}
@@ -24,10 +27,10 @@ Trims, welds and the cut list follow.
 ```
 
 Members are ordinary bodies: mirror, pattern, move, drill and combine them with the usual
-commands. Where members meet they overlap unless you choose a corner type (see Corners).
+commands. Where members meet they overlap unless you choose a corner type (see Corners) or use Trim/Extend.
 
 The **Weldments** ribbon tab gathers the frame commands: New Sketch, Frame Member, End Cap,
-Mounting Plate, Gusset and Parameters. Like Sheet Metal it is always there, and it selects itself when a
+Mounting Plate, Gusset, Trim/Extend and Parameters. Like Sheet Metal it is always there, and it selects itself when a
 frame member, end cap, mounting plate or gusset is the selected body (or the last body of the active component).
 
 ## The Frame Member dialog
@@ -51,6 +54,45 @@ members and point pairs retain Auto, corner, fitting and gap behavior described 
   gap). A new Frame Member and the command both start on None.
 - **Anchor**, **Angle** and **Mirror** place the section on each line, as below. **Name** names
   the members (default: after the profile).
+- **Offset A** and **Offset B** move the section from its anchor by a length, along the
+  section's own axes as drawn (A across its width, B across its height; they turn with **Angle**,
+  so they are not the world's X and Y): Anchor **Bottom Middle** with Offset B `50 mm` puts a
+  tube's bottom 50 mm above its line. Both empty: the anchor sits on the line. The offsets are
+  your intention: once typed (or set by an arrow or the marker in the view), changing a
+  dimension of the profile, the **Anchor**, **Mirror** or **Angle** keeps them and moves the
+  member to keep them (Bottom Middle with Offset B `50 mm` on a 40 mm tube, then a height of
+  60 mm: the tube's bottom stays 50 mm from its line; Anchor **Top Middle** then puts its top
+  there). They are saved as the member's `locate` (the point of the section on the line), so
+  **Edit Feature** shows a member made with `locate` as the offsets from its anchor, and a
+  member placed by its anchor alone with both offsets empty (OK then adds no `locate`). Offsets that
+  cannot be applied (the point on the line would be past the largest profile, 10000 mm, or the
+  section cannot be laid out) are refused at **OK**, naming Offset A and Offset B; a value that
+  is not a length yet leaves the section where it was until it is one.
+- **Hot points**: while the dialog is open, the view draws the section at the start of the first
+  chosen line, as the member will be placed (angle and mirror applied), with a dot at each anchor
+  (origin, centre, centroid and the corners and edge middles of its bounding box; anchors that
+  fall on the same point share one dot). The anchor in use is ringed. Click a dot to make it the
+  **Anchor**; Offset A and B are emptied (the anchor wins). Drag the marker at the line's start
+  over the section, or past it to put the member off its line, to put that point on the line
+  (Offset A and B are written from the anchor, rounded to 0.1 mm; hold Alt or Ctrl for no
+  rounding); let go near a dot and it takes that anchor instead.
+- **Arrows and arc**: an arrow labelled **A** out from the middle of the section's +A side and
+  one labelled **B** out from the middle of its +B side drag the section along that axis: they
+  change Offset A or Offset B and keep the other as typed (an expression stays an expression).
+  Each drag adds whole steps (1 mm; 0.1 mm with Alt or Ctrl) to the offset as it was at the press,
+  so a press that does not move a step changes nothing and a typed `20.3 mm` becomes `21.3 mm`
+  one step on. An arrow's label is its letter alone while its offset is 0 or empty, and the
+  letter with the offset once it is not (`A 5.0 mm`, in the design's unit, 0.1 mm shown), live
+  while it drags. An arc past the section's corner farthest from the line turns the section about
+  the point on the line, adding 15° steps (1° with Alt or Ctrl) to the **Angle** at the press
+  (`7 deg` becomes `22 deg`). Dots, arrows and arc are hidden while the section is too small on
+  screen or seen edge-on.
+- While they are drawn, presses on the drawn section, the arrows, the arc and a margin of about
+  24 px around them belong to the hot points: one that misses a handle there does nothing, so a
+  slightly missed arrow never starts a box selection that would empty **Lines**. Elsewhere the
+  view picks and box selects as usual.
+- Only the first line of the group shown gets the section; the anchor is the same on every line
+  of the group. Nothing is drawn until the lines and the profile make a member.
 - **Groups**: one feature can lay several groups of lines in the same profile, each with its own
   lines, **Anchor**, **Angle**, **Mirror** and **Name** (uprights turned one way, rails another).
   **New Group** starts an empty group and shows it; click a group to show and edit it, **Remove
@@ -60,7 +102,8 @@ members and point pairs retain Auto, corner, fitting and gap behavior described 
   selected settings; they are not silently dropped. Use separate Frame Members for joined
   corners or point pairs. A single group uses the normal flat form and retains all corner,
   pair and finishing options. Later flat frames can fit their ends to earlier grouped members,
-  using each group's actual anchor, mirror and rotation.
+  using each group's actual anchor, mirror and rotation. **Offset A**, **Offset B** and the hot
+  points act on the group shown and are kept with it.
 - The preview shows the members as you change the values. **Edit Feature** reopens the dialog with
   the feature's values; the members keep their names through the edit, and a new **Name**
   renames them all. A member made with a whole profile sketch keeps it (the **Section** row shows
@@ -193,7 +236,9 @@ own choice.
 
 **Fits.** A tube that ends against the side of another (a T-junction), or one of three or more tubes
 ending at a point, is cut to fit the tube it meets, only near its end: flat on a box tube, with the
-radii squared, and a fishmouth on a round tube.
+radii squared, and a fishmouth on a round tube. On an open section (an angle, a channel) the end
+reaches across the open side to the face beyond, the far leg or the web, and an inside corner's
+fillet is kept, not squared.
 
 **Tubes in no sketch plane.** Point-to-point tubes (`pairs`) and 3D-sketch lines are laid after every
 group, chained among themselves: where two of them end together they are mitred (or joined as an
@@ -545,6 +590,68 @@ centre of its profile's bounding box, so it stays where it is.
 `face` is a pick as the view makes it (a world point on the face, its body and face index);
 `parallel_to` is a `{sketch, curve}` line or an edge or axis pick. Give `angle` or `parallel_to`;
 when both are given, `parallel_to` wins. **Edit Feature** reopens the step with its angle.
+
+## Trim/Extend
+
+General Trim/Extend currently accepts unjointed Frame Members: **None**, without corner overrides,
+**Fit Ends** or **Coped**. It refuses members made with Auto, Mitre, Butt, overrides, fitted ends
+or copes, both as members to trim and as member targets. Rebuilding their original stock would
+discard their existing cuts. Their ordinary Frame Member and Multi-Trim Corner operations stay
+available. A planar face on such a member can still be used as a plane target.
+
+**Trim/Extend** (WELDMENTS › MODIFY, `frame.trim`) moves the ends of members to what they meet:
+
+- **Another member** (a butt joint): the end stops flat against that member's side. The side is
+  worked out from the other member's line and profile, not from a face of its body, so the joint
+  follows sketch and parameter edits: widen the frame and the rails between the posts grow with it.
+- **A plane or a planar face**: an origin or construction plane, or a flat face of any body. A
+  face that slants across the member cuts its end at that slant. A face is attached as a sketch on
+  it is, so the trim follows the face: make the plate under a post thicker and the post stands on
+  its new top.
+
+A member trims or extends alike: an end short of its target grows to it. Each member keeps its
+body and its name, and later trims see it as it now is (trim the cross members to rails that were
+themselves trimmed to the posts).
+
+```json
+{"command": "frame.trim", "params": {"members": ["Rail", "Rail (2)", "Rail (3)", "Rail (4)"], "to": ["Post", "Post (2)", "Post (3)", "Post (4)"]}}
+{"command": "frame.trim", "params": {"members": ["Brace"], "to": {"plane": {"face": [0, 200, 500]}}, "gap": "1.5 mm"}}
+```
+
+- `members`: the members to trim, each a member's body name or `{feature, line}` (its Frame Member
+  feature and its line's id). A trim keeps them by feature and line, so renaming a member or its
+  feature keeps the trim.
+- `to`: what to trim them to, one or a list: a member (its body name, or `{member, side}` with
+  `side` one of `right`, `left`, `top`, `bottom` of its profile; by default the side the trimmed
+  member meets), or `{plane}` as `sketch.create` takes it (`XY`, a construction plane,
+  `{origin, normal}`, or `{face: [x, y, z]}` for a planar face, with `body`, `index` and `path` for
+  the exact face picked).
+- `end`: `auto` (the default: for each target, the end of the member nearer it), `start` or `end`.
+- `gap`: the weld gap between each end and its target, a length expression (default 0, at most
+  1 m).
+
+A member meets a member target when the line through the middle of its profile passes through the
+target's profile and along the target's length; a plane it crosses. With several targets, each
+moves the end it meets, so one trim can butt every rail of a frame against its posts. It is refused,
+with the reason, when a member meets none of the targets, when two targets would move the same end
+(trim them in separate features), when a chosen side faces away from the member, and when the
+member's body was changed after it was made (a hole drilled in it, say): a trim rebuilds the member
+from its line and profile, and would lose that change, so trim it before the features that change
+it. A changed member is also refused as a member target, because its sketch line and profile
+may no longer describe its actual side. Use a planar face target to follow the modified body.
+This includes symmetric rotations whose outline stays the same and bodies transferred into
+another component after the member was made. Members of another component
+are not supported yet.
+
+### The Trim/Extend dialog
+
+- **Members**: pick the members to trim (their bodies or faces of them).
+- **To**: pick members, planar faces or planes. A face of an unmodified member selects that
+  member; a face on a modified member is kept as a planar-face target.
+- **End** (Nearer End, Start, End) and **Gap** as above.
+- **Edit Feature** reopens the dialog with the trim's picks and values. Targets a pick can't show
+  (a member's chosen side, a face, a plane given by its origin and normal) are listed as **Keep:
+  n more targets**, kept while ticked; untick it to drop them all and pick again.
 
 ## Built-in profiles
 

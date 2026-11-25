@@ -11,7 +11,8 @@
 //! its result (1 region, 1 shell, 8 faces, 9 loops, 16 edges, 10 vertices) is no solid:
 //! `V - E + F - (L - F) = 1`, which no closed surface gives. `MateEdges` now keeps an
 //! offset edge only where it is proved on both surfaces, and installs the intersection
-//! (proved on both) otherwise.
+//! (proved on both) otherwise. That intersection is now the exact ellipse of the plane and
+//! the tilted cylinder (WR-495, #21301), proved in closed form below.
 //!
 //! The result is one closed manifold solid: two regions (the infinite one and the solid's)
 //! bounded by the two faceuse shells of one surface (8 faces, 9 loops, 15 edges, 10
@@ -27,9 +28,8 @@
 mod offset_fixture;
 
 use offset_fixture::Notifications;
-use solidcore::blend::fillet_section::certificate::NurbsCurve;
 use solidcore::blend::fillet_section::station::Nurbs;
-use solidcore::curve::curve::{Curve, CurveKind};
+use solidcore::curve::curve::CurveKind;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::object::ObjectRef;
 use solidcore::offset::curve_on_surfaces::curve_on_surfaces;
@@ -224,26 +224,41 @@ fn assert_one_genus_0_solid(inset: bool) {
 
 /// The fixture `tests/data/issue_15282_tilt_cyl_mate_pair.json`, which the unit test
 /// `offset::curve_on_surfaces::tests::tilt_cyl_old_offset_edge_is_off_its_plane_and_the_intersection_is_on_both`
-/// certifies, is the outward offset's mate: its installed intersection is a result edge's curve,
-/// bit for bit, over the fixture's interval, and its two surfaces are that edge's faces'.
-/// A change to the offset that moves either fails here rather than leaving the fixture
-/// stale.
+/// certifies, holds the outward offset's mated pair: its two surfaces (the tilted cylinder's
+/// side, a rational quadratic by linear net, and the plane `z = 0`, a bilinear net) are one
+/// result edge's faces', bit for bit. That edge's curve is no longer the fixture's marched
+/// B-spline: `MateEdges` installs the exact intersection of the two surfaces (WR-495,
+/// #21301), the ellipse proved here in closed form.
+///
+/// **Closed form.** The net's weight-1 points `P0`, `P2`, `P4`, `P6` of each `v` row are
+/// the circle's quarter points, so its centre is `c = (P0 + P4) / 2` and its radius
+/// `r = |P0 - c|`; the axis is `a = c1 - c0` between the two rows' centres. The plane
+/// `z = 0` cuts it in the ellipse with centre `c0 - (c0.z / a.z) a`, minor radius `r` along
+/// `a x z`, major radius `r |a| / |a.z|` along `(a.x, a.y, 0)`.
+///
+/// **Allowance.** Every coordinate, length and radius here is below `S = 256` in
+/// magnitude. Each closed-form quantity takes at most 12 roundings of such operands (the
+/// centre: two midpoints, a difference, a quotient, a product and a sum per coordinate;
+/// the radii: three squares, two sums, a root, a product and a quotient), each within
+/// `u S` (`u = 2^-53`), so within `12 u S` of the exact value of the net's data; the kernel
+/// builds the ellipse from the same cylinder and plane in no more operations, so the two
+/// agree within `32 u S` (directions, unit length: `32 u`). The measured differences are
+/// below `1e-14` (`2^-46.5`), well inside `32 u S = 2^-40`.
+///
+/// **On both surfaces.** The ellipse is proved within `1e-6` of both nets over its whole
+/// interval (`curve_on_surfaces`, an enclosure certificate), a thousandth of the edge's
+/// tolerance. That tolerance is the offset's own, `0.001339890721639`: the B-rep
+/// tolerance every edge of the inward offset carries and the floor of the outward one
+/// (whose marched edges carry twice it), not raised by the exact mate.
 #[test]
-fn tilt_cyl_fixture_is_this_offsets_mate() {
-    let Some((_, b)) = offset(false) else {
+fn tilt_cyl_fixture_mate_is_the_exact_ellipse() {
+    const OPERATION_TOLERANCE: f64 = 0.001_339_890_721_639;
+    let Some((k, b)) = offset(false) else {
         return;
     };
     let data: serde_json::Value =
         serde_json::from_str(include_str!("data/issue_15282_tilt_cyl_mate_pair.json")).unwrap();
     let f64s = |v: &serde_json::Value| -> Vec<f64> { serde_json::from_value(v.clone()).unwrap() };
-    let same_curve = |c: &Curve| match c.kind() {
-        CurveKind::BSpline(bs) => NurbsCurve::of(bs).is_ok_and(|n| {
-            n.p as u64 == data["new"]["p"].as_u64().unwrap()
-                && n.u == f64s(&data["new"]["u"])
-                && n.pw == f64s(&data["new"]["pw"])
-        }),
-        _ => false,
-    };
     let same_net = |s: &Surface, net: &serde_json::Value| match s.kind() {
         SurfaceKind::BSpline(bs) => Nurbs::of(bs).is_ok_and(|n| {
             n.p as u64 == net["p"].as_u64().unwrap()
@@ -254,29 +269,101 @@ fn tilt_cyl_fixture_is_this_offsets_mate() {
         }),
         _ => false,
     };
-    let edges = brep_p1::edges(&b, None).unwrap();
-    let mated: Vec<_> = edges
-        .iter()
-        .filter(|&&e| same_curve(edge::curve(&b, e).unwrap().expect("edge curve")))
+    let nets = data["s"].as_array().unwrap();
+    let mated: Vec<_> = brep_p1::edges(&b, None)
+        .unwrap()
+        .into_iter()
+        .filter(|&e| {
+            let faces = edge::faces(&b, e, None).unwrap();
+            nets.iter().all(|net| {
+                faces.iter().any(|&f| {
+                    same_net(
+                        face_p2::surface(&b, f).unwrap().expect("surface"),
+                        &net["net"],
+                    )
+                })
+            })
+        })
         .collect();
-    assert_eq!(mated.len(), 1, "edges carrying the fixture's curve");
-    let e = *mated[0];
-    let ivl = edge::interval(&b, e).unwrap();
-    assert_eq!(
-        [ivl.min(), ivl.max()].to_vec(),
-        f64s(&data["new_ivl"]),
-        "interval"
+    assert_eq!(mated.len(), 1, "edges between the fixture's two surfaces");
+    let e = mated[0];
+    let curve = edge::curve(&b, e).unwrap().expect("edge curve");
+    let CurveKind::Ellipse(el) = curve.kind() else {
+        panic!("the mate is not an ellipse: {}", curve.type_code());
+    };
+    assert_eq!(edge::tolerance(&b, e).unwrap(), OPERATION_TOLERANCE);
+
+    // the closed form from the fixture's nets
+    let plane = f64s(&nets[1]["net"]["pw"]);
+    assert!(
+        plane.chunks(4).all(|p| p[2] == 0.0 && p[3] == 1.0),
+        "the plane z = 0"
     );
+    let cyl = f64s(&nets[0]["net"]["pw"]);
+    let pt = |i: usize| {
+        let w = cyl[4 * i + 3];
+        [cyl[4 * i] / w, cyl[4 * i + 1] / w, cyl[4 * i + 2] / w]
+    };
+    let mid = |p: [f64; 3], q: [f64; 3]| {
+        [
+            0.5 * (p[0] + q[0]),
+            0.5 * (p[1] + q[1]),
+            0.5 * (p[2] + q[2]),
+        ]
+    };
+    let len = |v: [f64; 3]| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    let sub = |p: [f64; 3], q: [f64; 3]| [p[0] - q[0], p[1] - q[1], p[2] - q[2]];
+    // u-major, two v rows: the row v0's points are the even indices
+    let (c0, c1) = (mid(pt(0), pt(8)), mid(pt(1), pt(9)));
+    let a = sub(c1, c0);
+    let r = len(sub(pt(0), c0));
+    let s = -c0[2] / a[2];
+    let centre = [c0[0] + s * a[0], c0[1] + s * a[1], c0[2] + s * a[2]];
+    let major = r * len(a) / a[2].abs();
+    let lp = (a[0] * a[0] + a[1] * a[1]).sqrt();
+    let major_dir = [a[0] / lp, a[1] / lp, 0.0];
+
+    let u = f64::EPSILON / 2.0;
+    let (point_tol, dir_tol) = (32.0 * u * 256.0, 32.0 * u);
+    let pos = el.position();
+    let o = pos.origin();
+    assert!(
+        len(sub([o.x, o.y, o.z], centre)) <= point_tol,
+        "centre {o:?} against {centre:?}"
+    );
+    // the major axis is the placement's x (radius at 0 degrees), the minor its y
+    assert!(
+        (el.x_radius() - major).abs() <= point_tol,
+        "{} {major}",
+        el.x_radius()
+    );
+    assert!(
+        (el.y_radius() - r).abs() <= point_tol,
+        "{} {r}",
+        el.y_radius()
+    );
+    let x = pos.x_axis();
+    let cross = [
+        x.y * major_dir[2] - x.z * major_dir[1],
+        x.z * major_dir[0] - x.x * major_dir[2],
+        x.x * major_dir[1] - x.y * major_dir[0],
+    ];
+    assert!(
+        len(cross) <= dir_tol,
+        "major axis {x:?} against {major_dir:?}"
+    );
+    let y = pos.y_axis();
+    assert!(
+        (x.x * y.x + x.y * y.y + x.z * y.z).abs() <= dir_tol && y.z.abs() <= dir_tol,
+        "minor axis {y:?}"
+    );
+
+    // on both of the fixture's surfaces, by certificate, over the edge's whole interval
     let faces = edge::faces(&b, e, None).unwrap();
-    for net in data["s"].as_array().unwrap() {
-        assert!(
-            faces.iter().any(|&f| same_net(
-                face_p2::surface(&b, f).unwrap().expect("surface"),
-                &net["net"]
-            )),
-            "a fixture surface is not on the mated edge's faces"
-        );
-    }
+    let s0 = face_p2::surface(&b, faces[0]).unwrap().expect("surface");
+    let s1 = face_p2::surface(&b, faces[1]).unwrap().expect("surface");
+    let ivl = edge::interval(&b, e).unwrap();
+    assert!(curve_on_surfaces(&k, curve, ivl, [s0, s1], 1e-6).unwrap());
 }
 
 #[test]

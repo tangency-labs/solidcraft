@@ -1054,6 +1054,7 @@ fn rail_rail_intersect(
 fn point_on_plane_solve(
     k: &Kernel,
     fs: &mut dyn FilletSolverOps,
+    target: Option<&mut Brep>,
     plane_orig: Point3,
     plane_normal: Vec3,
     domain1: &Extent2d,
@@ -1066,7 +1067,7 @@ fn point_on_plane_solve(
     let found = FilletSolverOps::point_on_plane_solve(
         fs,
         k,
-        None,
+        target,
         plane_orig,
         plane_normal,
         domain1,
@@ -1076,6 +1077,46 @@ fn point_on_plane_solve(
         &mut tsect,
     )?;
     Ok((found, tsect))
+}
+
+/// The two contact points in the order of the shared section's vertices. The
+/// continued plane is evaluated beyond the cliff rim, and a curved support keeps
+/// the same extension that its solver used.
+fn cliff_section_feet(
+    k: &Kernel,
+    fs: &FilletSolver,
+    tsect: &TsectPnt,
+    first: usize,
+) -> Result<[Point3; 2]> {
+    let foot = |side: SrfIndex| {
+        let offset = solver_surface(fs, side.index(), OP_JOIN)?;
+        let uv = tsect.uv_pos(side);
+        if let SurfaceKind::Plane(plane) = offset.base_surface().kind() {
+            return Ok(plane.evaluate_point(uv));
+        }
+        let support = offset.clone();
+        support.set_offset_distance(0.0);
+        support.evaluate_point(k, uv)
+    };
+    Ok([
+        foot(srf(first, OP_JOIN)?)?,
+        foot(other_srf(first, OP_JOIN)?)?,
+    ])
+}
+
+fn check_cliff_section(reference: [Point3; 2], current: [Point3; 2], tol: f64) -> Result<()> {
+    if !tol.is_finite()
+        || reference.into_iter().zip(current).any(|(a, b)| {
+            let gap = a.distance(b);
+            !gap.is_finite() || gap > tol
+        })
+    {
+        return Err(SolidError::blend(
+            OP_JOIN,
+            BlendFailure::NoRoom(crate::blend::fillet_executive::NoRoomReason::JoinOffsetsDiffer),
+        ));
+    }
+    Ok(())
 }
 
 /// `SmFilletGeom::RailEdgeuseIntersect(lRailIndex, pSideEU, dGuess, rbFound,
@@ -1530,6 +1571,286 @@ fn on_closed_seam(
     Ok(false)
 }
 
+/// Not upstream (solidcore-native, #21416): the intersection curve `traced` from the start,
+/// which stopped at `stop` on the seam of a surface closed there (a trace runs within its
+/// surfaces' domains, and a closed surface's domain ends at its seam), run on across that seam
+/// to `end`: the rest is traced from `stop` again, taken on the side of the seam that `end`
+/// lies nearer (the seam's other side, a short end curve), and the two pieces are joined. On the surface whose seam the curve crosses its UV image is no one curve on the
+/// surface's domain: it has none there, as a curve run through a closed candidate's closure
+/// has none (`on_closed_seam`); on the other surface its UV curve is the joined curve dropped
+/// onto it. `None` where `stop` is not on such a seam, where the rest is not traced, or where it
+/// does not run from `stop` to `end`: the curve is then a candidate as it was.
+///
+/// # Errors
+/// Those of the seam tests, the evaluations, the join and the drop.
+#[allow(clippy::too_many_arguments)]
+fn on_across_closed_seam(
+    k: &Kernel,
+    traced: &Curve,
+    stop: Point3,
+    end: Point3,
+    end_dir: Option<Vec3>,
+    surfaces: [(&Surface, &Extent2d); 2],
+    ssi_tol: f64,
+    approx_tol: f64,
+) -> Result<Option<SrfSrfCurves>> {
+    let near = 100.0 * approx_tol;
+    if stop.distance(end) < near {
+        return Ok(None);
+    }
+    let [(surf1, domain1), (surf2, domain2)] = surfaces;
+    let Some(crossed) = crossed_seam(k, stop, surfaces, approx_tol)? else {
+        return Ok(None);
+    };
+    let ivl = traced.natural_interval();
+    let dir = traced
+        .evaluate(k, ivl.max(), 1, true, true)?
+        .get(1)
+        .copied()
+        .ok_or_else(|| defect(OP_SRF_SRF, SHORT_EVALUATION))?;
+    let Ok(dir) = dir.unitize() else {
+        return Ok(None);
+    };
+    // the two points on each surface; on the surface whose seam the curve crosses, `stop` on
+    // the seam's side the rest runs to `end` from (the side nearer `end`)
+    let mut uvs = [[Point2::new(0.0, 0.0); 2]; 2];
+    for (slot, ((surface, domain), crosses)) in
+        uvs.iter_mut().zip(surfaces.into_iter().zip(crossed))
+    {
+        let mut dropped = [Point2::new(0.0, 0.0); 2];
+        for (uv, p) in dropped.iter_mut().zip([stop, end]) {
+            let d = surface.drop_point::<NoObject>(k, p, domain, &DropPointOptions::default())?;
+            if !d.success || surface.evaluate_point(k, d.result_uv)?.distance(p) > near {
+                return Ok(None);
+            }
+            *uv = d.result_uv;
+        }
+        if crosses {
+            let [at, to] = &mut dropped;
+            for (param, along_u) in [(SurfParamType::U, true), (SurfParamType::V, false)] {
+                if !surface.is_closed(k, domain, param, None, false)?.0 {
+                    continue;
+                }
+                let (lo, hi) = if along_u {
+                    (domain.u_interval().min(), domain.u_interval().max())
+                } else {
+                    (domain.v_interval().min(), domain.v_interval().max())
+                };
+                let seam = if along_u {
+                    Point2::new(lo, at.y)
+                } else {
+                    Point2::new(at.x, lo)
+                };
+                if surface.evaluate_point(k, seam)?.distance(stop) > approx_tol {
+                    continue;
+                }
+                let toward = if along_u { to.x } else { to.y };
+                let side = if toward - lo <= hi - toward { lo } else { hi };
+                if along_u {
+                    at.x = side;
+                } else {
+                    at.y = side;
+                }
+            }
+        }
+        *slot = dropped;
+    }
+    let [uvs1, uvs2] = &uvs;
+    let Some(rest) = ignore_status(surf1.point_based_surface_intersect(
+        k,
+        domain1,
+        surf2,
+        domain2,
+        uvs1,
+        uvs2,
+        [false, false],
+        [Some(dir), end_dir],
+        Some(ssi_tol),
+        Some(PI / 6.0),
+    ))?
+    .and_then(|pi| pi.curve_3d) else {
+        return Ok(None);
+    };
+    let rest_ivl = rest.natural_interval();
+    if rest.evaluate_point(k, rest_ivl.min())?.distance(stop) >= near
+        || rest.evaluate_point(k, rest_ivl.max())?.distance(end) >= near
+    {
+        return Ok(None);
+    }
+    joined_across_seam(k, [traced, &rest], crossed, surfaces, approx_tol)
+}
+
+/// Not upstream (solidcore-native, #21416): which of the two `surfaces` is closed with its
+/// seam through `at` (`on_closed_seam`), where exactly one is: a curve crossing that seam at
+/// `at` has no UV curve on it, and its UV curve on the other surface is whole. `None` where
+/// neither or both are.
+///
+/// # Errors
+/// Those of the seam tests.
+fn crossed_seam(
+    k: &Kernel,
+    at: Point3,
+    surfaces: [(&Surface, &Extent2d); 2],
+    tol: f64,
+) -> Result<Option<[bool; 2]>> {
+    let [(surf1, domain1), (surf2, domain2)] = surfaces;
+    let crossed = [
+        on_closed_seam(k, surf1, domain1, Some(at), tol)?,
+        on_closed_seam(k, surf2, domain2, Some(at), tol)?,
+    ];
+    let [on1, on2] = crossed;
+    Ok((on1 != on2).then_some(crossed))
+}
+
+/// Not upstream (solidcore-native, #21416): the two pieces of an intersection curve on either
+/// side of the seam of one of its surfaces (`crossed`, [`crossed_seam`]), the first ending where
+/// the second starts, joined as one B-spline curve. On the surface whose seam it crosses its UV
+/// image is no one curve on the surface's domain, so it has none there, as a curve run through
+/// a closed candidate's closure has none (`on_closed_seam`): the merge cuts the curve at the
+/// seam where it meets the face. On the other surface its UV curve is the joined curve dropped
+/// onto it. `None` where a piece is not a B-spline curve (no curve of the intersectors') or
+/// the joined curve does not drop onto that other surface: the pieces then stay what they were.
+///
+/// # Errors
+/// Those of the join and the drop.
+fn joined_across_seam(
+    k: &Kernel,
+    pieces: [&Curve; 2],
+    crossed: [bool; 2],
+    surfaces: [(&Surface, &Extent2d); 2],
+    approx_tol: f64,
+) -> Result<Option<SrfSrfCurves>> {
+    let [first, second] = pieces;
+    let (Some(first), Some(second)) = (b_spline_base(first), b_spline_base(second)) else {
+        return Ok(None);
+    };
+    let mut pieces = [first.clone(), second.clone()];
+    // each piece's parameters as long as the piece, so the joined curve runs on through the
+    // seam at about the speed it had (pieces of the intersectors' own parameters can differ
+    // in speed many times, and the joined curve's UV images would nearly stop there)
+    let mut from = 0.0;
+    for piece in &mut pieces {
+        let curve = Curve::from(piece.clone());
+        let length = curve
+            .approximate_length(k, &curve.natural_interval(), 5, false)?
+            .0;
+        if length.is_nan() || length <= 0.0 {
+            return Ok(None);
+        }
+        piece.edit_parameterization(&Extent1d::from_min_max(from, from + length))?;
+        from += length;
+    }
+    let curve_3d = Curve::from(BSplineCurve::create_by_joining(&mut pieces, None)?);
+    let joined_ivl = curve_3d.natural_interval();
+    let mut uv = [None, None];
+    for (slot, ((surface, domain), crosses)) in uv.iter_mut().zip(surfaces.into_iter().zip(crossed))
+    {
+        if crosses {
+            continue;
+        }
+        let dropped = surface_drop_curve(k, surface, domain, &curve_3d, &joined_ivl, approx_tol)?;
+        let Some(c) = dropped.into_iter().next() else {
+            return Ok(None);
+        };
+        *slot = Some(c);
+    }
+    let [uv_curve1, uv_curve2] = uv;
+    Ok(Some(SrfSrfCurves {
+        curve_3d: Some(curve_3d),
+        uv_curve1,
+        uv_curve2,
+    }))
+}
+
+/// Not upstream (solidcore-native, #21416): of the general intersection's `candidates`, none
+/// through both `start` and `end`, two that are one curve cut at the seam of a closed surface
+/// (the intersectors trace within their surfaces' domains, which end at a closed surface's
+/// seam): one through `start` with an end on that seam where the other, through `end`, has an
+/// end too. The piece of each between its point and the seam, joined ([`joined_across_seam`]).
+/// `None` where no two candidates are.
+///
+/// # Errors
+/// Those of the drops, trims, reversals, the seam tests and the join.
+fn candidates_across_seam(
+    k: &Kernel,
+    candidates: &[Candidate],
+    start: Point3,
+    end: Point3,
+    surfaces: [(&Surface, &Extent2d); 2],
+    approx_tol: f64,
+) -> Result<Option<SrfSrfCurves>> {
+    let near = 100.0 * approx_tol;
+    // the piece of `c` from the point `from` to `to`, oriented that way; `None` where either
+    // point is not on it or they drop to one parameter
+    let piece = |c: &Curve, from: Point3, to: Point3| -> Result<Option<Curve>> {
+        let ivl = c.natural_interval();
+        let mut params = [0.0; 2];
+        for (t, p) in params.iter_mut().zip([from, to]) {
+            let d = c.drop_point(
+                k,
+                &ivl,
+                p,
+                None,
+                approx_tol,
+                None,
+                SolverOperation::Intersect,
+            )?;
+            if !d.success {
+                return Ok(None);
+            }
+            *t = d.parameter;
+        }
+        let [a, b] = params;
+        if a == b {
+            return Ok(None);
+        }
+        let mut part = c.clone();
+        let mut span = Extent1d::from_min_max(a.min(b), a.max(b));
+        part.trim(k, &mut span, TrimMode::Notify)?;
+        if a > b {
+            let _ = part.reverse_parameterization(k, &span)?;
+        }
+        Ok(Some(part))
+    };
+    for (i, a) in candidates.iter().enumerate() {
+        let a_ivl = a.curve_3d.natural_interval();
+        for t in [a_ivl.min(), a_ivl.max()] {
+            let seam = a.curve_3d.evaluate_point(k, t)?;
+            if seam.distance(start) < near || seam.distance(end) < near {
+                continue;
+            }
+            let Some(crossed) = crossed_seam(k, seam, surfaces, approx_tol)? else {
+                continue;
+            };
+            for (j, b) in candidates.iter().enumerate() {
+                if i == j {
+                    continue;
+                }
+                let b_ivl = b.curve_3d.natural_interval();
+                let mut meets = false;
+                for u in [b_ivl.min(), b_ivl.max()] {
+                    meets |= b.curve_3d.evaluate_point(k, u)?.distance(seam) < near;
+                }
+                if !meets {
+                    continue;
+                }
+                let (Some(first), Some(second)) = (
+                    piece(&a.curve_3d, start, seam)?,
+                    piece(&b.curve_3d, seam, end)?,
+                ) else {
+                    continue;
+                };
+                if let Some(joined) =
+                    joined_across_seam(k, [&first, &second], crossed, surfaces, approx_tol)?
+                {
+                    return Ok(Some(joined));
+                }
+            }
+        }
+    }
+    Ok(None)
+}
+
 /// The face-aware surface cache context of a [`srf_srf_intersection_with_context`]: the
 /// caller's context and the two surfaces' handles in it (a face's surface is named
 /// by its face, so its trimmed surface cache is made with the face's boundary, as
@@ -1774,6 +2095,27 @@ pub fn srf_srf_intersection_with_context(
                         });
                     }
 
+                    // Not upstream (#21416): a trace from the start stops where it reaches the
+                    // seam of a closed surface, its domain's side; the curve runs on across the
+                    // seam, traced from the seam's other side to the end
+                    if p1.distance(start_pnt) < 100.0 * approx_tol {
+                        // (a failure of the continuation leaves the trace a candidate)
+                        if let Some(across) = ignore_status(on_across_closed_seam(
+                            k,
+                            &curve_3d,
+                            p2,
+                            end_pnt,
+                            opt_end_dir,
+                            [(surf1, &domain1), (surf2, &domain2)],
+                            ssi_tol,
+                            approx_tol,
+                        ))?
+                        .flatten()
+                        {
+                            return Ok(across);
+                        }
+                    }
+
                     // Got a result, but apparently not the whole curve
                     curves_3d.push(curve_3d);
                     surface1_uv_curves.push(uv1);
@@ -2013,6 +2355,22 @@ pub fn srf_srf_intersection_with_context(
 
     // error: didn't find a curve within tol of endPoints
     if best_dist == NO_CURVE && best_len == NO_CURVE {
+        // Not upstream (#21416): one curve the intersectors cut at a closed surface's seam
+        if let (Some(start_pnt), Some(end_pnt), None) = (start, end, wanted_heading) {
+            // (a failure of the pairing leaves the search empty, as it was)
+            if let Some(across) = ignore_status(candidates_across_seam(
+                k,
+                &candidates,
+                start_pnt,
+                end_pnt,
+                [(surf1, &domain1), (surf2, &domain2)],
+                approx_tol,
+            ))?
+            .flatten()
+            {
+                return Ok(across);
+            }
+        }
         // Not upstream: a curve through the points that heads away from the wanted heading is
         // not the curve the caller asked for, and no other is built in its place
         if headed_away {
@@ -3482,6 +3840,7 @@ impl FilletBrep {
             let (found, t) = point_on_plane_solve(
                 k,
                 solvers.solver_ops_mut(s1)?,
+                None,
                 plane_orig,
                 plane_normal,
                 &domain1,
@@ -3570,7 +3929,8 @@ impl FilletBrep {
     /// `SM_ERR_NULL_POINTER` without corner, mate, faces, filleted vertex, solver, edge
     /// use, edge, curve, offset or base surface or rail-end vertex use; `SM_ERR` without a
     /// fillet geometry and, after setting `SM_FV_SOLVER_NOT_CONVERGE`, when a blend has
-    /// no ball in the plane; those of the evaluations and solves.
+    /// no ball in the plane; a stationwise cliff join whose contact points differ;
+    /// those of the evaluations and solves.
     pub fn calc_join_section(
         &mut self,
         k: &Kernel,
@@ -3651,10 +4011,15 @@ impl FilletBrep {
         // Not the fork's (solidcore-native, [`crate::blend::fillet_tangent_rollover`]): whether
         // a blend of the join rolled a rail over a smooth far edge of its face
         let mut any_rolled = false;
+        let mut stationwise = false;
         for &g in &geoms {
-            any_rolled |= rolls_anywhere(self, solvers, g)?;
+            let fs = solvers.solver(self.geom_solver_id(g, OP)?)?;
+            any_rolled |= fs.rolled_faces.iter().any(Option::is_some);
+            stationwise |= fs.station_setback().is_some();
         }
-        let mut ended = false;
+        let check_cliff = at_cliff && stationwise && !any_rolled && geoms.len() == 2;
+        let mut cliff_section = None;
+        let mut ends = None;
         for (gg, &g) in geoms.iter().enumerate() {
             let sid = self.geom_solver_id(g, OP)?;
             let fs = solvers.solver(sid)?;
@@ -3764,41 +4129,15 @@ impl FilletBrep {
                     return Err(defect(OP, FOOT_NO_DROP));
                 }
                 // a closed surface names the foot once per period: take the name nearest the
-                // edge use's parameters, as the section solve continues from them across a seam.
-                // Not along a direction that collapses at the edge use's parameters (a sphere's
-                // pole): there the edge use's parameter is an arbitrary label, not a side of the
-                // seam, and the nearest name to it could lie a quarter period outside the
-                // domain. A miss of that test leaves the nearest name, as on a regular point.
-                // (a predicate that cannot evaluate reads as collapsed: the foot keeps its name)
-                let sing = match base.is_singularity(k, b.uv, EFF_ZERO, false) {
-                    Ok(sing) => sing,
-                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                    Err(_) => crate::surface::surface::p5::Singularity {
-                        singular: true,
-                        direction: SurfParamType::Neither,
-                    },
-                };
-                let collapsed = |dir: SurfParamType| {
-                    sing.direction == dir
-                        || (sing.singular
-                            && matches!(
-                                sing.direction,
-                                SurfParamType::Neither | SurfParamType::Both
-                            ))
-                };
-                let mut foot = dropped.result_uv;
-                let periods = crate::blend::fillet_solver::p1::seam_periods(k, &base)?;
-                for (period, (value, near, dir)) in periods.iter().zip([
-                    (&mut foot.x, b.uv.x, SurfParamType::U),
-                    (&mut foot.y, b.uv.y, SurfParamType::V),
-                ]) {
-                    if let Some(interval) = period {
-                        if !collapsed(dir) {
-                            let length = interval.length();
-                            *value += length * ((near - *value) / length).round();
-                        }
-                    }
-                }
+                // edge use's parameters, as the section solve continues from them across a seam
+                // (`period_name_nearest`, which leaves a direction collapsing there, a sphere's
+                // pole, alone).
+                let foot = crate::blend::fillet_solver::p1::period_name_nearest(
+                    k,
+                    &base,
+                    dropped.result_uv,
+                    b.uv,
+                )?;
                 *slot = foot;
             }
 
@@ -3814,6 +4153,8 @@ impl FilletBrep {
             let (found, tsect) = point_on_plane_solve(
                 k,
                 solvers.solver_ops_mut(sid)?,
+                // The constant-distance solver seeds from the other edge use.
+                (at_cliff && stationwise).then_some(&mut *target),
                 plane_orig,
                 plane_normal,
                 &domain1,
@@ -3822,8 +4163,10 @@ impl FilletBrep {
                 uv1,
                 &tsect,
             )?;
-            self.fillet_vertexuse_mut(vu)?.set_tsect_pnt(&tsect);
             if !found {
+                if !check_cliff {
+                    self.fillet_vertexuse_mut(vu)?.set_tsect_pnt(&tsect);
+                }
                 self.fillet_vertex_mut(v)?
                     .set_status(FilStatus::SolverNotConverge);
                 // SER_MSG: no ball of the blend lies in the shared section's plane
@@ -3832,6 +4175,35 @@ impl FilletBrep {
                     BlendFailure::JoinSectionNotConverged { blend: gg },
                 ));
             }
+            if check_cliff {
+                let fs = solvers.solver(sid)?;
+                let first = self.rail_index_of_vertexuse(g, Some(vu))?;
+                let feet = cliff_section_feet(k, fs, &tsect, first)?;
+                let tol = fs.approx_tol_3d.max(target.tolerance());
+                let rail_ends = [Some(vu), self.vu_at_rail_end(v, Some(g), Some(vu), None)?];
+                if let Some((reference_ends, reference_tsect, reference, reference_tol)) =
+                    cliff_section.take()
+                {
+                    check_cliff_section(reference, feet, reference_tol + tol)?;
+                    for (ends, point) in [(reference_ends, &reference_tsect), (rail_ends, &tsect)] {
+                        for end in ends.into_iter().flatten() {
+                            self.fillet_vertexuse_mut(end)?.set_tsect_pnt(point);
+                        }
+                    }
+                } else {
+                    let [p_first, p_other] = feet;
+                    ends = Some((
+                        tsect.uv_pos(srf(first, OP)?),
+                        p_first,
+                        tsect.uv_pos(other_srf(first, OP)?),
+                        p_other,
+                    ));
+                    cliff_section = Some((rail_ends, tsect, feet, tol));
+                }
+                continue;
+            }
+
+            self.fillet_vertexuse_mut(vu)?.set_tsect_pnt(&tsect);
             // a closed blend's other rail end here
             if let Some(other_vu) = self.vu_at_rail_end(v, Some(g), Some(vu), None)? {
                 self.fillet_vertexuse_mut(other_vu)?.set_tsect_pnt(&tsect);
@@ -3846,7 +4218,7 @@ impl FilletBrep {
             // beyond's
             let first = if !any_rolled {
                 (gg == 0).then_some(usize::from(eu1::face(target, eu)? != Some(first_face)))
-            } else if ended {
+            } else if ends.is_some() {
                 None
             } else {
                 let fs = solvers.solver(sid)?;
@@ -3877,12 +4249,13 @@ impl FilletBrep {
                 };
                 let p_first = foot_on_support(first_face, uv_first)?;
                 let p_other = foot_on_support(other_face, uv_other)?;
-                self.set_processed(v, uv_first, p_first)?;
-                self.set_processed(mate, uv_other, p_other)?;
-                ended = true;
+                ends = Some((uv_first, p_first, uv_other, p_other));
             }
         }
-        if any_rolled && !ended {
+        if let Some((uv_first, p_first, uv_other, p_other)) = ends {
+            self.set_processed(v, uv_first, p_first)?;
+            self.set_processed(mate, uv_other, p_other)?;
+        } else if any_rolled {
             // no blend of the join rolls on the two faces its shared section ends on
             return Err(SolidError::blend(
                 OP,
@@ -4016,6 +4389,7 @@ impl FilletBrep {
         let (found, tsect) = point_on_plane_solve(
             k,
             solvers.solver_ops_mut(si)?,
+            None,
             plane_orig,
             plane_normal,
             &domain1,
@@ -4737,6 +5111,110 @@ mod tests {
         domain.set_min_max_coords(0.0, 0.0, 360.0, 40.0).unwrap();
         cylinder.adjust_step_uv_domain(k, &domain).unwrap();
         Surface::from(cylinder)
+    }
+
+    #[test]
+    fn stationwise_cliff_section_requires_both_physical_feet_to_match() -> Result<()> {
+        use crate::blend::fillet_custom_solver::{OffsetSurface, SurfaceId};
+        use crate::blend::fillet_solver::p1::OffsetSurfaceSlot;
+        use crate::blend::fillet_standard_solver::p1::ConstantDistanceFs;
+        use crate::geom::vector2d::Vec2;
+        use crate::surface::offset_surface::SS_UNKNOWN;
+        use crate::surface::procedural_blend::chamfer::{ChamferDefinition, ChamferSize};
+
+        let k = Kernel::default();
+        let sharp = Point3::new(10.0, 0.0, 0.0);
+        // Both sides have a right wedge between z = 0 and the cylinder of
+        // radius 10. Its section in y = 0 has the exact feet (10 - d, 0, 0)
+        // and (10, 0, d), so the compatible chord is d sqrt(2).
+        let solve = |chord: f64, setback: Option<f64>, reversed: bool| -> Result<[Point3; 2]> {
+            let plane = Plane::new(
+                sharp + f64::from(u8::from(reversed)) * Vec3::Y,
+                Vec3::X,
+                Vec3::Y,
+                Vec2::new(1.0, 1.0),
+                &Extent2d::from_bounds(-2.0, -2.0, 2.0, 2.0),
+            );
+            let plane_uv = plane.project_point_to_uv_domain(sharp - 0.25 * Vec3::X);
+            let cylinder = seamed_cylinder(&k, -90.0);
+            let domain = cylinder.natural_uv_domain_with_nurb(&k)?;
+            let dropped = cylinder.drop_point::<NoObject>(
+                &k,
+                sharp + 0.25 * Vec3::Z,
+                &domain,
+                &DropPointOptions::default(),
+            )?;
+            assert!(dropped.success);
+            let mut sides = [
+                (Surface::from(plane), plane_uv, 1.0),
+                (cylinder, dropped.result_uv, -1.0),
+            ];
+            if reversed {
+                sides.reverse();
+            }
+            let [a, b] = &sides;
+            let (uv0, uv1) = (a.1, b.1);
+            let domain0 = a.0.natural_uv_domain_with_nurb(&k)?;
+            let domain1 = b.0.natural_uv_domain_with_nurb(&k)?;
+            let mut solver = FilletSolver::new(1e-7, 1e-6, 1e-6);
+            if let Some(d) = setback {
+                solver.chamfer = Some(
+                    ChamferDefinition::new(ChamferSize::Distances([d, d]), PI / 2.0)?
+                        .at_every_station()?,
+                );
+            }
+            for (rail, (surface, _, sign)) in sides.into_iter().enumerate() {
+                let id = rail as u32;
+                let offset = OffsetSurface::new(
+                    &k,
+                    sign * chord * std::f64::consts::FRAC_1_SQRT_2,
+                    surface,
+                    SurfaceId::Free(id),
+                    SS_UNKNOWN,
+                )?;
+                solver.orientations[rail] = sign;
+                solver.set_surface(
+                    rail,
+                    Some(OffsetSurfaceSlot {
+                        key: u64::from(id),
+                        surface: offset,
+                    }),
+                )?;
+            }
+            let mut fs = ConstantDistanceFs {
+                solver,
+                distance: chord,
+            };
+            let (found, point) = point_on_plane_solve(
+                &k,
+                &mut fs,
+                None,
+                sharp,
+                Vec3::Y,
+                &domain0,
+                &domain1,
+                uv0,
+                uv1,
+                &TsectPnt::new(),
+            )?;
+            assert!(found);
+            cliff_section_feet(&k, &fs.solver, &point, usize::from(reversed))
+        };
+        let reference = solve(0.4 * std::f64::consts::SQRT_2, Some(0.25), false)?;
+        let exact = [Point3::new(9.75, 0.0, 0.0), Point3::new(10.0, 0.0, 0.25)];
+        for (found, expected) in reference.into_iter().zip(exact) {
+            assert!(found.distance(expected) < 1e-7, "{found:?}");
+        }
+        let compatible = solve(0.25 * std::f64::consts::SQRT_2, None, true)?;
+        check_cliff_section(reference, compatible, 1e-7)?;
+
+        let too_wide = solve(0.5 * std::f64::consts::SQRT_2, None, true)?;
+        let refused = check_cliff_section(reference, too_wide, 1e-7).unwrap_err();
+        assert_eq!(refused.kind(), crate::error::ErrorKind::JoinOffsetsDiffer);
+        let [a, mut b] = compatible;
+        b.x = f64::NAN;
+        assert!(check_cliff_section(reference, [a, b], 1e-7).is_err());
+        Ok(())
     }
 
     /// The ends of a curve.
