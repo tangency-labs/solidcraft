@@ -1952,7 +1952,7 @@ fn select_set(s: &mut Session, p: &Value) -> Result<Value> {
             && !s.selectable_in_drawing(*drawing, *object)
         {
             let object = solidcraft_doc::ids::encode(*object);
-            return Err(bad("select.set", format!("the drawing open has no view, dimension or balloon {object}")));
+            return Err(bad("select.set", format!("the drawing open has no selectable object {object}")));
         }
         sel.push(one);
     }
@@ -2783,17 +2783,33 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         parameters.entry("convention").or_insert_with(|| json!(convention));
     }
-    if let FeatureKind::SurfaceRevolve { faced, .. } = &old.kind
+    if let FeatureKind::SurfaceRevolve { faced, stays_surface, .. } = &old.kind
         && cid == "surface.revolve"
         && let Some(parameters) = params.as_object_mut()
     {
         parameters.entry("faced").or_insert_with(|| json!(faced));
+        parameters.entry("stays_surface").or_insert_with(|| json!(stays_surface));
     }
     if let FeatureKind::SurfaceLoft { faced, .. } = &old.kind
         && cid == "surface.loft"
         && let Some(parameters) = params.as_object_mut()
     {
         parameters.entry("faced").or_insert_with(|| json!(faced));
+    }
+    // A redefine keeps what the feature's result was (#21969): a surface body where it closes,
+    // or a solid there in a feature saved before `stays_surface`.
+    let stays = match &old.kind {
+        FeatureKind::SurfaceSweep { stays_surface, .. } if cid == "surface.sweep" => Some(*stays_surface),
+        FeatureKind::SurfaceLoft { stays_surface, .. } if cid == "surface.loft" => Some(*stays_surface),
+        FeatureKind::SurfaceOffset { stays_surface, .. } if cid == "surface.offset" => Some(*stays_surface),
+        FeatureKind::SurfaceRuled { stays_surface, .. } if cid == "surface.ruled" => Some(*stays_surface),
+        FeatureKind::SurfaceExtend { stays_surface, .. } if cid == "surface.extend" => Some(*stays_surface),
+        _ => None,
+    };
+    if let Some(stays) = stays
+        && let Some(parameters) = params.as_object_mut()
+    {
+        parameters.entry("stays_surface").or_insert_with(|| json!(stays));
     }
     if let FeatureKind::Thread { continuous_flanks, .. } = &old.kind
         && cid == "solid.thread"

@@ -1128,6 +1128,9 @@ fn extent_raw(
         // is free there too), the directions a pole it passes collapses, the pole it is on, and
         // the jump each crossing makes by the loop's side ([`pole_jump`]).
         let (mut wraps, mut passes) = (false, [false; 2]);
+        // Whether a crossing comes out half a turn round from where it went in ([`half_turn`]):
+        // the nearest branch is then no answer.
+        let mut half = false;
         let mut pole_at: Option<([f64; 2], [bool; 2])> = None;
         let mut jumps: Vec<[f64; 2]> = Vec::new();
         for (c, [t0, t1], forward) in l {
@@ -1284,7 +1287,10 @@ fn extent_raw(
                         crossings += 1;
                         on_pole = false;
                         let jump = match (prev, pole_at) {
-                            (Some(a), Some(on)) => pole_jump(a, q, on, period),
+                            (Some(a), Some(on)) => {
+                                half |= half_turn(&eval, a, q, on, period, reach);
+                                pole_jump(a, q, on, period)
+                            }
                             _ => [0.0; 2],
                         };
                         jumps.push(jump);
@@ -1352,14 +1358,19 @@ fn extent_raw(
         // whatever its turns are, so closing it says nothing. Where it also runs along an edge
         // both ways (a seam: the face spans the whole turn there), each crossing turns the way
         // the face's side says instead ([`pole_jump`]). A loop with no seam (a narrow lune, up
-        // one meridian and down another) keeps closing: its width is the one it shows.
+        // one meridian and down another) keeps closing: its width is the one it shows. A lune
+        // half a turn wide (a half sphere whose rim is a meridian circle, both its halves a lune
+        // of the same width) shows no width of its own: the nearest branch past each pole is a
+        // tie that rounding settles, and either half could come out. It turns the way the
+        // face's side says too.
         wraps |= on_pole;
         let by_side = crossings + usize::from(wraps) >= 2
-            && l.iter().enumerate().any(|(i, (c, t, f))| {
-                l.iter()
-                    .skip(i + 1)
-                    .any(|(c2, t2, f2)| f != f2 && t == t2 && c == c2)
-            });
+            && (half
+                || l.iter().enumerate().any(|(i, (c, t, f))| {
+                    l.iter()
+                        .skip(i + 1)
+                        .any(|(c2, t2, f2)| f != f2 && t == t2 && c == c2)
+                }));
         // The turn the points past each crossing are moved by: none before the first.
         let turned: Vec<[f64; 2]> = std::iter::once([0.0; 2])
             .chain(jumps.iter().scan([0.0; 2], |s, j| {
@@ -1475,6 +1486,38 @@ fn extent_raw(
         }
     }
     Some((lo, hi))
+}
+
+/// Whether a loop through a pole comes out of it half a turn round from where it went in, so
+/// that neither way round is the shorter: `a` the last point before the pole, `b` the first after,
+/// `p` the pole's parameters and `collapsed` the directions collapsed there (as [`pole_jump`]).
+/// Half a turn to within rounding and the angle `reach` (the face's tolerance) makes at the nearer
+/// of the two points, each a tolerance off its place, taken at its distance from the pole (no
+/// more than its distance from the axis there, so the angle is no smaller than it should be).
+fn half_turn(
+    eval: &SurfaceEval,
+    a: [f64; 2],
+    b: [f64; 2],
+    (p, collapsed): ([f64; 2], [bool; 2]),
+    period: [Option<f64>; 2],
+    reach: f64,
+) -> bool {
+    let (Some(pa), Some(pb), Some(pole)) = (eval.point(a), eval.point(b), eval.point(p)) else {
+        return false;
+    };
+    let near = pa.dist(pole).min(pb.dist(pole));
+    if !(near > 0.0) {
+        return false;
+    }
+    let angle = 2.0 * (reach.max(0.0) / near).min(1.0).asin();
+    (0..2).any(|d| {
+        let per = ix(&period, d).filter(|p| p.is_finite() && *p > 0.0);
+        let (true, Some(per)) = (ix(&collapsed, d), per) else {
+            return false;
+        };
+        let gap = (ix(&b, d) - ix(&a, d)).rem_euclid(per);
+        (gap - 0.5 * per).abs() <= per * TURN_ROUNDING + angle
+    })
 }
 
 /// The whole periods a loop's points after a pole are moved by: `a` the last point before it,
