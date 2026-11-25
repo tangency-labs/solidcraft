@@ -36,6 +36,7 @@ mod corner_g2;
 mod curvature_comb;
 mod delete_face;
 mod distance;
+mod dome;
 mod draft_corners;
 pub mod drawing_centre_mark;
 mod emboss;
@@ -309,6 +310,7 @@ pub use distance::body_distance;
 pub use distance::edges_closest;
 pub use distance::faces_closest;
 pub use distance::point_closest;
+pub use dome::dome;
 pub use draft_corners::CornerFill;
 pub use draft_corners::CornerOption;
 pub use draft_corners::CornerRefusal;
@@ -428,15 +430,19 @@ pub use round_face::round_face_grow_block;
 pub use round_face::round_face_past_end;
 pub use round_face::round_face_stands_over;
 pub use round_face::round_face_whole_band;
+pub use route::CELL_GRID_LIMITS;
 pub use route::Which;
 pub use route::boolean;
 pub use route::box_solid;
+pub use route::cell_regions;
 pub use route::chamfer;
 pub use route::chamfer_sides;
 pub use route::cylinder;
+pub use route::default_cell_grid;
 pub use route::extrude;
 pub use route::fillet;
 pub use route::offset_faces;
+pub use route::plan_cell_grid;
 pub use route::revolve;
 pub use route::revolve_whole;
 pub use route::shell;
@@ -451,6 +457,8 @@ pub use sew::SurfSpec;
 pub use sew::sew;
 pub use sew::sew_touching;
 pub use sew::sew_touching_traced;
+pub use solidcore_ops::dome::DomeRefusal;
+pub use solidcore_ops::dome::DomeShape;
 pub use solidcore_ops::member_turn::ParallelTurnError;
 pub use solidcore_ops::member_turn::parallel_turn;
 /// SolidCraft's kernel interface: the trait each kernel's adapter implements, its operations,
@@ -621,9 +629,16 @@ pub enum KernelError {
     /// run ([`heal_tolerance_defects`]).
     #[error("the operation failed: {0}")]
     Heal(#[from] HealFailure),
+    /// A dome the face or the height cannot take.
+    #[error("the operation failed: {0}")]
+    Dome(#[from] DomeRefusal),
 }
 
 pub type Result<T> = std::result::Result<T, KernelError>;
+
+/// Most guide rails a loft takes. solidcore states the same limit (`solidcore::sweep::loft_rails`);
+/// the kernel does not depend on solidcore, so the number is repeated here.
+pub const MAX_LOFT_RAILS: usize = 16;
 
 /// The mesher's error as the kernel's: the same words.
 impl From<solidcore_tess::TessError> for KernelError {

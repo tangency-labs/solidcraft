@@ -174,7 +174,7 @@ pub fn default_block() -> TitleBlock {
         ("date_of_issue", [-62.0, 14.0, -30.0, 24.0], "Date of issue", text(3.5, Left, most(10), vec![field(Revision, "date")])),
         ("sheet", [-30.0, 14.0, 0.0, 24.0], "Sheet", text(3.5, Centre, most(9), sheet)),
         ("material", [-180.0, 24.0, -100.0, 34.0], "Material", text(3.5, Left, whole, vec![field(Component, "material")])),
-        ("finish", [-100.0, 24.0, -30.0, 34.0], "Finish", text(3.5, Left, whole, vec![field(Component, "properties.finish")])),
+        ("finish", [-100.0, 24.0, -30.0, 34.0], "Finish", text(3.5, Left, whole, vec![field(Component, "finish")])),
         ("mass", [-30.0, 24.0, 0.0, 34.0], "Mass", text(3.5, Centre, whole, vec![field(Component, "mass")])),
         ("legal_owner", [-180.0, 34.0, -100.0, 49.0], "Legal owner", text(3.5, Left, wrap, vec![field(Drawing, "organization")])),
         ("general_tolerances", [-100.0, 34.0, -30.0, 49.0], "General tolerances", text(2.5, Left, wrap, Vec::new())),

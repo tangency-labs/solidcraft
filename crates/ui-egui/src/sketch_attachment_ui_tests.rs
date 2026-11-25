@@ -480,6 +480,35 @@ fn plane_redefinition_uses_dense_card_and_keeps_command_preview_cancel_and_ok() 
     }
 }
 
+/// #14675: a construction plane built from a sketch made after this one. The panel says the
+/// sketch moves after the plane, the preview has no error, and OK moves it there and redefines it.
+#[test]
+fn redefine_panel_moves_the_sketch_after_a_later_plane_and_says_so() {
+    use crate::scenario;
+    let mut h = Harness::new();
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY","name":"Sketch4"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[10,10],"p1":[30,20]})).unwrap();
+    h.app.finish_sketch();
+    h.app.run("sketch.create", json!({"plane":"XZ","name":"Sketch5"})).unwrap();
+    let line = h.app.run("sketch.line", json!({"points":[[0,0],[0,40]]})).unwrap()["curves"][0].as_str().unwrap().to_string();
+    h.app.finish_sketch();
+    h.app.run("construct.plane.along_path", json!({"path":{"sketch":"Sketch5","curve":line},"t":0.5,"name":"Plane5"})).unwrap();
+    let order = |h: &Harness| h.app.session.doc.features.iter().map(|f| f.name.clone()).collect::<Vec<_>>();
+    assert_eq!(order(&h), ["Sketch4", "Sketch5", "Plane5"]);
+    crate::browser::redefine_sketch(&mut h.app, sketch);
+    h.frames(5);
+    assert!(scenario::rect_of("dialog:hint:moves_sketch").is_none(), "no hint before a plane is chosen");
+    h.step(&json!({"widget":"Plane5"})).unwrap();
+    h.settle();
+    h.frames(3);
+    assert!(scenario::rect_of("dialog:hint:moves_sketch").is_some(), "the panel says the sketch moves");
+    assert_eq!(h.app.preview.error, None);
+    assert_eq!(order(&h), ["Sketch4", "Sketch5", "Plane5"], "the preview moves nothing");
+    h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    assert!(h.app.tree.redefine.is_none(), "applied");
+    assert_eq!(order(&h), ["Sketch5", "Plane5", "Sketch4"]);
+}
+
 /// #5103: Redefine Sketch Plane names the plane a sketch is on now, not only "no body-face
 /// attachment": an origin plane, a construction plane, and planes built from them.
 #[test]

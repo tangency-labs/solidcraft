@@ -59,6 +59,7 @@ pub mod curve_knots;
 pub mod curve_plane;
 pub mod cylinder_wall;
 pub mod develop;
+pub mod dome;
 pub mod dxf;
 pub mod error;
 pub mod extend;
@@ -99,6 +100,7 @@ pub mod round_face;
 pub mod section_corners;
 pub mod session;
 pub mod shaft_spline;
+pub mod sketch_arc;
 pub mod spline_projection;
 pub mod split;
 pub mod step_assembly;
@@ -229,6 +231,8 @@ pub fn reduce_mesh(
 
 #[cfg(test)]
 mod ball_corner_tests;
+#[cfg(test)]
+mod dome_tests;
 #[cfg(test)]
 mod noisy_round_tests;
 #[cfg(test)]
