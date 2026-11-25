@@ -1034,10 +1034,6 @@ pub(super) fn own_built(
         // the gap walk may leave size estimates a copy does not carry: read afresh
         return read_as(&mut k, &path, *rebuild, validate_only, init_gaps, conv);
     }
-    if crate::tolsub::active() || crate::refit::active() {
-        // (a tolerance-substitution replay sees every read: no cached copy)
-        return read_as(&mut k, &path, *rebuild, validate_only, false, conv);
-    }
     let key = (path, *rebuild, validate_only);
     // a copy of the same file's earlier Rust read (the reader is deterministic): the
     // renumbering of a B-rep already in traversal order is a plain copy

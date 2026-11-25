@@ -40,6 +40,8 @@ pub(crate) struct Section {
     pub plane: Plane,
     pub curves: Vec<CurveN<4>>,
     pub numbers: Vec<Vec<usize>>,
+    /// The sketch segments the curves are, on `plane`.
+    pub segs: Vec<Seg2>,
 }
 
 impl Section {
@@ -47,7 +49,7 @@ impl Section {
     /// standing for the profile segments `numbers[i]`.
     pub(crate) fn of(plane: &Plane, segs: &[Seg2], numbers: Vec<Vec<usize>>) -> Result<Section> {
         let curves = segs.iter().map(|s| nurbs(&crate::freeform::segment(plane, s)?.0)).collect::<Result<Vec<_>>>()?;
-        Ok(Section { plane: *plane, curves, numbers })
+        Ok(Section { plane: *plane, curves, numbers, segs: segs.to_vec() })
     }
 }
 
@@ -176,7 +178,7 @@ fn raised(c: &CurveN<4>, degree: usize) -> Result<CurveN<4>> {
 /// (Boehm insertion), so that their control points correspond one to one. The weights stay each
 /// curve's own (a line's are all 1, an arc's are not); a station between takes its control
 /// points straight between the sections' and its weights between theirs.
-fn unified(sections: &[Section]) -> Result<Vec<Section>> {
+pub(crate) fn unified(sections: &[Section]) -> Result<Vec<Section>> {
     let n = sections.first().map_or(0, |s| s.curves.len());
     let fail = |m: &str| KernelError::Failed(format!("loft rails: {m}"));
     let mut columns: Vec<Vec<CurveN<4>>> = Vec::with_capacity(n);
@@ -215,7 +217,12 @@ fn unified(sections: &[Section]) -> Result<Vec<Section>> {
     Ok(sections
         .iter()
         .enumerate()
-        .map(|(i, s)| Section { plane: s.plane, curves: columns.iter().filter_map(|col| col.get(i).cloned()).collect(), numbers: s.numbers.clone() })
+        .map(|(i, s)| Section {
+            plane: s.plane,
+            curves: columns.iter().filter_map(|col| col.get(i).cloned()).collect(),
+            numbers: s.numbers.clone(),
+            segs: s.segs.clone(),
+        })
         .collect())
 }
 
@@ -277,6 +284,7 @@ pub(crate) fn railed_to_point(base: &Section, apex: Vec3, rails: &[Vec<Vec3>], f
         plane: Plane { origin: apex, ..base.plane },
         curves: base.curves.iter().map(|c| with(c, &vec![apex; c.ctrl.len()])).collect(),
         numbers: base.numbers.clone(),
+        segs: Vec::new(),
     };
     let (mut rows, along) = railed_ending(&[base.clone(), tip], true, rails, fit, true)?;
     rows.pop();

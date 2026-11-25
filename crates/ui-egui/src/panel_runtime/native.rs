@@ -127,7 +127,7 @@ impl DesktopNativeAdapter {
         let min = egui::vec2(min.width, min.height);
         let max = egui::vec2(max.width, max.height);
         // The window a drag showed becomes an ordinary window again here.
-        let builder = egui::ViewportBuilder::default()
+        let builder = crate::window_chrome::popout_viewport(egui::ViewportBuilder::default(), ctx.viewport_id())
             .with_title(title)
             .with_min_inner_size(min)
             .with_max_inner_size(max)

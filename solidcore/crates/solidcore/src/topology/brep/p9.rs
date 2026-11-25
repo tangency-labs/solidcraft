@@ -155,18 +155,6 @@ pub struct SplitEdgeOutput {
     pub vertex: Option<VertexId>,
 }
 
-impl SplitEdgeOutput {
-    /// The upstream status; dependency errors use the enclosing `Result`.
-    #[must_use]
-    pub const fn status(self) -> i32 {
-        if self.split {
-            0
-        } else {
-            SM_ERR
-        }
-    }
-}
-
 /// `FindInfiniteRegion`, including its optional shell and bounding box arguments.
 ///
 /// The first call, `GetRegions`, requires the B-rep's native owning-list order.
@@ -1019,9 +1007,9 @@ fn split_uv_trim(k: &Kernel, b: &mut Brep, input: SplitUvInput) -> Result<()> {
 ///
 /// The editing state is the B-rep's `m_bEditingEnabled` ([`Brep::editing_enabled`]):
 /// false from the constructor, set by editing scopes. Ordinary no-split results are
-/// successful Rust returns whose
-/// [`SplitEdgeOutput::status`] is `SM_ERR`; this preserves outputs that C++ callers
-/// consume despite that status. Dependency/invalid-graph errors remain `Err`.
+/// successful Rust returns whose [`SplitEdgeOutput::split`] is false (upstream's
+/// `SM_ERR`); this preserves outputs that C++ callers consume despite that status.
+/// Dependency/invalid-graph errors remain `Err`.
 ///
 /// # Errors
 /// Invalid graph; evaluator errors; face notifications or the
@@ -1814,7 +1802,7 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
             .unwrap_or(end);
         }
         edge::insert_manifold_edge_end(b, edge_id, Some(end), false)?;
-        let mut reparameterised = false;
+        let mut off_domain = None;
         let (new_face, new_fu1, new_fu2) = if new_loop_without_new_face {
             let fu1 = required(fp2::upward_faceuse(b, face)?, "face without upward use")?;
             let fu2 = required(b.faceuse(fu1)?.mate, "faceuse without mate")?;
@@ -1831,13 +1819,15 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
             let new_face = b.add_face_record(crate::topology::Face::new(shell))?;
             let old_surface =
                 required(b.face(face)?.surface.as_ref(), "split face without surface")?;
+            // (WR-450: the copy keeps the old surface's parameterisation, so the trims of
+            // the edge uses that move onto the new face stay on their edges)
             let mut surface = old_surface.copy_and_add_analytics(k)?;
-            // Not upstream (WR-361): without WR-450's fix, a B-spline recognised as an
-            // analytic is copied in the analytic's own parameterisation, so the trims of
-            // the edge uses that move onto the new face no longer lie on their edges
-            reparameterised = !k.fixes.analytic_copy_keeps_parameterization
-                && std::mem::discriminant(old_surface.kind())
-                    != std::mem::discriminant(surface.kind());
+            // (a copy of another kind is checked against the old surface on its natural
+            // domain only: trims that leave it are dropped below)
+            if std::mem::discriminant(old_surface.kind()) != std::mem::discriminant(surface.kind())
+            {
+                off_domain = Some(old_surface.natural_uv_domain_with_nurb(k)?);
+            }
             let new_face_owner = (env.key_of)(EntityRef::Face(new_face));
             surface.set_owner(Some(new_face_owner));
             b.face_mut(new_face)?.surface = Some(surface);
@@ -1945,16 +1935,14 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
                     }
                 }
             }
-            // The loops new_face has now (after the separating cut's swap) carry trims in
-            // the old parameterisation: drop them before redistribute_inner_loops
-            // classifies the old face's inner loops against new_face, and again after,
-            // for the inner loops it moves over from the old face
-            if reparameterised {
-                drop_face_trims(b, new_face)?;
+            // (the loops new_face has now, after the separating cut's swap, and again
+            // after redistribute_inner_loops for the inner loops it moves over)
+            if let Some(domain) = &off_domain {
+                drop_trims_off_domain(k, b, new_face, domain)?;
             }
             redistribute_inner_loops(k, b, face, new_face, start_loop, new_loop, env)?;
-            if reparameterised {
-                drop_face_trims(b, new_face)?;
+            if let Some(domain) = &off_domain {
+                drop_trims_off_domain(k, b, new_face, domain)?;
             }
         } else {
             // Both boundary cycles belong to this face. Put one seam side first;
@@ -2155,24 +2143,54 @@ fn remove_old_loop_vertices(b: &mut Brep, vu: VertexuseId) -> Result<()> {
     crate::topology::brep::p1::rm_and_del_old_loop_vertices(b, vu)
 }
 
-/// Not upstream (WR-361): drops the UV trim curves of every edge use of `face`'s loops
-/// (the lazy caches of their edges' curves on the face, rebuilt when next asked for),
-/// for a face whose surface is no longer in the parameterisation they were made in.
-fn drop_face_trims(b: &mut Brep, face: FaceId) -> Result<()> {
+/// Not upstream (WR-450, #18923): drops the UV trim of every edge use of `face`'s loops
+/// whose certified box over its edge's interval ([`crate::curve::curve::Curve::certified_bounding_box`],
+/// which holds every point of the trim there) leaves `domain`, the natural domain of the surface
+/// `face`'s surface was copied from as an analytic of another kind. The copy keeps that
+/// surface's parameterisation on `domain` only (the copy check's grid); outside it the
+/// two differ (a cone clamps where a B-spline extrapolates), so such a trim is no longer
+/// on its edge. A dropped trim is the lazy cache of the edge's curve on the face, made
+/// again when next asked for; a trim with no certified box is dropped as well.
+///
+/// # Errors
+///
+/// Those of the topology walk and of dropping a trim.
+fn drop_trims_off_domain(
+    k: &Kernel,
+    b: &mut Brep,
+    face: FaceId,
+    domain: &crate::geom::extent2d::Extent2d,
+) -> Result<()> {
     let Some(fu) = crate::topology::face::p2::upward_faceuse(b, face)? else {
         return Ok(());
     };
     let mate = b.faceuse(fu)?.mate;
     for fu in std::iter::once(fu).chain(mate) {
         for eu in crate::topology::edgeuse::p1::faceuse_edgeuses(b, fu, false, None)? {
-            crate::topology::edgeuse::p1::set_uv_trim_curve(
-                b,
-                eu,
-                crate::topology::edgeuse::p1::UvTrimCurveArg::Null,
-                0.0,
-                true,
-                None,
-            )?;
+            let record = b.edgeuse(eu)?;
+            let (Some(trim), Some(edge)) = (record.uv_trim_curve.as_ref(), record.edge) else {
+                continue;
+            };
+            let interval = b.edge(edge)?.interval;
+            let inside = crate::error::ignored(trim.certified_bounding_box(k, &interval))?
+                .flatten()
+                .is_some_and(|uv| {
+                    uv.is_defined()
+                        && uv.min_at(0) >= domain.min().x
+                        && uv.max_at(0) <= domain.max().x
+                        && uv.min_at(1) >= domain.min().y
+                        && uv.max_at(1) <= domain.max().y
+                });
+            if !inside {
+                crate::topology::edgeuse::p1::set_uv_trim_curve(
+                    b,
+                    eu,
+                    crate::topology::edgeuse::p1::UvTrimCurveArg::Null,
+                    0.0,
+                    true,
+                    None,
+                )?;
+            }
         }
     }
     Ok(())
@@ -3805,7 +3823,6 @@ mod tests {
                     )
                     .unwrap();
                     assert!(!output.split);
-                    assert_eq!(output.status(), SM_ERR);
                     assert_eq!(k.context.doing_boolean(), previous);
                 }
                 b.set_editing_enabled(false);
@@ -4027,8 +4044,8 @@ mod tests {
             })
             .unwrap();
             assert_eq!(
-                (result.status(), result.edges, result.vertex),
-                (SM_ERR, None, vertex)
+                (result.split, result.edges, result.vertex),
+                (false, None, vertex)
             );
             b.set_editing_enabled(false);
             let disabled = make_vertex_split_edge(&mut k, &mut b, e, p, &mut env, &|_, kind| {
@@ -4038,7 +4055,7 @@ mod tests {
                 }
             })
             .unwrap();
-            assert_eq!(disabled.status(), SM_ERR);
+            assert!(!disabled.split);
             assert_eq!((disabled.edges, disabled.vertex), (None, None));
         }
         assert!(!k.context.doing_boolean());
@@ -4053,8 +4070,8 @@ mod tests {
             })
             .unwrap();
             assert_eq!(
-                (outside.status(), outside.edges, outside.vertex),
-                (SM_ERR, None, None)
+                (outside.split, outside.edges, outside.vertex),
+                (false, None, None)
             );
             assert!(k.context.doing_boolean());
         }
@@ -4074,7 +4091,7 @@ mod tests {
         // With parts 1 and 2 wired, a wire split completes, its final B-rep ADD
         // notification included.
         let out = result.unwrap();
-        assert_eq!(out.status(), 0);
+        assert!(out.split);
         let edges = out.edges.unwrap();
         assert!(edges.contains(&e));
         assert!(out.vertex.is_some());

@@ -16,8 +16,8 @@ use super::measure::{equivalent, section};
 use super::placement::LoopPlacement;
 use super::profile::rational_curve;
 use super::profile::{
-    check_regions, curve_on_frame, largest_arc_sweep, smallest_arc_sweep, tapered_flange_ends,
-    Loop2, ProfileRefusal, Region2, Seg2,
+    check_regions, curve_on_frame, largest_arc_sweep, smallest_arc_sweep, Loop2, ProfileRefusal,
+    Region2, Seg2,
 };
 use super::read::{
     arc_before_line, circular_boundary, planar_curves, planar_pieces, PlanarPiece, Run,
@@ -50,7 +50,7 @@ fn p(x: f64, y: f64) -> Point2 {
 
 #[test]
 fn chord_coordinates_preserve_aspect_ratio_and_refuse_unrepresentable_inputs() {
-    use super::import_geometry::chord_coordinates;
+    use super::transform::chord_coordinates;
 
     // c = 1.5 - 0.25 = 1.25; 0.625/c = 0.5, 0.15625/c = 0.125.
     assert_eq!(
@@ -1364,26 +1364,6 @@ fn discontinuous_splines_are_not_read() {
 }
 
 #[test]
-fn a_tapered_flange_changes_by_half_its_length_times_the_slope_tangent() {
-    // No slope: the given thickness at both ends.
-    assert_eq!(tapered_flange_ends(80.0, 14.0, 0.0), (14.0, 14.0));
-    // 45 degrees over an 80 mm inside length: 40 mm thinner at the toe, 40 mm thicker at the root.
-    let (toe, root) = tapered_flange_ends(80.0, 50.0, 45.0);
-    assert!(
-        (toe - 10.0).abs() < 1e-12 && (root - 90.0).abs() < 1e-12,
-        "{toe} {root}"
-    );
-    // A 5 degree taper flange channel (203 x 89, web 8.9, flange 14.2): the ends are the mean
-    // thickness less and plus 40.05 tan 5°, and they average back to it.
-    let (toe, root) = tapered_flange_ends(89.0 - 8.9, 14.2, 5.0);
-    let change = 40.05 * 5.0_f64.to_radians().tan();
-    assert!((toe - (14.2 - change)).abs() < 1e-12 && (root - (14.2 + change)).abs() < 1e-12);
-    assert!(((toe + root) / 2.0 - 14.2).abs() < 1e-12);
-    // A non-finite input gives a non-finite answer, never a panic.
-    assert!(tapered_flange_ends(f64::NAN, 1.0, 5.0).0.is_nan());
-}
-
-#[test]
 fn directed_planar_sweep_keeps_quadrants_and_tiny_seam_angles() {
     let sweep = super::profile::counterclockwise_sweep;
     let center = Point2::new(0.0, 0.0);
@@ -2592,8 +2572,8 @@ mod recognition {
     }
 }
 
-mod path_export_regressions {
-    use super::super::path_export::*;
+mod arc_conversion_regressions {
+    use super::super::arc_conversion::*;
     use super::super::profile::Seg2;
     use crate::math::Vec2;
 
@@ -2726,7 +2706,7 @@ mod path_export_regressions {
                 Seg2::Line { a, b },
             ];
             let error =
-                path_shapes(DxfPath::Open(&segs), DxfPathStyle::Exact, encoding).unwrap_err();
+                path_shapes(PlanarPath::Open(&segs), PathStyle::Exact, encoding).unwrap_err();
             assert_eq!(error.piece, Some((1, 2)));
             assert_eq!(error.reason, "line endpoint cannot be encoded");
         }
@@ -2749,7 +2729,7 @@ mod path_export_regressions {
             b: Vec2::new(11.0, 0.0),
         };
         let error =
-            path_shapes(DxfPath::Open(&[far]), DxfPathStyle::Polyline, encoding).unwrap_err();
+            path_shapes(PlanarPath::Open(&[far]), PathStyle::Polyline, encoding).unwrap_err();
         assert_eq!(error.reason, "line endpoint cannot be encoded");
         let off_grid = Seg2::Arc {
             center: Vec2::new(11.0, 0.0),
@@ -2757,8 +2737,8 @@ mod path_export_regressions {
             start: 0.0,
             sweep: 0.5,
         };
-        for style in [DxfPathStyle::Exact, DxfPathStyle::Polyline] {
-            let error = path_shapes(DxfPath::Open(&[off_grid]), style, encoding).unwrap_err();
+        for style in [PathStyle::Exact, PathStyle::Polyline] {
+            let error = path_shapes(PlanarPath::Open(&[off_grid]), style, encoding).unwrap_err();
             assert_eq!(error.reason, "arc centre cannot be encoded");
         }
         // A bulge of 0.00025 is written as 0, and two ends 0.0002 apart as one point: neither arc
@@ -2782,15 +2762,15 @@ mod path_export_regressions {
             sweep: 1.0,
         };
         assert!(matches!(
-            path_shapes(DxfPath::Open(&[flat]), DxfPathStyle::Polyline, encoding).unwrap()[..],
+            path_shapes(PlanarPath::Open(&[flat]), PathStyle::Polyline, encoding).unwrap()[..],
             [PathShape::Arc { .. }]
         ));
         assert!(matches!(
-            path_shapes(DxfPath::Open(&[packed]), DxfPathStyle::Polyline, encoding).unwrap()[..],
+            path_shapes(PlanarPath::Open(&[packed]), PathStyle::Polyline, encoding).unwrap()[..],
             [PathShape::BulgedPolyline { .. }]
         ));
         assert!(
-            path_shapes(DxfPath::Open(&[short]), DxfPathStyle::Polyline, encoding)
+            path_shapes(PlanarPath::Open(&[short]), PathStyle::Polyline, encoding)
                 .map_or(true, |shapes| matches!(shapes[..], [PathShape::Arc { .. }]))
         );
     }
@@ -2856,7 +2836,7 @@ mod path_export_regressions {
     }
 
     #[test]
-    fn translated_conic_keeps_its_rational_definition_in_public_path_export() {
+    fn translated_conic_keeps_its_rational_definition_in_public_arc_conversion() {
         let c = 2.0_f64.powi(52);
         let w = 0.5_f64.sqrt();
         let a = Vec2::new(c + 4.0, 0.0);
@@ -2884,8 +2864,8 @@ mod path_export_regressions {
                     },
                 ];
                 let shapes = path_shapes(
-                    DxfPath::Open(&segs),
-                    DxfPathStyle::Exact,
+                    PlanarPath::Open(&segs),
+                    PathStyle::Exact,
                     scalar_encoding(Some),
                 )
                 .expect("finite conic must retain its rational definition");

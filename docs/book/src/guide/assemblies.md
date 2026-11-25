@@ -216,8 +216,10 @@ which suits scripts and agents checking a whole assembly:
 It returns `overlaps` (pairs sharing at least `min_volume`, 0.01 mm³ by default, with the shared
 volume, area, box and centre), `near` (pairs closer than `clearance`, with the distance and the
 two nearest points; a contact sharing less than `min_volume` is listed here at 0 with its
-`overlap_mm3`), `nearest` (each body's `nearest` closest bodies) and `unchecked` (pairs whose
-overlap could not be worked out, with the reason). `against` limits the check to pairs with one
+`overlap_mm3`), `nearest` (each body's `nearest` closest checked bodies, omitting pairs in
+`unchecked`) and `unchecked` (pairs whose overlap could not be worked out, with the reason and
+the non-boolean minimum `distance_mm` when computable).
+`against` limits the check to pairs with one
 body in `bodies` and the other in `against`, and `skip_within` leaves out pairs inside one
 occurrence (`"occurrence"`) or one placed component, its subcomponents included
 (`"component"`): the parts of a bought component that touch by design. Distances are measured on
@@ -538,10 +540,15 @@ which. So does a link whose part file changed since the assembly read it, and a 
 older SolidCraft that kept no record of the file it read: run **Update Links**, then save again. A `.sc` assembly saved this way has no saved model, so it is evaluated when it opens. A
 part that is a plain `.json` design is evaluated the first time it is read this way, and that
 evaluation is kept on this computer with the reused imports (**Clear Reused Imports** removes
-them), so later opens read an unchanged part without building it again. The
-mesh bodies of a linked part stay in the assembly's file, and so do the bodies of a linked STEP
-file. There is no button for this yet: run
-the command from a script, the command line or an agent.
+them), so later opens read an unchanged part without building it again. A linked STEP file
+(**Insert STEP**) is left out the same way and read again from the STEP file when the assembly
+opens; if the STEP file changed meanwhile, its new bodies come in and **List Links** shows it as
+changed. A STEP file inserted with `reader: "cadmpeg"` keeps its bodies in the file, because
+reading it again gives STEP text, not the records it was read into. Each save without linked
+bodies names it in its warnings. The mesh bodies a linked part brings (an STL or 3MF inserted in
+the part) are left out with its solids and read back with them. An STL, 3MF or OBJ inserted
+straight into the assembly is not linked, so it stays in the file. There is no button for this
+yet: run the command from a script, the command line or an agent.
 
 Linked files from other folders load after you allow them. When an assembly opens, the parts in
 its own folder, or below it, are read again by themselves as above. If a changed part is in
@@ -600,6 +607,16 @@ new linked component; the other occurrences keep the old source. Scripts pass th
 `component.relink {component, occurrence, path}`, and the reply's `component` is then the one
 the occurrence shows and `previous_component` the one it showed.
 
+Relink Source leaves the linked bodies' names as they are, unless the new source has another
+number of bodies, when they take the source's names. **Relink Source and Use Its Names…**
+(in the same menu) gives the bodies the new source's names instead: what the design keeps under
+the old names (materials, appearances, later features that name the body) follows each body to
+its new name, and the linked feature takes the source design's name when it still had its
+component's. The component's own name stays yours, and a body whose new name another body
+already has keeps its name and is reported in the warnings. Scripts pass `names: "keep"`
+(the default) or `names: "sync"`; it applies when the whole component is relinked, not to one
+placement shown by `occurrence`, which shows a component made from the new source.
+
 Scripts use `component.relink {component, path}`. The reply includes `previous_path`, `path`,
 `warnings`, `joint_errors` and `joint_conflicts`. Changed geometry can invalidate a joint's
 face reference: relinking reports those joints in the reply and UI status/message history;
@@ -632,9 +649,20 @@ revision, other tools' data under a reverse-DNS key (the same rules as the desig
 properties), and free text properties such as a material grade or a finish. Every occurrence of
 the component shares them, Paste New copies them, and they are saved with the component.
 `component.metadata {component}` reads them and
-`component.metadata.set {component, part_number?, description?, revision?, bom_type?, material?, bom_quantity?, virtual?, values?, properties?}`
+`component.metadata.set {component, part_number?, description?, revision?, bom_type?, material?, finish?, bom_quantity?, virtual?, values?, properties?}`
 changes them in one undo step (an empty value removes a field). The root component is the
-design itself: its properties are `document.metadata`'s. Standard parts (`parts.insert`) get a
+design itself: its properties are `document.metadata`'s.
+
+A part's **material** is what it is ordered as ("5052-H32, 0.090 in", "CRS, 16 ga") and its
+**finish** is free text ("powder coat, RAL 9005, matt", "zinc plate, clear", "#4 brushed, grain
+along length"); masking and no-coat notes stay ordinary notes. Both are text of your own: the
+windows offer common finishes to pick from and never hold you to them. A design that is one part has
+no component to hold them, so the design carries them itself: `document.metadata.set {values:
+{material, finish}}` (Design Properties in the window). They are in the bill of materials (a
+`finish` column in the rows and the CSV), in a drawing's parts list (a FINISH column you add with the table's columns; a new list
+keeps its columns) and in its title block, whose Material and Finish cells read them with nothing typed over. A part
+that has only a free property named `finish` (as parts did before) shows that one wherever a finish
+is shown. Standard parts (`parts.insert`) get a
 part number from their standard and size (`ISO 4762 M6x20`, `GOST 7798-70 M12x60`, or a bearing's
 designation) and a description; **Change Part Size** renumbers them, keeping a field you changed yourself.
 
@@ -705,7 +733,7 @@ in the one material an assembly around it shares, so two parts typed in as S355 
 S355. Where several definitions share a row, the first one's static material wins. It doesn't change
 the mass, which still comes from the bodies, and clearing it (empty or null) brings the worked-out
 material back.
-A free property such as a material grade stays in `properties`. `mass: true` adds `mass_g`: what one of the row's parts weighs in grams, with
+Each row also has `finish`: the part's finish, else a free property named `finish`. A free property such as a material grade stays in `properties`. `mass: true` adds `mass_g`: what one of the row's parts weighs in grams, with
 what is placed inside it except what the list shows as rows of their own beside it, so the rows of any
 list add up to the assembly. It adds `total_mass_g` beside the rows too: what the assembly weighs, measured
 from the design rather than added up from the rows. At the top level a row weighs all it holds. In parts only a part's contents
@@ -714,7 +742,7 @@ one (all it holds) and an inseparable one (all but its purchased parts). A refer
 nothing. Every part is measured for it, once per definition, so it takes longer. It is `null` when nothing
 in the part has a body, a body can't be measured, or the definitions sharing the row's part number weigh
 differently (by more than the measurement can tell apart: one part modelled two ways weighs the same). `path` writes them to a `.csv` file
-(the columns item, part_number, description, revision, count, definition, material and quantity, every field
+(the columns item, part_number, description, revision, count, definition, material, quantity and finish (a column added later goes last, so the others keep their places), every field
 quoted, and a field that a spreadsheet would run as a formula written with a `'` before it so the
 spreadsheet shows it as text; children follow their row) or a `.json` file. A formula field is one that
 starts with `=`, `+`, `-` or `@`, their full-width forms, a tab or a line break, after any spaces and

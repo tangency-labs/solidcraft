@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="760" height="380" viewBox="0 0 760 380">
+  <title>WR-21540--stitched-cavity</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect id="background" x="0" y="0" width="760" height="380" fill="#ffffff"/>
+    <rect id="A_outer_shell" data-name="A outer shell" x="70" y="80" width="260" height="200" fill="#f0f0f0" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <rect id="A_inner_shell" data-name="A inner shell" x="150" y="140" width="100" height="90" fill="#f0f0f0" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <rect id="B_outer_shell" data-name="B outer shell" x="430" y="80" width="260" height="200" fill="#f0f0f0" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <rect id="B_inner_shell" data-name="B inner shell" x="510" y="140" width="100" height="90" fill="#ffffff" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 70 50)" x="0" y="0" xml:space="preserve" font-family="Helvetica-Bold, sans-serif" font-size="20" fill="#000000"><tspan x="0" y="0">main: the cavity stays material</tspan></text>
+    <text transform="matrix(1 0 0 1 430 50)" x="0" y="0" xml:space="preserve" font-family="Helvetica-Bold, sans-serif" font-size="20" fill="#000000"><tspan x="0" y="0">this change: the cavity is a void</tspan></text>
+    <text transform="matrix(1 0 0 1 82 108)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">material</tspan></text>
+    <text transform="matrix(1 0 0 1 442 108)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">material</tspan></text>
+    <text transform="matrix(1 0 0 1 162 178)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">cavity:</tspan></text>
+    <text transform="matrix(1 0 0 1 162 198)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">material</tspan></text>
+    <text transform="matrix(1 0 0 1 522 178)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">cavity:</tspan></text>
+    <text transform="matrix(1 0 0 1 522 198)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">void</tspan></text>
+    <text transform="matrix(1 0 0 1 70 302)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">outside: void</tspan></text>
+    <text transform="matrix(1 0 0 1 430 302)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">outside: void</tspan></text>
+    <text transform="matrix(1 0 0 1 70 318)" x="0" y="12" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#555555"><tspan x="0" y="12">The inner shell&apos;s faces lie between two material</tspan><tspan x="0" y="26.4">regions: the export refuses the stitched part.</tspan></text>
+    <text transform="matrix(1 0 0 1 430 318)" x="0" y="12" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#555555"><tspan x="0" y="12">Every face lies between material and a void: one</tspan><tspan x="0" y="26.4">solid with a cavity. Regions alternate from the</tspan><tspan x="0" y="40.8">outside in.</tspan></text>
+  </g>
+</svg>
