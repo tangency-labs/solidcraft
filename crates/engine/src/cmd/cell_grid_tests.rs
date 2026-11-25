@@ -352,6 +352,50 @@ fn raised_cells_stand_as_deep_as_depth_and_never_through_all() {
     assert!((volume(&s) - (62.0 * 62.0 * 3.0 + 25.0 * 100.0)).abs() < 1e-6, "{}", volume(&s));
 }
 
+/// Two plates 3 thick side by side, `a` long from x = 0 and the rest of 62 from `b_from`, 62 wide, and the
+/// 62 x 62 field sketched over both: 25 whole 10 mm cells on a 12 mm pitch, centred at 6 + 12k.
+fn two_plates(a: f64, b_from: f64) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": a, "width": 62, "height": 3, "body_name": "A"}));
+    run(
+        &mut s,
+        "solid.box",
+        json!({"corner": [b_from, 0, 0], "length": 62.0 - b_from, "width": 62, "height": 3, "body_name": "B", "operation": "new_body"}),
+    );
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Field"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [62, 62]}));
+    run(&mut s, "sketch.finish", json!({}));
+    s
+}
+
+fn volume_of(s: &Session, name: &str) -> f64 {
+    let st = s.model.state();
+    let b = st.bodies.iter().find(|b| b.name == name).unwrap_or_else(|| panic!("no body {name}"));
+    solidcraft_kernel::measure(&b.body).unwrap().volume
+}
+
+#[test]
+fn raised_cells_over_two_separate_plates_leave_two_bodies_each_with_its_own_cells() {
+    // Plate A spans x 0..30, B x 40..62. Cell columns span 1..11, 13..23, 25..35, 37..47, 49..59:
+    // three columns meet only A, two only B, and none bridges the gap.
+    let mut s = two_plates(30.0, 40.0);
+    cut(&mut s, json!({"mode": "raised", "depth": 1.5, "direction": "negative", "targets": ["A", "B"]})).unwrap();
+    let st = s.model.state();
+    assert_eq!(st.bodies.len(), 2, "{:?}", st.bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>());
+    let cell = 100.0 * 1.5;
+    assert!((volume_of(&s, "A") - (30.0 * 62.0 * 3.0 + 15.0 * cell)).abs() < 1e-6, "{}", volume_of(&s, "A"));
+    assert!((volume_of(&s, "B") - (22.0 * 62.0 * 3.0 + 10.0 * cell)).abs() < 1e-6, "{}", volume_of(&s, "B"));
+}
+
+#[test]
+fn a_raised_cell_that_bridges_two_plates_joins_them() {
+    // The gap is 30..32: the column 25..35 meets both plates, so it makes them one body.
+    let mut s = two_plates(30.0, 32.0);
+    cut(&mut s, json!({"mode": "raised", "depth": 1.5, "direction": "negative", "targets": ["A", "B"]})).unwrap();
+    assert_eq!(s.model.state().bodies.len(), 1);
+    assert!((volume(&s) - (60.0 * 62.0 * 3.0 + 25.0 * 100.0 * 1.5)).abs() < 1e-6, "{}", volume(&s));
+}
+
 /// Cuts grids of square cells (10 mm on a 12 mm pitch) through a 3 mm plate, from 250 to 1000
 /// cells (a tool of more than 1024 cells fails in the kernel: 39 x 38 ended in "shell count"), and prints what each took. Cells are whole, so a `cols` x `rows` plate cuts exactly that many.
 /// Run by hand, on a quiet machine: `cargo test --profile ci -p solidcraft-engine cell_grid_speed -- --ignored --nocapture`.

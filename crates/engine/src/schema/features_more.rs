@@ -19,9 +19,9 @@ use super::check::whole;
 use super::config::NameList;
 use super::motion::require;
 use super::types::{
-    AngleExpr, AxisDir, CoilSectionParam, CoilSectionPositionParam, EmbossFacePoint, EmbossModeParam, FaceRef, FeatureCommon, IdOrName, LengthExpr,
-    NumberExpr, OperationParam, PlaneParam, Point3, PointExpr3, ProfilesParam, RibDirectionParam, SketchRef, StringList, TouchingParam,
-    feature_common, present,
+    AngleExpr, CoilAxis, CoilEndCutParam, CoilSectionParam, CoilSectionPositionParam, DomeShapeParam, EmbossFacePoint, EmbossModeParam, FaceRef,
+    FeatureCommon, IdOrName, LengthExpr, NumberExpr, OperationParam, PlaneParam, Point3, PointExpr3, ProfilesParam, RibDirectionParam, SketchRef,
+    StringList, TouchingParam, feature_common, present,
 };
 use crate::params::{self, MAX_STRING_LIST};
 
@@ -303,16 +303,24 @@ pub struct CoilParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "PointExpr3")]
     pub base: Option<PointExpr3>,
-    /// The direction the helix climbs. Default: Z.
+    /// The direction the helix climbs, or an axis reference in the same forms as Revolve. Default: Z.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "AxisDir")]
-    pub axis: Option<AxisDir>,
+    #[schemars(with = "CoilAxis")]
+    pub axis: Option<CoilAxis>,
+    /// Climb in the opposite direction along the axis, independently of `clockwise`. Default: false.
+    #[serde(default, deserialize_with = "super::features::reversed_flag", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub reversed: Option<bool>,
     /// Where around the axis the section starts. Default: 0. Refused with `sketch`.
     #[serde(default)]
     pub start_angle: Option<AngleExpr>,
-    /// A left-handed coil, turning the other way while still climbing along `axis`. Default: false.
+    /// Turn clockwise about the selected axis without changing axial propagation. Default: false.
     #[serde(default)]
     pub clockwise: Option<bool>,
+    /// Where the wire ends: in a plane through the axis (axial, the default) or square to the
+    /// wire. Refused with `sketch`.
+    #[serde(default)]
+    pub end_cut: Option<CoilEndCutParam>,
     /// A sketch whose profile is the section. Its plane is the section plane, so its placement
     /// sets the radius and the start phase.
     #[serde(default)]
@@ -352,11 +360,32 @@ pub struct EmbossParams {
     /// The bodies to emboss, by name. With `face`, only these are searched for it.
     #[serde(default)]
     pub targets: Option<NameList>,
-    /// A world point selecting a planar face or a complete cylindrical wall, outside or a bore. Default:
+    /// A world point on the face to emboss: planar, a cylinder wall (either side) or another curved face. Default:
     /// inferred when exactly one supported tangent cylinder matches the selected profiles.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "EmbossFacePoint")]
     pub face: Option<EmbossFacePoint>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// Raise a planar face of a body into a dome along its outward normal. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct DomeParams {
+    /// The face: a point [x, y, z] on it, or a face name from `model.faces`.
+    pub face: FaceRef,
+    /// How far the dome rises from the face, along its outward normal.
+    pub height: LengthExpr,
+    /// The dome's meridian. Default: elliptical.
+    #[serde(default)]
+    pub shape: Option<DomeShapeParam>,
+    /// Cut the dome into the body instead. Not supported yet: refused. Default: false.
+    #[serde(default)]
+    pub reverse: Option<bool>,
+    /// The body the face is on. Default: found from the face.
+    #[serde(default)]
+    pub body: Option<String>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }

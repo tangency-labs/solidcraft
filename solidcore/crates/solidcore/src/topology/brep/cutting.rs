@@ -47,7 +47,10 @@ use std::collections::BTreeSet;
 
 use crate::curve::curve::p7::PropertyAnalysisOptions;
 use crate::curve::curve::CurvePropertyType;
-use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
+use crate::error::topology::TopologyFailure;
+use crate::error::{
+    ignore_status, ignored, EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER,
+};
 use crate::geom::attribute::{ids, Attribute, Behavior};
 use crate::geom::context::{MarkLock, ALL_MARKS};
 use crate::geom::extent3d::Extent3d;
@@ -75,6 +78,18 @@ use crate::topology::{vertex, Brep, EdgeId, FaceId, VertexId};
 const OP_MERGE: &str = "topology::brep::cutting::PlaneCutter::merge_intersection";
 const OP_CLASSIFY: &str = "topology::brep::cutting::PlaneCutter::classification";
 const OP_CUT: &str = "topology::brep::cutting::cut";
+
+/// A defect of the B-rep's own links ([`TopologyFailure::Defect`]) in `op`, with the status
+/// `SM_ERR_NULL_POINTER` of the `NER` it replaces.
+fn broken_link(op: &'static str, why: &'static str) -> SolidError {
+    Failure::new(op, TopologyFailure::Defect { why })
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+}
+
+/// Why an edge has no vertex at an end.
+const EDGE_NO_VERTEX: &str = "an edge has no vertex at an end, though the kernel makes every \
+                              edge with its two edge uses and their vertex uses";
 
 /// `SmPlaneCutter`: the infinite plane through [`PlaneCutter::plane_point`] with unit
 /// normal [`PlaneCutter::plane_normal`]; the part of a B-rep on the normal's side is
@@ -157,7 +172,7 @@ impl PlaneCutter {
         for f in faces {
             // locals for plane/surface intersections
             let surface = face2::surface(b, f)?
-                .ok_or_else(|| SolidError::topology_missing(OP_MERGE, "the face's surface"))?
+                .ok_or_else(|| SolidError::topology(OP_MERGE, TopologyFailure::FaceWithoutSurface))?
                 .clone_for_evaluation()?;
             let uv_domain = face2::uv_domain(b, f)?;
 
@@ -237,7 +252,7 @@ impl PlaneCutter {
             let solutions = {
                 let e = b.edge(wire_edge)?;
                 let curve = e.curve.as_ref().ok_or_else(|| {
-                    SolidError::topology_missing(OP_MERGE, "the wire edge's curve")
+                    SolidError::topology(OP_MERGE, TopologyFailure::EdgeWithoutCurve)
                 })?;
                 // find wire/plane intersection points
                 curve
@@ -259,19 +274,19 @@ impl PlaneCutter {
             // For every solution - merge points not on the cutplane into TgtBrep
             for sol in solutions.as_slice() {
                 let param = sol.start.param(0)?;
-                let v1 = edge::vertex(b, wire_edge)?.ok_or_else(|| {
-                    SolidError::topology_missing(OP_MERGE, "the wire edge's first vertex")
-                })?;
-                let v2 = edge::other_vertex(b, wire_edge, Some(v1))?.ok_or_else(|| {
-                    SolidError::topology_missing(OP_MERGE, "the wire edge's second vertex")
-                })?;
+                let v1 = edge::vertex(b, wire_edge)?
+                    .ok_or_else(|| broken_link(OP_MERGE, EDGE_NO_VERTEX))?;
+                let v2 = edge::other_vertex(b, wire_edge, Some(v1))?
+                    .ok_or_else(|| broken_link(OP_MERGE, EDGE_NO_VERTEX))?;
 
                 // get edge endPoints, Curve, and SolutionPoint
                 let new_v_pnt = b
                     .edge(wire_edge)?
                     .curve
                     .as_ref()
-                    .ok_or_else(|| SolidError::topology_missing(OP_MERGE, "the wire edge's curve"))?
+                    .ok_or_else(|| {
+                        SolidError::topology(OP_MERGE, TopologyFailure::EdgeWithoutCurve)
+                    })?
                     .evaluate_point(k, param)?;
 
                 // when solutionPoint is not close to endPoints
@@ -283,15 +298,16 @@ impl PlaneCutter {
                     // split the wire edge with the solutionPoint
                     let split = p9::make_vertex_split_edge(k, b, wire_edge, param, env, curve_ref)?;
                     if !split.split {
-                        return Err(SolidError::topology_failed(
+                        return Err(SolidError::topology(
                             OP_MERGE,
-                            "the wire edge could not be split at the plane",
+                            TopologyFailure::EdgeNotSplit,
                         ));
                     }
                     let (Some([_new_e1, new_e2]), Some(new_v)) = (split.edges, split.vertex) else {
-                        return Err(SolidError::topology_missing(
+                        return Err(broken_link(
                             OP_MERGE,
-                            "the split's new edge or vertex",
+                            "the split reports an edge split without its new edges or vertex, \
+                             though it makes them when it splits",
                         ));
                     };
                     // SM_OLDTOL_LINE pNewV->SetTolerance(SM_XSECT_TO_ZONETOL3D(dXSectTol3d))
@@ -428,7 +444,9 @@ impl PlaneCutter {
                 b.edge(e)?
                     .curve
                     .as_ref()
-                    .ok_or_else(|| SolidError::topology_missing(OP_CLASSIFY, "the edge's curve"))?
+                    .ok_or_else(|| {
+                        SolidError::topology(OP_CLASSIFY, TopologyFailure::EdgeWithoutCurve)
+                    })?
                     .evaluate_point(k, ivl.evaluate(t))
             };
             let mut signed_dist = (point_at(0.45678)? - self.plane_point).dot(self.plane_normal);
@@ -492,12 +510,20 @@ impl PlaneCutter {
 
             // for every edgeuse on the face's upward faceuse
             let fu = face2::upward_faceuse(b, f)?.ok_or_else(|| {
-                SolidError::topology_missing(OP_CLASSIFY, "the face's upward face use")
+                broken_link(
+                    OP_CLASSIFY,
+                    "the face has no upward face use, though the kernel makes every face with \
+                     its two face uses",
+                )
             })?;
             for eu in eu1::faceuse_edgeuses(b, fu, false, None)? {
                 // get edgeuse midPoint binormal vector
                 let e = eu1::edge(b, eu)?.ok_or_else(|| {
-                    SolidError::topology_missing(OP_CLASSIFY, "the edge use's edge")
+                    broken_link(
+                        OP_CLASSIFY,
+                        "an edge use has no edge, though the kernel links every edge use to its \
+                         edge",
+                    )
                 })?;
                 let mid = edge::interval(b, e)?.evaluate(0.5);
                 let binormal =
@@ -724,9 +750,9 @@ pub fn cut_notified(
     plane_normal: Vec3,
 ) -> Result<()> {
     let Ok(normal) = plane_normal.unitize() else {
-        return Err(SolidError::topology_invalid_value(
+        return Err(SolidError::topology(
             OP_CUT,
-            "the plane normal has zero length",
+            TopologyFailure::ZeroLengthVector,
         ));
     };
     let mut cutter = PlaneCutter::new(plane_point, normal);

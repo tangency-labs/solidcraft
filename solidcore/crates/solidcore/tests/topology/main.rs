@@ -55,6 +55,8 @@ mod issue_1570_transform_matrix;
 mod issue_1628_copy_faces_into_nonempty_brep;
 #[path = "../issue_1766_notify_ref_public.rs"]
 mod issue_1766_notify_ref_public;
+#[path = "../issue_17985_projected_arc_vertex_tolerance.rs"]
+mod issue_17985_projected_arc_vertex_tolerance;
 #[path = "../issue_1869_copy_faces_merge_into_empty.rs"]
 mod issue_1869_copy_faces_merge_into_empty;
 #[path = "../issue_1875_local_operation_marks.rs"]
@@ -91,6 +93,8 @@ mod merge_after_copy_faces_keeps_attributes;
 mod patterned_cut;
 #[path = "../precise_area_holds_its_accuracy.rs"]
 mod precise_area_holds_its_accuracy;
+#[path = "../uv_trim_edge_tolerance.rs"]
+mod uv_trim_edge_tolerance;
 #[path = "../wr260_failed_reversal_observable.rs"]
 mod wr260_failed_reversal_observable;
 #[path = "../wr69_dupin_bottom_hyperbola.rs"]

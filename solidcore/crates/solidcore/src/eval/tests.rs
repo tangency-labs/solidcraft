@@ -676,6 +676,68 @@ fn hostile_parameters_give_none() {
     assert!(c.derivatives(0.5, 2).is_none());
 }
 
+/// A piece from the float below a knot up to the knot is taken from the span it starts in: its
+/// middle rounds onto the knot, whose span on the right is another polynomial. Here x is
+/// `1 - t` on `[0, 1]` and `0` on `[1, 2]`, so the piece's start is `2^-53`, not `0`.
+#[test]
+fn a_bezier_piece_ending_at_a_knot_is_its_own_spans() {
+    let c = EvalCurve::new(
+        1,
+        vec![0.0, 0.0, 1.0, 2.0, 2.0],
+        vec![
+            [1.0, 0.0, 0.0, 1.0],
+            [0.0, 0.0, 0.0, 1.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+    );
+    let below = 1.0 - f64::EPSILON / 2.0;
+    assert_eq!(
+        0.5 * (below + 1.0),
+        1.0,
+        "the piece's middle rounds onto the knot"
+    );
+    let piece = c.bezier(below, 1.0).unwrap();
+    let ([x, ..], [e, ..]) = piece[0];
+    assert!((x - f64::EPSILON / 2.0).abs() <= e, "x {x}, bound {e}");
+    assert_eq!(piece[1].0[0], 0.0);
+    // Either side of the knot, and the range's very end, still have their pieces.
+    assert!(c.bezier(1.0, 1.5).is_some_and(|p| p[0].0[0] == 0.0));
+    assert!(c.bezier(2.0, 2.0).is_some());
+    // A piece across the knot is not one span's.
+    assert!(c.bezier(0.5, 1.5).is_none());
+}
+
+/// A control point whose exact coordinate lies below the least subnormal rounds to zero, and its
+/// bound still encloses it; a knot span whose width overflows has no piece.
+#[test]
+fn a_bezier_bound_counts_underflow_and_an_overflowing_span_has_no_piece() {
+    let least = f64::from_bits(1);
+    // x is `least · t` on [0, 1]: at 0.5 it is half the least subnormal.
+    let c = EvalCurve::new(
+        1,
+        vec![0.0, 0.0, 1.0, 1.0],
+        vec![[0.0, 0.0, 0.0, 1.0], [least, 0.0, 0.0, 1.0]],
+    );
+    let ([x, ..], [e, ..]) = c.bezier(0.5, 1.0).unwrap()[0];
+    // The exact x, half of `least`, is no float: the bound reaches past it from what came back.
+    assert!(x.abs() + least <= e, "x {x}, bound {e}");
+    // x is `t` on [0, 2]: at the least subnormal it is that, and `least / 2` rounds to zero.
+    let c = EvalCurve::new(
+        1,
+        vec![0.0, 0.0, 2.0, 2.0],
+        vec![[0.0, 0.0, 0.0, 1.0], [2.0, 0.0, 0.0, 1.0]],
+    );
+    let ([x, ..], [e, ..]) = c.bezier(least, 1.0).unwrap()[0];
+    assert!((x - least).abs() <= e, "x {x}, bound {e}");
+    // Knots 2e308 apart: the width is not a number a step can divide by.
+    let c = EvalCurve::new(
+        1,
+        vec![-1e308, -1e308, 1e308, 1e308],
+        vec![[0.0, 0.0, 0.0, 1.0], [1.0, 0.0, 0.0, 1.0]],
+    );
+    assert!(c.bezier(0.0, 1.0).is_none());
+}
+
 #[test]
 fn plane_point_and_normal() {
     let s = EvalSurface::Plane {
@@ -1992,6 +2054,157 @@ fn a_lune_between_two_poles_keeps_its_width_round_the_axis() {
             assert!(
                 (v[0] + FRAC_PI_2).abs() < 1e-9 && (v[1] - FRAC_PI_2).abs() < 1e-9,
                 "centre {centre}, width {width}, {name}: {v:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn attachment_residuals_keep_derivatives_of_the_point_and_the_moving_curve() {
+    use super::constraint::{self as k, Dual, Num, V};
+    // Radius five in XY. A point at (8,0,3) is three above the plane and
+    // three beyond the circle. Translating the circle alone reverses the point gradient.
+    let p = V {
+        x: Dual::var(8.0, 0),
+        y: Dual::var(0.0, 1),
+        z: Dual::var(3.0, 2),
+    };
+    let circle = |x, y| V {
+        x: Dual::num(x) + Dual::var(0.0, 3),
+        y: Dual::num(y),
+        z: Dual::var(0.0, 4),
+    };
+    let [height, radial] =
+        k::point_on_circle(p, circle(5.0, 0.0), circle(0.0, 5.0), circle(-5.0, 0.0));
+    assert!((height.v - 3.0).abs() < 1e-12);
+    assert!((radial.v - 3.0).abs() < 1e-12);
+    for (actual, expected) in height.d.into_iter().take(5).zip([0.0, 0.0, 1.0, 0.0, -1.0]) {
+        assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
+    }
+    for (actual, expected) in radial.d.into_iter().take(5).zip([1.0, 0.0, 0.0, -1.0, 0.0]) {
+        assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
+    }
+    let line = k::point_on_line(p, V::of([0.0, 0.0, 0.0]), V::of([10.0, 0.0, 0.0]));
+    assert_eq!(line.map(|v| v.v), [0.0, 3.0, 0.0]);
+    assert_eq!(line[1].d[2], 1.0);
+    assert_eq!(line[2].d[1], -1.0);
+}
+
+#[test]
+fn plane_measurements_and_circle_operands_have_closed_form_values() {
+    use super::constraint::{self as k, Dual, Num, V};
+    let origin = V::of([0.0, 0.0, 5.0]);
+    let normal = V::of([0.0, 0.0, 1.0]);
+    let point = V {
+        x: Dual::num(4.0),
+        y: Dual::num(0.0),
+        z: Dual::var(2.0, 0),
+    };
+    let d = k::plane_distance(point, origin, normal);
+    assert_eq!((d.v, d.d[0]), (-3.0, 1.0));
+    let end = V {
+        x: Dual::num(4.0),
+        y: Dual::num(0.0),
+        z: Dual::var(3.0, 0),
+    };
+    let (angle, length) = k::plane_angle(V::of([0.0; 3]), end, normal);
+    assert!((angle.v - 3.0_f64.atan2(4.0)).abs() < 1e-12);
+    assert!((angle.d[0] - 4.0 / 25.0).abs() < 1e-12);
+    assert_eq!(length.v, 5.0);
+    let frame = a_frame();
+    assert_eq!(k::plane_point(&frame, [2.0, 4.0]), [3.0, 6.0, 3.0]);
+    assert_eq!(k::plane_normal(&frame), [0.0, 0.0, 1.0]);
+    for [x, y, z] in k::arc_circle_points([0.0, 0.0], [5.0, 0.0], &frame) {
+        assert!(((x - 1.0).powi(2) + (y - 2.0).powi(2) - 25.0).abs() < 1e-12);
+        assert_eq!(z, 3.0);
+    }
+    let mut other = frame.clone();
+    other.origin = [100.0, 200.0, 3.0];
+    other.y_axis = [0.0, -1.0, 0.0];
+    assert!(k::same_plane(&frame, &other));
+    other.origin[2] = 4.0;
+    assert!(!k::same_plane(&frame, &other));
+}
+
+/// A lune half a turn wide (a half sphere whose rim is a meridian circle) is as wide as the
+/// other half, so its width says nothing of which half it is: the face is the half on the loop's
+/// left in (u, v), whichever way the loop runs, wherever it starts and wherever the seam lies,
+/// across it included.
+#[test]
+fn a_half_sphere_lune_is_the_half_on_its_loops_left() {
+    let r = 1.0f64;
+    let sphere = Surface::Sphere {
+        frame: Frame {
+            origin: [0.; 3],
+            x_axis: [1., 0., 0.],
+            y_axis: [0., 1., 0.],
+        },
+        radius: r,
+    };
+    let meridian = |a: f64| Curve::Circle {
+        frame: Frame {
+            origin: [0.; 3],
+            x_axis: [a.cos(), a.sin(), 0.],
+            y_axis: [0., 0., 1.],
+        },
+        radius: r,
+    };
+    let half = FRAC_PI_2;
+    for centre in [0.0, 0.3, std::f64::consts::PI, -1.0, 6.2] {
+        let (a, b) = (meridian(centre - half), meridian(centre + half));
+        // Up a meridian the face is on the side of lower angle, down one on the side of higher.
+        let loops = [
+            (
+                "up b, down a",
+                centre,
+                vec![
+                    (&b, [-FRAC_PI_2, FRAC_PI_2], true),
+                    (&a, [-FRAC_PI_2, FRAC_PI_2], false),
+                ],
+            ),
+            (
+                "up a, down b",
+                centre + std::f64::consts::PI,
+                vec![
+                    (&a, [-FRAC_PI_2, FRAC_PI_2], true),
+                    (&b, [-FRAC_PI_2, FRAC_PI_2], false),
+                ],
+            ),
+            (
+                "from b's middle",
+                centre,
+                vec![
+                    (&b, [0., FRAC_PI_2], true),
+                    (&a, [-FRAC_PI_2, FRAC_PI_2], false),
+                    (&b, [-FRAC_PI_2, 0.], true),
+                ],
+            ),
+            (
+                "from a's middle",
+                centre + std::f64::consts::PI,
+                vec![
+                    (&a, [0., FRAC_PI_2], true),
+                    (&b, [-FRAC_PI_2, FRAC_PI_2], false),
+                    (&a, [-FRAC_PI_2, 0.], true),
+                ],
+            ),
+        ];
+        for (name, middle, lune) in loops {
+            let [u, v] = form::extent(&sphere, &[lune], 1e-9)
+                .unwrap()
+                .expect("an extent");
+            assert!(
+                (u[1] - u[0] - std::f64::consts::PI).abs() < 1e-9,
+                "centre {centre}, {name}: {u:?}"
+            );
+            let off = (0.5 * (u[0] + u[1]) - middle).rem_euclid(TAU);
+            assert!(
+                off.min(TAU - off) < 1e-9,
+                "centre {centre}, {name}: {u:?}, middle {middle} expected"
+            );
+            assert!(
+                (v[0] + FRAC_PI_2).abs() < 1e-9 && (v[1] - FRAC_PI_2).abs() < 1e-9,
+                "centre {centre}, {name}: {v:?}"
             );
         }
     }

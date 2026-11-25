@@ -15,7 +15,7 @@
 
 use super::certify::{affine_fundamentals, t_make, t_nonneg, t_pieces, t_scale, AffinePatch};
 use super::qp::QpRows;
-use super::{el, el_mut, el_ref, sm_err, smax, tensor_elevate, Tensor};
+use super::{el, el_mut, el_ref, past_table, smax, tensor_elevate, Tensor};
 use crate::error::Result;
 use crate::math::{Vec3, PI};
 use core::cell::Cell;
@@ -129,16 +129,16 @@ impl SectorRows {
         pc0: Vec<Vec<Tensor>>,
         pcf: Vec<Vec<Tensor>>,
     ) -> Result<()> {
-        let free_components = self.free.checked_mul(3).ok_or_else(sm_err)?;
+        let free_components = self.free.checked_mul(3).ok_or_else(past_table)?;
         if pc0.len() != 3 || pcf.len() != free_components || theta.len() < 2 {
-            return Err(sm_err());
+            return Err(past_table());
         }
         let first = el_ref(&pc0, 0)?;
         let pieces = first.len();
         let coefficients = first.first().map_or(0, |t| t.c.len());
         for component in pc0.iter().chain(&pcf) {
             if component.len() != pieces || component.iter().any(|t| t.c.len() != coefficients) {
-                return Err(sm_err());
+                return Err(past_table());
             }
         }
         let mut weights = Vec::new();
@@ -158,8 +158,8 @@ impl SectorRows {
         let count = pieces
             .checked_mul(coefficients)
             .and_then(|n| n.checked_mul(weights.len()))
-            .ok_or_else(sm_err)?;
-        let end = self.slots.checked_add(count).ok_or_else(sm_err)?;
+            .ok_or_else(past_table)?;
+        let end = self.slots.checked_add(count).ok_or_else(past_table)?;
         self.patches.push(SectorPatch {
             start: self.slots,
             end,
@@ -193,7 +193,7 @@ impl QpRows for SectorRows {
         native: bool,
     ) -> Result<Vec<(f64, usize)>> {
         if y.len() != self.free || taken.len() != self.slots {
-            return Err(sm_err());
+            return Err(past_table());
         }
         // Bound both evaluation orders, including normalization and the final
         // dot product. The generous issue-specified relative bound is used only
@@ -235,7 +235,7 @@ impl QpRows for SectorRows {
                                 let component = k
                                     .checked_mul(self.free)
                                     .and_then(|v| v.checked_add(f))
-                                    .ok_or_else(sm_err)?;
+                                    .ok_or_else(past_table)?;
                                 let c = el(&el_ref(el_ref(&patch.pcf, component)?, piece)?.c, i)?;
                                 regular &= c.is_finite() && c.abs() <= f64::MAX / 16.0;
                                 raw_scale = smax(raw_scale, c.abs());
@@ -249,8 +249,8 @@ impl QpRows for SectorRows {
                     }
                     for w in &patch.weights {
                         let current = slot;
-                        slot = slot.checked_add(1).ok_or_else(sm_err)?;
-                        if *taken.get(current).ok_or_else(sm_err)? {
+                        slot = slot.checked_add(1).ok_or_else(past_table)?;
+                        if *taken.get(current).ok_or_else(past_table)? {
                             continue;
                         }
                         let mut v = 0.0;
@@ -310,20 +310,20 @@ impl QpRows for SectorRows {
             .patches
             .iter()
             .find(|patch| slot >= patch.start && slot < patch.end)
-            .ok_or_else(sm_err)?;
+            .ok_or_else(past_table)?;
         self.rows_built.set(self.rows_built.get().saturating_add(1));
-        let local = slot.checked_sub(patch.start).ok_or_else(sm_err)?;
+        let local = slot.checked_sub(patch.start).ok_or_else(past_table)?;
         let directions = patch.weights.len();
-        let coefficient = local.checked_div(directions).ok_or_else(sm_err)?;
+        let coefficient = local.checked_div(directions).ok_or_else(past_table)?;
         let piece = coefficient
             .checked_div(patch.coefficients)
-            .ok_or_else(sm_err)?;
+            .ok_or_else(past_table)?;
         let i = coefficient
             .checked_rem(patch.coefficients)
-            .ok_or_else(sm_err)?;
+            .ok_or_else(past_table)?;
         let w = el_ref(
             &patch.weights,
-            local.checked_rem(directions).ok_or_else(sm_err)?,
+            local.checked_rem(directions).ok_or_else(past_table)?,
         )?;
         let mut cst = 0.0;
         let mut dmax = 0.0;
@@ -337,7 +337,7 @@ impl QpRows for SectorRows {
                 let component = k
                     .checked_mul(self.free)
                     .and_then(|v| v.checked_add(f))
-                    .ok_or_else(sm_err)?;
+                    .ok_or_else(past_table)?;
                 s += patch.side * wk * el(&el_ref(el_ref(&patch.pcf, component)?, piece)?.c, i)?;
             }
             *rf = s;
@@ -391,7 +391,7 @@ pub(super) fn sector_pieces(
         big_q = if big_q > t.q { big_q } else { t.q };
     }
     let mut pc0: Vec<Vec<Tensor>> = vec![Vec::new(); 3];
-    let components = free.checked_mul(3).ok_or_else(sm_err)?;
+    let components = free.checked_mul(3).ok_or_else(past_table)?;
     let mut pcf: Vec<Vec<Tensor>> = vec![Vec::new(); components];
     let mut scale = 0.0;
     for k in 0..3 {
@@ -422,7 +422,7 @@ pub(super) fn sector_pieces(
             let component = k
                 .checked_mul(free)
                 .and_then(|v| v.checked_add(f))
-                .ok_or_else(sm_err)?;
+                .ok_or_else(past_table)?;
             *el_mut(&mut pcf, component)? = t_pieces(sff, GRAPH_LEVELS)?;
         }
     }

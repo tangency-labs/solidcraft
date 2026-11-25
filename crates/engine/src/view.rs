@@ -150,17 +150,7 @@ fn bounds_by(s: &Session, of: impl Fn(&solidcraft_doc::ModelBody) -> Aabb3) -> R
         b = b.union(&of(body));
     }
     for ss in st.sketches.iter().filter(|x| sketch_shown(s, x.feature)) {
-        // All four corners: on a tilted plane two opposite ones don't span the rectangle.
-        if let Some((lo, hi)) = ss.sketch.bounds() {
-            for p in [lo, hi, solidcore_record::Vec2::new(lo.x, hi.y), solidcore_record::Vec2::new(hi.x, lo.y)] {
-                b.add(ss.plane.to_world(p));
-            }
-        }
-        for w in ss.sketch.wires.iter().filter(|w| !w.fit.is_empty() || !ss.sketch.view.hide_projected) {
-            for p in &w.pts {
-                b.add(*p);
-            }
-        }
+        b = b.union(&sketch_bounds(ss));
     }
     for c in shown_point_clouds(s) {
         for p in c.world_corners().into_iter().flatten() {
@@ -168,6 +158,23 @@ fn bounds_by(s: &Session, of: impl Fn(&solidcraft_doc::ModelBody) -> Aabb3) -> R
         }
     }
     Ok(b)
+}
+
+/// World bounds of a sketch's visible geometry, shared by Home/Fit and scratch previews.
+pub fn sketch_bounds(ss: &solidcraft_doc::SolvedSketch) -> Aabb3 {
+    let mut b = Aabb3::EMPTY;
+    // All four corners: on a tilted plane two opposite ones don't span the rectangle.
+    if let Some((lo, hi)) = ss.sketch.bounds() {
+        for p in [lo, hi, solidcore_record::Vec2::new(lo.x, hi.y), solidcore_record::Vec2::new(hi.x, lo.y)] {
+            b.add(ss.plane.to_world(p));
+        }
+    }
+    for w in ss.sketch.wires.iter().filter(|w| !w.fit.is_empty() || !ss.sketch.view.hide_projected) {
+        for p in &w.pts {
+            b.add(*p);
+        }
+    }
+    b
 }
 
 /// The origin plane a grid lies on.
@@ -708,7 +715,8 @@ fn sketch_lines_in(
         }
     }
     // 3D curves are in world coordinates already.
-    for w in sk.wires.iter().filter(|w| !w.fit.is_empty() || !sk.view.hide_projected) {
+    let hidden_link = |w: &solidcraft_sketch::Wire| w.link.as_deref().and_then(|l| sk.link(l)).is_some_and(|l| l.hidden);
+    for w in sk.wires.iter().filter(|w| (!w.fit.is_empty() || !sk.view.hide_projected) && !hidden_link(w)) {
         // Curves drawn in a 3D sketch look like the sketch's own; included ones are references.
         let col = if w.fit.is_empty() {
             p.sketch_projected
@@ -738,7 +746,8 @@ pub fn sketch_curve_visible(sk: &Sketch, i: usize) -> bool {
         return false;
     }
     if c.link.is_some() && !sk.is_text_curve(i) {
-        return !sk.view.hide_projected;
+        // A hidden link is left out of the view only (it still bounds profiles).
+        return !sk.view.hide_projected && !c.link.as_deref().and_then(|l| sk.link(l)).is_some_and(|l| l.hidden);
     }
     !(c.construction && sk.view.hide_construction)
 }
@@ -808,8 +817,14 @@ impl<'a> SketchPointVisibility<'a> {
             .filter(|l| l.kind == solidcraft_sketch::LinkKind::Text)
             .map(|l| l.id.as_str())
             .collect();
-        let mut hidden: std::collections::HashSet<&str> =
-            sk.points.iter().filter(|p| p.link.as_deref().is_some_and(|l| text.contains(l))).map(|p| p.id.as_str()).collect();
+        // Points of hidden links are not shown or picked either.
+        let concealed: std::collections::HashSet<&str> = sk.links.iter().filter(|l| l.hidden).map(|l| l.id.as_str()).collect();
+        let mut hidden: std::collections::HashSet<&str> = sk
+            .points
+            .iter()
+            .filter(|p| p.link.as_deref().is_some_and(|l| text.contains(l) || concealed.contains(l)))
+            .map(|p| p.id.as_str())
+            .collect();
         for curve in sk.curves.iter().filter(|c| outputs.contains(c.id.as_str())) {
             let ends = curve.kind.ends();
             let interior = curve.kind.point_ids().into_iter().filter(|i| ends.is_none_or(|(a, b)| *i != a && *i != b));
@@ -1431,11 +1446,27 @@ impl SectionIndex {
 /// shown only when shown on their own. The user's own hide wins over the marker (#12125): the
 /// browser shows the eye off, and hiding the sketch again must take it away.
 pub fn sketch_shown(s: &Session, id: u64) -> bool {
+    sketch_shown_in(s, id, None)
+}
+
+/// Is a component sketch drawn at another placement of its component ([`solidcraft_doc::SketchCopy`])?
+/// As [`sketch_shown`] says for the placement it is drawn at, with that placement's own eye and
+/// Sketches folder in place of those of the drawn one.
+pub fn sketch_shown_at(s: &Session, id: u64, path: &[u64]) -> bool {
+    sketch_shown_in(s, id, Some(path))
+}
+
+fn sketch_shown_in(s: &Session, id: u64, path: Option<&[u64]>) -> bool {
     let v = &s.visibility;
+    let placement_hidden = match path {
+        None => !s.feature_placement_visible(id) || s.feature_folder_hidden(id, "sketches"),
+        Some(path) => !s.occurrence_visible(path) || s.feature_folder_hidden_at(id, path, "sketches"),
+    };
     if s.active_sketch == Some(id) || s.feature_edit_sketch == Some(id) {
-        return true;
+        // The open sketch is drawn where it is edited, its copies where their parts are shown.
+        return path.is_none() || !placement_hidden;
     }
-    if !s.feature_placement_visible(id) || s.feature_folder_hidden(id, "sketches") || v.hidden_sketches.contains(&id) {
+    if placement_hidden || v.hidden_sketches.contains(&id) {
         return false;
     }
     if s.doc
@@ -1485,6 +1516,8 @@ fn consumed_sketches(doc: &solidcraft_doc::Document) -> impl Iterator<Item = u64
         | FeatureKind::CellGrid { sketch, .. }
         | FeatureKind::SheetBase { sketch, .. }
         | FeatureKind::SheetContour { sketch, .. }
+        | FeatureKind::SheetTab { sketch, .. }
+        | FeatureKind::SheetBead { sketch, .. }
         | FeatureKind::Hole { points: Some(SketchPoints { sketch, single: false, .. }), .. }
         | FeatureKind::SheetPerforate { sketch: Some(sketch), .. } => Some(sketch.0),
         _ => None,
@@ -1579,6 +1612,18 @@ fn plane_face_anchor<'a>(
     }
 }
 
+/// Parse a typed axis reference for the primitive Coil marker as the command reads it.
+/// Numeric directions leave the marker at the Coil base.
+pub fn coil_axis_reference(s: &Session, axis: &serde_json::Value) -> Option<solidcraft_doc::AxisRef> {
+    if crate::cmd::axis_dir_form(axis).is_ok() {
+        return None;
+    }
+    if let Some(geo) = crate::cmd::coil_placed_edge(s, Some(axis), "solid.coil").ok()? {
+        return Some(solidcraft_doc::AxisRef::Model { geo });
+    }
+    crate::cmd::axis_param(s, 0, &serde_json::json!({ "axis": axis }), "solid.coil").ok()
+}
+
 /// Construction axes, as evaluated: (feature id, name, origin, unit direction).
 pub fn construction_axes(s: &Session) -> Vec<(u64, String, Vec3, Vec3)> {
     constructs(s)
@@ -1609,7 +1654,8 @@ fn constructs(s: &Session) -> Vec<(u64, String, solidcraft_doc::construct::Const
         .iter()
         .filter_map(|c| {
             let f = s.doc.feature(c.feature).filter(|f| !f.suppressed)?;
-            let m = s.doc.component_transform(f.component);
+            // With a joint drag's shown frame, so it follows its part while that is dragged.
+            let m = s.shown_component_transform(f.component);
             if solidcraft_doc::is_identity(&m) {
                 return Some((c.feature, c.name.clone(), c.geom.clone()));
             }
@@ -1915,6 +1961,26 @@ mod tests {
                 }
                 assert!(wrong.is_empty(), "fov {fov}, angled {angled}, post first {post_first}: not the post's cap at {wrong:?}");
             }
+        }
+    }
+
+    #[test]
+    fn preview_sketch_visibility_uses_the_state_after_the_commands() {
+        let mut s = Session::default();
+        let sketch = s.execute("sketch.create", &json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+        s.execute("sketch.rectangle.two_point", &json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+        s.execute("sketch.line", &json!({"points":[[100,20],[120,30]],"construction":true})).unwrap();
+        s.execute("sketch.finish", &json!({})).unwrap();
+        assert!(sketch_shown(&s, sketch));
+        assert_eq!(sketch_bounds(s.world_state().unwrap().sketch(sketch).unwrap()).max.x, 120.0);
+        for command in [
+            ("browser.visibility".into(), json!({"items":[sketch],"visible":false})),
+            ("solid.extrude".into(), json!({"sketch":sketch,"distance":10})),
+        ] {
+            let preview = s.preview_visible_world(std::slice::from_ref(&command)).unwrap();
+            assert!(preview.after.sketch(sketch).is_some(), "{} retains geometry for the preview diff", command.0);
+            assert!(!preview.shown_sketches.contains(&sketch), "{} leaves the sketch hidden after the run", command.0);
+            assert!(sketch_shown(&s, sketch), "the live session is unchanged");
         }
     }
 

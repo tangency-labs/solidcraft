@@ -116,22 +116,32 @@ pub fn collecting_parts<T>(write: impl FnOnce() -> T) -> (T, Vec<(String, Blob)>
     (written, parts)
 }
 
+/// The name of the container part that holds `blob`: `blobs/<sha256>.<extension>`.
+pub fn part_name(blob: &Blob, extension: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(blob.as_bytes());
+    let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    format!("blobs/{hex}.{extension}")
+}
+
 /// The part name for `blob`, `blobs/<sha256>.<extension>`, recorded for the container while one is
 /// written ([`collecting_parts`]). A record always names its part, so one read back without it is
 /// refused by name rather than read as an empty file.
 pub(crate) fn add_part(blob: &Blob, extension: &str) -> String {
-    use sha2::{Digest, Sha256};
-    let digest = Sha256::digest(blob.as_bytes());
-    let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
-    let name = format!("blobs/{hex}.{extension}");
+    let name = part_name(blob, extension);
+    keep_part(&name, blob);
+    name
+}
+
+/// Save an existing container part under the verified name the file used for it.
+pub(crate) fn keep_part(name: &str, blob: &Blob) {
     WRITING.with(|held| {
         if let Some(parts) = held.borrow_mut().as_mut()
-            && !parts.iter().any(|(known, _)| *known == name)
+            && !parts.iter().any(|(known, _)| known == name)
         {
-            parts.push((name.clone(), blob.clone()));
+            parts.push((name.into(), blob.clone()));
         }
     });
-    name
 }
 
 /// An older design's base64 text, as [`Blob`]'s own reading, except that text which is not base64
