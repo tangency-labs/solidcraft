@@ -124,6 +124,40 @@ An equation curve is an ordinary sketch curve, so you can build with it:
   shape. For example, close a wave with three lines down to the x axis to get a wavy strip.
 - It can be the **path** of a sweep.
 
+## Curves in 3D: a third rule, z(t)
+
+Turn on **3D Sketch** in the Sketch Palette (see [Sketching](sketching.md)), set **Form** to
+**Parametric**, and the window shows a third rule, **z(t)**: *how high is the curve at each
+moment of the clock?* Leave it empty and the curve stays on the sketch plane, as always; fill it
+in and the curve becomes a **3D curve** that can leave the plane. The **Explicit** form, y = f(x),
+never takes z(t).
+
+A helix is a circle whose height grows with the clock:
+
+| Rule in **x(t)** | Rule in **y(t)** | Rule in **z(t)** | Start | End |
+|---|---|---|---|---|
+| `20 * cos(t)` | `20 * sin(t)` | `2 * t` | `0` | `6 * pi` |
+
+![A helix of three turns drawn from x = 20 cos(t), y = 20 sin(t), z = 2 t](../generated/equation-helix.png)
+
+The rules give the curve's x, y and z, the same coordinates a 3D Spline's points are picked in
+(the model's X, Y and Z in the root component). As with the other rules, parameters work in z(t),
+and the curve follows them when they change.
+
+The clock can turn the curve in space as well as round the plane. This one spirals from one pole
+of a sphere of radius 1 to the other in twenty-five turns: its distance from the z axis is
+`cos(t)`, which comes to 0 at either end:
+
+| Rule in **x(t)** | Rule in **y(t)** | Rule in **z(t)** | Start | End |
+|---|---|---|---|---|
+| `cos(50 * t) * cos(t)` | `sin(50 * t) * cos(t)` | `sin(t)` | `-pi / 2` | `pi / 2` |
+
+A 3D equation curve is a **3D sketch curve**, like a 3D Spline: Extrude and Revolve do not take
+it as a profile, but you can pick it as the **path** of a sweep or a pipe. The two forms have their
+limits: **Explicit** is a plane curve and has no z(t). Editing a curve between the plane and 3D
+kinds (giving it a z(t), or setting **Form** back to **Explicit**) makes it a new curve, so a
+sketch tool that names it must be pointed at the new one.
+
 ## Changing a curve
 
 Right-click the curve and choose **Edit Equation Curve**. The same window opens with the rules
@@ -144,5 +178,8 @@ The commands are `sketch.equation_curve` and `sketch.equation_curve.edit` (see t
 [command reference](../reference/commands.md)). The curve is a fit point spline through points
 worked out from the rules, as many as keep it within the **Tolerance** (0.01 mm unless you set
 another), up to 500. Its points are fixed, so other curves can start at its ends. When a parameter
-a rule uses changes, the points follow. The pictures on this page come from the scripts in
-`docs/book/scripts/equation-*.json`.
+a rule uses changes, the points follow. With a `z` formula the curve is a 3D sketch curve (a
+`wires` entry of the sketch) drawn through the same number of fit points, and the 3D sketch
+option must be on. Giving `z` turns a plane curve into a 3D one and `explicit: true` turns it
+back: each is a new curve, whose id the reply names. The pictures on this page come from the
+scripts in `docs/book/scripts/equation-*.json`.

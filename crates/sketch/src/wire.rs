@@ -332,6 +332,8 @@ fn clean_wires(wires: &[Vec<Vec3>]) -> Result<Vec<Vec<Vec3>>> {
     wires.iter().map(|w| clean(w).ok_or_else(|| SketchError::Invalid("3D linked curve points out of range or coincident".into()))).collect()
 }
 
+/// The polyline of a drawn 3D curve through `fit`: checked for the count, the range and repeats,
+/// then made by [`fit_polyline`].
 pub(crate) fn drawn_polyline(fit: &[Vec3]) -> Result<Vec<Vec3>> {
     if fit.is_empty() || fit.len() > MAX_FIT_POINTS {
         return Err(SketchError::Invalid(format!("a 3D curve needs 1 to {MAX_FIT_POINTS} points")));
@@ -374,6 +376,14 @@ pub(crate) fn drawn_control(ctrl: &[Vec3], degree: u8) -> Result<Vec<Vec3>> {
         .ok_or_else(|| SketchError::Invalid("3D spline samples out of range".into()))
 }
 
+/// Refuse a sketch whose 3D curves would hold more than `count` curves or `points` points.
+fn check_wire_budget(count: usize, points: usize) -> Result<()> {
+    if count > crate::link::MAX_LINK_ENTITIES || points > 1_000_000 {
+        return Err(SketchError::Invalid("3D curves exceed the stored geometry budget".into()));
+    }
+    Ok(())
+}
+
 impl Sketch {
     fn wire_budget(&self, replacing: Option<&str>, new_count: usize, new_points: usize) -> Result<()> {
         let mut count = new_count;
@@ -382,10 +392,22 @@ impl Sketch {
             count = count.saturating_add(1);
             points = points.saturating_add(w.pts.len()).saturating_add(w.fit.len());
         }
-        if count > crate::link::MAX_LINK_ENTITIES || points > 1_000_000 {
-            return Err(SketchError::Invalid("3D curves exceed the stored geometry budget".into()));
+        check_wire_budget(count, points)
+    }
+
+    /// Whether a drawn curve (a 3D equation curve, #12662) may take these polyline and fit point
+    /// counts in place of wire `index` (`None`: as a new wire).
+    pub(crate) fn wire_budget_for(&self, index: Option<usize>, points: usize, fit: usize) -> Result<()> {
+        let mut count = 1usize;
+        let mut total = points.saturating_add(fit);
+        for (i, w) in self.wires.iter().enumerate() {
+            if Some(i) == index {
+                continue;
+            }
+            count = count.saturating_add(1);
+            total = total.saturating_add(w.pts.len()).saturating_add(w.fit.len());
         }
-        Ok(())
+        check_wire_budget(count, total)
     }
 
     /// Validate saved arrays without regenerating legacy geometry or changing point values.
@@ -623,6 +645,7 @@ impl Sketch {
     pub fn remove_wires(&mut self, ids: &[String]) {
         self.wires.retain(|w| !ids.contains(&w.id));
         self.prune_wire_constraints();
+        self.prune_equations(&ids.iter().cloned().collect());
         self.prune_links();
     }
 }

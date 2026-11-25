@@ -1,7 +1,7 @@
 //! Equation curves (#8352): a fit point spline from formulas over the design's parameters.
 
 use serde_json::{Value, json};
-use solidcore_record::Vec2;
+use solidcore_record::{Vec2, Vec3};
 use solidcraft_geom::prelude::*;
 use solidcraft_sketch::CurveKind;
 
@@ -403,4 +403,219 @@ fn a_design_saved_without_the_flag_reopens_the_same() {
     let r = Session::new(solidcraft_doc::Document::from_json(&old.to_string()).unwrap());
     no_trouble(&r);
     assert_eq!(curve_points(&r, &id), want);
+}
+
+/// The fit points of the 3D curve `id` in the evaluated sketch `S`.
+fn wire_points(s: &Session, id: &str) -> Vec<Vec3> {
+    let sk = solved(s);
+    sk.wires.iter().find(|w| w.id == id).unwrap_or_else(|| panic!("no 3D curve {id}")).fit.clone()
+}
+
+/// A 3D equation curve (#12662): x = t, y = 0, z = h + t^2 / 10 over t from 0 to 10, in a 3D
+/// sketch `S`, through the parameter `h`.
+fn lift(s: &mut Session) -> String {
+    run(s, "parameters.add", json!({"name": "h", "expression": "5 mm"}));
+    run(s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    run(s, "sketch.options", json!({"sketch_3d": true}));
+    let r = run(s, "sketch.equation_curve", json!({"x": "t", "y": "0", "z": "h + t * t / 10", "start": 0, "end": 10}));
+    assert_eq!(r["closed"], false, "{r}");
+    assert!(r["deviation"].as_f64().unwrap() <= 0.01, "{r}");
+    let id = r["curve"].as_str().unwrap().to_string();
+    run(s, "sketch.finish", json!({}));
+    no_trouble(s);
+    id
+}
+
+#[test]
+fn a_3d_curve_from_a_formula_is_a_wire_that_follows_its_parameter() {
+    let mut s = Session::default();
+    let id = lift(&mut s);
+    let f = s.doc.find_feature("S").unwrap().id;
+    let sk = s.doc.sketch(f).unwrap();
+    assert!(sk.wire_index(&id).is_some() && sk.curve_index(&id).is_none(), "a drawn 3D curve: {id}");
+    let eq = sk.equation_of(&id).unwrap().clone();
+    assert_eq!((eq.x.as_deref(), eq.y.as_str(), eq.z.as_deref()), (Some("t"), "0", Some("h + t * t / 10")));
+    let before = wire_points(&s, &id);
+    assert!(before.len() >= 9, "{}", before.len());
+    assert!(
+        before.iter().all(|p| p.y.abs() < 1e-9 && (p.z - (5.0 + p.x * p.x / 10.0)).abs() < 1e-9 && (-1e-9..=10.0 + 1e-9).contains(&p.x)),
+        "{before:?}"
+    );
+    // The curve follows the parameter: it rises as one, keeping every point.
+    run(&mut s, "parameters.change", json!({"name": "h", "expression": "15 mm"}));
+    no_trouble(&s);
+    let after = wire_points(&s, &id);
+    assert_eq!(before.len(), after.len());
+    assert!(before.iter().zip(&after).all(|(a, b)| (b.z - a.z - 10.0).abs() < 1e-9 && (a.x - b.x).abs() < 1e-9), "{after:?}");
+    // The parameter knows the curve uses it, and a rename reaches z(t).
+    let users = run(&mut s, "parameters.users", json!({"name": "h"}));
+    assert!(users.to_string().contains("Curve Z"), "{users}");
+    run(&mut s, "parameters.rename", json!({"name": "h", "new_name": "height"}));
+    assert_eq!(s.doc.sketch(f).unwrap().equation_of(&id).unwrap().z.as_deref(), Some("height + t * t / 10"));
+    no_trouble(&s);
+    // The design saves the formula, and a reopened design follows it.
+    assert!(s.doc.to_json().contains("\"z\": \"height + t * t / 10\""));
+    let r = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    no_trouble(&r);
+    let reopened = wire_points(&r, &id);
+    assert!(reopened.iter().all(|p| (p.z - (15.0 + p.x * p.x / 10.0)).abs() < 1e-9), "{reopened:?}");
+}
+
+/// A circle swept up a 3D curve from a formula: the path is a line straight up, so the sweep is a
+/// tube 30 long.
+#[test]
+fn a_3d_equation_curve_sweeps_a_circle_into_a_tube() {
+    let mut s = Session::default();
+    let path = run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Path"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    let r = run(&mut s, "sketch.equation_curve", json!({"x": "0", "y": "0", "z": "30 * t", "start": 0, "end": 1}));
+    let wire = r["curve"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    let prof = run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Prof"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 2}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.sweep", json!({"sketch": prof, "path_sketch": path, "path": [wire], "operation": "new"}));
+    no_trouble(&s);
+    near(volume(&mut s), std::f64::consts::PI * 4.0 * 30.0, 2e-3);
+    // The path follows its formulas: twice the height, twice the tube.
+    run(&mut s, "sketch.edit", json!({"sketch": path, "restore_marker": false}));
+    run(&mut s, "sketch.equation_curve.edit", json!({"curve": wire, "z": "60 * t"}));
+    run(&mut s, "sketch.finish", json!({}));
+    no_trouble(&s);
+    near(volume(&mut s), std::f64::consts::PI * 4.0 * 60.0, 2e-3);
+}
+
+#[test]
+fn a_curve_with_z_needs_the_3d_sketch_option() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    let before = s.doc.to_json();
+    let why = s.execute("sketch.equation_curve", &json!({"x": "t", "y": "t", "z": "t", "start": 0, "end": 1})).unwrap_err().to_string();
+    assert!(why.contains("3D Sketch"), "{why}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
+fn giving_z_makes_a_3d_curve_and_the_explicit_form_turns_it_back() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    let r = run(&mut s, "sketch.equation_curve", json!({"x": "10 * cos(t)", "y": "10 * sin(t)", "start": 0, "end": "2 * pi"}));
+    assert_eq!(r["closed"], true, "{r}");
+    let plane = r["curve"].as_str().unwrap().to_string();
+    // Giving z makes a 3D curve: a new id, and the plane curve and its points go.
+    let r = run(
+        &mut s,
+        "sketch.equation_curve.edit",
+        json!({"curve": plane, "x": "10 * cos(t)", "y": "10 * sin(t)", "z": "5", "start": 0, "end": "2 * pi"}),
+    );
+    let wire = r["curve"].as_str().unwrap().to_string();
+    assert_ne!(wire, plane, "{r}");
+    assert_eq!(r["closed"], true, "{r}");
+    let f = s.doc.find_feature("S").unwrap().id;
+    let sk = s.doc.sketch(f).unwrap();
+    assert!(sk.wire_index(&wire).is_some() && sk.curve_index(&plane).is_none(), "{sk:?}");
+    assert_eq!(sk.points.len(), 1, "the origin alone is left");
+    assert_eq!(sk.equations.len(), 1, "one curve, one equation");
+    assert!(wire_points(&s, &wire).iter().all(|p| (Vec2::new(p.x, p.y).len() - 10.0).abs() < 1e-9));
+    // The explicit form is a plane curve again: another new curve, the 3D one gone.
+    let r = run(&mut s, "sketch.equation_curve.edit", json!({"curve": wire, "explicit": true, "y": "x / 2", "start": 0, "end": 10}));
+    let back = r["curve"].as_str().unwrap().to_string();
+    assert_ne!(back, wire, "{r}");
+    let sk = s.doc.sketch(f).unwrap();
+    assert!(sk.curve_index(&back).is_some() && sk.wire_index(&wire).is_none(), "{sk:?}");
+    assert!(sk.equation_of(&back).unwrap().z.is_none());
+    assert_eq!(sk.equations.len(), 1);
+}
+
+/// The window's empty z(t) row on an edit sends `z: null`: the formula goes and the curve is a
+/// plane curve again (#12662), while leaving `z` out still keeps it.
+#[test]
+fn clearing_z_in_the_window_makes_the_curve_a_plane_one_again() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    let r = run(&mut s, "sketch.equation_curve", json!({"x": "10 * cos(t)", "y": "10 * sin(t)", "z": "5", "start": 0, "end": "2 * pi"}));
+    let wire = r["curve"].as_str().unwrap().to_string();
+    let f = s.doc.find_feature("S").unwrap().id;
+    // Leaving z out keeps it: the same curve, still a 3D one.
+    let r = run(&mut s, "sketch.equation_curve.edit", json!({"curve": wire, "end": "2 * pi"}));
+    assert_eq!(r["curve"].as_str(), Some(wire.as_str()), "{r}");
+    assert!(s.doc.sketch(f).unwrap().wire_index(&wire).is_some());
+    // An empty z row removes it: a new plane curve, and the 3D one is gone.
+    let r = run(&mut s, "sketch.equation_curve.edit", json!({"curve": wire, "z": null}));
+    let back = r["curve"].as_str().unwrap().to_string();
+    assert_ne!(back, wire, "{r}");
+    let sk = s.doc.sketch(f).unwrap();
+    assert!(sk.curve_index(&back).is_some() && sk.wire_index(&wire).is_none(), "{sk:?}");
+    assert!(sk.equation_of(&back).unwrap().z.is_none());
+    assert_eq!(sk.equations.len(), 1, "one curve, one equation");
+    run(&mut s, "sketch.finish", json!({}));
+    no_trouble(&s);
+}
+
+#[test]
+fn deleting_a_3d_curve_forgets_its_formulas() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    let r = run(&mut s, "sketch.equation_curve", json!({"x": "t", "y": "sin(t)", "z": "t", "start": 0, "end": 6}));
+    let id = r["curve"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.delete", json!({"entities": [id]}));
+    let f = s.doc.find_feature("S").unwrap().id;
+    let sk = s.doc.sketch(f).unwrap();
+    assert!(sk.equations.is_empty() && sk.wires.is_empty() && sk.curves.is_empty(), "{sk:?}");
+}
+
+#[test]
+fn bad_3d_formulas_are_refused_and_change_nothing() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    let before = s.doc.to_json();
+    for p in [
+        json!({"x": "t", "y": "t", "z": "sqrt(t)", "start": -1, "end": 1}),
+        json!({"x": "t", "y": "t", "z": "1 / t", "start": -1, "end": 1}),
+        json!({"x": "t", "y": "t", "z": "t", "start": 1, "end": 1}),
+        json!({"x": "t", "y": "t", "z": "t", "start": 0, "end": "1e12"}),
+        json!({"x": "t", "y": "t", "z": "nope", "start": 0, "end": 1}),
+        json!({"x": "t", "y": "t", "z": "1e300 * t", "start": 0, "end": 1}),
+        json!({"explicit": true, "y": "x", "z": "x", "start": 0, "end": 1}),
+        json!({"y": "t", "z": "t", "start": 0, "end": 1}),
+        json!({"x": "5", "y": "5", "z": "5", "start": 0, "end": 1}),
+    ] {
+        assert!(s.execute("sketch.equation_curve", &p).is_err(), "{p} should be refused");
+        assert_eq!(s.doc.to_json(), before, "{p} changed the design");
+    }
+    // An empty z row on a new curve is a plane curve, not a refusal (#12662).
+    let r = run(&mut s, "sketch.equation_curve", json!({"x": "t", "y": "0", "z": "", "start": 0, "end": 1}));
+    let plane = r["curve"].as_str().unwrap().to_string();
+    let f = s.doc.find_feature("S").unwrap().id;
+    let sk = s.doc.sketch(f).unwrap();
+    assert!(sk.curve_index(&plane).is_some() && sk.wire_index(&plane).is_none(), "a plane curve: {sk:?}");
+    assert!(sk.equation_of(&plane).unwrap().z.is_none());
+    let r = run(&mut s, "sketch.equation_curve", json!({"x": "t", "y": "t", "z": "t", "start": 0, "end": 1, "tolerance": 0.02}));
+    let id = r["curve"].as_str().unwrap().to_string();
+    let ok = s.doc.to_json();
+    for p in [json!({"curve": id, "z": "sqrt(t - 2)"}), json!({"curve": id, "z": "t", "start": 5, "end": 5})] {
+        assert!(s.execute("sketch.equation_curve.edit", &p).is_err(), "{p} should be refused");
+        assert_eq!(s.doc.to_json(), ok, "{p} changed the design");
+    }
+}
+
+#[test]
+fn a_3d_curve_its_parameters_break_is_an_error_not_a_crash() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "k", "expression": "1 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    run(&mut s, "sketch.equation_curve", json!({"x": "t", "y": "0", "z": "sqrt(k / 1 mm - t)", "start": 0, "end": 0.5}));
+    run(&mut s, "sketch.finish", json!({}));
+    no_trouble(&s);
+    // The square root goes negative inside the range: the sketch reports it.
+    run(&mut s, "parameters.change", json!({"name": "k", "expression": "0.25 mm"}));
+    let r = s.model.results.iter().find(|r| r.name == "S").unwrap();
+    assert!(r.error.as_deref().is_some_and(|e| e.contains("equation curve")), "{:?}", r.error);
+    run(&mut s, "parameters.change", json!({"name": "k", "expression": "1 mm"}));
+    no_trouble(&s);
 }

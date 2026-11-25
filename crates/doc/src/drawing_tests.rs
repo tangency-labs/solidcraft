@@ -2301,6 +2301,7 @@ fn sheet_sketch_unsupported_equations_and_centerlines_are_refused_before_solving
                 curve: record.sketch.curves[0].id.clone(),
                 x: None,
                 y: "x".into(),
+                z: None,
                 start: "0".into(),
                 end: "1".into(),
                 tolerance: 0.01,

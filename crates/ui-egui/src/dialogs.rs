@@ -5278,6 +5278,17 @@ fn recall(app: &SolveApp, dialog: &mut Dialog) {
             *cells = fresh_cells.clone();
             *of = fresh_of.clone();
         }
+        (
+            Kind::SketchModify(crate::sketch_modify_ui::Mod::Equation { three_d, z, .. }),
+            Kind::SketchModify(crate::sketch_modify_ui::Mod::Equation { three_d: fresh, .. }),
+        ) => {
+            // 3D Sketch is the sketch's option, not the last dialog's, and a plane sketch shows no
+            // z(t) row: a recalled formula there could neither be seen nor cleared (#12662).
+            *three_d = *fresh;
+            if !*fresh {
+                z.clear();
+            }
+        }
         (Kind::Hole { opts, .. }, Kind::Hole { opts: fresh, .. }) => opts.refs = fresh.refs.clone(),
         (Kind::Primitive { at, .. }, Kind::Primitive { at: fresh, .. }) => *at = *fresh,
         (Kind::Sweep { opts, .. }, Kind::Sweep { opts: fresh, .. }) => opts.direction = fresh.direction,

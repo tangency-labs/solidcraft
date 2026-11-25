@@ -152,9 +152,11 @@ pub enum Mod {
     /// the first distance lands on the other leg of the corner.
     Corner { chamfer: bool, ctype: usize, size: String, distance2: String, angle: String, flip: bool },
     /// `sketch.equation_curve` (or `.edit` on the curve the window's `curve` extra names): the
-    /// form (an index into [`EQUATION_FORMS`]), x(t) and y(t) (or y(x)), the variable's range and
-    /// how far the curve may stray from the formulas.
-    Equation { form: usize, x: String, y: String, start: String, end: String, tolerance: String, range_unit: bool },
+    /// form (an index into [`EQUATION_FORMS`]), x(t) and y(t) (or y(x)), z(t), the variable's
+    /// range and how far the curve may stray from the formulas. `three_d` is the 3D Sketch
+    /// option of the sketch being edited: only then is z(t) offered, and a formula there makes
+    /// the curve a 3D one (#12662).
+    Equation { form: usize, x: String, y: String, z: String, start: String, end: String, tolerance: String, range_unit: bool, three_d: bool },
     /// `sketch.point.divide` (#8969): the curves picked are each divided into `count` pieces of equal
     /// length by points held at their shares of it.
     Divide { count: String },
@@ -299,10 +301,12 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             form: 0,
             x: "20 * t / pi".into(),
             y: "5 * sin(t)".into(),
+            z: String::new(),
             start: "0".into(),
             end: "2 * pi".into(),
             tolerance: "0.01 mm".into(),
             range_unit: false,
+            three_d: sketch_is_3d(app),
         },
         "sketch.point.divide" => Mod::Divide { count: "4".into() },
         _ => return None,
@@ -317,20 +321,30 @@ pub fn edit_equation(app: &mut SolveApp, id: &str) -> bool {
     let Some(sid) = app.session.active_sketch else { return false };
     let state = crate::open_meshing::session_world(&app.session);
     let Some(eq) = state.sketch(sid).and_then(|s| s.sketch.equation_of(id)).cloned() else { return false };
+    let three_d = state.sketch(sid).is_some_and(|s| s.sketch.view.three_d);
     let kind = Mod::Equation {
         form: usize::from(eq.x.is_none()),
         x: eq.x.clone().unwrap_or_else(|| "t".into()),
         y: eq.y,
+        z: eq.z.unwrap_or_default(),
         start: eq.start,
         end: eq.end,
         tolerance: format!("{} mm", eq.tolerance),
         range_unit: eq.variable_unit == VariableUnit::Range,
+        three_d,
     };
     let mut dialog = Dialog::new(Kind::SketchModify(kind), Vec::new());
     dialog.extra.insert("curve".into(), json!(id));
     app.tool = None;
     app.dialog = Some(dialog);
     true
+}
+
+/// Whether the sketch being edited has its 3D Sketch option on, so an equation curve may leave
+/// the plane (#12662).
+pub(crate) fn sketch_is_3d(app: &SolveApp) -> bool {
+    let Some(sid) = app.session.active_sketch else { return false };
+    crate::open_meshing::session_world(&app.session).sketch(sid).is_some_and(|s| s.sketch.view.three_d)
 }
 
 /// The equation curve the selection is, when it is one curve that has formulas.
@@ -704,11 +718,16 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document) -> bool {
             enter |= quantity(ui, doc, "Segments", count, 2, DIVIDE_MAX);
             ui_kit::text(ui, solidcraft_ui_text::tr("sketch.divide_hint"), ui_kit::Text::Note("divide"));
         }
-        Mod::Equation { form, x, y, start, end, tolerance, range_unit } => {
+        Mod::Equation { form, x, y, z, start, end, tolerance, range_unit, three_d } => {
             ui_kit::choice_row(ui, "Form", "equation_form", form, &EQUATION_FORMS);
             if *form == 0 {
                 enter |= number(ui, "x(t)", x);
                 enter |= number(ui, "y(t)", y);
+                // Only a 3D sketch may take the curve off its plane (#12662); empty keeps it on
+                // the plane.
+                if *three_d {
+                    enter |= number(ui, "z(t)", z);
+                }
             } else {
                 enter |= number(ui, "y(x)", y);
             }
@@ -1228,7 +1247,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 _ => ("sketch.chamfer.equal_distance", p),
             }
         }
-        Mod::Equation { form, x, y, start, end, tolerance, range_unit } => {
+        Mod::Equation { form, x, y, z, start, end, tolerance, range_unit, .. } => {
             let filled = |label: &str, text: &str| -> Result<String, String> {
                 let text = text.trim();
                 if text.is_empty() { Err(format!("{label} is empty")) } else { Ok(text.to_string()) }
@@ -1240,6 +1259,13 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             let mut p = json!({"y": filled(if *form == 0 { "y(t)" } else { "y(x)" }, y)?, "start": filled("Start", start)?, "end": filled("End", end)?, "tolerance": tol});
             if *form == 0 {
                 p["x"] = json!(filled("x(t)", x)?);
+                // Empty leaves a new curve on the plane; on an edit it takes the formula away and
+                // the curve is a plane curve again, where leaving `z` out would keep it (#12662).
+                if !z.trim().is_empty() {
+                    p["z"] = json!(filled("z(t)", z)?);
+                } else if extra.contains_key("curve") {
+                    p["z"] = json!(null);
+                }
             } else {
                 p["explicit"] = json!(true);
             }

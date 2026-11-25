@@ -474,6 +474,7 @@ point it lined up with, in the shape's undo step, unless the sketch already sets
 preference off, drawing lines up only with the previous point, one axis at a time.
 
 Enable **3D Sketch** in the Sketch Palette to draw lines, arcs, splines and points off the plane.
+An [equation curve](equation-curves.md) takes a third rule, **z(t)**, there too.
 
 A 3D sketch has two kinds of spline. **3D Spline** passes through every point you click.
 **3D Control Point Spline** starts on the first point you click and ends on the last; the points

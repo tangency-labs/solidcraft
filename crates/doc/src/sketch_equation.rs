@@ -4,11 +4,16 @@
 //! as it takes for the spline to stay within the curve's tolerance of the formulas, checked
 //! between the points, up to the most a spline takes. When the parameters change, the same
 //! number of points is placed again (`Document::apply_equation_values`), before every solve.
+//!
+//! A `z` formula (#12662) gives a 3D curve: the sketch keeps it as a drawn 3D curve (a wire),
+//! whose smooth spline is the centripetal Catmull–Rom curve through the points, so the same
+//! point count and tolerance rule applies to it ([`sample3`], [`fit3`]).
 
 use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
-use solidcore_record::Vec2;
+use solidcore_record::{Vec2, Vec3};
+use solidcraft_geom::catmull_rom;
 use solidcraft_sketch::{EquationCurve, MAX_COORD, MAX_EQUATION_TEXT, MAX_SPLINE_POINTS, Sketch, VariableUnit, bezier_distance, fit_beziers_mode};
 
 use crate::expr::{self, Defaults, Kind, Value};
@@ -31,6 +36,18 @@ const MAX_ROUNDS: usize = 12;
 pub struct EquationFit {
     /// The spline's points in order; a closed curve's last point is its first one again.
     pub points: Vec<Vec2>,
+    /// The curve ends where it starts: the spline closes smoothly there.
+    pub closed: bool,
+    /// The largest distance (mm) found between the spline and the formulas.
+    pub deviation: f64,
+}
+
+/// A 3D equation curve's points (#12662) and how well the 3D spline through them follows the
+/// formulas.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EquationFit3 {
+    /// The drawn 3D curve's fit points in order; a closed curve's last point is its first again.
+    pub points: Vec<Vec3>,
     /// The curve ends where it starts: the spline closes smoothly there.
     pub closed: bool,
     /// The largest distance (mm) found between the spline and the formulas.
@@ -196,12 +213,123 @@ fn deviation(vals: &BTreeMap<String, Value>, eq: &EquationCurve, (a, b): (f64, f
     Ok(worst)
 }
 
+/// The curve's 3D point where the variable is `at` (#12662): x(t), y(t) and z(t) in the sketch's
+/// own 3D coordinates.
+fn point_at3(vals: &BTreeMap<String, Value>, eq: &EquationCurve, at: f64, d: Defaults) -> Result<Vec3> {
+    let (Some(x_expr), Some(z_expr)) = (&eq.x, &eq.z) else {
+        return Err(DocError::Invalid("a 3D curve takes x(t), y(t) and z(t)".into()));
+    };
+    let variable = eq.variable();
+    let value = variable_value(eq, at, d);
+    let x = formula(vals, x_expr, variable, value, d).map_err(|e| DocError::Expr(format!("x: {e}")))?;
+    let y = formula(vals, &eq.y, variable, value, d).map_err(|e| DocError::Expr(format!("y: {e}")))?;
+    let z = formula(vals, z_expr, variable, value, d).map_err(|e| DocError::Expr(format!("z: {e}")))?;
+    Ok(Vec3::new(x, y, z))
+}
+
+/// The formulas' 3D points at `count` evenly spaced values of the variable, from start to end.
+fn samples3(vals: &BTreeMap<String, Value>, eq: &EquationCurve, (a, b): (f64, f64), count: usize, d: Defaults) -> Result<Vec<Vec3>> {
+    let last = count.saturating_sub(1).max(1) as f64;
+    (0..count)
+        .map(|i| {
+            let at = a + (b - a) * (i as f64 / last);
+            point_at3(vals, eq, at, d).map_err(|e| DocError::Expr(format!("at {} = {}: {e}", eq.variable(), short(at))))
+        })
+        .collect()
+}
+
+/// The size of a 3D curve: the larger side of its box (for closing tolerances).
+fn extent3(points: &[Vec3]) -> f64 {
+    let (mut lo, mut hi) =
+        (Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY), Vec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY));
+    for p in points {
+        lo = Vec3::new(lo.x.min(p.x), lo.y.min(p.y), lo.z.min(p.z));
+        hi = Vec3::new(hi.x.max(p.x), hi.y.max(p.y), hi.z.max(p.z));
+    }
+    (hi.x - lo.x).max(hi.y - lo.y).max(hi.z - lo.z).max(0.0)
+}
+
+/// Does a 3D curve through these samples end where it starts?
+fn closes3(points: &[Vec3]) -> bool {
+    match (points.first(), points.last()) {
+        (Some(a), Some(b)) => points.len() >= 4 && a.dist(*b) <= 1e-7 * extent3(points).max(1.0),
+        _ => false,
+    }
+}
+
+/// Refuse 3D samples a spline cannot pass through: two in a row on the same spot, or all of them.
+fn check_samples3(points: &[Vec3], closed: bool) -> Result<()> {
+    let size = extent3(points);
+    if size <= 1e-9 {
+        return Err(DocError::Invalid("the formulas give the same point all along the range".into()));
+    }
+    let spans = if closed { points.len().saturating_sub(1) } else { points.len() };
+    for w in points.windows(2).take(spans) {
+        if let [p, q] = w
+            && p.dist(*q) <= 1e-9 * size.max(1.0)
+        {
+            return Err(DocError::Invalid("the curve stands still between two of its points: narrow the range or use fewer points".into()));
+        }
+    }
+    Ok(())
+}
+
+/// Distance from `q` to the cubic Bézier `b` in space, sampled finely.
+fn bezier_distance3(b: &[Vec3; 4], q: Vec3) -> f64 {
+    const STEPS: usize = 32;
+    let at = |t: f64| {
+        let s = 1.0 - t;
+        b[0] * (s * s * s) + b[1] * (3.0 * t * s * s) + b[2] * (3.0 * t * t * s) + b[3] * (t * t * t)
+    };
+    let mut best = f64::INFINITY;
+    let mut prev = at(0.0);
+    for i in 1..=STEPS {
+        let next = at(i as f64 / STEPS as f64);
+        let d = next - prev;
+        let l2 = d.len2();
+        let t = if l2 > 0.0 { ((q - prev).dot(d) / l2).clamp(0.0, 1.0) } else { 0.0 };
+        best = best.min(q.dist(prev + d * t));
+        prev = next;
+    }
+    best
+}
+
+/// How far the 3D spline through `points` strays from the formulas: the largest distance from the
+/// formulas' points a quarter, a half and three quarters of the way between two samples to the
+/// spline's piece between them. The drawn curve's spline is the centripetal Catmull–Rom curve
+/// through the points ([`solidcraft_geom::catmull_rom::beziers`]).
+fn deviation3(vals: &BTreeMap<String, Value>, eq: &EquationCurve, (a, b): (f64, f64), points: &[Vec3], d: Defaults) -> Result<f64> {
+    let pieces = match points.len() {
+        0 | 1 => return Ok(0.0),
+        // Two points: a straight curve, its one piece the line between them.
+        2 => vec![[points[0], points[0], points[1], points[1]]],
+        _ => catmull_rom::beziers(points).ok_or_else(|| DocError::Invalid("the 3D curve's spline is not finite".into()))?,
+    };
+    let step = (b - a) / points.len().saturating_sub(1).max(1) as f64;
+    let mut worst: f64 = 0.0;
+    for (i, piece) in pieces.iter().enumerate() {
+        // Probes at fractions of a piece that the sample grid and the quarters never land on, so a
+        // spline that swings out between two samples is measured, not passed (#12662).
+        for k in [0.25, 0.382, 0.5, 0.618, 0.75] {
+            let q = point_at3(vals, eq, a + step * (i as f64 + k), d)?;
+            worst = worst.max(bezier_distance3(piece, q));
+        }
+    }
+    Ok(worst)
+}
+
 /// Check an equation's text and tolerance before any evaluation.
 pub fn check(eq: &EquationCurve) -> Result<()> {
     if let Some(x) = &eq.x {
         checked_text("x(t)", x)?;
     }
     checked_text(if eq.x.is_some() { "y(t)" } else { "y(x)" }, &eq.y)?;
+    if let Some(z) = &eq.z {
+        if eq.x.is_none() {
+            return Err(DocError::Invalid("an explicit curve y = f(x) is a plane curve: leave out `z`".into()));
+        }
+        checked_text("z(t)", z)?;
+    }
     checked_text("the start", &eq.start)?;
     checked_text("the end", &eq.end)?;
     if !(eq.tolerance.is_finite() && (MIN_TOLERANCE..=MAX_TOLERANCE).contains(&eq.tolerance)) {
@@ -257,13 +385,72 @@ pub fn fit(vals: &BTreeMap<String, Value>, eq: &EquationCurve) -> Result<Equatio
     Err(DocError::Invalid("the equation curve's points could not be fitted".into()))
 }
 
+/// The 3D points of `count` samples (#12662; a closed curve's last one is its first), whether it
+/// closes, and how far the 3D spline through them strays.
+pub fn sample3(vals: &BTreeMap<String, Value>, eq: &EquationCurve, count: usize, closed: Option<bool>) -> Result<EquationFit3> {
+    check(eq)?;
+    if eq.z.is_none() {
+        return Err(DocError::Invalid("a 3D equation curve takes a z(t) formula".into()));
+    }
+    if !(2..=MAX_SPLINE_POINTS).contains(&count) {
+        return Err(DocError::Invalid(format!("an equation curve takes 2 to {MAX_SPLINE_POINTS} points")));
+    }
+    let d = defaults(vals);
+    let span = range(vals, eq, d)?;
+    let mut points = samples3(vals, eq, span, count, d)?;
+    let closed = closed.unwrap_or_else(|| closes3(&points)) && count >= 4;
+    if closed
+        && let Some(first) = points.first().copied()
+        && let Some(last) = points.last_mut()
+    {
+        *last = first;
+    }
+    check_samples3(&points, closed)?;
+    let deviation = deviation3(vals, eq, span, &points, d)?;
+    Ok(EquationFit3 { points, closed, deviation })
+}
+
+/// The 3D points of an equation curve, as few as keep the spline within its tolerance of the
+/// formulas. Refused when even the most points a spline takes are not close enough.
+pub fn fit3(vals: &BTreeMap<String, Value>, eq: &EquationCurve) -> Result<EquationFit3> {
+    let mut count = FIRST_COUNT;
+    for _ in 0..MAX_ROUNDS {
+        let fit = sample3(vals, eq, count, None)?;
+        if fit.deviation <= eq.tolerance {
+            return Ok(fit);
+        }
+        if count >= MAX_SPLINE_POINTS {
+            return Err(DocError::Invalid(format!(
+                "even {MAX_SPLINE_POINTS} points stray {} mm from the formulas, more than the tolerance of {} mm: raise the tolerance or narrow the range",
+                short(fit.deviation),
+                short(eq.tolerance)
+            )));
+        }
+        let ratio = (fit.deviation / eq.tolerance).powf(0.25) * 1.2;
+        let next = (count as f64 * ratio.max(1.5)).ceil();
+        count = if next.is_finite() && next < MAX_SPLINE_POINTS as f64 { next as usize } else { MAX_SPLINE_POINTS };
+    }
+    Err(DocError::Invalid("the equation curve's points could not be fitted".into()))
+}
+
 impl crate::Document {
     /// Place the points of the sketch's equation curves where their formulas put them now (in
     /// place), with the number of points each has. Their points are fixed, so the solve keeps
-    /// them there. A curve that is gone or is no longer a fit point spline is left as it is.
+    /// them there; a 3D curve's fit points are the drawn 3D curve's, which the solve does not
+    /// touch. A curve that is gone or is no longer of the kind it was made as is left as it is.
     pub fn apply_equation_values(&self, vals: &BTreeMap<String, Value>, sk: &mut Sketch) -> Result<()> {
         for k in 0..sk.equations.len() {
             let Some(eq) = sk.equations.get(k).cloned() else { continue };
+            if eq.is_3d() {
+                let Some(wi) = sk.wire_index(&eq.curve) else { continue };
+                let Some(w) = sk.wires.get(wi).filter(|w| w.link.is_none()) else { continue };
+                // The same number of points, but whether the curve closes comes from the points
+                // the formulas give now, not from the ones it had (#12662).
+                let count = w.fit.len();
+                let fit = sample3(vals, &eq, count, None).map_err(|e| DocError::Expr(format!("equation curve {}: {e}", eq.curve)))?;
+                sk.place_equation_wire_points(wi, &fit.points)?;
+                continue;
+            }
             let Some(ci) = sk.curve_index(&eq.curve) else { continue };
             let Some(solidcraft_sketch::CurveKind::Spline { pts, control: false, periodic, .. }) = sk.curves.get(ci).map(|c| &c.kind) else {
                 continue;
@@ -285,11 +472,17 @@ mod tests {
             curve: String::new(),
             x: x.map(str::to_string),
             y: y.into(),
+            z: None,
             start: start.into(),
             end: end.into(),
             tolerance: DEFAULT_TOLERANCE,
             variable_unit: VariableUnit::Number,
         }
+    }
+
+    /// The same curve lifted off the plane by a `z(t)` formula (#12662).
+    fn eq3(x: &str, y: &str, z: &str, start: &str, end: &str) -> EquationCurve {
+        EquationCurve { z: Some(z.into()), ..eq(Some(x), y, start, end) }
     }
 
     /// The same curve with its variable in its range's unit.
@@ -464,5 +657,65 @@ mod tests {
         ] {
             assert!(fit(&vals, &with_range_unit(eq(Some(x), y, a, b))).is_err(), "{x} {y} {a}..{b}");
         }
+    }
+
+    /// A helix (#12662): x = 10 cos t, y = 10 sin t, z = t / 2 over two turns. Every point is on
+    /// the cylinder and on the helix, and the spline stays within the tolerance of the formulas.
+    #[test]
+    fn a_3d_curve_follows_its_formulas_within_the_tolerance() {
+        let vals = BTreeMap::new();
+        let e = eq3("10 * cos(t)", "10 * sin(t)", "t / 2", "0", "4 * pi");
+        let fit = fit3(&vals, &e).unwrap();
+        assert!(!fit.closed);
+        assert!(fit.deviation <= DEFAULT_TOLERANCE, "{}", fit.deviation);
+        for p in &fit.points {
+            assert!((Vec2::new(p.x, p.y).len() - 10.0).abs() < 1e-9, "{p:?}");
+            assert!((p.x - 10.0 * (2.0 * p.z).cos()).abs() < 1e-9 && (p.y - 10.0 * (2.0 * p.z).sin()).abs() < 1e-9, "{p:?}");
+        }
+        let (first, last) = (fit.points[0], *fit.points.last().unwrap());
+        assert!((first - Vec3::new(10.0, 0.0, 0.0)).len() < 1e-9, "{first:?}");
+        assert!((last.z - 2.0 * std::f64::consts::PI).abs() < 1e-9, "{last:?}");
+    }
+
+    /// A full turn at one height is a 3D circle: it closes on itself, its last point the first.
+    #[test]
+    fn a_3d_curve_that_ends_where_it_starts_closes() {
+        let vals = BTreeMap::new();
+        let fit = fit3(&vals, &eq3("12 * cos(t)", "12 * sin(t)", "5", "0", "2 * pi")).unwrap();
+        assert!(fit.closed);
+        assert_eq!(fit.points.first(), fit.points.last());
+        assert!(fit.deviation <= DEFAULT_TOLERANCE);
+        assert!(fit.points.iter().all(|p| (p.z - 5.0).abs() < 1e-9), "a flat circle at z = 5");
+    }
+
+    /// The explicit form is a plane curve: it takes no `z`, which `check` refuses.
+    #[test]
+    fn the_explicit_form_takes_no_z() {
+        let vals = BTreeMap::new();
+        let mut e = eq(None, "x / 2", "0", "10");
+        e.z = Some("x".into());
+        assert!(check(&e).is_err());
+        assert!(fit3(&vals, &e).is_err());
+        // A 3D curve needs all three formulas.
+        assert!(sample3(&vals, &eq(Some("t"), "t", "0", "1"), 9, None).is_err());
+    }
+
+    #[test]
+    fn hostile_3d_formulas_and_ranges_are_refused() {
+        let vals = BTreeMap::new();
+        for (x, y, z, a, b) in [
+            ("t", "t", "sqrt(t)", "-1", "1"),
+            ("t", "t", "1 / t", "-1", "1"),
+            ("t", "t", "t", "0", "0"),
+            ("t", "t", "t", "0", "1e300"),
+            ("t", "t", "t", "0", "nan"),
+            ("t", "t", "1e300 * t", "0", "1"),
+            ("5", "5", "5", "0", "1"),
+            ("t", "sin(1e5 * t)", "t", "0", "1000"),
+        ] {
+            assert!(fit3(&vals, &eq3(x, y, z, a, b)).is_err(), "{x} {y} {z} {a}..{b}");
+        }
+        let long = "t + ".repeat(400) + "t";
+        assert!(fit3(&vals, &eq3("t", "t", &long, "0", "1")).is_err());
     }
 }

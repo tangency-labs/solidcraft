@@ -1188,3 +1188,55 @@ fn project_link_tools_are_a_session_option_in_the_project_panel() {
     assert!(!h.app.ui.project_link_tools);
     assert_eq!(h.app.session.doc.to_json(), before);
 }
+
+/// A 3D sketch's equation window takes z(t) (#12662): OK draws a 3D curve, and the window
+/// reopens on its formulas.
+#[test]
+fn equation_curve_window_lifts_the_curve_with_z_in_a_3d_sketch() {
+    let mut h = fixture();
+    h.app.run("sketch.options", json!({"sketch_3d": true})).unwrap();
+    h.app.start("sketch.equation_curve");
+    h.settle();
+    let Some(Kind::SketchModify(Mod::Equation { x, y, z, end, three_d, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) else {
+        panic!("no equation window")
+    };
+    assert!(*three_d, "the window knows the sketch is a 3D one");
+    *x = "10 * cos(t)".into();
+    *y = "10 * sin(t)".into();
+    *z = "t".into();
+    *end = "6".into();
+    h.settle();
+    assert!(scenario::rect_of("dialog:row:z(t)").is_some(), "a 3D sketch offers z(t)");
+    h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none(), "the curve is made");
+    let sid = h.app.session.active_sketch.unwrap();
+    let sk = h.app.session.doc.sketch(sid).unwrap().clone();
+    let eq = sk.equations.first().cloned().expect("an equation curve");
+    assert_eq!(eq.z.as_deref(), Some("t"));
+    assert!(sk.wire_index(&eq.curve).is_some(), "a 3D curve");
+    assert!(crate::sketch_modify_ui::edit_equation(&mut h.app, &eq.curve));
+    h.settle();
+    let Some(Kind::SketchModify(Mod::Equation { z, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("no equation window") };
+    assert_eq!(z.as_str(), "t", "reopens on its z(t)");
+    // Clearing the row and pressing OK takes the formula away: the curve is a plane curve again.
+    z.clear();
+    h.settle();
+    h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    h.settle();
+    let sk = h.app.session.doc.sketch(sid).unwrap().clone();
+    assert!(sk.equations.iter().all(|e| e.z.is_none()), "z(t) is gone");
+    assert!(sk.wire_index(&eq.curve).is_none(), "the 3D curve is gone");
+    assert_eq!(sk.equations.len(), 1, "one curve, one equation");
+}
+
+/// A plane sketch's window offers no z(t): its curves stay on the plane.
+#[test]
+fn a_plane_sketchs_equation_window_offers_no_z() {
+    let mut h = fixture();
+    h.app.start("sketch.equation_curve");
+    h.settle();
+    assert!(scenario::rect_of("dialog:row:z(t)").is_none(), "no z(t) on the plane");
+    h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
+    h.settle();
+}

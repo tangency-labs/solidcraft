@@ -1,0 +1,2 @@
+| docs/book/src/generated/equation-helix.png | SolidCraft contributors | rendered by `cargo xtask book` (`solidcraft-cli snapshot docs/book/scripts/equation-helix.json`; gitignored) | MIT OR Apache-2.0 |
+| docs/book/scripts/equation-helix.json | SolidCraft contributors | original parametric recipe for a three-turn helix drawn from x(t), y(t) and z(t), authored for the equation-curves guide | MIT OR Apache-2.0 |

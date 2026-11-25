@@ -2479,7 +2479,7 @@
   "help.sketch.dimension": "Adds a driving dimension: a length, distance, angle, radius or diameter, depending on what you pick. Type a value or a parameter name, and the sketch follows it.",
   "help.sketch.edit": "Opens an existing sketch for editing. The features built on it update when you finish the sketch.",
   "help.sketch.ellipse": "Draws an ellipse from its center, the end of its major axis and a point on its minor side. Use it for oval openings, cams and other elongated round shapes.",
-  "help.sketch.equation_curve": "Draws a curve from formulas: x(t) and y(t), or y = f(x), over a range. The formulas can use parameters and the curve follows them: use it for a sine wave, a spiral or a gear tooth's involute.",
+  "help.sketch.equation_curve": "Draws a curve from formulas: x(t) and y(t), or y = f(x), over a range. The formulas can use parameters and the curve follows them: use it for a sine wave, a spiral or a gear tooth's involute. In a 3D sketch, a third rule z(t) lifts the curve off the plane into a 3D curve, which a sweep can use as its path.",
   "help.sketch.extend": "Lengthens a line or arc up to the nearest curve in its way, or grows two curves until they meet. Use it to close gaps in a profile after trimming or editing.",
   "help.sketch.fillet": "Rounds the corner where two curves meet (lines, arcs, conics or control point splines) with an arc of a given radius. Several corners rounded together share one radius.",
   "help.sketch.finish": "Leaves the sketch and returns to the model. Its closed profiles are then ready for Extrude, Revolve and other features.",

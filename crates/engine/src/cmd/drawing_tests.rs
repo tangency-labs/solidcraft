@@ -2046,6 +2046,7 @@ fn sheet_fill_profiles_refuse_equation_metadata_without_disabling_sketch_inspect
         curve: record.sketch.curves[0].id.clone(),
         x: None,
         y: "x".into(),
+        z: None,
         start: "0".into(),
         end: "1".into(),
         variable_unit: solidcraft_sketch::VariableUnit::Number,
