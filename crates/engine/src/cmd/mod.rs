@@ -221,6 +221,7 @@ mod parameter_sweep;
 mod parameters;
 mod plastic;
 mod print_face;
+mod remove_history;
 mod render;
 pub(crate) use render::PreparedCapture;
 pub(crate) use render::prepare_capture_with_metadata;
@@ -650,6 +651,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(bom::COMMANDS.iter());
     v.extend(mass_properties::COMMANDS.iter());
     v.extend(browser::COMMANDS.iter());
+    v.extend(remove_history::COMMANDS.iter());
     v.extend(notes::COMMANDS.iter());
     v.extend(delete::COMMANDS.iter());
     v.extend(edit::COMMANDS.iter());

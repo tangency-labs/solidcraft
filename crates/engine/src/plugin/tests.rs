@@ -841,6 +841,37 @@ mod native {
             s.execute("plugin.install", &json!({"path":zip,"replace":true,"approve":approve})).unwrap()["folder"].as_str().unwrap().into()
         }
     }
+    /// A 0.41 plugin runs as before, alone and with a background shader added.
+    #[test]
+    fn a_commands_plugin_from_041_installs_and_runs_unchanged_beside_shaders() {
+        let root = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-plugin-041-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let mut s = Session::default();
+        s.plugin_state.plugins_dir = Some(root.join("plugins"));
+        std::fs::create_dir_all(&root).unwrap();
+        let wasm = component("call $box");
+        let shader = b"fn background(px: ScPixel) -> vec4<f32> { return sc.top; }
+";
+        let mut with_shader = manifest();
+        with_shader["id"] = json!("shaded");
+        with_shader["capabilities"] = json!(["commands@0.1", "shaders@0.1"]);
+        with_shader["shaders"] = json!([{"id": "plain", "name": "Plain", "kind": "background", "source": "plain.wgsl"}]);
+        for (id, plugin) in [("sample", manifest()), ("shaded", with_shader)] {
+            let text = serde_json::to_vec(&plugin).unwrap();
+            let zip = solidcraft_io::safe_zip::write(&[("plugin.json", &text[..]), ("plugin.wasm", &wasm[..]), ("plain.wgsl", &shader[..])]).unwrap();
+            let path = root.join(format!("{id}.zip"));
+            std::fs::write(&path, zip).unwrap();
+            let installed = s.execute("plugin.install", &json!({"path": path.to_string_lossy()})).unwrap();
+            assert_eq!(installed["entries"], json!([format!("{id}.make")]));
+            let folder = root.join("plugins").join(id).to_string_lossy().into_owned();
+            let approval = s.execute("plugin.inspect", &json!({"path": folder})).unwrap()["approval"].clone();
+            let before = s.model.state().bodies.len();
+            s.execute("plugin.run", &json!({"path": folder, "approval": approval, "entry": "make", "params": {}})).unwrap();
+            assert_eq!(s.model.state().bodies.len(), before + 1, "{id} made its box");
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     impl Drop for Fixture {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
@@ -3879,6 +3910,55 @@ mod install_zip {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    fn sky(shader: &[u8], extra: &[(&str, &[u8])]) -> Vec<u8> {
+        let manifest = json!({"id": "sky", "name": "Sky", "version": "1.0.0", "capabilities": ["shaders@0.1"], "shaders": [
+            {"id": "dusk", "name": "Dusk", "kind": "background", "source": "dusk.wgsl", "textures": [{"name": "stars", "file": "stars.png"}]}
+        ]});
+        let text = serde_json::to_vec(&manifest).unwrap();
+        let mut files: Vec<(&str, &[u8])> = vec![("plugin.json", &text[..]), ("dusk.wgsl", shader)];
+        files.extend_from_slice(extra);
+        zip(&files)
+    }
+    const DUSK: &[u8] = b"fn background(px: ScPixel) -> vec4<f32> {
+    return mix(sc.bottom, textureSample(stars, sc_repeat, px.uv), 0.5);
+}
+";
+
+    #[test]
+    fn a_shader_plugin_installs_without_a_runtime() {
+        let (mut s, root) = session("shaders");
+        let path = put(&root, "sky.zip", &sky(DUSK, &[("stars.png", b"png")]));
+        let reply = s.execute("plugin.install", &json!({"path": path})).unwrap();
+        assert_eq!((reply["shaders"].clone(), reply["entries"].clone()), (json!(["sky/dusk"]), json!([])));
+        let list = s.execute("plugin.list", &json!({})).unwrap();
+        assert_eq!(list["plugins"][0]["manifest"]["shaders"][0]["source"], "dusk.wgsl");
+        assert!(root.join("plugins/sky/dusk.wgsl").is_file() && root.join("plugins/sky/stars.png").is_file());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_shader_that_cannot_draw_is_refused_at_install() {
+        let missing_texture = unpack(&sky(DUSK, &[])).unwrap_err();
+        assert_eq!(missing_texture, InstallError::MissingModule("stars.png".into()));
+        let broken = unpack(&sky(
+            b"fn background(px: ScPixel) -> vec4<f32> {
+    return 1.0;
+}
+",
+            &[("stars.png", b"png")],
+        ))
+        .unwrap_err();
+        assert!(broken.to_string().contains("dusk.wgsl: line ") && broken.to_string().contains("vec4<f32>"), "{broken}");
+        let bound = b"@group(0) @binding(7) var<storage, read_write> out: array<u32>;
+fn background(px: ScPixel) -> vec4<f32> { return sc.top; }
+";
+        assert!(unpack(&sky(bound, &[("stars.png", b"png")])).unwrap_err().to_string().contains("resource `out`"));
+        let text = serde_json::to_vec(&json!({"id": "sky", "name": "Sky", "version": "1", "capabilities": ["shaders@0.1"],
+            "shaders": [{"id": "dusk", "name": "Dusk", "kind": "background", "source": "dusk.wgsl"}]}))
+        .unwrap();
+        assert_eq!(unpack(&zip(&[("plugin.json", &text[..])])).unwrap_err(), InstallError::MissingModule("dusk.wgsl".into()));
+    }
+
     #[test]
     fn a_zip_replaced_after_review_is_refused_before_files_or_grants_are_written() {
         let (mut s, root) = session("swapped-after-review");
@@ -4470,5 +4550,22 @@ mod stored_grants {
         Synced::default().adopt(&plugins, &mut restarted).unwrap();
         assert_eq!(restarted, desktop_grants);
         std::fs::remove_dir_all(plugins).unwrap();
+    }
+}
+
+/// The shader examples in docs/plugin-examples parse and compile. The test lives here, not in
+/// craft-plugin, because a shared crate's tests may not read files outside the crate.
+#[test]
+fn the_documented_shader_examples_compile() {
+    for (folder, manifest_text, source) in [
+        ("dusk", include_str!("../../../../docs/plugin-examples/dusk/plugin.json"), include_str!("../../../../docs/plugin-examples/dusk/dusk.wgsl")),
+        (
+            "panorama",
+            include_str!("../../../../docs/plugin-examples/panorama/plugin.json"),
+            include_str!("../../../../docs/plugin-examples/panorama/panorama.wgsl"),
+        ),
+    ] {
+        let manifest = craft_plugin::parse_manifest(manifest_text.as_bytes(), folder).unwrap();
+        craft_plugin::shader::compile(&manifest.shaders[0], source).unwrap_or_else(|e| panic!("{folder}: {e}"));
     }
 }
