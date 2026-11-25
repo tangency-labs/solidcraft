@@ -1015,7 +1015,7 @@ fn design_images(part: &Session, shown: &str) -> LinkedImages {
                 let aspect = if w == 0 { 1.0 } else { f64::from(h) / f64::from(w) };
                 let at = |p: solidcore_record::Vec3| [p.x, p.y, p.z];
                 let (Some(plane), Some((width, stretched))) =
-                    (Plane::new(bl, br - bl, tl - bl), solidcore_ops::affine::fit_aspect(at(bl), at(br), at(tl), aspect))
+                    (Plane::new(bl, br - bl, tl - bl), solidcraft_kernel::services::affine::fit_aspect(at(bl), at(br), at(tl), aspect))
                 else {
                     warnings.push(format!("{shown}: image `{}` has no area where its sketch puts it: left out", c.name));
                     continue;
@@ -2165,6 +2165,8 @@ fn relink_placement(
     }
     let parent = s.doc.occurrences.iter().find(|o| o.id == occurrence).map_or(0, |o| o.parent);
     let old = s.model.state();
+    // A pattern or mirror of this placement can stop working: the reply names each feature that does.
+    let failing_before: std::collections::BTreeSet<u64> = s.model.results.iter().filter(|r| r.error.is_some()).map(|r| r.id).collect();
     let made = insert_design(s, &json!({"path": given, "parent": parent, "reuse": true, "configuration": configuration.map(|c| c.row)}))?;
     let linked = made["component"].as_u64().ok_or_else(|| bad(cmd, "the linked component was not created"))?;
     if s.doc.links.get(&linked).and_then(selected_configuration) != configuration {
@@ -2195,6 +2197,13 @@ fn relink_placement(
     s.refresh();
     extract::rename_joint_faces(s, &old, feature, &std::collections::BTreeSet::from([occurrence]));
     s.refresh();
+    warnings.extend(
+        s.model
+            .results
+            .iter()
+            .filter(|r| !failing_before.contains(&r.id))
+            .filter_map(|r| r.error.as_ref().map(|e| format!("`{}` worked before this relink and fails now: {e}", r.name))),
+    );
     let (joint_errors, joint_conflicts) = joint_diagnostics(s, &mut warnings);
     reply(
         cmd,
