@@ -9,7 +9,7 @@ use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 use crate::dialogs::Kind;
-use crate::dialogs_insert_drawing::{MAX_SCALE, Place};
+use crate::dialogs_insert_drawing::{Align, MAX_SCALE, Place};
 use crate::viewport::Proj;
 
 /// Half the side of a corner handle, in screen points.
@@ -48,10 +48,20 @@ fn turn(v: Vec2, degrees: f64) -> Vec2 {
     Vec2::new(v.x * c - v.y * s, v.x * s + v.y * c)
 }
 
+/// Where the box's middle is from the point X and Y place, in the file's units before scaling and
+/// turning: nothing when the middle is placed, the middle itself when the file's origin is (#22057).
+fn offset(p: &Place) -> Option<Vec2> {
+    match p.align {
+        Align::Middle => Some(Vec2::ZERO),
+        Align::Origin => p.middle.map(|(x, y)| Vec2::new(x, y)),
+    }
+}
+
 /// A spot of the box in its own frame (`u`, `v` in half sizes) on the sketch.
 fn spot(p: &Place, u: f64, v: f64) -> Option<Vec2> {
     let h = half(p)?;
-    Some(Vec2::new(p.x, p.y) + turn(Vec2::new(u * h.x, v * h.y), p.angle))
+    let off = offset(p)?;
+    Some(Vec2::new(p.x, p.y) + turn(Vec2::new(off.x * p.scale + u * h.x, off.y * p.scale + v * h.y), p.angle))
 }
 
 fn on_screen(plane: &Plane, proj: &Proj, q: Vec2) -> Option<Pos2> {
@@ -144,8 +154,16 @@ fn apply(target: &mut Place, drag: &Drag, p: Vec2, snap: bool) {
         }
         Part::Turn => {
             let to = p - Vec2::new(x, y);
+            let from = drag.from - Vec2::new(x, y);
             if to.len() > 1e-9 {
-                let a = to.angle().to_degrees() - 90.0;
+                let a = match start.align {
+                    // The knob is straight above the point it turns about: it points the way up goes.
+                    Align::Middle => to.angle().to_degrees() - 90.0,
+                    // It turns about the file's origin, away from the knob: by as much as the
+                    // pointer has gone round that point since the drag began.
+                    Align::Origin if from.len() > 1e-9 => angle + (to.angle() - from.angle()).to_degrees(),
+                    Align::Origin => return,
+                };
                 let a = if snap { (a / 15.0).round() * 15.0 } else { a };
                 // Into -180..180, the range the field takes.
                 target.angle = (a + 180.0).rem_euclid(360.0) - 180.0;
@@ -156,8 +174,10 @@ fn apply(target: &mut Place, drag: &Drag, p: Vec2, snap: bool) {
             // The pointer in the box's own frame, measured from the corner that stays.
             let local = turn(p - fixed, -angle);
             let k = (local.x.abs() / nw).max(local.y.abs() / nh).clamp(MIN_SCALE, MAX_SCALE);
+            let Some(off) = offset(&start) else { return };
             if k.is_finite() {
-                let reach = turn(Vec2::new(u * k * nw / 2.0, v * k * nh / 2.0), angle);
+                // From the corner that stays back to the point X and Y place, at the new scale.
+                let reach = turn(Vec2::new(k * (u * nw / 2.0 - off.x), k * (v * nh / 2.0 - off.y)), angle);
                 target.scale = k;
                 target.x = fixed.x + reach.x;
                 target.y = fixed.y + reach.y;
@@ -180,6 +200,8 @@ mod tests {
             angle: 0.0,
             natural: Some((20.0, 10.0)),
             dpi: 96.0,
+            middle: Some((40.0, 25.0)),
+            align: Align::Middle,
         }
     }
 
@@ -223,5 +245,28 @@ mod tests {
         assert!((p.angle - 90.0).abs() < 1e-9, "{}", p.angle);
         apply(&mut p, &d, Vec2::new(4.0, 3.0), true);
         assert!(p.angle == 90.0 || (p.angle % 15.0).abs() < 1e-9, "snapped: {}", p.angle);
+    }
+
+    /// #22057: placed by the file's origin, the box stands where the drawing is in the file, moved by
+    /// X and Y; a corner still scales about the opposite corner, and the knob turns it about the origin.
+    #[test]
+    fn placed_by_its_origin_the_box_is_where_the_drawing_is_and_scales_and_turns_about_the_origin() {
+        let mut p = Place { align: Align::Origin, x: 0.0, y: 0.0, ..place() };
+        // The drawing spans 30..50 by 20..30 in its file: its middle is (40, 25).
+        assert!(spot(&p, 0.0, 0.0).unwrap().dist(Vec2::new(40.0, 25.0)) < 1e-9);
+        assert!(spot(&p, -1.0, -1.0).unwrap().dist(Vec2::new(30.0, 20.0)) < 1e-9);
+        let fixed = spot(&p, -1.0, -1.0).unwrap();
+        let d = drag(Part::Corner(1.0, 1.0), spot(&p, 1.0, 1.0).unwrap(), &p);
+        apply(&mut p, &d, Vec2::new(70.0, 40.0), false);
+        assert!((p.scale - 2.0).abs() < 1e-9, "{}", p.scale);
+        assert!(spot(&p, -1.0, -1.0).unwrap().dist(fixed) < 1e-9, "the opposite corner stayed");
+        // The origin moves to (-30, -20), so the middle, twice (40, 25) from it, is at (50, 30).
+        assert!(Vec2::new(p.x, p.y).dist(Vec2::new(-30.0, -20.0)) < 1e-9, "{} {}", p.x, p.y);
+        // The knob turns the drawing about the origin by as much as the pointer goes round it.
+        let mut q = Place { align: Align::Origin, x: 0.0, y: 0.0, ..place() };
+        let d = drag(Part::Turn, Vec2::new(10.0, 0.0), &q);
+        apply(&mut q, &d, Vec2::new(0.0, 10.0), false);
+        assert!((q.angle - 90.0).abs() < 1e-9, "{}", q.angle);
+        assert_eq!((q.x, q.y), (0.0, 0.0), "the origin stays put");
     }
 }

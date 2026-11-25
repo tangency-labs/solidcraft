@@ -3,7 +3,7 @@
 //! The kit ships no artwork. A host keeps its icons in a `static` [`IconSet`] and [`install`]s it
 //! once, before the first frame (and in every test context that draws icons). Every painter here
 //! draws from that set, in the set's colour roles for the current theme, accent and colour vision;
-//! colours never come from arbitrary caller tints. A name the set does not know draws the set's
+//! colours never come from arbitrary caller tints, except a plugin's tint ([`paint_tinted`]). A name the set does not know draws the set's
 //! placeholder master; with no set installed nothing is drawn. A host that draws another host's
 //! icons plus a few of its own installs [`IconSet::extended`] over that host's data.
 use std::collections::HashMap;
@@ -89,6 +89,13 @@ enum Finish {
     Artwork,
     Ink(Color32),
     Danger,
+    Greyscale,
+    /// The artwork's coloured parts, as they are.
+    Accent,
+    /// The artwork's coloured parts as their brightness, for a tint to multiply.
+    AccentGrey,
+    /// The artwork without its coloured parts: its whites and greys.
+    Neutral,
 }
 
 /// Textures already rasterised: one per (master, look, pixel size, finish).
@@ -172,6 +179,17 @@ pub fn paint_accented(p: &Painter, r: Rect, name: &str, accent: Option<&str>, op
     paint_resolved(p, r, resolved, look, opacity, Finish::Artwork, Mirror::None);
 }
 
+/// Draw palette-owned icon artwork converted to greyscale, preserving facet shading, highlights and outlines.
+pub fn paint_greyscale(p: &Painter, r: Rect, name: &str, accent: Option<&str>, opacity: f32) {
+    let resolved = resolve(name);
+    let accent = match accent {
+        Some(name) => accent_index(name).or(resolved.accent),
+        None => None,
+    };
+    let look = Look::themed(p.ctx().global_style().visuals.dark_mode, accent, solidcraft_theme::vision());
+    paint_resolved(p, r, resolved, look, opacity, Finish::Greyscale, Mirror::None);
+}
+
 /// Shared destructive-action artwork: shaded faces in the set's danger ramp, normal outlines and cutouts.
 /// Unlike a single-colour mask, this also tints a master's passive faces through
 /// that ramp without flattening the lid, handle or other details.
@@ -182,7 +200,51 @@ pub fn paint_danger(p: &Painter, r: Rect, name: &str, opacity: f32) {
     paint_resolved(p, r, resolved, look, opacity, Finish::Danger, Mirror::None);
 }
 
+/// The icon `name` with its coloured parts in `tint` (sRGB, premultiplied) by `strength` (0 to 1),
+/// its whites and greys as they are: a plugin's tint shader.
+pub fn paint_tinted(p: &Painter, r: Rect, name: &str, opacity: f32, tint: Color32, strength: f32) {
+    let resolved = resolve(name);
+    let look = Look::themed(p.ctx().global_style().visuals.dark_mode, resolved.accent, solidcraft_theme::vision());
+    let (opacity, strength) = (opacity.clamp(0.0, 1.0), strength.clamp(0.0, 1.0));
+    paint_resolved(p, r, resolved, look, opacity, Finish::Neutral, Mirror::None);
+    if strength < 1.0 {
+        paint_resolved(p, r, resolved, look, opacity * (1.0 - strength), Finish::Accent, Mirror::None);
+    }
+    paint_resolved_in(p, r, resolved, look, Finish::AccentGrey, Mirror::None, tint.gamma_multiply(opacity * strength));
+}
+
+/// How much of a pixel is colour rather than white or grey, by its saturation.
+fn colour_share(pixel: Color32) -> f32 {
+    let [r, g, b, _] = pixel.to_srgba_unmultiplied();
+    let (max, min) = (r.max(g).max(b), r.min(g).min(b));
+    if max == 0 {
+        return 0.0;
+    }
+    let saturation = f32::from(max - min) / f32::from(max);
+    ((saturation - 0.12) / 0.2).clamp(0.0, 1.0)
+}
+
+/// A pixel's coloured part, as it is or as its brightness, or the rest of it. Brightness and not
+/// luminance: a blue's luminance is dark whatever its shade.
+fn split(pixel: Color32, finish: Finish) -> Color32 {
+    let share = colour_share(pixel);
+    match finish {
+        Finish::Neutral => pixel.gamma_multiply(1.0 - share),
+        Finish::Accent => pixel.gamma_multiply(share),
+        _ => {
+            let [r, g, b, a] = pixel.to_srgba_unmultiplied();
+            let v = r.max(g).max(b);
+            Color32::from_rgba_unmultiplied(v, v, v, a).gamma_multiply(share)
+        }
+    }
+}
+
 fn paint_resolved(p: &Painter, r: Rect, resolved: Resolved, look: Look, opacity: f32, finish: Finish, mirror: Mirror) {
+    let tint = Color32::from_white_alpha((opacity.clamp(0.0, 1.0) * 255.0).round() as u8);
+    paint_resolved_in(p, r, resolved, look, finish, mirror, tint);
+}
+
+fn paint_resolved_in(p: &Painter, r: Rect, resolved: Resolved, look: Look, finish: Finish, mirror: Mirror, tint: Color32) {
     let ctx = p.ctx();
     let ppp = ctx.pixels_per_point().max(0.5);
     let side = r.width().min(r.height());
@@ -208,9 +270,20 @@ fn paint_resolved(p: &Painter, r: Rect, resolved: Resolved, look: Look, opacity:
         let pm = if finish == Finish::Danger { render_tinted(doc, look, px) } else { render(doc, look, px) };
         let Some(pm) = pm else { return };
         let mut image = egui::ColorImage::from_rgba_premultiplied([px as usize, px as usize], pm.data());
+        if matches!(finish, Finish::Accent | Finish::AccentGrey | Finish::Neutral) {
+            for pixel in &mut image.pixels {
+                *pixel = split(*pixel, finish);
+            }
+        }
         if let Finish::Ink(ink) = finish {
             for pixel in &mut image.pixels {
                 *pixel = ink.gamma_multiply(f32::from(pixel.a()) / 255.0);
+            }
+        } else if finish == Finish::Greyscale {
+            for pixel in &mut image.pixels {
+                let [r, g, b, a] = pixel.to_array();
+                let y = ((r as u32 * 54 + g as u32 * 183 + b as u32 * 19) >> 8) as u8;
+                *pixel = Color32::from_rgba_premultiplied(y, y, y, a);
             }
         }
         slot.insert(ctx.load_texture(format!("icon:{}:{px}", resolved.master), image, TextureOptions::LINEAR));
@@ -219,7 +292,6 @@ fn paint_resolved(p: &Painter, r: Rect, resolved: Resolved, look: Look, opacity:
     // Snap the image to whole physical pixels so it stays crisp.
     let size = px as f32 / ppp;
     let min = pos2(((r.center().x - size / 2.0) * ppp).round() / ppp, ((r.center().y - size / 2.0) * ppp).round() / ppp);
-    let tint = Color32::from_white_alpha((opacity.clamp(0.0, 1.0) * 255.0).round() as u8);
     let uv = match mirror {
         Mirror::None => Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
         Mirror::Vertical => Rect::from_min_max(pos2(0.0, 1.0), pos2(1.0, 0.0)),

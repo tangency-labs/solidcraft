@@ -404,7 +404,7 @@ fn context_signature(app: &SolveApp, dialog: Option<&dialogs::Dialog>) -> u64 {
     if let Some(d) = dialog {
         let _ = write!(&mut h, "{:?}{:?}{:?}", d.kind, d.inputs, d.extra);
     }
-    let _ = write!(&mut h, "{:?}", app.session.selection);
+    let _ = write!(&mut h, "{:?}{}", app.session.selection, app.session.all_bodies_selected());
     h.0.finish()
 }
 
@@ -530,6 +530,10 @@ pub fn draft_for(app: &SolveApp, dialog: Option<&dialogs::Dialog>, error: Option
                 context.push_str(&block(&debug(&d.extra, 1000)));
             }
         }
+    }
+    if app.session.all_bodies_selected() {
+        let count = app.session.selected_count().unwrap_or(0);
+        let _ = writeln!(&mut context, "\nSelect All: every shown body ({count}) is selected.");
     }
     context.push_str("\nSelected items (including occurrence paths):\n");
     context.push_str(&block(&debug(&app.session.selection.iter().take(32).collect::<Vec<_>>(), 3000)));
@@ -1078,7 +1082,14 @@ mod tests {
     fn combine(app: &mut SolveApp) {
         app.start("solid.combine");
         let dialog = app.dialog.as_mut().unwrap();
-        dialog.kind = dialogs::Kind::Combine { operation: 2, keep_tools: true };
+        dialog.kind = dialogs::Kind::Combine {
+            operation: 2,
+            keep_tools: true,
+            offset: "0 mm".into(),
+            round_edges: false,
+            picked_faces: false,
+            radius: String::new(),
+        };
         dialog.inputs.get_mut(0).unwrap().items = vec![Sel::Body { name: "Stock".into() }];
         dialog.inputs.get_mut(1).unwrap().items = vec![Sel::Body { name: "Cutter".into() }];
     }
@@ -1655,7 +1666,7 @@ mod tests {
         let error = app.session.model.result(fillet.id).and_then(|r| r.error.clone()).unwrap();
         let latest = app.session.doc.features.iter().rev().find(|f| reportable(f)).unwrap();
         assert_ne!(latest.id, fillet.id, "Fillet1 must not be the latest operation");
-        assert!(app.session.selection.is_empty());
+        assert!(!app.session.has_selection());
         let at = crate::now_ms() - 125_000.0;
         for i in 0..12 {
             app.messages.push(&format!("message number {i:02}"), i % 2 == 0, at);

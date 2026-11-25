@@ -4805,3 +4805,77 @@ fn joint_list_filters_and_summarises_rigid_groups() {
     assert_eq!(summary["rigid_groups"][0]["name"], "Kit", "the largest first: {summary}");
     assert_eq!(summary["more_rigid_groups"], json!({"groups": 1, "joints": 1}), "{summary}");
 }
+
+/// Two cubes on a cylindrical joint.
+fn sleeve() -> Session {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        s.execute("component.activate", &json!({"component": "root"})).ok();
+        s.execute("component.create", &json!({"name": name})).ok();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]})).ok();
+    }
+    s.execute("joint.create", &json!({"type": "cylindrical", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "name": "Sleeve"})).ok();
+    s
+}
+
+#[test]
+fn joint_dynamics_clears_when_nothing_is_given() {
+    let mut s = sleeve();
+    assert!(s.execute("joint.dynamics", &json!({"joint": "Sleeve", "damping": 0.5})).is_ok());
+    assert_eq!(s.doc.assembly.joints[0].dynamics[0].and_then(|d| d.damping), Some(0.5));
+    assert!(s.execute("joint.dynamics", &json!({"joint": "Sleeve"})).is_ok());
+    assert!(s.doc.assembly.joints[0].dynamics.is_empty());
+}
+
+#[test]
+fn a_changed_joint_type_keeps_only_its_own_slots() {
+    let mut s = sleeve();
+    assert!(s.execute("joint.dynamics", &json!({"joint": "Sleeve", "index": 1, "damping": 0.5})).is_ok());
+    assert_eq!(s.doc.assembly.joints[0].dynamics.len(), 2);
+    assert!(s.execute("joint.edit", &json!({"joint": "Sleeve", "type": "revolute"})).is_ok());
+    assert_eq!(s.doc.assembly.joints[0].dynamics.len(), 1);
+}
+
+#[test]
+fn joint_dynamics_are_reported_by_the_joint_list() {
+    let mut s = sleeve();
+    assert!(s.execute("joint.dynamics", &json!({"joint": "Sleeve", "effort": 3.0})).is_ok());
+    let list = s.execute("joint.list", &json!({})).unwrap_or_default();
+    assert_eq!(list["joints"][0]["values"][0]["dynamics"]["effort"], json!(3.0), "{list}");
+}
+
+#[test]
+fn joint_dynamics_refuses_hostile_values() {
+    let mut s = sleeve();
+    for p in [
+        json!({"joint": "Sleeve", "effort": 0.0}),
+        json!({"joint": "Sleeve", "velocity": -1.0}),
+        json!({"joint": "Sleeve", "damping": -1.0}),
+        json!({"joint": "Sleeve", "friction": 1e300}),
+        json!({"joint": "Sleeve", "index": 99, "damping": 1.0}),
+        json!({"joint": "Sleeve", "index": -1, "damping": 1.0}),
+        json!({"joint": "Sleeve", "index": 0.5, "damping": 1.0}),
+        json!({"joint": "Sleeve", "index": "0", "damping": 1.0}),
+        json!({"joint": "Nobody", "damping": 1.0}),
+    ] {
+        assert!(s.execute("joint.dynamics", &p).is_err(), "{p}");
+    }
+    assert!(s.doc.assembly.joints[0].dynamics.iter().all(Option::is_none));
+}
+
+/// A value given as an expression has the bound a number has: past it, the design would save
+/// and not open again.
+#[test]
+fn joint_values_given_as_expressions_are_bounded_like_numbers() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Part"}));
+    let (a, b) = (json!({"occurrence": 0, "point": [0, 0, 0]}), json!({"occurrence": "Part", "point": [0, 0, 0]}));
+    for values in [json!([1e12]), json!(["1e12 mm"])] {
+        let p = json!({"type": "slider", "a": a, "b": b, "values": values});
+        assert!(s.execute("joint.create", &p).is_err(), "{p}");
+    }
+    let joint = run(&mut s, "joint.create", json!({"type": "slider", "a": a, "b": b, "values": ["5 mm"]}))["joint"].as_u64().unwrap();
+    assert!(s.execute("joint.drive", &json!({"joint": joint, "value": "1e12 mm"})).is_err());
+    assert!(s.execute("joint.edit", &json!({"joint": joint, "offset": "1e12 mm"})).is_err());
+    solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+}

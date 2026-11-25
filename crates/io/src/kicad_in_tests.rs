@@ -63,6 +63,9 @@ fn models_stand_on_the_board_face_they_are_on() {
     let footprint = |layer: &str| KicadFootprint {
         reference: String::new(),
         value: String::new(),
+        name: String::new(),
+        fields: Vec::new(),
+        uuid: String::new(),
         layer: layer.into(),
         at: [10.0, 20.0, 90.0],
         models: Vec::new(),
@@ -323,6 +326,42 @@ fn drilled_pads_cut_holes_in_the_substrate() {
     assert!((measure.volume - expected).abs() < expected * 0.01, "{measure:?}");
 }
 
+/// A missing model names the folder that was searched, and the same warning from many footprints
+/// is said once with a count.
+#[test]
+fn missing_model_warnings_name_the_folder_and_repeats_are_counted() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "a" (at 5 5) (layer "F.Cu") (model "/libs/jst/JST_SH.step"))
+      (footprint "b" (at 10 5) (layer "F.Cu") (model "/libs/jst/JST_SH.step"))
+      (footprint "c" (at 15 5) (layer "F.Cu") (model "/libs/jst/JST_SH.step")))"#;
+    let mut load = |model: &str| Err(format!("{model}: No such file or directory (os error 2)"));
+    let imported = read_kicad(source.as_bytes(), "t.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
+    let lines: Vec<&String> = imported.feature.warnings.iter().filter(|w| w.contains("JST_SH")).collect();
+    assert_eq!(lines.len(), 1, "{:?}", imported.feature.warnings);
+    assert_eq!(lines[0].as_str(), "JST_SH.step: not found in /libs/jst (x3)");
+    // A model beside the board is named from the board, not by the folder's full path.
+    let beside = r#"(kicad_pcb (general (thickness 1.6)) (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "a" (at 5 5) (layer "F.Cu") (model "/work/board/models/X.step")))"#;
+    let imported = read_kicad(beside.as_bytes(), "/work/board/t.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
+    assert!(imported.feature.warnings.iter().any(|w| w == "X.step: not found in the board's folder, models"), "{:?}", imported.feature.warnings);
+    // Windows and the browser word a missing file differently; the folder is named all the same.
+    for words in ["The system cannot find the file specified. (os error 2)", "no such file in this browser"] {
+        let mut other = |path: &str| Err(format!("{path}: {words}"));
+        let imported = read_kicad(source.as_bytes(), "t.kicad_pcb", &KicadOptions::default(), &mut other).unwrap();
+        assert!(
+            imported.feature.warnings.iter().any(|w| w == "JST_SH.step: not found in /libs/jst (x3)"),
+            "{words}: {:?}",
+            imported.feature.warnings
+        );
+    }
+    let mut unset = |_: &str| Err("unresolved environment variable `EASYEDA2KICAD`".to_string());
+    let imported = read_kicad(source.as_bytes(), "t.kicad_pcb", &KicadOptions::default(), &mut unset).unwrap();
+    let lines: Vec<&String> = imported.feature.warnings.iter().filter(|w| w.contains("EASYEDA2KICAD")).collect();
+    assert_eq!(lines.len(), 1, "{:?}", imported.feature.warnings);
+    assert!(lines[0].ends_with("(x3)"), "{lines:?}");
+}
+
 #[test]
 fn missing_model_is_warned_and_the_board_is_kept() {
     let mut load = |_: &str| Err("model file was not found".to_string());
@@ -353,6 +392,29 @@ fn skips_footprints_with_invalid_models_and_keeps_other_parts() {
 fn rejects_malformed_and_wrong_root_documents() {
     assert!(parse_kicad_board(b"(kicad_pcb (general", "bad.kicad_pcb").is_err());
     assert!(parse_kicad_board(b"(kicad_pro)", "bad.kicad_pcb").is_err());
+}
+
+#[test]
+fn a_board_over_the_old_token_cap_but_under_the_size_cap_is_read() {
+    // 4 tokens per indented `(zz 1)` line, as KiCad writes them: just over 2 000 000 tokens in
+    // about 4.5 MB, far below the size cap.
+    let mut board = String::from("(kicad_pcb (general (thickness 1.6))\n");
+    for _ in 0..500_100 {
+        board.push_str("\t\t(zz 1)\n");
+    }
+    board.push(')');
+    assert!(board.len() < MAX_KICAD_BYTES);
+    assert!(tokenize(&board).map(|t| t.len() > MIN_TOKEN_CAP).unwrap_or(false));
+    assert!(parse_kicad_board(board.as_bytes(), "big.kicad_pcb").is_ok());
+}
+
+#[test]
+fn the_token_cap_follows_the_size_and_still_refuses_dense_junk() {
+    assert_eq!(token_cap(0), MIN_TOKEN_CAP);
+    assert_eq!(token_cap(MAX_KICAD_BYTES), MAX_KICAD_BYTES / 2);
+    // One token per byte is denser than any board: refused by count, quickly.
+    let junk = format!("(kicad_pcb {})", "()".repeat(MIN_TOKEN_CAP));
+    assert!(parse_kicad_board(junk.as_bytes(), "junk.kicad_pcb").is_err());
 }
 
 #[test]
@@ -886,6 +948,172 @@ fn unlocked_written_in_the_position_keeps_the_position() {
     assert!(footprint.texts[0].unlocked);
 }
 
+/// The board text and each footprint's text, after the variables are put in.
+fn texts_of(items: &str) -> (Vec<String>, Vec<Vec<String>>) {
+    let source = format!(r#"(kicad_pcb (general (thickness 1.6)) (gr_rect (start -20 -20) (end 20 20) (layer "Edge.Cuts")) {items})"#);
+    let board = parse_kicad_board(source.as_bytes(), "vars.kicad_pcb").unwrap();
+    let texts = |list: &[KicadText]| list.iter().map(|t| t.text.clone()).collect::<Vec<_>>();
+    (texts(&board.texts), board.footprints.iter().map(|f| texts(&f.texts)).collect())
+}
+
+const VAR_FONT: &str = "(effects (font (size 1 1) (thickness 0.15)))";
+
+const TITLE_BLOCK: &str = r#"(title_block (title "Probe board") (date "2026-01-02") (rev "B2") (company "Acme") (comment 1 "first"))"#;
+
+/// A footprint R7 (value 10k, a hidden MPN field) from library `Lib`, with one silk text `text`.
+fn footprint_with_text(text: &str) -> String {
+    format!(
+        r#"(footprint "Lib:Part" (layer "F.Cu") (at 0 0)
+          (property "Reference" "R7" (at 0 -3) (layer "F.Fab") (hide yes) {VAR_FONT})
+          (property "Value" "10k" (at 0 3) (layer "F.Fab") (hide yes) {VAR_FONT})
+          (property "MPN" "XQ-12" (at 0 0) (layer "F.Fab") (hide yes) {VAR_FONT})
+          (fp_text user "{text}" (at 0 0) (layer "F.SilkS") {VAR_FONT}))"#
+    )
+}
+
+/// Each name and its value, as KiCad 10 draws them (checked against kicad-cli renders): the title
+/// block anywhere, and in a footprint's text its reference, value, any field by name (hidden ones
+/// too), its library and name, and the text's layer by the name KiCad shows.
+#[test]
+fn reference_and_title_block_variables_are_expanded() {
+    let board_text = |text: &str| format!(r#"(gr_text "{text}" (at 0 0) (layer "F.SilkS") {VAR_FONT})"#);
+    let (board, _) = texts_of(&format!("{TITLE_BLOCK} {}", board_text("${TITLE} rev ${REVISION}, ${ISSUE_DATE}, ${COMPANY}, ${COMMENT1}, ${LAYER}")));
+    assert_eq!(board, vec!["Probe board rev B2, 2026-01-02, Acme, first, F.Silkscreen"]);
+    let (_, footprints) = texts_of(&format!(
+        "{TITLE_BLOCK} {}",
+        footprint_with_text("${REFERENCE}=${VALUE} ${MPN} ${FOOTPRINT_LIBRARY}/${FOOTPRINT_NAME} ${LAYER} ${REVISION}")
+    ));
+    assert_eq!(footprints, vec![vec!["R7=10k XQ-12 Lib/Part F.Silkscreen B2"]]);
+}
+
+/// `${R7:VALUE}` reads another footprint's field, from board text or another footprint's; a
+/// reference no footprint has reads as KiCad shows it.
+#[test]
+fn a_text_variable_can_read_another_footprints_field() {
+    let (board, _) = texts_of(&format!(
+        r#"{TITLE_BLOCK} {} (gr_text "${{R7:VALUE}} ${{R7:REVISION}} ${{R9:VALUE}}" (at 0 0) (layer "F.SilkS") {VAR_FONT})"#,
+        footprint_with_text("x")
+    ));
+    assert_eq!(board, vec!["10k B2 <Unknown reference: R9>"]);
+}
+
+/// KiCad's text dialog saves `${R7:VALUE}` with the footprint's id in place of its reference
+/// (`(uuid …)` since KiCad 8, `(tstamp …)` before), and reads either form back.
+#[test]
+fn a_saved_cross_reference_names_the_footprint_by_its_id() {
+    for id in ["uuid", "tstamp"] {
+        let footprint =
+            footprint_with_text("x").replacen(r#"(layer "F.Cu")"#, &format!(r#"(layer "F.Cu") ({id} "0e467c16-584b-4a66-9b99-5dd5e1ebf143")"#), 1);
+        let (board, _) =
+            texts_of(&format!(r#"{footprint} (gr_text "${{0e467c16-584b-4a66-9b99-5dd5e1ebf143:VALUE}}" (at 0 0) (layer "F.SilkS") {VAR_FONT})"#));
+        assert_eq!(board, vec!["10k"], "{id}");
+    }
+}
+
+/// A field's own variables are put in where the field is read, in its footprint (KiCad reads a
+/// field by its shown text): from the footprint's text, through a cross reference, and through a
+/// chain of them.
+#[test]
+fn a_field_holding_variables_is_expanded_where_it_is_read() {
+    let footprint = footprint_with_text("${Label}").replacen(
+        r#"(property "MPN""#,
+        &format!(r#"(property "Label" "${{REFERENCE}}=${{VALUE}}" (at 0 0) (layer "F.Fab") (hide yes) {VAR_FONT}) (property "MPN""#),
+        1,
+    );
+    let (board, footprints) = texts_of(&format!(r#"{footprint} (gr_text "${{R7:Label}} ${{R7:R7:VALUE}}" (at 0 0) (layer "F.SilkS") {VAR_FONT})"#));
+    assert_eq!(footprints, vec![vec!["R7=10k"]]);
+    assert_eq!(board, vec!["R7=10k 10k"]);
+}
+
+/// A field that names itself, and a cross reference repeated a hundred thousand times, end at the
+/// depth limit and stay as written instead of running the stack out.
+#[test]
+fn variables_that_never_end_stay_as_written() {
+    let footprint = footprint_with_text("${Loop}").replacen(
+        r#"(property "MPN""#,
+        &format!(r#"(property "Loop" "${{Loop}}" (at 0 0) (layer "F.Fab") (hide yes) {VAR_FONT}) (property "MPN""#),
+        1,
+    );
+    let chain = format!("${{{}VALUE}}", "R7:".repeat(100_000));
+    let (board, footprints) = texts_of(&format!(r#"{footprint} (gr_text "{chain}" (at 0 0) (layer "F.SilkS") {VAR_FONT})"#));
+    assert_eq!(board, vec![chain]);
+    assert_eq!(footprints, vec![vec!["${Loop}"]]);
+}
+
+/// Fields that each read the next a hundred times, eight deep, would take about 100^8 lookups to
+/// put in. One work budget for the whole text stops it: the import finishes at once, the text
+/// stays within the length limit, and the board says which text was left partly as written.
+#[test]
+fn deeply_nested_fields_stop_at_the_work_budget() {
+    let names = ["A", "B", "C", "D", "E", "F", "G", "H"];
+    let mut fields = String::new();
+    for (i, name) in names.iter().enumerate() {
+        let value = match names.get(i + 1) {
+            Some(next) => format!("${{{next}}}").repeat(100),
+            None => "x".to_string(),
+        };
+        fields.push_str(&format!(r#"(property "{name}" "{value}" (at 0 0) (layer "F.Fab") (hide yes) {VAR_FONT}) "#));
+    }
+    let footprint = footprint_with_text("${A}").replacen(r#"(property "MPN""#, &format!(r#"{fields}(property "MPN""#), 1);
+    let source = format!(r#"(kicad_pcb (general (thickness 1.6)) (gr_rect (start -20 -20) (end 20 20) (layer "Edge.Cuts")) {footprint})"#);
+    let board = parse_kicad_board(source.as_bytes(), "vars.kicad_pcb").unwrap();
+    let text = &board.footprints[0].texts[0].text;
+    assert!(text.len() <= 4096 + 8, "{} characters", text.len());
+    assert!(board.warnings.iter().any(|w| w.contains("text variables") && w.contains("R7")), "{:?}", board.warnings);
+}
+
+/// A value that would take a text past the length limit is not put in: the name stays as written,
+/// so a long title read by many texts cannot make each of them long.
+#[test]
+fn a_value_past_the_length_limit_leaves_its_name() {
+    let title = "T".repeat(5000);
+    let (board, _) = texts_of(&format!(r#"(title_block (title "{title}")) (gr_text "Board ${{TITLE}}" (at 0 0) (layer "F.SilkS") {VAR_FONT})"#));
+    assert_eq!(board, vec!["Board ${TITLE}"]);
+}
+
+/// A layer the board's layer table names is shown by that name.
+#[test]
+fn the_layer_variable_reads_the_boards_own_layer_name() {
+    let (board, _) = texts_of(&format!(r#"(layers (5 "F.SilkS" user "Top silk")) (gr_text "${{LAYER}}" (at 0 0) (layer "F.SilkS") {VAR_FONT})"#));
+    assert_eq!(board, vec!["Top silk"]);
+}
+
+/// A title-block name the board never set is empty, so a text made only of it draws nothing; a
+/// text with other characters keeps them.
+#[test]
+fn empty_text_variables_draw_nothing() {
+    let (board, _) = texts_of(&format!(
+        r#"(gr_text "${{REVISION}}" (at 0 0) (layer "F.SilkS") {VAR_FONT}) (gr_text "${{ISSUE_DATE}} " (at 0 5) (layer "F.SilkS") {VAR_FONT}) (gr_text "Rev ${{REVISION}}" (at 0 9) (layer "F.SilkS") {VAR_FONT})"#
+    ));
+    assert_eq!(board, vec!["Rev "]);
+}
+
+/// Unknown names, names in the wrong case, a footprint's names in board text and a cross
+/// reference to a field the footprint lacks stay as written; a `${` never closed runs to the end
+/// of the text, and a name is expanded first, as KiCad reads them.
+#[test]
+fn unknown_text_variables_stay_literal() {
+    let (board, footprints) = texts_of(&format!(
+        r#"{TITLE_BLOCK} {} (gr_text "${{NOSUCH}} ${{revision}} ${{REFERENCE}} ${{R7:NOSUCH}}" (at 0 0) (layer "F.SilkS") {VAR_FONT})"#,
+        footprint_with_text("${mpn} ${${REFERENCE}} x${REFERENCE")
+    ));
+    assert_eq!(board, vec!["${NOSUCH} ${revision} ${REFERENCE} ${R7:NOSUCH}"]);
+    assert_eq!(footprints, vec![vec!["${mpn} ${R7} xR7"]]);
+}
+
+/// A text that names a long title many times grows only so far.
+#[test]
+fn expanded_text_has_a_length_limit() {
+    let title = "T".repeat(1000);
+    let text = "${TITLE}".repeat(1000);
+    let (board, _) = texts_of(&format!(r#"(title_block (title "{title}")) (gr_text "{text}" (at 0 0) (layer "F.SilkS") {VAR_FONT})"#));
+    let [expanded] = board.as_slice() else { panic!("one text: {board:?}") };
+    // It stops past 4096 characters; the names after that stay as written.
+    assert!(expanded.len() > 4096 && expanded.len() < 4096 + 1000 + 8000, "{}", expanded.len());
+    assert!(expanded.starts_with(&title), "the first names are expanded");
+    assert!(expanded.ends_with("${TITLE}"), "the rest stays as written");
+}
+
 #[test]
 fn copper_overlay_is_a_flat_face_on_the_board() {
     let source = r#"(kicad_pcb (general (thickness 1.6))
@@ -998,7 +1226,7 @@ fn a_fill_outline_that_touches_itself_keeps_its_area() {
     let points = [a[0], a[1], a[2], b[1], b[2], b[3], b[0], a[3]];
     let region = Region2 { outer: Loop2::polygon(&points), holes: Vec::new() };
     let loops = region_loops(&region).unwrap();
-    let (points, triangles) = solidcore_tess::triangulate_planar(&loops).unwrap();
+    let (points, triangles) = solidcraft_kernel::services::tess::triangulate_planar(&loops).unwrap();
     let area: f64 = triangles
         .iter()
         .map(|[a, b, c]| {
@@ -1443,4 +1671,86 @@ fn a_pad_opens_up_for_any_hole_it_covers() {
     // The pad with the via's drill open through it: the pad data names no drill of its own.
     let expected = 9.0 - std::f64::consts::PI * 0.3 * 0.3;
     assert!((area - expected).abs() < 0.05, "{area} vs {expected}");
+}
+
+/// A pour with a square hole, as KiCad saves a fill: one outline that runs in to the hole along a
+/// zero-width bridge, round the hole and back out along the same line.
+const BRIDGED_FILL: &str = r#"(kicad_pcb (general (thickness 1.6))
+  (gr_rect (start 0 0) (end 20 20) (layer "Edge.Cuts"))
+  (zone (net 1) (net_name "GND") (layer "F.Cu")
+    (filled_polygon (layer "F.Cu") (pts (xy 2 2) (xy 18 2) (xy 18 18) (xy 2 18) (xy 2 10)
+      (xy 8 10) (xy 8 12) (xy 12 12) (xy 12 8) (xy 8 8) (xy 8 10) (xy 2 10)))))"#;
+
+#[test]
+fn a_fill_s_bridges_to_its_holes_are_taken_out() {
+    let board = parse_kicad_board(BRIDGED_FILL.as_bytes(), "bridged.kicad_pcb").unwrap();
+    let [zone] = board.zones.as_slice() else { panic!("one zone") };
+    // The outline and the hole, each a loop of its own, and no edge run both ways.
+    let mut sizes: Vec<usize> = zone.contours.iter().map(Vec::len).collect();
+    sizes.sort_unstable();
+    assert_eq!(sizes, vec![4, 4], "{:?}", zone.contours);
+    // Drawn, the pour's open edges are the outline and the hole's, not the bridge as well.
+    let options = KicadOptions { copper: KicadCopper::Overlay, components: false, silkscreen: false, ..Default::default() };
+    let mut load = |_: &str| Err("not used".to_string());
+    let imported = read_kicad(BRIDGED_FILL.as_bytes(), "bridged.kicad_pcb", &options, &mut load).unwrap();
+    let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = &imported.feature.kind else { panic!("expected a mesh import") };
+    let mesh = meshes.iter().find(|m| m.name == "Copper F.Cu").expect("the pour");
+    let points = mesh.positions.as_chunks::<3>().0;
+    let mut uses: HashMap<(u32, u32), i32> = HashMap::new();
+    for [a, b, c] in mesh.triangles.as_chunks::<3>().0.iter().copied() {
+        for (p, q) in [(a, b), (b, c), (c, a)] {
+            *uses.entry((p.min(q), p.max(q))).or_default() += 1;
+        }
+    }
+    let open: f64 = uses
+        .iter()
+        .filter(|(_, n)| **n == 1)
+        .map(|((p, q), _)| {
+            let (p, q) = (points[*p as usize], points[*q as usize]);
+            ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2)).sqrt()
+        })
+        .sum();
+    assert!((open - (64.0 + 16.0)).abs() < 1e-6, "open edges {open} mm: the bridge is drawn");
+}
+
+/// Two holes, the second bridged on from the first, as KiCad's fill joins neighbouring holes.
+const CHAINED_FILL: &str = r#"(kicad_pcb (general (thickness 1.6))
+  (gr_rect (start 0 0) (end 20 20) (layer "Edge.Cuts"))
+  (zone (net 1) (net_name "GND") (layer "F.Cu")
+    (filled_polygon (layer "F.Cu") (pts (xy 2 2) (xy 18 2) (xy 18 18) (xy 2 18) (xy 2 6) (xy 4 6) (xy 4 8) (xy 8 8)
+      (xy 8 6) (xy 12 6) (xy 12 8) (xy 16 8) (xy 16 4) (xy 12 4) (xy 12 6) (xy 8 6) (xy 8 4) (xy 4 4) (xy 4 6) (xy 2 6)))))"#;
+
+#[test]
+fn a_fill_s_holes_bridged_one_to_the_next_are_each_a_loop() {
+    let board = parse_kicad_board(CHAINED_FILL.as_bytes(), "chained.kicad_pcb").unwrap();
+    let [zone] = board.zones.as_slice() else { panic!("one zone") };
+    let mut sizes: Vec<usize> = zone.contours.iter().map(Vec::len).collect();
+    sizes.sort_unstable();
+    assert_eq!(sizes, vec![4, 4, 4], "the outline and two holes: {:?}", zone.contours);
+}
+
+#[test]
+fn a_hatched_fill_s_thousands_of_holes_are_taken_apart_in_one_pass() {
+    // One pour, 2500 holes each bridged from its bottom edge: 17,500 points in one polygon.
+    const HOLES: usize = 2500;
+    let width = 2.0 * HOLES as f64 + 1.0;
+    let mut pts = String::from("(xy 0 0)");
+    for i in 0..HOLES {
+        let (x0, x1) = (2.0 * i as f64 + 0.5, 2.0 * i as f64 + 1.5);
+        pts += &format!(" (xy {x0} 0) (xy {x0} 1) (xy {x0} 2) (xy {x1} 2) (xy {x1} 1) (xy {x0} 1) (xy {x0} 0)");
+    }
+    pts += &format!(" (xy {width} 0) (xy {width} 3) (xy 0 3)");
+    let text = format!(
+        r#"(kicad_pcb (general (thickness 1.6)) (gr_rect (start -1 -1) (end {} 4) (layer "Edge.Cuts"))
+  (zone (net 1) (net_name "GND") (layer "F.Cu") (filled_polygon (layer "F.Cu") (pts {pts}))))"#,
+        width + 1.0
+    );
+    let board = parse_kicad_board(text.as_bytes(), "hatched.kicad_pcb").unwrap();
+    let [zone] = board.zones.as_slice() else { panic!("one zone") };
+    assert_eq!(zone.contours.len(), HOLES + 1, "the outline and every hole");
+    assert!(zone.contours.iter().all(|c| c.len() == 4), "each a plain rectangle");
+    let options = KicadOptions { copper: KicadCopper::Overlay, components: false, silkscreen: false, ..Default::default() };
+    let mut load = |_: &str| Err("not used".to_string());
+    let imported = read_kicad(text.as_bytes(), "hatched.kicad_pcb", &options, &mut load).unwrap();
+    assert!(imported.feature.warnings.is_empty(), "{:?}", imported.feature.warnings);
 }

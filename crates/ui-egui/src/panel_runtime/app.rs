@@ -4,6 +4,41 @@ use solidcraft_engine::panels::*;
 use super::runtime::standalone_header_action;
 use super::*;
 
+pub(crate) struct CatalogueLayoutStore<'a>(pub(crate) &'a mut dyn commands::LayoutCatalogue);
+
+impl super::workspace::PanelLayoutStore for CatalogueLayoutStore<'_> {
+    fn remembered_key(&self, workspace: &WorkspaceId) -> Option<&[u8]> {
+        self.0.state().remembered(workspace).map(commands::StoredEnvelope::bytes)
+    }
+
+    fn current_envelope(&self, state: &LayoutReply, registry: &PanelRegistry) -> PanelResult<LayoutEnvelope> {
+        commands::current_envelope_snapshot(self.0, state, registry)
+    }
+
+    fn execute_action(&mut self, action: LayoutAction, sink: &mut dyn ActionSink, registry: &PanelRegistry) -> PanelResult<LayoutReply> {
+        commands::execute_layout_action(
+            action,
+            &mut commands::PanelCommandContext { sink, registry, catalogue: self.0, web: cfg!(target_arch = "wasm32") },
+        )
+    }
+}
+
+pub(crate) struct CatalogueLayoutStoreRef<'a>(pub(crate) &'a dyn commands::LayoutCatalogue);
+
+impl super::workspace::PanelLayoutStore for CatalogueLayoutStoreRef<'_> {
+    fn remembered_key(&self, workspace: &WorkspaceId) -> Option<&[u8]> {
+        self.0.state().remembered(workspace).map(commands::StoredEnvelope::bytes)
+    }
+
+    fn current_envelope(&self, state: &LayoutReply, registry: &PanelRegistry) -> PanelResult<LayoutEnvelope> {
+        commands::current_envelope_snapshot(self.0, state, registry)
+    }
+
+    fn execute_action(&mut self, _action: LayoutAction, _sink: &mut dyn ActionSink, _registry: &PanelRegistry) -> PanelResult<LayoutReply> {
+        Err(error(Rule::Capability, "read-only catalogue layout store"))
+    }
+}
+
 /// Later content adapters supply their own services. The app integration exposes
 /// only an immutable Session during refresh; a layout tick cannot run a document
 /// command. Explicit content commands stay on the separate supplied sink.
@@ -549,8 +584,15 @@ impl AppPanelRuntime {
         Ok(())
     }
 
+    /// `drawn`: the windows that drew the open menu (#19364).
     #[cfg(not(target_arch = "wasm32"))]
-    fn show_desktop_windows(&mut self, app: &mut crate::SolveApp, ctx: &egui::Context, enabled: bool) -> PanelResult<()> {
+    fn show_desktop_windows(
+        &mut self,
+        app: &mut crate::SolveApp,
+        ctx: &egui::Context,
+        enabled: bool,
+        drawn: &mut Vec<egui::ViewportId>,
+    ) -> PanelResult<()> {
         use super::native_ui::WindowAction;
 
         let (Some(desktop), Some(state)) = (self.desktop.clone(), self.production.clone()) else { return Ok(()) };
@@ -573,6 +615,7 @@ impl AppPanelRuntime {
             .collect();
         let mut failure = None;
         for (host, section) in windows {
+            let drawn = &mut *drawn;
             let paint = (|| -> PanelResult<()> {
                 let layout = self.runtime.layout();
                 let available = section.tabs.iter().map(|id| (id.clone(), layout.availability(id))).collect();
@@ -607,6 +650,7 @@ impl AppPanelRuntime {
                             }
                             desktop.observe(ui.ctx(), &host, active);
                             let _blur = content.app.blur.begin(ui.ctx());
+                            let before = crate::semantic_content::presented_owners(content.app);
                             let painted = solidcraft_ui_registry::isolated(|| {
                                 super::native_ui::paint(&mut self.runtime, &mut services, &mut content, &host, &section, ui, enabled)
                             });
@@ -644,6 +688,14 @@ impl AppPanelRuntime {
                                 } else {
                                     ui.ctx().request_repaint();
                                 }
+                            }
+                            // This window is drawn after the frame's rows opened their menus: it
+                            // opens and draws its own rows' menu (#19364).
+                            if let Some((at, target)) = crate::semantic_content::take_late_menu(content.app, &before) {
+                                crate::context_menu::open_in_window(content.app, ui.ctx().viewport_id(), at, target);
+                            }
+                            if crate::context_menu::show_in_window(content.app, ui.ctx()) {
+                                drawn.push(ui.ctx().viewport_id());
                             }
                             painted
                         });
@@ -843,7 +895,7 @@ impl AppPanelRuntime {
         self.reconcile(session)?;
         self.refresh_metrics()?;
         if let Some(host) = &mut self.host {
-            host.capture_reservations(&self.runtime, self.catalogue.as_ref())?;
+            host.capture_reservations(&self.runtime, &CatalogueLayoutStoreRef(self.catalogue.as_ref()))?;
             host.note_native_capabilities(self.native.capabilities());
         }
         let result = self.host.as_mut().ok_or_else(|| error(Rule::Lifecycle, "universal panel host disabled"))?.prepare_in_domain(
@@ -917,7 +969,7 @@ impl AppPanelRuntime {
                         app.shell.browser = Some(rect);
                         crate::scenario::publish_rect("browser:card", rect);
                     }
-                    "history" => {
+                    "history" | "timeline-2d" => {
                         app.shell.history = Some(rect);
                         crate::scenario::publish_rect("history:card", rect);
                         crate::scenario::publish_rect(if section.zone == Zone::Bottom { "history:strip" } else { "history:vertical" }, rect);
@@ -961,7 +1013,7 @@ impl AppPanelRuntime {
         if deferred {
             host.show_deferred(ui, &mut self.runtime, self.native.as_mut(), &mut services)
         } else {
-            host.show(ui, &mut self.runtime, self.native.as_mut(), &mut services, self.catalogue.as_mut())
+            host.show(ui, &mut self.runtime, self.native.as_mut(), &mut services, &mut CatalogueLayoutStore(self.catalogue.as_mut()))
         }
     }
     fn prepare_host_paint(&mut self, session: &Session, ui: &egui::Ui) -> PanelResult<()> {
@@ -993,7 +1045,7 @@ impl AppPanelRuntime {
         self.refresh_metrics()?;
         let mut services = self.services.services();
         if let Some(host) = &mut self.host {
-            host.finish(ui, &mut self.runtime, self.native.as_mut(), &mut services, self.catalogue.as_mut())
+            host.finish(ui, &mut self.runtime, self.native.as_mut(), &mut services, &mut CatalogueLayoutStore(self.catalogue.as_mut()))
         } else {
             Ok(())
         }
@@ -1017,7 +1069,7 @@ impl AppPanelRuntime {
     }
     fn refresh_reservations(&mut self) -> PanelResult<()> {
         if let Some(host) = &mut self.host {
-            host.capture_reservations(&self.runtime, self.catalogue.as_ref())?;
+            host.capture_reservations(&self.runtime, &CatalogueLayoutStoreRef(self.catalogue.as_ref()))?;
         }
         Ok(())
     }
@@ -1407,6 +1459,12 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
             && let Some(host) = &mut integration.host
         {
             host.set_header_action_visible(InstanceId("history".into()), ControlId("play".into()), app.preferences.history_play_button);
+            // The 2D Timeline shows only at the bottom: a History on the left has no switch.
+            let view = ControlId(super::production::TIMELINE_VIEW.into());
+            host.set_header_action_visible(InstanceId("history".into()), view.clone(), !app.preferences.timeline_left);
+            for instance in ["history", "timeline-2d"] {
+                host.set_header_action_trailing(InstanceId(instance.into()), view.clone());
+            }
             host.set_header_content(InstanceId("browser".into()), browser_header);
             // The open search box holds the magnifier.
             host.set_header_action_visible(InstanceId("browser".into()), ControlId("magnifier".into()), browser_header.is_none());
@@ -1440,11 +1498,15 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
 pub(crate) fn show_desktop_windows(app: &mut crate::SolveApp, ctx: &egui::Context) {
     let Some(mut integration) = app.panel_runtime.take() else { return };
     let enabled = !crate::ui_kit::Container::modal_input_blocked(ctx);
-    if let Err(reason) = integration.show_desktop_windows(app, ctx, enabled) {
+    let mut drawn = Vec::new();
+    let shown = integration.show_desktop_windows(app, ctx, enabled, &mut drawn);
+    crate::context_menu::close_unshown_window(app, &drawn);
+    if let Err(reason) = shown {
         app.set_status(solidcraft_ui_text::tr(super::workspace::rule_key(reason.rule)).to_owned(), true);
         integration.last_error = Some(reason);
     }
     app.panel_runtime = Some(integration);
+    crate::context_menu::run_deferred(app);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1674,9 +1736,14 @@ impl crate::SolveApp {
             self.shell.cards = cards;
             self.shell.status_bar = status_bar;
         }
+        // Home can open a document after the services tick. Bind the restored panel
+        // visibility to that document before the host delivers its lifecycle events.
+        let restoring = self.panel_runtime.as_ref().and_then(|runtime| runtime.preferences.as_ref()).is_some_and(|prefs| prefs.pending.is_some());
+        let refresh = if restoring { super::production::refresh_production(self) } else { Ok(()) };
         match &mut self.panel_runtime {
             Some(integration) => {
                 let result = (|| {
+                    refresh?;
                     integration.sync_native_direction(direction)?;
                     integration.set_keyboard_shortcuts(shortcuts);
                     if let Some(host) = &mut integration.host {

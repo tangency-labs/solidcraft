@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Timeline 1D</title>
+  <path d="M4 26.5L15 26.5L15 37.5L4 37.5ZM19 26.5L30 26.5L30 37.5L19 37.5ZM49 26.5L60 26.5L60 37.5L49 37.5Z" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M34 26.5L45 26.5L45 37.5L34 37.5Z" fill="#328bd3" stroke="#328bd3" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

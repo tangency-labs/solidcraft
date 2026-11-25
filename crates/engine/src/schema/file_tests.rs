@@ -3,9 +3,9 @@ use std::time::Duration;
 use serde_json::{Value, json};
 
 use super::{
-    Export3mfParams, ExportMeshParams, ExportParams, ExportSdfParams, ExportStepParams, ExportStlParams, ExportUrdfParams, FileExportResult,
-    NewerFileReport, OpenElsewhere, OpenParams, OpenResult, OpenedDesign, RecoverParams, RecoverResult, RecoveryDiscardParams, RecoveryDiscardResult,
-    RecoveryListParams, RecoveryListResult, UsdPurpose,
+    Export3mfParams, ExportMeshParams, ExportMjcfParams, ExportParams, ExportSdfParams, ExportStepParams, ExportStlParams, ExportUrdfParams,
+    FileExportResult, NewerFileReport, OpenElsewhere, OpenParams, OpenResult, OpenedDesign, RecoverParams, RecoverResult, RecoveryDiscardParams,
+    RecoveryDiscardResult, RecoveryListParams, RecoveryListResult, UsdPurpose,
 };
 use crate::Session;
 use crate::recovery::Autosaver;
@@ -18,8 +18,9 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<ExportMeshParams>(), &["bodies", "path", "quality"]);
     assert_keys(input_schema_for::<ExportStlParams>(), &["ascii", "bodies", "lay_on_print_faces", "path", "quality", "solids"]);
     assert_keys(input_schema_for::<Export3mfParams>(), &["bodies", "lay_on_print_faces", "objects", "path", "quality"]);
-    assert_keys(input_schema_for::<ExportUrdfParams>(), &["effort", "images", "mesh_prefix", "path", "velocity"]);
+    assert_keys(input_schema_for::<ExportUrdfParams>(), &["effort", "images", "mesh_prefix", "mimic", "path", "place_meshes", "velocity"]);
     assert_keys(input_schema_for::<ExportSdfParams>(), &["bodies", "model_uris", "name", "path", "quality", "static"]);
+    assert_keys(input_schema_for::<ExportMjcfParams>(), &["path"]);
     assert_keys(
         input_schema_for::<ExportParams>(),
         &[
@@ -31,12 +32,14 @@ fn schemas_and_the_key_check_agree() {
             "images",
             "lay_on_print_faces",
             "mesh_prefix",
+            "mimic",
             "model_uris",
             "name",
             "objects",
             "options",
             "path",
             "physics",
+            "place_meshes",
             "purpose",
             "quality",
             "render_setup",
@@ -53,6 +56,7 @@ fn schemas_and_the_key_check_agree() {
             "format",
             "geometry",
             "history",
+            "linked_bodies",
             "max_points",
             "names",
             "new_tab",
@@ -68,7 +72,7 @@ fn schemas_and_the_key_check_agree() {
         ],
     );
     assert_keys(input_schema_for::<RecoveryListParams>(), &["dir"]);
-    assert_keys(input_schema_for::<RecoverParams>(), &["dir", "discard", "id"]);
+    assert_keys(input_schema_for::<RecoverParams>(), &["dir", "discard", "id", "linked_bodies"]);
     assert_keys(input_schema_for::<RecoveryDiscardParams>(), &["all", "dir", "id"]);
 }
 
@@ -264,7 +268,9 @@ fn bad_calls_say_what_is_wrong_and_write_nothing() {
     std::fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("{e}"));
     let mut s = Session::default();
     s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap_or_else(|e| panic!("{e}"));
-    for cmd in ["file.export_step", "file.export_stl", "file.export_3mf", "file.export_obj", "file.export_urdf", "file.export_sdf"] {
+    for cmd in
+        ["file.export_step", "file.export_stl", "file.export_3mf", "file.export_obj", "file.export_urdf", "file.export_sdf", "file.export_mjcf"]
+    {
         let e = s.execute(cmd, &json!({})).unwrap_err().to_string();
         assert!(e.contains(cmd) && e.contains("path"), "{cmd}: {e}");
     }
@@ -274,9 +280,16 @@ fn bad_calls_say_what_is_wrong_and_write_nothing() {
     s.param_check = ParamCheck::Strict;
     let e = s.execute("file.export_stl", &json!({"path": at, "objects": "component"})).unwrap_err().to_string();
     assert!(e.contains("objects"), "objects is for 3MF only: {e}");
+    let e = s.execute("file.export_mjcf", &json!({"path": dir.join("r.xml").to_string_lossy(), "effort": 1})).unwrap_err().to_string();
+    assert!(e.contains("effort"), "MJCF takes no effort: {e}");
     s.param_check = ParamCheck::Off;
     let e = s.execute("file.export_urdf", &json!({"path": at, "effort": -1})).unwrap_err().to_string();
     assert!(e.contains("effort"), "{e}");
+    let e = s
+        .execute("file.export", &json!({"path": dir.join("r.xml").to_string_lossy(), "format": "mjcf", "bodies": ["Body1"]}))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("whole assembly"), "{e}");
     let model = dir.join("Model").to_string_lossy().to_string();
     for (key, value) in [("static", json!("yes")), ("model_uris", json!(1)), ("name", json!("a/b")), ("bodies", json!(["Nope"]))] {
         let e = s.execute("file.export_sdf", &json!({"path": model, key: value})).unwrap_err().to_string();
@@ -375,6 +388,8 @@ fn strict_keeps_todays_errors() {
         ("doc.recovery_discard", json!({})),
         ("doc.recovery_discard", json!({"all": false})),
         ("doc.recovery_discard", json!({"id": "nothing-here"})),
+        ("file.export", json!({"path": at("a.urdf"), "mimic": "yes"})),
+        ("file.export", json!({"path": at("a.urdf"), "place_meshes": 1})),
     ]);
     assert_eq!(std::fs::read_dir(&dir).map(|d| d.count()).unwrap_or(0), 0, "nothing written");
     let _ = std::fs::remove_dir_all(&dir);
@@ -393,6 +408,9 @@ fn the_export_type_reads_each_key_only_for_its_format() {
     assert!(ok(json!({"path": "a.stl", "format": "3mf", "objects": "component"})).objects.is_some());
     assert!(read(json!({"path": "a.3mf", "format": "stl", "objects": "component"})).is_err());
     assert!(read(json!({"path": "a", "format": "urdf", "effort": 0})).is_err());
+    let p = ok(json!({"path": "a.urdf", "mimic": true, "place_meshes": false}));
+    assert!(p.mimic == Some(true) && p.place_meshes == Some(false), "{p:?}");
+    assert!(ok(json!({"path": "a.stl", "mimic": "yes", "place_meshes": 1})).mimic.is_none());
     // An unknown format, or no path to write to, is the handler's to refuse: nothing else is read.
     assert!(ok(json!({"path": "a.xyz", "quality": "rough", "effort": -1})).quality.is_none());
     assert!(ok(json!({"quality": "rough"})).path.is_none());

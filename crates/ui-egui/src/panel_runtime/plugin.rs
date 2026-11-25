@@ -366,11 +366,16 @@ struct TextDraft {
     submitted: Option<String>,
 }
 
+fn panel_selection_id(panel: &PanelSnapshot) -> egui::Id {
+    egui::Id::unique((&panel.plugin, &panel.panel.id, "active-selection"))
+}
+
 fn button(ui: &mut egui::Ui, panel: &PanelSnapshot, spec: &model::ButtonSpec, actions: &mut Actions) {
     let response = crate::ui_kit::icon_label_action(ui, &spec.label, spec.icon.as_deref(), true, false);
     crate::scenario::publish_rect(&format!("plugin-panel:{}:{}:button:{}", panel.plugin, panel.panel.id, spec.entry), response.rect);
     if response.clicked() {
-        actions.push((spec.entry.clone(), event(panel, model::EventKind::Press, &spec.entry, None, None)));
+        let row = ui.ctx().data_mut(|data| data.get_temp::<Option<String>>(panel_selection_id(panel))).flatten();
+        actions.push((spec.entry.clone(), event(panel, model::EventKind::Press, &spec.entry, row, None)));
     }
 }
 
@@ -463,7 +468,11 @@ pub(super) fn draw(ui: &mut egui::Ui, panel: &PanelSnapshot, index: u32, actions
                     }
                 }
             });
-            ui.ctx().data_mut(|data| data.insert_temp(selected_id, selected.unwrap_or_default()));
+            let row = selected.clone();
+            ui.ctx().data_mut(|data| {
+                data.insert_temp(selected_id, selected.unwrap_or_default());
+                data.insert_temp(panel_selection_id(panel), row);
+            });
         }
         model::Widget::Form(spec) => form(ui, panel, spec, actions, units),
         model::Widget::Text(text) | model::Widget::EmptyState(text) => {
@@ -485,6 +494,8 @@ pub(super) fn draw(ui: &mut egui::Ui, panel: &PanelSnapshot, index: u32, actions
     });
 }
 
+pub(super) const TABLE_ROW_INDENT: f32 = 14.0;
+
 fn table(ui: &mut egui::Ui, panel: &PanelSnapshot, spec: &model::TableSpec, actions: &mut Actions, units: &str) {
     let rows = panel.data.rows(&spec.bind);
     let columns: Vec<_> = spec.columns.iter().map(|column| crate::ui_kit::Column::new(&column.label, 1.0).flex()).collect();
@@ -502,9 +513,20 @@ fn table(ui: &mut egui::Ui, panel: &PanelSnapshot, spec: &model::TableSpec, acti
                     if let Some((key, fields)) = rows.get(index) {
                         let row_id = value_text(fields.get(&spec.row_id), None, "mm");
                         let row_id = if row_id.is_empty() { key.clone() } else { row_id };
+                        let indent = match fields.get("indent") {
+                            Some(model::UiValue::Integer(level)) => (*level).clamp(0, model::MAX_TABLE_ROW_INDENT as i64) as usize,
+                            Some(model::UiValue::Number(level)) => (*level as i64).clamp(0, model::MAX_TABLE_ROW_INDENT as i64) as usize,
+                            Some(model::UiValue::Text(text)) => {
+                                text.parse::<i64>().unwrap_or(0).clamp(0, model::MAX_TABLE_ROW_INDENT as i64) as usize
+                            }
+                            _ => 0,
+                        };
                         let response = table.row(ui, key, selected.contains(&row_id), |row| {
-                            for column in &spec.columns {
+                            for (column_index, column) in spec.columns.iter().enumerate() {
                                 row.cell(|ui| {
+                                    if column_index == 0 && indent > 0 {
+                                        ui.add_space(indent as f32 * TABLE_ROW_INDENT);
+                                    }
                                     ui.label(value_text(fields.get(&column.key), column.unit.as_deref(), units));
                                 });
                             }
@@ -530,7 +552,17 @@ fn table(ui: &mut egui::Ui, panel: &PanelSnapshot, spec: &model::TableSpec, acti
             });
         },
     );
-    ui.ctx().data_mut(|data| data.insert_temp(selected_id, selected));
+    let selection_str = if selected.is_empty() {
+        None
+    } else if selected.len() == 1 {
+        selected.iter().next().cloned()
+    } else {
+        Some(selected.iter().cloned().collect::<Vec<_>>().join(","))
+    };
+    ui.ctx().data_mut(|data| {
+        data.insert_temp(selected_id, selected);
+        data.insert_temp(panel_selection_id(panel), selection_str);
+    });
 }
 
 fn form(ui: &mut egui::Ui, panel: &PanelSnapshot, spec: &model::FormSpec, actions: &mut Actions, units: &str) {

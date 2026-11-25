@@ -223,10 +223,8 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
     let preview_layout = crate::app_bar_custom::preview(app, ui.ctx());
     let customizing = app.toolbar_custom.app_bar_customizing;
     let bar_height = crate::app_bar::height(customizing);
+    crate::plugin_slots::set_context(app, ui.ctx());
     crate::plugin_slots::refresh(app);
-    if app.plugin_slots.discovery_pending() {
-        ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
-    }
     let t = Tokens::get();
     let app_bar = Container::new(ui.ctx(), Surface::ApplicationBar).edge("sc_appbar", Edge::Top);
     let frame = Container::new(ui.ctx(), Surface::ApplicationBar).edge_frame(t.app_bar);
@@ -236,7 +234,11 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         // or the caption buttons take its ends. In full screen macOS shows the traffic lights in
         // its own title bar that slides down over the window, not in the bar: no room for them.
         let fullscreen = ui.ctx().input(|i| i.viewport().fullscreen.unwrap_or(false));
-        let chrome = crate::window_chrome::TitleBar { traffic_lights: app.integrated_titlebar && !fullscreen, caption_buttons: app.custom_titlebar };
+        let chrome = crate::window_chrome::TitleBar {
+            traffic_lights: app.integrated_titlebar && !fullscreen,
+            caption_buttons: app.custom_titlebar,
+            hide_caption_buttons: !app.preferences.show_window_controls,
+        };
         let action = chrome.show(ui, r, |ui, content| {
             // While a file loads the design waits: no menus or commands from the bar.
             let idle = !app.file_load_holds();
@@ -270,7 +272,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 quick_ids: &quick_ids,
                 mark: &|painter, at| solidcraft_look::glyphs::brand_mark(painter, at),
                 name: "SolidCraft",
-                leading: (crate::library::available(app) && !app.home.open).then_some(vec2(app_bar::ITEM_HEIGHT, app_bar::ITEM_HEIGHT)),
+                leading: crate::parts_library::available(app).then_some(vec2(app_bar::ITEM_HEIGHT, app_bar::ITEM_HEIGHT)),
                 home: app_bar::BarButton { id: "home", icon: "home", tip: app.tr("ui.start_page"), enabled: idle, narrow: false, wide_only: false },
                 file: app.tr("ui.file"),
                 file_open,
@@ -331,10 +333,10 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     app_bar::paint_item(ui, rect, app_bar::Control::Documents, &response, app_bar::item_opacity(ui.ctx(), "documents"), "documents");
                     crate::scenario::publish_target("library:toggle", rect);
                 } else {
-                    // Keep the browser's native interaction, tooltip and focus, while the
+                    // Keep the parts library button's own interaction, tooltip and focus, while the
                     // shared bar renderer owns the same shape in the bar and tray.
                     let id = ui.scope_id().with("document_browser_toggle");
-                    let available = app_bar::interaction_only(ui, |ui| crate::library::app_bar_toggle(app, ui, rect));
+                    let available = app_bar::interaction_only(ui, |ui| crate::parts_library::app_bar_toggle(app, ui, rect));
                     if available && let Some(response) = ui.ctx().read_response(id) {
                         app_bar::paint_item(ui, rect, app_bar::Control::Documents, &response, 1.0, "documents");
                     }
@@ -511,7 +513,7 @@ fn fill_overflow_rows(app: &SolveApp, rows: &mut [app_bar::OverflowItem], shown:
                 row.icon = "zoom".to_string();
             }
             "leading" => {
-                row.label = app.tr(if app.preferences.show_document_browser { "library.hide" } else { "library.show" }).to_string();
+                row.label = crate::parts_library::toggle_label(app).to_string();
                 row.icon = "document_browser".to_string();
             }
             _ => {
@@ -541,9 +543,7 @@ fn run_overflow_control(app: &mut SolveApp, id: &str) {
         "managed" => crate::prefs::open_at(app, 0),
         "assistant" => crate::agent_chat::toggle(app),
         "search" => app.start("ui.palette"),
-        "leading" => {
-            app.preferences.show_document_browser = !app.preferences.show_document_browser;
-        }
+        "leading" => crate::parts_library::toggle(app),
         _ => {
             if let Some(command) = id
                 .strip_prefix("quick:")
@@ -574,6 +574,8 @@ pub enum FileAction {
     Undo,
     /// Redo the active design's last undone command.
     Redo,
+    /// Read the active design again from its file, dropping its unsaved changes after asking.
+    Revert,
     /// Save a JSON design using the existing save-as flow.
     SaveJson,
     /// Check the signatures of the active design's saved file.
@@ -603,7 +605,15 @@ impl FileAction {
     pub fn enabled(&self, app: &SolveApp) -> bool {
         let needs_design = matches!(
             self,
-            Self::NewDrawing | Self::Save | Self::SaveAs | Self::Undo | Self::Redo | Self::ExportMesh(_) | Self::Command(_) | Self::VerifySignature
+            Self::NewDrawing
+                | Self::Save
+                | Self::SaveAs
+                | Self::Revert
+                | Self::Undo
+                | Self::Redo
+                | Self::ExportMesh(_)
+                | Self::Command(_)
+                | Self::VerifySignature
         ) || matches!(self, Self::Export(extension) if *extension != "json");
         // An open bug report describes the designs as they are, and a window opened behind it
         // covers it (#7188). Quit too, as behind any modal window: it would switch to a design
@@ -615,6 +625,7 @@ impl FileAction {
             Self::Redo => !app.session.redo.is_empty(),
             Self::ClearRecent => !app.home.recent.is_empty(),
             Self::VerifySignature => app.session.path.is_some() && app.verifying.is_none(),
+            Self::Revert => app.session.path.is_some(),
             Self::AgentChat => crate::agent_chat::app_bar_button_shown(app),
             _ => true,
         };
@@ -645,6 +656,7 @@ impl FileAction {
             Self::Undo => drop(app.run("edit.undo", json!({}))),
             Self::Redo => drop(app.run("edit.redo", json!({}))),
             Self::SaveJson => save_as_with_extension(app, "json"),
+            Self::Revert => crate::documents::revert(app),
             Self::VerifySignature => {
                 crate::verify_job::start(app);
             }
@@ -738,6 +750,7 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     // Save As shows the shortcut of the command it runs, from the app's own registry.
     let save_as_key = crate::keymap::effective(app, "file.save_as").unwrap_or_default();
     rows.push(row("save_as", &format!("{}…", app.tr("ui.save_as")), &save_as_key, "save", shown));
+    rows.push(row("revert", app.tr("ui.revert_to_saved"), "", "open", shown && app.session.path.is_some()));
     rows.push(row("save_json", app.tr_label("Save As JSON…"), "", "save", true));
     rows.push(row("file.verify", app.tr("cmd.file.verify"), "", "shield", shown && app.session.path.is_some()));
     // The browser build: a copy as a downloaded file, whatever Save does.
@@ -841,6 +854,7 @@ pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
         "pointcloud.insert" | "file.send_to_slicer" => app.start(id),
         "save" => FileAction::Save.run(app),
         "save_as" => FileAction::SaveAs.run(app),
+        "revert" => FileAction::Revert.run(app),
         "save_json" => FileAction::SaveJson.run(app),
         "file.verify" => FileAction::VerifySignature.run(app),
         "download" => download_design(app),
@@ -895,6 +909,12 @@ pub(crate) fn provenance_params(app: &SolveApp) -> Value {
 }
 
 pub fn save(app: &mut SolveApp) {
+    if crate::save_job::host_pending(app, app.session.uid) {
+        if !crate::documents::saving_to_close(app) {
+            app.set_status(app.tr("ui.browser_save_in_progress"), true);
+        }
+        return;
+    }
     if crate::browser::needs_capture(app, crate::browser::SAVE) {
         app.tree.capture_prompt = Some(crate::browser::SAVE.into());
         return;
@@ -926,6 +946,10 @@ fn save_as_with_extension(app: &mut SolveApp, extension: &str) {
 }
 
 pub(crate) fn save_as_named(app: &mut SolveApp, name: &str, extension: &str) {
+    if crate::save_job::host_pending(app, app.session.uid) {
+        app.set_status(app.tr("ui.browser_save_in_progress"), true);
+        return;
+    }
     // The Capture Position question first, as Save asks it: the file can't hold a move not
     // captured yet (#9736).
     if crate::browser::needs_capture(app, crate::browser::SAVE) {
@@ -981,6 +1005,12 @@ pub(crate) fn export(app: &mut SolveApp, ext: &str) {
 /// does what that File › Export item does: STEP, OBJ and URDF ask where to save, STL and 3MF
 /// open the mesh dialog with the format chosen. `false`: `id` is no such command.
 pub(crate) fn start_export(app: &mut SolveApp, id: &str) -> bool {
+    if id == "file.export_urdf_options" {
+        if FileAction::Export("urdf").enabled(app) {
+            crate::dialogs_urdf::open(app);
+        }
+        return true;
+    }
     let (extension, mesh) = match id {
         "file.export_step" => ("step", false),
         "file.export_obj" => ("obj", false),
@@ -1544,7 +1574,7 @@ struct Panel {
     more: Vec<PanelMoreRow>,
 }
 
-/// The ribbon's Plugins group (Model tab): one button per command of each plugin turned on.
+/// The ribbon's Plugins group (Model tab): commands and explicitly declared plugin menus.
 struct PluginGroup {
     label: String,
     tip: String,
@@ -1555,7 +1585,7 @@ struct PluginGroup {
 /// The tab's panels for one pass of the ribbon, as the component's data.
 struct RibbonPanels {
     panels: Vec<Panel>,
-    /// The Plugins group after the panels, when the tab has one and a plugin is on.
+    /// The Plugins group after the ordinary panels and before the exit panel, when present.
     plugins: Option<PluginGroup>,
     /// The last panel leaves the sketch or the edit.
     exit: bool,
@@ -1599,7 +1629,8 @@ impl RibbonPanels {
                         size,
                         enabled: can_start(app, selected),
                         pressed: (ribbon_shows_pressed(app, selected.id) && !(persistent && app.preferences.persistent_ribbon_pressed))
-                            || (selected.id == "view.shots_strip" && app.preferences.render_shots_strip),
+                            || (selected.id == "view.shots_strip" && app.preferences.render_shots_strip)
+                            || (selected.id == "view.parts_library" && app.preferences.library_open),
                         // The buttons that leave the sketch or the edit never show pressed; a
                         // tool pinned into their group does.
                         exit: finish
@@ -1623,7 +1654,7 @@ impl RibbonPanels {
                         icon: info.icon,
                         size: ButtonSize { width: 0.0, min_width: 0.0 },
                         enabled: can_start(app, c),
-                        pressed: ribbon_shows_pressed(app, c.id),
+                        pressed: ribbon_shows_pressed(app, c.id) || (c.id == "view.parts_library" && app.preferences.library_open),
                         exit: false,
                         persistent: false,
                         disabled: info.disabled_reason,
@@ -1698,7 +1729,7 @@ impl RibbonPanels {
         reveal: Option<ribbon::Reveal<'a>>,
         more_tip: &'a str,
     ) -> ribbon::Row<'a> {
-        ribbon::Row {
+        let mut row = ribbon::Row {
             groups: self
                 .panels
                 .iter()
@@ -1740,7 +1771,11 @@ impl RibbonPanels {
                         enabled: true,
                         pressed: false,
                         exit: false,
-                        split: None,
+                        split: b.id.starts_with(crate::plugin_menu::RIBBON_GROUP_PREFIX).then_some(ribbon::Split {
+                            key: &b.id,
+                            title: &b.label,
+                            name: &b.name,
+                        }),
                         app_paints: false,
                         covers: &[],
                     };
@@ -1780,17 +1815,40 @@ impl RibbonPanels {
             reveal,
             more_tip,
             handles: RIBBON_HANDLES,
+        };
+        if self.exit
+            && self.plugins.is_some()
+            && let Some(tail) = row.groups.get_mut(self.panels.len().saturating_sub(1)..)
+        {
+            // The component reserves the last group's room for leaving the edit.
+            tail.rotate_right(1);
         }
+        row
+    }
+
+    /// The Plugins group's place in the drawn row, before the exit when one is present.
+    fn plugin_group(&self) -> Option<usize> {
+        self.plugins.as_ref().map(|_| self.panels.len().saturating_sub(usize::from(self.exit)))
+    }
+
+    /// Map a drawn group back to the built-in panel list, which does not contain Plugins.
+    fn panel_index(&self, group: usize) -> Option<usize> {
+        let index = match self.plugin_group() {
+            Some(plugin) if group == plugin => return None,
+            Some(plugin) if group > plugin => group.checked_sub(1)?,
+            _ => group,
+        };
+        self.panels.get(index).map(|_| index)
     }
 
     /// The id of panel `group`'s drop-down.
     fn popup_id(&self, group: usize) -> Option<egui::Id> {
-        self.panels.get(group).map(|p| p.popup_id)
+        self.panels.get(self.panel_index(group)?).map(|p| p.popup_id)
     }
 
     /// The plugin command button the component drew as `drawn`, when it is one.
     fn plugin_button(&self, drawn: &ribbon::Drawn) -> Option<&crate::plugin_menu::RibbonButton> {
-        if drawn.group != self.panels.len() || drawn.cell {
+        if Some(drawn.group) != self.plugin_group() || drawn.cell {
             return None;
         }
         self.plugins.as_ref()?.buttons.get(drawn.index)
@@ -1798,7 +1856,7 @@ impl RibbonPanels {
 
     /// The panel button the component drew as `drawn`.
     fn panel_button(&self, drawn: &ribbon::Drawn) -> Option<&PanelButton> {
-        let panel = self.panels.get(drawn.group)?;
+        let panel = self.panels.get(self.panel_index(drawn.group)?)?;
         if drawn.cell { panel.gallery.get(drawn.index) } else { panel.large.get(drawn.index) }
     }
 }
@@ -1915,9 +1973,12 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
         let mut persistent_paints = Vec::new();
         let top = r.top() + TAB_ROW_HEIGHT;
         let mut drop: Option<(String, &'static str, Option<String>)> = None;
-        let mut menu: Option<(egui::Pos2, &'static str)> = None;
+        // A command's menu to open, and whether the drop-down stays open under it (its ⋯).
+        let mut menu: Option<(egui::Pos2, &'static str, bool)> = None;
         // A drop-down row's pin icon clicked: pin or unpin that command.
         let mut toggle: Option<&'static str> = None;
+        // A command dragged to another place in its own drop-down: (panel, command, before).
+        let mut menu_move: Option<(&'static str, &'static str, Option<&'static str>)> = None;
         // The open drop-down (a button dropped on it leaves the toolbar).
         let mut popup_rect: Option<Rect> = None;
         // Search can draw a preview of its own. Only the open panel menu follows the pointer.
@@ -1969,9 +2030,6 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             ribbon::text(ui, at, app.tr("ui.toolbar_tabs_hidden"), t.font_body, t.text_dim, false);
             crate::scenario::publish_handle("ribbon:tabs_hidden", at);
         }
-        if tab == "MODEL" {
-            crate::plugin_menu::ensure_listed(app);
-        }
         let panels = RibbonPanels::new(app, ui, &tab, &lists, &painter, running.clone());
         let more_tip = solidcraft_ui_text::tr_label("More toolbar panels");
         let accent = crate::workspace::tab_accent(&t, &tab);
@@ -1985,7 +2043,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
         }
         let mut out = {
             let mut more_rows = |ui: &mut egui::Ui, group: usize| {
-                let Some((panel, cmds, shown)) = lists.get(group) else { return false };
+                let Some((panel, cmds, shown)) = panels.panel_index(group).and_then(|i| lists.get(i)) else { return false };
                 if tab == "SKETCH" && *panel == "CREATE" {
                     let cmds = menu_commands(cmds, shown);
                     sketch_create_menu(app, ui, &cmds, dropdown_width(app, ui, &cmds), &mut menu, &mut toggle);
@@ -2005,6 +2063,9 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             let deferred = d.deferred.take();
             if let Some(b) = panels.plugin_button(d) {
                 let _ = d.response.clone().backing_on_hover_text(&b.name);
+                if d.split.as_ref().is_some_and(|arrow| arrow.clicked()) {
+                    out.actions.push(ribbon::Action::Run { id: b.id.clone(), rect: d.whole, place: ribbon::Place::Button });
+                }
                 continue;
             }
             let Some(b) = panels.panel_button(d) else {
@@ -2049,7 +2110,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
         }
         // What was chosen on the row, in order.
         let mut opened = Vec::new();
-        let plugin_group = panels.plugins.as_ref().map(|_| panels.panels.len());
+        let plugin_group = panels.plugin_group();
         for action in std::mem::take(&mut out.actions) {
             if let ribbon::Action::Section { group } | ribbon::Action::Open { group } = action
                 && Some(group) == plugin_group
@@ -2061,6 +2122,9 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             }
             match action {
                 ribbon::Action::Run { id, rect, place } => {
+                    if crate::plugin_menu::toggle_ribbon_group(app, ui.ctx(), &id, rect) {
+                        continue;
+                    }
                     // A plugin command's button opens that command's dialog, and nothing else.
                     if crate::plugin_menu::choose_ribbon(app, &id) {
                         continue;
@@ -2092,7 +2156,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                 }
                 ribbon::Action::Menu { id, at } => {
                     if let Some(command) = solidcraft_engine::find_command(&id) {
-                        menu = Some((at, command.id));
+                        menu = Some((at, command.id, false));
                     }
                 }
                 ribbon::Action::Section { group } => {
@@ -2112,10 +2176,10 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                 }
                 ribbon::Action::Drop { id, group, before } => {
                     // Plugin buttons stay in their own group; they are not pinned commands.
-                    if id.starts_with(crate::plugin_menu::RIBBON_PREFIX) {
+                    if id.starts_with(crate::plugin_menu::RIBBON_PREFIX) || id.starts_with(crate::plugin_menu::RIBBON_GROUP_PREFIX) {
                         continue;
                     }
-                    if let Some((panel, _, _)) = lists.get(group) {
+                    if let Some((panel, _, _)) = panels.panel_index(group).and_then(|i| lists.get(i)) {
                         drop = Some((id, *panel, before));
                     }
                 }
@@ -2138,7 +2202,8 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                 }
                 continue;
             }
-            let (Some((panel, cmds, shown)), Some(data)) = (lists.get(g.group), panels.panels.get(g.group)) else { continue };
+            let Some(index) = panels.panel_index(g.group) else { continue };
+            let (Some((panel, cmds, shown)), Some(data)) = (lists.get(index), panels.panels.get(index)) else { continue };
             let panel: &&str = panel;
             let sketch_create = tab == "SKETCH" && *panel == "CREATE";
             let popup_id = data.popup_id;
@@ -2172,7 +2237,8 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                             }
                             if sketch_create && app.preferences.ribbon_icon_grid && !cmds.is_empty() {
                                 let mut paints = Vec::new();
-                                let action = dropdown_grid(app, ui, &tab, &sketch_create_grouped(&cmds), &[], &mut paints);
+                                // Built from the families, not the panel's order: no reordering here.
+                                let action = dropdown_grid(app, ui, &tab, &sketch_create_grouped(&cmds), &[], &mut paints, &mut Vec::new());
                                 grid_action(app, ui, action, &mut menu, &mut toggle);
                                 paint_persistent_ribbon(app, ui, paints, &tab, "ribbon_grid");
                                 return;
@@ -2190,9 +2256,24 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                             } else {
                                 crate::workspace::grouped_commands(&tab, panel, &cmds)
                             };
+                            let grouped = crate::toolbar_custom::order_grouped(app, &tab, panel, grouped);
+                            // Where each command was drawn, for a drag to another place (#5080).
+                            let mut placed: Vec<(&'static str, Rect)> = Vec::new();
                             if app.preferences.ribbon_icon_grid && !grouped.is_empty() {
                                 let mut paints = Vec::new();
-                                let action = dropdown_grid(app, ui, &tab, &grouped, &crate::workspace::ungrouped(&tab, panel, &cmds), &mut paints);
+                                let action = dropdown_grid(
+                                    app,
+                                    ui,
+                                    &tab,
+                                    &grouped,
+                                    &crate::workspace::ungrouped(&tab, panel, &cmds),
+                                    &mut paints,
+                                    &mut placed,
+                                );
+                                placed.retain(|(id, _)| crate::toolbar_custom::movable_in_menu(&tab, panel, id));
+                                if let Some((id, before)) = menu_drop(ui, &placed, true, &|id| crate::toolbar_custom::group_index(&tab, panel, id)) {
+                                    menu_move = Some((*panel, id, before));
+                                }
                                 grid_action(app, ui, action, &mut menu, &mut toggle);
                                 // Paint in this popup's layer, after its command has changed the session.
                                 paint_persistent_ribbon(app, ui, paints, &tab, "ribbon_grid");
@@ -2232,10 +2313,13 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                                         ribbon::section_heading(ui, &group_heading_text(heading), row_w);
                                     }
                                     let pinned = crate::toolbar_custom::pinned_on(app, &tab, c.id).is_some();
+                                    // Only the part the menu's scroll area shows takes a drop.
+                                    placed.push((c.id, Rect::from_min_size(ui.cursor().min, vec2(row_w, ROW_H)).intersect(ui.clip_rect())));
                                     let revealed = reveal.as_ref().is_some_and(|r| r.id == c.id);
                                     match dropdown_row(app, ui, c, row_w, pinned, revealed.then_some(pulse)) {
                                         None => {}
-                                        Some(ribbon::MenuAction::Menu(at)) => menu = Some((at, c.id)),
+                                        Some(ribbon::MenuAction::Menu(at)) => menu = Some((at, c.id, false)),
+                                        Some(ribbon::MenuAction::More(at)) => menu = Some((at, c.id, true)),
                                         Some(ribbon::MenuAction::TogglePin) => toggle = Some(c.id),
                                         Some(ribbon::MenuAction::Run(rect)) => {
                                             app.start_at(c.id, Some(rect));
@@ -2244,6 +2328,10 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                                     }
                                 }
                             });
+                            placed.retain(|(id, _)| crate::toolbar_custom::movable_in_menu(&tab, panel, id));
+                            if let Some((id, before)) = menu_drop(ui, &placed, false, &|id| crate::toolbar_custom::group_index(&tab, panel, id)) {
+                                menu_move = Some((*panel, id, before));
+                            }
                             ribbon::section_footer(ui, solidcraft_ui_text::tr("ui.ribbon_pin_footer"));
                         });
                     });
@@ -2301,11 +2389,17 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
         if let Some((id, panel, before)) = drop {
             crate::toolbar_custom::reorder(app, &tab, &id, panel, before.as_deref());
         }
+        if let Some((panel, id, before)) = menu_move {
+            crate::toolbar_custom::move_in_menu(app, &tab, panel, id, before);
+        }
         if let Some(id) = toggle {
             crate::toolbar_custom::toggle(app, &tab, id);
         }
-        if let Some((at, id)) = menu {
-            ui.ctx().data_mut(|d| d.remove::<egui::Id>(egui::Id::unique("sc_panel_open")));
+        // A right-click closes the drop-down; a row's ⋯ opens its menu over it.
+        if let Some((at, id, keep_open)) = menu {
+            if !keep_open {
+                ui.ctx().data_mut(|d| d.remove::<egui::Id>(egui::Id::unique("sc_panel_open")));
+            }
             crate::context_menu::open_for(app, at, crate::context_menu::Target::ToolbarCommand { id: id.to_string() });
         }
         tab_click
@@ -2405,6 +2499,8 @@ fn menu_style(app: &SolveApp) -> ribbon::MenuStyle<'static> {
         focus: egui::Id::unique("dropdown_row"),
         entry: &["toolbar:", "dropdown:"],
         pin: "dropdown_pin:",
+        more: "dropdown_more:",
+        more_tip: solidcraft_ui_text::tr_label("More: pin, keyboard shortcut, toolbar"),
         hot: "dropdown_hot:",
         reveal: "ribbon:reveal",
     }
@@ -2523,6 +2619,7 @@ fn dropdown_grid(
     grouped: &[(Option<&'static str>, &'static solidcraft_engine::CommandSpec)],
     loose: &[&str],
     paints: &mut Vec<PersistentRibbonPaint>,
+    placed: &mut Vec<(&'static str, Rect)>,
 ) -> Option<(&'static str, ribbon::MenuAction)> {
     let labels: Vec<String> = grouped.iter().map(|(_, c)| app.tr_command(c.id, c.label).to_string()).collect();
     let headings: Vec<Option<String>> = grouped.iter().map(|(heading, _)| heading.map(group_heading_text)).collect();
@@ -2535,10 +2632,56 @@ fn dropdown_grid(
     let out = ribbon::grid(ui, &entries, loose, &menu_style(app));
     for cell in out.cells {
         if let Some((_, c)) = grouped.get(cell.index) {
+            placed.push((c.id, cell.rect.intersect(ui.clip_rect())));
             grid_cell_extras(app, ui, c, cell, paints);
         }
     }
     out.action.and_then(|(index, action)| grouped.get(index).map(|(_, c)| (c.id, action)))
+}
+
+/// A command of this drop-down dragged over it (#5080): a marker shows where it would go, before
+/// or after the command under the pointer (the nearer side: across in the grid, up or down in
+/// the list), and on release it goes there. `placed`: where each command was drawn, in order.
+/// Returns the command and the one it goes before (None: after the last).
+fn menu_drop(
+    ui: &egui::Ui,
+    placed: &[(&'static str, Rect)],
+    grid: bool,
+    group_of: &dyn Fn(&str) -> usize,
+) -> Option<(&'static str, Option<&'static str>)> {
+    let payload = egui::DragAndDrop::payload::<ui_kit::ReorderPayload<String>>(ui.ctx()).filter(|d| d.from_menu)?;
+    let dragged = placed.iter().map(|(id, _)| *id).find(|id| *id == payload.id)?;
+    let pointer = ui.ctx().pointer_latest_pos()?;
+    let (at, &(target, rect)) = placed.iter().enumerate().find(|(_, (_, r))| r.is_positive() && r.contains(pointer))?;
+    let mut after = if grid { pointer.x > rect.center().x } else { pointer.y > rect.center().y };
+    let mut at = at;
+    let mut rect = rect;
+    // A command stays within its group: over another group's command, the marker shows at its
+    // own group's nearer end, where the move puts it.
+    let own = group_of(dragged);
+    if group_of(target) != own {
+        let mine: Vec<usize> = placed.iter().enumerate().filter(|(_, (id, _))| group_of(id) == own).map(|(i, _)| i).collect();
+        let end = if group_of(target) < own { mine.first().map(|i| (*i, false)) } else { mine.last().map(|i| (*i, true)) };
+        let (i, a) = end?;
+        (at, after, rect) = (i, a, placed.get(i)?.1);
+    }
+    let before = if after { placed.get(at + 1).map(|(id, _)| *id) } else { placed.get(at).map(|(id, _)| *id) };
+    let t = Tokens::get();
+    let painter = ui.ctx().layer_painter(ui.layer_id());
+    let stroke = Stroke::new(2.0, t.accent);
+    if grid {
+        let x = if after { rect.right() - 1.0 } else { rect.left() + 1.0 };
+        painter.line_segment([pos2(x, rect.top() + 4.0), pos2(x, rect.bottom() - 4.0)], stroke);
+    } else {
+        let y = if after { rect.bottom() - 1.0 } else { rect.top() + 1.0 };
+        painter.line_segment([pos2(rect.left() + 4.0, y), pos2(rect.right() - 4.0, y)], stroke);
+    }
+    crate::scenario::publish_handle("menu_drop_marker", pos2(if grid { rect.center().x } else { rect.left() }, rect.center().y));
+    if !ui.input(|i| i.pointer.any_released()) {
+        return None;
+    }
+    egui::DragAndDrop::take_payload::<ui_kit::ReorderPayload<String>>(ui.ctx())?;
+    Some((dragged, before))
 }
 
 /// Command `c` as a grid icon.
@@ -2640,6 +2783,7 @@ fn ribbon_tooltip(app: &SolveApp, response: egui::Response, command: &solidcraft
         // The tool's own help, when it has one (#2758).
         if let Some(help) = crate::command_help::help(command.id) {
             ui.add(egui::Label::new(egui::RichText::new(help).color(t.text_dim)).wrap());
+            crate::command_help::illustration(ui, command.id);
         }
         let reason = if crate::drawing_workspace::active(app) && command.planned.is_some() {
             coming_soon(app, command).then(|| app.tr("ui.drawing_ribbon.planned"))
@@ -2688,11 +2832,12 @@ fn grid_action(
     app: &mut SolveApp,
     ui: &egui::Ui,
     action: Option<(&'static str, ribbon::MenuAction)>,
-    menu: &mut Option<(egui::Pos2, &'static str)>,
+    menu: &mut Option<(egui::Pos2, &'static str, bool)>,
     toggle: &mut Option<&'static str>,
 ) {
     match action {
-        Some((id, ribbon::MenuAction::Menu(at))) => *menu = Some((at, id)),
+        Some((id, ribbon::MenuAction::Menu(at))) => *menu = Some((at, id, false)),
+        Some((id, ribbon::MenuAction::More(at))) => *menu = Some((at, id, true)),
         Some((id, ribbon::MenuAction::TogglePin)) => *toggle = Some(id),
         Some((id, ribbon::MenuAction::Run(rect))) => {
             app.start_at(id, Some(rect));
@@ -2735,7 +2880,7 @@ fn sketch_create_menu(
     ui: &mut egui::Ui,
     cmds: &[&'static solidcraft_engine::CommandSpec],
     width: f32,
-    menu: &mut Option<(egui::Pos2, &'static str)>,
+    menu: &mut Option<(egui::Pos2, &'static str, bool)>,
     toggle: &mut Option<&'static str>,
 ) {
     let room = (ui.ctx().content_rect().bottom() - ui.cursor().top() - 64.0).max(ROW_H * 3.0);
@@ -2754,7 +2899,7 @@ fn sketch_create_menu(
                 crate::scenario::publish_handle(&format!("create_family:{}", f.label), response.response.rect.center());
             }
         }
-        ui.separator();
+        crate::ui_kit::Menu::separator(ui);
         let rest: Vec<_> = cmds.iter().copied().filter(|c| crate::sketch_families::family(c.id).is_none()).collect();
         dropdown_keys(app, ui, &rest);
         sketch_menu_rows(app, ui, &rest, width, menu, toggle);
@@ -2766,7 +2911,7 @@ fn sketch_menu_rows(
     ui: &mut egui::Ui,
     cmds: &[&'static solidcraft_engine::CommandSpec],
     width: f32,
-    menu: &mut Option<(egui::Pos2, &'static str)>,
+    menu: &mut Option<(egui::Pos2, &'static str, bool)>,
     toggle: &mut Option<&'static str>,
 ) {
     for c in cmds {
@@ -2775,7 +2920,8 @@ fn sketch_menu_rows(
         let revealed = app.sbox.reveal.as_ref().is_some_and(|r| r.preview && r.id == c.id);
         match dropdown_row(app, ui, c, width, pinned, revealed.then_some(1.0)) {
             None => {}
-            Some(ribbon::MenuAction::Menu(at)) => *menu = Some((at, c.id)),
+            Some(ribbon::MenuAction::Menu(at)) => *menu = Some((at, c.id, false)),
+            Some(ribbon::MenuAction::More(at)) => *menu = Some((at, c.id, true)),
             Some(ribbon::MenuAction::TogglePin) => *toggle = Some(c.id),
             Some(ribbon::MenuAction::Run(rect)) => {
                 app.start_at(c.id, Some(rect));
@@ -2991,9 +3137,18 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
         app.escape_owner = Some(crate::EscapeOwner::Overlay);
         return;
     }
+    // Select Other is above the underlying editor and has first refusal.
+    if crate::select_other::is_open(app) && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        crate::select_other::close(app);
+        app.esc_handled = true;
+        app.escape_owner = Some(crate::EscapeOwner::Overlay);
+        app.last_escape = None;
+        return;
+    }
     if popup_owner
         || inline_editor
         || chat_owner
+        || crate::ui_kit::text_edit_owned_escape(ctx)
         || (crate::viewport_status::enabled(app) && app.ui.palette_open)
         || (ctx.egui_wants_keyboard_input() && !(crate::viewport_status::enabled(app) && app.viewport_status.owns_focus(ctx)))
     {
@@ -3051,7 +3206,7 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
                 || crate::drawing_sheet_page::clear_view_selection(app)
             {
                 app.esc_handled = true;
-            } else if !app.session.selection.is_empty() {
+            } else if app.session.has_selection() {
                 app.esc_handled = true;
                 let _ = app.run("select.clear", json!({}));
             }
@@ -3209,9 +3364,10 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
                     crate::dialogs::cancel(app);
                 } else if crate::viewport_status::enabled(app) && crate::viewport_status::escape(app, repeat) {
                     app.last_escape = None;
-                } else if !app.session.selection.is_empty() || app.session.active_sketch.is_none() {
+                } else if app.session.has_selection() || app.session.active_sketch.is_none() {
                     crate::edit_clipboard::drop_cut(app);
                     app.tree.picked_joints.clear();
+                    app.viewport.edit_dimensions = None;
                     let _ = app.run("select.clear", json!({}));
                 }
                 // A single Esc with nothing left to cancel keeps the sketch open (#1804); a quick
@@ -4428,6 +4584,84 @@ mod home_tests {
 mod dropdown_tests {
     use super::*;
 
+    /// A command dragged out of the drop-down, list or grid, and dropped on the ribbon (on a
+    /// button, the panel's label or its free space) is pinned there, in both layouts and with
+    /// pinned commands left out of the menus.
+    #[test]
+    fn a_command_dragged_from_the_drop_down_onto_the_ribbon_is_pinned() {
+        for (mode, labels) in
+            [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked].into_iter().flat_map(|m| [(m, true), (m, false)])
+        {
+            for grid in [false, true] {
+                for target in ["button", "label", "free"] {
+                    let mut h = crate::scenario::Harness::new();
+                    h.app.home.open = false;
+                    h.call("ui.set", json!({"layout":mode}));
+                    h.call("ui.resize", json!({"width":1600,"height":1000}));
+                    h.app.preferences.ribbon_labels = labels;
+                    h.app.preferences.ribbon_icon_grid = grid;
+                    h.app.preferences.ribbon_menus_skip_pinned = true;
+                    h.frames(4);
+                    let label = crate::scenario::handle_at("panel:MODEL:CREATE").unwrap();
+                    let panel = crate::scenario::rect_of("panel:MODEL:CREATE").unwrap();
+                    let to = match target {
+                        "button" => crate::scenario::handle_at("button:solid.revolve").unwrap(),
+                        "label" => label,
+                        _ => pos2(panel.right() - 3.0, label.y - 30.0),
+                    };
+                    h.step(&json!({"click":{"handle":"panel:MODEL:CREATE"}})).unwrap();
+                    h.frames(4);
+                    // Slowly, as a hand drags: long enough for tooltips to show on the way.
+                    let from = crate::scenario::handle_at("dropdown:solid.box").unwrap();
+                    h.call("ui.drag", json!({"x0": from.x, "y0": from.y, "x1": to.x, "y1": to.y, "steps": 60, "hold_end": 60}));
+                    h.frames(4);
+                    let why = format!("{mode:?}, labels {labels}, grid {grid}, onto the {target}");
+                    assert!(crate::toolbar_custom::pinned_on(&h.app, "MODEL", "solid.box").is_some(), "{why}: pinned");
+                    assert!(h.app.session.doc.features.is_empty(), "{why}: not run");
+                }
+            }
+        }
+    }
+
+    /// #5080: a command dragged to another place in its drop-down (list or grid) goes there,
+    /// a marker showing where while dragging; the order stays after a restart, and dropped on
+    /// itself nothing changes. It is not pinned.
+    #[test]
+    fn a_command_dragged_inside_its_drop_down_moves_there() {
+        for grid in [false, true] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", json!({"width":1600,"height":1000}));
+            h.app.preferences.ribbon_icon_grid = grid;
+            let order = |h: &mut crate::scenario::Harness| {
+                h.frames(4);
+                h.step(&json!({"click":{"handle":"panel:MODEL:CREATE"}})).unwrap();
+                h.frames(4);
+                let mut rows = crate::scenario::handles("dropdown:");
+                rows.sort_by_key(|(_, at)| (at.y.round() as i32, at.x.round() as i32));
+                rows.into_iter().map(|(id, _)| id.trim_start_matches("dropdown:").to_string()).collect::<Vec<_>>()
+            };
+            let before = order(&mut h);
+            let at_box = crate::scenario::handle_at("dropdown:solid.box").unwrap();
+            // The near side of Box: its left in the grid, its top in the list.
+            let to = at_box - if grid { vec2(ribbon::GRID_CELL / 4.0, 0.0) } else { vec2(0.0, ROW_H / 4.0) };
+            let from = crate::scenario::handle_at("dropdown:solid.sphere").unwrap();
+            h.call("ui.drag", json!({"x0": from.x, "y0": from.y, "x1": to.x, "y1": to.y, "steps": 30, "hold_end": 10}));
+            h.frames(4);
+            h.step(&json!({"key":"Escape"})).unwrap();
+            let after = order(&mut h);
+            h.step(&json!({"key":"Escape"})).unwrap();
+            let pos = |v: &[String], id: &str| v.iter().position(|x| x == id).unwrap();
+            assert_eq!(pos(&after, "solid.sphere") + 1, pos(&after, "solid.box"), "grid {grid}: Sphere now before Box: {after:?}");
+            assert_eq!(after.len(), before.len());
+            assert!(crate::toolbar_custom::pinned_on(&h.app, "MODEL", "solid.sphere").is_none(), "grid {grid}: not pinned");
+            h.step(&json!({"restart":"close"})).unwrap();
+            h.app.home.open = false;
+            h.app.preferences.ribbon_icon_grid = grid;
+            assert_eq!(order(&mut h), after, "grid {grid}: kept after a restart");
+        }
+    }
+
     #[test]
     fn sketch_create_families_have_icons_and_open_their_variants() {
         let mut h = crate::scenario::Harness::new();
@@ -4948,6 +5182,50 @@ mod dropdown_tests {
         }
         let box_ = solidcraft_engine::find_command("solid.box").unwrap();
         assert_eq!(skip_on_ribbon(vec![box_], &["solid.box"]).len(), 1, "a drop-down is never left empty");
+    }
+
+    #[test]
+    fn grouped_dropdowns_match_heading_layout_and_share_the_menu_separator() {
+        for theme in ["dark", "blueprint"] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", json!({"width":1280,"height":800}));
+            h.call("ui.prefs", json!({"theme": theme, "construct_menu_groups": true, "ribbon_icon_grid": false}));
+            for panel in ["panel:MODEL:MODIFY", "panel:MODEL:CONSTRUCT"] {
+                h.frames(4);
+                h.step(&json!({"click":{"handle":panel}})).unwrap();
+                h.frames(6);
+                let bounds = crate::scenario::rect_of("toolbar_dropdown").expect("the drop-down is open");
+                let mut output = h.ctx.run_ui(
+                    egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1280.0, 800.0))), ..Default::default() },
+                    |ui| h.app.ui(ui),
+                );
+                output.textures_delta.clear();
+                let mut rules = Vec::new();
+                for clipped in &output.shapes {
+                    crate::ui_kit::test_support::each_shape(&clipped.shape, &mut |shape| {
+                        if let egui::Shape::LineSegment { points: [a, b], stroke } = shape
+                            && (a.y - b.y).abs() < 0.01
+                            && (b.x - a.x).abs() >= bounds.width() * 0.7
+                            && bounds.contains(*a)
+                            && bounds.contains(*b)
+                        {
+                            rules.push(*stroke);
+                        }
+                    });
+                }
+                assert_eq!(rules.len(), 1, "{theme} {panel}: expected only the footer separator, got {rules:?}");
+                let expected = crate::ui_kit::Menu::separator_stroke(&Tokens::get());
+                assert_eq!(rules[0], expected, "{theme} {panel}: expected shared menu separator stroke");
+                assert!(
+                    solidcraft_theme::contrast_ratio(rules[0].color, Tokens::get().dialog_body) >= crate::ui_kit::Menu::SEPARATOR_MIN_CONTRAST,
+                    "{theme} {panel}: separator {:?} blends into {:?}",
+                    rules[0],
+                    Tokens::get().dialog_body
+                );
+                h.step(&json!({"key":"Escape"})).unwrap();
+            }
+        }
     }
 }
 
@@ -6016,6 +6294,10 @@ mod app_bar_tests {
         // plugin's row at its foot is on screen without scrolling the menu.
         h.call("ui.resize", json!({"width":1600,"height":1600}));
         h.frames(3);
+        // The plugin slot is the File menu's last row, and Revert to Saved made the menu one row taller:
+        // in the default 1600 x 1000 window it would sit below the fold, so give the window room.
+        h.call("ui.resize", json!({"width":1600,"height":1200}));
+        h.frames(3);
         h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
         h.step(&json!({"widget":"Workshop helper · measure"})).unwrap();
         h.frames(2);
@@ -6934,6 +7216,147 @@ mod command_start_tab_tests {
         h.app.session.selection = vec![face];
         h.app.start("occurrence.ground");
         assert!(!grounded(&h), "a picked face toggles its placement back: {:?}", h.app.status);
+    }
+
+    /// A design with a 40 x 30 x 20 box, saved as a file and inserted into a new design as a
+    /// linked component: the app, the component, its placement and the folder the file is in.
+    fn with_a_linked_component(name: &str) -> (Harness, u64, u64, std::path::PathBuf) {
+        let folder = std::env::temp_dir().join(format!("solidcraft-break-link-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let source = folder.join("part.solidcraft");
+        let mut part = solidcraft_engine::Session::default();
+        part.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        part.execute("file.save", &json!({"path": source})).unwrap();
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        let inserted = h.app.run("component.insert_design", json!({"path": source})).unwrap();
+        h.app.ui.tab = "INSERT".into();
+        h.app.status = None;
+        let (component, occurrence) = (inserted["component"].as_u64().unwrap(), inserted["occurrence"].as_u64().unwrap());
+        (h, component, occurrence, folder)
+    }
+
+    /// The ribbon's Break Link ran `component.break_link` with no component, so it always
+    /// failed with "`component` must be a component id or name". With a linked component's
+    /// placement selected in the Browser it breaks that component's link, and the body stays.
+    #[test]
+    fn ribbon_break_link_breaks_the_link_of_the_selected_placement() {
+        let (mut h, component, occurrence, folder) = with_a_linked_component("placement");
+        assert!(h.app.session.doc.links.contains_key(&component));
+        let bodies = h.app.session.model.state().bodies.len();
+        h.app.run("select.set", json!({"items": [{"type": "occurrence", "path": [occurrence]}]})).unwrap();
+        h.app.start("component.break_link");
+        assert!(!h.app.session.doc.links.contains_key(&component), "the link is broken: {:?}", h.app.status);
+        assert_eq!(h.app.session.model.state().bodies.len(), bodies, "its bodies stay");
+        let (status, _, error) = h.app.status.clone().expect("the status line says which link was broken");
+        assert_eq!(status, solidcraft_ui_text::format("ui.break_link_done", &[("name", "part")]));
+        assert!(!error);
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    /// A body of the linked component picked in the view stands for its placement, as it does
+    /// for Ground; so does the component picked in the Browser.
+    #[test]
+    fn ribbon_break_link_takes_the_component_of_a_picked_body_or_browser_row() {
+        let (mut h, component, _, folder) = with_a_linked_component("body");
+        let body = h.app.session.model.state().bodies.first().map(|b| b.name.clone()).unwrap();
+        h.app.run("select.set", json!({"items": [{"type": "body", "name": body}]})).unwrap();
+        h.app.start("component.break_link");
+        assert!(!h.app.session.doc.links.contains_key(&component), "the picked body's component: {:?}", h.app.status);
+        let _ = std::fs::remove_dir_all(folder);
+
+        let (mut h, component, _, folder) = with_a_linked_component("row");
+        h.app.tree.picked_components = vec![component];
+        h.app.start("component.break_link");
+        assert!(!h.app.session.doc.links.contains_key(&component), "the component picked in the Browser: {:?}", h.app.status);
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    /// A linked component inside a component that is not linked: a body of it picked in the view
+    /// breaks its link (the placement a drag or Ground takes for that body is the outer one,
+    /// which has no link), and so does its own placement's row. The outer component selected
+    /// breaks nothing: it is not linked.
+    #[test]
+    fn ribbon_break_link_finds_a_linked_component_inside_one_that_is_not_linked() {
+        let nested = |name: &str| {
+            let folder = std::env::temp_dir().join(format!("solidcraft-break-link-{name}-{}", std::process::id()));
+            std::fs::create_dir_all(&folder).unwrap();
+            let source = folder.join("part.solidcraft");
+            let mut part = solidcraft_engine::Session::default();
+            part.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
+            part.execute("file.save", &json!({"path": source})).unwrap();
+            let mut h = Harness::new();
+            h.app.home.open = false;
+            let holder = h.app.run("component.create", json!({"name": "Holder"})).unwrap();
+            let inserted = h.app.run("component.insert_design", json!({"path": source})).unwrap();
+            h.app.run("component.activate", json!({"component": 0})).unwrap();
+            h.app.status = None;
+            let ids = (holder["occurrence"].as_u64().unwrap(), inserted["component"].as_u64().unwrap(), inserted["occurrence"].as_u64().unwrap());
+            (h, ids, folder)
+        };
+        let (mut h, (holder, component, occurrence), folder) = nested("nested-body");
+        assert_eq!(
+            h.app.session.occurrence_placement(&[holder, occurrence]).ok().map(|p| p.component),
+            Some(component),
+            "the linked part is inside Holder"
+        );
+        h.app.run("select.set", json!({"items": [{"type": "occurrence", "path": [holder]}]})).unwrap();
+        h.app.start("component.break_link");
+        assert!(h.app.session.doc.links.contains_key(&component), "Holder is not linked: nothing is broken");
+        let body = h.app.session.model.state().bodies.first().map(|b| b.name.clone()).unwrap();
+        h.app.run("select.set", json!({"items": [{"type": "body", "name": body}]})).unwrap();
+        h.app.start("component.break_link");
+        assert!(!h.app.session.doc.links.contains_key(&component), "the picked body's linked component: {:?}", h.app.status);
+        let _ = std::fs::remove_dir_all(folder);
+
+        let (mut h, (holder, component, occurrence), folder) = nested("nested-row");
+        h.app.run("select.set", json!({"items": [{"type": "occurrence", "path": [holder, occurrence]}]})).unwrap();
+        h.app.start("component.break_link");
+        assert!(!h.app.session.doc.links.contains_key(&component), "its own placement's row: {:?}", h.app.status);
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    /// With no linked component among what is selected, Break Link says what to pick and changes
+    /// nothing: nothing selected, or a component that is not linked.
+    #[test]
+    fn ribbon_break_link_without_a_linked_component_says_what_to_pick() {
+        let (mut h, component, _, folder) = with_a_linked_component("nothing");
+        h.app.start("component.break_link");
+        let (status, _, error) = h.app.status.clone().expect("it says what to pick");
+        assert_eq!(status, h.app.tr("ui.break_link_select_first"));
+        assert!(!error);
+        assert!(h.app.session.doc.links.contains_key(&component), "nothing selected: the link stays");
+        let own = h.app.run("component.create", json!({"name": "Own"})).unwrap()["occurrence"].as_u64().unwrap();
+        h.app.run("component.activate", json!({"component": 0})).unwrap();
+        h.app.run("select.set", json!({"items": [{"type": "occurrence", "path": [own]}]})).unwrap();
+        h.app.status = None;
+        h.app.start("component.break_link");
+        assert_eq!(h.app.status.clone().map(|(status, _, _)| status), Some(h.app.tr("ui.break_link_select_first").to_string()));
+        assert!(h.app.session.doc.links.contains_key(&component), "a component that is not linked: the link stays");
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    /// A right-click on a linked component offers Break Link, beside Relink Source, and it
+    /// breaks that component's link; a component that is not linked does not offer it.
+    #[test]
+    fn a_linked_components_menu_offers_break_link() {
+        use crate::context_menu::{self, Target};
+        let (mut h, component, occurrence, folder) = with_a_linked_component("menu");
+        let own = h.app.run("component.create", json!({"name": "Own"})).unwrap()["component"].as_u64().unwrap();
+        h.app.run("component.activate", json!({"component": 0})).unwrap();
+        // Break Link sits in the menu's Component flyout, after Relink Source.
+        fn find(items: Vec<crate::ui_kit::Item>) -> Option<crate::ui_kit::Item> {
+            items.into_iter().find_map(|item| if item.id == "component.break_link" { Some(item) } else { find(item.children) })
+        }
+        let offered = |app: &SolveApp, target: Target| find(context_menu::items(app, &target));
+        assert!(offered(&h.app, Target::Component { id: own }).is_none(), "not for a component that is not linked");
+        assert!(offered(&h.app, Target::Occurrence { path: vec![occurrence] }).is_some(), "on its placement's row too");
+        let item = offered(&h.app, Target::Component { id: component }).expect("a linked component offers Break Link");
+        assert!(item.enabled);
+        context_menu::run_item(&mut h.app, &item, egui::Pos2::ZERO);
+        assert!(!h.app.session.doc.links.contains_key(&component), "the link is broken: {:?}", h.app.status);
+        assert!(offered(&h.app, Target::Component { id: component }).is_none(), "and no longer offered");
+        let _ = std::fs::remove_dir_all(folder);
     }
 
     /// #10540: View Fit, Home and the other view display commands act on the view the same way

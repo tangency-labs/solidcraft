@@ -73,7 +73,7 @@ use crate::geom::local_solve_nd::TerminationReason;
 use crate::geom::solution_array::{Solution, SolutionArray, SolutionObject, SortKey};
 use crate::geom::tol::is_zero;
 use crate::geom::vector2d::{Point2, Vec2};
-use crate::geom::vector3d::Point3;
+use crate::geom::vector3d::{sqrt, Point3};
 use crate::kernel::Kernel;
 use crate::math::{min2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQ, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
@@ -996,7 +996,10 @@ impl SurfPtGlobalSolver<'_> {
     /// off upstream); a result that is the wrong kind of extremum (or not on the
     /// surface for intersect, or pushing a boundary for normalise) is retried from a
     /// grid-refined guess; the best solution is returned with its across-seam
-    /// partners. Out-of-bounds evaluation is enabled for the solve. `surface_obj` is
+    /// partners, unless a target distance bounds it out (a minimum farther than the
+    /// target, or a maximum nearer, by more than the tolerance: #20438). Every request
+    /// is answered with that one candidate (`eSolutionRequested` is `NotUsed`
+    /// upstream). Out-of-bounds evaluation is enabled for the solve. `surface_obj` is
     /// the caller's handle for the surface.
     ///
     /// # Errors
@@ -1020,6 +1023,7 @@ impl SurfPtGlobalSolver<'_> {
         k: &Kernel,
         surface_obj: Option<O>,
     ) -> Result<SolutionArray<O>> {
+        self.set_dropped_beyond_target(false);
         let mut solutions = SolutionArray::new();
 
         // First find a rough guess.
@@ -1206,6 +1210,34 @@ impl SurfPtGlobalSolver<'_> {
                 sol = *s;
                 best_sol_value = sol.start.solution_value;
                 found_answer = true;
+            }
+        }
+
+        // Not upstream (#20438; `cpdOptTargetDistance` is `NotUsed` there): a target
+        // distance bounds the answer as it bounds the tree solve's, which seeds its
+        // best answer so far with the target's square (`GlobalPointSolve_0`) and culls
+        // a solution neither better than it nor within the tolerance of it
+        // (`AddSortedSolution`, the same expressions): a minimum farther than the
+        // target by more than the tolerance is not reported. Only a minimise is
+        // bounded here: the sort-out above keeps the nearest candidate for every
+        // operation, so for a maximise it is not the farthest (#13684) and a bound
+        // on it would drop answers the farther candidates honour; the kernel sends
+        // a maximise to the tree solve, which bounds every candidate. The tree solve
+        // culls only a minimum and a maximum by it.
+        if found_answer {
+            if let Some(target) = self.base.target_distance() {
+                let value = sol.start.solution_value;
+                let value_sq = value * value;
+                let best_sq = target * target;
+                let best = sqrt(best_sq.abs());
+                let (better, far) = match op {
+                    SolverOperation::Minimize => (value_sq < best_sq, value > best + loose_tol),
+                    _ => (true, false),
+                };
+                if !better && far {
+                    found_answer = false;
+                    self.set_dropped_beyond_target(true);
+                }
             }
         }
 
