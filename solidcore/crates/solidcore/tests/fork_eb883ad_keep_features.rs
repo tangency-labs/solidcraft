@@ -10,6 +10,7 @@
 #[path = "support/volume_leak.rs"]
 mod volume_leak;
 
+use solidcore::blend::definition_check::surface_kind_name;
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
@@ -749,30 +750,24 @@ fn boss_over_a_rounded_hole(k: &mut Kernel) -> Brep {
     boolean_difference(k, block, hole).unwrap()
 }
 
-/// The faces, edges and vertices of a sound solid, its rounds (faces on a procedural blend)
-/// and its volume.
-fn sound_counts(k: &mut Kernel, b: &mut Brep) -> ((usize, usize, usize, usize), f64) {
+/// The faces, edges and vertices of a sound solid, the kinds of its faces' surfaces (sorted) and
+/// its volume.
+fn sound_counts(k: &mut Kernel, b: &mut Brep) -> ((usize, usize, usize), Vec<&'static str>, f64) {
     assert!(solidcore::topology::brep::p2::is_manifold_solid(b).unwrap());
     let lines = check_brep(k, b, CheckLevel::Level2).unwrap().lines();
     assert!(lines.is_empty(), "{lines:?}");
-    let rounds = b
+    let mut kinds: Vec<&'static str> = b
         .face_list()
         .iter()
-        .filter(|&&f| {
-            b.face(f)
-                .unwrap()
-                .surface
-                .as_ref()
-                .is_some_and(|s| s.procedural_blend().is_some())
-        })
-        .count();
+        .map(|&f| surface_kind_name(b.face(f).unwrap().surface.as_ref().unwrap()))
+        .collect();
+    kinds.sort_unstable();
     let counts = (
         b.face_list().len(),
         b.edge_list().len(),
         b.vertex_list().len(),
-        rounds,
     );
-    (counts, volume_of(k, b))
+    (counts, kinds, volume_of(k, b))
 }
 
 #[test]
@@ -785,7 +780,9 @@ fn a_boss_beside_one_chain_is_not_reached_by_another_chain_s_round() {
     fillet_edges(&mut k, &mut apart, &[e], 1.0, 1, 1, 1.0).unwrap();
     let e = pick(&k, &apart, rim);
     fillet_edges(&mut k, &mut apart, &[e], 1.0, 1, 1, 1.0).unwrap();
-    let (want_counts, want) = sound_counts(&mut k, &mut apart);
+    let (want_counts, want_kinds, want) = sound_counts(&mut k, &mut apart);
+    // the block's 6 faces, the boss's side and top, the hole's wall and floor and the two rounds
+    assert_eq!(want_counts.0, 12, "{want_kinds:?}");
     // the closed forms: the front round's spandrel along its 40, and the rim round's revolved
     // about the hole's axis at its centroid (Pappus)
     let (a, r) = (1.5, 1.0);
@@ -802,8 +799,11 @@ fn a_boss_beside_one_chain_is_not_reached_by_another_chain_s_round() {
     let edges = [pick(&k, &b, front), pick(&k, &b, rim)];
     fillet_edges(&mut k, &mut b, &edges, r, 1, 1, 1.0)
         .expect("two chains clear of each other and of the boss");
-    let (counts, v) = sound_counts(&mut k, &mut b);
-    println!("one fillet {counts:?} {v:.12}; one after the other {want_counts:?} {want:.12}");
+    let (counts, kinds, v) = sound_counts(&mut k, &mut b);
+    println!(
+        "one fillet {counts:?} {kinds:?} {v:.12}; one after the other {want_counts:?} {want:.12}"
+    );
     assert_eq!(counts, want_counts);
+    assert_eq!(kinds, want_kinds);
     assert!((v - want).abs() <= 1e-9 * want, "volume {v}, want {want}");
 }
