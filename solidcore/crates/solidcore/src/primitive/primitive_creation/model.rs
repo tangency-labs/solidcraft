@@ -32,6 +32,7 @@ use std::collections::BTreeMap;
 use crate::blend::hcr::Hcr;
 use crate::boolean::topology_intersector::p1::Relations;
 use crate::curve::composite_curve::OffsetMapAttribute;
+use crate::error::primitive::PrimitiveFailure;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::attribute::{ids, Attribute, AttributeStore, AttributeValue, Behavior, TagData};
 use crate::geom::context::{MarkLock, MarkType};
@@ -183,37 +184,29 @@ impl<'k> PrimitiveModel<'k> {
     ///
     /// `SM_ERR_NULL_POINTER` for an unknown or deleted B-rep.
     pub fn take_brep(&mut self, id: BrepId) -> Result<Brep> {
-        let mut b = self
-            .breps
-            .get_mut(id.index() as usize)
-            .and_then(Option::take)
-            .ok_or_else(|| SolidError::primitive_missing(OP, "the model's B-rep"))?;
+        let mut b = model_slot(
+            self.breps
+                .get_mut(id.index() as usize)
+                .and_then(Option::take),
+        )?;
         // (not upstream) its objects take their attributes with them
         attributes::write_back(&mut self.attributes, id, &mut b)?;
         Ok(b)
     }
 
     /// (not upstream) Readies B-rep `id`'s attributes for an edit that notifies its
-    /// objects under `view`'s identities (`model/attributes.rs`).
-    fn enter_view(&mut self, id: BrepId, view: &dyn Fn(EntityRef) -> ObjectRef) -> Result<()> {
-        let b = self
-            .breps
-            .get_mut(id.index() as usize)
-            .and_then(Option::as_mut)
-            .ok_or_else(|| SolidError::primitive_missing(OP, "the model's B-rep"))?;
-        attributes::adopt(&mut self.attributes, id, b)?;
-        attributes::enter(&mut self.attributes, id, view)
-    }
-
-    /// (not upstream) Ends [`Self::enter_view`]: `decode` recognises the edit's
-    /// identities of B-rep `id`'s objects.
-    fn leave_view(
-        &mut self,
+    /// objects under `view`'s identities (`model/attributes.rs`); the B-rep, for the edit
+    /// and for [`attributes::leave`] after it.
+    fn enter_view<'b>(
+        breps: &'b mut [Option<Brep>],
+        store: &mut AttributeStore,
         id: BrepId,
-        decode: &dyn Fn(crate::geom::attribute::ObjectKey) -> Option<EntityRef>,
-    ) -> Result<()> {
-        let b = self.breps.get(id.index() as usize).and_then(Option::as_ref);
-        attributes::leave(&mut self.attributes, id, b, decode)
+        view: &dyn Fn(EntityRef) -> ObjectRef,
+    ) -> Result<&'b mut Brep> {
+        let b = model_slot(breps.get_mut(id.index() as usize).and_then(Option::as_mut))?;
+        attributes::adopt(store, id, b)?;
+        attributes::enter(store, id, view)?;
+        Ok(b)
     }
 
     /// Runs `body` on B-rep `id` with its records and the model's attributes under
@@ -225,14 +218,16 @@ impl<'k> PrimitiveModel<'k> {
         with_context: bool,
         body: impl FnOnce(&mut Kernel, &mut Brep, &mut NotifyEnv<'_>) -> Result<T>,
     ) -> Result<T> {
-        self.enter_view(id, &notify_ref)?;
+        let b = Self::enter_view(&mut self.breps, &mut self.attributes, id, &notify_ref)?;
         let result = (|| {
-            let b = self
-                .breps
-                .get_mut(id.index() as usize)
-                .and_then(Option::as_mut)
-                .ok_or_else(|| SolidError::primitive_missing(OP, "the model's B-rep"))?;
-            let mut state = ArenaNotifyState::new(b);
+            // (not upstream) The kernel's reused record map, as the stitch's glues and
+            // `p1::primitives::with_face_env` reuse it: a primitive that adds its faces one
+            // at a time (a revolve, a sweep) would otherwise give every object of the B-rep a
+            // default record for each face it adds, which is quadratic in the faces
+            // (solidcraft#15786). `reusing` leaves the records exactly as `new` leaves them.
+            let (tag, records) = crate::heal::stitch::p1::take_arena_records(self.k, b);
+            let serial = self.k.context.issued_brep_serial(b.notify_identity());
+            let mut state = ArenaNotifyState::reusing(records, b, serial);
             let attributes = &mut self.attributes;
             let run = |k: &mut Kernel, context: Option<&mut crate::geom::context::Context>| {
                 let mut env = NotifyEnv {
@@ -243,15 +238,18 @@ impl<'k> PrimitiveModel<'k> {
                 };
                 body(k, b, &mut env)
             };
-            if with_context {
+            let r = if with_context {
                 crate::geom::context::Context::with_notification_context(self.k, |k, context| {
                     run(k, Some(context))
                 })?
             } else {
                 run(self.k, None)
-            }
+            };
+            // the map goes back to the kernel for the next edit of this B-rep value
+            self.k.arena_notify_records = (tag, state.into_records());
+            r
         })();
-        let left = self.leave_view(id, &notify_entity);
+        let left = attributes::leave(&mut self.attributes, id, Some(&*b), &notify_entity);
         let value = result?;
         left?;
         Ok(value)
@@ -285,11 +283,30 @@ impl<'k> PrimitiveModel<'k> {
         result
     }
 
+    #[track_caller]
     fn slot(&mut self, id: BrepId) -> Result<&mut Brep> {
-        self.breps
-            .get_mut(id.index() as usize)
-            .and_then(Option::as_mut)
-            .ok_or_else(|| SolidError::primitive_missing(OP, "the model's B-rep"))
+        model_slot(
+            self.breps
+                .get_mut(id.index() as usize)
+                .and_then(Option::as_mut),
+        )
+    }
+}
+
+/// Why a B-rep id resolves to no B-rep of the model: the model's ids are its own handles.
+const NO_BREP: &str =
+    "a B-rep id names no slot of the model, or a slot whose B-rep is gone, though \
+                       the id is a handle the model issued and the kernel's primitive and sweep \
+                       code pass back only handles of B-reps they have not deleted or merged away";
+
+/// What a model B-rep id should find in its slot (the B-rep, or its marks, kept for every
+/// slot): a defect ([`PrimitiveFailure::Defect`], [`NO_BREP`]) with the status
+/// `SM_ERR_NULL_POINTER` of the `NER` it replaces when the slot is missing or empty.
+#[track_caller]
+fn model_slot<T>(found: Option<T>) -> Result<T> {
+    match found {
+        Some(v) => Ok(v),
+        None => Err(SolidError::primitive_broken_link(OP, NO_BREP)),
     }
 }
 
@@ -304,10 +321,7 @@ fn entity(e: SweepEntity) -> Result<(BrepId, Entity)> {
 
 impl SweepAccess for PrimitiveModel<'_> {
     fn brep(&self, id: BrepId) -> Result<&Brep> {
-        self.breps
-            .get(id.index() as usize)
-            .and_then(Option::as_ref)
-            .ok_or_else(|| SolidError::primitive_missing(OP, "the model's B-rep"))
+        model_slot(self.breps.get(id.index() as usize).and_then(Option::as_ref))
     }
     fn brep_mut(&mut self, id: BrepId) -> Result<&mut Brep> {
         self.slot(id)
@@ -350,21 +364,14 @@ impl SweepAccess for PrimitiveModel<'_> {
         if si == di {
             return Err(SolidError::invalid_input(OP, "aliased B-reps"));
         }
-        let (left, right) = self
-            .breps
-            .split_at_mut_checked(si.max(di))
-            .ok_or_else(|| SolidError::primitive_missing(OP, "the model's B-rep"))?;
+        let (left, right) = model_slot(self.breps.split_at_mut_checked(si.max(di)))?;
         let (src, dst) = if si < di {
             (left.get_mut(si), right.first_mut())
         } else {
             (right.first_mut(), left.get_mut(di))
         };
-        let src = src
-            .and_then(Option::as_mut)
-            .ok_or_else(|| SolidError::primitive_missing(OP, "the model's B-rep"))?;
-        let dst = dst
-            .and_then(Option::as_mut)
-            .ok_or_else(|| SolidError::primitive_missing(OP, "the model's B-rep"))?;
+        let src = model_slot(src.and_then(Option::as_mut))?;
+        let dst = model_slot(dst.and_then(Option::as_mut))?;
         let mut state = ArenaNotifyState::new(dst);
         // (not upstream) The model's attributes ride the edit's notifications: the
         // destination's objects under their identities (`notify_ref`), the source's
@@ -402,13 +409,8 @@ impl SweepAccess for PrimitiveModel<'_> {
         brep: BrepId,
         body: impl FnOnce(&mut Brep, &mut NotifyEnv<'_>) -> Result<T>,
     ) -> Result<T> {
-        self.enter_view(brep, &notify_ref)?;
-        let result = (|| {
-            let b = self
-                .breps
-                .get_mut(brep.index() as usize)
-                .and_then(Option::as_mut)
-                .ok_or_else(|| SolidError::primitive_missing(OP, "the model's B-rep"))?;
+        let b = Self::enter_view(&mut self.breps, &mut self.attributes, brep, &notify_ref)?;
+        let result = {
             let mut state = ArenaNotifyState::new(b);
             let mut env = NotifyEnv {
                 records: &mut state.records,
@@ -417,8 +419,8 @@ impl SweepAccess for PrimitiveModel<'_> {
                 key_of: &notify_ref,
             };
             body(b, &mut env)
-        })();
-        let left = self.leave_view(brep, &notify_entity);
+        };
+        let left = attributes::leave(&mut self.attributes, brep, Some(&*b), &notify_entity);
         let value = result?;
         left?;
         Ok(value)
@@ -502,13 +504,8 @@ impl SweepAccess for PrimitiveModel<'_> {
             u32::try_from(self.breps.len())
                 .map_err(|_| SolidError::invalid_input(OP, "too many B-reps"))?,
         );
-        self.enter_view(brep, &source_ref)?;
-        let made = (|| {
-            let model = self
-                .breps
-                .get(brep.index() as usize)
-                .and_then(Option::as_ref)
-                .ok_or_else(|| SolidError::primitive_missing(OP, "the model's B-rep"))?;
+        let model = Self::enter_view(&mut self.breps, &mut self.attributes, brep, &source_ref)?;
+        let made = {
             let mut state = ArenaNotifyState::default();
             crate::topology::brep::p3::seed_records(&mut state.records, model, &source_ref);
             let mut env = NotifyEnv {
@@ -518,8 +515,8 @@ impl SweepAccess for PrimitiveModel<'_> {
                 key_of: &notify_ref,
             };
             Hcr::with_transform(self.k, &mut env, model, &source_ref, &inverse, opts)
-        })();
-        let left = self.leave_view(brep, &source_entity);
+        };
+        let left = attributes::leave(&mut self.attributes, brep, Some(&*model), &source_entity);
         let mut hcr = made?;
         left?;
         attributes::leave(
@@ -530,8 +527,7 @@ impl SweepAccess for PrimitiveModel<'_> {
         )?;
         hcr.set_hcr_for_silhouettes(silhouettes);
         // fork c8f6a31 (WR-662): SER(sHCR.ComputeGlobalVisibility()).
-        let p = self.k.fixes.sweep_statuses_pass_on;
-        crate::error::ignore_or_pass_on(hcr.compute_global_visibility(self.k), p)?;
+        hcr.compute_global_visibility(self.k)?;
         let id = self.retain_hcr(brep, hcr)?;
         if id != scene {
             return Err(SolidError::port_invariant(OP, "HCR scene id moved"));
@@ -639,7 +635,7 @@ impl SweepAccess for PrimitiveModel<'_> {
                 use_existing_topology,
                 create_new_breps_for_faces,
             )?
-            .ok_or_else(|| SolidError::primitive_missing(OP, "the piecewise merge's B-rep"))
+            .ok_or_else(|| SolidError::primitive(OP, PrimitiveFailure::MergeGaveNoBrep))
         })
     }
     fn union(&mut self, merge: SweepMergeId) -> Result<BrepId> {
@@ -673,11 +669,11 @@ impl SweepAccess for PrimitiveModel<'_> {
         // `AddAttribute(new SmTagAttribute(SM_AI_TAG, ...))`: an `SmAObject` attribute
         // (copy behaviour), so later edits carry it as upstream's notifications do
         let (id, entity) = sweep_entity_ref(e);
-        let b = self
-            .breps
-            .get_mut(id.index() as usize)
-            .and_then(Option::as_mut)
-            .ok_or_else(|| SolidError::primitive_missing(OP, "the model's B-rep"))?;
+        let b = model_slot(
+            self.breps
+                .get_mut(id.index() as usize)
+                .and_then(Option::as_mut),
+        )?;
         if !b.is_live_entity(entity) {
             return Err(SolidError::NotFound {
                 operation: OP,
@@ -697,7 +693,7 @@ impl SweepAccess for PrimitiveModel<'_> {
             .edge(edge.1)?
             .curve
             .as_ref()
-            .ok_or_else(|| SolidError::primitive_missing(OP, "the edge's curve"))?;
+            .ok_or_else(|| SolidError::primitive(OP, PrimitiveFailure::EdgeWithoutCurve))?;
         Ok(None)
     }
     fn set_editing(&mut self, brep: BrepId, editing: bool) -> Result<bool> {
@@ -721,18 +717,12 @@ impl SweepAccess for PrimitiveModel<'_> {
     }
     fn is_marked(&self, e: SweepEntity, mark: MarkType) -> Result<bool> {
         let (b, x) = entity(e)?;
-        let marks = self
-            .marks
-            .get(b.index() as usize)
-            .ok_or_else(|| SolidError::primitive_missing(OP, "the B-rep's marks"))?;
+        let marks = model_slot(self.marks.get(b.index() as usize))?;
         Ok(marks.is_marked(self.k, x, mark))
     }
     fn mark(&mut self, e: SweepEntity, mark: MarkType) -> Result<()> {
         let (b, x) = entity(e)?;
-        let marks = self
-            .marks
-            .get_mut(b.index() as usize)
-            .ok_or_else(|| SolidError::primitive_missing(OP, "the B-rep's marks"))?;
+        let marks = model_slot(self.marks.get_mut(b.index() as usize))?;
         marks.mark(self.k, x, mark);
         Ok(())
     }
@@ -743,15 +733,13 @@ impl SweepAccess for PrimitiveModel<'_> {
         faces: &mut Vec<FaceId>,
     ) -> Result<()> {
         let index = face.0.index() as usize;
-        let b = self
-            .breps
-            .get(index)
-            .and_then(Option::as_ref)
-            .ok_or_else(|| SolidError::primitive_missing(OP, "the model's B-rep"))?;
-        let marks = self
-            .marks
-            .get_mut(index)
-            .ok_or_else(|| SolidError::primitive_missing(OP, "the B-rep's marks"))?;
+        // the marks are kept for every slot (`add_brep`), so one lookup finds both
+        let (b, marks) = model_slot(
+            self.breps
+                .get(index)
+                .and_then(Option::as_ref)
+                .zip(self.marks.get_mut(index)),
+        )?;
         crate::topology::topology_traverser::collect_faces(
             self.k,
             b,
@@ -771,11 +759,11 @@ impl PrimitiveAccess for PrimitiveModel<'_> {
         brep: BrepId,
         body: impl FnOnce(&mut Kernel, &mut Brep) -> Result<T>,
     ) -> Result<T> {
-        let b = self
-            .breps
-            .get_mut(brep.index() as usize)
-            .and_then(Option::as_mut)
-            .ok_or_else(|| SolidError::primitive_missing(OP, "the model's B-rep"))?;
+        let b = model_slot(
+            self.breps
+                .get_mut(brep.index() as usize)
+                .and_then(Option::as_mut),
+        )?;
         body(self.k, b)
     }
     fn delete_primitive_faces(&mut self, brep: BrepId, faces: &[FaceId]) -> Result<()> {
@@ -885,6 +873,51 @@ mod tests {
         face.unwrap()
     }
 
+    /// A primitive that adds its faces one at a time carries one notification record map
+    /// across its edits, so the work of readying the records does not grow with the faces
+    /// already in the B-rep. Seeding a map from scratch visits every object of the B-rep;
+    /// doing that once per added face is quadratic in the faces, which is what made a
+    /// revolve of a many-segment profile slow (solidcraft#15786).
+    #[test]
+    fn adding_many_faces_readies_the_records_without_reseeding_the_whole_brep() {
+        use crate::topology::brep::p2::seeded;
+        let faces_of = |n: usize| -> (u64, u64, usize) {
+            let mut kernel = Kernel::default();
+            let brep = crate::topology::brep::p3::new_brep(
+                &mut kernel,
+                crate::geom::tol::USE_DEFAULT,
+                crate::geom::tol::USE_DEFAULT,
+            )
+            .unwrap();
+            let mut model = PrimitiveModel::new(&mut kernel, brep);
+            let _ = seeded::take();
+            for _ in 0..n {
+                plane_face(&mut model, PrimitiveModel::MAIN);
+            }
+            let (calls, entities) = seeded::take();
+            let made = SweepAccess::faces(&mut model, PrimitiveModel::MAIN)
+                .unwrap()
+                .len();
+            (calls, entities, made)
+        };
+        // the faces are really made, so the counts below are not of an empty run
+        let (small_calls, small_entities, small_faces) = faces_of(8);
+        let (big_calls, big_entities, big_faces) = faces_of(32);
+        assert_eq!((small_faces, big_faces), (8, 32));
+        // Four times the faces must not cost about sixteen times the readying. A map seeded
+        // per face visits every object of the B-rep each time: here that is hundreds of
+        // visits for 8 faces and thousands for 32. Reusing the map seeds none.
+        assert!(
+            big_entities <= 4 * small_entities + 8 * big_faces as u64,
+            "readying grew faster than the faces: {small_entities} entities in {small_calls} seedings for {small_faces} faces, {big_entities} in {big_calls} for {big_faces}"
+        );
+        // and the work per face does not grow with the faces already there
+        assert!(
+            big_entities <= 8 * big_faces as u64,
+            "{big_faces} faces cost {big_entities} entity visits in {big_calls} seedings"
+        );
+    }
+
     #[test]
     fn hcr_scene_is_a_model_brep_until_deleted() {
         let mut kernel = Kernel::default();
@@ -932,7 +965,14 @@ mod tests {
         let other = SweepAccess::new_brep(&mut model, PrimitiveModel::MAIN).unwrap();
         SweepAccess::delete_brep(&mut model, PrimitiveModel::MAIN);
         SweepAccess::delete_brep(&mut model, other);
-        assert!(model.take_brep(other).is_err());
+        // a deleted B-rep's id is a defect keeping upstream's `NER` status
+        let e = model.take_brep(other).unwrap_err();
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert!(e.is_defect(), "{e}");
+        assert_eq!(
+            e.primitive_failure(),
+            Some(&PrimitiveFailure::Defect { why: NO_BREP })
+        );
         assert!(model.into_brep().is_ok());
     }
 
@@ -963,9 +1003,15 @@ mod tests {
         assert_eq!(main.face_list(), &[main_face]);
         assert_eq!(main.edge_list().len(), 4);
         assert_eq!(main.vertex_list().len(), 4);
-        assert!(model
+        // an id past the model's slots is the same defect
+        let e = model
             .delete_primitive_faces(BrepId::from_index(99), &[main_face])
-            .is_err());
+            .unwrap_err();
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(
+            e.primitive_failure(),
+            Some(&PrimitiveFailure::Defect { why: NO_BREP })
+        );
         assert_eq!(
             model.brep(PrimitiveModel::MAIN).unwrap().face_list(),
             &[main_face]

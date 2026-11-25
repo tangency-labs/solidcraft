@@ -16,7 +16,7 @@ use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 
 use super::check::whole;
-use super::types::{FaceRefs, FeatureCommon, PlaneParam, SketchRef, ToolFace, feature_common};
+use super::types::{FaceRefs, FeatureCommon, PlaneParam, Point3, SketchRef, ToolFace, feature_common};
 
 /// Cut a body into pieces along a plane, a face of another body (its surface extended), or a
 /// straight sketch line (along the sketch's normal). Each piece becomes a body.
@@ -30,6 +30,18 @@ pub struct SplitBodyParams {
     /// `line` is given.
     #[serde(default)]
     pub tool: Option<ToolFace>,
+    /// With `tool`: use only the face's infinite plane, which follows the face. The face must
+    /// remain planar. Default: false, use its extended surface and its sheet.
+    #[serde(default)]
+    pub tool_plane: Option<bool>,
+    /// With `tool`: what of the tool body cuts. `extended` (the default): the face's surface
+    /// extended. `faces`: the `tool` face and the faces at `tool_faces`, exactly as they are, not
+    /// extended. `body`: every face of the tool's surface body, exactly as it is.
+    #[serde(default)]
+    pub tool_sheet: Option<ToolSheet>,
+    /// With `tool_sheet` `faces`: a point on each other face of the tool body that cuts.
+    #[serde(default)]
+    pub tool_faces: Option<Vec<Point3>>,
     /// With `line`: the sketch, by feature id (not its name), whose line splits the body.
     #[serde(default)]
     pub sketch: Option<SketchFeatureId>,
@@ -64,12 +76,29 @@ pub struct SplitFaceParams {
     /// `tool` is given.
     #[serde(default)]
     pub sketch: Option<SketchRef>,
+    /// With `sketch`: true joins its curves end to end first, so a closed loop of lines and arcs
+    /// splits the faces along the loop only. Default: false, each curve on its own, an open one
+    /// extended past its ends.
+    #[serde(default)]
+    pub loops: Option<bool>,
     /// The plane to split along. Read when neither `tool` nor `sketch` is given; then it is
     /// required.
     #[serde(default)]
     pub plane: Option<PlaneParam>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
+}
+
+/// What of Split Body's tool body cuts (`tool_sheet`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolSheet {
+    /// The tool face's surface, extended.
+    Extended,
+    /// The picked faces, exactly as they are.
+    Faces,
+    /// Every face of the tool's surface body, exactly as it is.
+    Body,
 }
 
 /// Split Body's `body`, with the handler's message for anything that isn't text.

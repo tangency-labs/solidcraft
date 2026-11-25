@@ -12,21 +12,84 @@ use crate::geom::{
 };
 use crate::p21::Param;
 
+pub mod product;
 pub mod topology;
 
-/// A real as Part 21 writes it: always with a decimal point, exponent as `E`.
+/// Room for the longest text a finite `f64` makes: a sign, 17 mantissa digits, `.`, `e`, a sign
+/// and three exponent digits (24 in all).
+const REAL_MAX: usize = 32;
+
+/// A real as Part 21 writes it: always with a decimal point, exponent as `E`. Part 21 has no
+/// form for a value that is not finite: it is written as `0.`, and a [`Writer`] counts every one it
+/// writes ([`Writer::non_finite`]) so its caller can refuse the file.
 pub fn real(x: f64) -> String {
+    let mut o = String::with_capacity(REAL_MAX);
+    real_into(x, &mut o);
+    o
+}
+
+/// [`real`] written straight into `o`: the same bytes, without the one to three `String`s `real`
+/// makes for each. A file's every coordinate goes through here ([`param`]), so the export of a
+/// large assembly makes none of them.
+pub fn real_into(x: f64, o: &mut String) {
     if !x.is_finite() {
-        return "0.".into();
+        o.push_str("0.");
+        return;
     }
-    let s = format!("{x:?}");
+    let mut t = RealText::default();
+    if write!(t, "{x:?}").is_ok() {
+        real_text(t.as_str(), o);
+    } else {
+        // Not reachable for a finite `f64` (whose shortest form is 24 bytes at most); keep the
+        // bytes exact all the same.
+        real_text(&format!("{x:?}"), o);
+    }
+}
+
+/// The Part 21 form of `{x:?}`'s text `s`: a decimal point in the mantissa, the exponent's `e`
+/// written `E`.
+fn real_text(s: &str, o: &mut String) {
     match s.split_once('e') {
         Some((m, e)) => {
-            let m = if m.contains('.') { m.to_string() } else { format!("{m}.") };
-            format!("{m}E{e}")
+            o.push_str(m);
+            if !m.contains('.') {
+                o.push('.');
+            }
+            o.push('E');
+            o.push_str(e);
         }
-        None if s.contains('.') => s,
-        None => format!("{s}."),
+        None => {
+            o.push_str(s);
+            if !s.contains('.') {
+                o.push('.');
+            }
+        }
+    }
+}
+
+/// `{x:?}` taken into a stack buffer of [`REAL_MAX`], so formatting a real allocates nothing.
+#[derive(Default)]
+struct RealText {
+    bytes: [u8; REAL_MAX],
+    len: usize,
+}
+
+impl RealText {
+    fn as_str(&self) -> &str {
+        match self.bytes.get(..self.len).map(std::str::from_utf8) {
+            Some(Ok(s)) => s,
+            _ => "",
+        }
+    }
+}
+
+impl std::fmt::Write for RealText {
+    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+        let end = self.len.checked_add(s.len()).ok_or(std::fmt::Error)?;
+        let slot = self.bytes.get_mut(self.len..end).ok_or(std::fmt::Error)?;
+        slot.copy_from_slice(s.as_bytes());
+        self.len = end;
+        Ok(())
     }
 }
 
@@ -57,7 +120,7 @@ fn param(p: &Param, o: &mut String) {
         Param::Int(i) => {
             let _ = write!(o, "{i}");
         }
-        Param::Real(x) => o.push_str(&real(*x)),
+        Param::Real(x) => real_into(*x, o),
         Param::Str(s) => o.push_str(&string(s)),
         Param::Enum(e) => {
             let _ = write!(o, ".{e}.");
@@ -84,6 +147,17 @@ fn param(p: &Param, o: &mut String) {
     }
 }
 
+/// How many reals in `v` (lists and typed values included) are not finite.
+fn non_finite(v: &[Param]) -> usize {
+    v.iter()
+        .map(|p| match p {
+            Param::Real(x) => usize::from(!x.is_finite()),
+            Param::List(v) | Param::Typed(_, v) => non_finite(v),
+            _ => 0,
+        })
+        .sum()
+}
+
 fn params(v: &[Param], o: &mut String) {
     for (i, p) in v.iter().enumerate() {
         if i > 0 {
@@ -99,6 +173,7 @@ fn params(v: &[Param], o: &mut String) {
 pub struct Writer {
     lines: Vec<String>,
     shared: HashMap<String, u64>,
+    non_finite: usize,
 }
 
 impl Writer {
@@ -130,12 +205,14 @@ impl Writer {
 
     /// A simple entity instance, shared with an identical earlier one.
     pub fn add(&mut self, name: &str, p: &[Param]) -> u64 {
+        self.non_finite += non_finite(p);
         self.push(Self::simple(name, p))
     }
 
     /// A simple entity instance of its own, even when an identical one exists: an entity whose
     /// identity matters (two vertices at one point are two vertices; a product is one product).
     pub fn add_distinct(&mut self, name: &str, p: &[Param]) -> u64 {
+        self.non_finite += non_finite(p);
         self.push_distinct(&Self::simple(name, p))
     }
 
@@ -145,6 +222,7 @@ impl Writer {
         sorted.sort_by(|a, b| a.0.cmp(b.0));
         let mut body = String::from("(");
         for (name, p) in sorted {
+            self.non_finite += non_finite(p);
             body.push_str(name);
             body.push('(');
             params(p, &mut body);
@@ -152,6 +230,12 @@ impl Writer {
         }
         body.push(')');
         self.push(body)
+    }
+
+    /// How many reals that are not finite were written so far (each as `0.`). A file with any is
+    /// not the geometry it was given.
+    pub fn non_finite(&self) -> usize {
+        self.non_finite
     }
 
     /// Entities added so far.
@@ -176,7 +260,7 @@ impl Writer {
     /// A whole exchange file around the entities written so far.
     pub fn file(&self, name: &str, schema: &str) -> String {
         format!(
-            "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION((''),'2;1');\nFILE_NAME({},'',(''),(''),'SolidCraft','SolidCraft','');\nFILE_SCHEMA(({}));\nENDSEC;\nDATA;\n{}ENDSEC;\nEND-ISO-10303-21;\n",
+            "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION((''),'2;1');\nFILE_NAME({},'',(''),(''),'','','');\nFILE_SCHEMA(({}));\nENDSEC;\nDATA;\n{}ENDSEC;\nEND-ISO-10303-21;\n",
             string(name),
             string(schema),
             self.data()
@@ -522,6 +606,67 @@ impl<'w> GeomWriter<'w> {
                 ("REPRESENTATION_ITEM", vec![s()]),
                 ("SURFACE", vec![]),
             ]),
+        }
+    }
+}
+
+#[cfg(test)]
+mod real_tests {
+    use super::{real, real_into};
+
+    /// The exact text each value must keep: Part 21's form of the shortest round-tripping decimal
+    /// (`{x:?}`), with a decimal point in the mantissa and the exponent written `E`. Pinned from
+    /// the writer's behaviour before [`real_into`] replaced the allocating form, so the change
+    /// cannot move a byte of a file.
+    #[test]
+    fn the_text_of_a_real_is_unchanged() {
+        let cases: &[(f64, &str)] = &[
+            (0.0, "0.0"),
+            (-0.0, "-0.0"),
+            (1.0, "1.0"),
+            (-1.0, "-1.0"),
+            (0.5, "0.5"),
+            (0.1, "0.1"),
+            (1.0 / 3.0, "0.3333333333333333"),
+            (100.0, "100.0"),
+            (1e15, "1000000000000000.0"),
+            (1e16, "1.E16"),
+            (1e17, "1.E17"),
+            (1e-5, "1.E-5"),
+            (1e-6, "1.E-6"),
+            (1e-7, "1.E-7"),
+            (1.5e-7, "1.5E-7"),
+            (1.25e-7, "1.25E-7"),
+            (-1e-7, "-1.E-7"),
+            (2.5e20, "2.5E20"),
+            (-2.5e20, "-2.5E20"),
+            (3.0e100, "3.E100"),
+            (1e308, "1.E308"),
+            (f64::MAX, "1.7976931348623157E308"),
+            (f64::MIN_POSITIVE, "2.2250738585072014E-308"),
+            (5e-324, "5.E-324"),
+            (f64::EPSILON, "2.220446049250313E-16"),
+            (123456789012345678.0, "1.2345678901234568E17"),
+            // Part 21 has no form for these: they are written as `0.`, counted by the writer.
+            (f64::NAN, "0."),
+            (f64::INFINITY, "0."),
+            (f64::NEG_INFINITY, "0."),
+        ];
+        for &(x, want) in cases {
+            assert_eq!(real(x), want, "real({:?})", x.to_bits());
+            let mut into = String::new();
+            real_into(x, &mut into);
+            assert_eq!(into, want, "real_into({:?})", x.to_bits());
+        }
+    }
+
+    /// Every finite `f64`'s shortest form fits the stack buffer, so the allocating fallback of
+    /// [`real_into`] is never taken and the text stays exact for the whole domain.
+    #[test]
+    fn a_finite_reals_text_fits_the_stack_buffer() {
+        let longest = [f64::MAX, f64::MIN, f64::MIN_POSITIVE, 5e-324, -f64::MAX, -1.7976931348623157e308, -0.30000000000000004, 9007199254740993.0];
+        for x in longest {
+            assert!(format!("{x:?}").len() < super::REAL_MAX, "{x:?} is longer than REAL_MAX");
         }
     }
 }

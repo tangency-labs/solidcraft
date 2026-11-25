@@ -5,6 +5,7 @@
 //! Upstream: `source/SMLib/src/SmFace.cpp`, `source/SMLib/inc/SmFace.h`.
 
 pub mod assert_tests;
+pub mod curve_on;
 pub mod p1;
 pub mod p2;
 pub mod p3;

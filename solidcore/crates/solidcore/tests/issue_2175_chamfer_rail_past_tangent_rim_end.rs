@@ -1,6 +1,6 @@
 //! tangency-labs/solidcore#2175: a chamfer whose rail leaves its face before the end of
 //! the filleted edge, where the edge meets the face's side edge tangentially, was not
-//! refused with `fillet_refuse_rails_leaving_faces` (WR-302): `do_filleting` returned
+//! refused by the check of rails leaving their faces (WR-302): `do_filleting` returned
 //! `Ok` with an open body.
 //!
 //! The body is a block with an arc side (17.5 high) less a ball r 5 at (2.5, 22.5, 5).
@@ -13,14 +13,17 @@
 //! (-0.207, 22.045, 0.821). `RailsFitTheirFaces` skipped that middle off-face run (the
 //! #1580 skip of a run wholly past an end) because both of its ends lie past an end of
 //! the edge, though not the same one. The fork (tangency-labs/smlib at 5afca53, the same
-//! chamfer through `SmFilletExecutive`, rails identical to the port's with the flag)
+//! chamfer through `SmFilletExecutive`, rails identical to the port's)
 //! judges the run and refuses the chamfer with `SM_FILERR_NO_ROOM` (8): "a rail leaves
 //! the face it rolls on, and the fillet ends on more than one face". Pinned SMLib returns
-//! success with the open body (14 faces, not a manifold solid), as the port does without
-//! the flag.
+//! success with the open body (14 faces, not a manifold solid), as the port did without
+//! the check.
 //!
 //! The #1580 skip now asks for both ends of the run on or beyond the cross section at the
-//! same end of the filleted edge.
+//! same end of the filleted edge. A run that leaves past one end and comes back past the
+//! other is no cliff overflow: the cliff-overflow choice refuses it as a rail leaving its
+//! face (`NoRoomReason::RailLeavesFace`), before the corners, where the bevelled End
+//! corners would only later turn the global merge on (the fork's own refusal).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -143,20 +146,18 @@ fn chamfer(k: &mut Kernel) -> Result<(usize, bool), i32> {
     Ok((b.face_list().len(), is_manifold_solid(&b).unwrap()))
 }
 
-/// SolidCraft's fixes: every `UpstreamFixes` field on except `geometric_g2_continuity`.
+/// SolidCraft's fixes: every `UpstreamFixes` field on.
 fn solidcraft_kernel() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *f.flag_mut(name).unwrap() = true;
-        }
+        *f.flag_mut(name).unwrap() = true;
     }
     k.fixes = f;
     k
 }
 
-/// Every fix but `geometric_g2_continuity`: refused. Before
+/// Every fix: refused. Before
 /// smlib#124 the trace ran on to the edge's ends before it was extended (from smlib#82,
 /// `c2_trace_to_edge_ends`), the rails no longer left their faces, and the chamfer built a
 /// manifold solid of 12 faces, as the fork does at b785227 (smlib#82 merged, before
@@ -177,8 +178,7 @@ fn chamfer_past_the_bottom_is_refused_with_the_blend_corner() {
 }
 
 #[test]
-fn chamfer_past_the_bottom_is_no_room_with_the_flag() {
+fn chamfer_past_the_bottom_is_no_room_on_the_default_kernel() {
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_rails_leaving_faces = true;
     assert_eq!(chamfer(&mut k), Err(FilletErrorType::NoRoom as i32));
 }

@@ -12,7 +12,7 @@ use solidcraft_doc::Occurrence;
 
 use super::check::{located, whole};
 use super::component_link::{ComponentRef, component_key, require};
-use super::types::{IdOrName, Point3, PointExpr3, not_blank_pattern, present};
+use super::types::{IdOrName, LengthExpr, Point3, PointExpr3, not_blank_pattern, present};
 use crate::params;
 
 /// Edit a linked component's design in place. In the app window: open the design it links in a
@@ -572,6 +572,14 @@ pub struct CreateParams {
     #[serde(default, deserialize_with = "grounded_flag", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub grounded: Option<bool>,
+    /// What one placement means in a bill of materials, as an expression (`component.metadata.set`'s
+    /// `bom_quantity`). Default: one.
+    #[serde(default)]
+    pub bom_quantity: Option<String>,
+    /// A component with no geometry (grease, paint, a label): listed in bills of materials with
+    /// its quantity, never active, and nothing can be put in it. Only `true`. Default: not virtual.
+    #[serde(default, rename = "virtual")]
+    pub r#virtual: Option<bool>,
 }
 
 /// What `component.create` returns.
@@ -807,11 +815,24 @@ pub struct PlacementInfo {
     pub transform: [[f64; 4]; 4],
     /// Whether it is grounded.
     pub grounded: bool,
+    /// How this occurrence counts in the bill of materials, in place of its component's type;
+    /// left out when it counts as its component.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<String>")]
+    pub bom_type: Option<solidcraft_doc::BomType>,
 }
 
 impl From<&Occurrence> for PlacementInfo {
     fn from(o: &Occurrence) -> Self {
-        PlacementInfo { id: o.id, component: o.component, parent: o.parent, name: o.name.clone(), transform: o.transform, grounded: o.grounded }
+        PlacementInfo {
+            id: o.id,
+            component: o.component,
+            parent: o.parent,
+            name: o.name.clone(),
+            transform: o.transform,
+            grounded: o.grounded,
+            bom_type: o.bom_type,
+        }
     }
 }
 
@@ -828,6 +849,11 @@ pub struct CompactPlacement {
     /// Its placement in its parent, as a 4×4 matrix; left out when it is the identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transform: Option<[[f64; 4]; 4]>,
+    /// How this occurrence counts in the bill of materials, in place of its component's type;
+    /// left out when it counts as its component.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<String>")]
+    pub bom_type: Option<solidcraft_doc::BomType>,
 }
 
 /// A placement in a component's `occurrences`: in full, or compact.
@@ -881,6 +907,12 @@ pub struct ComponentNode {
 pub struct ListResult {
     /// The active component, by id.
     pub active: u64,
+    /// The exact occurrence path selected for authoring, from the root to the active component.
+    /// Empty for component-only activation, including the design root; no placement is inferred.
+    /// To restore a nonempty path, call `component.activate` with `component: active`,
+    /// `occurrence` set to the path's last id, and `path: active_path`.
+    /// For an empty path, pass only `component: active`; omit `occurrence` and `path`.
+    pub active_path: Vec<u64>,
     /// The design and its components.
     pub components: Vec<ComponentNode>,
     /// The occurrences with a move not captured yet, by id.
@@ -1018,19 +1050,37 @@ pub struct PropertiesResult {
     pub name: String,
     #[serde(flatten)]
     pub properties: PhysicalProperties,
+    /// What robot exports use instead of the measured values (`component.physical_override`),
+    /// when one is saved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub physical_override: Option<PhysicalOverrideSaved>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
 }
 
-/// The new name `component.rename` reads: text of 1 to 128 bytes once trimmed.
+/// A component's saved physical override (`component.physical_override`).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, JsonSchema)]
+pub struct PhysicalOverrideSaved {
+    /// The mass, in kg.
+    pub mass: f64,
+    /// The centre of mass in the component's frame, in mm; left out for the measured one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub com: Option<[f64; 3]>,
+    /// The inertia [xx, yy, zz, xy, xz, yz] about the centre of mass along the component's axes,
+    /// in kg m²; left out for the measured one scaled to the mass.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inertia: Option<[f64; 6]>,
+}
+
+/// The new name `component.rename` reads: text of 1 to 128 characters once trimmed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ComponentName(pub String);
 
 impl<'de> Deserialize<'de> for ComponentName {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         match Value::deserialize(d)? {
-            Value::String(s) if !s.trim().is_empty() && s.trim().len() <= 128 => Ok(ComponentName(s)),
+            Value::String(s) if !s.trim().is_empty() && s.trim().chars().count() <= 128 => Ok(ComponentName(s)),
             _ => Err(D::Error::custom(whole("`name` must be 1…128 characters"))),
         }
     }
@@ -1042,7 +1092,7 @@ impl JsonSchema for ComponentName {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
-            "description": "Text with something in it; once surrounding blanks are cut, at most 128 bytes.",
+            "description": "Text with something in it; once surrounding blanks are cut, at most 128 characters.",
             "type": "string",
             "pattern": not_blank_pattern()
         })
@@ -1123,8 +1173,61 @@ pub struct UnlockParams {
 pub struct UnlockResult {
     /// The component, by id.
     pub component: u64,
-    /// The joints removed, by id.
+    /// The rigid joints removed, by id (an import saved before rigid groups held its contents
+    /// with these).
     pub joints: Vec<u64>,
+    /// The rigid group removed, by id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rigid_group: Option<u64>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Keep a component's features in the design but out of the History bar (`component.hide_history`),
+/// or put them back (`component.show_history`). A component inside one that is hidden is left out of
+/// the bar too; the design itself never is, and its features always show.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = component_required)]
+pub struct HistoryVisibilityParams {
+    // Optional in the type and required in the schema (`component_required`).
+    /// The component, by id or name.
+    #[serde(default, deserialize_with = "component", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ComponentRef")]
+    pub component: Option<ComponentRef>,
+}
+
+/// Give a component the next colour of the Component Colors palette (`component.cycle_color`). The
+/// colour is shared by every instance of the component and is separate from its appearances.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = component_required)]
+pub struct CycleColorParams {
+    // Optional in the type and required in the schema (`component_required`).
+    /// The component, by id or name.
+    #[serde(default, deserialize_with = "component", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ComponentRef")]
+    pub component: Option<ComponentRef>,
+}
+
+/// What both commands return: the component they changed and how its history sits now.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct HistoryVisibilityResult {
+    /// The component, by id.
+    pub component: u64,
+    /// Whether its features are left out of the History bar now.
+    pub history_hidden: bool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// What `component.cycle_color` returns: the component it changed and the colour it has now.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct CycleColorResult {
+    /// The component, by id.
+    pub component: u64,
+    /// Its identification colour now, as red, green and blue.
+    pub color: [u8; 3],
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -1144,7 +1247,7 @@ pub struct UnlockResult {
 // ---------------------------------------------------------------------------------------------
 
 /// The message of a handler's refusal, to give whole.
-fn refusal(e: crate::EngineError) -> String {
+pub(crate) fn refusal(e: crate::EngineError) -> String {
     match e {
         crate::EngineError::BadParams { msg, .. } => msg,
         e => e.to_string(),
@@ -1185,11 +1288,13 @@ fn without(mut value: Value, keys: &[&str]) -> Value {
 /// in size, with its message `key must contain three finite numbers` for anything else, `null`
 /// included.
 fn move_point_key<'de, D: Deserializer<'de>>(d: D, key: &str, coordinate: bool) -> Result<Option<Point3>, D::Error> {
+    move_point_value::<D::Error>(Value::deserialize(d)?, key, coordinate)
+}
+
+fn move_point_value<E: serde::de::Error>(value: Value, key: &str, coordinate: bool) -> Result<Option<Point3>, E> {
     let mut one = serde_json::Map::new();
-    one.insert(key.to_string(), Value::deserialize(d)?);
-    crate::cmd::move_vector(&Value::Object(one), key, Vec3::ZERO, coordinate, "")
-        .map(|v| Some(Point3(v)))
-        .map_err(|e| D::Error::custom(whole(refusal(e))))
+    one.insert(key.to_string(), value);
+    crate::cmd::move_vector(&Value::Object(one), key, Vec3::ZERO, coordinate, "").map(|v| Some(Point3(v))).map_err(|e| E::custom(whole(refusal(e))))
 }
 
 macro_rules! move_point {
@@ -1201,8 +1306,36 @@ macro_rules! move_point {
 }
 
 move_point!(translate_key, "translate", true);
+
+/// `occurrence.move`'s `translate`: three numbers, or three entries of which some are length
+/// expressions (#8192). Whether the expressions work out is the handler's to say.
+#[derive(Clone, Debug, PartialEq)]
+pub enum MoveTranslate {
+    Point(Point3),
+    Exprs(PointExpr3),
+}
+
+fn move_translate_key<'de, D: Deserializer<'de>>(d: D) -> Result<Option<MoveTranslate>, D::Error> {
+    let v = Value::deserialize(d)?;
+    if matches!(&v, Value::Array(a) if a.len() == 3 && a.iter().any(Value::is_string)) {
+        return PointExpr3::deserialize(&v)
+            .map(|p| Some(MoveTranslate::Exprs(p)))
+            .map_err(|_| D::Error::custom(whole("translate entries must be numbers or length expressions")));
+    }
+    move_point_value::<D::Error>(v, "translate", true).map(|p| p.map(MoveTranslate::Point))
+}
 move_point!(axis_key, "axis", false);
-move_point!(origin_key, "origin", true);
+
+/// `occurrence.move`'s `origin`, as `translate`: three numbers or length expressions (#8192).
+fn move_origin_key<'de, D: Deserializer<'de>>(d: D) -> Result<Option<MoveTranslate>, D::Error> {
+    let v = Value::deserialize(d)?;
+    if matches!(&v, Value::Array(a) if a.len() == 3 && a.iter().any(Value::is_string)) {
+        return PointExpr3::deserialize(&v)
+            .map(|p| Some(MoveTranslate::Exprs(p)))
+            .map_err(|_| D::Error::custom(whole("origin entries must be numbers or length expressions")));
+    }
+    move_point_value::<D::Error>(v, "origin", true).map(|p| p.map(MoveTranslate::Point))
+}
 move_point!(at_key, "at", true);
 move_point!(point_key, "point", true);
 
@@ -1324,6 +1457,38 @@ impl JsonSchema for MatrixParam {
                 {"type": "array", "items": {"type": "number"}, "minItems": 12, "maxItems": 12},
                 {"type": "array", "items": {"type": "number"}, "minItems": 16, "maxItems": 16},
                 {"type": "array", "items": row, "minItems": 3, "maxItems": 4}
+            ]
+        })
+    }
+}
+
+/// `matrix` of `occurrence.move` and `file.insert_step`: as [`MatrixParam`], and the translation
+/// column (the last entry of each of the first three rows) may be length expressions that name
+/// parameters (#8192), which the placed occurrence then follows.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExprMatrixParam(pub Value);
+
+impl<'de> Deserialize<'de> for ExprMatrixParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Value::deserialize(d).map(ExprMatrixParam)
+    }
+}
+
+impl JsonSchema for ExprMatrixParam {
+    fn schema_name() -> Cow<'static, str> {
+        "MoveMatrixExprs".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let n = json!({"type": "number"});
+        let e = generator.subschema_for::<LengthExpr>();
+        let row = json!({"type": "array", "prefixItems": [n, n, n, e], "items": false, "minItems": 4, "maxItems": 4});
+        let last = json!({"type": "array", "items": n, "minItems": 4, "maxItems": 4});
+        json_schema!({
+            "description": "A rigid move as a row-major 3x4 (12 numbers) or 4x4 (16 numbers) matrix, flat or as 3 or 4 rows of 4. The translation column (the 4th entry of each of the first three rows) may be a number in mm or a length expression; one that names a parameter is kept, and the occurrence follows the parameter.",
+            "anyOf": [
+                {"type": "array", "prefixItems": [n, n, n, e, n, n, n, e, n, n, n, e], "items": false, "minItems": 12, "maxItems": 12},
+                {"type": "array", "prefixItems": [n, n, n, e, n, n, n, e, n, n, n, e, n, n, n, n], "items": false, "minItems": 16, "maxItems": 16},
+                {"type": "array", "prefixItems": [row, row, row, last], "items": false, "minItems": 3, "maxItems": 4}
             ]
         })
     }
@@ -1533,6 +1698,15 @@ pub struct GroundResult {
     pub occurrence: u64,
     /// Whether it is grounded now.
     pub grounded: bool,
+    /// The resulting placement within its parent, in the design's column-major matrix form.
+    pub transform: [[f64; 4]; 4],
+    /// Names of occurrences whose world placement changed in the solve (their first path when
+    /// nested in a component placed more than once). Empty also when already correctly placed.
+    pub moved: Vec<String>,
+    /// Joint errors and conflicts from the assembly-wide solve, including unrelated joints.
+    /// Degrees of freedom and the fixed-occurrence list are omitted.
+    #[serde(flatten)]
+    pub solved: super::joints::SolveReport,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -1723,10 +1897,12 @@ pub struct MoveKeys {
     #[serde(default, deserialize_with = "move_space", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "MoveSpace")]
     pub space: Option<MoveSpace>,
-    /// Move by this much, in mm. Default: no move. Not with `matrix`.
-    #[serde(default, deserialize_with = "translate_key", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Point3")]
-    pub translate: Option<Point3>,
+    /// Move by this much, in mm: numbers or length expressions. An occurrence moved by
+    /// expressions that name parameters keeps them and moves with them. Default: no move. Not with
+    /// `matrix`.
+    #[serde(default, deserialize_with = "move_translate_key", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PointExpr3")]
+    pub translate: Option<MoveTranslate>,
     /// The axis to turn about, not zero when `angle` is. Default: Z. Not with `matrix`.
     #[serde(default, deserialize_with = "axis_key", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Point3")]
@@ -1735,16 +1911,17 @@ pub struct MoveKeys {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "MoveAngle")]
     pub angle: Option<MoveAngle>,
-    /// The point the turn is about, in mm. Default: the origin. Not with `matrix`.
-    #[serde(default, deserialize_with = "origin_key", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Point3")]
-    pub origin: Option<Point3>,
+    /// The point the turn is about, in mm, numbers or length expressions (kept when they name
+    /// parameters, as `translate`'s are). Default: the origin. Not with `matrix`.
+    #[serde(default, deserialize_with = "move_origin_key", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PointExpr3")]
+    pub origin: Option<MoveTranslate>,
     /// A rigid move instead of `translate`, `axis`, `angle` and `origin`: a rotation and a
     /// translation. One that is a rotation only up to `tolerance` is made exact; a scale, shear or
-    /// mirror is refused.
+    /// mirror is refused. Its translation column may be length expressions (#8192).
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "MatrixParam")]
-    pub matrix: Option<MatrixParam>,
+    #[schemars(with = "ExprMatrixParam")]
+    pub matrix: Option<ExprMatrixParam>,
     /// Absolute placement (#12150): where the occurrence goes in `space`, not a move. Not with
     /// `translate`, `axis`, `angle`, `origin`, `matrix`, `to_matrix` or `base_transform`.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
@@ -1819,7 +1996,10 @@ impl<'de> Deserialize<'de> for MoveParams {
                 return Err(D::Error::custom(whole(format!("give either matrix or {key}, not both"))));
             }
             let tolerance = crate::cmd::matrix_tolerance(&value, "").map_err(|e| D::Error::custom(whole(refusal(e))))?;
-            crate::cmd::rigid_matrix(value.get("matrix").unwrap_or(&Value::Null), tolerance, "").map_err(|e| D::Error::custom(whole(refusal(e))))?;
+            // The translation column may be length expressions (#8192); the handler evaluates them.
+            let (numbers, _) = crate::cmd::matrix_with_exprs(value.get("matrix").unwrap_or(&Value::Null), |_| Ok(0.0), "")
+                .map_err(|e| D::Error::custom(whole(refusal(e))))?;
+            crate::cmd::rigid_matrix(&numbers, tolerance, "").map_err(|e| D::Error::custom(whole(refusal(e))))?;
             return staged(&value, &[&["space"], &["path"]]).map(MoveParams);
         }
         value = without(value, &["tolerance"]);
@@ -2038,3 +2218,62 @@ pub struct MoveSketchesResult {
 #[cfg(test)]
 #[path = "component_tests.rs"]
 mod tests;
+
+/// Set or clear the mass values robot exports use for a component's own bodies (a bought motor
+/// modelled as a solid block). Its nested components keep theirs. Give none to clear them.
+/// Properties and the bill of materials keep the mass worked out from the bodies.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct PhysicalOverrideParams {
+    /// The component, by id or name. Not the root design.
+    pub component: IdOrName,
+    /// Mass in kg. Required with `com` or `inertia`.
+    #[serde(default)]
+    pub mass: Option<f64>,
+    /// Centre of mass in mm, in the component's frame. Default: worked out from its bodies.
+    #[serde(default)]
+    pub com: Option<[f64; 3]>,
+    /// Inertia about the centre of mass, kg m², along the component's axes: xx, yy, zz, xy, xz, yz.
+    /// Default: worked out from its bodies, scaled by the mass.
+    #[serde(default)]
+    pub inertia: Option<[f64; 6]>,
+}
+
+/// What `component.physical_override` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PhysicalOverrideResult {
+    /// The component, by id.
+    pub component: u64,
+    /// The mass now saved in kg. Absent when cleared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mass: Option<f64>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Set what a body, or every body of a component, looks like to a simulator.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct BodyCollisionParams {
+    /// The body, by name. Give this or `component`.
+    #[serde(default)]
+    pub body: Option<String>,
+    /// The component whose bodies to set, by id or name. Give this or `body`.
+    #[serde(default)]
+    pub component: Option<IdOrName>,
+    /// `auto` (the export decides), `mesh`, `box`, `cylinder`, `sphere` or `none`.
+    pub shape: String,
+}
+
+/// What `body.collision` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct BodyCollisionResult {
+    /// The bodies set.
+    pub bodies: Vec<String>,
+    /// The shape they now have.
+    pub shape: String,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}

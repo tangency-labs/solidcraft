@@ -350,3 +350,39 @@ fn a_move_its_joints_undo_names_the_joint_in_a_repeated_assembly() {
     let warning = r["warning"].as_str().unwrap_or_default();
     assert!(warning.contains("Mount"), "the warning names the joint: {warning}");
 }
+
+/// #8197: `file.insert_step` names a component `cap` and its occurrence `cap:1`; a script that
+/// gives the component's name to an occurrence command gets that one occurrence.
+#[test]
+fn an_occurrence_command_takes_the_name_of_a_component_with_one_occurrence() {
+    let mut s = Session::default();
+    part(&mut s, "Base", [0.0, 0.0, 0.0]);
+    let (_, cap) = part(&mut s, "cap", [20.0, 0.0, 0.0]);
+    run(&mut s, "occurrence.move", json!({"occurrence": "cap", "translate": [0, 10, 0]}));
+    near(origin(&s, &[cap]), [0.0, 10.0, 0.0]);
+}
+
+#[test]
+fn a_component_with_several_occurrences_is_refused_by_name_and_the_error_lists_them() {
+    let mut s = Session::default();
+    part(&mut s, "Base", [0.0, 0.0, 0.0]);
+    let (component, first) = part(&mut s, "cap", [20.0, 0.0, 0.0]);
+    run(&mut s, "occurrence.copy", json!({"component": "cap", "translate": [0, 30, 0]}));
+    let names: Vec<String> = s.doc.occurrences.iter().filter(|o| o.component == component).map(|o| o.name.clone()).collect();
+    assert_eq!(names.len(), 2, "{names:?}");
+    let e = s.execute("occurrence.move", &json!({"occurrence": "cap", "translate": [0, 10, 0]})).unwrap_err().to_string();
+    assert!(e.contains("no occurrence `cap`") && names.iter().all(|n| e.contains(&format!("`{n}`"))), "{e}");
+    near(origin(&s, &[first]), [0.0, 0.0, 0.0]);
+}
+
+#[test]
+fn an_unknown_name_or_a_number_that_is_no_occurrence_stays_a_plain_refusal() {
+    let mut s = Session::default();
+    part(&mut s, "Base", [0.0, 0.0, 0.0]);
+    let (component, _) = part(&mut s, "cap", [20.0, 0.0, 0.0]);
+    let missing = 90_000 + component;
+    for (given, want) in [(json!("nothing"), "no occurrence `nothing`"), (json!(missing), &format!("no occurrence `{missing}`"))] {
+        let e = s.execute("occurrence.move", &json!({"occurrence": given, "translate": [0, 10, 0]})).unwrap_err().to_string();
+        assert!(e.ends_with(want), "{e}");
+    }
+}

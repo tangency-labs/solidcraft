@@ -29,21 +29,15 @@ pub(super) fn exported(s: &Session, bodies: &[String]) -> Option<Vec<u8>> {
 
 /// `scene` drawn over black and over white, unblended to straight RGBA.
 fn transparent(renderer: &crate::capture::Renderer, scene: &mut Scene, camera: &Camera, size: u32) -> Option<Vec<u8>> {
-    let mut draw = |backdrop: Rgb| {
-        scene.background = Some((backdrop, backdrop));
-        crate::capture::rgba_with(Some(renderer), scene, camera, size, size).ok().map(|p| p.rgba)
-    };
-    let over_black = draw(Rgb(0, 0, 0))?;
-    let mut over_white = draw(Rgb(255, 255, 255))?;
-    solidcraft_viewport::unblend(&mut over_white, &over_black);
-    Some(over_white)
+    crate::capture::rgba_transparent_with(Some(renderer), scene, camera, size, size).ok().map(|p| p.rgba)
 }
 
 /// What the thumbnail shows, in the bodies' colours, iso, fitted with the distance scaled by `zoom`.
 /// Saved (`exported` is None): the shown bodies' warm display meshes only. Exported: the bodies the
 /// file holds (none named, every body), meshed here when cold, as a headless export has drawn nothing.
 fn scene(s: &Session, zoom: f64, exported: Option<&[String]>) -> Option<(Scene, Camera)> {
-    if s.active_sketch.is_some() || !s.pending_moves.is_empty() || s.model.results.iter().any(|r| r.error.is_some()) {
+    // Nor while a joint drag shows a frame: the world placed for it is not the design's.
+    if s.active_sketch.is_some() || !s.pending_moves.is_empty() || !s.drag_moves().is_empty() || s.model.results.iter().any(|r| r.error.is_some()) {
         return None;
     }
     let world = s.cached_world_state()?;
@@ -71,7 +65,7 @@ fn scene(s: &Session, zoom: f64, exported: Option<&[String]>) -> Option<(Scene, 
         let face_colors =
             s.doc.face_colors(body).into_iter().map(|(face, look)| (face as u32, Rgb(look.color[0], look.color[1], look.color[2]))).collect();
         let opacity = s.doc.model_body_opacity(body) as f32;
-        scene.meshes.push(SceneMesh { mesh, color, face_colors, opacity, closed: body.is_closed(), hatch: Default::default() });
+        scene.meshes.push(SceneMesh { mesh, color, face_colors, opacity, closed: body.is_closed(), hatch: Default::default(), values: None });
     }
     if bounds.is_empty() {
         return None;

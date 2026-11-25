@@ -122,7 +122,7 @@ fn the_window_keeps_drawing_and_moving_while_a_large_design_opens() {
         assert!(w.app.file_load.busy(), "frames finish before the file worker is released");
         assert!(std::sync::Arc::ptr_eq(&w.app.session.doc, &blank), "the old design stays intact");
     }
-    let bar = pos2(500.0, 17.0);
+    let bar = pos2(900.0, 17.0);
     let viewport = w.app.viewport.rect.map_or(pos2(800.0, 500.0), |r| r.center());
     let cmds = w.gesture(&[bar, bar + vec2(12.0, 4.0), bar + vec2(40.0, 10.0)]);
     assert!(cmds.iter().any(|c| matches!(c, ViewportCommand::StartDrag)), "the title bar drag was handled during the open");
@@ -595,6 +595,69 @@ fn reloading_a_point_cloud_on_a_network_location_asks_first() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// `doc.open` with `new_tab` over the control channel lands in a tab of its own, even where the
+/// shown design is blank (an ordinary open replaces that one), and one that fails opens no tab.
+#[test]
+fn a_control_open_with_new_tab_lands_in_a_tab_of_its_own() {
+    let dir = scratch("control-new-tab");
+    let paths: Vec<String> = [("a", 5), ("b", 6)]
+        .into_iter()
+        .map(|(name, side)| {
+            let mut s = Session::default();
+            s.execute("solid.box", &json!({"length": side, "width": side, "height": side})).unwrap();
+            let path = dir.join(format!("{name}.solidcraft")).to_string_lossy().into_owned();
+            s.execute("file.save", &json!({"path": path})).unwrap();
+            path
+        })
+        .collect();
+    let mut w = Win::new();
+    let (tx, rx) = std::sync::mpsc::channel();
+    w.app.control_rx = Some(rx);
+    let open = |w: &mut Win, params: serde_json::Value| {
+        let (req, reply) = crate::control::ControlRequest::new("engine.execute", json!({"command": "doc.open", "params": params}));
+        tx.send(req).unwrap();
+        for _ in 0..100_000 {
+            w.frame(vec![]);
+            if let Ok(reply) = reply.try_recv() {
+                return reply;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        panic!("no reply");
+    };
+
+    let blank = w.app.session.document_id.clone();
+    let reply = open(&mut w, json!({"path": paths[0], "new_tab": true}));
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!((w.app.docs.count(), w.app.docs.active), (2, 1), "the blank design keeps its tab");
+    assert_eq!(w.app.session.path.as_deref(), Some(paths[0].as_str()));
+    let reply = open(&mut w, json!({"path": paths[1], "new_tab": true}));
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!((w.app.docs.count(), w.app.docs.active), (3, 2));
+    assert_eq!(w.app.session.path.as_deref(), Some(paths[1].as_str()));
+    let shown: Vec<_> = crate::documents::open_sessions(&w.app).iter().map(|s| (s.document_id.clone(), s.path.clone())).collect();
+    assert_eq!(shown[0], (blank, None), "the design that was open is as it was");
+    assert_eq!(shown[1].1.as_deref(), Some(paths[0].as_str()));
+
+    let missing = dir.join("missing.solidcraft").to_string_lossy().into_owned();
+    let reply = open(&mut w, json!({"path": missing, "new_tab": true}));
+    assert_eq!(reply["ok"], false, "{reply}");
+    assert_eq!((w.app.docs.count(), w.app.docs.active), (3, 2), "a failed open opens no tab");
+
+    // Without it a blank design is replaced, as before.
+    let mut w = Win::new();
+    let (tx2, rx2) = std::sync::mpsc::channel();
+    w.app.control_rx = Some(rx2);
+    let (req, reply) = crate::control::ControlRequest::new("engine.execute", json!({"command": "doc.open", "params": {"path": paths[0]}}));
+    tx2.send(req).unwrap();
+    while reply.try_recv().is_err() {
+        w.frame(vec![]);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert_eq!(w.app.docs.count(), 1, "the blank design was replaced");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// A control-channel (MCP) open is answered when the file is in, with the synchronous
 /// command's reply, and the window draws frames while it waits. Commands sent meanwhile wait.
 #[test]
@@ -689,6 +752,44 @@ fn a_control_import_passes_up_and_names_on() {
     let (_, size, offered) = import(json!({"path": path, "up": "z"}));
     assert!(size[1] > 39.9 && !offered, "{size:?} {offered}");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The normal off-thread opening path uses the original file digest and the same remembered
+/// answer as synchronous opening, without adding a second offer.
+#[test]
+fn stand_up_memory_applies_after_an_off_thread_open() {
+    let dir = scratch("stand-up-memory");
+    let path = dir.join("plate.step").to_string_lossy().to_string();
+    let mut src = Session::default();
+    src.execute("solid.box", &json!({"length": 10, "width": 40, "height": 5})).unwrap();
+    src.execute("file.export", &json!({"path": path})).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap().replace("'SolidCraft','SolidCraft'", "'SolidCraft','Example CAD'");
+    std::fs::write(&path, text).unwrap();
+    let mut w = Win::new();
+    w.app.preferences.stand_up_unknown = crate::prefs::StandUpUnknown::Ask;
+    let (tx, rx) = std::sync::mpsc::channel();
+    w.app.control_rx = Some(rx);
+    let open = |w: &mut Win| {
+        let (req, reply) = crate::control::ControlRequest::new("engine.execute", json!({"command":"doc.open", "params":{"path":path}}));
+        tx.send(req).unwrap();
+        for _ in 0..100_000 {
+            w.frame(vec![]);
+            if let Ok(reply) = reply.try_recv() {
+                assert_eq!(reply["ok"], true, "{reply}");
+                assert!(reply["result"]["content_sha256"].is_string());
+                return;
+            }
+        }
+        panic!("the import was not answered");
+    };
+    open(&mut w);
+    assert!(w.app.stand_up.is_some());
+    crate::prefs::control(&mut w.app, &json!({"stand_up":true})).unwrap();
+    let stood = solidcraft_engine::view::bounds(&w.app.session).unwrap();
+    open(&mut w);
+    assert!(w.app.stand_up.is_none());
+    assert_eq!(solidcraft_engine::view::bounds(&w.app.session).unwrap(), stood);
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 /// #4676: a control-channel import's `matrix` and `name` reach the command, as they do when it
@@ -1076,6 +1177,110 @@ fn a_newer_design_opens_with_a_notice_and_no_dialog() {
     assert!(app.dialog.is_none() && !app.ui.palette_open);
 }
 
+#[test]
+fn newer_drawing_notices_put_the_name_in_the_translated_sentence() {
+    use solidcraft_engine::doc::format::DRAWING;
+
+    let dir = scratch("newer_drawing_notice");
+    let mut design = Session::default();
+    design.execute("solid.box", &json!({"length": 20, "width": 10, "height": 5})).unwrap();
+    design.execute("drawing.create", &json!({"name": "Plate {format}"})).unwrap();
+    let source = serde_json::from_str::<serde_json::Value>(&design.doc.to_json()).unwrap();
+    for newer_format in [true, false] {
+        let mut file = source.clone();
+        let drawing = &mut file["drawings"][0];
+        drawing["future_ink_type"] = json!("unreadable");
+        let expected = if newer_format {
+            let format = DRAWING.current() + 1;
+            drawing["format"] = json!(DRAWING.format_string(format));
+            format!("Format {format}")
+        } else {
+            let mut pending = DRAWING.pending_names();
+            pending.push("future-ink".into());
+            drawing["format_pending"] = json!(pending);
+            "Änderung `future-ink`".into()
+        };
+        let path = dir.join(format!("drawing-{newer_format}.json"));
+        std::fs::write(&path, file.to_string()).unwrap();
+
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        app.preferences.language = "de".into();
+        let _lang = solidcraft_ui_text::scope("de");
+        app.open_path_with(&path.to_string_lossy(), &Default::default()).unwrap();
+
+        let (text, _, error) = app.status.as_ref().unwrap();
+        assert!(!error && text.starts_with("Die Zeichnung „Plate {format}“") && text.contains(&expected), "{text}");
+        assert!(app.messages.iter().any(|message| {
+            !message.error
+                && message.text.starts_with("SolidCraft konnte")
+                && message.text.contains("future_ink_type")
+                && message.text.contains("in der Zeichnung „Plate {format}“")
+        }));
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A design with the data of a plugin that isn't installed opens as usual: the status line names
+/// the plugin, and the data is kept as it came.
+#[test]
+fn a_design_with_a_missing_plugins_data_opens_and_names_the_plugin() {
+    let mut app = SolveApp::new(Session::default(), Default::default());
+    let dir = scratch("missing_plugin_data");
+    app.session.plugin_state.plugins_dir = Some(dir.join("plugins"));
+    let mut design = Session::default();
+    design.execute("solid.box", &json!({"length": 2, "width": 3, "height": 4})).unwrap();
+    let meta = br#"{"plugin":"manufacture","name":"Manufacture","plugin_version":"1.4","format":3}"#;
+    let data = design.doc_mut();
+    data.plugin_data.insert("manufacture/meta.json".into(), meta.into());
+    data.plugin_data.insert("manufacture/data.json".into(), br#"{"setups":[]}"#.into());
+    let path = dir.join("with-data.sc");
+    std::fs::write(&path, solidcraft_engine::io::write_design_container(&design.doc).unwrap()).unwrap();
+
+    app.open_path(&path.to_string_lossy());
+
+    let (text, _, error) = app.status.clone().unwrap();
+    assert_eq!(text, "Contains Manufacture data (plugin 1.4). Install it to edit.");
+    assert!(!error && app.dialog.is_none());
+    assert_eq!(app.session.doc.plugin_data, design.doc.plugin_data);
+}
+
+/// Imported STEP bodies have no editor. Both edit entry points explain this without opening
+/// the palette, changing its text, or leaving the timeline rolled back.
+#[test]
+fn editing_an_imported_body_reports_nothing_to_edit() {
+    let dir = scratch("import-edit");
+    let path = step_box(&dir);
+    for double_click in [false, true] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.open_path(&path);
+        h.app.home.open = false;
+        let feature = h.app.session.doc.features.iter().find(|f| matches!(f.kind, solidcraft_engine::doc::FeatureKind::Import { .. })).unwrap();
+        let (id, name) = (feature.id, feature.name.clone());
+        h.app.run("solid.box", json!({"length": 2, "width": 3, "height": 4, "corner": [40,0,0]})).unwrap();
+        h.settle();
+        let before = h.app.session.doc.to_json();
+        h.app.sbox.text = "kept search".into();
+        if double_click {
+            h.frames(4);
+            h.step(&json!({"click": {"handle": format!("timeline:{name}")}, "double": true})).unwrap();
+        } else {
+            let reply = h.call("ui.editFeature", json!({"feature": id}));
+            assert_eq!(reply["ok"], true, "{reply}");
+            assert_eq!(reply["result"]["dialog"], serde_json::Value::Null, "{reply}");
+            assert_eq!(reply["result"]["marker"], serde_json::Value::Null, "{reply}");
+        }
+        h.settle();
+        assert!(!h.app.ui.palette_open, "no raw command palette");
+        assert!(h.app.dialog.is_none() && h.app.editing_state.is_none());
+        assert_eq!(h.app.sbox.text, "kept search");
+        assert_eq!(h.app.session.doc.to_json(), before, "the timeline is restored");
+        let (text, _, error) = h.app.status.as_ref().expect("a status explains the missing editor");
+        assert_eq!(text, "Imported body: nothing to edit");
+        assert!(!error, "an informational notice");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A STEP file of a 10 x 20 x 30 box in `dir`.
 fn step_box(dir: &std::path::Path) -> String {
     let path = dir.join("box.step").to_string_lossy().to_string();
@@ -1105,6 +1310,70 @@ fn hold_next(w: &mut Win) -> (std::sync::mpsc::Receiver<std::thread::ThreadId>, 
 
 fn bodies(app: &SolveApp) -> usize {
     app.session.world_state().map_or(0, |state| state.bodies.len())
+}
+
+#[test]
+fn opening_a_file_from_home_shows_progress_and_cancel_until_the_design_lands() {
+    let dir = scratch("home-open");
+    let path = large_design(&dir, 0);
+    for size in [vec2(1280.0, 720.0), vec2(640.0, 480.0)] {
+        let mut w = Win::new();
+        w.size = size;
+        w.app.home.open = true;
+        let (started, release) = hold_next(&mut w);
+        crate::file_load::begin(&mut w.app, &path, false);
+        started.recv_timeout(std::time::Duration::from_secs(60)).unwrap();
+        for _ in 0..3 {
+            w.frame(vec![]);
+        }
+        assert!(w.app.home.open && w.app.file_load.busy(), "Home stays open while the worker waits");
+        let cancel = crate::scenario::handle_at("file_loading:cancel").expect("Home shows the loading card's Cancel button");
+        assert!(Rect::from_min_size(Pos2::ZERO, size).contains(cancel), "Cancel is inside the window at {size:?}");
+        assert!(crate::scenario::rect_of("operations:panel").is_none(), "Home has no operations panel");
+        release.send(()).unwrap();
+        frames_until(&mut w, "the file opened from Home lands", |app| app.file_load.idle());
+        w.frame(vec![]);
+        assert!(!w.app.home.open, "the loaded design replaces Home");
+        assert_eq!(bodies(&w.app), 1);
+        assert!(w.app.session.path.as_deref().is_some_and(|p| crate::documents::same_path(p, &path)));
+        assert!(crate::scenario::handle_at("file_loading:cancel").is_none(), "the completed load's card disappears");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn returning_home_during_a_file_open_shows_cancel_and_preserves_the_current_design() {
+    let dir = scratch("home-cancel");
+    let path = large_design(&dir, 0);
+    let mut w = Win::new();
+    w.size = vec2(1280.0, 720.0);
+    w.app.home.open = false;
+    w.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5})).unwrap();
+    let original = w.app.session.doc.clone();
+    let (started, release) = hold_next(&mut w);
+    crate::file_load::begin(&mut w.app, &path, false);
+    started.recv_timeout(std::time::Duration::from_secs(60)).unwrap();
+    for _ in 0..3 {
+        w.frame(vec![]);
+    }
+    assert!(crate::scenario::rect_of("operations:panel").is_some(), "the workspace shows the operation");
+    assert!(crate::scenario::handle_at("file_loading:cancel").is_none());
+    w.app.home.open = true;
+    for _ in 0..3 {
+        w.frame(vec![]);
+    }
+    assert!(w.app.home.open && w.app.file_load.busy());
+    assert!(crate::scenario::rect_of("operations:panel").is_none());
+    let cancel = crate::scenario::handle_at("file_loading:cancel").expect("Cancel stays available after returning Home");
+    w.gesture(&[cancel]);
+    assert!(!w.app.file_load.busy(), "Home's Cancel button cancels the open");
+    drop(release);
+    w.frame(vec![]);
+    assert!(w.app.home.open);
+    assert!(std::sync::Arc::ptr_eq(&original, &w.app.session.doc));
+    assert_eq!((w.app.docs.count(), bodies(&w.app)), (1, 1));
+    assert!(crate::scenario::handle_at("file_loading:cancel").is_none());
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// With the design usable (the default), a file opening is a row of the operations panel, not a
@@ -1184,6 +1453,8 @@ fn an_insert_runs_again_for_a_design_edited_meanwhile_and_lands_after_the_edit()
     let dir = scratch("insert-again");
     let step = step_box(&dir);
     let mut w = Win::new();
+    // Its queue, not the import options asked before a STEP file is read (`import_options`).
+    w.app.preferences.ask_import_options = false;
     w.app.home.open = false;
     w.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [-50, 0, 0]})).unwrap();
     let (started, release) = hold_next(&mut w);
@@ -1204,6 +1475,41 @@ fn an_insert_runs_again_for_a_design_edited_meanwhile_and_lands_after_the_edit()
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A result waiting to land does not hold the file worker: another open runs meanwhile. Closing
+/// the tab the waiting design belongs to answers its request instead of leaving it waiting.
+#[test]
+fn a_waiting_result_does_not_hold_the_queue_and_a_closed_tab_releases_it() {
+    let dir = scratch("waiting-queue");
+    let step = step_box(&dir);
+    let other = large_design(&dir, 2);
+    let mut w = Win::new();
+    // Its queue, not the import options asked before a STEP file is read (`import_options`).
+    w.app.preferences.ask_import_options = false;
+    w.app.home.open = false;
+    w.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5})).unwrap();
+    // An insert for the design in tab 0, with another tab shown when its result comes in.
+    let (started, release) = hold_next(&mut w);
+    crate::file_load::begin(&mut w.app, &step, true);
+    started.recv_timeout(std::time::Duration::from_secs(60)).unwrap();
+    crate::documents::open_tab(&mut w.app, Session::default()).unwrap();
+    release.send(()).unwrap();
+    frames_until(&mut w, "the insert is ready", |app| crate::operations::current(app).iter().any(|r| r.waiting));
+    // An open runs while that result waits: the waiting one is out of the worker's way.
+    let (started, release) = hold_next(&mut w);
+    crate::file_load::begin(&mut w.app, &other, false);
+    started.recv_timeout(std::time::Duration::from_secs(60)).unwrap();
+    release.send(()).unwrap();
+    frames_until(&mut w, "the open runs while the insert waits", |app| {
+        app.session.path.as_deref().is_some_and(|p| crate::documents::same_path(p, &other))
+            && crate::operations::current(app).iter().any(|r| r.waiting)
+    });
+    // Closing the waiting design's tab answers its request: nothing waits for it any more.
+    crate::documents::close(&mut w.app, 0, true);
+    frames_until(&mut w, "the waiting result is answered", |app| !crate::operations::current(app).iter().any(|r| r.waiting) && app.file_load.idle());
+    assert_eq!(w.app.docs.count(), 1, "the closed tab released its request");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// An insert for a design whose tab is no longer shown waits, ready, for it: the design shown
 /// gets nothing; showing the tab again lands it there.
 #[test]
@@ -1211,6 +1517,8 @@ fn an_insert_waits_for_its_designs_tab() {
     let dir = scratch("insert-tab");
     let step = step_box(&dir);
     let mut w = Win::new();
+    // Its queue, not the import options asked before a STEP file is read (`import_options`).
+    w.app.preferences.ask_import_options = false;
     w.app.home.open = false;
     w.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [-50, 0, 0]})).unwrap();
     let (started, release) = hold_next(&mut w);
@@ -1229,5 +1537,139 @@ fn an_insert_waits_for_its_designs_tab() {
     assert_eq!(bodies(&w.app), 2, "{:?}", w.app.status);
     crate::documents::switch(&mut w.app, 1);
     assert_eq!(bodies(&w.app), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The offer to stand a just-opened part up weighs how its bodies rest, which meshes them. While
+/// an open meshes the bodies beside the window, meshing them for the offer waited for that work:
+/// the window stood still for over a second on a large assembly. The offer is now worked out
+/// beside the window and made on a later frame, and a design changed meanwhile gets none.
+#[test]
+fn the_stand_up_offer_waits_beside_the_window_for_the_bodies_meshed_on_open() {
+    let dir = scratch("stand-up-later");
+    let path = dir.join("on_its_back.step").to_string_lossy().to_string();
+    let mut src = Session::default();
+    // Tall in Z, thin in Y: it rests on faces across Y, a Y-up part lying on its back here.
+    src.execute("solid.box", &json!({"length": 10, "width": 5, "height": 40})).unwrap();
+    src.execute("file.export", &json!({"path": path})).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, text.replace("'SolidCraft','SolidCraft'", "'SolidCraft','Example CAD'")).unwrap();
+    let opened = |w: &mut Win| {
+        let result = w.app.session.execute("file.insert_step", &json!({"path": path})).unwrap();
+        crate::open_meshing::start(&mut w.app, None);
+        assert!(crate::open_meshing::active(&w.app), "the bodies are being meshed");
+        crate::stand_up::offer(&mut w.app, &path, &[], Some(&result));
+        assert!(w.app.stand_up.is_none() && w.app.stand_up_later.is_some(), "not made on the window thread while the bodies are meshed");
+    };
+    let mut w = Win::new();
+    assert_eq!(w.app.preferences.stand_up_unknown, crate::prefs::StandUpUnknown::Note);
+    opened(&mut w);
+    for _ in 0..10_000 {
+        w.frame(vec![]);
+        if w.app.stand_up.is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert!(w.app.stand_up.is_some() && w.app.stand_up_note, "the note is offered once the estimate is made");
+    assert!(w.app.stand_up_later.is_none());
+    // Changed before the estimate is made: no offer.
+    let mut w = Win::new();
+    opened(&mut w);
+    w.app.session.execute("solid.box", &json!({"length": 4, "width": 4, "height": 4, "corner": [40, 0, 0]})).unwrap();
+    w.frame(vec![]);
+    assert!(w.app.stand_up.is_none() && w.app.stand_up_later.is_none(), "a changed design is not offered");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An offer waiting for its estimate is not made when the offer was turned off meanwhile, and a
+/// file from another program gets no estimate at all when such files get no offer.
+#[test]
+fn a_waiting_stand_up_offer_follows_the_preferences_when_it_is_made() {
+    let dir = scratch("stand-up-later-prefs");
+    let path = dir.join("on_its_back.step").to_string_lossy().to_string();
+    let mut src = Session::default();
+    src.execute("solid.box", &json!({"length": 10, "width": 5, "height": 40})).unwrap();
+    src.execute("file.export", &json!({"path": path})).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, text.replace("'SolidCraft','SolidCraft'", "'SolidCraft','Example CAD'")).unwrap();
+    let opened = |w: &mut Win| {
+        let result = w.app.session.execute("file.insert_step", &json!({"path": path})).unwrap();
+        crate::open_meshing::start(&mut w.app, None);
+        crate::stand_up::offer(&mut w.app, &path, &[], Some(&result));
+    };
+    // Turned off while the estimate is made: no offer.
+    let mut w = Win::new();
+    opened(&mut w);
+    assert!(w.app.stand_up_later.is_some());
+    w.app.preferences.offer_stand_up = false;
+    for _ in 0..10_000 {
+        w.frame(vec![]);
+        if w.app.stand_up_later.is_none() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert!(w.app.stand_up_later.is_none() && w.app.stand_up.is_none(), "an offer turned off meanwhile is not made");
+    // Another program's files get no offer: nothing waits for an estimate.
+    let mut w = Win::new();
+    w.app.preferences.stand_up_unknown = crate::prefs::StandUpUnknown::Off;
+    opened(&mut w);
+    assert!(w.app.stand_up_later.is_none() && w.app.stand_up.is_none(), "no estimate for an offer that won't be made");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A scenario's `settle` waits for the stand-up estimate too, not only for the open's meshing:
+/// on a busy machine the estimate's thread can finish frames after the meshing, and a test that
+/// read the offer then found none (`tests/stand_up_offer.rs`, under full CI load).
+#[test]
+fn settle_waits_for_the_stand_up_estimate_after_the_bodies_are_meshed() {
+    let dir = scratch("stand-up-settle");
+    let path = dir.join("on_its_back.step").to_string_lossy().to_string();
+    let mut src = Session::default();
+    src.execute("solid.box", &json!({"length": 10, "width": 5, "height": 40})).unwrap();
+    src.execute("file.export", &json!({"path": path})).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, text.replace("'SolidCraft','SolidCraft'", "'SolidCraft','Example CAD'")).unwrap();
+    let mut h = crate::scenario::Harness::new();
+    // This test is about the estimate, not the import-options window it would ask first.
+    h.app.preferences.ask_import_options = false;
+    // Still running for more frames than `settle` ran once the meshing was done.
+    crate::stand_up::hold_estimate(30);
+    h.app.open_path_async(&path);
+    h.settle();
+    assert!(h.app.stand_up_later.is_none(), "settled with the estimate still being made");
+    assert!(h.app.stand_up.is_some() && h.app.stand_up_note, "the note is offered once settled");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An OBJ file with a line that can't be read opens with a warning. The web's open
+/// (`open_path_with`, which reads the file before it returns) says it on the status line as the
+/// desktop's staged open does: before, only the desktop said it.
+#[test]
+fn an_opened_files_import_warnings_are_said_on_the_web_as_on_the_desktop() {
+    let dir = scratch("open-warnings");
+    let path = dir.join("triangle.obj");
+    std::fs::write(&path, "v 0 0 0\nv 10 0 0\nv 0 10 0\nv 1 nope 2\nf 1 2 3\n").unwrap();
+    let path = path.to_string_lossy().into_owned();
+    let warned = "imported with 1 warning(s): 1 vertex or face line(s) could not be read and were left out";
+
+    let mut web = Win::new();
+    // In millimetres, so the desktop's open asks no unit first.
+    let units = json!({"units": "mm"});
+    web.app.open_path_with(&path, units.as_object().unwrap()).unwrap();
+    assert_eq!(web.app.session.model.state().bodies.len(), 1);
+    assert_eq!(web.app.status.as_ref().map(|s| (s.0.as_str(), s.2)), Some((warned, false)));
+
+    let mut desktop = Win::new();
+    desktop.app.open_path_async_with_options(&path, units);
+    // Read on another thread; it lands in a later frame.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while desktop.app.file_load.busy() || desktop.app.session.model.state().bodies.is_empty() {
+        desktop.frame(vec![]);
+        assert!(std::time::Instant::now() < deadline, "the open finishes");
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert_eq!(desktop.app.status.as_ref().map(|s| (s.0.as_str(), s.2)), Some((warned, false)));
     let _ = std::fs::remove_dir_all(&dir);
 }

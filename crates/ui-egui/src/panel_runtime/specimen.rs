@@ -22,14 +22,14 @@ fn preset(value: &str) -> PanelResult<()> {
 }
 
 /// The caller explicitly opts into original synthetic content at the actual
-/// workspace composition point. An existing runtime is never replaced.
+/// workspace composition point. Explicit fixture mode can replace the production host.
 pub fn enable_host_specimen(app: &mut crate::SolveApp, name: &str) -> PanelResult<()> {
     enable_host_specimen_remembered(app, name, false, None)
 }
 
 fn enable_host_specimen_remembered(app: &mut crate::SolveApp, name: &str, remember: bool, requested_opacity: Option<f32>) -> PanelResult<()> {
     preset(name)?;
-    if app.panel_runtime().is_some() {
+    if app.panel_runtime.as_ref().is_some_and(|runtime| runtime.production.is_none()) {
         return Err(error(Rule::Lifecycle, "panel specimen cannot take over an existing runtime"));
     }
     let (layout, registry) = specimen_layout(name)?;
@@ -106,6 +106,7 @@ fn enable_host_specimen_remembered(app: &mut crate::SolveApp, name: &str, rememb
     } else {
         false
     };
+    app.disable_panel_runtime()?;
     app.panel_runtime = Some(integration);
     if repaired {
         super::preferences::report_notice(app);
@@ -456,6 +457,8 @@ impl PanelController for VisibleSpecimen {
             ContentSlot::Inline => {
                 self.render_inline(ui, context, services)?;
             }
+            // The specimen never asks for header content.
+            ContentSlot::Title => {}
         }
         Ok(())
     }
@@ -745,6 +748,7 @@ fn drop_target_observation(target: &HostDropTargetId) -> Value {
         HostDropTargetId::Dock { zone, before } => json!({"type":"dock","zone":zone,"before":before}),
         HostDropTargetId::Tab { section, before } => json!({"type":"tab","section":section,"before":before}),
         HostDropTargetId::Relative { section, placement } => json!({"type":"relative","section":section,"placement":placement}),
+        HostDropTargetId::Window => json!({"type":"window"}),
     }
 }
 
@@ -772,7 +776,8 @@ fn target_observation(target: &HostControlTarget) -> Value {
             HostPointerTarget::Sash { first, second } => json!({"type":"sash","first":first,"second":second}),
             HostPointerTarget::Resize { section, edge } => json!({"type":"resize","section":section,"edge":match edge {
                 HostResizeEdge::Left => "left", HostResizeEdge::Right => "right", HostResizeEdge::Top => "top",
-                HostResizeEdge::Bottom => "bottom", HostResizeEdge::BottomRight => "bottom_right",
+                HostResizeEdge::Bottom => "bottom", HostResizeEdge::TopLeft => "top_left", HostResizeEdge::TopRight => "top_right",
+                HostResizeEdge::BottomLeft => "bottom_left", HostResizeEdge::BottomRight => "bottom_right",
             }}),
             HostPointerTarget::Overflow { zone } => json!({"type":"overflow","zone":zone}),
             HostPointerTarget::OverflowAll => json!({"type":"overflow_all"}),
@@ -785,6 +790,7 @@ fn target_observation(target: &HostControlTarget) -> Value {
                 HostSharedAction::Focus => json!({"type":"focus"}),
                 HostSharedAction::Close => json!({"type":"close"}),
                 HostSharedAction::Collapse => json!({"type":"collapse"}),
+                HostSharedAction::ResetHeight => json!({"type":"reset_height"}),
                 HostSharedAction::Move(zone) => json!({"type":"move","zone":zone}),
                 HostSharedAction::Join(section) => json!({"type":"join","section":section}),
                 HostSharedAction::Popout => json!({"type":"popout"}),

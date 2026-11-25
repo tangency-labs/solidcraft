@@ -1,4 +1,4 @@
-//! tangency-labs/solidcore#1818 under `Kernel::fixes.offset_extended_edges_mated` (WR-344):
+//! tangency-labs/solidcore#1818 under WR-344's mated extended edges (always on):
 //! a ruled loft from a 40 x 40 square at z = 0 to a circle r 15 at z = 60 (four curves a
 //! section, `create_skin_primitive`), shelled 1 inward open at its top with extended convex
 //! edges, merged results and the offset solid made (as SolidCraft's `smlib_shell` calls
@@ -13,9 +13,9 @@
 //! a sound body: eleven faces, valid at every check level, a manifold solid facing out,
 //! its volume the loft's less the cavity's, measured independently ([`assert_sound`]).
 //! solidcore is the reference here, not the fork's refusal. The circle-to-circle loft
-//! (a cone frustum r 15) is the control: it shells to the closed form under the flag.
-//! With loop-gap closure and the vertex splits always enabled, the default fixes
-//! now build the same sound eleven-face shell; the old flag-off refusal is gone.
+//! (a cone frustum r 15) is the control: it shells to the closed form. With loop-gap
+//! closure, the vertex splits and the mated edges always enabled, the default fixes build
+//! the sound eleven-face shell.
 
 #![allow(
     clippy::unwrap_used,
@@ -26,6 +26,8 @@
 
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
+#[path = "support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
 
 use offset_fixture::{offset_full, planar_faces_at, volume, Notifications};
 use solidcore::curve::curve::Curve;
@@ -43,6 +45,7 @@ use solidcore::sweep::api_surfaces::create_skin_primitive;
 use solidcore::topology::brep::is_outward_solid;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::{Brep, Kernel};
+use solidcraft_fixes::solidcraft_fixes;
 
 /// The issue's loft: a 40 x 40 square (or, for the control, a circle r 15) at z = 0 to a
 /// circle r 15 at z = 60, each section four curves, the circle's quarter arcs starting at
@@ -120,12 +123,6 @@ fn shell(fixes: &UpstreamFixes, square: bool) -> (Kernel, ShellOutcome) {
     (k, result)
 }
 
-fn mated() -> UpstreamFixes {
-    let mut f = UpstreamFixes::default();
-    f.offset_extended_edges_mated = true;
-    f
-}
-
 /// Default loop-gap closure now reaches the shell difference rather than the old early refusal.
 #[test]
 fn default_fixes_shell_the_square_to_circle_loft() {
@@ -163,7 +160,6 @@ fn assert_sound(k: &mut Kernel, mut wall: Brep, label: &str) {
     let ring = face_area(k, &mut wall, ring[0], 1e-10).unwrap();
 
     let mut k2 = Kernel::default();
-    k2.fixes.clone_from(&mated());
     let mut part = loft(&mut k2, true);
     let loft_volume = volume(&k2, &mut part).unwrap();
     let disk = planar_faces_at(&k2, &part, 2, 60.0);
@@ -186,21 +182,7 @@ fn assert_sound(k: &mut Kernel, mut wall: Brep, label: &str) {
     );
 }
 
-/// The flag alone: the shell is a sound body (it was the broken ten-face wall on the
-/// fitted extensions, refused).
-#[test]
-fn mated_offsets_alone_shell_the_square_to_circle_loft() {
-    let (mut k, result) = shell(&mated(), true);
-    assert!(result.input_ownership_transferred());
-    assert_sound(
-        &mut k,
-        result.result.unwrap(),
-        "offset_extended_edges_mated",
-    );
-}
-
-/// SolidCraft's fixes (`issue_1476_swept_bar_shell.rs`, which include the flag and WR-454's
-/// `shell_empty_cavity_fails`): the same sound body, with loop-gap closure unconditional.
+/// SolidCraft's fixes (`support/solidcraft_fixes.rs`): the same sound body, with loop-gap closure unconditional.
 #[test]
 fn solidcraft_fixes_shell_the_square_to_circle_loft() {
     let (mut k, result) = shell(&solidcraft_fixes(), true);
@@ -208,19 +190,17 @@ fn solidcraft_fixes_shell_the_square_to_circle_loft() {
 }
 
 /// The control: the circle-to-circle loft (a cone frustum, here a cylinder r 15) shells
-/// under the flag to the closed form, as on the default path.
+/// to the closed form.
 #[test]
 fn mated_offsets_shell_the_circle_control() {
     let analytic = std::f64::consts::PI * (15.0 * 15.0 * 60.0 - 14.0 * 14.0 * 59.0);
-    for fixes in [UpstreamFixes::default(), mated()] {
-        let (k, result) = shell(&fixes, false);
-        let mut wall = result.result.unwrap();
-        wall.refresh_cached_topology();
-        assert!(solidcore::topology::integrity::check(&wall).is_ok());
-        assert!(brep_is_manifold_solid(&wall).unwrap());
-        let v = volume(&k, &mut wall).unwrap();
-        assert!((v - analytic).abs() < 1e-6 * analytic, "{v} vs {analytic}");
-    }
+    let (k, result) = shell(&UpstreamFixes::default(), false);
+    let mut wall = result.result.unwrap();
+    wall.refresh_cached_topology();
+    assert!(solidcore::topology::integrity::check(&wall).is_ok());
+    assert!(brep_is_manifold_solid(&wall).unwrap());
+    let v = volume(&k, &mut wall).unwrap();
+    assert!((v - analytic).abs() < 1e-6 * analytic, "{v} vs {analytic}");
 }
 
 /// The difftest operand (`offset.offset_executive_p2`, `issue1818.json`).
@@ -297,78 +277,4 @@ fn write_issue_1818_operand() {
         read.edges().len(),
         volume(&k, &mut read)
     );
-}
-
-/// SolidCraft's `core::fixes()` as `issue_1476_swept_bar_shell.rs` lists them.
-fn solidcraft_fixes() -> UpstreamFixes {
-    let mut f = UpstreamFixes::default();
-    f.fillet_retry_radius_as_first = true;
-    f.fillet_rail_rim_on_face = true;
-    f.fillet_refuse_rails_leaving_faces = true;
-    f.fillet_refuse_face_consuming_blends = true;
-    f.fillet_refuse_non_manifold_result = true;
-    f.fillet_corner_ball_patch = true;
-    f.fillet_chamfer_cone_on_arc = true;
-    f.fillet_torus_center_on_axis = true;
-    f.offset_excess_faces_after_merge = true;
-    f.offset_clip_right_side_out = true;
-    f.revolution_offset_axis_both_sides = true;
-    f.offset_extended_edges_mated = true;
-    f.keep_operand_uv_trims = true;
-    f.geometric_g2_continuity = true;
-    f.proto_vertex_miss_is_false = true;
-    f.check_loop_vertex_tolerance = true;
-    f.check_loop_projected_seam_ends = true;
-    f.bspline_check_min_radius = true;
-    f.oscillating_skips_failed_guesses = true;
-    f.refine_cc_range_ends = true;
-    f.flat_corners_test_bits = true;
-    f.cylinder_rebuild_mean_radius = true;
-    f.revolve_analytic_profile_faces = true;
-    f.revolve_nested_shells_as_cavities = true;
-    f.join_touching_loops = true;
-    f.uv_trim_reversal_on_surface = true;
-    f.offset_resolve_crossing_loops = true;
-    f.offset_walls_touch_refused = true;
-    f.offset_analytic_mate_edges = true;
-    f.nurb_cylinder_inside_out_frame = true;
-    f.offset_collapsed_rounds_mated = true;
-    f.offset_missing_surface_fails = true;
-    f.fillet_nx1_end_rib_global_merge = true;
-    f.uv_trim_corner_end_points_only = true;
-    f.bspline_trim_preserves_uv_spans = true;
-    f.proto_edge_self_loop_on_vertex_degenerate = true;
-    f.slice_coincident_faces_sheet_side = true;
-    f.boolean_outer_shell_first = true;
-    f.edge_reversal_keeps_failed_edge = true;
-    f.topology_failed_evaluations_propagate = true;
-    f.heal_stage3_failures_propagate = true;
-    f.sweep_frame_on_planar_path_normal = true;
-    f.cover_refuses_folded_continuation = true;
-    f.boolean_vertex_by_best_crossing = true;
-    f.boolean_cleanup_removes_slits = true;
-    f.classify_edge_interval = true;
-    f.ellipse_trim_seam_lines_span_cone_height = true;
-    f.degenerate_proto_edge_in_one_vertex = true;
-    f.new_edge_vertex_tolerance_covers_gap = true;
-    f.torus_signed_gen_curve_interval = true;
-    f.sheet_sweep_joins_profile_wires = true;
-    f.point_solve_keeps_triangle_guess = true;
-    f.imprint_trims_edge_to_proto_vertex = true;
-    f.imprint_extends_edge_to_proto_vertex = true;
-    f.fillet_point_step_per_point = true;
-    f.analytic_copy_keeps_parameterization = true;
-    f.precise_properties_body_length_scale = true;
-    f.offset_extension_from_base = true;
-    f.corner_blend_stays_inside_neighbours = true;
-    f.fillet_cleanup_keeps_target_faces = true;
-    f.fillet_nx1_tangent_side_edge = true;
-    f.offset_stitch_at_body_tolerance = true;
-    f.curve_contacts_at_curve_ends = true;
-    f.shell_empty_cavity_fails = true;
-    f.boolean_lists_virtual_surface_copies = true;
-    f.ssi_tangent_contact_points = true;
-    f.ssi_trace_tangent_curves_once = true;
-    f.found_torus_sphere_keep_tested_nurb = true;
-    f
 }

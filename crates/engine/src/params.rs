@@ -10,6 +10,20 @@ pub fn bad(cmd: &str, msg: impl Into<String>) -> EngineError {
     EngineError::BadParams { cmd: cmd.to_string(), msg: msg.into() }
 }
 
+/// Resolve a reference only when one item matches. Callers retain their own name/id precedence;
+/// a repeated name reports every matching id instead of choosing an arbitrary item.
+pub(crate) fn unique_reference<T>(cmd: &str, kind: &str, key: &str, mut matches: impl Iterator<Item = (u64, T)>) -> Result<Option<T>> {
+    let Some((first_id, first)) = matches.next() else { return Ok(None) };
+    if let Some((second_id, _)) = matches.next() {
+        let mut ids = vec![first_id, second_id];
+        ids.extend(matches.map(|(id, _)| id));
+        ids.sort_unstable();
+        let ids = ids.iter().map(u64::to_string).collect::<Vec<_>>().join(", ");
+        return Err(bad(cmd, format!("ambiguous {kind} `{key}`; matching IDs: {ids}; use a numeric {kind} ID")));
+    }
+    Ok(Some(first))
+}
+
 pub fn finite(x: f64) -> Option<f64> {
     (x.is_finite() && x.abs() < 1e9).then_some(x)
 }

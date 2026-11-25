@@ -67,8 +67,6 @@ pub struct Popup {
     revision: u64,
     dialog: bool,
     include_hidden: bool,
-    /// The browser's body highlight is ours to clear.
-    lit_body: bool,
     /// The keys held at the press or click that opened it.
     held: Held,
 }
@@ -108,8 +106,8 @@ fn rows_capped(app: &SolveApp, proj: &Proj, pos: Pos2, through: bool) -> (Vec<Ro
     let hits = if through { crate::viewport::pick_through(app, proj, pos) } else { crate::viewport::pick_all(app, proj, pos) };
     let mut found = crate::viewport::candidates(app, &hits);
     let dialog = app.dialog.as_ref().is_some_and(|d| d.wants_picks());
-    // A body behind each face (body picking already turns faces into bodies).
-    if !dialog && !app.ui.pick_bodies {
+    // A body behind each face (a whole-object selection mode already turns faces into objects).
+    if !dialog && crate::selection_mode::picks(app) == solidcraft_engine::PickMode::Faces {
         for h in &hits {
             if let Hit::Face { body, .. } = h {
                 found.push((h.clone(), Sel::Body { name: body.clone() }));
@@ -236,16 +234,17 @@ fn shown_as(hit: &Hit, sel: &Sel) -> Sel {
 /// Sort key: in a sketch its own points and curves come first; then by kind.
 fn rank(s: &Sel, sketching: bool) -> (u8, u8) {
     let kind = match s {
-        Sel::SketchPoint { .. } | Sel::SketchMidpoint { .. } | Sel::ExternalSketchPoint { .. } => 0,
+        Sel::SketchPoint { .. } | Sel::SketchMidpoint { .. } | Sel::ExternalSketchPoint { .. } | Sel::PlacedSketchPoint { .. } => 0,
         Sel::SketchCurve { .. } | Sel::ExternalSketchCurve { .. } => 1,
         Sel::SketchConstraint { .. } => 2,
-        Sel::Vertex { .. } | Sel::ConstructionPoint { .. } => 3,
+        Sel::Vertex { .. } | Sel::ConstructionPoint { .. } | Sel::PointCloudPoint { .. } => 3,
         Sel::Edge { .. } => 4,
         Sel::Face { .. } | Sel::Feature { .. } => 5,
         Sel::Body { .. } | Sel::Occurrence { .. } => 6,
         Sel::Profile { .. } => 7,
         Sel::Plane { .. } => 8,
         Sel::Axis { .. } => 9,
+        Sel::Drawing { .. } => 10,
     };
     let own = matches!(s, Sel::SketchPoint { .. } | Sel::SketchMidpoint { .. } | Sel::SketchCurve { .. });
     (if sketching && !own { 1 } else { 0 }, kind)
@@ -330,13 +329,23 @@ pub fn label(app: &SolveApp, sel: &Sel) -> String {
         Sel::SketchPoint { id } => app.session.active_sketch.map(|s| in_sketch(s, &|sk| point_label(sk, id))).unwrap_or_else(|| id.clone()),
         Sel::SketchCurve { id, .. } => app.session.active_sketch.map(|s| in_sketch(s, &|sk| curve_label(sk, id))).unwrap_or_else(|| id.clone()),
         Sel::ExternalSketchPoint { sketch, id } => format!("{} · {}", in_sketch(*sketch, &|sk| point_label(sk, id)), sketch_name(app, *sketch)),
+        // On another copy of its part: that copy's name too.
+        Sel::PlacedSketchPoint { sketch, id, path } => {
+            let copy = path.last().and_then(|o| app.session.doc.occurrences.iter().find(|x| x.id == *o)).map(|o| o.name.clone()).unwrap_or_default();
+            format!("{} · {} · {copy}", in_sketch(*sketch, &|sk| point_label(sk, id)), sketch_name(app, *sketch))
+        }
         Sel::ExternalSketchCurve { sketch, id } => format!("{} · {}", in_sketch(*sketch, &|sk| curve_label(sk, id)), sketch_name(app, *sketch)),
         Sel::SketchConstraint { id } => format!("Constraint {id}"),
         Sel::Vertex { body, .. } => format!("Vertex · {body}"),
+        Sel::PointCloudPoint { cloud, index, .. } => {
+            let name = app.session.doc.point_clouds.iter().find(|c| c.id == *cloud).map(|c| c.name.as_str()).unwrap_or("Point Cloud");
+            format!("Point {index} · {name}")
+        }
         Sel::Edge { body, index, .. } => format!("Edge {} · {body}", index + 1),
         Sel::Face { body, index, .. } => format!("Face {} · {body}", index + 1),
         Sel::Body { name } => format!("Body · {name}"),
         Sel::Occurrence { path } => format!("Occurrence {path:?}"),
+        Sel::Drawing { object, .. } => format!("Drawing object {object}"),
         Sel::Feature { id } => app.session.doc.feature(*id).map(|f| f.name.clone()).unwrap_or_else(|| format!("Feature {id}")),
         Sel::Profile { sketch, index } => format!("Profile {} · {}", index + 1, sketch_name(app, *sketch)),
         Sel::Plane { name } if matches!(name.as_str(), "XY" | "XZ" | "YZ") => format!("{} Plane", app.preferences.origin_plane_names.label(name)),
@@ -364,15 +373,17 @@ fn icon(app: &SolveApp, sel: &Sel) -> &'static str {
         Sel::SketchPoint { .. }
         | Sel::SketchMidpoint { .. }
         | Sel::ExternalSketchPoint { .. }
+        | Sel::PlacedSketchPoint { .. }
         | Sel::Vertex { .. }
-        | Sel::ConstructionPoint { .. } => "point",
+        | Sel::ConstructionPoint { .. }
+        | Sel::PointCloudPoint { .. } => "point",
         Sel::SketchCurve { id, .. } => curve(app.session.active_sketch, id),
         Sel::ExternalSketchCurve { sketch, id } => curve(Some(*sketch), id),
         Sel::SketchConstraint { .. } => "dimension",
         Sel::Edge { .. } => "fillet",
         Sel::Face { .. } | Sel::Feature { .. } => "presspull",
         Sel::Body { .. } => "body",
-        Sel::Occurrence { .. } => "component",
+        Sel::Occurrence { .. } | Sel::Drawing { .. } => "component",
         Sel::Profile { .. } => "sketch",
         Sel::Plane { .. } => "plane",
         Sel::Axis { .. } => "axis",
@@ -409,18 +420,13 @@ fn open_with(app: &mut SolveApp, proj: &Proj, at: Pos2, held: Held) -> bool {
         revision: app.session.revision,
         dialog: app.dialog.is_some(),
         include_hidden: app.preferences.select_other_hidden,
-        lit_body: false,
         held,
     });
     true
 }
 
 pub fn close(app: &mut SolveApp) {
-    if let Some(p) = app.viewport.select_other.popup.take()
-        && p.lit_body
-    {
-        crate::semantic_content::set_external_body_hover(app, Vec::new());
-    }
+    app.viewport.select_other.popup = None;
 }
 
 pub fn is_open(app: &SolveApp) -> bool {
@@ -548,26 +554,31 @@ pub fn track_hold(
     consumed || opened
 }
 
+/// The popup belongs to the focused modeling view. Other views have their own canvas feedback.
+fn active_popup(app: &SolveApp) -> Option<&Popup> {
+    if app.viewport.card || crate::render_workspace::active(app) {
+        return None;
+    }
+    app.viewport.select_other.popup.as_ref().filter(|p| {
+        p.revision == app.session.revision
+            && p.dialog == app.dialog.is_some()
+            && p.include_hidden == app.preferences.select_other_hidden
+            && app.tool.is_none()
+    })
+}
+
+pub(crate) fn hovered_body(app: &SolveApp) -> Option<&str> {
+    let popup = active_popup(app)?;
+    match &popup.rows.get(popup.hovered?)?.sel {
+        Sel::Body { name } => Some(name),
+        _ => None,
+    }
+}
+
 /// While the list is open, the hovered row is what the viewport lights up.
 pub fn hover_override(app: &mut SolveApp) {
-    let Some(p) = app.viewport.select_other.popup.as_mut() else { return };
-    let row = p.hovered.and_then(|i| p.rows.get(i));
-    let body = match row.map(|r| &r.sel) {
-        Some(Sel::Body { name }) => Some(name.clone()),
-        _ => None,
-    };
-    app.viewport.hover = if body.is_some() { None } else { row.map(|r| r.hit.clone()) };
-    match body {
-        Some(b) => {
-            p.lit_body = true;
-            crate::semantic_content::set_external_body_hover(app, vec![b]);
-        }
-        None if p.lit_body => {
-            p.lit_body = false;
-            crate::semantic_content::set_external_body_hover(app, Vec::new());
-        }
-        None => {}
-    }
+    let Some(popup) = active_popup(app) else { return };
+    app.viewport.hover = popup.hovered.and_then(|i| popup.rows.get(i)).filter(|row| !matches!(row.sel, Sel::Body { .. })).map(|row| row.hit.clone());
 }
 
 /// What a repeat click must find unchanged: the model, the view, the sketch and the filter.
@@ -579,7 +590,7 @@ fn cycle_key(app: &SolveApp) -> u64 {
     }
     app.session.active_sketch.hash(&mut h);
     app.ui.pick_off.hash(&mut h);
-    app.ui.pick_bodies.hash(&mut h);
+    crate::selection_mode::picks(app).hash(&mut h);
     app.dialog.is_some().hash(&mut h);
     h.finish()
 }
@@ -618,15 +629,13 @@ pub fn cycle_click(app: &mut SolveApp, proj: &Proj, at: Pos2) -> bool {
 
 /// Draw the open list; handle its hover, clicks, and a press elsewhere (which closes it).
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
-    let Some(p) = app.viewport.select_other.popup.clone() else { return };
-    if p.revision != app.session.revision
-        || p.dialog != app.dialog.is_some()
-        || p.include_hidden != app.preferences.select_other_hidden
-        || app.tool.is_some()
-    {
-        close(app);
+    if app.viewport.select_other.popup.is_none() {
         return;
     }
+    let Some(p) = active_popup(app).cloned() else {
+        close(app);
+        return;
+    };
     let t = Tokens::get();
     let mut hovered = None;
     let mut picked = None;

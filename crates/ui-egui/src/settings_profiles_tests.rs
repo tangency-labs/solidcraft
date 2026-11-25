@@ -19,21 +19,33 @@ fn panel_arrow_bindings_and_cleared_defaults_survive_profile_export_import_and_a
     let mut h = Harness::new();
     crate::keymap::bind(&mut h.app, "panel.sash.left", "Ctrl+Left", false).unwrap();
     crate::keymap::bind(&mut h.app, "panel.sash.right", "", false).unwrap();
+    h.app.preferences.live_panel_drag_preview = false;
     run(&mut h, "settings.profile.save", json!({"name":"Panels"}));
     let profile = run(&mut h, "settings.profile.export", json!({"name":"Panels"}))["profile"].clone();
     assert_eq!(profile["shortcuts"]["panel.sash.left"], "Ctrl+Left");
     assert_eq!(profile["shortcuts"]["panel.sash.right"], "");
+    assert_eq!(profile["preferences"]["live_panel_drag_preview"], false);
+    h.app.preferences.live_panel_drag_preview = true;
     crate::keymap::reset(&mut h.app, None);
     run(&mut h, "settings.profile.import", json!({"profile":profile,"name":"Imported panels"}));
     run(&mut h, "settings.profile.apply", json!({"name":"Imported panels"}));
     assert_eq!(crate::keymap::keys(&h.app, "panel.sash.left"), ["Ctrl+Left"]);
     assert!(crate::keymap::keys(&h.app, "panel.sash.right").is_empty());
+    assert!(!h.app.preferences.live_panel_drag_preview);
 }
 
 #[test]
 fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
-    assert_eq!(keys.len(), 105, "Appearance system-theme slots and Maya zoom are included");
+    // Test change: show_design_view_switcher is a portable key; 110 -> 109 because the
+    // wide_panel_grab key left Preferences, so one fewer portable key; 109 -> 107 because the
+    // documents browser's show_document_browser and library_thumbnail_size left with it (#8206);
+    // 108 -> 109 because Turn Around adds one portable Navigation preference.
+    assert_eq!(
+        keys.len(),
+        109,
+        "include the repeated-shortcut preference, the browser scroll wheel preferences and the centred command search among the current portable settings"
+    );
     for key in [
         "nav",
         "maya_horizontal_zoom",
@@ -46,10 +58,12 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
         "ui_scale",
         "ui_font",
         "navigator_style",
+        "navigator_turn_around",
         "nav_bridge_enabled",
         "nav_bridge_port",
         "language",
         "suppress_sketch_snap",
+        "browser_scroll_wheel",
     ] {
         assert!(keys.contains(&key), "{key} belongs in a profile");
     }
@@ -87,7 +101,7 @@ fn profile_panel_layout_is_checked_separately_from_ordinary_preferences() {
 
     let h = Harness::new();
     let mut doc = capture(&h.app, "Layout");
-    assert!(doc.get("panel_layout").is_none(), "Classic does not acquire an opt-in layout through profile capture");
+    assert_eq!(doc["panel_layout"]["version"], 2, "Classic captures the shared workspace layout");
     let envelope = LayoutEnvelope::new(Layout::empty(WorkspaceId::new("fixture.workspace").unwrap()));
     let bytes = encode(&envelope, &PanelRegistry::default()).unwrap();
     let layout = json!({"version":1,"envelope":String::from_utf8(bytes).unwrap()});
@@ -524,7 +538,7 @@ fn general_profile_rows_save_replace_apply_and_show_real_state_in_both_themes() 
             assert!((computer.top() - held.bottom() - 8.0).abs() < 0.5);
         }
         assert!((profiles.top() - heading.bottom() - 38.0).abs() < 0.5, "{theme}: the first section has the same breathing room as later sections");
-        for (previous, next) in [("profiles", "language"), ("language", "saving")] {
+        for (previous, next) in [("profiles", "language"), ("language", "startup"), ("startup", "saving")] {
             let previous_body = crate::scenario::rect_of(&format!("prefs:section:{previous}:body")).unwrap();
             let next_header = crate::scenario::rect_of(&format!("prefs:section:{next}")).unwrap();
             assert!((next_header.top() - previous_body.bottom() - 38.0).abs() < 0.5, "{theme}: {previous} to {next}");
@@ -795,19 +809,20 @@ fn general_profile_row_rename_keeps_validation_and_unchanged_name_noop() {
 }
 
 #[test]
-fn profile_keys_preserve_the_baseline_and_explicit_additions() {
+fn profile_keys_cover_the_current_portable_preferences() {
     let expected = [
         "browser_bodies_folders",
-        "browser_collapsed",
         "browser_eye_left",
-        "browser_float",
-        "browser_share",
-        "browser_show",
-        "browser_width",
+        "browser_scroll_wheel",
         "center_arc_follows_cursor",
         "color_vision",
+        "command_search_centred",
+        "design_reopen_views",
+        "design_reuse_views",
+        "design_sub_tab_render",
+        "design_sub_tab_sheets",
+        "design_views_as_tabs",
         "dialog_buttons",
-        "dialog_place",
         "direct_interaction",
         "escape_twice_finishes_sketch",
         "free_orbit",
@@ -819,11 +834,13 @@ fn profile_keys_preserve_the_baseline_and_explicit_additions() {
         "history_sketches",
         "home_fit_size",
         "invert_navigator_arrows",
+        "keep_hover_while_navigating",
         "keep_work_on_tab_switch",
         "language",
         "layout",
         "line_drag_draws_one",
         "line_hover_tangent_arc",
+        "live_panel_drag_preview",
         "logo_accent",
         "look_at_anim",
         "look_at_speed",
@@ -834,9 +851,11 @@ fn profile_keys_preserve_the_baseline_and_explicit_additions() {
         "nav",
         "nav_bridge_enabled",
         "nav_bridge_port",
+        "nav_button_map",
         "navigation_bar",
         "navigator_fit",
         "navigator_style",
+        "navigator_turn_around",
         "orbit_around",
         "orbit_reverse",
         "origin_plane_names",
@@ -857,7 +876,10 @@ fn profile_keys_preserve_the_baseline_and_explicit_additions() {
         "right_drag_orbits",
         "select_other_hidden",
         "selection_shift_add_only",
+        "shortcut_again_ends_tool",
         "shortcut_cycles_modes",
+        "show_design_view_switcher",
+        "show_selected_hidden_edges",
         "sketch_align_points",
         "sketch_auto_dimensions",
         "sketch_auto_locate",
@@ -880,14 +902,10 @@ fn profile_keys_preserve_the_baseline_and_explicit_additions() {
         "theme_follow",
         "theme_night",
         "theme_options",
-        "timeline_collapsed",
-        "timeline_left",
-        "timeline_left_browser_collapsed",
-        "timeline_left_width",
         "timeline_origin_bodies",
-        "timeline_under_browser",
         "toast_place",
         "trackpad_pan",
+        "trackpad_twist_turns",
         "trackpad_zoom_modifier",
         "ui_font",
         "ui_scale",
@@ -905,7 +923,11 @@ fn profile_keys_preserve_the_baseline_and_explicit_additions() {
     ];
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
-    assert_eq!(expected.len(), 105);
+    // Test change: one more portable key, show_design_view_switcher, the setting the owner asked for.
+    // Test change: one more portable key, nav_button_map (what each mouse button drags).
+    // Test change: two fewer portable keys, show_document_browser and library_thumbnail_size, gone with the document browser;
+    // Turn Around adds one portable Navigation preference to the 108 keys on main.
+    assert_eq!(expected.len(), 109);
     assert_eq!(actual, expected);
 }
 
@@ -927,6 +949,7 @@ fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
     h.app.preferences.keep_work_on_tab_switch = true;
     h.app.preferences.line_hover_tangent_arc = true;
     h.app.preferences.navigator_fit = true;
+    h.app.preferences.navigator_turn_around = false;
     h.app.preferences.invert_navigator_arrows = true;
     h.app.preferences.home_fit_size = 0.5;
     h.app.preferences.ribbon_click_ends_tool = false;
@@ -941,6 +964,7 @@ fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
         ("home_fit_size", json!(0.5)),
         ("invert_navigator_arrows", json!(true)),
         ("navigator_fit", json!(true)),
+        ("navigator_turn_around", json!(false)),
         ("ribbon_click_ends_tool", json!(false)),
         ("ribbon_menus_follow_hover", json!(true)),
         ("sketch_face_activates_part", json!(true)),
@@ -968,6 +992,7 @@ fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
     h.app.preferences.keep_work_on_tab_switch = false;
     h.app.preferences.line_hover_tangent_arc = false;
     h.app.preferences.navigator_fit = defaults.navigator_fit;
+    h.app.preferences.navigator_turn_around = defaults.navigator_turn_around;
     h.app.preferences.invert_navigator_arrows = defaults.invert_navigator_arrows;
     h.app.preferences.home_fit_size = defaults.home_fit_size;
     h.app.preferences.ribbon_click_ends_tool = defaults.ribbon_click_ends_tool;
@@ -1120,10 +1145,10 @@ fn a_profile_carries_the_view_navigators_body_and_one_without_leaves_it_alone() 
     run(&mut h, "view.navigator", json!({"style": "custom", "body": body, "texture": "modeled", "arrows": false, "home": false}));
     run(&mut h, "settings.profile.save", json!({"name": "Gizmo"}));
     let exported = capture(&h.app, "Gizmo");
-    assert!(exported["view_gizmo"]["v"].is_string(), "the body is packed into the profile: {}", exported["view_gizmo"]);
+    assert!(exported["view_gizmo"]["v"].is_array(), "the body is carried in the profile as plain numbers: {}", exported["view_gizmo"]);
     assert!(exported.to_string().len() < 64 * 1024, "a box costs little");
 
-    // Elsewhere: a design without that body, the cube, and no custom body yet.
+    // Elsewhere: a design without that body, the signed axes, and no custom body yet.
     let mut other = Harness::new();
     run(&mut other, "settings.profile.save", json!({"name": "Plain"}));
     assert_eq!(run(&mut other, "settings.profile.import", json!({"profile": exported})), json!({"name": "Gizmo"}));

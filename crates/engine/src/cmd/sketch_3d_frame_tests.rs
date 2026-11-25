@@ -87,8 +87,11 @@ fn wire_frame_pending_moves_other_owner_and_legacy_world_do_not_join() {
     run(&mut s, "component.activate", json!({"component":0}));
     let root = run(&mut s, "sketch.create", json!({"plane":"XY","name":"Root path"}))["sketch"].as_u64().unwrap();
     run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    // Starting another component ends the open sketch; the person reopens it.
+    run(&mut s, "sketch.finish", json!({}));
     let unrelated = run(&mut s, "component.create", json!({"name":"Unrelated"}))["occurrence"].as_u64().unwrap();
     run(&mut s, "occurrence.move", json!({"occurrence":unrelated,"translate":[100,200,300]}));
+    run(&mut s, "sketch.edit", json!({"sketch":root}));
     run(&mut s, "sketch.point3d", json!({"sketch":root,"point":[9,8,7]}));
     near(s.doc.sketch(root).unwrap().wires[0].fit[0], Vec3::new(9.0, 8.0, 7.0));
 }
@@ -167,12 +170,14 @@ fn wire_frame_include_other_component_refresh_break_lost_and_reopen() {
 fn wire_frame_pipe_component_and_world_paths_have_analytic_volume_and_position() {
     for space in [WireSpace::Component, WireSpace::World] {
         let (mut s, _, first, second) = second_frame();
+        let sketch = s.active_sketch.unwrap();
         if space == WireSpace::World {
             // A single placed owner lets an immutable world path stay physically fixed;
             // replicated solids still follow their occurrence placements by design.
             run(&mut s, "selection.delete", json!({"items":[{"type":"occurrence","path":[first]}]}));
+            // Deleting a body or occurrence ends the open sketch; reopen it.
+            run(&mut s, "sketch.edit", json!({"sketch":sketch}));
         }
-        let sketch = s.active_sketch.unwrap();
         let wire = if space == WireSpace::Component {
             run(&mut s, "sketch.line3d", json!({"points":[[17,32,45],[17,32,55]]}))["curves"][0].as_str().unwrap().to_string()
         } else {
@@ -224,6 +229,8 @@ fn wire_frame_wide_owner_graph_has_bounded_indexed_traversal() {
             name: format!("Sibling{i}"),
             transform: solidcraft_doc::IDENTITY,
             grounded: false,
+            bom_type: None,
+            expressed_moves: Vec::new(),
         });
     }
     assert_eq!(super::inverse_owner_frame(&s, &json!({"sketch":target}), "sketch.point3d").unwrap(), solidcraft_doc::IDENTITY);
@@ -470,6 +477,1937 @@ fn wire_frame_copies_keep_component_and_legacy_coordinates() {
     near(wires.iter().find(|w| w.id == copied[0]).unwrap().arc.unwrap().center, Vec3::new(1.6, 0.0, 5.0));
     near(wires.iter().find(|w| w.id == copied[1]).unwrap().arc.unwrap().center, Vec3::new(20.0, 31.6, 45.0));
     run(&mut s, "component.activate", json!({"component":component,"occurrence":second,"path":[second]}));
+    let restored = solidcraft_doc::format::read(&s.doc.to_json()).unwrap();
+    assert_eq!(restored.sketch(sketch).unwrap().wires, s.doc.sketch(sketch).unwrap().wires);
+}
+
+/// Where a fit point of the active sketch's 3D curve `wire` is.
+fn fit(s: &Session, wire: &str, index: usize) -> Vec3 {
+    let sk = s.doc.sketch(s.active_sketch.unwrap()).unwrap();
+    sk.wires[sk.wire_index(wire).unwrap()].fit[index]
+}
+
+#[test]
+fn constraints_3d_join_hold_axes_follow_moves_undo_and_reopen() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let sketch = s.active_sketch.unwrap();
+    // A run along X and a rise along Z, drawn a little off both.
+    let r = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[100,2,3],[101,3,60]]}));
+    let (a, b) = (r["curves"][0].as_str().unwrap().to_string(), r["curves"][1].as_str().unwrap().to_string());
+    assert_eq!(r["constraints"].as_array().map(Vec::len), Some(1), "the joint: {r}");
+    run(&mut s, "sketch.constraint.fix", json!({"entity": format!("{a}.start")}));
+    run(&mut s, "sketch.constraint.along_axis", json!({"line": a, "axis": "x"}));
+    let last = run(&mut s, "sketch.constraint.along_axis", json!({"line": b, "axis": "z"}));
+    near(fit(&s, &a, 0), Vec3::new(0.0, 0.0, 0.0));
+    let corner = fit(&s, &a, 1);
+    assert!(corner.y.abs() < 1e-9 && corner.z.abs() < 1e-9, "{corner:?}");
+    near(fit(&s, &b, 0), corner);
+    let top = fit(&s, &b, 1);
+    assert!((top.x - corner.x).abs() < 1e-9 && (top.y - corner.y).abs() < 1e-9, "{top:?}");
+    // 4 points: 12 coordinates, less the fix (3), the joint (3) and two axes (2 each).
+    assert_eq!(last["sketch"]["dof"], 2, "{last}");
+
+    // Dragging the top along X takes the corner with it; the start stays.
+    run(&mut s, "sketch.move3d", json!({"wire": b, "index": 1, "by": [5, 0, 0]}));
+    near(fit(&s, &a, 0), Vec3::new(0.0, 0.0, 0.0));
+    assert!((fit(&s, &a, 1).x - (corner.x + 5.0)).abs() < 1e-6 && (fit(&s, &b, 0).x - (corner.x + 5.0)).abs() < 1e-6);
+    // A fixed point does not move, and a move the constraints cannot hold changes nothing.
+    let before = s.doc.to_json();
+    assert!(s.execute("sketch.move3d", &json!({"wire": a, "index": 0, "to": [1, 1, 1]})).is_err());
+    assert!(s.execute("sketch.move3d", &json!({"wire": b, "index": 1, "by": [0, 0, 0.5], "to": [3, 9, 70]})).is_err());
+    assert_eq!(s.doc.to_json(), before);
+    // A constraint that conflicts is refused, the design unchanged.
+    let e = s.execute("sketch.constraint.along_axis", &json!({"line": a, "axis": "y"})).unwrap_err().to_string();
+    assert!(e.contains("over-constrain"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+
+    // It is saved and read back; undo takes the last constraint off, and delete removes one.
+    let restored = solidcraft_doc::format::read(&s.doc.to_json()).unwrap();
+    assert_eq!(restored.sketch(sketch).unwrap().wire_constraints, s.doc.sketch(sketch).unwrap().wire_constraints);
+    let n = s.doc.sketch(sketch).unwrap().wire_constraints.len();
+    let id = last["constraints"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.delete", json!({"entities": [id]}));
+    assert_eq!(s.doc.sketch(sketch).unwrap().wire_constraints.len(), n - 1);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.sketch(sketch).unwrap().wire_constraints.len(), n);
+    // Deleting a curve takes its constraints with it.
+    run(&mut s, "sketch.delete", json!({"entities": [b]}));
+    assert!(s.doc.sketch(sketch).unwrap().wire_constraints.iter().all(|c| !c.kind.wires().contains(&b.as_str())));
+}
+
+#[test]
+fn coincident_3d_joins_points_puts_a_point_on_a_line_and_keeps_planar_geometry_apart() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let a = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[10,0,0]]}))["curves"][0].as_str().unwrap().to_string();
+    let b = run(&mut s, "sketch.line3d", json!({"points":[[10,1,1],[10,5,9]]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.fix", json!({"entity": a}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": format!("{a}.end"), "b": format!("{b}.start")}));
+    near(fit(&s, &b, 0), Vec3::new(10.0, 0.0, 0.0));
+    // A 3D point dropped onto the fixed line, straight down.
+    let q = run(&mut s, "sketch.point3d", json!({"point":[4,3,4]}))["point"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.coincident", json!({"a": q, "b": a}));
+    near(fit(&s, &q, 0), Vec3::new(4.0, 0.0, 0.0));
+    // A 3D point on the sketch's 2D origin (#10616): the line's fixed start is there too.
+    run(&mut s, "sketch.constraint.coincident", json!({"a": q, "b": "origin"}));
+    near(fit(&s, &q, 0), Vec3::new(0.0, 0.0, 0.0));
+    // Unfix releases every point of the line.
+    let r = run(&mut s, "sketch.constraint.fix", json!({"entity": a, "fixed": false}));
+    assert_eq!(r["result"]["changed"], 2, "{r}");
+}
+
+#[test]
+fn a_constrained_3d_line_follows_its_constraints_through_a_drag() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let l = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[50,3,4]]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.fix", json!({"entity": format!("{l}.start")}));
+    // Along X with the start fixed: the end drops straight onto the axis, 50 along.
+    run(&mut s, "sketch.constraint.along_axis", json!({"line": l, "axis": "x"}));
+    near(fit(&s, &l, 1), Vec3::new(50.0, 0.0, 0.0));
+    // Stretched along the axis by a drag, it stays on it.
+    run(&mut s, "sketch.move3d", json!({"wire": l, "index": 1, "by": [10, 0, 0]}));
+    near(fit(&s, &l, 1), Vec3::new(60.0, 0.0, 0.0));
+    // With neither end fixed, each end moves half the gap: the line runs at y = 11.5, z = 2.
+    let free = run(&mut s, "sketch.line3d", json!({"points":[[0,10,0],[100,13,4]]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.along_axis", json!({"line": free, "axis": "x"}));
+    near(fit(&s, &free, 0), Vec3::new(0.0, 11.5, 2.0));
+    near(fit(&s, &free, 1), Vec3::new(100.0, 11.5, 2.0));
+}
+
+#[test]
+fn planar_constraints_and_dimensions_count_without_the_3d_curves() {
+    // A free 3D line beside a planar line: the planar edits measure the planar sketch alone.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[10,5,5]]}));
+    let l = run(&mut s, "sketch.line", json!({"points":[[2,3],[10,4]]}))["curves"][0].as_str().unwrap().to_string();
+    let r = run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line": l, "mode": "horizontal"}));
+    // The planar line's 4 less 1, and the 3D line's 6.
+    assert_eq!(r["sketch"]["dof"], 3 + 6, "{r}");
+    let r = run(&mut s, "sketch.dimension", json!({"entities": [l], "value": 25}));
+    assert_eq!(r["sketch"]["dof"], 2 + 6, "{r}");
+    let sketch = s.active_sketch.unwrap();
+    let st = s.model.state();
+    let ss = st.sketch(sketch).unwrap();
+    assert_eq!((ss.report.dof, ss.report.shown_dof()), (2, 8));
+}
+
+#[test]
+fn lines_drawn_one_segment_at_a_time_stay_joined_through_their_constraints() {
+    // As the 3D Line tool draws: one call per segment.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let a = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[50,3,4]]}))["curves"][0].as_str().unwrap().to_string();
+    let r = run(&mut s, "sketch.line3d", json!({"points":[[50,3,4],[52,5,40]]}));
+    let b = r["curves"][0].as_str().unwrap().to_string();
+    assert_eq!(r["constraints"].as_array().map(Vec::len), Some(1), "joined to the first: {r}");
+    run(&mut s, "sketch.constraint.fix", json!({"entity": format!("{a}.start")}));
+    run(&mut s, "sketch.constraint.along_axis", json!({"line": a, "axis": "x"}));
+    let r = run(&mut s, "sketch.constraint.along_axis", json!({"line": b, "axis": "z"}));
+    assert_eq!(r["created"]["constraints"].as_array().map(Vec::len), Some(1), "{r}");
+    near(fit(&s, &b, 0), fit(&s, &a, 1));
+    let top = fit(&s, &b, 1);
+    assert!((top.x - fit(&s, &b, 0).x).abs() < 1e-9 && (top.y - fit(&s, &b, 0).y).abs() < 1e-9, "the rise stands on the joint: {top:?}");
+}
+
+#[test]
+fn a_3d_conflict_does_not_block_planar_edits_and_shows() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let sketch = s.active_sketch.unwrap();
+    let l3 = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[10,5,5]]}))["curves"][0].as_str().unwrap().to_string();
+    // A design whose 3D constraints conflict (the end fixed off the axis it is held to).
+    let mut doc = (*s.doc).clone();
+    let sk = doc.sketch_mut(sketch).unwrap();
+    let end = sk.wire_point(&format!("{l3}.end")).unwrap();
+    let start = sk.wire_point(&format!("{l3}.start")).unwrap();
+    sk.add_wire_constraint(solidcraft_sketch::WireConstraintKind::Fix { p: start, at: Vec3::ZERO, exprs: None }).unwrap();
+    sk.add_wire_constraint(solidcraft_sketch::WireConstraintKind::Fix { p: end, at: Vec3::new(10.0, 5.0, 5.0), exprs: None }).unwrap();
+    sk.add_wire_constraint(solidcraft_sketch::WireConstraintKind::AlongAxis { line: l3.clone(), axis: solidcraft_sketch::Axis::X }).unwrap();
+    s.set_doc(doc);
+    let l = run(&mut s, "sketch.line", json!({"points":[[0,0],[10,1]]}))["curves"][0].as_str().unwrap().to_string();
+    let r = run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line": l, "mode": "horizontal"}));
+    // `solved` is the planar sketch's; the 3D conflict is its own.
+    assert_eq!((r["sketch"]["solved"].as_bool(), r["sketch"]["wires_solved"].as_bool()), (Some(true), Some(false)), "{r}");
+    let info = run(&mut s, "sketch.inspect", json!({}));
+    assert_eq!(info["status"], "solved", "{info}");
+    assert_eq!(info["wires_solve"]["ok"], false, "{info}");
+    let st = s.model.state();
+    assert!(!st.sketch(sketch).unwrap().report.shown_ok());
+}
+
+#[test]
+fn a_3d_curve_and_its_own_constraint_delete_together() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let l = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[10,1,1]]}))["curves"][0].as_str().unwrap().to_string();
+    let k = run(&mut s, "sketch.constraint.along_axis", json!({"line": l, "axis": "x"}))["constraints"][0].as_str().unwrap().to_string();
+    let info = run(&mut s, "sketch.inspect", json!({}));
+    assert!(info["wire_constraints"].as_array().is_some_and(|a| a.iter().any(|c| c["id"] == k.as_str())), "{info}");
+    run(&mut s, "sketch.delete", json!({"entities": [l, k]}));
+    let sk = s.doc.sketch(s.active_sketch.unwrap()).unwrap();
+    assert!(sk.wires.is_empty() && sk.wire_constraints.is_empty());
+}
+
+#[test]
+fn a_planar_conflict_does_not_block_3d_edits_and_solved_groups_still_move() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let sketch = s.active_sketch.unwrap();
+    let l = run(&mut s, "sketch.line", json!({"points":[[2,3],[10,4]]}))["curves"][0].as_str().unwrap().to_string();
+    // A planar line held both horizontal and vertical: the planar sketch conflicts.
+    let mut doc = (*s.doc).clone();
+    let sk = doc.sketch_mut(sketch).unwrap();
+    let c = sk.curve_index(&l).unwrap();
+    sk.add_constraint(solidcraft_sketch::ConstraintKind::Horizontal { l: c }, None).unwrap();
+    sk.add_constraint(solidcraft_sketch::ConstraintKind::Vertical { l: c }, None).unwrap();
+    s.set_doc(doc);
+    // 3D edits go ahead.
+    let a = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[10,1,1]]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.fix", json!({"entity": format!("{a}.start")}));
+    run(&mut s, "sketch.constraint.along_axis", json!({"line": a, "axis": "x"}));
+    let end = fit(&s, &a, 1);
+    assert!(end.y.abs() < 1e-9 && end.z.abs() < 1e-9, "{end:?}");
+}
+
+#[test]
+fn a_3d_line_is_not_squeezed_to_a_point() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let l = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[10,0.000001,0]]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.fix", json!({"entity": format!("{l}.start")}));
+    let before = s.doc.to_json();
+    // Along Y would leave a millionth of a 10 mm line (the limits planar lines have).
+    let e = s.execute("sketch.constraint.along_axis", &json!({"line": l, "axis": "y"})).unwrap_err().to_string();
+    assert!(e.contains("shrink"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
+fn a_deleted_joint_stays_deleted() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let r = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[10,1,1],[10,1,20]]}));
+    let (a, b) = (r["curves"][0].as_str().unwrap().to_string(), r["curves"][1].as_str().unwrap().to_string());
+    let joint = r["constraints"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.along_axis", json!({"line": a, "axis": "x"}));
+    run(&mut s, "sketch.delete", json!({"entities": [joint]}));
+    run(&mut s, "sketch.constraint.along_axis", json!({"line": b, "axis": "z"}));
+    let sketch = s.active_sketch.unwrap();
+    let joins = |s: &Session| {
+        s.doc
+            .sketch(sketch)
+            .unwrap()
+            .wire_constraints
+            .iter()
+            .filter(|c| matches!(c.kind, solidcraft_sketch::WireConstraintKind::Coincident { .. }))
+            .count()
+    };
+    assert_eq!(joins(&s), 0, "the deleted joint is not put back");
+}
+
+#[test]
+fn a_drag_cannot_squeeze_a_3d_line_away() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let r = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[10,0,0],[10,0,20]]}));
+    let (a, b) = (r["curves"][0].as_str().unwrap().to_string(), r["curves"][1].as_str().unwrap().to_string());
+    run(&mut s, "sketch.constraint.fix", json!({"entity": format!("{a}.start")}));
+    run(&mut s, "sketch.constraint.along_axis", json!({"line": a, "axis": "x"}));
+    run(&mut s, "sketch.constraint.along_axis", json!({"line": b, "axis": "z"}));
+    let before = s.doc.to_json();
+    // Dragging the top to x = 1e-6 would leave the run a micron long.
+    let e = s.execute("sketch.move3d", &json!({"wire": b, "index": 1, "to": [0.000001, 0, 20]})).unwrap_err().to_string();
+    assert!(e.contains("shrink"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
+fn an_older_unjoined_path_is_joined_once_and_a_deleted_joint_stays_gone() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let sketch = s.active_sketch.unwrap();
+    let r = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[10,1,1],[10,1,20]]}));
+    let (a, b) = (r["curves"][0].as_str().unwrap().to_string(), r["curves"][1].as_str().unwrap().to_string());
+    // As a design saved before 3D constraints: the path, no joints, not joined yet.
+    let mut doc = (*s.doc).clone();
+    let sk = doc.sketch_mut(sketch).unwrap();
+    sk.wire_constraints.clear();
+    sk.wires_joined = false;
+    s.set_doc(doc);
+    // A curve drawn elsewhere joins the old path too; constraining the first line keeps the second on it.
+    run(&mut s, "sketch.line3d", json!({"points":[[50,0,0],[60,0,0]]}));
+    run(&mut s, "sketch.constraint.along_axis", json!({"line": a, "axis": "x"}));
+    near(fit(&s, &b, 0), fit(&s, &a, 1));
+    // Its only joint deleted (and every other constraint), the next one does not put it back.
+    let ids: Vec<String> = s.doc.sketch(sketch).unwrap().wire_constraints.iter().map(|c| c.id.clone()).collect();
+    run(&mut s, "sketch.delete", json!({"entities": ids}));
+    run(&mut s, "sketch.constraint.along_axis", json!({"line": b, "axis": "z"}));
+    let joins = s
+        .doc
+        .sketch(sketch)
+        .unwrap()
+        .wire_constraints
+        .iter()
+        .filter(|c| matches!(c.kind, solidcraft_sketch::WireConstraintKind::Coincident { .. }))
+        .count();
+    assert_eq!(joins, 0);
+}
+
+#[test]
+fn a_motion_trace_curve_takes_no_constraints_and_counts_no_freedoms() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let sketch = s.active_sketch.unwrap();
+    let t = run(&mut s, "sketch.spline3d", json!({"points":[[0,0,0],[5,2,1],[10,0,3]]}))["curves"][0].as_str().unwrap().to_string();
+    let mut doc = (*s.doc).clone();
+    doc.assembly.traces.push(solidcraft_doc::motion::MotionTrace {
+        sketch,
+        wire: t.clone(),
+        occurrence: Vec::new(),
+        point: solidcraft_doc::joints::JointOrigin::new(
+            0,
+            solidcraft_doc::joints::Snap::Frame { origin: Vec3::ZERO, z: Vec3::new(0.0, 0.0, 1.0), x: None },
+        ),
+        motion: solidcraft_doc::motion::TraceMotion::Study { study: 0 },
+        samples: None,
+        seeds: Vec::new(),
+    });
+    s.set_doc(doc);
+    let e = s.execute("sketch.constraint.fix", &json!({"entity": format!("{t}.start")})).unwrap_err().to_string();
+    assert!(e.contains("motion trace"), "{e}");
+    // Its fit points are no freedoms to take away: a line drawn beside it adds its own 6 only.
+    let r = run(&mut s, "sketch.line3d", json!({"points":[[0,20,0],[10,20,5]]}));
+    assert_eq!(r["sketch"]["dof"], 6, "{r}");
+    assert_eq!(r["sketch"]["planar_dof"], 0, "{r}");
+    // A copy that lands on the trace's end is not joined to it either, as a drawn curve is not.
+    let l = r["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.move", json!({"entities": [l], "copy": true, "translate": [0, -20]}));
+    let sk = s.doc.sketch(sketch).unwrap();
+    assert!(!sk.wire_constraints.iter().any(|c| c.kind.wires().iter().any(|w| *w == t)), "{:?}", sk.wire_constraints);
+}
+
+#[test]
+fn a_move_that_breaks_a_constraint_in_a_group_too_large_to_solve_is_refused() {
+    // A path of 521 points along X, each of its 520 lines held along X: more unknowns than one
+    // solve takes, so the group is left as it is. Dragging a point off X is refused.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let sketch = s.active_sketch.unwrap();
+    // In two calls (a call takes at most 500 points), the second joined to the first's end.
+    let mut lines = Vec::new();
+    for (from, to) in [(0, 300), (299, 521)] {
+        let path: Vec<[f64; 3]> = (from..to).map(|x| [f64::from(x), 0.0, 0.0]).collect();
+        let r = run(&mut s, "sketch.line3d", json!({"points": path}));
+        lines.extend(r["curves"].as_array().unwrap().iter().map(|c| c.as_str().unwrap().to_string()));
+    }
+    let mut doc = (*s.doc).clone();
+    let sk = doc.sketch_mut(sketch).unwrap();
+    for line in &lines {
+        sk.add_wire_constraint(solidcraft_sketch::WireConstraintKind::AlongAxis { line: line.clone(), axis: solidcraft_sketch::Axis::X }).unwrap();
+    }
+    s.set_doc(doc);
+    let before = s.doc.sketch(sketch).unwrap().wires.clone();
+    let e = s.execute("sketch.move3d", &json!({"wire": lines[0], "index": 0, "to": [0, 5, 5]})).unwrap_err().to_string();
+    assert!(e.contains("cannot hold"), "{e}");
+    assert_eq!(s.doc.sketch(sketch).unwrap().wires, before, "nothing moved");
+}
+
+/// Where a fit point of 3D curve `wire` lands once the model is evaluated (parameters applied).
+fn solved_fit(s: &Session, sketch: u64, wire: &str, index: usize) -> Vec3 {
+    let world = s.world_state().unwrap();
+    let sk = &world.sketch(sketch).unwrap().sketch;
+    sk.wires[sk.wire_index(wire).unwrap()].fit[index]
+}
+
+#[test]
+fn a_3d_line_placed_by_expressions_follows_the_parameters() {
+    // The runner of #10608: a line on the tube top, from mid-length to 370 short of the end.
+    let mut s = Session::default();
+    run(&mut s, "parameters.change", json!({"name": "len", "expression": "3500 mm"}));
+    run(&mut s, "parameters.change", json!({"name": "shs", "expression": "150 mm"}));
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let sketch = s.active_sketch.unwrap();
+    let r = run(&mut s, "sketch.line3d", json!({"points": [["len / 2", 0, "shs"], ["len - 370 mm", 0, "shs"]]}));
+    let l = r["curves"][0].as_str().unwrap().to_string();
+    assert_eq!(r["constraints"].as_array().map(Vec::len), Some(2), "a placed Fix per point: {r}");
+    run(&mut s, "sketch.finish", json!({}));
+    near(solved_fit(&s, sketch, &l, 0), Vec3::new(1750.0, 0.0, 150.0));
+    near(solved_fit(&s, sketch, &l, 1), Vec3::new(3130.0, 0.0, 150.0));
+    run(&mut s, "parameters.change", json!({"name": "shs", "expression": "120 mm"}));
+    run(&mut s, "parameters.change", json!({"name": "len", "expression": "3000 mm"}));
+    near(solved_fit(&s, sketch, &l, 0), Vec3::new(1500.0, 0.0, 120.0));
+    near(solved_fit(&s, sketch, &l, 1), Vec3::new(2630.0, 0.0, 120.0));
+    // Renaming a parameter renames it in the point's expressions, and they still evaluate.
+    run(&mut s, "parameters.rename", json!({"name": "shs", "new_name": "tube"}));
+    run(&mut s, "parameters.change", json!({"name": "tube", "expression": "100 mm"}));
+    near(solved_fit(&s, sketch, &l, 0), Vec3::new(1500.0, 0.0, 100.0));
+    // An unknown parameter is refused, the design unchanged.
+    let before = s.doc.to_json();
+    run(&mut s, "sketch.edit", json!({"sketch": sketch}));
+    assert!(s.execute("sketch.point3d", &json!({"point": [0, "nope", 0]})).is_err());
+    assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
+fn dimensions_3d_drive_measure_and_follow_their_parameters() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let sketch = s.active_sketch.unwrap();
+    let r = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[100,0,0],[100,0,60]]}));
+    let (a, b) = (r["curves"][0].as_str().unwrap().to_string(), r["curves"][1].as_str().unwrap().to_string());
+    run(&mut s, "sketch.constraint.fix", json!({"entity": format!("{a}.start")}));
+    run(&mut s, "sketch.constraint.along_axis", json!({"line": a, "axis": "x"}));
+    // The run's length, as a new user parameter.
+    let d = run(&mut s, "sketch.dimension", json!({"entities": [a], "value": "run = 120"}));
+    assert_eq!((d["type"].as_str(), d["defined"].as_str()), (Some("length"), Some("run")), "{d}");
+    assert!((d["measured"].as_f64().unwrap() - 120.0).abs() < 1e-6, "{d}");
+    near(fit(&s, &a, 1), Vec3::new(120.0, 0.0, 0.0));
+    // The rise: 60 along Z from the corner, and the angle between run and rise.
+    let z = run(&mut s, "sketch.dimension", json!({"entities": [format!("{a}.end"), format!("{b}.end")], "type": "distance_z", "value": 80}));
+    assert_eq!(z["type"], "distance_z", "{z}");
+    let angle = run(&mut s, "sketch.dimension", json!({"entities": [a, b], "value": "90 deg"}));
+    assert_eq!(angle["unit"], "deg", "{angle}");
+    let top = fit(&s, &b, 1);
+    assert!((top.x - 120.0).abs() < 1e-6 && top.y.abs() < 1e-6 && (top.z - 80.0).abs() < 1e-6, "{top:?}");
+    // The parameter drives it after the sketch is closed.
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "parameters.change", json!({"name": "run", "expression": "150 mm"}));
+    near(solved_fit(&s, sketch, &a, 1), Vec3::new(150.0, 0.0, 0.0));
+    near(solved_fit(&s, sketch, &b, 1), Vec3::new(150.0, 0.0, 80.0));
+    // A dimension the other constraints already settle is refused; driven, it measures.
+    run(&mut s, "sketch.edit", json!({"sketch": sketch}));
+    let before = s.doc.to_json();
+    let e = s
+        .execute("sketch.dimension", &json!({"entities": [format!("{a}.start"), format!("{a}.end")], "type": "distance_x"}))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("already determined"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+    let driven = run(&mut s, "sketch.dimension", json!({"entities": [format!("{a}.start"), format!("{b}.end")], "driven": true}));
+    let diagonal = (150.0f64 * 150.0 + 80.0 * 80.0).sqrt();
+    assert!((driven["measured"].as_f64().unwrap() - diagonal).abs() < 1e-6, "{driven}");
+    // The dimensions' parameters are in use: not pruned, and they survive a save.
+    let restored = solidcraft_doc::format::read(&s.doc.to_json()).unwrap();
+    let params = restored.sketch(sketch).unwrap().dimension_params().into_iter().cloned().collect::<Vec<_>>();
+    assert_eq!(params.len(), 3, "{params:?}");
+    for p in &params {
+        assert!(restored.param(p).is_some(), "{p}");
+    }
+}
+
+/// A run along X from a fixed start, dimensioned by parameter `run`, then a rise from its end.
+fn run_and_rise(s: &mut Session) -> (u64, String, String) {
+    run(s, "sketch.create", json!({"plane":"XY"}));
+    run(s, "sketch.options", json!({"sketch_3d":true}));
+    let sketch = s.active_sketch.unwrap();
+    let r = run(s, "sketch.line3d", json!({"points":[[0,0,0],[100,0,0],[100,0,60]]}));
+    let (a, b) = (r["curves"][0].as_str().unwrap().to_string(), r["curves"][1].as_str().unwrap().to_string());
+    run(s, "sketch.constraint.fix", json!({"entity": format!("{a}.start")}));
+    run(s, "sketch.constraint.along_axis", json!({"line": a, "axis": "x"}));
+    run(s, "sketch.dimension", json!({"entities": [a], "value": "run = 100"}));
+    (sketch, a, b)
+}
+
+#[test]
+fn a_parameter_change_stores_the_3d_curves_where_it_puts_them() {
+    let mut s = Session::default();
+    let (sketch, a, b) = run_and_rise(&mut s);
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "parameters.change", json!({"name": "run", "expression": "150 mm"}));
+    // The stored sketch, not only the evaluated one: later edits start from it.
+    let stored = |s: &Session, w: &str, i: usize| {
+        let sk = s.doc.sketch(sketch).unwrap();
+        sk.wires[sk.wire_index(w).unwrap()].fit[i]
+    };
+    near(stored(&s, &a, 1), Vec3::new(150.0, 0.0, 0.0));
+    near(stored(&s, &b, 0), Vec3::new(150.0, 0.0, 0.0));
+    // The rise's top, held by nothing, stayed put. Moving the corner works from where the
+    // change put it, and fixing it holds it there.
+    near(stored(&s, &b, 1), Vec3::new(100.0, 0.0, 60.0));
+    run(&mut s, "sketch.edit", json!({"sketch": sketch}));
+    run(&mut s, "sketch.move3d", json!({"wire": b, "index": 0, "by": [0, 0, 0]}));
+    near(stored(&s, &b, 0), Vec3::new(150.0, 0.0, 0.0));
+    run(&mut s, "sketch.constraint.fix", json!({"entity": format!("{b}.start")}));
+    near(stored(&s, &b, 0), Vec3::new(150.0, 0.0, 0.0));
+}
+
+#[test]
+fn a_parameter_change_that_breaks_the_3d_constraints_is_refused() {
+    let mut s = Session::default();
+    let (sketch, a, _) = run_and_rise(&mut s);
+    // The run's end also fixed: changing its length can only conflict.
+    run(&mut s, "sketch.constraint.fix", json!({"entity": format!("{a}.end")}));
+    run(&mut s, "sketch.finish", json!({}));
+    let before = s.doc.to_json();
+    let e = s.execute("parameters.change", &json!({"name": "run", "expression": "150 mm"})).unwrap_err().to_string();
+    assert!(e.contains("3D constraints would conflict"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+    let _ = sketch;
+}
+
+#[test]
+fn a_redundant_3d_dimension_can_be_placed_driven_and_toggled() {
+    let mut s = Session::default();
+    let (sketch, a, _) = run_and_rise(&mut s);
+    // The run along X is its length already.
+    let ends = json!([format!("{a}.start"), format!("{a}.end")]);
+    let r = run(&mut s, "sketch.dimension", json!({"entities": ends, "type": "distance_x", "if_redundant": "driven"}));
+    assert_eq!((r["driven"].as_bool(), r["redundant"].as_bool()), (Some(true), Some(true)), "{r}");
+    let k = r["constraint"].as_str().unwrap().to_string();
+    // Making it driving would over-constrain: it stays driven.
+    let before = s.doc.to_json();
+    let e = s.execute("sketch.toggle_driven", &json!({"constraint": k})).unwrap_err().to_string();
+    assert!(e.contains("stays driven"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+    // The length dimension made driven frees the run; the X distance can then drive it.
+    let length = s.doc.sketch(sketch).unwrap().wire_constraints.iter().find(|c| c.param.is_some()).unwrap().id.clone();
+    run(&mut s, "sketch.toggle_driven", json!({"constraint": length, "driven": true}));
+    let r = run(&mut s, "sketch.toggle_driven", json!({"constraint": k, "driven": false}));
+    assert_eq!(r["driven"], false, "{r}");
+    let e = s.execute("sketch.dimension_text", &json!({"dimension": k, "at": [1, 2]})).unwrap_err().to_string();
+    assert!(e.contains("#10617"), "{e}");
+}
+
+#[test]
+fn an_angle_at_a_corner_is_the_corner_s_angle() {
+    // A bracket drawn as a run out and a return leg back over it (180° apart at the corner).
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let r = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[100,0,0],[50,0,40]]}));
+    let (a, b) = (r["curves"][0].as_str().unwrap().to_string(), r["curves"][1].as_str().unwrap().to_string());
+    run(&mut s, "sketch.constraint.fix", json!({"entity": a}));
+    let d = run(&mut s, "sketch.dimension", json!({"entities": [a, b], "value": "60 deg"}));
+    assert!((d["measured"].as_f64().unwrap() - 60.0).abs() < 1e-6, "{d}");
+    // The leg leans back over the run at 60° from the corner, as on a drawing.
+    let (corner, tip) = (fit(&s, &b, 0), fit(&s, &b, 1));
+    let leg = tip - corner;
+    assert!(leg.x < 0.0 && (leg.x / leg.len() + 0.5).abs() < 1e-9, "{leg:?}");
+}
+
+#[test]
+fn a_driven_3d_dimension_takes_any_value_it_measures_through_edits() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    // A reference distance between two points that are then joined: it measures 0.
+    let p = run(&mut s, "sketch.point3d", json!({"point":[0,0,0]}))["point"].as_str().unwrap().to_string();
+    let q = run(&mut s, "sketch.point3d", json!({"point":[5,0,0]}))["point"].as_str().unwrap().to_string();
+    let d = run(&mut s, "sketch.dimension", json!({"entities": [p, q], "driven": true}));
+    assert!(d["created"]["dimensions"].as_array().is_some_and(|a| a.len() == 1), "listed as a dimension: {d}");
+    run(&mut s, "sketch.constraint.coincident", json!({"a": p, "b": q}));
+    // The sketch still evaluates and takes edits, planar ones too.
+    run(&mut s, "sketch.point3d", json!({"point":[1,2,3]}));
+    run(&mut s, "sketch.line", json!({"points":[[2,3],[10,4]]}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()));
+    // A reference length of 1.5 km.
+    let l = run(&mut s, "sketch.line3d", json!({"points":[[0,10,0],[1500000,10,0]]}))["curves"][0].as_str().unwrap().to_string();
+    let r = run(&mut s, "sketch.dimension", json!({"entities": [l], "driven": true}));
+    assert!((r["measured"].as_f64().unwrap() - 1.5e6).abs() < 1e-3, "{r}");
+}
+
+/// A driven (reference) dimension measures: moving what it measures is allowed and it takes the
+/// new value. A driving one still holds its curve.
+#[test]
+fn a_move_changes_what_a_driven_3d_dimension_measures() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let sketch = s.active_sketch.unwrap();
+    let r = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[10,0,0],[10,8,6]]}));
+    let (a, b) = (r["curves"][0].as_str().unwrap().to_string(), r["curves"][1].as_str().unwrap().to_string());
+    let arc = run(&mut s, "sketch.arc3d", json!({"start":[40,0,0],"through":[45,5,0],"end":[50,0,0]}))["curves"][0].as_str().unwrap().to_string();
+    let value =
+        |s: &Session, k: &str| s.doc.sketch(sketch).unwrap().wire_constraints.iter().find(|c| c.id == k).and_then(|c| c.kind.value()).unwrap();
+    let dim = |s: &mut Session, entities: Value| {
+        let d = run(s, "sketch.dimension", json!({"entities": entities, "driven": true}));
+        assert_eq!(d["driven"], true, "{d}");
+        d["constraint"].as_str().unwrap().to_string()
+    };
+    let length = dim(&mut s, json!([a]));
+    let angle = dim(&mut s, json!([a, b]));
+    let radius = dim(&mut s, json!([arc]));
+    // Beside the joint drawing made, then beside a fix too.
+    run(&mut s, "sketch.move3d", json!({"wire": a, "index": 0, "to": [-5, 0, 0]}));
+    assert!((value(&s, &length) - 15.0).abs() < 1e-9);
+    run(&mut s, "sketch.constraint.fix", json!({"entity": format!("{a}.start")}));
+    run(&mut s, "sketch.move3d", json!({"wire": b, "index": 1, "to": [10, 0, 9]}));
+    assert!((value(&s, &angle) - std::f64::consts::FRAC_PI_2).abs() < 1e-9, "{}", value(&s, &angle));
+    run(&mut s, "sketch.move3d", json!({"wire": arc, "index": 1, "to": [45, 2, 0]}));
+    assert!((value(&s, &radius) - 7.25).abs() < 1e-9, "{}", value(&s, &radius));
+    // A driving length still refuses a move that would break it.
+    run(&mut s, "sketch.dimension", json!({"entities": [b], "value": "9 mm"}));
+    run(&mut s, "sketch.constraint.fix", json!({"entity": format!("{b}.end")}));
+    let before = s.doc.to_json();
+    let e = s.execute("sketch.move3d", &json!({"wire": b, "index": 0, "to": [10, 3, 3]})).unwrap_err().to_string();
+    assert!(e.contains("cannot hold"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
+fn a_parameter_value_a_3d_dimension_cannot_take_is_refused() {
+    let mut s = Session::default();
+    let (_, _, _) = run_and_rise(&mut s);
+    run(&mut s, "sketch.finish", json!({}));
+    for bad in ["0 mm", "-5 mm", "2000000 mm"] {
+        let before = s.doc.to_json();
+        let e = s.execute("parameters.change", &json!({"name": "run", "expression": bad})).unwrap_err().to_string();
+        assert!(e.contains("not changed"), "{bad}: {e}");
+        assert_eq!(s.doc.to_json(), before, "{bad}");
+    }
+}
+
+#[test]
+fn a_settled_angle_between_long_oblique_lines_is_placed_driven() {
+    // A corner of 53.13010235…° between 300 and 500 mm lines, both fixed: the angle is settled,
+    // and its value must not be rounded into a conflict.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let r = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[300,0,0],[0,400,0]]}));
+    let (a, b) = (r["curves"][0].as_str().unwrap().to_string(), r["curves"][1].as_str().unwrap().to_string());
+    run(&mut s, "sketch.constraint.fix", json!({"entities": [a, b]}));
+    let d = run(&mut s, "sketch.dimension", json!({"entities": [a, b], "if_redundant": "driven"}));
+    assert_eq!((d["driven"].as_bool(), d["redundant"].as_bool()), (Some(true), Some(true)), "{d}");
+}
+
+#[test]
+fn a_new_3d_dimension_s_bad_value_is_refused_as_its_value() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let l = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[10,1,2]]}))["curves"][0].as_str().unwrap().to_string();
+    let before = s.doc.to_json();
+    let e = s.execute("sketch.dimension", &json!({"entities": [l], "value": "-4 mm"})).unwrap_err().to_string();
+    assert!(e.contains("value:") && !e.contains("k1:") && !e.contains("k2:"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
+fn plane_3d_sketch() -> (Session, u64) {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Lifted"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let sketch = s.active_sketch.unwrap();
+    (s, sketch)
+}
+
+/// A line's end on the plane leaves it: both lines through it become drawn 3D lines through the
+/// same places, joined at the moved point; one undo puts the plane lines back.
+#[test]
+fn a_plane_point_lifts_the_lines_through_it() {
+    let (mut s, sketch) = plane_3d_sketch();
+    run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0],[10,5]]}));
+    let lines: Vec<String> = s.doc.sketch(sketch).unwrap().curves.iter().map(|c| c.id.clone()).collect();
+    assert_eq!(lines.len(), 2);
+    let before = s.doc.sketch(sketch).unwrap().clone();
+    let r = run(&mut s, "sketch.move3d", json!({"point": format!("{}.end", lines[0]), "by":[0,0,4]}));
+    assert_eq!(r["moved"], 2, "{r}");
+    let made: Vec<String> = r["curves"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect();
+    assert_eq!(made.len(), 2, "{r}");
+    let sk = s.doc.sketch(sketch).unwrap();
+    assert!(sk.curves.iter().all(|c| !lines.contains(&c.id)), "the plane lines are gone");
+    let fit = |id: &str| sk.wires[sk.wire_index(id).unwrap()].fit.clone();
+    let (a, b) = (fit(&made[0]), fit(&made[1]));
+    near(a[0], Vec3::new(0.0, 0.0, 0.0));
+    near(a[1], Vec3::new(10.0, 0.0, 4.0));
+    near(b[0], Vec3::new(10.0, 0.0, 4.0));
+    near(b[1], Vec3::new(10.0, 5.0, 0.0));
+    run(&mut s, "edit.undo", json!({}));
+    let back = s.doc.sketch(sketch).unwrap();
+    assert_eq!((&back.curves, &back.wires, &back.points), (&before.curves, &before.wires, &before.points));
+}
+
+/// A fit-point spline's middle point and a lone point leave the plane too; `to` is a world
+/// point.
+#[test]
+fn a_spline_fit_point_and_a_lone_point_lift() {
+    let (mut s, sketch) = plane_3d_sketch();
+    run(&mut s, "sketch.spline.fit_point", json!({"points":[[0,0],[10,5],[20,0]]}));
+    let sk = s.doc.sketch(sketch).unwrap();
+    let solidcraft_sketch::CurveKind::Spline { pts, .. } = &sk.curves[0].kind else { panic!("{:?}", sk.curves[0].kind) };
+    let middle = sk.points[pts[1]].id.clone();
+    let r = run(&mut s, "sketch.move3d", json!({"point": middle, "to":[10,5,7]}));
+    let sk = s.doc.sketch(sketch).unwrap();
+    let w = &sk.wires[sk.wire_index(r["curves"][0].as_str().unwrap()).unwrap()];
+    assert_eq!(w.fit.len(), 3);
+    near(w.fit[0], Vec3::new(0.0, 0.0, 0.0));
+    near(w.fit[1], Vec3::new(10.0, 5.0, 7.0));
+    near(w.fit[2], Vec3::new(20.0, 0.0, 0.0));
+    assert!(sk.curves.is_empty());
+
+    run(&mut s, "sketch.point", json!({"point":[3,4]}));
+    let lone = s.doc.sketch(sketch).unwrap().points.last().unwrap().id.clone();
+    let r = run(&mut s, "sketch.move3d", json!({"point": lone, "by":[0,0,-2]}));
+    let sk = s.doc.sketch(sketch).unwrap();
+    assert!(sk.points.iter().all(|p| p.id != lone), "the plane point is gone");
+    let w = &sk.wires[sk.wire_index(r["curves"][0].as_str().unwrap()).unwrap()];
+    assert_eq!(w.fit.len(), 1);
+    near(w.fit[0], Vec3::new(3.0, 4.0, -2.0));
+}
+
+/// What can't leave the plane says so, and changes nothing: a circle's centre, a point in a
+/// flat sketch, `wire` and `point` together.
+#[test]
+fn a_plane_point_lift_refuses_what_it_cannot_lift() {
+    let (mut s, sketch) = plane_3d_sketch();
+    run(&mut s, "sketch.circle.center", json!({"center":[0,0],"diameter":10,"id":"c1"}));
+    let before = s.doc.to_json();
+    let e = s.execute("sketch.move3d", &json!({"point":"c1.center","by":[0,0,1]})).unwrap_err().to_string();
+    assert!(e.contains("is a circle"), "{e}");
+    let e = s.execute("sketch.move3d", &json!({"point":"c1.center","wire":"w1","by":[0,0,1]})).unwrap_err().to_string();
+    assert!(e.contains("not both"), "{e}");
+    assert!(s.execute("sketch.move3d", &json!({"point":"nope","by":[0,0,1]})).is_err());
+    assert!(s.execute("sketch.move3d", &json!({"point":"origin","by":[0,0,1]})).is_err());
+    assert_eq!(s.doc.to_json(), before, "a refused lift changes nothing");
+    run(&mut s, "sketch.options", json!({"sketch_3d":false}));
+    run(&mut s, "sketch.line", json!({"points":[[20,0],[30,0]]}));
+    let l = s.doc.sketch(sketch).unwrap().curves.last().unwrap().id.clone();
+    let e = s.execute("sketch.move3d", &json!({"point": format!("{l}.end"),"by":[0,0,1]})).unwrap_err().to_string();
+    assert!(e.contains("3D Sketch"), "{e}");
+    assert!(s.doc.sketch(sketch).unwrap().wires.is_empty());
+}
+
+// The next two tests come from #7665 (Gabe's split of #4432), adapted to this reply's keys.
+
+/// A spline's middle fit point lifts: the reply says where the point is now (`wire`, `index`),
+/// so it can be moved again as a drawn point; two undos put the plane spline back.
+#[test]
+fn a_lifted_spline_point_moves_again_by_wire_and_index() {
+    let (mut s, sketch) = plane_3d_sketch();
+    let spline = run(&mut s, "sketch.spline.fit_point", json!({"points":[[0,0],[10,5],[20,0]]}))["curves"][0].as_str().unwrap().to_string();
+    let sk = s.doc.sketch(sketch).unwrap();
+    let solidcraft_sketch::CurveKind::Spline { pts, .. } = &sk.curves[sk.curve_index(&spline).unwrap()].kind else { panic!("a spline") };
+    let middle = sk.points[pts[1]].id.clone();
+    let before = s.doc.to_json();
+    let r = run(&mut s, "sketch.move3d", json!({"point": middle, "by": [0, 0, 7]}));
+    assert_eq!(r["index"], 1, "{r}");
+    let wire = r["wire"].as_str().unwrap().to_string();
+    assert_eq!(r["curves"][0], wire.as_str());
+    let sk = s.doc.sketch(sketch).unwrap();
+    assert!(sk.curve_index(&spline).is_none(), "the plane spline is gone");
+    let w = &sk.wires[sk.wire_index(&wire).unwrap()];
+    near(w.fit[0], Vec3::new(0.0, 0.0, 0.0));
+    near(w.fit[1], Vec3::new(10.0, 5.0, 7.0));
+    near(w.fit[2], Vec3::new(20.0, 0.0, 0.0));
+    run(&mut s, "sketch.move3d", json!({"wire": wire, "index": 2, "by": [0, 0, -3]}));
+    near(s.doc.sketch(sketch).unwrap().wires.iter().find(|x| x.id == wire).unwrap().fit[2], Vec3::new(20.0, 0.0, -3.0));
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), before);
+}
+
+/// Lines joined at the grabbed point (a polyline's corner) lift together and stay joined there;
+/// their far ends stay put.
+#[test]
+fn lines_through_a_lifted_corner_stay_joined() {
+    let (mut s, sketch) = plane_3d_sketch();
+    let first = run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0],[10,10]]}))["curves"][0].as_str().unwrap().to_string();
+    let r = run(&mut s, "sketch.move3d", json!({"point": format!("{first}.end"), "to": [10, 0, 5]}));
+    assert_eq!(r["curves"].as_array().unwrap().len(), 2, "{r}");
+    let fits: Vec<Vec<Vec3>> = s.doc.sketch(sketch).unwrap().wires.iter().map(|w| w.fit.clone()).collect();
+    assert!(fits.iter().all(|f| f.iter().any(|p| p.dist(Vec3::new(10.0, 0.0, 5.0)) < 1e-9)), "{fits:?}");
+    assert!(
+        fits.iter().flatten().any(|p| p.dist(Vec3::new(0.0, 0.0, 0.0)) < 1e-9)
+            && fits.iter().flatten().any(|p| p.dist(Vec3::new(10.0, 10.0, 0.0)) < 1e-9),
+        "{fits:?}"
+    );
+}
+
+/// Off the identity frame: on XZ at offset 5 the plane point (10,0) is world (10,5,0). A line's
+/// end lifted `by` [0,0,4] lands at world (10,5,4); the other line keeps its far end at (10,5,-5).
+#[test]
+fn a_plane_point_lift_on_xz_offset_by_is_world() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XZ","offset":5,"name":"Lifted XZ"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let sketch = s.active_sketch.unwrap();
+    run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0],[10,5]]}));
+    let lines: Vec<String> = s.doc.sketch(sketch).unwrap().curves.iter().map(|c| c.id.clone()).collect();
+    let r = run(&mut s, "sketch.move3d", json!({"point": format!("{}.end", lines[0]), "by":[0,0,4]}));
+    assert_eq!(r["moved"], 2, "{r}");
+    let made: Vec<String> = r["curves"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect();
+    let sk = s.doc.sketch(sketch).unwrap();
+    let fit = |id: &str| sk.wires[sk.wire_index(id).unwrap()].fit.clone();
+    let (a, b) = (fit(&made[0]), fit(&made[1]));
+    near(a[0], Vec3::new(0.0, 5.0, 0.0));
+    near(a[1], Vec3::new(10.0, 5.0, 4.0));
+    near(b[0], Vec3::new(10.0, 5.0, 4.0));
+    near(b[1], Vec3::new(10.0, 5.0, -5.0));
+}
+
+/// The same on XZ offset 5, lifted `to` a world point: the drawn fit point is that point.
+#[test]
+fn a_plane_point_lift_on_xz_offset_to_is_world() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XZ","offset":5,"name":"Lifted XZ to"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let sketch = s.active_sketch.unwrap();
+    run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0],[10,5]]}));
+    let lines: Vec<String> = s.doc.sketch(sketch).unwrap().curves.iter().map(|c| c.id.clone()).collect();
+    let r = run(&mut s, "sketch.move3d", json!({"point": format!("{}.end", lines[0]), "to":[12,5,3]}));
+    let made: Vec<String> = r["curves"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect();
+    let sk = s.doc.sketch(sketch).unwrap();
+    let fit = |id: &str| sk.wires[sk.wire_index(id).unwrap()].fit.clone();
+    let (a, b) = (fit(&made[0]), fit(&made[1]));
+    near(a[0], Vec3::new(0.0, 5.0, 0.0));
+    near(a[1], Vec3::new(12.0, 5.0, 3.0));
+    near(b[0], Vec3::new(12.0, 5.0, 3.0));
+    near(b[1], Vec3::new(10.0, 5.0, -5.0));
+}
+
+/// Inside a moved, turned component: the plane point (10,0,0) of the moved occurrence is world
+/// (20,40,40). Lifted `to` world (20,40,44), the drawn fit point is (20,40,44) in world and
+/// (10,0,4) in the component's own coordinates (the inverse of the occurrence move).
+#[test]
+fn a_plane_point_lift_to_world_inside_a_moved_component() {
+    let (mut s, _, _, _) = second_frame();
+    let sketch = s.active_sketch.unwrap();
+    run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0],[10,5]]}));
+    let lines: Vec<String> = s.doc.sketch(sketch).unwrap().curves.iter().map(|c| c.id.clone()).collect();
+    let r = run(&mut s, "sketch.move3d", json!({"point": format!("{}.end", lines[0]), "to":[20,40,44]}));
+    let made: Vec<String> = r["curves"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect();
+    let sk = s.doc.sketch(sketch).unwrap();
+    near(sk.wires[sk.wire_index(&made[0]).unwrap()].fit[1], Vec3::new(10.0, 0.0, 4.0));
+    let world = s.world_state().unwrap();
+    let ws = &world.sketch(sketch).unwrap().sketch;
+    near(ws.wires[ws.wire_index(&made[0]).unwrap()].fit[1], Vec3::new(20.0, 40.0, 44.0));
+    near(ws.wires[ws.wire_index(&made[1]).unwrap()].fit[0], Vec3::new(20.0, 40.0, 44.0));
+}
+
+/// `index` names a fit point of a `wire`; with `point` it would be silently dropped, so it is
+/// refused and the doc is untouched.
+#[test]
+fn a_plane_point_lift_refuses_an_index() {
+    let (mut s, sketch) = plane_3d_sketch();
+    run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0]]}));
+    let l = s.doc.sketch(sketch).unwrap().curves[0].id.clone();
+    let before = s.doc.to_json();
+    let e = s.execute("sketch.move3d", &json!({"point": format!("{l}.end"), "index": 2, "to": [0, 0, 1]})).unwrap_err().to_string();
+    assert!(e.contains("`index` goes with `wire`"), "{e}");
+    assert_eq!(s.doc.to_json(), before, "a refused lift changes nothing");
+}
+
+/// Lifting a rectangle's corner: the two lines through it become drawn lines whose far ends sit
+/// on the two plane corners they came from. The two plane lines left keep the constraints on
+/// them; the two constraints on the lifted lines are gone. Moving a remaining plane corner
+/// afterwards moves the plane point but not the drawn line's end: they are not joined.
+#[test]
+fn a_rectangle_corner_lift_says_what_stays() {
+    let (mut s, sketch) = plane_3d_sketch();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[20,10]}));
+    let corner = s.doc.sketch(sketch).unwrap().points.iter().find(|p| p.pos.x == 20.0 && p.pos.y == 10.0).unwrap().id.clone();
+    let r = run(&mut s, "sketch.move3d", json!({"point": corner, "by":[0,0,5]}));
+    assert_eq!(r["moved"], 2, "{r}");
+    let sk = s.doc.sketch(sketch).unwrap();
+    // (a) the far ends are the remaining plane corners (20,0) and (0,10), and the lifted corner is (20,10,5).
+    let fit = |id: &str| sk.wires[sk.wire_index(id).unwrap()].fit.clone();
+    let (a, b) = (fit(r["curves"][0].as_str().unwrap()), fit(r["curves"][1].as_str().unwrap()));
+    near(a[0], Vec3::new(20.0, 0.0, 0.0));
+    near(a[1], Vec3::new(20.0, 10.0, 5.0));
+    near(b[0], Vec3::new(20.0, 10.0, 5.0));
+    near(b[1], Vec3::new(0.0, 10.0, 0.0));
+    // (b) the lifted lines' constraints are gone (Horizontal on the top, Vertical on the right),
+    // the rest stay with their renumbered lines; no dimension was there to lose.
+    let kinds: Vec<String> = sk.constraints.iter().map(|c| format!("{:?}", c.kind)).collect();
+    assert_eq!(kinds, ["Horizontal { l: 0 }", "Vertical { l: 1 }", "Coincident { p: 0, q: 1 }"], "{kinds:?}");
+    assert!(sk.constraints.iter().all(|c| c.param.is_none()));
+    // (c) moving the remaining plane corner (20,0) to (25,0) moves the plane point, not the drawn end.
+    let corner_20 = sk.points.iter().find(|p| p.pos.x == 20.0 && p.pos.y == 0.0).unwrap().id.clone();
+    run(&mut s, "sketch.move_point", json!({"point": corner_20, "to": [25, 0]}));
+    let sk = s.doc.sketch(sketch).unwrap();
+    assert!(sk.points.iter().any(|p| p.pos.x == 25.0 && p.pos.y == 0.0));
+    near(sk.wires[sk.wire_index(r["curves"][0].as_str().unwrap()).unwrap()].fit[0], Vec3::new(20.0, 0.0, 0.0));
+}
+
+/// Move/Copy's `z` takes what moved off the plane as drawn 3D curves.
+#[test]
+fn move_with_z_lifts_the_moved_curves() {
+    let (mut s, sketch) = plane_3d_sketch();
+    let line = run(&mut s, "sketch.line", json!({"points":[[3,3],[13,3]]}))["curves"][0].as_str().unwrap().to_string();
+    let r = run(&mut s, "sketch.move", json!({"entities":[line], "translate":[1,2], "z": 4}));
+    let wire = r["curves"][0].as_str().unwrap().to_string();
+    let sk = s.doc.sketch(sketch).unwrap();
+    let w = &sk.wires[sk.wire_index(&wire).unwrap()];
+    near(w.fit[0], Vec3::new(4.0, 5.0, 4.0));
+    near(w.fit[1], Vec3::new(14.0, 5.0, 4.0));
+}
+
+#[test]
+fn move_with_z_joins_the_lifted_curves_where_they_meet() {
+    let (mut s, sketch) = plane_3d_sketch();
+    run(&mut s, "sketch.line3d", json!({"points":[[50,50,0],[60,50,5]]}));
+    let lines: Vec<String> = run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0],[10,10]]}))["curves"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    let r = run(&mut s, "sketch.move", json!({"entities": lines, "translate":[0,0], "z": 4}));
+    let made: Vec<String> = r["curves"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect();
+    assert_eq!(made.len(), 2, "{r}");
+    let sk = s.doc.sketch(sketch).unwrap();
+    assert!(sk.wire_constraints.iter().any(|c| made.iter().all(|w| c.kind.wires().contains(&w.as_str()))), "{:?}", sk.wire_constraints);
+}
+
+/// Points placed on the plane first move off it with Move/Copy's `z`: each becomes a drawn 3D
+/// point that far up. A copy leaves the point and lifts its copy. A fit point of a spline picked
+/// on its own lifts just that point; the spline's other points stay.
+#[test]
+fn move_with_z_lifts_picked_points_too() {
+    let (mut s, sketch) = plane_3d_sketch();
+    let a = run(&mut s, "sketch.point", json!({"point":[2,2]}))["created"]["points"][0].as_str().unwrap().to_string();
+    let b = run(&mut s, "sketch.point", json!({"point":[5,6]}))["created"]["points"][0].as_str().unwrap().to_string();
+    let r = run(&mut s, "sketch.move", json!({"entities":[a, b], "translate":[0,0], "z": 3}));
+    assert_eq!(r["curves"].as_array().unwrap().len(), 2, "{r}");
+    let sk = s.doc.sketch(sketch).unwrap();
+    let fits: Vec<Vec3> = sk.wires.iter().flat_map(|w| w.fit.clone()).collect();
+    assert!(fits.iter().any(|p| p.dist(Vec3::new(2.0, 2.0, 3.0)) < 1e-9) && fits.iter().any(|p| p.dist(Vec3::new(5.0, 6.0, 3.0)) < 1e-9), "{fits:?}");
+    assert!(sk.points.iter().skip(1).all(|p| p.id != a && p.id != b), "the plane points went");
+    let c = run(&mut s, "sketch.point", json!({"point":[8,1]}))["created"]["points"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.move", json!({"entities":[c.clone()], "translate":[0,0], "z": -2, "copy": true}));
+    let sk = s.doc.sketch(sketch).unwrap();
+    assert!(sk.resolve_point(&c).is_some(), "the original stays");
+    assert!(sk.wires.iter().flat_map(|w| w.fit.clone()).any(|p| p.dist(Vec3::new(8.0, 1.0, -2.0)) < 1e-9));
+    let spline = run(&mut s, "sketch.spline.fit_point", json!({"points":[[0,10],[5,14],[10,10]]}));
+    let sk = s.doc.sketch(sketch).unwrap();
+    let ci = sk.curve_index(spline["curves"][0].as_str().unwrap()).unwrap();
+    let solidcraft_sketch::CurveKind::Spline { pts, .. } = &sk.curves[ci].kind else { panic!("not a spline") };
+    let mid = sk.points[pts[1]].id.clone();
+    let r = run(&mut s, "sketch.move", json!({"entities":[mid], "translate":[0,0], "z": 4}));
+    let sk = s.doc.sketch(sketch).unwrap();
+    let w = r["curves"].as_array().unwrap().iter().filter_map(|c| c.as_str()).find_map(|id| sk.wire_index(id).map(|i| &sk.wires[i])).unwrap();
+    near(w.fit[0], Vec3::new(0.0, 10.0, 0.0));
+    near(w.fit[1], Vec3::new(5.0, 14.0, 4.0));
+}
+
+#[test]
+fn moving_a_line_and_a_lone_point_off_the_plane_keeps_the_other_lines() {
+    let (mut s, sketch) = plane_3d_sketch();
+    let l1 = run(&mut s, "sketch.line", json!({"points":[[20,0],[30,0]]}))["curves"][0].as_str().unwrap().to_string();
+    let p = run(&mut s, "sketch.point", json!({"point":[25,5]}))["created"]["points"][0].as_str().unwrap().to_string();
+    let l2 = run(&mut s, "sketch.line", json!({"points":[[20,10],[30,10]]}))["curves"][0].as_str().unwrap().to_string();
+    let r = run(&mut s, "sketch.move", json!({"entities":[l1, p.clone()], "translate":[0,0], "z": 5}));
+    let sk = s.doc.sketch(sketch).unwrap();
+    assert!(sk.curve_index(&l2).is_some(), "the other line stays: {r}");
+    let at = |end: &str, x: f64, y: f64| {
+        sk.resolve_point(&format!("{l2}.{end}")).is_some_and(|i| (sk.points[i].pos.x - x).abs() < 1e-9 && (sk.points[i].pos.y - y).abs() < 1e-9)
+    };
+    assert!(at("start", 20.0, 10.0) && at("end", 30.0, 10.0), "the other line is where it was");
+    assert!(sk.point_index(&p).is_none(), "the plane point went");
+    let fits: Vec<Vec3> = sk.wires.iter().flat_map(|w| w.fit.clone()).collect();
+    assert!(fits.iter().any(|q| q.dist(Vec3::new(25.0, 5.0, 5.0)) < 1e-9), "{fits:?}");
+}
+
+/// What can't leave the plane says so and changes nothing: `z` on a circle is refused, the
+/// doc is the same afterwards.
+#[test]
+fn move_z_refuses_a_circle_and_changes_nothing() {
+    let (mut s, _) = plane_3d_sketch();
+    run(&mut s, "sketch.circle.center", json!({"center":[0,0],"diameter":10,"id":"c1"}));
+    let before = s.doc.to_json();
+    let e = s.execute("sketch.move", &json!({"entities":["c1"],"translate":[1,0],"z":2})).unwrap_err().to_string();
+    assert!(e.contains("is a circle"), "{e}");
+    assert_eq!(s.doc.to_json(), before, "a refused lift changes nothing");
+}
+
+/// `z` needs a 3D sketch: on a flat sketch it is refused and nothing changes.
+#[test]
+fn move_z_needs_a_3d_sketch() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Flat"}));
+    let line = run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0]]}))["curves"][0].as_str().unwrap().to_string();
+    let before = s.doc.to_json();
+    let e = s.execute("sketch.move", &json!({"entities":[line],"translate":[1,0],"z":2})).unwrap_err().to_string();
+    assert!(e.contains("3D Sketch"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
+/// Copying a drawn 3D curve with `z` leaves the original and makes a drawn copy `z` up along the
+/// sketch normal: each fit point of the copy is the original's plus z.
+#[test]
+fn move_z_copies_a_drawn_curve_up() {
+    let (mut s, sketch) = plane_3d_sketch();
+    let w = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[10,0,0]]}))["curves"][0].as_str().unwrap().to_string();
+    let r = run(&mut s, "sketch.move", json!({"entities":[w.clone()], "translate":[0,0], "copy": true, "z": 2}));
+    let copy = r["curves"][0].as_str().unwrap().to_string();
+    assert_ne!(copy, w, "{r}");
+    let sk = s.doc.sketch(sketch).unwrap();
+    near(sk.wires[sk.wire_index(&w).unwrap()].fit[1], Vec3::new(10.0, 0.0, 0.0));
+    let c = &sk.wires[sk.wire_index(&copy).unwrap()];
+    near(c.fit[0], Vec3::new(0.0, 0.0, 2.0));
+    near(c.fit[1], Vec3::new(10.0, 0.0, 2.0));
+}
+
+/// A plane line and a drawn curve copied together with `z`: the plane line's copy becomes a
+/// drawn line `z` up, the drawn copy is `z` up too, and both originals stay where they were.
+#[test]
+fn move_z_copies_a_plane_line_and_a_drawn_curve_together() {
+    let (mut s, sketch) = plane_3d_sketch();
+    let line = run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0]]}))["curves"][0].as_str().unwrap().to_string();
+    let w = run(&mut s, "sketch.line3d", json!({"points":[[0,5,1],[10,5,1]]}))["curves"][0].as_str().unwrap().to_string();
+    let r = run(&mut s, "sketch.move", json!({"entities":[line.clone(), w.clone()], "translate":[0,0], "copy": true, "z": 3}));
+    assert_eq!(r["curves"].as_array().unwrap().len(), 2, "{r}");
+    let sk = s.doc.sketch(sketch).unwrap();
+    assert!(sk.curve_index(&line).is_some(), "the plane line stays");
+    near(sk.wires[sk.wire_index(&w).unwrap()].fit[0], Vec3::new(0.0, 5.0, 1.0));
+    let fits: Vec<Vec<Vec3>> = r["curves"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|c| c.as_str())
+        .filter_map(|id| sk.wire_index(id))
+        .map(|i| sk.wires[i].fit.clone())
+        .collect();
+    let has = |a: Vec3, b: Vec3| fits.iter().any(|f| f.len() == 2 && f[0].dist(a) < 1e-9 && f[1].dist(b) < 1e-9);
+    assert!(has(Vec3::new(0.0, 0.0, 3.0), Vec3::new(10.0, 0.0, 3.0)), "{fits:?}");
+    assert!(has(Vec3::new(0.0, 5.0, 4.0), Vec3::new(10.0, 5.0, 4.0)), "{fits:?}");
+}
+
+/// A line joined to the lifted end by a Coincident constraint lifts with it: the joined line
+/// becomes a drawn curve too, and the constraint goes.
+#[test]
+fn move3d_point_lift_takes_lines_joined_by_coincident() {
+    let (mut s, sketch) = plane_3d_sketch();
+    run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0]]}));
+    run(&mut s, "sketch.line", json!({"points":[[10,0],[10,5]]}));
+    let (end_pt, start_pt) = {
+        let sk = s.doc.sketch(sketch).unwrap();
+        let end = match &sk.curves[0].kind {
+            solidcraft_sketch::CurveKind::Line { b, .. } => sk.points[*b].id.clone(),
+            _ => panic!("first curve is not a line"),
+        };
+        let start = match &sk.curves[1].kind {
+            solidcraft_sketch::CurveKind::Line { a, .. } => sk.points[*a].id.clone(),
+            _ => panic!("second curve is not a line"),
+        };
+        (end, start)
+    };
+    run(&mut s, "sketch.constraint.coincident", json!({"a": end_pt, "b": start_pt}));
+    let first = s.doc.sketch(sketch).unwrap().curves[0].id.clone();
+    let r = run(&mut s, "sketch.move3d", json!({"point": format!("{first}.end"), "by":[0,0,4]}));
+    let made: Vec<String> = r["curves"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect();
+    assert_eq!(made.len(), 2, "{r}");
+    let sk = s.doc.sketch(sketch).unwrap();
+    let fits: Vec<Vec<Vec3>> = made.iter().map(|w| sk.wires[sk.wire_index(w).unwrap()].fit.clone()).collect();
+    let has = |f: &[Vec3], p: Vec3| f.iter().any(|q| q.dist(p) < 1e-7);
+    assert!(fits.iter().all(|f| has(f, Vec3::new(10.0, 0.0, 4.0))), "{fits:?}");
+    assert!(fits.iter().any(|f| has(f, Vec3::new(0.0, 0.0, 0.0))), "{fits:?}");
+    assert!(fits.iter().any(|f| has(f, Vec3::new(10.0, 5.0, 0.0))), "{fits:?}");
+    assert!(!sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_sketch::ConstraintKind::Coincident { .. })), "the coincident constraint goes");
+}
+
+/// A joined lift leaves unrelated points where they were: a separate point and a line drawn
+/// after the joined lines keep their places.
+#[test]
+fn move3d_joined_lift_keeps_unrelated_points() {
+    let (mut s, sketch) = plane_3d_sketch();
+    run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0]]}));
+    run(&mut s, "sketch.line", json!({"points":[[10,0],[10,5]]}));
+    let (end_pt, start_pt) = {
+        let sk = s.doc.sketch(sketch).unwrap();
+        let end = match &sk.curves[0].kind {
+            solidcraft_sketch::CurveKind::Line { b, .. } => sk.points[*b].id.clone(),
+            _ => panic!("first curve is not a line"),
+        };
+        let start = match &sk.curves[1].kind {
+            solidcraft_sketch::CurveKind::Line { a, .. } => sk.points[*a].id.clone(),
+            _ => panic!("second curve is not a line"),
+        };
+        (end, start)
+    };
+    run(&mut s, "sketch.constraint.coincident", json!({"a": end_pt, "b": start_pt}));
+    run(&mut s, "sketch.line", json!({"points":[[20,0],[25,0]]}));
+    run(&mut s, "sketch.point", json!({"point":[30,30]}));
+    let first = s.doc.sketch(sketch).unwrap().curves[0].id.clone();
+    run(&mut s, "sketch.move3d", json!({"point": format!("{first}.end"), "by":[0,0,4]}));
+    let sk = s.doc.sketch(sketch).unwrap();
+    let at = |x: f64, y: f64| sk.points.iter().any(|q| (q.pos.x - x).abs() < 1e-7 && (q.pos.y - y).abs() < 1e-7);
+    assert!(at(30.0, 30.0), "the separate point is gone");
+    assert!(at(20.0, 0.0) && at(25.0, 0.0), "the third line lost an end");
+}
+
+/// A point joined to the origin does not lift: the lift is refused and nothing changes.
+#[test]
+fn move3d_point_joined_to_the_origin_is_refused() {
+    let (mut s, sketch) = plane_3d_sketch();
+    run(&mut s, "sketch.line", json!({"points":[[2,3],[10,0]]}));
+    let (line, start_pt) = {
+        let sk = s.doc.sketch(sketch).unwrap();
+        let start = match &sk.curves[0].kind {
+            solidcraft_sketch::CurveKind::Line { a, .. } => sk.points[*a].id.clone(),
+            _ => panic!("curve is not a line"),
+        };
+        (sk.curves[0].id.clone(), start)
+    };
+    run(&mut s, "sketch.constraint.coincident", json!({"a": start_pt, "b": "origin"}));
+    let before = s.doc.to_json();
+    let e = s.execute("sketch.move3d", &json!({"point": format!("{line}.start"), "by":[0,0,4]})).unwrap_err().to_string();
+    assert!(e.contains("joined to the origin"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
+/// A lifted point's curves are joined to the drawn 3D ends they meet, and the lift is a 3D move:
+/// one that would break a held 3D constraint is refused, the sketch unchanged (#10608).
+#[test]
+fn a_plane_point_lift_keeps_the_3d_constraints() {
+    let (mut s, sketch) = plane_3d_sketch();
+    run(&mut s, "sketch.line", json!({"points":[[20,0],[30,0]]}));
+    let plane_line = s.doc.sketch(sketch).unwrap().curves[0].id.clone();
+    // A drawn 3D line along X ends where the plane line starts; its start is fixed.
+    let r = run(&mut s, "sketch.line3d", json!({"points":[[10,0,0],[20,0,0]]}));
+    let held = r["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.fix", json!({"entity": format!("{held}.start")}));
+    run(&mut s, "sketch.constraint.along_axis", json!({"line": held, "axis": "x"}));
+    let before = s.doc.sketch(sketch).unwrap().clone();
+    // Lifting the shared point off the X axis would tear the held line off it.
+    let e = s.execute("sketch.move3d", &json!({"point": format!("{plane_line}.start"), "by":[0,0,5]})).unwrap_err().to_string();
+    assert!(e.contains("cannot hold"), "{e}");
+    let sk = s.doc.sketch(sketch).unwrap();
+    assert_eq!((&sk.curves, &sk.wires, sk.wire_constraints.len()), (&before.curves, &before.wires, before.wire_constraints.len()), "nothing changed");
+    // Along X it can go: the lifted line is joined to the held one, which follows.
+    let r = run(&mut s, "sketch.move3d", json!({"point": format!("{plane_line}.start"), "by":[3,0,0]}));
+    let lifted = r["wire"].as_str().unwrap().to_string();
+    assert!(r["created"]["constraints"].as_array().is_some_and(|c| !c.is_empty()), "the joint: {r}");
+    let sk = s.doc.sketch(sketch).unwrap();
+    let fit = |id: &str| sk.wires[sk.wire_index(id).unwrap()].fit.clone();
+    near(fit(&lifted)[0], Vec3::new(23.0, 0.0, 0.0));
+    near(fit(&held)[1], Vec3::new(23.0, 0.0, 0.0));
+    near(fit(&held)[0], Vec3::new(10.0, 0.0, 0.0));
+}
+
+#[test]
+fn a_tangent_line_leaves_a_fixed_arc_along_its_end_and_a_loose_line_is_refused() {
+    // A quarter arc of radius 20 about the origin, from (20,0,0) round to (0,20,0), with a line
+    // into it along +Y and a line out of it drawn off true; Tangent turns the second one onto -X.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let d = 20.0 * std::f64::consts::FRAC_1_SQRT_2;
+    let into = run(&mut s, "sketch.line3d", json!({"points":[[20,-30,0],[20,0,0]]}))["curves"][0].as_str().unwrap().to_string();
+    let arc = run(&mut s, "sketch.arc3d", json!({"start":[20,0,0],"through":[d,d,0],"end":[0,20,0]}))["curves"][0].as_str().unwrap().to_string();
+    let out = run(&mut s, "sketch.line3d", json!({"points":[[0,20,0],[-30,25,3]]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.fix", json!({"entities": [into, arc]}));
+    run(&mut s, "sketch.constraint.tangent", json!({"a": out, "b": arc}));
+    // The way out now runs along -X from the arc's end (its free end swung onto that line).
+    near(fit(&s, &out, 0), Vec3::new(0.0, 20.0, 0.0));
+    let end = fit(&s, &out, 1);
+    assert!((end.y - 20.0).abs() < 1e-7 && end.z.abs() < 1e-7 && end.x < -25.0, "{end:?}");
+    // A line not touching the arc has no tangent to take.
+    let loose = run(&mut s, "sketch.line3d", json!({"points":[[50,50,0],[60,50,0]]}))["curves"][0].as_str().unwrap().to_string();
+    let e = s.execute("sketch.constraint.tangent", &json!({"a": loose, "b": arc})).unwrap_err().to_string();
+    assert!(e.contains("meet"), "{e}");
+}
+
+#[test]
+fn relations_3d_square_up_a_frame_corner_and_hold_it_to_the_origin_planes() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    // Three legs from one corner, drawn roughly, and a second leg along the first.
+    let r = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[100,4,2]]}));
+    let x = r["curves"][0].as_str().unwrap().to_string();
+    let y = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[3,80,5]]}))["curves"][0].as_str().unwrap().to_string();
+    let z = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[2,6,70]]}))["curves"][0].as_str().unwrap().to_string();
+    let far = run(&mut s, "sketch.line3d", json!({"points":[[0,60,3],[90,63,1]]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.fix", json!({"entity": format!("{x}.start")}));
+    for leg in [&y, &z] {
+        run(&mut s, "sketch.constraint.coincident", json!({"a": format!("{x}.start"), "b": format!("{leg}.start")}));
+    }
+    // x lies in XY; y square to x and in XY too; z square to both.
+    run(&mut s, "sketch.constraint.parallel", json!({"a": x, "b": "xy"}));
+    run(&mut s, "sketch.constraint.parallel", json!({"a": y, "b": "xy"}));
+    run(&mut s, "sketch.constraint.perpendicular", json!({"a": x, "b": y}));
+    run(&mut s, "sketch.constraint.perpendicular", json!({"a": x, "b": z}));
+    run(&mut s, "sketch.constraint.perpendicular", json!({"a": y, "b": z}));
+    // The far rail: parallel to x, as long as x, its start on XY.
+    run(&mut s, "sketch.constraint.parallel", json!({"a": far, "b": x}));
+    run(&mut s, "sketch.constraint.equal", json!({"a": far, "b": x}));
+    run(&mut s, "sketch.constraint.on_plane", json!({"point": format!("{far}.start"), "plane": "xy"}));
+    let (dx, dy, dz) = (fit(&s, &x, 1), fit(&s, &y, 1), fit(&s, &z, 1));
+    assert!(dx.z.abs() < 1e-7 && dy.z.abs() < 1e-7, "{dx:?} {dy:?}");
+    assert!(dx.dot(dy).abs() < 1e-6 && dx.dot(dz).abs() < 1e-6 && dy.dot(dz).abs() < 1e-6, "{dx:?} {dy:?} {dz:?}");
+    let (f0, f1) = (fit(&s, &far, 0), fit(&s, &far, 1));
+    assert!(f0.z.abs() < 1e-7);
+    assert!(((f1 - f0).len() - dx.len()).abs() < 1e-6 && (f1 - f0).cross(dx).len() < 1e-6 * dx.len() * (f1 - f0).len());
+    // A dimension to a plane: the upright's top 50 above XY. The far rail's end is already on
+    // XY (parallel to x, which lies in XY, from a start on it), so a height there is refused.
+    let h = run(&mut s, "sketch.dimension", json!({"entities": [format!("{z}.end"), "xy"], "value": 50}));
+    assert_eq!(h["type"], "plane_distance", "{h}");
+    assert!((fit(&s, &z, 1).z - 50.0).abs() < 1e-6);
+    assert!(s.execute("sketch.dimension", &json!({"entities": [format!("{far}.end"), "xy"], "value": 25})).is_err());
+    let e = s.execute("sketch.constraint.perpendicular", &json!({"a": x, "b": "xy"})).unwrap_err().to_string();
+    assert!(e.contains("only Parallel takes a plane") && e.contains("along_axis"), "{e}");
+}
+
+#[test]
+fn an_upright_set_to_80_degrees_to_xy_and_on_plane_take_plane_names_either_case() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    // Drawn lying in XY: the angle to it starts at 0.
+    let l = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[10,0,0]]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.fix", json!({"entity": format!("{l}.start")}));
+    let d = run(&mut s, "sketch.dimension", json!({"entities": [l, "xy"], "value": "80 deg"}));
+    assert!((d["measured"].as_f64().unwrap() - 80.0).abs() < 1e-6, "{d}");
+    let top = fit(&s, &l, 1);
+    assert!((top.z / top.len() - 80f64.to_radians().sin()).abs() < 1e-9, "{top:?}");
+    let q = run(&mut s, "sketch.point3d", json!({"point":[3,4,5]}))["point"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.on_plane", json!({"point": q, "plane": "XY"}));
+    assert!(fit(&s, &q, 0).z.abs() < 1e-9);
+    // A line held on XY at both ends: each end moves straight down, as little as it can.
+    let w = run(&mut s, "sketch.line3d", json!({"points":[[0,10,5],[100,10,9]]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.on_plane", json!({"points": [format!("{w}.start"), format!("{w}.end")], "plane": "xy"}));
+    near(fit(&s, &w, 0), Vec3::new(0.0, 10.0, 0.0));
+    near(fit(&s, &w, 1), Vec3::new(100.0, 10.0, 0.0));
+}
+
+#[test]
+fn a_paste_shifted_along_a_plane_keeps_the_distance_from_it_with_the_geometry() {
+    // A point 20 above XY by a dimension (its parameter `h`), a point on XZ; pasted 10 up and
+    // 5 along Y, each lands where the paste put it and stays there when solved.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY", "name": "Path"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let q = run(&mut s, "sketch.point3d", json!({"point":[3,4,20]}))["point"].as_str().unwrap().to_string();
+    let o = run(&mut s, "sketch.point3d", json!({"point":[7,0,6]}))["point"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.dimension", json!({"entities": [q, "xy"], "value": "h = 20"}));
+    run(&mut s, "sketch.constraint.on_plane", json!({"point": o, "plane": "xz"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "timeline.copy", json!({"features": ["Path"]}));
+    // Into another design.
+    let mut t = Session { foreign_copy: s.foreign_copy.clone(), ..Default::default() };
+    let pasted = run(&mut t, "timeline.paste", json!({"from_design": true, "translate": [0, 5, 10]}))["pasted"][0]["id"].as_u64().unwrap();
+    near(solved_fit(&t, pasted, &q, 0), Vec3::new(3.0, 9.0, 30.0));
+    near(solved_fit(&t, pasted, &o, 0), Vec3::new(7.0, 5.0, 16.0));
+    // The pasted distance still follows `h`: 25 above XY, plus the 10 the paste added.
+    let h = t.doc.params.iter().find(|p| !p.model).map(|p| p.name.clone()).unwrap();
+    run(&mut t, "parameters.change", json!({"name": h, "expression": "25 mm"}));
+    near(solved_fit(&t, pasted, &q, 0), Vec3::new(3.0, 9.0, 35.0));
+}
+
+#[test]
+fn a_driven_angle_to_a_plane_made_driving_keeps_the_side_the_line_is_on() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let l = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[10,0,5]]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.fix", json!({"entity": format!("{l}.start")}));
+    let k = run(&mut s, "sketch.dimension", json!({"entities": [l, "xy"], "driven": true}))["constraint"].as_str().unwrap().to_string();
+    // The line is moved to run down at 30°; its driven angle reads 30°.
+    run(&mut s, "sketch.move3d", json!({"wire": l, "index": 1, "to": [8.660254037844386, 0, -5]}));
+    run(&mut s, "sketch.toggle_driven", json!({"constraint": k, "driven": false}));
+    let end = fit(&s, &l, 1);
+    assert!(end.z < 0.0 && (end.z / end.len() + 0.5).abs() < 1e-6, "still down at 30°: {end:?}");
+}
+
+#[test]
+fn move_copy_moves_drawn_points_and_curves() {
+    let (mut s, _, _, _) = second_frame();
+    let sketch = s.active_sketch.unwrap();
+    let point = run(&mut s, "sketch.point3d", json!({"point":[17,32,45]}))["point"].as_str().unwrap().to_string();
+    let line = run(&mut s, "sketch.line3d", json!({"points":[[10,30,40],[10,30,50]]}))["curves"][0].as_str().unwrap().to_string();
+    let plane = s.world_state().unwrap().sketch(sketch).unwrap().plane;
+    let (x, y) = (plane.x, plane.y);
+    let shown = |s: &Session, w: &str| s.world_state().unwrap().sketch(sketch).unwrap().sketch.wires.iter().find(|q| q.id == w).unwrap().fit.clone();
+    let undo = s.undo.len();
+    run(&mut s, "sketch.move", json!({"entities":[format!("{point}@0")],"translate":[3,0]}));
+    near(shown(&s, &point)[0], Vec3::new(17.0, 32.0, 45.0) + x * 3.0);
+    assert_eq!(s.undo.len(), undo + 1, "one undo step");
+    run(&mut s, "sketch.move", json!({"entities":[line.clone()],"translate":[0,4]}));
+    let fit = shown(&s, &line);
+    near(fit[0], Vec3::new(10.0, 30.0, 40.0) + y * 4.0);
+    near(fit[1], Vec3::new(10.0, 30.0, 50.0) + y * 4.0);
+    let e = s.execute("sketch.move", &json!({"entities":[format!("{point}@0")],"translate":[1,0],"copy":true})).unwrap_err().to_string();
+    assert!(e.contains("not supported yet"), "{e}");
+    near(shown(&s, &point)[0], Vec3::new(17.0, 32.0, 45.0) + x * 3.0);
+}
+
+#[test]
+fn move_drawn_point_past_the_end_changes_nothing() {
+    let (mut s, _, _, _) = second_frame();
+    let point = run(&mut s, "sketch.point3d", json!({"point":[17,32,45]}))["point"].as_str().unwrap().to_string();
+    let before = s.doc.to_json();
+    let e = s.execute("sketch.move", &json!({"entities":[format!("{point}@9")],"translate":[3,0]})).unwrap_err().to_string();
+    assert!(!e.is_empty());
+    assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
+fn move_mixed_plane_and_drawn_picks_move_together() {
+    let (mut s, _, _, _) = second_frame();
+    let sketch = s.active_sketch.unwrap();
+    let point = run(&mut s, "sketch.point3d", json!({"point":[17,32,45]}))["point"].as_str().unwrap().to_string();
+    let plane_line = run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0]]}))["curves"][0].as_str().unwrap().to_string();
+    let plane = s.world_state().unwrap().sketch(sketch).unwrap().plane;
+    let y = plane.y;
+    let undo = s.undo.len();
+    let r = run(&mut s, "sketch.move", json!({"entities":[format!("{point}@0"), plane_line.clone()],"translate":[0,2]}));
+    assert_eq!(s.undo.len(), undo + 1, "one undo step");
+    let shown = s.world_state().unwrap().sketch(sketch).unwrap().sketch.wires.iter().find(|q| q.id == point).unwrap().fit.clone();
+    near(shown[0], Vec3::new(17.0, 32.0, 45.0) + y * 2.0);
+    let curves: Vec<&str> = r["curves"].as_array().unwrap().iter().filter_map(|c| c.as_str()).collect();
+    assert!(curves.contains(&point.as_str()), "the moved drawn curve is listed: {curves:?}");
+    assert!(s.doc.sketch(sketch).unwrap().curve_index(&plane_line).is_some(), "the plane line stays");
+}
+
+#[test]
+fn move_joined_drawn_curves_moves_their_shared_point_once() {
+    let (mut s, _, _, _) = second_frame();
+    let sketch = s.active_sketch.unwrap();
+    let r = run(&mut s, "sketch.line3d", json!({"points":[[10,30,40],[10,30,50],[20,30,50]]}));
+    let (a, b) = (r["curves"][0].as_str().unwrap().to_string(), r["curves"][1].as_str().unwrap().to_string());
+    let x = s.world_state().unwrap().sketch(sketch).unwrap().plane.x;
+    run(&mut s, "sketch.move", json!({"entities":[a.clone(), b.clone()],"translate":[3,0]}));
+    let wires = s.world_state().unwrap().sketch(sketch).unwrap().sketch.wires.clone();
+    let fit = |w: &str| wires.iter().find(|q| q.id == w).unwrap().fit.clone();
+    near(fit(&a)[0], Vec3::new(10.0, 30.0, 40.0) + x * 3.0);
+    near(fit(&a)[1], Vec3::new(10.0, 30.0, 50.0) + x * 3.0);
+    near(fit(&b)[0], Vec3::new(10.0, 30.0, 50.0) + x * 3.0);
+    near(fit(&b)[1], Vec3::new(20.0, 30.0, 50.0) + x * 3.0);
+}
+
+#[test]
+fn move_drawn_line_along_itself_by_its_length() {
+    let (mut s, _, _, _) = second_frame();
+    let sketch = s.active_sketch.unwrap();
+    let x = s.world_state().unwrap().sketch(sketch).unwrap().plane.x;
+    let start = Vec3::new(10.0, 30.0, 40.0);
+    let end = start + x * 10.0;
+    let line = run(&mut s, "sketch.line3d", json!({"points":[[start.x, start.y, start.z],[end.x, end.y, end.z]]}))["curves"][0]
+        .as_str()
+        .unwrap()
+        .to_string();
+    run(&mut s, "sketch.move", json!({"entities":[line.clone()],"translate":[10,0]}));
+    let fit = s.world_state().unwrap().sketch(sketch).unwrap().sketch.wires.iter().find(|q| q.id == line).unwrap().fit.clone();
+    near(fit[0], end);
+    near(fit[1], end + x * 10.0);
+}
+
+#[test]
+fn move_drawn_curve_with_a_fixed_point_is_refused() {
+    let (mut s, _, _, _) = second_frame();
+    let line = run(&mut s, "sketch.line3d", json!({"points":[[10,30,40],[10,30,50]]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.fix", json!({"entity": format!("{line}.start")}));
+    let before = s.doc.to_json();
+    let e = s.execute("sketch.move", &json!({"entities":[line],"translate":[3,0]})).unwrap_err().to_string();
+    assert!(e.contains("fixed"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
+fn move_drawn_curve_that_breaks_a_3d_constraint_is_refused() {
+    let (mut s, _) = plane_3d_sketch();
+    let line = run(&mut s, "sketch.line3d", json!({"points":[[0,0,5],[10,0,5]]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.along_axis", json!({"line": line, "axis": "x"}));
+    let before = s.doc.to_json();
+    let e = s.execute("sketch.move", &json!({"entities":[line],"angle":90})).unwrap_err().to_string();
+    assert!(e.contains("cannot hold"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
+/// `z` lifts drawn picks along the sketch normal, drawn-only: a drawn point and a whole drawn
+/// curve, each in one undo step.
+#[test]
+fn move_z_lifts_drawn_picks_along_the_normal() {
+    let (mut s, _, _, _) = second_frame();
+    let sketch = s.active_sketch.unwrap();
+    let point = run(&mut s, "sketch.point3d", json!({"point":[17,32,45]}))["point"].as_str().unwrap().to_string();
+    let line = run(&mut s, "sketch.line3d", json!({"points":[[10,30,40],[10,30,50]]}))["curves"][0].as_str().unwrap().to_string();
+    let plane = s.world_state().unwrap().sketch(sketch).unwrap().plane;
+    let (x, n) = (plane.x, plane.normal());
+    let shown = |s: &Session, w: &str| s.world_state().unwrap().sketch(sketch).unwrap().sketch.wires.iter().find(|q| q.id == w).unwrap().fit.clone();
+    let undo = s.undo.len();
+    run(&mut s, "sketch.move", json!({"entities":[format!("{point}@0")],"translate":[3,0],"z":2}));
+    near(shown(&s, &point)[0], Vec3::new(17.0, 32.0, 45.0) + x * 3.0 + n * 2.0);
+    assert_eq!(s.undo.len(), undo + 1, "one undo step");
+    run(&mut s, "sketch.move", json!({"entities":[line.clone()],"translate":[0,0],"z":-5}));
+    let fit = shown(&s, &line);
+    near(fit[0], Vec3::new(10.0, 30.0, 40.0) - n * 5.0);
+    near(fit[1], Vec3::new(10.0, 30.0, 50.0) - n * 5.0);
+    assert_eq!(s.undo.len(), undo + 2, "one undo step per move");
+    let r = run(&mut s, "sketch.line3d", json!({"points":[[30,30,40],[30,30,50],[40,30,50]]}));
+    let (a, b) = (r["curves"][0].as_str().unwrap().to_string(), r["curves"][1].as_str().unwrap().to_string());
+    run(&mut s, "sketch.move", json!({"entities":[a.clone(), b.clone()],"translate":[0,0],"z":2}));
+    near(shown(&s, &a)[1], Vec3::new(30.0, 30.0, 50.0) + n * 2.0);
+    near(shown(&s, &b)[0], Vec3::new(30.0, 30.0, 50.0) + n * 2.0);
+    near(shown(&s, &b)[1], Vec3::new(40.0, 30.0, 50.0) + n * 2.0);
+}
+
+/// `z` on a plane line and a drawn point picked together: both move along the normal in one
+/// command, and the plane line becomes a drawn line lifted by `z`.
+#[test]
+fn move_z_mixed_plane_and_drawn_picks_lift_together() {
+    let (mut s, _, _, _) = second_frame();
+    let sketch = s.active_sketch.unwrap();
+    let point = run(&mut s, "sketch.point3d", json!({"point":[17,32,45]}))["point"].as_str().unwrap().to_string();
+    let plane_line = run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0]]}))["curves"][0].as_str().unwrap().to_string();
+    let plane = s.world_state().unwrap().sketch(sketch).unwrap().plane;
+    let (x, y, n) = (plane.x, plane.y, plane.normal());
+    let undo = s.undo.len();
+    let r = run(&mut s, "sketch.move", json!({"entities":[format!("{point}@0"), plane_line.clone()],"translate":[0,2],"z":3}));
+    assert_eq!(s.undo.len(), undo + 1, "one undo step");
+    let wires = s.world_state().unwrap().sketch(sketch).unwrap().sketch.wires.clone();
+    let shown = wires.iter().find(|q| q.id == point).unwrap().fit.clone();
+    near(shown[0], Vec3::new(17.0, 32.0, 45.0) + y * 2.0 + n * 3.0);
+    let lifted_id = r["curves"].as_array().unwrap().iter().filter_map(|c| c.as_str()).find(|c| *c != point).unwrap();
+    let lifted = &wires.iter().find(|w| w.id == lifted_id).unwrap().fit;
+    assert_eq!(lifted.len(), 2, "the plane line is lifted as one drawn line");
+    let a = plane.origin + y * 2.0 + n * 3.0;
+    near(lifted[0], a);
+    near(lifted[1], a + x * 10.0);
+}
+
+/// A 3D sketch on XY with 3D drawing on.
+fn sketch_3d_on_xy(s: &mut Session) -> u64 {
+    run(s, "sketch.create", json!({"plane":"XY", "name": "Path"}));
+    run(s, "sketch.options", json!({"sketch_3d":true}));
+    s.active_sketch.unwrap()
+}
+
+#[test]
+fn a_3d_line_is_held_to_the_sketchs_2d_point_and_line() {
+    let mut s = Session::default();
+    let sketch = sketch_3d_on_xy(&mut s);
+    let p2 = run(&mut s, "sketch.point", json!({"point":[5,5]}))["point"].as_str().unwrap().to_string();
+    let l2 = run(&mut s, "sketch.line", json!({"points":[[0,20],[10,20]]}))["curves"][0].as_str().unwrap().to_string();
+    let w = run(&mut s, "sketch.line3d", json!({"points":[[4,6,30],[3,22,31]]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.coincident", json!({"a": format!("{w}.start"), "b": p2}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": format!("{w}.end"), "b": l2}));
+    near(fit(&s, &w, 0), Vec3::new(5.0, 5.0, 0.0));
+    let end = fit(&s, &w, 1);
+    assert!((end.y - 20.0).abs() < 1e-7 && end.z.abs() < 1e-7, "on the 2D line, in the sketch plane: {end:?}");
+    // Dragging the 2D point takes the 3D line's start with it.
+    run(&mut s, "sketch.move", json!({"entities": [p2], "translate": [3, 0]}));
+    run(&mut s, "sketch.finish", json!({}));
+    near(solved_fit(&s, sketch, &w, 0), Vec3::new(8.0, 5.0, 0.0));
+}
+
+#[test]
+fn a_3d_line_held_to_an_included_model_edge_follows_the_model() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "h", "expression": "10 mm"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": "h"}));
+    let sketch = sketch_3d_on_xy(&mut s);
+    // The box's top front edge, from (0,0,10) to (40,0,10), included as a fixed 3D curve.
+    let inc = run(&mut s, "sketch.include_3d", json!({"refs": [{"edge": [20, 0, 10], "body": "Body1"}]}));
+    let sk = s.doc.sketch(sketch).unwrap();
+    let edge = sk.wires.iter().find(|w| w.link.is_some()).map(|w| w.id.clone()).unwrap_or_else(|| panic!("{inc}"));
+    let start = if sk.wires[sk.wire_index(&edge).unwrap()].pts[0].x < 1.0 { "start" } else { "end" };
+    let w = run(&mut s, "sketch.line3d", json!({"points":[[1,1,12],[30,2,15]]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.coincident", json!({"a": format!("{w}.start"), "b": format!("{edge}.{start}")}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": format!("{w}.end"), "b": edge}));
+    near(fit(&s, &w, 0), Vec3::new(0.0, 0.0, 10.0));
+    let end = fit(&s, &w, 1);
+    assert!(end.y.abs() < 1e-7 && (end.z - 10.0).abs() < 1e-7, "{end:?}");
+    // A taller box moves the edge, and the 3D line with it.
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "parameters.change", json!({"name": "h", "expression": "25 mm"}));
+    near(solved_fit(&s, sketch, &w, 0), Vec3::new(0.0, 0.0, 25.0));
+    let end = solved_fit(&s, sketch, &w, 1);
+    assert!(end.y.abs() < 1e-7 && (end.z - 25.0).abs() < 1e-7, "{end:?}");
+}
+
+#[test]
+fn a_3d_point_held_on_a_construction_plane_follows_it() {
+    let mut s = Session::default();
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 5, "name": "Shelf"}));
+    let sketch = sketch_3d_on_xy(&mut s);
+    let q = run(&mut s, "sketch.point3d", json!({"point":[3,4,9]}))["point"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.on_plane", json!({"point": q, "plane": "Shelf"}));
+    near(fit(&s, &q, 0), Vec3::new(3.0, 4.0, 5.0));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "timeline.edit", json!({"feature": "Shelf", "set": {"plane.distance": "8"}}));
+    near(solved_fit(&s, sketch, &q, 0), Vec3::new(3.0, 4.0, 8.0));
+}
+
+#[test]
+fn a_3d_point_is_held_on_a_planar_face_and_dimensioned_from_it() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "h", "expression": "10 mm"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": "h"}));
+    let sketch = sketch_3d_on_xy(&mut s);
+    let w = run(&mut s, "sketch.line3d", json!({"points":[[5,5,12],[30,8,40]]}))["curves"][0].as_str().unwrap().to_string();
+    // The start on the box's top face; the end 15 above it.
+    run(&mut s, "sketch.constraint.on_plane", json!({"point": format!("{w}.start"), "plane": {"face": [20, 10, 10]}}));
+    let d = run(&mut s, "sketch.dimension", json!({"entities": [format!("{w}.end"), {"face": [20, 10, 10], "body": "Body1"}], "value": 15}));
+    assert_eq!(d["type"], "plane_distance", "{d}");
+    assert!((fit(&s, &w, 0).z - 10.0).abs() < 1e-7 && (fit(&s, &w, 1).z - 25.0).abs() < 1e-7);
+    // A point on an edge between two face planes is refused, not guessed.
+    let e = s.execute("sketch.constraint.on_plane", &json!({"point": format!("{w}.end"), "plane": {"face": [40, 0, 10]}})).unwrap_err().to_string();
+    assert!(e.contains("different planes meet"), "{e}");
+    // The face is kept by its name: a taller box lifts both points.
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "parameters.change", json!({"name": "h", "expression": "20 mm"}));
+    assert!((solved_fit(&s, sketch, &w, 0).z - 20.0).abs() < 1e-7);
+    assert!((solved_fit(&s, sketch, &w, 1).z - 35.0).abs() < 1e-7);
+    // Saved and opened, it is found again.
+    let reopened = Session::new(solidcraft_doc::format::read(&s.doc.to_json()).unwrap());
+    assert!((solved_fit(&reopened, sketch, &w, 1).z - 35.0).abs() < 1e-7);
+}
+
+#[test]
+fn a_paste_into_another_design_drops_what_is_held_to_this_designs_model() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": 10}));
+    sketch_3d_on_xy(&mut s);
+    let q = run(&mut s, "sketch.point3d", json!({"point":[3,4,9]}))["point"].as_str().unwrap().to_string();
+    let r = run(&mut s, "sketch.point3d", json!({"point":[6,4,9]}))["point"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.on_plane", json!({"point": q, "plane": {"face": [20, 10, 10]}}));
+    run(&mut s, "sketch.constraint.on_plane", json!({"point": r, "plane": "xy"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "timeline.copy", json!({"features": ["Path"]}));
+    let mut t = Session { foreign_copy: s.foreign_copy.clone(), ..Default::default() };
+    let pasted = run(&mut t, "timeline.paste", json!({"from_design": true}))["pasted"][0]["id"].as_u64().unwrap();
+    let kinds: Vec<_> = t.doc.sketch(pasted).unwrap().wire_constraints.iter().map(|c| c.kind.clone()).collect();
+    assert_eq!(kinds.len(), 1, "{kinds:?}");
+    assert!(kinds[0].model_plane().is_none());
+    assert!(matches!(&kinds[0], solidcraft_sketch::WireConstraintKind::OnPlane { p, plane }
+        if p.wire == r && p.index == 0 && plane.origin_plane() == Some(solidcraft_sketch::OriginPlane::Xy)));
+}
+
+#[test]
+fn the_beam_runner_rides_the_tube_top_and_follows_len_and_shs() {
+    // #10608's beam: a runner on the top of a `shs` tube, from half its length to 370 short of
+    // its far end, held to the faces and dimensioned from them rather than placed by numbers.
+    // Strict, as a script runs: the typed contracts take the faces as the handlers do.
+    let mut s = Session { param_check: crate::schema::ParamCheck::Strict, ..Session::default() };
+    run(&mut s, "parameters.add", json!({"name": "len", "expression": "3000 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "shs", "expression": "150 mm"}));
+    run(&mut s, "solid.box", json!({"length": "len", "width": "shs", "height": "shs"}));
+    let sketch = sketch_3d_on_xy(&mut s);
+    let w = run(&mut s, "sketch.line3d", json!({"points":[[1400,70,160],[2700,80,155]]}))["curves"][0].as_str().unwrap().to_string();
+    let top = json!({"face": [1000, 75, 150], "body": "Body1"});
+    let far_end = json!({"face": [3000, 75, 75], "body": "Body1"});
+    let near_end = json!({"face": [0, 75, 75], "body": "Body1"});
+    run(&mut s, "sketch.constraint.on_plane", json!({"points": [format!("{w}.start"), format!("{w}.end")], "plane": top}));
+    run(&mut s, "sketch.constraint.parallel", json!({"a": w, "b": "xz"}));
+    run(&mut s, "sketch.dimension", json!({"entities": [format!("{w}.start"), near_end], "value": "len / 2"}));
+    run(&mut s, "sketch.dimension", json!({"entities": [format!("{w}.end"), far_end], "value": 370}));
+    run(&mut s, "sketch.finish", json!({}));
+    let ends = |s: &Session| (solved_fit(s, sketch, &w, 0), solved_fit(s, sketch, &w, 1));
+    let (a, b) = ends(&s);
+    assert!((a.x - 1500.0).abs() < 1e-6 && (b.x - 2630.0).abs() < 1e-6 && (a.z - 150.0).abs() < 1e-6 && (b.z - 150.0).abs() < 1e-6, "{a:?} {b:?}");
+    run(&mut s, "parameters.change", json!({"name": "shs", "expression": "120 mm"}));
+    run(&mut s, "parameters.change", json!({"name": "len", "expression": "3500 mm"}));
+    let (a, b) = ends(&s);
+    assert!((a.x - 1750.0).abs() < 1e-6 && (b.x - 3130.0).abs() < 1e-6 && (a.z - 120.0).abs() < 1e-6 && (b.z - 120.0).abs() < 1e-6, "{a:?} {b:?}");
+}
+
+#[test]
+fn a_3d_point_held_to_a_second_occurrences_face_follows_the_copy() {
+    let mut s = Session::default();
+    let part = run(&mut s, "component.create", json!({"name":"Part"}));
+    run(&mut s, "solid.box", json!({"length":20,"width":20,"height":10,"body_name":"Block"}));
+    run(&mut s, "component.activate", json!({"component":0}));
+    let copy = run(&mut s, "occurrence.copy", json!({"component":part["component"],"translate":[50,0,5]}))["occurrence"].as_u64().unwrap();
+    let sketch = sketch_3d_on_xy(&mut s);
+    let q = run(&mut s, "sketch.point3d", json!({"point":[60,10,18]}))["point"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.on_plane", json!({"point":q,"plane":{"body":"Block (Part:2)","face":[60,10,15]}}));
+    near(fit(&s, &q, 0), Vec3::new(60.0, 10.0, 15.0));
+    run(&mut s, "sketch.finish", json!({}));
+    near(solved_fit(&s, sketch, &q, 0), Vec3::new(60.0, 10.0, 15.0));
+    let reopened = Session::new(solidcraft_doc::format::read(&s.doc.to_json()).unwrap());
+    near(solved_fit(&reopened, sketch, &q, 0), Vec3::new(60.0, 10.0, 15.0));
+    // Only the second placement moves: its top face rises from 15 to 20.
+    run(&mut s, "occurrence.move", json!({"occurrence":copy,"translate":[0,0,5],"capture":true}));
+    near(solved_fit(&s, sketch, &q, 0), Vec3::new(60.0, 10.0, 20.0));
+}
+
+#[test]
+fn a_3d_attachment_follows_a_named_planes_owner_placement_and_rename() {
+    let mut s = Session::default();
+    let owner = run(&mut s, "component.create", json!({"name":"Plane owner","grounded":false}));
+    let occurrence = owner["occurrence"].as_u64().unwrap();
+    run(&mut s, "construct.plane.offset", json!({"base":"XY","offset":5,"name":"Shelf"}));
+    run(&mut s, "component.activate", json!({"component":0}));
+    run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[0,0,10],"capture":true}));
+    let sketch = sketch_3d_on_xy(&mut s);
+    let q = run(&mut s, "sketch.point3d", json!({"point":[3,4,19]}))["point"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.on_plane", json!({"point":q,"plane":"Shelf"}));
+    near(fit(&s, &q, 0), Vec3::new(3.0, 4.0, 15.0));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[0,0,5],"capture":true}));
+    near(solved_fit(&s, sketch, &q, 0), Vec3::new(3.0, 4.0, 20.0));
+    run(&mut s, "timeline.rename", json!({"feature":"Shelf","name":"Deck"}));
+    let source = &s.doc.sketch(sketch).unwrap().wire_constraints[0].kind.model_plane().unwrap().source;
+    assert!(matches!(source, solidcraft_sketch::LinkSource::Plane { name } if name == "Deck"));
+    let mut reopened = Session::new(solidcraft_doc::format::read(&s.doc.to_json()).unwrap());
+    near(solved_fit(&reopened, sketch, &q, 0), Vec3::new(3.0, 4.0, 20.0));
+    run(&mut reopened, "timeline.edit", json!({"feature":"Deck","set":{"plane.distance":"8"}}));
+    near(solved_fit(&reopened, sketch, &q, 0), Vec3::new(3.0, 4.0, 23.0));
+}
+
+#[test]
+fn axis_dimensions_keep_the_side_of_fixed_and_drawn_operands() {
+    for fixed in [true, false] {
+        for explicit in [true, false] {
+            let mut s = Session::default();
+            sketch_3d_on_xy(&mut s);
+            let a = if fixed {
+                run(&mut s, "sketch.point", json!({"point":[10,0]}))["point"].as_str().unwrap().to_string()
+            } else {
+                run(&mut s, "sketch.point3d", json!({"point":[10,0,0]}))["point"].as_str().unwrap().to_string()
+            };
+            let b = run(&mut s, "sketch.point3d", json!({"point":[5,0,0]}))["point"].as_str().unwrap().to_string();
+            let mut params = json!({"entities":[a,b],"type":"distance_x"});
+            if explicit {
+                params["value"] = json!(5);
+            }
+            let result = run(&mut s, "sketch.dimension", params);
+            assert_eq!(result["measured"], 5.0, "{result}");
+            near(fit(&s, &b, 0), Vec3::new(5.0, 0.0, 0.0));
+        }
+    }
+}
+
+#[test]
+fn a_new_3d_dimension_measures_the_current_included_endpoint() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name":"h","expression":"10 mm"}));
+    run(&mut s, "solid.box", json!({"length":40,"width":20,"height":"h"}));
+    let sketch = sketch_3d_on_xy(&mut s);
+    run(&mut s, "sketch.include_3d", json!({"refs":[{"edge":[20,0,10],"body":"Body1"}]}));
+    let edge = s.doc.sketch(sketch).unwrap().wires.iter().find(|w| w.link.is_some()).unwrap().id.clone();
+    let q = run(&mut s, "sketch.point3d", json!({"point":[3,4,40]}))["point"].as_str().unwrap().to_string();
+    run(&mut s, "parameters.change", json!({"name":"h","expression":"25 mm"}));
+    let result = run(&mut s, "sketch.dimension", json!({"entities":[format!("{edge}.start"),q],"type":"distance_z"}));
+    assert_eq!(result["measured"], 15.0, "the current top is at 25, so 40 - 25 = 15: {result}");
+    near(fit(&s, &q, 0), Vec3::new(3.0, 4.0, 40.0));
+}
+
+#[test]
+fn toggling_a_driven_plane_angle_uses_the_refreshed_plane() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name":"tilt","expression":"30 deg"}));
+    run(&mut s, "construct.plane.at_angle", json!({"base":"XY","axis":"X","angle":"tilt","name":"Slope"}));
+    let sketch = sketch_3d_on_xy(&mut s);
+    let line = run(&mut s, "sketch.line3d", json!({"points":[[0,0,0],[0,10,0]]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.fix", json!({"entity":format!("{line}.start")}));
+    let dimension = run(&mut s, "sketch.dimension", json!({"entities":[line,"Slope"],"driven":true}))["constraint"].as_str().unwrap().to_string();
+    run(&mut s, "parameters.change", json!({"name":"tilt","expression":"15 deg"}));
+    run(&mut s, "sketch.toggle_driven", json!({"constraint":dimension,"driven":false}));
+    let slot = s.doc.sketch(sketch).unwrap().wire_constraints.iter().find(|c| c.id == dimension).unwrap();
+    let value = s.doc.param_values().0[slot.param.as_ref().unwrap()].to_kind(solidcraft_doc::expr::Kind::Angle).unwrap();
+    assert!((value - 15.0_f64.to_radians()).abs() < 1e-9, "{value}");
+    near(fit(&s, &line, 1), Vec3::new(0.0, 10.0, 0.0));
+}
+
+#[test]
+fn a_foreign_model_plane_dimension_does_not_consume_the_paste_parameter_budget() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":40,"width":20,"height":10}));
+    sketch_3d_on_xy(&mut s);
+    let q = run(&mut s, "sketch.point3d", json!({"point":[3,4,15]}))["point"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.dimension", json!({"entities":[q,{"face":[20,10,10]}],"value":5}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "timeline.copy", json!({"features":["Path"]}));
+    let mut target = Session { foreign_copy: s.foreign_copy.clone(), ..Default::default() };
+    for index in 0..solidcraft_doc::MAX_PARAMS {
+        target.doc_mut().params.push(solidcraft_doc::Param {
+            name: format!("p{index}"),
+            expr: "1 mm".into(),
+            unit: "mm".into(),
+            comment: String::new(),
+            model: false,
+        });
+    }
+    let result = run(&mut target, "timeline.paste", json!({"from_design":true}));
+    let id = result["pasted"][0]["id"].as_u64().unwrap();
+    assert!(target.doc.sketch(id).unwrap().wire_constraints.is_empty());
+    assert_eq!(target.doc.params.len(), solidcraft_doc::MAX_PARAMS);
+}
+
+const CONTROL: &str = "sketch.spline3d.control_point";
+
+/// A 3D sketch on the XY plane being edited, and its id.
+fn sketch_3d() -> (Session, u64) {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let sketch = s.active_sketch.unwrap();
+    (s, sketch)
+}
+
+/// The drawn 3D curve `wire` of `sketch`, as stored.
+fn stored_wire(s: &Session, sketch: u64, wire: &str) -> solidcraft_sketch::Wire {
+    let sk = s.doc.sketch(sketch).unwrap();
+    sk.wires[sk.wire_index(wire).unwrap()].clone()
+}
+
+/// The volume of the body made last.
+fn last_volume(s: &Session) -> f64 {
+    let world = s.world_state().unwrap();
+    solidcraft_kernel::measure(&world.bodies.last().unwrap().body).unwrap().volume
+}
+
+/// Length of the cubic Bézier over `p`, by Simpson's rule on the speed
+/// |B'(t)| = 3 |(1-t)² (P1-P0) + 2t(1-t) (P2-P1) + t² (P3-P2)| (2000 steps: far below the
+/// tolerances here).
+fn cubic_length(p: [Vec3; 4]) -> f64 {
+    let speed = |t: f64| ((p[1] - p[0]) * ((1.0 - t) * (1.0 - t)) + (p[2] - p[1]) * (2.0 * t * (1.0 - t)) + (p[3] - p[2]) * (t * t)).len() * 3.0;
+    let n = 2000;
+    let h = 1.0 / n as f64;
+    (0..=n)
+        .map(|i| {
+            speed(i as f64 * h)
+                * if i == 0 || i == n {
+                    1.0
+                } else if i % 2 == 1 {
+                    4.0
+                } else {
+                    2.0
+                }
+        })
+        .sum::<f64>()
+        * h
+        / 3.0
+}
+
+/// Three control points of the parabola z = x²/20 over x in -20…20, in the XZ plane: the
+/// quadratic Bézier from (-20, 0, 20) to (20, 0, 20) whose tangents meet at (0, 0, -20). Its
+/// length is 10 (2√5 + asinh 2), and it bends no tighter than radius 10 (at its vertex).
+const PARABOLA: [[f64; 3]; 3] = [[-20.0, 0.0, 20.0], [0.0, 0.0, -20.0], [20.0, 0.0, 20.0]];
+
+fn parabola_length() -> f64 {
+    10.0 * (2.0 * 5.0_f64.sqrt() + 2.0_f64.asinh())
+}
+
+#[test]
+fn a_3d_control_point_spline_is_drawn_over_its_control_points_in_one_undo_step() {
+    let (mut s, sketch) = sketch_3d();
+    let ctrl =
+        [Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 20.0), Vec3::new(20.0, 0.0, 40.0), Vec3::new(40.0, 20.0, 40.0), Vec3::new(60.0, 30.0, 60.0)];
+    let before = s.doc.to_json();
+    let undo = s.undo.len();
+    let r = run(&mut s, CONTROL, json!({"points": ctrl}));
+    assert_eq!(s.undo.len(), undo + 1, "one undo step");
+    let id = r["curves"][0].as_str().unwrap().to_string();
+    let w = stored_wire(&s, sketch, &id);
+    assert_eq!(w.fit, ctrl.to_vec());
+    assert_eq!(w.control, Some(solidcraft_sketch::WireControl { degree: 3 }));
+    assert!(w.arc.is_none() && w.link.is_none());
+    // The curve starts and ends on its end control points and passes the others by: the two
+    // spans of five control points join at (P1 + 2 P2 + P3) / 4, by inserting the knot ½.
+    assert_eq!((w.pts.first(), w.pts.last()), (ctrl.first(), ctrl.last()));
+    near(w.pts[(w.pts.len() - 1) / 2], (ctrl[1] + ctrl[2] * 2.0 + ctrl[3]) * 0.25);
+    assert!(w.pts.iter().all(|p| ctrl[1..4].iter().all(|c| p.dist(*c) > 1.0)));
+    let insp = run(&mut s, "sketch.inspect", json!({}));
+    let entry = insp["wires"].as_array().unwrap().iter().find(|e| e["id"] == json!(id)).unwrap();
+    assert_eq!(entry["control"], json!({"degree": 3, "points": ctrl}));
+    // A spline through fit points says nothing of control points.
+    let fit = run(&mut s, "sketch.spline3d", json!({"points": [[0, 50, 0], [10, 60, 10], [20, 50, 20]]}))["curves"][0].as_str().unwrap().to_string();
+    let insp = run(&mut s, "sketch.inspect", json!({}));
+    assert!(insp["wires"].as_array().unwrap().iter().find(|e| e["id"] == json!(fit)).unwrap().get("control").is_none());
+    run(&mut s, "edit.undo", json!({}));
+    // Undo takes the curve away whole; redo draws the same curve again.
+    let drawn = s.doc.to_json();
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), before);
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(s.doc.to_json(), drawn);
+    assert_eq!(stored_wire(&s, sketch, &id), w);
+}
+
+#[test]
+fn a_3d_control_point_moves_its_curve_through_undo_redo_and_reopening() {
+    let (mut s, sketch) = sketch_3d();
+    let id = run(&mut s, CONTROL, json!({"points": [[0, 0, 0], [0, 0, 20], [20, 0, 40], [40, 20, 40]]}))["curves"][0].as_str().unwrap().to_string();
+    let drawn = stored_wire(&s, sketch, &id);
+    let undo = s.undo.len();
+    let r = run(&mut s, "sketch.move3d", json!({"wire": id, "index": 2, "to": [20, 10, 30]}));
+    assert_eq!(r["moved"], json!(1));
+    assert_eq!(s.undo.len(), undo + 1, "one undo step");
+    let moved = stored_wire(&s, sketch, &id);
+    let ctrl = [Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 20.0), Vec3::new(20.0, 10.0, 30.0), Vec3::new(40.0, 20.0, 40.0)];
+    assert_eq!(moved.fit, ctrl.to_vec());
+    assert_eq!(moved.control, drawn.control);
+    // Four control points are one cubic Bézier: its middle is (P0 + 3 P1 + 3 P2 + P3) / 8, off
+    // the control point that moved.
+    near(moved.pts[(moved.pts.len() - 1) / 2], (ctrl[0] + ctrl[1] * 3.0 + ctrl[2] * 3.0 + ctrl[3]) * 0.125);
+    // A move by an offset, on an end: the curve still ends on its last control point.
+    run(&mut s, "sketch.move3d", json!({"wire": id, "index": 3, "by": [0, 0, 5]}));
+    let ended = stored_wire(&s, sketch, &id);
+    assert_eq!(ended.pts.last(), Some(&Vec3::new(40.0, 20.0, 45.0)));
+    // Saved and read back, the curve is the same control point spline.
+    let saved = s.doc.to_json();
+    let file: Value = serde_json::from_str(&saved).unwrap();
+    let wires: Vec<&Value> = file["features"].as_array().unwrap().iter().filter_map(|f| f["sketch"]["wires"].as_array()).flatten().collect();
+    assert_eq!(wires.len(), 1);
+    assert_eq!(wires[0]["control"], json!({"degree": 3}), "the design saves the curve's control form");
+    let restored = solidcraft_doc::format::read(&saved).unwrap();
+    assert_eq!(restored.sketch(sketch).unwrap().wires, s.doc.sketch(sketch).unwrap().wires);
+    assert_eq!(restored.to_json(), saved);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(stored_wire(&s, sketch, &id), moved);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(stored_wire(&s, sketch, &id), drawn);
+    run(&mut s, "edit.redo", json!({}));
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(stored_wire(&s, sketch, &id), ended);
+    // There is no fifth control point, and a control point cannot land on its neighbour.
+    let before = s.doc.to_json();
+    assert!(s.execute("sketch.move3d", &json!({"wire": id, "index": 4, "to": [1, 2, 3]})).is_err());
+    assert!(s.execute("sketch.move3d", &json!({"wire": id, "index": 1, "to": [0, 0, 0]})).is_err());
+    assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
+fn a_3d_control_point_spline_refuses_hostile_input_and_needs_a_3d_sketch() {
+    let mut s = Session::default();
+    assert!(!crate::cmd::find_command(CONTROL).unwrap().info(&s).enabled, "offered with no sketch being edited");
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    assert!(!crate::cmd::find_command(CONTROL).unwrap().info(&s).enabled, "offered in a plain 2D sketch");
+    let good = json!({"points": [[0, 0, 0], [0, 0, 20], [20, 0, 40]]});
+    let off = s.execute(CONTROL, &good).unwrap_err().to_string();
+    assert!(off.contains("3D Sketch"), "{off}");
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    assert!(crate::cmd::find_command(CONTROL).unwrap().info(&s).enabled);
+    let doc = s.doc.to_json();
+    let history = (s.undo.len(), s.redo.len());
+    let many: Vec<Value> = (0..501).map(|i| json!([i, 0, 0])).collect();
+    for p in [
+        json!({}),
+        json!({"points": [[0, 0, 0], [0, 0, 20]]}),             // two control points are a line
+        json!({"points": [[0, 0, 0], [0, 0, 0], [20, 0, 40]]}), // neighbours at one place
+        json!({"points": [[0, 0, 0], [f64::NAN, 0, 20], [20, 0, 40]]}),
+        json!({"points": [[0, 0, 0], [1e100, 0, 20], [20, 0, 40]]}),
+        json!({"points": [[0, 0, 0], ["nope", 0, 20], [20, 0, 40]]}),
+        json!({"points": [[0, 0, 0], [0, 20], [20, 0, 40]]}),
+        json!({"points": many}),
+        json!({"points": "x"}),
+    ] {
+        assert!(s.execute(CONTROL, &p).is_err(), "{p}");
+        assert_eq!(s.doc.to_json(), doc);
+        assert_eq!((s.undo.len(), s.redo.len()), history);
+    }
+    let two = s.execute(CONTROL, &json!({"points": [[0, 0, 0], [0, 0, 20]]})).unwrap_err().to_string();
+    assert!(two.contains("`points` needs 3 to 500 points"), "{two}");
+    run(&mut s, CONTROL, good);
+}
+
+#[test]
+fn a_pipe_follows_a_3d_control_point_spline_and_its_moved_control_point() {
+    let (mut s, sketch) = sketch_3d();
+    let wire = run(&mut s, CONTROL, json!({"points": PARABOLA}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.pipe", json!({"path_sketch":sketch,"path":[wire],"diameter":4}));
+    // A round tube along a curve that bends wider than the tube holds its section's area times
+    // the curve's length (Pappus): 4π mm² along the parabola, not along the longer way
+    // through the control point at the bottom.
+    let area = 4.0 * std::f64::consts::PI;
+    let along_parabola = area * parabola_length();
+    assert!((last_volume(&s) - along_parabola).abs() < 0.5, "{} is not {along_parabola}", last_volume(&s));
+    // Reopened, the pipe is built along the same curve.
+    let saved = s.doc.to_json();
+    let mut reopened = Session { doc: solidcraft_doc::format::read(&saved).unwrap().into(), ..Default::default() };
+    reopened.refresh();
+    assert!((last_volume(&reopened) - along_parabola).abs() < 0.5, "{}", last_volume(&reopened));
+    // The middle control point lifted between the ends: the curve is the straight 40 mm between
+    // them, and the pipe follows it; undo puts the parabola back.
+    run(&mut s, "sketch.edit", json!({"sketch":sketch,"restore_marker":false}));
+    run(&mut s, "sketch.move3d", json!({"wire":wire,"index":1,"to":[0,0,20]}));
+    assert!((last_volume(&s) - area * 40.0).abs() < 0.05, "{} is not {}", last_volume(&s), area * 40.0);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), saved);
+    assert!((last_volume(&s) - along_parabola).abs() < 0.5, "{}", last_volume(&s));
+}
+
+#[test]
+fn a_sweep_follows_the_spans_of_a_3d_control_point_spline() {
+    let (mut s, path_sketch) = sketch_3d();
+    // Five control points leaving the origin straight up, then turning out of the XZ plane.
+    let c =
+        [Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 20.0), Vec3::new(20.0, 0.0, 40.0), Vec3::new(40.0, 20.0, 40.0), Vec3::new(60.0, 40.0, 40.0)];
+    let wire = run(&mut s, CONTROL, json!({"points": c}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    let profile = run(&mut s, "sketch.create", json!({"plane":"XY","name":"Profile"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.circle.center", json!({"center":[0,0],"radius":2}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.sweep", json!({"sketch":profile,"path_sketch":path_sketch,"path":[wire],"operation":"new"}));
+    // Knots 0 0 0 0 ½ 1 1 1 1: inserting ½ until it is there three times leaves two cubic
+    // Béziers, P0 P1 (P1+P2)/2 J and J (P2+P3)/2 P3 P4, joined at J = (P1 + 2 P2 + P3) / 4.
+    let joint = (c[1] + c[2] * 2.0 + c[3]) * 0.25;
+    let length = cubic_length([c[0], c[1], (c[1] + c[2]) * 0.5, joint]) + cubic_length([joint, (c[2] + c[3]) * 0.5, c[3], c[4]]);
+    let swept = 4.0 * std::f64::consts::PI * length;
+    assert!((last_volume(&s) - swept).abs() < 0.5, "{} is not {swept}", last_volume(&s));
+    // A spline through the same five points is a longer curve: the sweep did not take that one.
+    let through: f64 = c.windows(2).map(|w| w[0].dist(w[1])).sum();
+    assert!(length < through - 5.0, "{length} against the polygon's {through}");
+}
+
+#[test]
+fn a_3d_control_point_spline_follows_its_owner_takes_constraints_and_copies() {
+    let (mut s, _, _, second) = second_frame();
+    let sketch = s.active_sketch.unwrap();
+    // World points; the owner's placement is (x, y, z) -> (20 - y, 30 + x, 40 + z).
+    let id =
+        run(&mut s, CONTROL, json!({"points": [[20, 30, 40], [20, 30, 60], [10, 50, 60], [0, 50, 80]]}))["curves"][0].as_str().unwrap().to_string();
+    let local = [Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 20.0), Vec3::new(20.0, 10.0, 20.0), Vec3::new(20.0, 20.0, 40.0)];
+    let w = stored_wire(&s, sketch, &id);
+    for (p, q) in w.fit.iter().zip(local) {
+        near(*p, q);
+    }
+    assert_eq!(w.space, WireSpace::Component);
+    let shown = |s: &Session, id: &str| {
+        let world = s.world_state().unwrap();
+        let sk = &world.sketch(sketch).unwrap().sketch;
+        sk.wires[sk.wire_index(id).unwrap()].clone()
+    };
+    let placed = shown(&s, &id);
+    assert_eq!(placed.control, w.control);
+    near(placed.fit[2], Vec3::new(10.0, 50.0, 60.0));
+    near(placed.pts[(placed.pts.len() - 1) / 2], (placed.fit[0] + placed.fit[1] * 3.0 + placed.fit[2] * 3.0 + placed.fit[3]) * 0.125);
+    run(&mut s, "occurrence.move", json!({"occurrence":second,"translate":[5,0,0]}));
+    near(shown(&s, &id).fit[2], Vec3::new(15.0, 50.0, 60.0));
+    // Moving the occurrence ended the sketch; open it again.
+    run(&mut s, "sketch.edit", json!({"sketch":sketch}));
+    // A line drawn from its end is joined to it; a control point takes On Plane and Fix.
+    let line = run(&mut s, "sketch.line3d", json!({"points": [[5, 50, 80], [5, 50, 100]]}));
+    assert_eq!(line["constraints"].as_array().map(Vec::len), Some(1), "joined to the spline's end: {line}");
+    run(&mut s, "sketch.constraint.on_plane", json!({"point": format!("{id}.1"), "plane": "yz"}));
+    run(&mut s, "sketch.constraint.fix", json!({"entities": [format!("{id}.2")]}));
+    let held = s.execute("sketch.move3d", &json!({"wire": id, "index": 2, "by": [0, 0, 1]})).unwrap_err().to_string();
+    assert!(held.contains("fixed"), "{held}");
+    // World -X is the owner's +Y: a slide within the owner's YZ plane.
+    run(&mut s, "sketch.move3d", json!({"wire": id, "index": 1, "by": [-3, 0, 0]}));
+    let slid = stored_wire(&s, sketch, &id);
+    near(slid.fit[1], Vec3::new(0.0, 3.0, 20.0));
+    assert_eq!(slid.pts, solidcraft_sketch::control_polyline(&slid.fit, 3));
+    // A distance between two control points drives them, and the curve follows.
+    let d = run(&mut s, "sketch.dimension", json!({"entities": [format!("{id}.start"), format!("{id}.1")], "value": 25}));
+    assert_eq!(d["type"], "distance", "{d}");
+    let slid = stored_wire(&s, sketch, &id);
+    assert!((slid.fit[0].dist(slid.fit[1]) - 25.0).abs() < 1e-6, "{:?}", slid.fit);
+    assert!(slid.fit[1].x.abs() < 1e-6, "still on the YZ plane: {:?}", slid.fit[1]);
+    assert_eq!(slid.pts, solidcraft_sketch::control_polyline(&slid.fit, 3));
+    // A copy is a control point spline too, over the copied control points.
+    let out = run(&mut s, "sketch.move", json!({"entities":[id],"copy":true,"translate":[0,0],"z":7}));
+    let copy = out["curves"][0].as_str().unwrap().to_string();
+    let copied = stored_wire(&s, sketch, &copy);
+    assert_eq!(copied.control, slid.control);
+    for (p, q) in copied.fit.iter().zip(&slid.fit) {
+        near(*p, *q + Vec3::new(0.0, 0.0, 7.0));
+    }
+    assert_eq!(copied.pts, solidcraft_sketch::control_polyline(&copied.fit, 3));
     let restored = solidcraft_doc::format::read(&s.doc.to_json()).unwrap();
     assert_eq!(restored.sketch(sketch).unwrap().wires, s.doc.sketch(sketch).unwrap().wires);
 }

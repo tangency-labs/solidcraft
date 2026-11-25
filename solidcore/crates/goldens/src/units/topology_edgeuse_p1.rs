@@ -940,7 +940,7 @@ fn run_rust_brep(k: &Kernel, b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
         OpIn::Collect { fu, threshold } => {
             let mut list = Vec::new();
             eu1::faceuse_collect_adjacent(
-                &Kernel::default(),
+                &crate::runner_kernel(),
                 b,
                 FaceuseId::from_index(*fu as u32),
                 &mut list,
@@ -985,7 +985,7 @@ fn run_rust_brep(k: &Kernel, b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
         OpIn::UvLoopGap { eu } => Ok(Output::new().values(
             "gap",
             vec![eu1::start_point_uv_loop_gap(
-                &Kernel::default(),
+                &crate::runner_kernel(),
                 b,
                 eid(*eu),
             )?],
@@ -1063,12 +1063,12 @@ fn run_rust_brep(k: &Kernel, b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
             let mut vals: Vec<f64> = Vec::new();
             match which {
                 0 => out.push(flag(
-                    eu1::max_edge_face_gap(&Kernel::default(), b, e, *f)?.is_some(),
+                    eu1::max_edge_face_gap(&crate::runner_kernel(), b, e, *f)?.is_some(),
                 )),
                 1 => out.push(flag(
-                    eu1::edge_ccw_edge_gap(&Kernel::default(), b, e, *f)?.is_some(),
+                    eu1::edge_ccw_edge_gap(&crate::runner_kernel(), b, e, *f)?.is_some(),
                 )),
-                2 => match eu1::calc_max_edge_face_gap(&Kernel::default(), b, e, *f) {
+                2 => match eu1::calc_max_edge_face_gap(&crate::runner_kernel(), b, e, *f) {
                     Ok(g) => {
                         out.extend([0.0, flag(*want_out && g.is_init())]);
                         if *want_out && g.is_init() {
@@ -1078,7 +1078,7 @@ fn run_rust_brep(k: &Kernel, b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
                     Err(x) if x.is_unported() => return Err(x.into()),
                     Err(x) => out.extend([status_of(&x), 0.0]),
                 },
-                _ => match eu1::calc_edge_ccw_edge_gap(&Kernel::default(), b, e, *want_out, *f) {
+                _ => match eu1::calc_edge_ccw_edge_gap(&crate::runner_kernel(), b, e, *want_out, *f) {
                     Ok(g) => {
                         out.extend([0.0, flag(g.is_some_and(|g| g.is_init()))]);
                         if let Some(g) = g.filter(solidcore::heal::gap::EdgeEdgeGap::is_init) {
@@ -1567,7 +1567,7 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        let k = &mut Kernel::default();
+        let k = &mut crate::runner_kernel();
         run_rust(k, &case.parse::<Inputs>()?)
     }
 
@@ -1584,3 +1584,86 @@ impl UnitDiff for Runner {
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// WR-56 (#17467), the moved rows `face_pinched_huge_gaps0_{0,2}_{0,1}`: edge use 0's
+    /// maximum edge-face gap, sampled by a curve-to-surface gap function of 20 samples
+    /// (`CalcMaxEdgeFaceGap`). The face is a cubic Bezier patch about 3000 across whose
+    /// `u = 0` side is pinched to the z axis; edge use 0 runs along it. The true sampled
+    /// maximum is enclosed ([`crate::certify::sampled_max`]): every sample's distance is
+    /// bounded below by the certified surface distance bound and above by its own foot. Each
+    /// row's gap lies in the enclosure, and the value before WR-56 (`5.278e-9`, a drop that
+    /// stopped short of the nearest point) lies above it.
+    ///
+    /// The same for the moved rows `review_gapval_ellips_ts2.smb_{0,1}_16_{0,2}`: edge use 16
+    /// of the `ellips_ts2.smb` B-rep, whose gap was `3.7008e-12` before.
+    #[test]
+    fn wr56_pinched_face_max_gap_is_enclosed() {
+        use crate::certify::sampled_max;
+        use solidcore::geom::tol::context_xsect_tol_3d;
+        use solidcore::heal::gap::GapFunction;
+        const PINCHED: f64 = 5.278_275_086_186_592e-9;
+        const ELLIPS: f64 = 3.700_826_664_369_302e-12;
+        for (name, before) in [
+            ("face_pinched_huge_gaps0_0_0", PINCHED),
+            ("face_pinched_huge_gaps0_0_1", PINCHED),
+            ("face_pinched_huge_gaps0_2_0", PINCHED),
+            ("face_pinched_huge_gaps0_2_1", PINCHED),
+            ("review_gapval_ellips_ts2.smb_0_16_0", ELLIPS),
+            ("review_gapval_ellips_ts2.smb_0_16_2", ELLIPS),
+            ("review_gapval_ellips_ts2.smb_1_16_0", ELLIPS),
+            ("review_gapval_ellips_ts2.smb_1_16_2", ELLIPS),
+        ] {
+            let case = crate::case::regression_case(&Runner, name);
+            let inputs: Inputs = case.parse().expect("inputs");
+            let mut k = crate::runner_kernel();
+            let row = run_rust(&mut k, &inputs).expect("rust");
+            let state = &row.values["state"];
+            let [gap, t, u, v] = state[state.len() - 4..] else {
+                unreachable!()
+            };
+            let Ok((b, _, _)) = rust_brep(
+                &mut k,
+                inputs.brep.as_ref(),
+                inputs.validate_only,
+                inputs.init_gaps,
+            )
+            .expect("build") else {
+                panic!("{name}: the face did not build");
+            };
+            let OpIn::Gaps { eu, .. } = inputs.op else {
+                panic!("{name}: not a gaps case");
+            };
+            let e = eid(eu);
+            let edge = eu1::edge(&b, e).expect("edge").expect("an edge");
+            let face = eu1::face(&b, e).expect("face").expect("a face");
+            let curve = b.edge(edge).expect("edge").curve.as_ref().expect("curve");
+            let interval = b.edge(edge).expect("edge").interval;
+            let surface = b.face(face).expect("face").surface.as_ref().expect("surface");
+            let tol = context_xsect_tol_3d(
+                &k,
+                None,
+                solidcore::geom::tol::SmallTopoType::NormalSize,
+            );
+            let mut gf = GapFunction::crv_srf(tol, curve, &interval, surface, 20);
+            let max = *gf.max_gap_sample(&k, false).expect("samples");
+            assert_eq!(
+                (max.this_param().x, max.other_param().x, max.other_param().y),
+                (t, u, v),
+                "{name}: the row's sample"
+            );
+            let enclosure = sampled_max(&k, surface, None, gf.samples());
+            eprintln!(
+                "{name}: gap {gap:e} in [{:e}, {:e}] over {} samples",
+                enclosure.lo,
+                enclosure.hi,
+                gf.samples().len()
+            );
+            assert!(enclosure.holds(gap), "{name}: {gap:e} outside {enclosure:?}");
+            assert!(enclosure.hi < before, "{name}: {enclosure:?} reaches {before:e}");
+        }
+    }
+}

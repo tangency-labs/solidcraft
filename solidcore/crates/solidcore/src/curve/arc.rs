@@ -151,6 +151,61 @@ impl ArcDefinition {
         Ok((p, bound))
     }
 
+    /// The arc about `centre` and `axis` from `start` to the direction of `end`: the reference
+    /// is `start - centre` taken square to the axis, the radius its length, the start angle 0,
+    /// and the end angle the anticlockwise angle about the axis ([`ArcDefinition::angle_of`]) of
+    /// `end - centre` taken square to it, in `(0, 2 pi]`: an end in the start's direction makes a
+    /// full turn. The arc lies in the plane through `centre` square to the axis (`start` and
+    /// `end` are taken into it); `end`'s distance from the axis does not count.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for a number not finite, an axis of no length, or a start or an end within
+    /// [`MIN_ARC`] of the axis.
+    pub fn from_points(
+        centre: Point3,
+        axis: Vec3,
+        start: Point3,
+        end: Point3,
+    ) -> Result<ArcDefinition> {
+        const OP: &str = "curve::arc::ArcDefinition::from_points";
+        let finite = |v: Vec3| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
+        if ![centre, axis, start, end].into_iter().all(finite) {
+            return Err(SolidError::invalid_input(OP, "not finite"));
+        }
+        let n = axis
+            .unitize()
+            .map_err(|_| SolidError::invalid_input(OP, "an axis of no length"))?;
+        let across = |p: Point3| {
+            let d = p - centre;
+            d - n * d.dot(n)
+        };
+        let reference = across(start);
+        let radius = reference.length();
+        // Past the smallest arc, and a number (a NaN from an overflow is no length).
+        let off_axis = |d: f64| d.partial_cmp(&MIN_ARC) == Some(std::cmp::Ordering::Greater);
+        if !off_axis(radius) {
+            return Err(SolidError::invalid_input(OP, "the start is on the axis"));
+        }
+        let towards = across(end);
+        if !off_axis(towards.length()) {
+            return Err(SolidError::invalid_input(OP, "the end is on the axis"));
+        }
+        let mut arc = ArcDefinition {
+            centre,
+            axis: n,
+            reference,
+            radius,
+            start: 0.0,
+            end: TAU,
+        };
+        let angle = arc.angle_of(centre + towards)?;
+        if angle > MIN_ARC {
+            arc.end = angle;
+        }
+        Ok(arc)
+    }
+
     /// The angle of `p` about the circle's axis, from its reference (radians, in
     /// `[0, 2 pi)`).
     ///
@@ -459,6 +514,63 @@ mod tests {
         defs.iter()
             .map(|a| PathPiece::of_arc(k, a).unwrap())
             .collect()
+    }
+
+    /// An arc from its centre, axis, start and end direction: a quarter, three quarters the
+    /// other way round, and a full turn back to the start's direction; refused on the axis.
+    #[test]
+    fn an_arc_from_points_sweeps_anticlockwise_to_the_end_direction() {
+        let k = Kernel::default();
+        let c = Point3::new(1.0, 2.0, 3.0);
+        let up = Vec3::new(0.0, 0.0, 5.0);
+        // From +X (radius 4) to the +Y direction (at any distance and height): a quarter turn.
+        let quarter = ArcDefinition::from_points(
+            c,
+            up,
+            c + Vec3::new(4.0, 0.0, 1.0),
+            c + Vec3::new(0.0, 9.0, -2.0),
+        )
+        .unwrap();
+        assert!(
+            (quarter.radius - 4.0).abs() < 1e-12 && (quarter.sweep() - 0.5 * PI).abs() < 1e-12,
+            "{quarter:?}"
+        );
+        let ends = Ellipse::arc(&k, &quarter).unwrap().base().ends().unwrap();
+        assert!(
+            near(ends.start, c + Vec3::new(4.0, 0.0, 0.0))
+                && near(ends.end, c + Vec3::new(0.0, 4.0, 0.0)),
+            "{ends:?}"
+        );
+        // About -Z the same points are three quarters round.
+        let three = ArcDefinition::from_points(
+            c,
+            up * -1.0,
+            c + Vec3::new(4.0, 0.0, 0.0),
+            c + Vec3::new(0.0, 1.0, 0.0),
+        )
+        .unwrap();
+        assert!((three.sweep() - 1.5 * PI).abs() < 1e-12, "{three:?}");
+        // The end in the start's direction: a full turn.
+        let full = ArcDefinition::from_points(
+            c,
+            up,
+            c + Vec3::new(4.0, 0.0, 0.0),
+            c + Vec3::new(2.0, 0.0, 0.0),
+        )
+        .unwrap();
+        assert!((full.sweep() - TAU).abs() < 1e-12, "{full:?}");
+        assert!(ArcDefinition::from_points(
+            c,
+            up,
+            c + Vec3::new(0.0, 0.0, 3.0),
+            c + Vec3::new(1.0, 0.0, 0.0)
+        )
+        .is_err());
+        assert!(ArcDefinition::from_points(c, up, c + Vec3::new(1.0, 0.0, 0.0), c).is_err());
+        assert!(
+            ArcDefinition::from_points(c, Vec3::new(0.0, 0.0, 0.0), c + Vec3::X, c + Vec3::Y)
+                .is_err()
+        );
     }
 
     #[test]

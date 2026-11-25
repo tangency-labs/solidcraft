@@ -14,13 +14,14 @@
 //! class. Missing topology that native dereferences is an input error. There is no
 //! recursion.
 
-use super::{need, new_corner_vertex, NxNTopologyEnv};
+use super::{defect, need, new_corner_vertex, shape_not_built, NxNTopologyEnv};
 use crate::blend::fillet_corner::p1::face_by_two_edgeuses;
 use crate::blend::fillet_corner::p2::find_concave_edgeuses;
 use crate::blend::fillet_corner::p3::{FilletCorner, FilletCornerKind};
 use crate::blend::fillet_geom::p1::{
     CornerLookup, FilletCornerId, FilletEdgeType, FilletVertexType,
 };
+use crate::error::blend::CornerShape;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::intersect::point_class::PointClassType;
 use crate::topology::edgeuse::p1 as eu1;
@@ -39,8 +40,9 @@ impl FilletCorner {
     /// if a later operation fails. Vertex geometry is computed later.
     ///
     /// # Errors
-    /// `SM_ERR` unless exactly two concave edge uses are found;
-    /// [`SolidError::null_pointer`] when two consecutive edge uses share no face;
+    /// a reviewed `Defect` (`SM_ERR`) unless exactly two concave edge uses are found;
+    /// [`CornerShapeNotBuilt`](crate::error::blend::BlendFailure::CornerShapeNotBuilt)
+    /// (`SM_ERR_NULL_POINTER`) when two consecutive edge uses share no face;
     /// [`SolidError::InvalidInput`] for a different corner kind, a setback corner (the
     /// caller delegates it), a solver list that does not match the edge uses, or
     /// missing topology upstream dereferences; those of the convexity, solver and
@@ -81,7 +83,12 @@ impl FilletCorner {
         let vertex = need(self.vertex, "corner without vertex")?;
         let concave = find_concave_edgeuses(k, target, vertex, &all)?;
         let [concave_eu1, concave_eu2] = concave[..] else {
-            return Err(SolidError::sm_err(OP));
+            return Err(defect(
+                OP,
+                "the corner does not have exactly two concave edge uses, though the search \
+                 finds none or two and the corner is made concave only where the same search \
+                 found two",
+            ));
         };
         let total_eus = all.len();
         if solvers.len() != total_eus {
@@ -114,7 +121,7 @@ impl FilletCorner {
             let common_face = face_by_two_edgeuses(target, Some(prev_eu), Some(curr_eu), None)?;
             let Some(common_face) = common_face else {
                 //Unrecoverable error
-                return Err(SolidError::null_pointer(OP));
+                return Err(shape_not_built(OP, CornerShape::RingEdgesShareNoFace));
             };
             pseudo
                 .fillet_vertex_mut(curr_fv)?

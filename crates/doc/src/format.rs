@@ -243,6 +243,31 @@ use serde_json::Value;
 
 use crate::{DocError, Document, Result};
 
+pub use solidcraft_format::{Alias, Newer};
+
+/// A kind of file whose format is versioned here: designs, and drawings (#3890). Each family has
+/// its own format tag, its own numbers and its own folder of change files (`build.rs` lists them);
+/// reading a file's format, telling a file a newer build saved and the upgrade are the same code
+/// for every family, the shared `solidcraft_format`.
+pub type Family<'a> = solidcraft_format::Family<'a, DocError>;
+
+/// A family's upgrade path: the steps written out by hand (designs' up to [`HAND_WRITTEN`]), the
+/// folded formats after them (each a list of changes) and the pending changes, which make the
+/// next format.
+pub(crate) type Formats<'a> = solidcraft_format::Formats<'a, DocError>;
+
+/// One change to a family's file format: a file in its `v<N>/` or `pending/` folder.
+pub(crate) type Part = solidcraft_format::Part<DocError>;
+
+impl From<solidcraft_format::FormatError> for DocError {
+    fn from(e: solidcraft_format::FormatError) -> Self {
+        match e {
+            solidcraft_format::FormatError::Invalid(why) => DocError::Invalid(why),
+            solidcraft_format::FormatError::Cancelled => DocError::Invalid("cancelled".into()),
+        }
+    }
+}
+
 /// The format this build writes: the last folded one, or the next while changes are pending.
 pub const FORMAT: u32 = FORMATS.current();
 
@@ -250,221 +275,59 @@ pub const FORMAT: u32 = FORMATS.current();
 /// of [`Part`]s (`src/format/`, listed by `build.rs`).
 const HAND_WRITTEN: u32 = 22;
 
-/// One change to a family's file format: a file in its `v<N>/` or `pending/` folder.
-pub(crate) struct Part {
-    /// The file's name, which a file written while the change was pending lists.
-    pub name: &'static str,
-    /// How a file from before the change is rewritten as it opens, if it is.
-    pub step: Option<JsonStep>,
-}
-
 include!(concat!(env!("OUT_DIR"), "/format_parts.rs"));
 
 /// Every format this build knows and how to upgrade a design through them.
 const FORMATS: Formats<'static> = Formats { hand: &JSON_STEPS, folded: FOLDED, pending: PENDING };
 
-/// A kind of file whose format is versioned here: designs, and drawings (#3890). Each family has
-/// its own format tag, its own numbers and its own folder of change files (`build.rs` lists them);
-/// reading a file's format, telling a file a newer build saved and the upgrade are the same code
-/// for every family.
-pub struct Family<'a> {
-    /// What a file of the family is called in messages.
-    noun: &'static str,
-    /// The tag before the number in a file's `format`.
-    prefix: &'static str,
-    /// The tag files saved before the rename carry: read, never written (docs/compatibility.md).
-    legacy_prefix: Option<&'static str>,
-    /// The format of a file that names none: designs saved before format strings are format 1; a
-    /// drawing always names its own.
-    untagged: Option<u32>,
-    formats: Formats<'a>,
-}
+/// Another spelling a design of format 29 may carry: the personal format-29 renderer's name for
+/// the engineering material cards. Its card schema is unchanged; recognising the alias must never
+/// grant support to another reader, so it counts only while this build has the change.
+const DESIGN_ALIASES: [Alias; 1] = [Alias { format: 29, name: "physical-material-cards", known_as: "material-engineering-cards" }];
 
 /// Designs (`solidcraft/N`): the upgrade steps written out up to format 22, then the change files
 /// in `src/format/`.
-pub const DESIGN: Family<'static> =
-    Family { noun: "design", prefix: "solidcraft/", legacy_prefix: Some(LEGACY_FORMAT_PREFIX), untagged: Some(1), formats: FORMATS };
+pub const DESIGN: Family<'static> = Family {
+    app: "SolidCraft",
+    noun: "design",
+    prefix: "solidcraft/",
+    legacy_prefix: Some(LEGACY_FORMAT_PREFIX),
+    untagged: Some(1),
+    aliases: &DESIGN_ALIASES,
+    formats: FORMATS,
+};
 
 /// Drawings (`solidcraft-drawing/N`, #3890): format 1 is the first drawing record, and every later
 /// change is a file in `src/drawing/format/`.
 pub const DRAWING: Family<'static> = Family {
+    app: "SolidCraft",
     noun: "drawing",
     prefix: "solidcraft-drawing/",
     legacy_prefix: None,
     untagged: None,
+    aliases: &[],
     formats: Formats { hand: &[], folded: DRAWING_FOLDED, pending: DRAWING_PENDING },
 };
 
-impl Family<'_> {
-    /// The format this build writes: the last folded one, or the next while changes are pending.
-    pub const fn current(&self) -> u32 {
-        self.formats.current()
-    }
-
-    /// The names of the pending changes this build writes into a file (`format_pending`).
-    pub fn pending_names(&self) -> Vec<String> {
-        self.formats.pending.iter().map(|p| p.name.to_string()).collect()
-    }
-
-    /// The format tag of format `n`.
-    pub fn format_string(&self, n: u32) -> String {
-        format!("{}{n}", self.prefix)
-    }
-
-    /// The version in one of this family's format tags; `None` for any other tag, another
-    /// family's included.
-    pub fn version_of(&self, s: &str) -> Option<u32> {
-        s.strip_prefix(self.prefix).or_else(|| self.legacy_prefix.and_then(|p| s.strip_prefix(p)))?.parse().ok()
-    }
-
-    /// Read a file's format and take its `format_pending` out of its JSON, before anything else
-    /// in it is read: a file that isn't this family's is refused here. One a newer build saved is
-    /// not: [`Family::newer`] says so.
-    pub fn take_version(&self, v: &mut Value) -> Result<(u32, Option<Vec<String>>)> {
-        let noun = self.noun;
-        let not_ours = |what: String| DocError::Invalid(format!("not a SolidCraft {noun} ({what})"));
-        let Some(obj) = v.as_object() else { return Err(not_ours("expected a JSON object".into())) };
-        let version = match obj.get("format") {
-            None => self.untagged.ok_or_else(|| not_ours("no format".into()))?,
-            Some(Value::String(f)) => self.version_of(f).ok_or_else(|| not_ours(format!("format `{f}`")))?,
-            Some(_) => return Err(not_ours("format is not a string".into())),
-        };
-        let applied = take_names(v, "format_pending", noun)?;
-        if version == 0 {
-            return Err(not_ours("format 0".into()));
-        }
-        Ok((version, applied))
-    }
-
-    /// What says a file of format `version` with the changes `applied` came from a newer build:
-    /// a number past this build's, or a change this build doesn't have anywhere in its history.
-    /// `None` for a file this build fully knows.
-    pub fn newer(&self, version: u32, applied: Option<&[String]>) -> Option<Newer> {
-        self.formats.newer(version, applied)
-    }
-
-    /// Bring a file of format `version` up to this build's; `applied` is its `format_pending`
-    /// (both from [`Family::take_version`]).
-    pub fn upgrade(&self, v: &mut Value, version: u32, applied: Option<&[String]>) -> Result<()> {
-        self.formats.upgrade(self.noun, v, version, applied)
-    }
-
-    /// Every number a file of the family holds is in range ([`check_numbers`]), but for its
-    /// top-level `kept` field: other tools' data (a design's `metadata`, a drawing's `properties`),
-    /// kept as it is and never read as a number (#1015); parsing already bounds its nesting.
-    pub(crate) fn check_numbers(&self, v: &Value, kept: &str) -> Result<()> {
-        match v {
-            Value::Object(m) => m.iter().filter(|(k, _)| k.as_str() != kept).try_for_each(|(_, x)| check_numbers(x, self.noun, 1)),
-            v => check_numbers(v, self.noun, 0),
-        }
-    }
+/// Every number a file of a family holds is in range ([`check_numbers`]), but for its top-level
+/// `kept` field: other tools' data (a design's `metadata`, a drawing's `properties`), kept as it is
+/// and never read as a number (#1015); parsing already bounds its nesting.
+pub(crate) trait CheckNumbers {
+    fn check_numbers(&self, v: &Value, kept: &str) -> Result<()>;
 }
 
-/// How a file shows a newer build saved it ([`Family::newer`]).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Newer {
-    /// The number the file says.
-    pub format: u32,
-    /// The number this build reads up to.
-    pub reads_up_to: u32,
-    /// The changes the file names that this build doesn't have.
-    pub unknown_changes: Vec<String>,
+impl CheckNumbers for Family<'_> {
+    fn check_numbers(&self, v: &Value, kept: &str) -> Result<()> {
+        match v {
+            Value::Object(m) => m.iter().filter(|(k, _)| k.as_str() != kept).try_for_each(|(_, x)| check_numbers(x, self.noun(), 1)),
+            v => check_numbers(v, self.noun(), 0),
+        }
+    }
 }
 
 /// The names of the pending changes this build writes into a design (`format_pending`).
 pub fn pending_names() -> Vec<String> {
     DESIGN.pending_names()
-}
-
-/// A family's upgrade path: the steps written out by hand (designs' up to [`HAND_WRITTEN`]), the
-/// folded formats after them (each a list of changes) and the pending changes, which make the
-/// next format.
-struct Formats<'a> {
-    hand: &'a [JsonStep],
-    folded: &'a [(u32, &'a [Part])],
-    pending: &'a [Part],
-}
-
-impl Formats<'_> {
-    const fn current(&self) -> u32 {
-        self.hand.len() as u32 + 1 + self.folded.len() as u32 + if self.pending.is_empty() { 0 } else { 1 }
-    }
-
-    /// The changes format `version` is made of, if it is made of changes.
-    fn parts(&self, version: u32) -> Option<&[Part]> {
-        let after = version.checked_sub(self.hand.len() as u32 + 2)? as usize;
-        match self.folded.get(after) {
-            Some((_, parts)) => Some(parts),
-            None if after == self.folded.len() && !self.pending.is_empty() => Some(self.pending),
-            None => None,
-        }
-    }
-
-    /// A concept is implemented only when this reader registers its descriptor.
-    fn knows_part_name(&self, name: &str) -> bool {
-        self.folded.iter().flat_map(|(_, parts)| *parts).chain(self.pending).any(|part| part.name == name)
-    }
-
-    /// Read-only spelling from the personal format-29 renderer. Its card schema is
-    /// unchanged; recognizing the alias must never grant support to another reader.
-    fn canonical_applied_name<'name>(&self, version: u32, name: &'name str) -> &'name str {
-        if version == 29 && name == "physical-material-cards" && self.knows_part_name("material-engineering-cards") {
-            "material-engineering-cards"
-        } else {
-            name
-        }
-    }
-
-    /// [`Family::newer`]. Changes are recognized across the entire history: a branch's pending
-    /// change may have landed at a later number. A list beside a format that isn't made of changes
-    /// means nothing (a tool or a test set an older number on a newer file).
-    fn newer(&self, version: u32, applied: Option<&[String]>) -> Option<Newer> {
-        let current = self.current();
-        let listed = applied.filter(|_| version > current || self.parts(version).is_some()).unwrap_or_default();
-        let unknown_changes: Vec<String> =
-            listed.iter().filter(|name| !self.knows_part_name(self.canonical_applied_name(version, name))).cloned().collect();
-        (version > current || !unknown_changes.is_empty()).then_some(Newer { format: version, reads_up_to: current, unknown_changes })
-    }
-
-    /// Bring a `noun` of format `version` up to [`Formats::current`]. `applied` is the file's
-    /// `format_pending`: the changes of its format it already has, when it was written while they
-    /// were pending; the others' steps run first, and already-applied changes never run again at
-    /// their later number. A file past this build's number has no steps to run.
-    fn upgrade(&self, noun: &str, v: &mut Value, version: u32, applied: Option<&[String]>) -> Result<()> {
-        if version == 0 {
-            return Err(DocError::Invalid(format!("not a SolidCraft {noun} (format 0)")));
-        }
-        // A list beside a format that isn't made of changes is ignored, like any field an upgrade
-        // drops.
-        let applied = applied.filter(|_| self.parts(version).is_some());
-        let already_applied =
-            |part: &Part| applied.is_some_and(|names| names.iter().any(|name| self.canonical_applied_name(version, name) == part.name));
-        if applied.is_some() {
-            for part in self.parts(version).unwrap_or_default().iter().filter(|part| !already_applied(part)) {
-                part.step.map_or(Ok(()), |step| step(v))?;
-            }
-        }
-        for from in version..self.current() {
-            match self.hand.get(from as usize - 1) {
-                Some(step) => step(v)?,
-                None => {
-                    for part in self.parts(from + 1).unwrap_or_default().iter().filter(|part| !already_applied(part)) {
-                        part.step.map_or(Ok(()), |step| step(v))?;
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-}
-
-/// Take a short list of names out of a file's JSON: its `format_pending` (the pending changes it
-/// has).
-fn take_names(v: &mut Value, key: &str, noun: &str) -> Result<Option<Vec<String>>> {
-    let Some(list) = v.as_object_mut().and_then(|o| o.remove(key)) else { return Ok(None) };
-    let invalid = || DocError::Invalid(format!("damaged {noun}: `{key}` is not a short list of names"));
-    let list = list.as_array().filter(|l| l.len() <= 1000).ok_or_else(invalid)?;
-    list.iter().map(|n| n.as_str().filter(|n| n.len() <= 128).map(str::to_string).ok_or_else(invalid)).collect::<Result<_>>().map(Some)
 }
 
 pub fn format_string(n: u32) -> String {
@@ -482,7 +345,7 @@ pub fn version_of(s: &str) -> Option<u32> {
 
 /// JSON-level upgrades up to [`HAND_WRITTEN`]: entry `i` turns format `i + 1` into `i + 2`.
 /// Never add to it: a new format is a file in `src/format/pending/`.
-type JsonStep = fn(&mut Value) -> Result<()>;
+type JsonStep = solidcraft_format::Step<DocError>;
 const JSON_STEPS: [JsonStep; HAND_WRITTEN as usize - 1] = [
     |_| Ok(()),
     v2_to_v3,
@@ -687,10 +550,21 @@ fn v2_to_v3(v: &mut Value) -> Result<()> {
 /// Read a design file's JSON, upgrading older formats.
 pub fn read(s: &str) -> Result<Document> {
     let mut v: Value = serde_json::from_str(s).map_err(|e| DocError::Invalid(format!("not a SolidCraft design: {e}")))?;
+    let drawings = if v.get("drawings").is_some() {
+        #[derive(serde::Deserialize)]
+        struct Inline<'a> {
+            #[serde(borrow)]
+            drawings: &'a serde_json::value::RawValue,
+        }
+        let raw: Inline<'_> = serde_json::from_str(s).map_err(|e| DocError::Invalid(format!("not a SolidCraft design: {e}")))?;
+        serde_json::from_str::<Vec<&serde_json::value::RawValue>>(raw.drawings.get()).ok()
+    } else {
+        None
+    };
     let (version, applied) = DESIGN.take_version(&mut v)?;
     match DESIGN.newer(version, applied.as_deref()) {
-        Some(newer) => crate::newer_file::read(v, version, applied, newer),
-        None => decode(v, version, applied.as_deref()),
+        Some(newer) => crate::newer_file::read(v, version, applied, newer, drawings.as_deref()),
+        None => decode(v, version, applied.as_deref(), drawings.as_deref()),
     }
 }
 
@@ -716,6 +590,7 @@ pub(crate) fn check_raw(v: &Value, version: u32) -> Result<Vec<(usize, usize)>> 
     validate_versioned_geometry(v)?;
     validate_emboss_targets(v)?;
     validate_freeform_offsets(v)?;
+    validate_freeform_chain_offsets(v)?;
     validate_sketch_sizes(v)?;
     crate::format_offsets::validate_raw(v)?;
     validate_wires(v, version)
@@ -724,6 +599,8 @@ pub(crate) fn check_raw(v: &Value, version: u32) -> Result<Vec<(usize, usize)>> 
 /// [`check_raw`], the upgrade and the typed record alone: what a piece of a design must pass by
 /// itself ([`crate::newer_file`]), with nothing else in the file for it to refer to.
 pub(crate) fn check_piece(mut v: Value, version: u32, applied: Option<&[String]>) -> Result<()> {
+    // Each drawing is a record of its own family, read by its own rules, numbers and all.
+    take_drawings(&mut v, None)?;
     check_raw(&v, version)?;
     DESIGN.upgrade(&mut v, version, applied)?;
     let d: Document = serde_json::from_value(v).map_err(|e| DocError::Invalid(format!("design file: {e}")))?;
@@ -731,7 +608,14 @@ pub(crate) fn check_piece(mut v: Value, version: u32, applied: Option<&[String]>
 }
 
 /// A design's JSON, its format taken out, as the document it holds.
-pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> Result<Document> {
+pub(crate) fn decode(
+    mut v: Value,
+    version: u32,
+    applied: Option<&[String]>,
+    drawing_text: Option<&[&serde_json::value::RawValue]>,
+) -> Result<Document> {
+    // Each drawing is a record of its own family, read by its own rules, numbers and all.
+    let drawings = take_drawings(&mut v, drawing_text)?;
     let legacy_wires = check_raw(&v, version)?;
     validate_body_transfers(&v)?;
     DESIGN.upgrade(&mut v, version, applied)?;
@@ -778,7 +662,7 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
         group.features.retain(|feature| feature_ids.contains(feature) && grouped_features.insert(*feature));
     }
     for group in &d.timeline_groups {
-        if group.name.trim().is_empty() || group.name.len() > 128 || !group_ids.insert(group.id) {
+        if group.name.trim().is_empty() || group.name.chars().count() > 128 || !group_ids.insert(group.id) {
             return Err(DocError::Invalid("damaged design: invalid timeline folder".into()));
         }
         if group.parent.is_some_and(|parent| parent == group.id) {
@@ -824,13 +708,25 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
         return Err(DocError::Invalid("damaged design: duplicate feature, component, occurrence or configuration row id".into()));
     }
     let component_ids: std::collections::BTreeSet<_> = d.components.iter().map(|component| component.id).chain(std::iter::once(0)).collect();
+    // A 3D constraint that no longer checks out (it names a fit point its curve no longer has)
+    // is dropped rather than refusing the design (#10608); damaged ids still refuse it.
+    for feature in &mut d.features {
+        if let crate::FeatureKind::Sketch { sketch, .. } = &mut feature.kind
+            && sketch.validate_wires().is_ok()
+        {
+            sketch.prune_wire_constraints();
+        }
+    }
     for feature in &d.features {
         if let crate::FeatureKind::Sketch { sketch, .. } = &feature.kind {
             sketch.validate_freeform_offsets().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
+            sketch.validate_freeform_chain_offsets().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_wires().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
+            sketch.validate_wire_constraints().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_patterns().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_periodic_splines().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_spline_knots().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
+            sketch.validate_spline_handles().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
         }
         if let crate::FeatureKind::BodyTransfer { from, to, .. } = &feature.kind
             && [from, to].into_iter().any(|id| !component_ids.contains(id))
@@ -842,12 +738,16 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
         {
             return Err(DocError::Invalid("damaged design: body transfer owner must match its destination".into()));
         }
+        if let Some(frame) = &feature.profile_frame
+            && !crate::is_placement(frame)
+        {
+            return Err(DocError::Invalid(format!("damaged design: feature `{}` has an invalid profile frame", feature.name)));
+        }
     }
-    // Fill in what older designs (and hand-edited files) may lack; a no-op otherwise.
     crate::format_offsets::validate_typed(&d)?;
-    normalise(&mut d)?;
     // `next_id` is trusted by nothing: a hand-edited or generated file may omit it or leave it stale,
     // and the next feature, component or occurrence would then reuse an id that is already taken.
+    // Raised before `normalise`, which adds the occurrences older designs lack under new ids.
     let largest =
         d.features.iter().map(|f| f.id).chain(d.components.iter().map(|c| c.id)).chain(d.occurrences.iter().map(|o| o.id)).max().unwrap_or(0);
     let floor = largest.checked_add(1).ok_or_else(|| DocError::Invalid("damaged design: the id space is exhausted".into()))?;
@@ -855,9 +755,27 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
     // These lists used to allocate independently. Keep their existing identities, but never
     // let a later deletion make them available again after loading an older design.
     d.next_id = d.next_item_id()?;
+    // Fill in what older designs (and hand-edited files) may lack; a no-op otherwise.
+    normalise(&mut d)?;
+    d.drawings = crate::drawing::in_design(drawings).map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
     d.format = format_string(FORMAT);
     d.format_pending = pending_names();
     Ok(d)
+}
+
+/// Take a plain JSON design's drawings out of its JSON and read each, before the design's own
+/// rules see anything: a drawing this build can't read refuses the design, never dropped.
+fn take_drawings(v: &mut Value, text: Option<&[&serde_json::value::RawValue]>) -> Result<Vec<crate::drawing::Drawing>> {
+    let Some(list) = v.as_object_mut().and_then(|o| o.remove("drawings")) else { return Ok(Vec::new()) };
+    let Value::Array(list) = list else { return Err(DocError::Invalid("damaged design: `drawings` is not a list".into())) };
+    crate::drawing::check_count(list.len()).map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
+    list.into_iter()
+        .enumerate()
+        .map(|(i, drawing)| {
+            let text = text.and_then(|records| records.get(i)).map(|raw| raw.get());
+            crate::drawing::Drawing::read_value(drawing, text).map_err(|e| DocError::Invalid(format!("drawing {}: {e}", i + 1)))
+        })
+        .collect()
 }
 
 fn all_unique(ids: impl Iterator<Item = u64>) -> bool {
@@ -877,6 +795,7 @@ fn validate_sketch_sizes(value: &Value) -> Result<()> {
         if feature.get("type").and_then(Value::as_str) != Some("sketch") {
             continue;
         }
+        validate_sketch_plane_placement(feature.get("plane"))?;
         let Some(sketch) = feature.get("sketch") else { continue };
         let len = |key: &str| sketch.get(key).and_then(Value::as_array).map_or(0, Vec::len);
         // The ceilings, not the limits in force: a design made where the limit was raised opens (#10874).
@@ -884,8 +803,28 @@ fn validate_sketch_sizes(value: &Value) -> Result<()> {
             || len("curves") > solidcraft_sketch::CEILING_CURVES
             || len("constraints") > solidcraft_sketch::CEILING_CONSTRAINTS
             || len("patterns") > solidcraft_sketch::CEILING_CONSTRAINTS
+            // The 3D constraints too (#10608): refused here, before a typed list is built or
+            // stale entries are pruned from it.
+            || len("wire_constraints") > solidcraft_sketch::CEILING_CONSTRAINTS
         {
             return Err(invalid());
+        }
+        if let Some(curves) = sketch.get("curves").and_then(Value::as_array) {
+            let mut point_references = 0usize;
+            for curve in curves {
+                for key in ["pts", "handles"] {
+                    if let Some(points) = curve.get(key) {
+                        let Some(points) = points.as_array() else { return Err(invalid()) };
+                        point_references = point_references.saturating_add(points.len());
+                        if points.len() > solidcraft_sketch::MAX_SPLINE_POINTS || point_references > 1_000_000 {
+                            return Err(invalid());
+                        }
+                    }
+                }
+                if curve.get("spline_handle_of").and_then(Value::as_str).is_some_and(|id| id.len() > 512) {
+                    return Err(invalid());
+                }
+            }
         }
         if let Some(patterns) = sketch.get("patterns").and_then(Value::as_array) {
             let mut points = 0usize;
@@ -911,6 +850,27 @@ fn validate_sketch_sizes(value: &Value) -> Result<()> {
                 }
             }
         }
+    }
+    Ok(())
+}
+
+fn validate_sketch_plane_placement(mut plane: Option<&Value>) -> Result<()> {
+    let invalid = || DocError::Invalid("damaged design: invalid captured construction plane placement".into());
+    let mut depth = 0;
+    while let Some(value) = plane {
+        depth += 1;
+        if depth > 64 {
+            return Err(invalid());
+        }
+        if value.get("type").and_then(Value::as_str) == Some("construction")
+            && let Some(placement) = value.get("placement").filter(|p| !p.is_null())
+        {
+            let placement: crate::Mat = serde_json::from_value(placement.clone()).map_err(|_| invalid())?;
+            if !crate::is_placement(&placement) {
+                return Err(invalid());
+            }
+        }
+        plane = value.get("base");
     }
     Ok(())
 }
@@ -1084,6 +1044,14 @@ fn validate_versioned_geometry(value: &Value) -> Result<()> {
                 if link.get("auto_face").is_some_and(|marker| !marker.is_boolean()) {
                     return Err(invalid());
                 }
+                if let Some(pins) = link.get("sketch_placements") {
+                    let invalid = || DocError::Invalid("damaged design: invalid captured sketch projection placement".into());
+                    if pins.as_array().is_none_or(|pins| pins.len() > crate::project::MAX_SKETCH_PLACEMENTS) {
+                        return Err(invalid());
+                    }
+                    let link: solidcraft_sketch::Link = serde_json::from_value(link.clone()).map_err(|_| invalid())?;
+                    crate::project::validate_link_sketch_placements(&link)?;
+                }
             }
         }
         let Some(curves) = sketch.get("curves").and_then(Value::as_array) else { continue };
@@ -1100,11 +1068,21 @@ fn validate_versioned_geometry(value: &Value) -> Result<()> {
             }
             let indices = curve.get("pts").and_then(Value::as_array).ok_or_else(invalid)?;
             work = work.saturating_add(indices.len());
-            if !(4..=solidcraft_sketch::MAX_SPLINE_POINTS).contains(&indices.len())
-                || work > 1_000_000
-                || curve.get("control").is_some_and(|control| control.as_bool() != Some(false))
-                || curve.get("degree").is_some_and(|degree| degree.as_u64() != Some(3))
-            {
+            let control = match curve.get("control") {
+                None => false,
+                Some(control) => control.as_bool().ok_or_else(invalid)?,
+            };
+            let degree = match curve.get("degree") {
+                None => 3,
+                Some(degree) => degree.as_u64().and_then(|degree| u8::try_from(degree).ok()).ok_or_else(invalid)?,
+            };
+            if work > 1_000_000 {
+                return Err(invalid());
+            }
+            if control {
+                // A closed control spline: its own degree and count rule.
+                solidcraft_sketch::validate_closed_control(indices.len(), degree).map_err(|_| invalid())?;
+            } else if !(4..=solidcraft_sketch::MAX_SPLINE_POINTS).contains(&indices.len()) || degree != 3 {
                 return Err(invalid());
             }
             let count = points.ok_or_else(invalid)?.len();
@@ -1212,9 +1190,59 @@ fn validate_freeform_offsets(value: &Value) -> Result<()> {
     Ok(())
 }
 
+/// The trimmed chain offsets of a design's sketches: the sources each was made from, the
+/// curves it made and the distance it runs at.
+fn validate_freeform_chain_offsets(value: &Value) -> Result<()> {
+    let Some(features) = value.get("features").and_then(Value::as_array) else { return Ok(()) };
+    for feature in features {
+        if feature.get("type").and_then(Value::as_str) != Some("sketch") {
+            continue;
+        }
+        let Some(records) = feature.get("sketch").and_then(|sketch| sketch.get("freeform_chain_offsets")) else { continue };
+        let invalid = || DocError::Invalid("damaged design: invalid trimmed chain offset metadata".into());
+        let records = records.as_array().ok_or_else(invalid)?;
+        if records.len() > 128 {
+            return Err(invalid());
+        }
+        let mut outputs = std::collections::BTreeSet::new();
+        for record in records {
+            let object = record.as_object().ok_or_else(invalid)?;
+            if object.len() != 3 || object.keys().any(|key| !matches!(key.as_str(), "sources" | "outputs" | "distance")) {
+                return Err(invalid());
+            }
+            let sources = record.get("sources").and_then(Value::as_array).ok_or_else(invalid)?;
+            let made = record.get("outputs").and_then(Value::as_array).ok_or_else(invalid)?;
+            if sources.is_empty() || sources.len() > 512 || made.is_empty() || made.len() > 512 {
+                return Err(invalid());
+            }
+            for source in sources {
+                let pair = source.as_array().ok_or_else(invalid)?;
+                if pair.len() != 2 {
+                    return Err(invalid());
+                }
+                let id = pair[0].as_str().ok_or_else(invalid)?;
+                if id.is_empty() || id.len() > 512 || id.chars().any(char::is_control) || pair[1].as_bool().is_none() {
+                    return Err(invalid());
+                }
+            }
+            for output in made {
+                let id = output.as_str().ok_or_else(invalid)?;
+                if id.is_empty() || id.len() > 512 || id.chars().any(char::is_control) || !outputs.insert(id) {
+                    return Err(invalid());
+                }
+            }
+            let distance = record.get("distance").and_then(Value::as_f64).ok_or_else(invalid)?;
+            if !distance.is_finite() || !(1e-9..=MAX_REAL).contains(&distance.abs()) {
+                return Err(invalid());
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Largest coordinate or size a design may hold (mm): a kilometre-scale part is already far
 /// outside what the kernel's tolerances serve.
-const MAX_REAL: f64 = 1e9;
+pub(crate) const MAX_REAL: f64 = 1e9;
 
 /// Every number the design itself holds is in range ([`check_numbers`]). `metadata` is left
 /// alone: it is other tools' data, kept as it is and never read as a number (#1015); parsing
@@ -1288,18 +1316,141 @@ fn check_numbers(v: &Value, noun: &str, depth: usize) -> Result<()> {
 fn normalise(d: &mut Document) -> Result<()> {
     d.normalise_component_color_indices()?;
     d.name_all_feature_inputs();
-    let missing: Vec<(u64, u64)> =
-        d.components.iter().filter(|c| !d.occurrences.iter().any(|o| o.component == c.id)).map(|c| (c.id, c.parent)).collect();
-    for (c, p) in missing {
-        d.add_occurrence(c, p, crate::IDENTITY)?;
-    }
-    Ok(())
+    d.place_unplaced_components()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use solidcraft_geom::prelude::*;
+
+    #[test]
+    fn captured_sketch_reference_placements_reject_damaged_metadata() {
+        let valid = serde_json::json!({"features":[{"type":"sketch", "sketch":{"links":[{
+            "id":"j1", "source":{"type":"sketch_point", "sketch":7, "point":"p1"},
+            "sketch_placements":[{"sketch":7, "placement":crate::IDENTITY}]
+        }]}}]});
+        assert!(validate_versioned_geometry(&valid).is_ok());
+        for pins in [
+            serde_json::json!({}),
+            serde_json::json!([{"sketch":8,"placement":crate::IDENTITY}]),
+            serde_json::json!([{"sketch":7,"placement":crate::IDENTITY},{"sketch":7,"placement":crate::IDENTITY}]),
+            serde_json::json!([{"sketch":7,"placement":[[1,0,0,0]]}]),
+            serde_json::json!(vec![serde_json::json!({"sketch":7,"placement":crate::IDENTITY}); crate::project::MAX_SKETCH_PLACEMENTS + 1]),
+        ] {
+            let mut damaged = valid.clone();
+            damaged["features"][0]["sketch"]["links"][0]["sketch_placements"] = pins;
+            assert!(validate_versioned_geometry(&damaged).is_err());
+        }
+        let mut scaled = crate::IDENTITY;
+        scaled[0][0] = 2.;
+        let mut damaged = valid;
+        damaged["features"][0]["sketch"]["links"][0]["sketch_placements"][0]["placement"] = serde_json::json!(scaled);
+        assert!(validate_versioned_geometry(&damaged).is_err());
+        let plane = serde_json::json!({"type":"construction", "feature":7,"placement":scaled});
+        assert!(validate_sketch_plane_placement(Some(&plane)).is_err());
+    }
+
+    #[test]
+    fn profile_frame_rejects_damaged_matrix() {
+        let mut doc = Document::new("profile_frame");
+        let id = doc
+            .add_feature(
+                crate::FeatureKind::Box {
+                    corner: ["0".into(), "0".into(), "0".into()],
+                    length: "10 mm".into(),
+                    width: "10 mm".into(),
+                    height: "10 mm".into(),
+                    operation: crate::Operation::NewBody,
+                    centred: false,
+                },
+                Some("Box 1"),
+            )
+            .unwrap();
+        doc.feature_mut(id).unwrap().profile_frame = Some(crate::IDENTITY);
+        let mut valid: Value = serde_json::from_str(&doc.to_json()).unwrap();
+        assert!(read(&valid.to_string()).is_ok());
+
+        let mut scaled = crate::IDENTITY;
+        scaled[0][0] = 2.0;
+        valid["features"][0]["profile_frame"] = serde_json::json!(scaled);
+        let err = read(&valid.to_string()).unwrap_err().to_string();
+        assert!(err.contains("invalid profile frame"), "{err}");
+    }
+
+    fn older_design_with_anchored_component_sketch() -> (Value, u64) {
+        let mut document = Document::new("anchored component");
+        let base = document
+            .add_feature(
+                crate::FeatureKind::Box {
+                    corner: ["0".into(), "0".into(), "0".into()],
+                    length: "10".into(),
+                    width: "10".into(),
+                    height: "10".into(),
+                    operation: crate::Operation::NewBody,
+                    centred: false,
+                },
+                Some("Base"),
+            )
+            .unwrap();
+        document.feature_mut(base).unwrap().body_names = vec!["Base".into()];
+        let component = document.add_component(Some("Part"), 0).unwrap();
+        // The same certified box face as the raw anchor validation fixture below.
+        let plane = serde_json::from_value(serde_json::json!({
+            "type":"face", "plane":{"origin":[0,0,10], "x_dir":[1,0,0], "y_dir":[0,1,0]},
+            "at":[0,0,10], "name":format!("F{base}:+z"),
+            "anchor":{
+                "target":{"body":"Base", "origin_feature":base, "name":format!("F{base}:+z"), "point":[0,0,10],
+                    "certificate":{"kind":"box", "axis":2, "high":true}},
+                "component":0, "path":[], "author_path":document.first_path(component),
+                "coordinates":[0,0], "x_axis":[1,0]
+            }
+        }))
+        .unwrap();
+        let sketch = document.add_feature(crate::FeatureKind::Sketch { plane, sketch: solidcraft_sketch::Sketch::new() }, Some("Attached")).unwrap();
+        document.feature_mut(sketch).unwrap().component = component;
+        let mut file: Value = serde_json::from_str(&document.to_json()).unwrap();
+        // Predates the sketch-reference migration, including after its pending file is folded.
+        file["format"] = Value::from("solidcraft/56");
+        file.as_object_mut().unwrap().remove("format_pending");
+        (file, sketch)
+    }
+
+    #[test]
+    fn sketch_reference_migration_keeps_missing_author_paths_as_feature_errors() {
+        for author_path in [serde_json::json!([]), serde_json::json!([999_999])] {
+            let (mut file, sketch) = older_design_with_anchored_component_sketch();
+            file["features"][1]["plane"]["anchor"]["author_path"] = author_path.clone();
+            let opened = read(&file.to_string()).unwrap();
+            let feature = opened.feature(sketch).unwrap();
+            let crate::FeatureKind::Sketch { plane, .. } = &feature.kind else { panic!("attached sketch was not retained") };
+            let anchor = crate::face_anchor::plane_face_anchor(plane).unwrap();
+            assert_eq!(serde_json::to_value(&anchor.author_path).unwrap(), author_path);
+            assert!(anchor.author_frame(&opened, feature.component).is_err());
+            assert!(opened.newer_file.is_none());
+        }
+    }
+
+    #[test]
+    fn sketch_reference_migration_preserves_anchored_sketches_during_newer_file_salvage() {
+        let (mut file, sketch) = older_design_with_anchored_component_sketch();
+        // Salvage checks each feature alone, without components or occurrences in its stub.
+        let piece = serde_json::json!({"name":"", "params":[], "features":[file["features"][1].clone()]});
+        check_piece(piece, 56, None).unwrap();
+        file["format_pending"] = serde_json::json!(["a-later-change"]);
+        file["features"].as_array_mut().unwrap().push(serde_json::json!({
+            "id":900, "name":"Future", "type":"unknown_future_feature"
+        }));
+        let opened = read(&file.to_string()).unwrap();
+        let feature = opened.feature(sketch).unwrap();
+        let crate::FeatureKind::Sketch { plane, .. } = &feature.kind else { panic!("known sketch became a placeholder") };
+        let anchor = crate::face_anchor::plane_face_anchor(plane).unwrap();
+        assert!(anchor.author_frame(&opened, feature.component).is_ok());
+        assert!(matches!(opened.feature(900).unwrap().kind, crate::FeatureKind::NewerFileFeature { .. }));
+        let report = opened.newer_file.as_ref().unwrap();
+        assert!(report.not_understood.iter().any(|note| note.contains("Future")), "{:?}", report.not_understood);
+        assert!(!report.not_understood.iter().any(|note| note.contains("Attached")), "{:?}", report.not_understood);
+    }
 
     /// A pending change that records that its step ran, in `trace`.
     fn traced(name: &'static str) -> Part {
@@ -1362,30 +1513,30 @@ mod tests {
     #[test]
     fn pending_changes_apply_in_order_after_older_formats() {
         let pending = [traced("a-first"), traced("b-second")];
-        let formats = Formats { hand: &JSON_STEPS, folded: FOLDED, pending: &pending };
+        let formats = Family { formats: Formats { hand: &JSON_STEPS, folded: FOLDED, pending: &pending }, ..DESIGN };
         let next = HAND_WRITTEN + FOLDED.len() as u32 + 1;
         assert_eq!(formats.current(), next);
         for version in [1, HAND_WRITTEN, next - 1] {
             let mut v = serde_json::json!({"features": [], "assembly": {"joints": [{"flip": false}]}});
-            formats.upgrade("design", &mut v, version, None).unwrap();
+            formats.upgrade(&mut v, version, None).unwrap();
             assert_eq!(trace_of(&v), ["a", "b"], "from format {version}");
             // The hand-written steps ran too: format 3's joints were flipped on the way up.
             assert_eq!(v["assembly"]["joints"][0]["flip"], Value::Bool(version < 4), "from format {version}");
         }
         // A design of the pending number written before `b-second` existed gets just that step.
         let mut v = serde_json::json!({});
-        formats.upgrade("design", &mut v, next, Some(&["a-first".to_string()])).unwrap();
+        formats.upgrade(&mut v, next, Some(&["a-first".to_string()])).unwrap();
         assert_eq!(trace_of(&v), ["b"]);
         // One that has both, or that this build wrote, needs nothing.
         let mut v = serde_json::json!({});
-        formats.upgrade("design", &mut v, next, Some(&["a-first".into(), "b-second".into()])).unwrap();
+        formats.upgrade(&mut v, next, Some(&["a-first".into(), "b-second".into()])).unwrap();
         assert_eq!(trace_of(&v), Vec::<&str>::new());
         // A change this build doesn't know is a newer build's: said, and kept.
         let said = formats.newer(next, Some(&["c-later".into()])).unwrap();
         assert_eq!(said, Newer { format: next, reads_up_to: next, unknown_changes: vec!["c-later".into()] });
         // A list on a format that isn't made of changes means nothing.
         let mut v = serde_json::json!({});
-        formats.upgrade("design", &mut v, HAND_WRITTEN, Some(&["a-first".into()])).unwrap();
+        formats.upgrade(&mut v, HAND_WRITTEN, Some(&["a-first".into()])).unwrap();
         assert_eq!(trace_of(&v), ["a", "b"]);
     }
 
@@ -1397,16 +1548,16 @@ mod tests {
         let mut folded: Vec<(u32, &[Part])> = FOLDED.to_vec();
         let next = HAND_WRITTEN + folded.len() as u32 + 1;
         folded.push((next, &parts));
-        let formats = Formats { hand: &JSON_STEPS, folded: &folded, pending: &[] };
+        let formats = Family { formats: Formats { hand: &JSON_STEPS, folded: &folded, pending: &[] }, ..DESIGN };
         assert_eq!(formats.current(), next);
         let mut old = serde_json::json!({});
-        formats.upgrade("design", &mut old, HAND_WRITTEN, None).unwrap();
+        formats.upgrade(&mut old, HAND_WRITTEN, None).unwrap();
         assert_eq!(trace_of(&old), ["a", "b"]);
         let mut nightly = serde_json::json!({});
-        formats.upgrade("design", &mut nightly, next, Some(&["a-first".into()])).unwrap();
+        formats.upgrade(&mut nightly, next, Some(&["a-first".into()])).unwrap();
         assert_eq!(trace_of(&nightly), ["b"]);
         let mut released = serde_json::json!({});
-        formats.upgrade("design", &mut released, next, None).unwrap();
+        formats.upgrade(&mut released, next, None).unwrap();
         assert_eq!(trace_of(&released), Vec::<&str>::new());
     }
 
@@ -1415,11 +1566,11 @@ mod tests {
         let hand: [JsonStep; 27] = [|_| Ok(()); 27];
         let first = [traced("a-first")];
         let cards = [traced("material-engineering-cards")];
-        let pending = Formats { hand: &hand, folded: &[(29, &first)], pending: &cards };
-        let folded = Formats { hand: &hand, folded: &[(29, &first), (30, &cards)], pending: &[] };
+        let pending = Family { formats: Formats { hand: &hand, folded: &[(29, &first)], pending: &cards }, ..DESIGN };
+        let folded = Family { formats: Formats { hand: &hand, folded: &[(29, &first), (30, &cards)], pending: &[] }, ..DESIGN };
         for formats in [pending, folded] {
             let mut file = serde_json::json!({"trace": ["b"]});
-            formats.upgrade("design", &mut file, 29, Some(&["physical-material-cards".into()])).unwrap();
+            formats.upgrade(&mut file, 29, Some(&["physical-material-cards".into()])).unwrap();
             assert_eq!(trace_of(&file), ["b", "a"], "never replay existing card semantics");
         }
     }
@@ -1428,7 +1579,7 @@ mod tests {
     fn personal_card_alias_without_support_is_a_newer_builds() {
         let hand: [JsonStep; 27] = [|_| Ok(()); 27];
         let first = [traced("a-first")];
-        let formats = Formats { hand: &hand, folded: &[(29, &first)], pending: &[] };
+        let formats = Family { formats: Formats { hand: &hand, folded: &[(29, &first)], pending: &[] }, ..DESIGN };
         let said = formats.newer(29, Some(&["physical-material-cards".into()])).unwrap();
         assert_eq!(said.unknown_changes, ["physical-material-cards"]);
     }
@@ -1439,7 +1590,7 @@ mod tests {
         let first = [traced("a-first")];
         let second = [traced("b-second")];
         let cards = [traced("material-engineering-cards")];
-        let formats = Formats { hand: &hand, folded: &[(28, &first), (29, &second), (30, &cards)], pending: &[] };
+        let formats = Family { formats: Formats { hand: &hand, folded: &[(28, &first), (29, &second), (30, &cards)], pending: &[] }, ..DESIGN };
         for version in [28, 30] {
             let said = formats.newer(version, Some(&["physical-material-cards".into()])).unwrap();
             assert_eq!(said.unknown_changes, ["physical-material-cards"]);
@@ -1451,7 +1602,7 @@ mod tests {
         let hand: [JsonStep; 27] = [|_| Ok(()); 27];
         let first = [traced("a-first")];
         let cards = [traced("material-engineering-cards")];
-        let formats = Formats { hand: &hand, folded: &[(29, &first)], pending: &cards };
+        let formats = Family { formats: Formats { hand: &hand, folded: &[(29, &first)], pending: &cards }, ..DESIGN };
         for names in
             [["physical-material-cards".into(), "unknown-card-codec".into()], ["unknown-card-codec".into(), "physical-material-cards".into()]]
         {
@@ -1463,14 +1614,14 @@ mod tests {
     fn alias_and_canonical_markers_never_reapply_the_card_migration() {
         let hand: [JsonStep; 27] = [|_| Ok(()); 27];
         let first = [traced("a-first"), traced("material-engineering-cards")];
-        let formats = Formats { hand: &hand, folded: &[(29, &first)], pending: &[] };
+        let formats = Family { formats: Formats { hand: &hand, folded: &[(29, &first)], pending: &[] }, ..DESIGN };
         for names in [
             vec!["physical-material-cards".into()],
             vec!["physical-material-cards".into(), "material-engineering-cards".into()],
             vec!["material-engineering-cards".into(), "physical-material-cards".into()],
         ] {
             let mut file = serde_json::json!({"trace": ["b"]});
-            formats.upgrade("design", &mut file, 29, Some(&names)).unwrap();
+            formats.upgrade(&mut file, 29, Some(&names)).unwrap();
             assert_eq!(trace_of(&file), ["b", "a"]);
         }
     }
@@ -1480,10 +1631,10 @@ mod tests {
         let hand: [JsonStep; 27] = [|_| Ok(()); 27];
         let first = [traced("a-first")];
         let cards = [traced("material-engineering-cards")];
-        let formats = Formats { hand: &hand, folded: &[(29, &first)], pending: &cards };
+        let formats = Family { formats: Formats { hand: &hand, folded: &[(29, &first)], pending: &cards }, ..DESIGN };
         let mut file = serde_json::json!({"trace": ["a"], "metadata": {"format_pending": ["physical-material-cards"]}});
         let metadata = file["metadata"].clone();
-        formats.upgrade("design", &mut file, 29, None).unwrap();
+        formats.upgrade(&mut file, 29, None).unwrap();
         assert_eq!(trace_of(&file), ["a", "b"]);
         assert_eq!(file["metadata"], metadata);
     }
@@ -1495,7 +1646,7 @@ mod tests {
         let parts = [traced("a-first")];
         let later = [traced("b-second")];
         for pending in [&[][..], &later[..]] {
-            let formats = Formats { hand: &[], folded: &[(2, &parts)], pending };
+            let formats = Family { formats: Formats { hand: &[], folded: &[(2, &parts)], pending }, ..DESIGN };
             assert_eq!(formats.newer(2, Some(&["experimental-card".into()])).unwrap().unknown_changes, ["experimental-card"]);
         }
     }
@@ -1506,14 +1657,14 @@ mod tests {
     fn pending_concepts_moved_to_later_formats_are_not_reapplied() {
         let first = [traced("a-first")];
         let later = [traced("b-second")];
-        let pending = Formats { hand: &[], folded: &[(2, &first)], pending: &later };
-        let folded = Formats { hand: &[], folded: &[(2, &first), (3, &later)], pending: &[] };
+        let pending = Family { formats: Formats { hand: &[], folded: &[(2, &first)], pending: &later }, ..DESIGN };
+        let folded = Family { formats: Formats { hand: &[], folded: &[(2, &first), (3, &later)], pending: &[] }, ..DESIGN };
         for formats in [pending, folded] {
             let mut experimental = serde_json::json!({"trace": ["b"]});
-            formats.upgrade("design", &mut experimental, 2, Some(&["b-second".into()])).unwrap();
+            formats.upgrade(&mut experimental, 2, Some(&["b-second".into()])).unwrap();
             assert_eq!(trace_of(&experimental), ["b", "a"]);
             let mut released = serde_json::json!({"trace": ["a"]});
-            formats.upgrade("design", &mut released, 2, None).unwrap();
+            formats.upgrade(&mut released, 2, None).unwrap();
             assert_eq!(trace_of(&released), ["a", "b"], "ordinary released files still get later migrations");
         }
     }
@@ -1920,6 +2071,7 @@ mod tests {
                         direction: Direction::Negative,
                         distance2: None,
                         start_offset: None,
+                        symmetric_offset: false,
                         through_all: false,
                         second_follows_first: false,
                         taper: Some("0 deg".into()),
@@ -1928,6 +2080,9 @@ mod tests {
                         to_offset: Some("offset + 1 mm".into()),
                         from: Some(crate::FacePick(solidcore_record::Vec3::new(0.0, 0.0, 5.0))),
                         to_body_apart: false,
+                        from_level: false,
+                        picked_placements: Vec::new(),
+                        one_sided_direction: None,
                     },
                     operation: Operation::NewBody,
                     targets: vec![],
@@ -1943,6 +2098,7 @@ mod tests {
                     width: "4".into(),
                     height: "6".into(),
                     operation: Operation::NewBody,
+                    centred: false,
                 },
                 None,
             )
@@ -1959,6 +2115,9 @@ mod tests {
         assert_eq!(upgraded.features[1].param_names.len(), 3);
         assert_eq!(upgraded.features[1].param_names[2], "d6");
         let saved: Value = serde_json::from_str(&upgraded.to_json()).unwrap();
+        // The extent is kept, and its From Object keeps starting at the face's level (#17639).
+        let mut old_kind = old_kind;
+        old_kind["extent"]["from_level"] = Value::Bool(true);
         for field in ["extent", "sketch", "operation", "profiles"] {
             assert_eq!(saved["features"][1][field], old_kind[field]);
         }
@@ -2068,7 +2227,7 @@ mod tests {
         assert!(validate_versioned_geometry(&make(curve.clone())).is_ok());
         for (key, malformed) in [
             ("periodic", serde_json::json!("true")),
-            ("control", serde_json::json!(true)),
+            ("control", serde_json::json!("yes")),
             ("degree", serde_json::json!(2)),
             ("pts", serde_json::json!([0, 1, 2])),
             ("pts", serde_json::json!([0, 1, 2, u64::MAX])),
@@ -2078,10 +2237,14 @@ mod tests {
             damaged[key] = malformed;
             assert!(validate_versioned_geometry(&make(damaged)).is_err(), "{key}");
         }
-        let mut legacy = curve;
+        let mut legacy = curve.clone();
         legacy.as_object_mut().unwrap().remove("periodic");
         legacy["control"] = Value::Bool(true);
         assert!(validate_versioned_geometry(&make(legacy)).is_ok());
+        // A closed control spline (#19337) of degree 3 over four points is a valid design.
+        let mut closed = curve;
+        closed["control"] = Value::Bool(true);
+        assert!(validate_versioned_geometry(&make(closed)).is_ok());
         for convention in [serde_json::json!(null), serde_json::json!(false), serde_json::json!("unknown")] {
             assert!(validate_versioned_geometry(&serde_json::json!({"features":[{"type":"revolve", "convention":convention}]})).is_err());
         }
@@ -2121,7 +2284,7 @@ mod tests {
         let first = pts[0];
         let neighbor = pts[1];
         let closing = pts[3];
-        sketch.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: true, nurbs: None }, None).unwrap();
+        sketch.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: true, nurbs: None, handles: Vec::new() }, None).unwrap();
         let mut document = Document::new("periodic file validation");
         document.add_feature(crate::FeatureKind::Sketch { plane: crate::PlaneRef::Origin { name: "XY".into() }, sketch }, None).unwrap();
         assert_eq!(read(&document.to_json()).unwrap(), document);
@@ -2208,6 +2371,7 @@ mod tests {
                     width: "20".into(),
                     height: "5".into(),
                     operation: crate::Operation::NewBody,
+                    centred: false,
                 },
                 None,
             )
@@ -2333,6 +2497,7 @@ mod tests {
                     width: "10".into(),
                     height: "10".into(),
                     operation: crate::Operation::NewBody,
+                    centred: false,
                 },
                 Some(&format!("Box{i}")),
             )
@@ -2363,6 +2528,7 @@ mod tests {
                     width: "10".into(),
                     height: "10".into(),
                     operation: crate::Operation::NewBody,
+                    centred: false,
                 },
                 None,
             )
@@ -2383,6 +2549,200 @@ mod tests {
         assert_eq!(names.first().unwrap().as_str(), "d1");
         assert_eq!(names.last().unwrap().as_str(), "d15000");
         assert_eq!(names.iter().collect::<std::collections::BTreeSet<_>>().len(), names.len());
+    }
+
+    /// Deterministic draws for the input-name repair tests (xorshift64), so a failure names its case.
+    struct Draws(u64);
+
+    impl Draws {
+        /// A number in `0..n`, for `n` above 0.
+        fn below(&mut self, n: usize) -> usize {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            (self.0 % n as u64) as usize
+        }
+    }
+
+    fn input_repair_box() -> crate::FeatureKind {
+        crate::FeatureKind::Box {
+            corner: ["0".into(), "0".into(), "0".into()],
+            length: "10".into(),
+            width: "10".into(),
+            height: "10".into(),
+            operation: crate::Operation::NewBody,
+            centred: false,
+        }
+    }
+
+    /// `Document::name_all_feature_inputs` as it was while a freed `dN` lowered `next`, the
+    /// reference for its names. Only the lines marked as counters are new. They return how often
+    /// a freed name lowered `next`, and how often a name freed at or above `next` was given later.
+    fn input_repair_that_restarts(d: &mut Document) -> (usize, usize) {
+        let mut taken: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+        for name in d.params.iter().map(|p| &p.name).chain(d.features.iter().flat_map(|f| &f.param_names)) {
+            *taken.entry(name.clone()).or_default() += 1;
+        }
+        let mut next = 1usize;
+        let (mut lowered, mut given_later, mut freed_above) = (0, 0, std::collections::BTreeSet::new()); // counters
+        for f in &mut d.features {
+            let n = f.kind.inputs().len();
+            for k in 0..n {
+                if f.param_names.get(k).is_some_and(|name| !name.is_empty()) {
+                    continue;
+                }
+                let name = loop {
+                    let name = format!("d{next}");
+                    next += 1;
+                    if !taken.contains_key(&name) {
+                        break name;
+                    }
+                };
+                given_later += usize::from(freed_above.remove(&name)); // counter
+                if f.param_names.len() <= k {
+                    f.param_names.resize(k + 1, String::new());
+                }
+                if let Some(slot) = f.param_names.get_mut(k) {
+                    *slot = name.clone();
+                }
+                taken.insert(name, 1);
+            }
+            for name in f.param_names.drain(n..) {
+                if let Some(count) = taken.get_mut(&name) {
+                    *count -= 1;
+                    if *count == 0 {
+                        taken.remove(&name);
+                        if let Some(i) = name.strip_prefix('d').and_then(|s| s.parse::<usize>().ok())
+                            && name == format!("d{i}")
+                            && i > 0
+                        {
+                            if i < next {
+                                lowered += 1; // counter
+                            } else {
+                                freed_above.insert(name.clone()); // counter
+                            }
+                            next = next.min(i);
+                        }
+                    }
+                }
+            }
+        }
+        (lowered, given_later)
+    }
+
+    /// A name as a damaged or hand-edited file may hold one. Often empty or a `dN` the repair
+    /// also gives (up to d24), sometimes a `dN` the repair rarely reaches, sometimes a name that
+    /// is not `dN` as the repair writes it (`d05` and `d+3` parse as 5 and 3).
+    fn drawn_input_name(draws: &mut Draws) -> String {
+        match draws.below(20) {
+            0..=7 => String::new(),
+            8..=14 => format!("d{}", 1 + draws.below(24)),
+            15 | 16 => format!("d{}", 25 + draws.below(40)),
+            _ => ["d0", "d05", "d007", "d-1", "dx", "d+3", "D2", "x1", "d", "d1.0"][draws.below(10)].to_string(),
+        }
+    }
+
+    /// Up to four parameters and twelve features of zero to three inputs, each feature with up
+    /// to three more names than inputs (fewer is missing names, more is surplus names).
+    fn drawn_input_design(draws: &mut Draws, kinds: &[crate::Feature]) -> Document {
+        let mut d = Document::new("drawn input names");
+        for _ in 0..draws.below(5) {
+            let name = drawn_input_name(draws);
+            d.params.push(crate::Param { name, expr: "1".into(), unit: String::new(), comment: String::new(), model: false });
+        }
+        for id in 1..=draws.below(13) as u64 {
+            let mut f = kinds[draws.below(kinds.len())].clone();
+            f.id = id;
+            f.param_names.clear();
+            for _ in 0..draws.below(f.kind.inputs().len() + 4) {
+                f.param_names.push(drawn_input_name(draws));
+            }
+            d.features.push(f);
+            d.next_id = id + 1;
+        }
+        d
+    }
+
+    /// Thousands of drawn timelines get the names of the repair that lowered `next` to a freed
+    /// name, and of `name_feature_inputs` feature by feature. The draws mix empty and missing
+    /// names, repeats, names shared with parameters, surplus names written as `dN` or not, and
+    /// freed names below and at or above `next`.
+    #[test]
+    fn bulk_input_repair_gives_the_names_of_the_repair_that_restarted_its_search() {
+        let mut kinds_doc = Document::new("kinds");
+        let at = || ["0".into(), "0".into(), "0".into()];
+        let sketch = crate::FeatureKind::Sketch { plane: crate::PlaneRef::Origin { name: "XY".into() }, sketch: solidcraft_sketch::Sketch::new() };
+        let sphere = crate::FeatureKind::Sphere { center: at(), radius: "5".into(), operation: crate::Operation::NewBody };
+        let torus = crate::FeatureKind::Torus { center: at(), major: "10".into(), minor: "2".into(), operation: crate::Operation::NewBody };
+        for kind in [sketch, sphere, torus, input_repair_box()] {
+            kinds_doc.add_feature(kind, None).unwrap();
+        }
+        let kinds = kinds_doc.features;
+        assert_eq!(kinds.iter().map(|f| f.kind.inputs().len()).collect::<Vec<_>>(), [0, 1, 2, 3]);
+        let names = |d: &Document| d.features.iter().map(|f| f.param_names.clone()).collect::<Vec<_>>();
+        let mut draws = Draws(0x9e37_79b9_7f4a_7c15);
+        let (mut lowered, mut given_later) = (0, 0);
+        for case in 0..5000 {
+            let drawn = drawn_input_design(&mut draws, &kinds);
+            let mut old = drawn.clone();
+            let (l, g) = input_repair_that_restarts(&mut old);
+            (lowered, given_later) = (lowered + l, given_later + g);
+            let mut new = drawn.clone();
+            new.name_all_feature_inputs();
+            assert_eq!(names(&new), names(&old), "case {case}, drawn {:?}", names(&drawn));
+            assert_eq!(new.params, drawn.params);
+            let mut one_by_one = drawn.clone();
+            for id in drawn.features.iter().map(|f| f.id) {
+                one_by_one.name_feature_inputs(id);
+            }
+            assert_eq!(names(&new), names(&one_by_one), "case {case}, drawn {:?}", names(&drawn));
+        }
+        assert!(lowered > 0 && given_later > 0, "the draws reach both kinds of freed name ({lowered}, {given_later})");
+    }
+
+    /// The shape of a slow file found by reading how designs are opened. Boxes 1 to m each have
+    /// three unnamed inputs and one surplus name, dj for box j, and a last box names its inputs
+    /// x1 to x3 and has the b surplus names d(m+2) to d(m+b+1). Before the repair the taken `dN`
+    /// are d1 to dm and that block, so the lowest free name is d(m+1) and the lowest above the
+    /// block d(m+b+2). Box 1 takes d(m+1), d(m+b+2) and d(m+b+3), then frees d1. When box j
+    /// (from 2) is repaired, boxes 2 to j-1 hold d1 to d(j-2), box j-1 has just freed d(j-1),
+    /// dj to dm are still surplus names, and boxes 1 to j-1 hold d(m+1) and d(m+b+2) to
+    /// d(m+b+2j-1). So box j takes d(j-1), d(m+b+2j) and d(m+b+2j+1). The last box keeps its
+    /// own three names and drops the block. Each name the search tries is either held before the
+    /// repair (d1 to dm and the block), and tried once at most since the search never goes back
+    /// down, or the name it then gives to one of the 3m unnamed inputs. So it tries at most
+    /// 4m + b names (this repair tries 3m + b + 1). Lowering the search to each freed name made
+    /// it pass the whole block again for every box, about m times (m+b) tries.
+    #[test]
+    fn freed_surplus_names_are_reused_without_passing_a_large_block_again() {
+        let mut template = Document::new("freed input names");
+        let id = template.add_feature(input_repair_box(), None).unwrap();
+        let f = template.feature(id).unwrap().clone();
+        assert_eq!(f.kind.inputs().len(), 3);
+        let d = |i: usize| format!("d{i}");
+        for (m, b) in [(2_000, 0), (2_000, 50_000)] {
+            let mut design = Document::new("freed input names");
+            for j in 1..=m {
+                let mut f = f.clone();
+                f.id = j as u64;
+                f.param_names = vec![String::new(), String::new(), String::new(), d(j)];
+                design.features.push(f);
+            }
+            let mut last = f.clone();
+            last.id = m as u64 + 1;
+            last.param_names = ["x1", "x2", "x3"].map(String::from).into_iter().chain((m + 2..=m + b + 1).map(d)).collect();
+            design.features.push(last);
+            design.next_id = m as u64 + 2;
+            let json = design.to_json();
+            crate::params::INPUT_NAME_TRIES.set(0);
+            let back = read(&json).unwrap();
+            let tries = crate::params::INPUT_NAME_TRIES.get();
+            assert!(tries <= 4 * m + b, "{m} boxes, {b} block names, {tries} names tried");
+            let mut expected = vec![vec![d(m + 1), d(m + b + 2), d(m + b + 3)]];
+            expected.extend((2..=m).map(|j| vec![d(j - 1), d(m + b + 2 * j), d(m + b + 2 * j + 1)]));
+            expected.push(["x1", "x2", "x3"].map(String::from).to_vec());
+            assert_eq!(back.features.iter().map(|f| f.param_names.clone()).collect::<Vec<_>>(), expected, "{m} boxes, {b} block names");
+        }
     }
 
     #[test]
@@ -2486,6 +2846,34 @@ mod tests {
             let error = read(&value.to_string()).unwrap_err().to_string();
             assert!(error.contains("sketch too large"), "{key}: {error}");
         }
+
+        // 3D constraints (#10608): a stale one (it names a fit point its curve does not have) is
+        // pruned as the design opens, up to the ceiling; one past the ceiling is refused first, so a huge
+        // list is neither built nor pruned away.
+        let mut sketch = Sketch::new();
+        let v = solidcore_record::Vec3::new;
+        let w = sketch.add_drawn_wire_in(&[v(0.0, 0.0, 0.0), v(10.0, 0.0, 0.0)], solidcraft_sketch::WireSpace::Component).unwrap();
+        let p = solidcraft_sketch::WirePoint { wire: w, index: 0 };
+        sketch.add_wire_constraint(solidcraft_sketch::WireConstraintKind::Fix { p, at: v(0.0, 0.0, 0.0), exprs: None }).unwrap();
+        let mut doc = Document::new("3D constraints");
+        doc.add_feature(crate::FeatureKind::Sketch { plane: crate::PlaneRef::Origin { name: "XY".into() }, sketch }, None).unwrap();
+        let mut stale: Value = serde_json::from_str(&doc.to_json()).unwrap();
+        let entry = &mut stale["features"][0]["sketch"]["wire_constraints"][0];
+        assert!(entry.to_string().contains("\"index\":0"), "the Fix names fit point 0: {entry}");
+        *entry = serde_json::from_str(&entry.to_string().replace("\"index\":0", "\"index\":9")).unwrap();
+        let one = stale["features"][0]["sketch"]["wire_constraints"][0].clone();
+        for (count, loads) in [(CEILING_CONSTRAINTS, true), (CEILING_CONSTRAINTS + 1, false)] {
+            let mut value = stale.clone();
+            value["features"][0]["sketch"]["wire_constraints"] = Value::Array(vec![one.clone(); count]);
+            match read(&value.to_string()) {
+                Ok(d) => {
+                    assert!(loads, "{count} 3D constraints must be refused");
+                    let crate::FeatureKind::Sketch { sketch, .. } = &d.features[0].kind else { panic!("sketch") };
+                    assert!(sketch.wire_constraints.is_empty(), "the stale ones are pruned");
+                }
+                Err(e) => assert!(!loads && e.to_string().contains("sketch too large"), "{count}: {e}"),
+            }
+        }
     }
 
     /// #10874: a design whose sketch is past the default limit (made where Preferences › Sketch ›
@@ -2516,6 +2904,25 @@ mod tests {
     }
 
     #[test]
+    fn occurrences_added_on_open_take_fresh_ids_and_the_design_reopens() {
+        let mut d = Document::new("Legacy");
+        d.add_component(None, 0).unwrap();
+        let b = d.add_component(None, 0).unwrap();
+        // No `next_id`, `b` without its occurrence, and the other occurrence on id 1.
+        let json = edited(&d, |v| {
+            v.as_object_mut().unwrap().remove("next_id");
+            let occurrences = v["occurrences"].as_array_mut().unwrap();
+            occurrences.retain(|o| o["component"] != b);
+            occurrences[0]["id"] = 1.into();
+        });
+        let back = read(&json).unwrap();
+        assert_eq!(back.occurrences.len(), 2);
+        assert!(back.occurrences.iter().any(|o| o.component == b));
+        assert!(all_unique(back.occurrences.iter().map(|o| o.id)), "{:?}", back.occurrences);
+        read(&back.to_json()).unwrap();
+    }
+
+    #[test]
     fn missing_or_stale_next_id_does_not_reuse_existing_ids() {
         let d = two_components_one_occurrence();
         let largest = d.components.iter().map(|c| c.id).chain(d.occurrences.iter().map(|o| o.id)).max().unwrap();
@@ -2532,6 +2939,323 @@ mod tests {
             let fresh = back.add_component(None, 0).unwrap();
             assert!(fresh > largest, "new component reused id {fresh}");
         }
+    }
+
+    /// #1017. An import's rigid group takes its id from the shared counter. A design whose saved
+    /// `next_id` is missing or stale must not hand that id out again, in memory or after it opens.
+    #[test]
+    fn a_stale_next_id_never_reuses_a_rigid_group_id() {
+        let mut d = two_components_one_occurrence();
+        let component = d.components[0].id;
+        let members = d.occurrences.iter().map(|o| o.id).collect();
+        let group = d.allocate_id().unwrap();
+        d.assembly.rigid_groups.push(crate::joints::RigidGroup { id: group, name: "Board".into(), component, members });
+        d.next_id = group;
+        assert!(d.next_item_id().unwrap() > group, "next_item_id {} with the group at {group}", d.next_item_id().unwrap());
+        for stale in [None, Some(0), Some(group)] {
+            let json = edited(&d, |v| {
+                let o = v.as_object_mut().unwrap();
+                match stale {
+                    Some(n) => o.insert("next_id".into(), n.into()),
+                    None => o.remove("next_id"),
+                };
+            });
+            let mut back = read(&json).unwrap();
+            assert_eq!(back.assembly.rigid_groups.len(), 1, "the group survives loading with {stale:?}");
+            assert!(back.next_id > group, "next_id {} after load with {stale:?}, group at {group}", back.next_id);
+            let fresh = back.allocate_id().unwrap();
+            assert!(fresh > group, "a new object reused the rigid group's id {fresh} with {stale:?}");
+        }
+    }
+
+    /// Loading gives an occurrence to each component that has none, as an older design may have.
+    /// With a missing or stale saved `next_id`, that occurrence must not take an id the design
+    /// already uses, a rigid group's included, so the counter is repaired before it is made.
+    #[test]
+    fn an_occurrence_made_while_loading_takes_no_id_in_use() {
+        let mut d = two_components_one_occurrence();
+        let (first, second) = (d.components[0].id, d.components[1].id);
+        let members = d.occurrences.iter().filter(|o| o.component == first).map(|o| o.id).collect();
+        let group = d.allocate_id().unwrap();
+        d.assembly.rigid_groups.push(crate::joints::RigidGroup { id: group, name: "Board".into(), component: first, members });
+        for stale in [None, Some(0), Some(1), Some(group)] {
+            let json = edited(&d, |v| {
+                let o = v.as_object_mut().unwrap();
+                match stale {
+                    Some(n) => o.insert("next_id".into(), n.into()),
+                    None => o.remove("next_id"),
+                };
+                // The file leaves out the second component's occurrences, so loading makes one.
+                if let Some(list) = o.get_mut("occurrences").and_then(Value::as_array_mut) {
+                    list.retain(|x| x.get("component").and_then(Value::as_u64) != Some(second));
+                }
+            });
+            let saved: Value = serde_json::from_str(&json).unwrap();
+            let kept = saved["occurrences"].as_array().map_or(0, |l| l.iter().filter(|x| x["component"].as_u64() == Some(second)).count());
+            assert_eq!(kept, 0, "the file holds no occurrence of the second component");
+            let back = read(&json).unwrap();
+            assert!(back.occurrences.iter().any(|x| x.component == second), "loading gave the second component an occurrence with {stale:?}");
+            let mut ids: Vec<u64> = back
+                .components
+                .iter()
+                .map(|c| c.id)
+                .chain(back.occurrences.iter().map(|o| o.id))
+                .chain(back.assembly.rigid_groups.iter().map(|g| g.id))
+                .collect();
+            let all = ids.len();
+            ids.sort_unstable();
+            ids.dedup();
+            assert_eq!(ids.len(), all, "an id is used twice after loading with {stale:?}: {ids:?}");
+        }
+    }
+
+    /// How loading placed each component that has no occurrence before it kept what it looks up
+    /// in sets and maps, copied as it was. It called `Document::add_occurrence` (copied below as
+    /// it was) once per component, and each call looked through the whole design.
+    fn old_place_unplaced(d: &mut Document) -> Result<()> {
+        let missing: Vec<(u64, u64)> =
+            d.components.iter().filter(|c| !d.occurrences.iter().any(|o| o.component == c.id)).map(|c| (c.id, c.parent)).collect();
+        for (c, p) in missing {
+            old_add_occurrence(d, c, p, crate::IDENTITY)?;
+        }
+        Ok(())
+    }
+
+    fn old_add_occurrence(d: &mut Document, component: u64, parent: u64, transform: crate::Mat) -> Result<u64> {
+        if component == 0 || !d.components.iter().any(|c| c.id == component) {
+            return Err(DocError::Unknown(format!("component {component}")));
+        }
+        if old_inside_component(d, parent, component) {
+            return Err(DocError::Invalid("a component can't contain itself".into()));
+        }
+        if d.occurrences.len() >= 100_000 {
+            return Err(DocError::Invalid("too many occurrences".into()));
+        }
+        if !crate::is_placement(&transform) {
+            return Err(DocError::Invalid("an occurrence's placement must be a rigid motion (no scaling or mirroring) within 1e9 mm".into()));
+        }
+        let id = d.next_id.max(1);
+        d.next_id = id.checked_add(1).ok_or_else(|| DocError::Invalid("too many items in the design".into()))?;
+        let cname = d.components.iter().find(|c| c.id == component).map(|c| c.name.clone()).unwrap_or_default();
+        let next = d.occurrences.iter().filter(|o| o.component == component).count() + 1;
+        let free = |k: &usize| {
+            let name = format!("{cname}:{k}");
+            !d.occurrences.iter().any(|o| o.name == name)
+        };
+        let k = std::iter::once(next).chain(1..).find(free).unwrap_or(next);
+        d.occurrences.push(crate::Occurrence {
+            id,
+            component,
+            parent,
+            name: format!("{cname}:{k}"),
+            transform,
+            grounded: false,
+            expressed_moves: Vec::new(),
+            bom_type: None,
+        });
+        Ok(id)
+    }
+
+    fn old_component_within(d: &Document, a: u64, b: u64) -> bool {
+        let mut c = a;
+        for _ in 0..1000 {
+            if c == b {
+                return true;
+            }
+            if c == 0 {
+                return false;
+            }
+            match d.components.iter().find(|x| x.id == c) {
+                Some(x) => c = x.parent,
+                None => return false,
+            }
+        }
+        false
+    }
+
+    fn old_inside_component(d: &Document, parent: u64, component: u64) -> bool {
+        if old_component_within(d, parent, component) {
+            return true;
+        }
+        let tree = crate::occurrence_tree::OccurrenceTree::new(d);
+        let mut stack = vec![component];
+        let mut seen = std::collections::BTreeSet::new();
+        while let Some(c) = stack.pop() {
+            if !seen.insert(c) || seen.len() > crate::MAX_PLACEMENTS {
+                continue;
+            }
+            for o in tree.children(c) {
+                if o.component == parent {
+                    return true;
+                }
+                stack.push(o.component);
+            }
+        }
+        false
+    }
+
+    /// Numbers for drawn designs, the same on every run (splitmix64).
+    struct Draw(u64);
+
+    impl Draw {
+        fn below(&mut self, n: u64) -> u64 {
+            self.0 = self.0.wrapping_add(0x9e37_79b9_7f4a_7c15);
+            let mut z = self.0;
+            z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+            (z ^ (z >> 31)) % n.max(1)
+        }
+
+        fn pick<'a>(&mut self, of: &[&'a str]) -> &'a str {
+            of[self.below(of.len() as u64) as usize]
+        }
+    }
+
+    fn occurrence(id: u64, component: u64, parent: u64, name: String) -> crate::Occurrence {
+        crate::Occurrence { id, component, parent, name, transform: crate::IDENTITY, grounded: false, expressed_moves: Vec::new(), bom_type: None }
+    }
+
+    /// A small design with components to place while loading. Components share a name or have
+    /// their own, names hold colons and digits, occurrences take the names other components'
+    /// occurrences would, leave gaps between numbers or end in what only looks like a number
+    /// (`P:01`, `P:+2`), components sit in other components or in unknown ones, and some
+    /// placements fail (an unknown component 0, a component inside itself through its parents or
+    /// its placements, no id left).
+    fn drawn_design(draw: &mut Draw) -> Document {
+        const NAMES: [&str; 9] = ["P", "P", "A", "A:1", "P:2", "7", "", "x:y:3", "P:1:1"];
+        let mut d = Document::new("drawn");
+        let n = draw.below(8) + 1;
+        for i in 1..=n {
+            // Mostly its own id, sometimes 0 or another component's (a damaged file).
+            let id = match draw.below(25) {
+                0 => 0,
+                1 => draw.below(n) + 1,
+                _ => i,
+            };
+            // Mostly the root, else a component of the design (itself too) or an unknown one.
+            let parent = match draw.below(8) {
+                0..=3 => 0,
+                4..=6 => draw.below(n + 1),
+                _ => 900 + draw.below(2),
+            };
+            d.components.push(crate::Component { id, name: draw.pick(&NAMES).into(), parent, ..Default::default() });
+        }
+        for i in 0..draw.below(12) {
+            let component = match draw.below(10) {
+                0 => 0,
+                1 => 900,
+                _ => draw.below(n) + 1,
+            };
+            let parent = if draw.below(3) == 0 { draw.below(n) + 1 } else { 0 };
+            let name = match draw.below(6) {
+                0 => draw.pick(&NAMES).to_string(),
+                1 => format!("o{i}"),
+                2 => format!("{}:{}", draw.pick(&NAMES), draw.pick(&["01", "+2", "0", "2x", " 3", "18446744073709551617"])),
+                _ => format!("{}:{}", draw.pick(&NAMES), draw.below(5) + 1),
+            };
+            d.occurrences.push(occurrence(500 + i, component, parent, name));
+        }
+        d.next_id = match draw.below(10) {
+            0 => u64::MAX - draw.below(3),
+            1 => 0,
+            _ => 600 + draw.below(3),
+        };
+        d
+    }
+
+    /// Loading gives each component without an occurrence the occurrence one `add_occurrence`
+    /// call per component gave, with the same names, ids, parents and order, or fails at the same
+    /// component with the same error. A command adding occurrences afterwards gets what it got
+    /// before too.
+    #[test]
+    fn loading_places_unplaced_components_as_one_add_occurrence_each_did() {
+        let mut draw = Draw(0x5eed_1017);
+        let mut scaled = crate::IDENTITY;
+        scaled[0][0] = 2.0;
+        let mut outcomes = std::collections::BTreeMap::<String, usize>::new();
+        for case in 0..5000 {
+            let design = drawn_design(&mut draw);
+            let shown = || {
+                let components: Vec<_> = design.components.iter().map(|c| (c.id, &c.name, c.parent)).collect();
+                let occurrences: Vec<_> = design.occurrences.iter().map(|o| (o.id, o.component, o.parent, &o.name)).collect();
+                format!("case {case}, next id {}, components {components:?}, occurrences {occurrences:?}", design.next_id)
+            };
+            let (mut old, mut new) = (design.clone(), design.clone());
+            let was = old_place_unplaced(&mut old);
+            assert_eq!(new.place_unplaced_components(), was, "{}", shown());
+            assert_eq!(new.occurrences, old.occurrences, "{}", shown());
+            assert_eq!(new.next_id, old.next_id, "{}", shown());
+            *outcomes.entry(was.err().map_or("placed".into(), |e| e.to_string())).or_default() += 1;
+            for _ in 0..3 {
+                let (component, parent) = (draw.below(10), draw.below(10));
+                let transform = if draw.below(8) == 0 { scaled } else { crate::IDENTITY };
+                let was = old_add_occurrence(&mut old, component, parent, transform);
+                assert_eq!(new.add_occurrence(component, parent, transform), was, "{}, then {component} into {parent}", shown());
+                assert_eq!(new.occurrences, old.occurrences, "{}, then {component} into {parent}", shown());
+                assert_eq!(new.next_id, old.next_id, "{}, then {component} into {parent}", shown());
+            }
+        }
+        for outcome in ["placed", "unknown component 0", "a component can't contain itself", "too many items in the design"] {
+            assert!(outcomes.contains_key(outcome), "no drawn design ended with {outcome}, outcomes {outcomes:?}");
+        }
+    }
+
+    /// Near the cap of 100 000 occurrences, loading stops at the component where one
+    /// `add_occurrence` per component stopped. Two short of the cap, three components named P
+    /// are to be placed. The first takes `P:1` (no occurrence has a name starting with P) and
+    /// the first id, the second finds `P:1` taken and takes `P:2`, and the third is refused. At
+    /// the cap, a component inside itself is refused as that, since it is checked before the
+    /// count.
+    #[test]
+    fn loading_stops_at_the_occurrence_cap_where_add_occurrence_did() {
+        let component =
+            |id: u64, parent: u64| crate::Component { id, name: if id == 1 { "Big".into() } else { "P".into() }, parent, ..Default::default() };
+        let mut short = Document::new("two short of the cap");
+        short.components = vec![component(1, 0), component(2, 0), component(3, 0), component(4, 0)];
+        short.occurrences = (1..=99_998).map(|i| occurrence(10 + i, 1, 0, format!("Big:{i}"))).collect();
+        short.next_id = 200_000;
+        let mut full = short.clone();
+        full.name = "at the cap".into();
+        full.components[1].parent = 2;
+        full.occurrences.extend((99_999..=100_000).map(|i| occurrence(10 + i, 1, 0, format!("Big:{i}"))));
+        let expected = [Err(DocError::Invalid("too many occurrences".into())), Err(DocError::Invalid("a component can't contain itself".into()))];
+        let mut loaded = Vec::new();
+        for (design, expected) in [short, full].into_iter().zip(expected) {
+            let (mut old, mut new) = (design.clone(), design.clone());
+            assert_eq!(old_place_unplaced(&mut old), expected, "{}", design.name);
+            assert_eq!(new.place_unplaced_components(), expected, "{}", design.name);
+            assert_eq!(new.occurrences, old.occurrences, "{}", design.name);
+            assert_eq!(new.next_id, old.next_id, "{}", design.name);
+            loaded.push(new);
+        }
+        let placed: Vec<_> = loaded[0].occurrences[99_998..].iter().map(|o| (o.id, o.component, o.parent, o.name.as_str())).collect();
+        assert_eq!(placed, [(200_000, 2, 0, "P:1"), (200_001, 3, 0, "P:2")]);
+        assert_eq!(loaded[0].next_id, 200_002);
+        assert_eq!(loaded[1].occurrences.len(), 100_000, "nothing is placed at the cap");
+    }
+
+    /// The shape of a design built by a code audit of how designs are read, at a tenth of its
+    /// size. Component 1 (A) has 9 000 occurrences named `P:1` to `P:9000`, and the 999
+    /// components named P (ids 2 to 1000) have none. Loading places them in file order. Each has
+    /// no occurrence yet, so it tries `P:1` first, which is taken, and then takes the first free
+    /// number. `P:1` to `P:9000` are taken by the file and the components before it took one
+    /// each, so component `k` gets `P:{8999 + k}`, which is `P:9001` to `P:9999`. The largest id
+    /// in the file is 109 000, so new ids start at 109 001 and component `k` gets `108 999 + k`,
+    /// in the root, and the counter ends at 110 000.
+    #[test]
+    fn loading_names_many_unplaced_components_past_many_taken_numbers() {
+        let components: Vec<Value> =
+            std::iter::once(serde_json::json!({"id": 1, "name": "A"})).chain((2..=1000).map(|k| serde_json::json!({"id": k, "name": "P"}))).collect();
+        let occurrences: Vec<Value> = (1..=9000).map(|i| serde_json::json!({"id": 100_000 + i, "component": 1, "name": format!("P:{i}")})).collect();
+        let json = edited(&Document::new("audit shape"), |v| {
+            v["components"] = components.into();
+            v["occurrences"] = occurrences.into();
+        });
+        let d = read(&json).unwrap();
+        let placed: Vec<_> = d.occurrences[9000..].iter().map(|o| (o.id, o.component, o.parent, o.name.clone())).collect();
+        let expected: Vec<_> = (2..=1000u64).map(|k| (108_999 + k, k, 0, format!("P:{}", 8999 + k))).collect();
+        assert_eq!(placed, expected);
+        assert_eq!(d.next_id, 110_000);
     }
 
     #[test]

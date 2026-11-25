@@ -96,6 +96,21 @@ fn aliases_and_defaults_choose_the_accent() {
     assert_eq!(TEST_SET.primary("warm_bar", true, solidcraft_theme::ColorVision::Off), Color32::from_rgb(0xd0, 0x60, 0x20));
 }
 
+/// An id resolves the same the first time and once remembered, and the icon audit still hears
+/// of an id asked for again after it was remembered.
+#[test]
+fn a_remembered_icon_resolves_the_same_and_is_still_audited() {
+    for name in ["bar", "warm_bar", "lost", "no_such_icon"] {
+        let (first, again) = (TEST_SET.resolve(name), TEST_SET.resolve(name));
+        assert_eq!((first.master, first.accent, first.placeholder), (again.master, again.accent, again.placeholder), "{name}");
+    }
+    audit::start();
+    let _ = TEST_SET.resolve("warm_bar");
+    let heard: Vec<String> = audit::take().into_iter().map(|r| r.name).collect();
+    audit::stop();
+    assert_eq!(heard, ["warm_bar"]);
+}
+
 #[test]
 fn a_set_without_artwork_draws_nothing() {
     static EMPTY: IconSet = IconSet::new(IconData::EMPTY);
@@ -153,4 +168,49 @@ fn an_extended_set_draws_the_hosts_masters_first_in_the_sets_palette() {
     // The set it extends is unchanged.
     assert_eq!(TEST_SET.master_ids(), ["bar", "placeholder"]);
     assert_eq!(drawn(&TEST_SET, "warm_bar"), drawn(&TEST_SET, "bar"));
+}
+
+static ADDING: IconSet = IconSet::new(TEST_DATA);
+
+#[test]
+fn added_masters_draw_in_the_sets_roles_and_never_replace_its_own() {
+    let look = Look::themed(false, None, solidcraft_theme::ColorVision::Off);
+    // Drawn before it is added: the placeholder; added: its own artwork, in the theme's roles.
+    assert!(ADDING.resolve("plugin:a").placeholder);
+    let dot = "<svg viewBox='0 0 64 64'><circle cx='32' cy='32' r='20' fill='#236ead'/></svg>";
+    ADDING.add("plugin:a", dot).unwrap();
+    let added = ADDING.resolve("plugin:a");
+    assert_eq!((added.master, added.placeholder), ("plugin:a", false));
+    let doc = ADDING.doc_for("plugin:a", 32).unwrap();
+    let light = render(doc, look, 32).unwrap();
+    let dark = render(doc, Look::themed(true, None, solidcraft_theme::ColorVision::Off), 32).unwrap();
+    assert_ne!(light.data(), dark.data(), "the role follows the theme");
+    assert_ne!(Some(light.data()), render(ADDING.doc_for(PLACEHOLDER, 32).unwrap(), look, 32).as_ref().map(|p| p.data()));
+    // The set's own names, the placeholder and an empty name are not for adding.
+    for name in ["bar", "warm_bar", "placeholder", ""] {
+        assert!(ADDING.add(name, dot).is_err(), "{name}");
+    }
+    assert_eq!(ADDING.resolve("bar").accent, ADDING.accent_index("cool"), "bar is still the set's");
+    // The first artwork added under a name stays.
+    ADDING.add("plugin:a", "<svg><path d='M8 8L56 56' stroke='#34465b'/></svg>").unwrap();
+    assert!(std::ptr::eq(ADDING.doc_for("plugin:a", 32).unwrap(), doc));
+}
+
+#[test]
+fn added_artwork_outside_the_subset_is_refused() {
+    let big = format!("<svg>{}</svg>", "<path d='M8 8L9 9' stroke='#34465b'/>".repeat(2000));
+    for (name, src) in [
+        ("colour", "<svg><circle cx='32' cy='32' r='20' fill='#ff0000'/></svg>".to_owned()),
+        ("image", "<svg><image href='https://example.com/a.png' width='64' height='64'/></svg>".to_owned()),
+        ("use", "<svg><use href='other.svg#a'/></svg>".to_owned()),
+        ("script", "<svg><script>alert(1)</script></svg>".to_owned()),
+        ("style", "<svg><style>path{fill:red}</style></svg>".to_owned()),
+        ("text", "<svg><text x='1' y='1'>A</text></svg>".to_owned()),
+        ("relative", "<svg><path d='m8 8l40 40' stroke='#34465b'/></svg>".to_owned()),
+        ("deep", format!("<svg>{}{}</svg>", "<g>".repeat(40), "</g>".repeat(40))),
+        ("big", big),
+    ] {
+        assert!(ADDING.add(&format!("plugin:bad:{name}"), &src).is_err(), "{name}");
+        assert!(ADDING.resolve(&format!("plugin:bad:{name}")).placeholder, "{name}");
+    }
 }

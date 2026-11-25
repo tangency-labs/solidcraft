@@ -15,6 +15,9 @@
     clippy::disallowed_methods
 )] // test
 
+#[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
+
 mod common;
 
 use common::{kernel_copy, rel, volume};
@@ -49,7 +52,9 @@ fn pick(b: &Body, p: [f64; 3]) -> usize {
 fn round(b: &Body, points: &[[f64; 3]], r: f64, chain: bool) {
     let seeds: Vec<usize> = points.iter().map(|&p| pick(b, p)).collect();
     let edges = if chain {
-        tangent_chain(b, &seeds, TANGENT).unwrap()
+        let chain = tangent_chain(b, None, &seeds, &[], TANGENT).unwrap();
+        assert!(chain.undecided.is_empty(), "{chain:?}");
+        chain.members
     } else {
         seeds
     };
@@ -106,11 +111,7 @@ fn exact_wedge() -> Body {
 
 #[test]
 fn rounds_as_the_exact_wedge_does() {
-    let fixes: Vec<String> = serde_json::from_str(include_str!(
-        "../../solidcore/tests/kernel_cases/fixes.json"
-    ))
-    .unwrap();
-    session::set_thread_fixes(fixes.iter().map(String::as_str)).unwrap();
+    session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
     let record: Record =
         serde_json::from_str(include_str!("data/raked_wedge_noisy_cylinders.json")).unwrap();
     let (noisy, _) = Body::from_record(&record, true).unwrap();

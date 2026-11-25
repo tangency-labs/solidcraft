@@ -41,20 +41,21 @@ pub use super::p1::PrimitiveCreation;
 pub use access::PrimitiveCreationAccess;
 pub use taper_walls::{CornerRefusal, TaperCornerRefusal};
 
-use crate::curve::curve::{Curve, CurveKind};
+use crate::curve::curve::Curve;
+use crate::error::Result;
+use crate::kernel::Kernel;
 use crate::nurbs::b_spline_curve::p1::BSplineCurve;
 
-/// The B-spline an `SmBSplineCurve` cast reads: B-splines and the analytic kinds
-/// built on one (`None` for the kinds upstream's cast would misread).
-fn as_bspline(curve: &Curve) -> Option<BSplineCurve> {
-    match curve.kind() {
-        CurveKind::BSpline(c) => Some(c.clone()),
-        CurveKind::Line(c) => Some(c.base().clone()),
-        CurveKind::Ellipse(c) => Some(c.base().clone()),
-        CurveKind::Parabola(c) => Some(c.base().clone()),
-        CurveKind::Hyperbola(c) => Some(c.base().clone()),
-        _ => None,
-    }
+/// The B-spline an `SmBSplineCurve` cast reaches: B-splines and the analytic kinds
+/// built on one, with the NURB upstream's `SmLine` and `SmEllipse` hold (#15938; the
+/// port builds theirs lazily, and a copy of the bare base refuses with 1001). `None`
+/// for the kinds upstream's cast would misread.
+///
+/// # Errors
+///
+/// `Unported` from `MakeNurb`.
+fn as_bspline(kernel: &Kernel, curve: &Curve) -> Result<Option<BSplineCurve>> {
+    super::p3::bspline_with_nurb(kernel, curve)
 }
 
 #[cfg(test)]
@@ -64,7 +65,8 @@ mod tests {
     //! deferred construction.
     use super::*;
     use crate::curve::composite_curve::{OffsetCornerType, OffsetMapAttribute};
-    use crate::error::{Result, SolidError};
+    use crate::error::primitive::PrimitiveFailure;
+    use crate::error::{ErrorKind, Result, SolidError};
     use crate::geom::attribute::TagData;
     use crate::geom::axis2_placement::Axis2Placement;
     use crate::geom::context::MarkType;
@@ -286,6 +288,14 @@ mod tests {
     fn primitive() -> PrimitiveCreation {
         PrimitiveCreation::new(Some(RegionId::from_index(0)), 0, false)
     }
+    /// The primitive cause of a failed result.
+    fn cause<T>(result: &Result<T>) -> Option<PrimitiveFailure> {
+        result
+            .as_ref()
+            .err()
+            .and_then(SolidError::primitive_failure)
+            .copied()
+    }
     fn code<T>(result: &Result<T>) -> Option<i32> {
         match result {
             Err(e) if e.upstream_status().is_some() => e.upstream_status(),
@@ -310,6 +320,81 @@ mod tests {
         let short =
             primitive().create_partial_cone(&mut a, B, 1.5e-12, 1.0, 1.0, 0.0, 90.0, &frame);
         assert_eq!((code(&short), a.b.editing_enabled()), (Some(1001), true));
+        // the caller's height, turn and side are refused by name, keeping SM_ERR
+        assert_eq!(
+            cause(&low),
+            Some(PrimitiveFailure::HeightTooSmall {
+                height: 0.0,
+                minimum: crate::math::EFF_ZERO,
+            })
+        );
+        assert_eq!(
+            cause(&unturned),
+            Some(PrimitiveFailure::SweepAngleTooSmall {
+                angle: 0.0,
+                minimum: crate::math::EFF_ZERO,
+            })
+        );
+        assert!(
+            matches!(
+                cause(&short),
+                Some(PrimitiveFailure::ConeSideTooShort { length, minimum })
+                    if length == 1.5e-12 && minimum > length
+            ),
+            "{short:?}"
+        );
+        assert_eq!(short.err().map(|e| e.kind()), Some(ErrorKind::InvalidInput));
+        Ok(())
+    }
+
+    /// A cone of no radius has only its side and its axis: refused by name with the radii
+    /// as built, keeping `SM_ERR`.
+    #[test]
+    fn a_partial_cone_of_no_radius_is_refused_with_its_radii() -> Result<()> {
+        let mut a = Model::new()?;
+        let none = primitive().create_partial_cone(
+            &mut a,
+            B,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            90.0,
+            &Axis2Placement::IDENTITY,
+        );
+        assert_eq!(code(&none), Some(1001));
+        assert!(
+            matches!(
+                cause(&none),
+                Some(PrimitiveFailure::ConeHasNoRadius { base, top, minimum })
+                    if base == 0.0 && top == 0.0 && minimum > 0.0
+            ),
+            "{none:?}"
+        );
+        Ok(())
+    }
+
+    /// A frame whose axes are one direction gives the revolved profile no frame: refused
+    /// by name, with the frame's error as the cause, keeping `SM_ERR`.
+    #[test]
+    fn a_degenerate_frame_gives_the_profile_no_frame() -> Result<()> {
+        let frame = Axis2Placement::from_stored(Point3::ZERO, Vec3::Z, Vec3::Z);
+        let mut a = Model::new()?;
+        let sphere = primitive().create_partial_sphere(&mut a, B, 1.0, 0.0, 90.0, &frame);
+        let torus = primitive().create_partial_torus(&mut a, B, 3.0, 1.0, 0.0, 90.0, &frame);
+        for result in [&sphere, &torus] {
+            assert_eq!(code(result), Some(1001), "{result:?}");
+            assert_eq!(
+                cause(result),
+                Some(PrimitiveFailure::ProfileFrameDegenerate)
+            );
+            let cause_kind = result
+                .as_ref()
+                .err()
+                .and_then(SolidError::cause)
+                .map(SolidError::kind);
+            assert_eq!(cause_kind, Some(ErrorKind::InvalidInput), "{result:?}");
+        }
         Ok(())
     }
 
@@ -343,6 +428,10 @@ mod tests {
             &mut transferred,
         );
         assert_eq!(code(&result), Some(1001));
+        assert_eq!(
+            cause(&result),
+            Some(PrimitiveFailure::TooFewProfiles { profiles: 1 })
+        );
         assert!(starts.is_empty() && sides.is_empty() && ends.is_empty());
         assert_eq!(transferred, vec![false]);
         assert!(curves.first().is_some_and(Option::is_some));
@@ -422,6 +511,7 @@ mod tests {
             &mut a, B, 1.0, &path, 0.0, true, false, &mut stale, &mut d, &mut e,
         );
         assert_eq!(code(&pipe), Some(1006));
+        assert_eq!(cause(&pipe), Some(PrimitiveFailure::NoRegion));
         assert!(stale.is_empty());
         Ok(())
     }
@@ -502,6 +592,28 @@ mod tests {
         assert_eq!(list, ids);
         assert_eq!(keys(&a, &ids)?, [before[2], before[0], before[1]]);
         assert!(a.deleted.is_empty());
+        Ok(())
+    }
+
+    /// A tree that names a B-rep twice: left on the stack, it leaves more B-reps than it
+    /// was given (`SM_ERR`, the caller's tree); after a union, it leaves a slot with no
+    /// B-rep (`SM_ERR_NULL_POINTER`).
+    #[test]
+    fn a_tree_naming_a_brep_twice_is_refused_by_name() -> Result<()> {
+        let (mut a, ids) = models(0)?;
+        let mut list = ids.clone();
+        let more = a.boolean_trees(&mut list, &[0, 0]);
+        assert_eq!(code(&more), Some(1001));
+        assert_eq!(
+            cause(&more),
+            Some(PrimitiveFailure::TreeLeavesMoreBreps { left: 2, given: 1 })
+        );
+        assert_eq!(more.err().map(|e| e.kind()), Some(ErrorKind::InvalidInput));
+        let (mut a, ids) = models(1)?;
+        let mut list = ids.clone();
+        let empty = a.boolean_trees(&mut list, &[0, 1, -1, 0]);
+        assert_eq!(code(&empty), Some(1006));
+        assert_eq!(cause(&empty), Some(PrimitiveFailure::TreeLeftNoBrep));
         Ok(())
     }
 

@@ -9,7 +9,7 @@ use solidcraft_theme::Tokens;
 #[derive(Clone, Debug, PartialEq)]
 pub struct HostSurfaceAppearance {
     pub fill: Color32,
-    pub contrast: ContrastOutcome,
+    pub contrast: Option<ContrastOutcome>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -48,6 +48,11 @@ impl HostSurfaceStyle {
             if invalid {
                 return fallback_appearance(&fallback, ContrastFailure::InvalidTokens);
             }
+            // The theme already resolves the ribbon's opacity. Keep that same
+            // backing for workspace panels instead of applying a second floor.
+            if !opaque && !force_opaque && requested_opacity.is_none() {
+                return HostSurfaceAppearance { fill, contrast: None };
+            }
             let requested = if opaque || force_opaque { 1.0 } else { requested_opacity.unwrap_or(f32::from(fill.a()) / 255.0) };
             resolve_appearance(fill, &authored, &fallback, requested)
         };
@@ -68,17 +73,19 @@ impl HostSurfaceStyle {
     }
 
     pub fn palette(&self, appearance: &HostSurfaceAppearance) -> &Tokens {
-        if matches!(appearance.contrast, ContrastOutcome::RetainReadableFallback { .. }) { &self.fallback } else { &self.authored }
+        if matches!(appearance.contrast, Some(ContrastOutcome::RetainReadableFallback { .. })) { &self.fallback } else { &self.authored }
     }
 }
 
 fn fallback_appearance(tokens: &Tokens, reason: ContrastFailure) -> HostSurfaceAppearance {
-    HostSurfaceAppearance { fill: tokens.panel, contrast: ContrastOutcome::RetainReadableFallback { reason } }
+    HostSurfaceAppearance { fill: tokens.panel, contrast: Some(ContrastOutcome::RetainReadableFallback { reason }) }
 }
 
 fn resolve_appearance(fill: Color32, tokens: &Tokens, fallback: &Tokens, requested: f32) -> HostSurfaceAppearance {
     match solidcraft_theme::panel_surface_fill(fill, tokens, requested) {
-        Some(fill) => HostSurfaceAppearance { fill, contrast: ContrastOutcome::Readable { effective_background_alpha: f32::from(fill.a()) / 255.0 } },
+        Some(fill) => {
+            HostSurfaceAppearance { fill, contrast: Some(ContrastOutcome::Readable { effective_background_alpha: f32::from(fill.a()) / 255.0 }) }
+        }
         None => fallback_appearance(fallback, ContrastFailure::UnreadableAtFullOpacity),
     }
 }

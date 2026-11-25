@@ -13,7 +13,7 @@
 //! tolerance), nothing is taken for an answer: the face is refused, named with the point and the
 //! reason ([`Face::refusal`]).
 
-use std::collections::HashMap;
+use crate::hash::BitsMap;
 use std::sync::Mutex;
 
 use solidcore::eval::plan::EvalSurface;
@@ -26,7 +26,7 @@ pub(crate) struct Face {
     /// How far (mm) a node may lie off the surface's parameter range and still be the face's.
     tolerance: f64,
     /// `(d, other parameter, reach)`, the two numbers by their bits, to the kernel's answer.
-    collapsed: Mutex<HashMap<(usize, u64, u64), bool>>,
+    collapsed: Mutex<BitsMap<(usize, u64, u64), bool>>,
     /// The first point where the kernel could not tell, with its reason.
     refused: Mutex<Option<String>>,
     /// Calls of the kernel's classifier made, for the tests.
@@ -41,7 +41,7 @@ impl Face {
             eval,
             kernel,
             tolerance: if tolerance.is_finite() { tolerance.max(0.0) } else { 0.0 },
-            collapsed: Mutex::new(HashMap::new()),
+            collapsed: Mutex::new(BitsMap::default()),
             refused: Mutex::new(None),
             #[cfg(test)]
             asked: std::sync::atomic::AtomicUsize::new(0),
@@ -134,7 +134,7 @@ impl Face {
         Ok(answer)
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<(usize, u64, u64), bool>> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, BitsMap<(usize, u64, u64), bool>> {
         // The map holds only finished answers, so one left by a panicking thread is sound.
         self.collapsed.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }

@@ -22,11 +22,7 @@ use crate::boolean::boolean;
 use crate::{make_box, make_cylinder, session, Body, BooleanOp, CheckLevel};
 
 fn fixes() {
-    let fixes: Vec<String> = serde_json::from_str(include_str!(
-        "../../solidcore/tests/kernel_cases/fixes.json"
-    ))
-    .unwrap();
-    session::set_fixes(fixes.iter().map(String::as_str)).unwrap();
+    session::set_fixes(crate::test_corpus::solidcraft_fixes::solidcraft_fix_names()).unwrap();
 }
 
 /// The faces of `b` that are no plane, as (with a definition, without one).
@@ -123,7 +119,9 @@ fn the_raked_wedges_rounds_keep_their_definitions() {
             seeds.push(edge_through(&b, p));
         }
     }
-    let chain = crate::blend::tangent_chain(&b, &seeds, 0.5_f64.to_radians()).unwrap();
+    let chain = crate::blend::tangent_chain(&b, None, &seeds, &[], 0.5_f64.to_radians()).unwrap();
+    assert!(chain.undecided.is_empty(), "{chain:?}");
+    let chain = chain.members;
     blend(&b, Blend::Round, &chain, &[0.854], &[], Corners::Filled).unwrap();
     let report = b.check(CheckLevel::All).unwrap();
     assert!(report.is_valid(), "{}", report.text);
@@ -167,7 +165,10 @@ fn exact_wedge_rounds() -> (usize, usize) {
     let round = |pts: &[[f64; 3]], r: f64, chain: bool| {
         let seeds: Vec<usize> = pts.iter().map(|&p| edge_through(&b, p)).collect();
         let edges = if chain {
-            crate::blend::tangent_chain(&b, &seeds, 0.5_f64.to_radians()).unwrap()
+            let chain =
+                crate::blend::tangent_chain(&b, None, &seeds, &[], 0.5_f64.to_radians()).unwrap();
+            assert!(chain.undecided.is_empty(), "{chain:?}");
+            chain.members
         } else {
             seeds
         };

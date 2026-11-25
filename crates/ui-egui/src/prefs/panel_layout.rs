@@ -20,6 +20,8 @@ struct State {
     workspace: String,
     source_name: Option<String>,
     popup: Option<Popover>,
+    /// A replacement or deletion waiting for the user's answer in the shared confirmation.
+    confirm: Option<Confirming>,
     escape: bool,
     view: Option<(crate::panel_runtime::PanelLayoutSnapshot, Arc<LayoutPreferencesView>)>,
     list_focus: Option<Id>,
@@ -36,12 +38,25 @@ struct Popover {
 #[derive(Clone)]
 enum PopoverKind {
     Save { name: String, chosen: usize },
-    Replace { name: String },
+}
+
+/// What the shared confirmation asks about: replacing or deleting a layout the user saved.
+#[derive(Clone)]
+enum Confirming {
+    Replace(String),
+    Delete(String),
 }
 
 /// Reserve the first Escape for our popover, before the Preferences footer.
 pub(super) fn reserve_escape(ctx: &egui::Context) {
     let key = Id::unique(STATE);
+    // An open confirmation answers Escape with Cancel; Preferences stays open.
+    if ctx.data_mut(|data| data.get_temp_mut_or_default::<State>(key).confirm.is_some())
+        && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+    {
+        ctx.data_mut(|data| data.get_temp_mut_or_default::<State>(key).escape = true);
+        return;
+    }
     let origin = ctx.data_mut(|data| data.get_temp_mut_or_default::<State>(key).popup.as_ref().map(|popup| popup.origin));
     let Some(origin) = origin else { return };
     if !egui::Popup::is_id_open(ctx, origin.with("popup")) || !ctx.read_response(origin).is_some_and(|owner| owner.enabled()) {
@@ -58,6 +73,7 @@ pub(super) fn closed(ctx: &egui::Context) {
     let origin = ctx.data_mut(|data| {
         let state = data.get_temp_mut_or_default::<State>(key);
         state.escape = false;
+        state.confirm = None;
         state.popup.take().map(|popup| popup.origin)
     });
     if let Some(origin) = origin {
@@ -67,7 +83,6 @@ pub(super) fn closed(ctx: &egui::Context) {
 
 pub(super) fn show(app: &mut SolveApp, ui: &mut Ui) {
     if !crate::panel_runtime::preferences_enabled(app) {
-        ui_kit::settings_section(ui, "panel_layout", app.tr("ui.panel_layout.panel_layout"), |ui| panel_system(app, ui));
         return;
     }
     let key = Id::unique(STATE);
@@ -82,6 +97,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut Ui) {
         state.focused = 0;
         state.source_name = None;
         state.popup = None;
+        state.confirm = None;
     }
     if !state.source_name.as_ref().is_some_and(|name| view.entries.iter().any(|entry| entry.matches && &entry.name == name))
         && let Some(entry) = view.entries.iter().find(|entry| entry.selected)
@@ -90,19 +106,14 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut Ui) {
     }
     ui_kit::settings_section(ui, "panel_layout", app.tr("ui.panel_layout.panel_layout"), |ui| {
         ui.spacing_mut().item_spacing.y = Tokens::get().space_16;
-        panel_system(app, ui);
         workspace_selector(app, ui, &view);
         tiles(app, ui, &view, &mut state);
     });
     if ui.is_visible() {
         popover(app, ui, &view, &mut state);
+        confirm(app, ui.ctx(), &view, &mut state);
         ui.ctx().data_mut(|data| data.insert_temp(key, state));
     }
-}
-
-fn panel_system(app: &mut SolveApp, ui: &mut Ui) {
-    ui_kit::checkbox(ui, solidcraft_ui_text::tr("prefs.shared_panel_layout"), &mut app.preferences.shared_panel_layout)
-        .backing_on_hover_text(solidcraft_ui_text::tr("prefs.shared_panel_layout_help"));
 }
 
 fn workspace_selector(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesView) {
@@ -243,7 +254,7 @@ fn tiles(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesView, state: &
                 .iter()
                 .map(|item| match item {
                     Tile::Custom => app.tr("ui.panel_layout.custom"),
-                    Tile::Saved(entry) => entry.name.as_str(),
+                    Tile::Saved(entry) => preset_label(app, view, entry),
                     Tile::Save => app.tr("ui.panel_layout.save_as_tile"),
                 })
                 .collect();
@@ -259,8 +270,9 @@ fn tiles(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesView, state: &
             list.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ListBox, ui.is_enabled(), &label));
             let mut activate = false;
             let mut menu = false;
+            let mut delete = false;
             let previous_focus = state.focused;
-            if list.has_focus() && state.popup.is_none() {
+            if list.has_focus() && state.popup.is_none() && state.confirm.is_none() {
                 ui.memory_mut(|memory| {
                     memory.set_focus_lock_filter(list_id, egui::EventFilter { horizontal_arrows: true, vertical_arrows: true, ..Default::default() })
                 });
@@ -284,6 +296,9 @@ fn tiles(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesView, state: &
                     activate =
                         input.consume_key(egui::Modifiers::NONE, egui::Key::Enter) || input.consume_key(egui::Modifiers::NONE, egui::Key::Space);
                     menu = input.consume_key(egui::Modifiers::SHIFT, egui::Key::F10) || input.consume_key(egui::Modifiers::NONE, egui::Key::Menu);
+                    // Only a layout the user saved can be deleted; the key does nothing on other tiles.
+                    delete = matches!(items.get(state.focused), Some(Tile::Saved(entry)) if entry.user)
+                        && input.consume_key(egui::Modifiers::NONE, egui::Key::Delete);
                 });
             }
             reveal_focus |= state.focused != previous_focus || list.gained_focus();
@@ -340,6 +355,16 @@ fn tiles(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesView, state: &
                                 if let Tile::Saved(entry) = item
                                     && entry.user
                                 {
+                                    // The focused tile, or the one under the pointer: a click does not
+                                    // always leave the keyboard focus on the list.
+                                    let hovered_delete = !delete
+                                        && state.popup.is_none()
+                                        && state.confirm.is_none()
+                                        && response.hovered()
+                                        && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Delete));
+                                    if (delete && state.focused == index) || hovered_delete {
+                                        open_delete(ui.ctx(), state, entry);
+                                    }
                                     tile_menu(app, ui, state, &response, entry, menu && state.focused == index);
                                 }
                             }
@@ -351,6 +376,15 @@ fn tiles(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesView, state: &
     });
 }
 
+fn preset_label<'a>(app: &'a SolveApp, view: &'a LayoutPreferencesView, entry: &'a LayoutPreferenceEntry) -> &'a str {
+    if !entry.user
+        && let Some(workspace) = view.workspaces.iter().find(|workspace| workspace.id == entry.layout.workspace)
+    {
+        return app.tr(&workspace.title_key);
+    }
+    &entry.name
+}
+
 fn tile(app: &SolveApp, ui: &mut Ui, item: Tile<'_>, view: &LayoutPreferencesView, state: &State, focused: bool) -> Response {
     let t = Tokens::get();
     let (rect, response) = ui.allocate_exact_size(vec2(TILE_WIDTH, TILE_HEIGHT), Sense::CLICK);
@@ -359,7 +393,7 @@ fn tile(app: &SolveApp, ui: &mut Ui, item: Tile<'_>, view: &LayoutPreferencesVie
         Tile::Custom => (app.tr("ui.panel_layout.custom"), true, t.pref_note_fill, t.form_ink),
         Tile::Saved(entry) => {
             let selected = entry.matches && state.source_name.as_ref().map_or(entry.selected, |name| name == &entry.name);
-            (entry.name.as_str(), selected, if selected { t.selected_bg } else { t.pref_well }, t.form_ink)
+            (preset_label(app, view, entry), selected, if selected { t.selected_bg } else { t.pref_well }, t.form_ink)
         }
         Tile::Save => (app.tr("ui.panel_layout.save_as_tile"), false, t.pref_well, t.form_primary),
     };
@@ -457,23 +491,95 @@ fn tile_menu(app: &SolveApp, ui: &mut Ui, state: &mut State, tile: &Response, en
             for x in [-4.0, 0.0, 4.0] {
                 ui.painter().circle_filled(at.center() + vec2(x, 0.0), 1.0, t.form_dim);
             }
-            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), app.tr("ui.panel_layout.replace_current")));
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), app.tr("ui.options")));
             crate::scenario::publish_target(&format!("prefs:panel_layout:menu:{}", entry.name), at);
             response
         },
         |ui| {
-            let action = ui_kit::button(ui, app.tr("ui.panel_layout.replace_current"), ui_kit::Button::Ghost);
+            // The same rows as the app's other menus: icons, and Delete in the danger style
+            // after a separator (as the theme and drawing-sheet menus).
+            // The list-menu width, as `ui_kit::Menu::show` sets it inside its frame.
+            ui.set_width((ui_kit::LIST_W - Tokens::get().space_6 * 2.0 - 2.0).max(0.0));
+            ui_kit::Menu::heading(ui, &entry.name);
+            let action = ui_kit::MenuItem::new("replace_current", app.tr("ui.panel_layout.replace_current"), "save").show(ui);
             if keyboard {
                 action.request_focus();
             }
+            crate::scenario::publish_target("prefs:panel_layout:menu_replace", action.rect);
             if action.clicked() {
-                state.popup = Some(Popover { origin: tile.id, kind: PopoverKind::Replace { name: entry.name.clone() }, first: true });
+                state.popup = None;
+                state.confirm = Some(Confirming::Replace(entry.name.clone()));
+                ui.close();
+            }
+            ui_kit::Menu::separator(ui);
+            let mut delete = ui_kit::MenuItem::new("delete", app.tr("ui.panel_layout.delete"), "delete");
+            delete.danger = true;
+            let delete = delete.show(ui);
+            crate::scenario::publish_target("prefs:panel_layout:delete", delete.rect);
+            if delete.clicked() {
+                open_delete(ui.ctx(), state, entry);
                 ui.close();
             }
         },
     );
     if popup.inner.is_some() {
         crate::ui_kit::settings_search::note_key_sink(ui.ctx());
+    }
+}
+
+/// Deleting always asks first, from the menu and from the Delete key alike.
+fn open_delete(ctx: &egui::Context, state: &mut State, entry: &LayoutPreferenceEntry) {
+    state.popup = None;
+    state.confirm = Some(Confirming::Delete(entry.name.clone()));
+    ctx.request_repaint();
+}
+
+/// The shared confirmation for replacing or deleting a saved layout, as for deleting a
+/// drawing sheet.
+fn confirm(app: &mut SolveApp, ctx: &egui::Context, view: &LayoutPreferencesView, state: &mut State) {
+    let Some(confirming) = state.confirm.clone() else { return };
+    let (name, icon, title, tone, ok, question) = match &confirming {
+        Confirming::Replace(name) => {
+            (name, "save", app.tr("ui.panel_layout.replace"), ui_kit::Tone::Warning, "Replace", "ui.panel_layout.confirm_replace")
+        }
+        Confirming::Delete(name) => {
+            (name, "delete", app.tr("ui.panel_layout.delete_layout"), ui_kit::Tone::Danger, "Delete", "ui.panel_layout.confirm_delete")
+        }
+    };
+    let message = solidcraft_ui_text::format(question, &[("name", name)]);
+    let (closed, action) = ui_kit::Confirm::new(Id::unique(("sc_panel_layout_confirm", icon, name)), icon, title)
+        .tone(tone)
+        .actions(ok, "Cancel", None)
+        .show(ctx, true, |ui| {
+            ui.label(&message);
+        });
+    let escape = std::mem::take(&mut state.escape);
+    if action == ui_kit::Action::Ok {
+        state.confirm = None;
+        match confirming {
+            Confirming::Replace(name) => {
+                if run(app, "layout.save", json!({"name":name,"replace":true}), Some((&name, view))) {
+                    state.focus_name = Some(name.clone());
+                    state.source_name = Some(name);
+                }
+            }
+            Confirming::Delete(name) => {
+                if run(app, "layout.delete", json!({"name":name}), None) {
+                    // The panels stay as they are; a hint must not name a layout that is gone.
+                    if state.source_name.as_ref().is_some_and(|source| commands::preset_names_equal(source, &name)) {
+                        state.source_name = None;
+                    }
+                    app.set_status(solidcraft_ui_text::format("ui.panel_layout.deleted", &[("name", &name)]), false);
+                }
+            }
+        }
+    } else if closed || escape || action == ui_kit::Action::Cancel {
+        state.confirm = None;
+    }
+    if state.confirm.is_none()
+        && let Some(list) = state.list_focus
+    {
+        ctx.memory_mut(|memory| memory.request_focus(list));
     }
 }
 
@@ -597,25 +703,6 @@ fn popover(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesView, state:
                                 ui.ctx().accesskit_node_builder(*field, |node| node.push_described_by(response.id.accesskit_id()));
                             }
                         }
-                        PopoverKind::Replace { name } => {
-                            let question = solidcraft_ui_text::format("ui.panel_layout.confirm_replace", &[("name", name)]);
-                            ui.label(egui::RichText::new(question).size(t.font_label).color(t.form_ink));
-                            ui.horizontal_wrapped(|ui| {
-                                let cancel = ui_kit::button(ui, app.tr("ui.panel_layout.cancel"), ui_kit::Button::Ghost);
-                                focus_ids.push(cancel.id);
-                                crate::scenario::publish_target("prefs:panel_layout:replace_cancel", cancel.rect);
-                                if first {
-                                    cancel.request_focus();
-                                }
-                                close |= cancel.clicked();
-                                let response = danger_button(ui, app.tr("ui.panel_layout.replace_short"));
-                                focus_ids.push(response.id);
-                                crate::scenario::publish_target("prefs:panel_layout:replace_confirm", response.rect);
-                                if response.clicked() {
-                                    save = Some(name.clone());
-                                }
-                            });
-                        }
                     }
                     trap_focus(ui, &focus_ids);
                     crate::ui_kit::settings_search::pop_force(ui);
@@ -624,22 +711,19 @@ fn popover(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesView, state:
         });
     if let Some(shown) = &shown {
         crate::scenario::publish_rect("prefs:panel_layout:popover", shown.response.rect);
-        crate::scenario::publish_rect(
-            if matches!(popup.kind, PopoverKind::Replace { .. }) { "prefs:panel_layout:replace_popover" } else { "prefs:panel_layout:save_popover" },
-            shown.response.rect,
-        );
+        crate::scenario::publish_rect("prefs:panel_layout:save_popover", shown.response.rect);
     }
     if let Some(name) = replace {
-        popup.kind = PopoverKind::Replace { name };
-        popup.first = true;
+        // Replacing a saved layout asks in the shared confirmation, as from its menu.
+        state.confirm = Some(Confirming::Replace(name));
+        close = true;
     }
-    if let Some(name) = save {
-        let is_replace = matches!(popup.kind, PopoverKind::Replace { .. });
-        if run(app, "layout.save", json!({"name":name,"replace":is_replace}), Some((&name, view))) {
-            state.focus_name = Some(name.clone());
-            state.source_name = Some(name);
-            close = true;
-        }
+    if let Some(name) = save
+        && run(app, "layout.save", json!({"name":name}), Some((&name, view)))
+    {
+        state.focus_name = Some(name.clone());
+        state.source_name = Some(name);
+        close = true;
     }
     if close {
         egui::Popup::close_id(ui.ctx(), popup_id);

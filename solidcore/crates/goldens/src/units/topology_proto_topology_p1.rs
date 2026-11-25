@@ -95,6 +95,9 @@ use solidcore::{EntityRef, SolidError};
 
 #[path = "topology_proto_topology_p1/script.rs"]
 pub(super) mod script;
+#[cfg(test)]
+#[path = "topology_proto_topology_p1/status_proof.rs"]
+mod status_proof;
 use script::{
     kind, list_op as lop, pool as pk, proto_op as p, proto_op_p2 as q, slot, tobj, PROBE_TYPES,
 };
@@ -102,6 +105,10 @@ use script::{
 use crate::case::{CaseContext, CaseSource};
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+
+// The case's transform certificate log (test builds only).
+#[cfg(test)]
+use super::topology_brep_p5::transform_certificate::Fired as CertificateLog;
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 1500;
@@ -695,10 +702,113 @@ impl From<HarnessError> for Fail {
 pub(super) fn st<T>(r: solidcore::Result<T>) -> Result<Result<T, f64>, Fail> {
     match r {
         Ok(v) => Ok(Ok(v)),
-        Err(e) => match Output::unported(&e) {
-            Some(o) => Err(Fail::Deferred(Box::new(o))),
-            None => Ok(Err(status(&e))),
-        },
+        Err(e) => {
+            if let Some(o) = Output::unported(&e) {
+                return Err(Fail::Deferred(Box::new(o)));
+            }
+            #[cfg(test)]
+            witness::error(&e);
+            Ok(Err(status(&e)))
+        }
+    }
+}
+
+/// What a script run did at each step, for the proof tests of the proto statuses passed
+/// on (WR-662, WR-73, #18927). Off unless a test calls [`witness::start`] on its thread.
+#[cfg(test)]
+pub(super) mod witness {
+    use std::cell::RefCell;
+
+    /// One step's returned error and the run's back-pointer consistency before the step.
+    #[derive(Debug, Clone)]
+    pub struct StepError {
+        /// The step's index in the script.
+        pub step: usize,
+        /// The step's op code.
+        pub op: i64,
+        /// The error a manager call of the step returned.
+        pub error: solidcore::SolidError,
+        /// The first back-pointer inconsistency of the state before the step, if any
+        /// (`ProtoRun::consistency`).
+        pub pre: Option<String>,
+    }
+
+    /// One `RemoveCoincidentNoEdgeProtoVertex` call: its answer and whether the manager
+    /// listed the proto vertex before and after it.
+    #[derive(Debug, Clone, Copy)]
+    pub struct Removal {
+        /// The step's index in the script.
+        pub step: usize,
+        /// The call's answer.
+        pub answer: bool,
+        /// The manager listed the proto vertex before the call.
+        pub listed_before: bool,
+        /// The manager lists the proto vertex after the call.
+        pub listed_after: bool,
+    }
+
+    /// Everything one run recorded.
+    #[derive(Debug, Default)]
+    pub struct Log {
+        /// The steps' errors, in order.
+        pub errors: Vec<StepError>,
+        /// The removal calls, in order.
+        pub removals: Vec<Removal>,
+        /// The run is a proto-topology script (its steps' states are recorded); a list
+        /// or assembly script calls the lists directly and records no state.
+        pub proto: bool,
+        step: usize,
+        op: i64,
+        pre: Option<String>,
+    }
+
+    thread_local! {
+        static LOG: RefCell<Option<Log>> = const { RefCell::new(None) };
+    }
+
+    /// Starts recording on this thread (clearing an earlier record).
+    pub fn start() {
+        LOG.with(|l| *l.borrow_mut() = Some(Log::default()));
+    }
+
+    /// Stops recording and returns what was recorded.
+    pub fn take() -> Log {
+        LOG.with(|l| l.borrow_mut().take()).unwrap_or_default()
+    }
+
+    /// Whether this thread records.
+    pub(super) fn on() -> bool {
+        LOG.with(|l| l.borrow().is_some())
+    }
+
+    /// A new step begins, with the state's consistency before it.
+    pub(super) fn step(step: usize, op: i64, pre: Option<String>) {
+        LOG.with(|l| {
+            if let Some(log) = l.borrow_mut().as_mut() {
+                (log.step, log.op, log.pre) = (step, op, pre);
+                log.proto = true;
+            }
+        });
+    }
+
+    /// A manager call of the current step returned `e`.
+    pub fn error(e: &solidcore::SolidError) {
+        LOG.with(|l| {
+            if let Some(log) = l.borrow_mut().as_mut() {
+                let (step, op, pre) = (log.step, log.op, log.pre.clone());
+                log.errors.push(StepError { step, op, error: e.clone(), pre });
+            }
+        });
+    }
+
+    /// A removal call of the current step answered `answer`.
+    pub(super) fn removal(answer: bool, listed_before: bool, listed_after: bool) {
+        LOG.with(|l| {
+            if let Some(log) = l.borrow_mut().as_mut() {
+                let step = log.step;
+                log.removals.push(Removal { step, answer, listed_before, listed_after });
+            }
+        });
     }
 }
 
@@ -2209,6 +2319,105 @@ impl ProtoRun {
         c.is_none_or(|c| self.pool.live_h(c) && self.pool.kinds.get(c.0) == Some(&pk::CURVE))
     }
 
+    /// The first back-pointer inconsistency of the manager's lists, if any: a proto edge's
+    /// end proto vertices list it once per end, every definition is listed by its owner
+    /// and its owner by the manager once, overlaps and coincidences are symmetric, and a
+    /// proto vertex lists only proto edges ending there. The library keeps these; a script
+    /// can break them with its single-list ops (`PV_ADD_PE`, `PE_ADD_ED`, ...).
+    #[cfg(test)]
+    pub(super) fn consistency(&self) -> Option<String> {
+        let m = &self.mgr;
+        if !self.mgr_alive {
+            return None;
+        }
+        for i in 0..self.n_pe {
+            let id = ProtoEdgeId::from_index(i);
+            let Some(e) = m.proto_edge(id) else { continue };
+            for (w, pv) in [("start", e.start_proto_vertex()), ("end", e.end_proto_vertex())] {
+                if let Some(pv) = pv {
+                    if let Some(v) = m.proto_vertex(pv) {
+                        let ends = usize::from(e.start_proto_vertex() == Some(pv))
+                            + usize::from(e.end_proto_vertex() == Some(pv));
+                        let listed = v.proto_edges().iter().filter(|&&x| x == id).count();
+                        if listed != ends {
+                            return Some(format!(
+                                "pe{i} {w} pv{} lists it {listed} times for {ends} ends",
+                                pv.index()
+                            ));
+                        }
+                    }
+                }
+            }
+            for &ed in e.edge_definitions() {
+                if m.edge_def(ed).is_some_and(|d| d.proto_edge() != Some(id)) {
+                    return Some(format!("pe{i} lists ed{} owned elsewhere", ed.index()));
+                }
+            }
+            for &o in e.overlapping_pes() {
+                if m.proto_edge(o).is_some_and(|oe| !oe.overlapping_pes().contains(&id)) {
+                    return Some(format!("pe{i} overlap pe{} not symmetric", o.index()));
+                }
+            }
+            for &f in e.coinc_proto_faces() {
+                if m.proto_face(f).is_some_and(|pf| !pf.coinc_proto_edges().contains(&id)) {
+                    return Some(format!("pe{i} coinc pf{} not symmetric", f.index()));
+                }
+            }
+        }
+        for i in 0..self.n_pv {
+            let id = ProtoVertexId::from_index(i);
+            let Some(v) = m.proto_vertex(id) else { continue };
+            for &pe in v.proto_edges() {
+                if m.proto_edge(pe).is_some_and(|e| e.start_proto_vertex() != Some(id) && e.end_proto_vertex() != Some(id)) {
+                    return Some(format!("pv{i} lists pe{} not ending there", pe.index()));
+                }
+            }
+            for &vd in v.vertex_definitions() {
+                if m.vertex_def(vd).is_some_and(|d| d.proto_vertex() != Some(id)) {
+                    return Some(format!("pv{i} lists vd{} owned elsewhere", vd.index()));
+                }
+            }
+        }
+        for i in 0..self.n_ed {
+            let id = EdgeDefId::from_index(i);
+            let Some(d) = m.edge_def(id) else { continue };
+            if let Some(pe) = d.proto_edge() {
+                if m.proto_edge(pe).is_some() && m.proto_edges().iter().filter(|&&x| x == pe).count() != 1 {
+                    return Some(format!("ed{i} owner pe{} not listed once in the manager", pe.index()));
+                }
+            }
+            if let Some(pe) = d.proto_edge() {
+                if m.proto_edge(pe).is_some_and(|e| !e.edge_definitions().contains(&id)) {
+                    return Some(format!("ed{i} owner pe{} does not list it", pe.index()));
+                }
+            }
+        }
+        for i in 0..self.n_vd {
+            let id = VertexDefId::from_index(i);
+            let Some(d) = m.vertex_def(id) else { continue };
+            if let Some(pv) = d.proto_vertex() {
+                if m.proto_vertex(pv).is_some() && m.proto_vertices().iter().filter(|&&x| x == pv).count() != 1 {
+                    return Some(format!("vd{i} owner pv{} not listed once in the manager", pv.index()));
+                }
+            }
+            if let Some(pv) = d.proto_vertex() {
+                if m.proto_vertex(pv).is_some_and(|v| !v.vertex_definitions().contains(&id)) {
+                    return Some(format!("vd{i} owner pv{} does not list it", pv.index()));
+                }
+            }
+        }
+        for i in 0..self.n_pf {
+            let id = ProtoFaceId::from_index(i);
+            let Some(f) = m.proto_face(id) else { continue };
+            for &pe in f.coinc_proto_edges() {
+                if m.proto_edge(pe).is_some_and(|e| !e.coinc_proto_faces().contains(&id)) {
+                    return Some(format!("pf{i} coinc pe{} not symmetric", pe.index()));
+                }
+            }
+        }
+        None
+    }
+
     pub(super) fn invariant(&self) -> bool {
         let m = &self.mgr;
         if self.mgr_alive
@@ -2585,6 +2794,7 @@ fn run_proto(
     capture: f64,
     override_tol: f64,
     ops: &[Vec<f64>],
+    stop: Option<(usize, &mut Option<ProtoRun>)>,
 ) -> Result<Vec<f64>, Fail> {
     let mut k = Kernel::default();
     let brep1 = H(100_000, ClassObjectKind::Other);
@@ -2851,8 +3061,15 @@ fn run_proto(
     };
     let mut o = Vec::new();
 
-    for opv in ops {
+    let mut stop = stop;
+    for (index, opv) in ops.iter().enumerate() {
         r.pool.sync_topo();
+        if let Some((at, state)) = stop.as_mut() {
+            if *at == index {
+                **state = Some(r);
+                return Ok(o);
+            }
+        }
         let mut rd = Rd {
             v: opv,
             at: 0,
@@ -2863,6 +3080,10 @@ fn run_proto(
         let mut out: Vec<f64> = Vec::new();
         let mut status = 0.0;
         let mut skip = !r.mgr_alive;
+        #[cfg(test)]
+        if witness::on() {
+            witness::step(index, op, r.consistency());
+        }
         let mut ok = true;
         let k = &r.k;
         match op {
@@ -3307,8 +3528,11 @@ fn run_proto(
                 let pt = rd.vec();
                 match d {
                     Some(d) if !skip => {
+                        // (no absorbed hull here, so the move never fails)
                         if let Some(x) = r.mgr.vertex_def_mut(d) {
-                            x.set_position(pt);
+                            if x.set_position(k, pt).is_err() {
+                                skip = true;
+                            }
                         }
                     }
                     _ => skip = true,
@@ -3441,7 +3665,7 @@ fn run_proto(
                             }
                         }
                         if !skip {
-                            status = st0(r.mgr.remove_vertex_definition(&r.k, d, flag))?;
+                            status = st0(r.mgr.remove_vertex_definition(d, flag))?;
                         }
                     }
                     _ => skip = true,
@@ -3452,7 +3676,7 @@ fn run_proto(
                 _ => skip = true,
             },
             p::MGR_REMOVE_PE => match r.pe(rd.idx()) {
-                Some(e) if !skip => status = st0(r.mgr.remove_proto_edge(&r.k, e))?,
+                Some(e) if !skip => status = st0(r.mgr.remove_proto_edge(e))?,
                 _ => skip = true,
             },
             p::MGR_SET_TOL => {
@@ -4289,9 +4513,16 @@ fn run_proto(
                             }
                         }
                         if !skip {
+                            #[cfg(test)]
+                            let listed_before = r.mgr.proto_vertices().contains(&v);
                             let res = r
                                 .mgr
                                 .remove_coincident_no_edge_proto_vertex(k, &r.pool, e, v);
+                            #[cfg(test)]
+                            if let Ok(f) = &res {
+                                let listed_after = r.mgr.proto_vertices().contains(&v);
+                                witness::removal(*f, listed_before, listed_after);
+                            }
                             match st(res)? {
                                 Ok(f) => out.push(b(f)),
                                 Err(s) => {
@@ -4920,6 +5151,13 @@ fn run_proto(
         o.push(out.len() as f64);
         o.extend(out);
     }
+    if let Some((at, state)) = stop {
+        if at == ops.len() {
+            r.pool.sync_topo();
+            *state = Some(r);
+            return Ok(o);
+        }
+    }
     r.put_state(&mut o);
     Ok(o)
 }
@@ -5060,7 +5298,46 @@ fn constructed_transform_body(k: &mut Kernel, obj: &TObjIn) -> Result<Brep, Fail
     })
 }
 
+#[cfg(not(test))]
 fn apply_transform_op(
+    k: &mut Kernel,
+    target: Option<TransformObject<'_>>,
+    op: &TOpIn,
+) -> solidcore::Result<()> {
+    apply_transform_op_inner(k, target, op)
+}
+
+/// [`apply_transform_op`] checked against the WR-507 / WR-508 tolerance certificate
+/// (`topology_brep_p5::transform_certificate`) when the target is a B-rep. The API
+/// transforms scale tolerances (`bScaleTol` `TRUE`); only the scales have a scale.
+#[cfg(test)]
+fn apply_transform_op(
+    k: &mut Kernel,
+    target: Option<TransformObject<'_>>,
+    op: &TOpIn,
+    log: &mut CertificateLog,
+) -> solidcore::Result<()> {
+    use super::topology_brep_p5::transform_certificate::Snapshot;
+    match target {
+        Some(TransformObject::Brep(b)) => {
+            let s = match op {
+                TOpIn::Scale { s } | TOpIn::ScaleByPt { s, .. } => Some(v3(*s)),
+                _ => None,
+            };
+            let before = Snapshot::before_transform(k, b, s).expect("certificate snapshot");
+            let r = apply_transform_op_inner(k, Some(TransformObject::Brep(&mut *b)), op);
+            if r.is_ok() {
+                before
+                    .check(k, b, s, true, "proto_topology_p1", log)
+                    .expect("certificate check");
+            }
+            r
+        }
+        other => apply_transform_op_inner(k, other, op),
+    }
+}
+
+fn apply_transform_op_inner(
     k: &mut Kernel,
     target: Option<TransformObject<'_>>,
     op: &TOpIn,
@@ -5119,7 +5396,11 @@ fn append_constructed_transform_record(
     Ok(())
 }
 
-fn run_transform_sequence(obj: &TObjIn, ops: &[TOpIn]) -> Result<Vec<f64>, Fail> {
+fn run_transform_sequence(
+    obj: &TObjIn,
+    ops: &[TOpIn],
+    #[cfg(test)] log: &mut CertificateLog,
+) -> Result<Vec<f64>, Fail> {
     if !(2..=8).contains(&ops.len()) {
         return Err(harness("transform sequence length").into());
     }
@@ -5137,6 +5418,8 @@ fn run_transform_sequence(obj: &TObjIn, ops: &[TOpIn]) -> Result<Vec<f64>, Fail>
             &mut k,
             Some(TransformObject::Brep(&mut brep)),
             op,
+            #[cfg(test)]
+            log,
         ))?;
         let mut record = Vec::new();
         append_constructed_transform_record(&k, &brep, &mut record)?;
@@ -5146,7 +5429,12 @@ fn run_transform_sequence(obj: &TObjIn, ops: &[TOpIn]) -> Result<Vec<f64>, Fail>
     Ok(out)
 }
 
-fn run_transform(obj: &TObjIn, op: &TOpIn, probe: bool) -> Result<Vec<f64>, Fail> {
+fn run_transform(
+    obj: &TObjIn,
+    op: &TOpIn,
+    probe: bool,
+    #[cfg(test)] log: &mut CertificateLog,
+) -> Result<Vec<f64>, Fail> {
     let mut k = Kernel::default();
     let mut curve = None;
     let mut surface = None;
@@ -5286,7 +5574,7 @@ fn run_transform(obj: &TObjIn, op: &TOpIn, probe: bool) -> Result<Vec<f64>, Fail
         TObjIn::Other => Some(TransformObject::Other),
         TObjIn::Null => None,
     };
-    let s = transform_status(apply_transform_op(&mut k, target, op))?;
+    let s = transform_status(apply_transform_op(&mut k, target, op, #[cfg(test)] log))?;
     let mut o = vec![s];
     if let Some(frame) = &probe_frame {
         o.push(frame.initial_types.len() as f64);
@@ -5328,7 +5616,16 @@ fn run_transform(obj: &TObjIn, op: &TOpIn, probe: bool) -> Result<Vec<f64>, Fail
     Ok(o)
 }
 
+#[cfg(test)]
 pub(super) fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
+    rust_run_logged(s, &mut CertificateLog::default())
+}
+
+/// Runs the script (`rust_run` in tests), with the case's certificate log in test builds.
+fn rust_run_logged(
+    s: &Script,
+    #[cfg(test)] log: &mut CertificateLog,
+) -> Result<Vec<f64>, Fail> {
     match s {
         Script::List { slots, ops } => run_list(slots, ops),
         Script::Proto {
@@ -5337,15 +5634,57 @@ pub(super) fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
             capture,
             override_tol,
             ops,
-        } => run_proto(objects, *approx_tol, *capture, *override_tol, ops),
-        Script::Transform { obj, op } => run_transform(obj, op, false),
-        Script::ScaleProbe { obj, op } => run_transform(obj, op, true),
-        Script::TransformSequence { obj, ops } => run_transform_sequence(obj, ops),
+        } => run_proto(objects, *approx_tol, *capture, *override_tol, ops, None),
+        Script::Transform { obj, op } => run_transform(obj, op, false, #[cfg(test)] log),
+        Script::ScaleProbe { obj, op } => run_transform(obj, op, true, #[cfg(test)] log),
+        Script::TransformSequence { obj, ops } => {
+            run_transform_sequence(obj, ops, #[cfg(test)] log)
+        }
     }
 }
 
+/// The proto run of the proto script `s` just before its op `index` (the state that op
+/// starts from, after the runner's per-op `sync_topo`), or after its last op for `index`
+/// equal to the op count, for tests that check a record against that state; `None` when
+/// the script is not a proto script or ends before that op.
+///
+/// # Errors
+///
+/// A deferred or harness failure of the ops before `index`.
+#[cfg(test)]
+pub(super) fn proto_state_before(s: &Script, index: usize) -> Result<Option<ProtoRun>, Fail> {
+    let Script::Proto {
+        objects,
+        approx_tol,
+        capture,
+        override_tol,
+        ops,
+    } = s
+    else {
+        return Ok(None);
+    };
+    let mut state = None;
+    run_proto(
+        objects,
+        *approx_tol,
+        *capture,
+        *override_tol,
+        ops,
+        Some((index, &mut state)),
+    )?;
+    Ok(state)
+}
+
 pub(super) fn rust(s: &Script) -> Result<Output, HarnessError> {
-    match rust_run(s) {
+    rust_logged(s, #[cfg(test)] &mut CertificateLog::default())
+}
+
+/// [`rust`], with the case's certificate log in test builds.
+fn rust_logged(
+    s: &Script,
+    #[cfg(test)] log: &mut CertificateLog,
+) -> Result<Output, HarnessError> {
+    match rust_run_logged(s, #[cfg(test)] log) {
         Ok(v) => Ok(Output::new().values("out", v)),
         Err(Fail::Deferred(d)) => Ok(*d),
         Err(Fail::Harness(e)) => Err(e),
@@ -6708,9 +7047,19 @@ fn edge_cases() -> Vec<(String, Value)> {
     ));
     // proto: the life cycle on lines and a circle at three scales
     for (name, s) in [("unit", 1.0), ("huge", 1e5), ("tiny", 1e-5)] {
+        // Line::bounded normalizes the direction; scale sets the length over [0, 1].
+        let scaled_line = |p, v| {
+            ObjIn::Curve(CurveIn::Line(LineIn {
+                p,
+                v,
+                domain: [0.0, 1.0],
+                scale: s,
+                inside_out: false,
+            }))
+        };
         let objects = vec![
-            ObjIn::Curve(line([0.0, 0.0, 0.0], [s, 0.0, 0.0], [0.0, 1.0])),
-            ObjIn::Curve(line([0.0, 1e-7 * s, 0.0], [s, 0.0, 0.0], [0.0, 1.0])),
+            scaled_line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+            scaled_line([0.0, 1e-7 * s, 0.0], [1.0, 0.0, 0.0]),
             ObjIn::Curve(CurveIn::Conic(ConicIn {
                 center: [0.0, 0.0, 0.0],
                 x: [1.0, 0.0, 0.0],
@@ -6725,7 +7074,7 @@ fn edge_cases() -> Vec<(String, Value)> {
                 n: [0.0, 0.0, 1.0],
             },
             ObjIn::Vertex,
-            ObjIn::Curve(line([0.0, 0.0, 0.0], [0.0, s, 0.0], [0.0, 1.0])),
+            scaled_line([0.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
             ObjIn::Edge(5),
             ObjIn::Face(3),
             ObjIn::Region,
@@ -7407,8 +7756,125 @@ impl UnitDiff for Runner {
 }
 
 #[cfg(test)]
+impl super::topology_brep_p5::transform_certificate::Certified for Runner {
+    fn run_certified(
+        &self,
+        case: &Case,
+        log: &mut CertificateLog,
+    ) -> Result<Output, HarnessError> {
+        rust_logged(&case.parse()?, log)
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn proto_lifecycle_curves_scale_with_their_positions() {
+        let cases = edge_cases();
+        let curves = |name: &str| {
+            let (_, input) = cases.iter().find(|(case, _)| case == name).unwrap();
+            let Script::Proto { objects, .. } = serde_json::from_value(input.clone()).unwrap()
+            else {
+                panic!("{name} is not a proto script");
+            };
+            objects
+                .iter()
+                .enumerate()
+                .filter_map(|(index, object)| match object {
+                    ObjIn::Curve(curve) => Some((index, build_curve(curve).unwrap())),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let unit = curves("edge_proto_unit");
+        assert_eq!(unit.len(), 4);
+        let k = Kernel::default();
+        for (name, scale) in [("edge_proto_huge", 1e5), ("edge_proto_tiny", 1e-5)] {
+            let scaled = curves(name);
+            assert_eq!(scaled.len(), unit.len());
+            for ((index, curve), (unit_index, unit_curve)) in scaled.iter().zip(&unit) {
+                assert_eq!(index, unit_index);
+                let domain = unit_curve.natural_interval();
+                assert_eq!(curve.natural_interval(), domain);
+                for fraction in [0.0, 0.25, 0.5, 1.0] {
+                    let t = domain.min() + fraction * domain.length();
+                    let expected = unit_curve.evaluate(&k, t, 1, false, false).unwrap();
+                    let actual = curve.evaluate(&k, t, 1, false, false).unwrap();
+                    for (order, (actual, expected)) in actual.iter().zip(&expected).enumerate() {
+                        let expected = *expected * scale;
+                        assert!(
+                            actual.distance(expected) <= 1e-12 * scale,
+                            "{name} curve {index}, t={t}, derivative {order}: {actual:?} != {expected:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// The p1 rows whose transforms scale the tolerances (WR-507 / WR-508 closed form).
+    const SCALED_P1: [&str; 23] = [
+        "constructed_sequence_box_identity_between_edits",
+        "constructed_sequence_box_scale_by_point_inverse",
+        "constructed_sequence_caller_face_identity_between_edits",
+        "constructed_sequence_caller_face_scale_by_point_inverse",
+        "constructed_sequence_sphere_identity_between_edits",
+        "constructed_sequence_sphere_scale_by_point_inverse",
+        "constructed_solid_box_scale_by_pt",
+        "constructed_solid_box_uniform_scale",
+        "constructed_solid_caller_face_scale_by_pt",
+        "constructed_solid_caller_face_uniform_scale",
+        "constructed_solid_sphere_scale_by_pt",
+        "constructed_solid_sphere_uniform_scale",
+        "public_extrusion_anisotropic",
+        "public_extrusion_signed",
+        "public_extrusion_uniform",
+        "public_scale_cone_nonuniform",
+        "public_scale_cylinder_nonuniform",
+        "public_scale_phase2_box_anisotropic",
+        "public_scale_phase2_copied_box_anisotropic",
+        "public_scale_phase2_copied_sphere_anisotropic",
+        "public_scale_phase2_copied_sphere_scale_by_point",
+        "public_scale_phase2_sphere_anisotropic",
+        "public_scale_torus_nonuniform",
+    ];
+    /// The p1 rows whose transforms have a scale of 1 (reflections): no tolerance changes
+    /// and the model size estimate stays unset (upstream set it from the vertex box).
+    const UNIT_SCALE_P1: [&str; 9] = [
+        "public_extrusion_even_reflection",
+        "public_extrusion_odd_reflection",
+        "public_scale_cone_reflection",
+        "public_scale_cylinder_reflection",
+        "public_scale_phase2_box_even_reflection",
+        "public_scale_phase2_box_odd_reflection",
+        "public_scale_phase2_sphere_all_negative",
+        "public_scale_phase2_sphere_odd_reflection",
+        "public_scale_torus_reflection",
+    ];
+
+    /// Every case of this unit replays against its blessed golden line through the
+    /// runner's test-only WR-507 / WR-508 certificate at each API transform of a B-rep.
+    /// Each row the retirement moved must have gone through a certified transform.
+    #[test]
+    fn every_case_meets_the_transform_certificate() {
+        use super::super::topology_brep_p5::transform_certificate::{
+            replay_matches_golden, Fired,
+        };
+        let p1 = replay_matches_golden(&Runner);
+        let get = |m: &BTreeMap<String, Fired>, c: &str| {
+            *m.get(c).unwrap_or_else(|| panic!("moved row {c} is not a case"))
+        };
+        for c in SCALED_P1 {
+            let f = get(&p1, c);
+            assert!(f.scaled > 0, "{c}: {f:?}");
+        }
+        for c in UNIT_SCALE_P1 {
+            let f = get(&p1, c);
+            assert!(f.unscaled > 0 && f.scaled == 0, "{c}: {f:?}");
+        }
+    }
 
     #[test]
     fn manager_classifications_keep_the_actual_body_in_region_identity() {

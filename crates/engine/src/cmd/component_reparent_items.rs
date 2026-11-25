@@ -59,7 +59,7 @@ pub(super) fn reparent_items(s: &mut Session, p: &Value) -> Result<Value> {
     if occurrences.is_empty() && features.is_empty() && bodies.is_empty() {
         return Err(bad(cmd, "give `occurrences`, `features` or `bodies` to move"));
     }
-    if s.doc.marker.is_some() {
+    if s.doc.marker.is_some_and(|m| m < s.doc.features.len()) {
         return Err(bad(cmd, "finish timeline rollback before moving"));
     }
     let mut feature_ids = BTreeSet::new();
@@ -144,7 +144,7 @@ pub(super) fn reparent_items(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // The steps above are this command's one undo step.
     sc.undo.clear();
-    s.accept_computed(sc);
+    s.accept_computed(sc)?;
     for (old, new) in &followed {
         follow_visibility(s, old, new);
     }

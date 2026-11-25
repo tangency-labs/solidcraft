@@ -480,6 +480,22 @@ fn move_features_keeps_the_world_and_the_attachment_in_the_active_component() {
     assert_eq!(anchor.map(|a| (a.component, a.path)), Some((part, s.doc.first_path(part))));
 }
 
+/// A plane built square to a line carries two picks of the model. Moving its feature into a
+/// placed component re-expresses both picks in the component's frame, so the plane keeps its
+/// place in the world (#11134).
+#[test]
+fn move_features_re_expresses_a_square_to_line_planes_picks() {
+    let (mut s, part) = block_and_part();
+    // Square to the block's edge along Z at (10, 0), through a fixed point off that edge.
+    run(&mut s, "construct.plane.square_to_line", json!({"line": {"edge": [10, 0, 2]}, "point": {"point": [12, 5, 3]}, "name": "Ward"}));
+    let before = crate::view::construction_planes(&s).into_iter().find(|(_, n, _)| n == "Ward").unwrap().2;
+    run(&mut s, "component.move_features", json!({"features": ["Ward"], "component": part}));
+    assert_eq!(s.doc.find_feature("Ward").map(|f| f.component), Some(part));
+    let after = crate::view::construction_planes(&s).into_iter().find(|(_, n, _)| n == "Ward").unwrap().2;
+    assert!(after.origin.dist(before.origin) < 1e-9, "the plane moved: {before:?} -> {after:?}");
+    assert!(after.normal().dist(before.normal()) < 1e-9, "the plane turned: {before:?} -> {after:?}");
+}
+
 /// Moved without its body, or with the body moved from under it, a feature would break: the move
 /// is refused and nothing changes.
 #[test]

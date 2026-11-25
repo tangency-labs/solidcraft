@@ -12,9 +12,9 @@
 //! At the edge's tolerance the drop does not take the start: it comes back as pieces on
 //! the patch, split at the crease. Upstream stretches the longer piece (96% of the edge)
 //! onto the whole edge, so the trim runs at the wrong pace, 0.85 mm off the edge, against
-//! a tolerance of 5e-5. With `uv_trim_joins_drop_pieces` the pieces that meet are joined
-//! on their own parameters: the trim lifts onto the edge within the edge's tolerance
-//! (as the fork's test requires), and the edge stays whole.
+//! a tolerance of 5e-5. The port joins the pieces that meet on their own parameters: the
+//! trim lifts onto the edge within the edge's tolerance (as the fork's test requires),
+//! and the edge stays whole.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -60,10 +60,9 @@ fn key_of(e: EntityRef) -> ObjectRef {
     }
 }
 
-/// The sheet without UV trims, then each edge use's trim made, with WR-543's `fixed`.
-fn sheet(fixed: bool) -> (Kernel, Brep) {
+/// The sheet without UV trims, then each edge use's trim made.
+fn sheet() -> (Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.uv_trim_joins_drop_pieces = fixed;
     let mut data = BrepData::read_from_file(&k, SHEET.to_vec(), FileType::Ascii).unwrap();
     data.set_healer_version(HEALER_VERSION);
     let mut b = Brep::new_with_infinite_region().unwrap();
@@ -129,7 +128,7 @@ fn trim_fits(k: &Kernel, b: &Brep) -> Vec<(EdgeId, [f64; 2], f64, f64)> {
 
 #[test]
 fn fork_e36feb1_every_trim_lifts_onto_its_edge_with_the_fix() {
-    let (k, b) = sheet(true);
+    let (k, b) = sheet();
     let fits = trim_fits(&k, &b);
     assert!(!fits.is_empty());
     for (e, range, gap, tolerance) in fits {
@@ -139,19 +138,4 @@ fn fork_e36feb1_every_trim_lifts_onto_its_edge_with_the_fix() {
             "{e:?}: its trim {gap} off it, tolerance {tolerance}"
         );
     }
-}
-
-/// Upstream stretches one piece onto the whole edge: the boundary row's trim runs 0.85 mm
-/// off its edge.
-#[test]
-fn fork_e36feb1_the_boundary_row_trim_runs_off_its_edge_by_default() {
-    let (k, b) = sheet(false);
-    let worst = trim_fits(&k, &b)
-        .into_iter()
-        .map(|(_, _, gap, tolerance)| gap - tolerance)
-        .fold(f64::NEG_INFINITY, f64::max);
-    assert!(
-        worst > 0.5,
-        "the worst trim exceeds its tolerance by {worst}"
-    );
 }

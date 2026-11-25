@@ -213,6 +213,77 @@ fn plane_through_axis_and_point_accepts_straight_model_and_sketch_lines() {
     assert!(parallel(plane(&s, "Side").normal(), Vec3::Y));
 }
 
+#[test]
+fn plane_through_point_square_to_line_takes_a_point_on_or_off_the_line() {
+    let mut s = Session::default();
+    run(&mut s, "construct.plane.square_to_line", json!({"line": {"axis": "Z"}, "point": {"point": [0, 0, 5]}, "name": "Cap"}));
+    let pl = plane(&s, "Cap");
+    assert!(parallel(pl.normal(), Vec3::Z), "{pl:?}");
+    assert!(on_plane(&pl, Vec3::new(0.0, 0.0, 5.0)));
+    assert!(!on_plane(&pl, Vec3::new(0.0, 0.0, 6.0)));
+    run(&mut s, "construct.plane.square_to_line", json!({"line": {"axis": "Z"}, "point": {"point": [10, 20, 30]}, "name": "Wall"}));
+    let pl = plane(&s, "Wall");
+    assert!(parallel(pl.normal(), Vec3::Z), "{pl:?}");
+    assert!(on_plane(&pl, Vec3::new(10.0, 20.0, 30.0)));
+    assert!(!on_plane(&pl, Vec3::new(10.0, 20.0, 31.0)));
+    // An edge and its end vertex, the picks of #15334, make the plane square to the edge there.
+    let mut p = part();
+    run(&mut p, "construct.plane.square_to_line", json!({"line": {"edge": [20, 0, 0]}, "point": {"vertex": [40, 30, 0]}, "name": "End"}));
+    let pl = plane(&p, "End");
+    assert!(parallel(pl.normal(), Vec3::X), "{pl:?}");
+    assert!(on_plane(&pl, Vec3::new(40.0, 30.0, 0.0)));
+    assert!(on_plane(&pl, Vec3::new(40.0, 0.0, 20.0)));
+}
+
+#[test]
+fn plane_through_point_square_to_line_accepts_a_model_edge_a_face_axis_and_a_sketch_line() {
+    let mut s = part();
+    let sk = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+    let line = run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]]}));
+    let curve = line["curves"][0].as_str().unwrap();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "construct.plane.square_to_line", json!({"line": {"sketch": sk, "curve": curve}, "point": {"point": [0, 0, 10]}, "name": "Side"}));
+    let pl = plane(&s, "Side");
+    assert!(parallel(pl.normal(), Vec3::X), "{pl:?}");
+    assert!(on_plane(&pl, Vec3::new(0.0, 0.0, 10.0)));
+    run(&mut s, "construct.plane.square_to_line", json!({"line": {"face": [65, 0, 5]}, "point": {"point": [0, 0, 3]}, "name": "Bore"}));
+    assert!(parallel(plane(&s, "Bore").normal(), Vec3::Z), "a cylinder face gives its axis");
+}
+
+#[test]
+fn plane_through_point_square_to_line_follows_renamed_sources_edits_undo_and_reopen() {
+    let mut s = Session::default();
+    run(&mut s, "construct.axis.two_points", json!({"a": {"point": [5, 6, 7]}, "b": {"point": [5, 6, 17]}, "name": "Spine"}));
+    run(&mut s, "construct.point.vertex", json!({"point": {"point": [15, 6, 7]}, "name": "Pin"}));
+    run(&mut s, "construct.plane.square_to_line", json!({"line": {"axis": "Spine"}, "point": {"construct_point": "Pin"}, "name": "Ward"}));
+    assert!(parallel(plane(&s, "Ward").normal(), Vec3::Z));
+    run(&mut s, "timeline.rename", json!({"feature": "Spine", "name": "Mast"}));
+    run(&mut s, "timeline.rename", json!({"feature": "Pin", "name": "Peg"}));
+    let definition = run(&mut s, "timeline.inspect", json!({"feature": "Ward"}));
+    assert_eq!(definition["definition"]["plane"]["line"]["name"], "Mast");
+    assert_eq!(definition["definition"]["plane"]["point"]["name"], "Peg");
+    run(&mut s, "timeline.edit", json!({"feature": "Peg", "set": {"def.point": {"type": "point", "p": [5, 16, 17]}}}));
+    let pl = plane(&s, "Ward");
+    assert!(parallel(pl.normal(), Vec3::Z), "the plane stays square to the axis when the point moves");
+    // The new point leaves the plane of the old one (Z 7 → 17), so a plane that never follows the
+    // edit fails the assertions on both sides.
+    assert!(on_plane(&pl, Vec3::new(5.0, 16.0, 17.0)));
+    assert!(!on_plane(&pl, Vec3::new(15.0, 6.0, 7.0)), "the plane left the old point behind");
+    run(&mut s, "edit.undo", json!({}));
+    let pl = plane(&s, "Ward");
+    assert!(on_plane(&pl, Vec3::new(15.0, 6.0, 7.0)), "undo puts the point back");
+    assert!(!on_plane(&pl, Vec3::new(5.0, 16.0, 17.0)), "undo puts the plane back too");
+    run(&mut s, "edit.redo", json!({}));
+    let reopened = solidcraft_doc::format::read(&s.doc.to_json()).unwrap();
+    let mut cold = Session::new(reopened);
+    cold.refresh();
+    assert!(cold.model.results.iter().all(|r| r.error.is_none()), "{:?}", cold.model.results);
+    let pl = plane(&cold, "Ward");
+    assert!(parallel(pl.normal(), Vec3::Z));
+    assert!(on_plane(&pl, Vec3::new(5.0, 16.0, 17.0)));
+    run(&mut cold, "sketch.create", json!({"plane": "Ward"}));
+}
+
 /// Issue #12851: construct.plane.axis_point with an edge pick whose circle centre lies on the
 /// axis (e.g. rim of a cylinder or revolved torus). The centre is on the axis, so resolving the
 /// edge pick to the centre would refuse with "the point is on the axis". Instead, resolve to the
@@ -337,11 +408,61 @@ fn point_at_a_vertex() {
     assert!(near(point(&s, "P"), Vec3::new(40.0, 30.0, 20.0)));
 }
 
+/// A vertex named by its edges is where every one of them ends. The bottom front edge and the
+/// uprights at both its ends don't all meet anywhere, so their names give no vertex and the pick
+/// decides: the top front corner, not an end of the first edge.
+#[test]
+fn a_vertex_is_where_every_named_edge_ends() {
+    let mut s = part();
+    let state = s.model.state();
+    let b = state.body("Box").unwrap_or_else(|| panic!("no Box"));
+    let at = [Vec3::new(20.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 10.0), Vec3::new(40.0, 0.0, 10.0)];
+    let edges = solidcraft_doc::naming::edge_names_at(b, &at);
+    assert!(edges.iter().all(|n| !n.is_empty()), "{edges:?}");
+    run(&mut s, "construct.point.vertex", json!({"point": {"type": "vertex", "at": [0, 0, 20], "edges": edges}, "name": "P"}));
+    assert!(near(point(&s, "P"), Vec3::new(0.0, 0.0, 20.0)), "{:?}", point(&s, "P"));
+}
+
 #[test]
 fn point_through_two_edges() {
     let mut s = part();
     run(&mut s, "construct.point.two_edges", json!({"a": {"edge": [20, 0, 0]}, "b": {"edge": [40, 15, 0]}, "name": "P"}));
     assert!(near(point(&s, "P"), Vec3::new(40.0, 0.0, 0.0)), "{:?}", point(&s, "P"));
+}
+
+#[test]
+fn point_at_the_average_of_points_takes_any_number_in_any_order_and_follows_them() {
+    let mut s = part();
+    // two vertices: halfway between them
+    run(&mut s, "construct.point.average", json!({"points": [{"vertex": [0.5, 0.5, 0.5]}, {"vertex": [39, 29, 19]}], "name": "M"}));
+    assert!(near(point(&s, "M"), Vec3::new(20.0, 15.0, 10.0)), "{:?}", point(&s, "M"));
+    // three points, given in either order: their centroid
+    let corners = [json!({"vertex": [0.5, 0.5, 0.5]}), json!({"vertex": [39, 0.5, 0.5]}), json!({"vertex": [0.5, 29, 0.5]})];
+    run(&mut s, "construct.point.average", json!({"points": corners, "name": "C"}));
+    let reversed: Vec<Value> = corners.iter().rev().cloned().collect();
+    run(&mut s, "construct.point.average", json!({"points": reversed, "name": "R"}));
+    let centroid = Vec3::new(40.0 / 3.0, 10.0, 0.0);
+    assert!(near(point(&s, "C"), centroid), "{:?}", point(&s, "C"));
+    assert!(near(point(&s, "R"), centroid), "{:?}", point(&s, "R"));
+    // four points, one a construction point that moves: the average follows it
+    run(&mut s, "construct.point.vertex", json!({"point": {"point": [0, 0, 0]}, "name": "A"}));
+    let points = json!([{"construct_point": "A"}, {"point": [10, 20, 30]}, {"point": [10, 0, 0]}, {"point": [0, 20, 30]}]);
+    run(&mut s, "construct.point.average", json!({"points": points, "name": "N"}));
+    assert!(near(point(&s, "N"), Vec3::new(5.0, 10.0, 15.0)), "{:?}", point(&s, "N"));
+    run(&mut s, "timeline.redefine", json!({"feature": "A", "command": "construct.point.vertex", "params": {"point": {"point": [-20, 0, 0]}}}));
+    assert!(near(point(&s, "N"), Vec3::new(0.0, 10.0, 15.0)), "{:?}", point(&s, "N"));
+    // saved as `{type: "average", points}`, and reopened where it was
+    let saved = s.doc.to_json();
+    assert!(saved.contains(r#""type":"average""#) || saved.contains(r#""type": "average""#), "{saved}");
+    let bytes = crate::io::write_design_container(&s.doc).unwrap();
+    let reopened = Session::new(crate::io::read_design(&bytes).unwrap());
+    assert!(near(point(&reopened, "N"), Vec3::new(0.0, 10.0, 15.0)), "{:?}", point(&reopened, "N"));
+    // fewer than two points, or no list, is refused and adds nothing
+    let features = s.doc.features.len();
+    for params in [json!({}), json!({"points": []}), json!({"points": [{"point": [1, 2, 3]}]}), json!({"points": {"point": [1, 2, 3]}})] {
+        assert!(s.execute("construct.point.average", &params).is_err(), "{params}");
+    }
+    assert_eq!(s.doc.features.len(), features);
 }
 
 #[test]
@@ -722,7 +843,7 @@ fn ambiguous_plane_aliases_refuse_without_document_or_history_changes() {
             assert!(error.to_string().contains(&format!("use `{other}` for the origin plane")), "{error}");
             assert_eq!(s.doc.to_json(), before);
             assert_eq!(s.undo.len(), history);
-            assert!(s.section.is_none());
+            assert!(s.section.is_empty());
         }
         run(&mut s, "sketch.create", json!({"plane":id}));
         let inspected = run(&mut s, "sketch.inspect", json!({}));
@@ -828,6 +949,20 @@ fn plane_at_angle_direction_only_projects_the_axis_and_pivots() {
     assert!(error.contains("square to the plane") || error.contains("no direction"), "{error}");
     assert_eq!(s.doc.to_json(), before);
 
+    // The origin is unused with the option, so a parameter in it is refused rather than kept as
+    // a dependency the plane never reads.
+    run(&mut s, "parameters.add", json!({"name": "unused_r", "expression": "12 mm"}));
+    let before = s.doc.to_json();
+    let error = s
+        .execute(
+            "construct.plane.at_angle",
+            &json!({"base": "XY", "axis": {"origin": ["unused_r", 0, 0], "dir": [0, 1, 0]}, "angle": "10 deg", "direction_only": true}),
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("direction_only") && error.contains("pivot"), "{error}");
+    assert_eq!(s.doc.to_json(), before);
+
     // A pivot without the option is refused.
     let error = s
         .execute("construct.plane.at_angle", &json!({"base": "XY", "axis": "Y", "angle": "10 deg", "pivot": {"point": [1, 0, 0]}}))
@@ -840,6 +975,85 @@ fn plane_at_angle_direction_only_projects_the_axis_and_pivots() {
     let saved = s.doc.to_json();
     let reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
     assert!(near(plane(&reopened, "Pivoted").origin, Vec3::new(5.0, 0.0, 5.0)));
+}
+
+/// Plane at Angle about `{origin, dir}` with length expressions in the origin: the plane is where
+/// the same numbers put it, and it follows the parameters as they change, are renamed and reopen.
+#[test]
+fn plane_at_angle_axis_origin_expressions_follow_their_parameters() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "r", "expression": "12 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "h", "expression": "5 mm"}));
+    let axis = |origin: Value| json!({"origin": origin, "dir": [0, 1, 0]});
+    run(&mut s, "construct.plane.at_angle", json!({"base": "XY", "axis": axis(json!(["r", "0 mm", "h"])), "angle": "30 deg", "name": "Expr"}));
+    run(&mut s, "construct.plane.at_angle", json!({"base": "XY", "axis": axis(json!([12, 0, 5])), "angle": "30 deg", "name": "Numbers"}));
+    let same = |a: Plane, b: Plane| near(a.origin, b.origin) && near(a.x, b.x) && near(a.y, b.y);
+    assert!(same(plane(&s, "Expr"), plane(&s, "Numbers")), "{:?} {:?}", plane(&s, "Expr"), plane(&s, "Numbers"));
+    // XY turned 30 deg about the line through (r, 0, h) along Y: its origin, which is (-r, 0, -h)
+    // from that point, turns about the line. Worked out by hand for each (r, h) used below, with
+    // cos 30 deg = 0.8660254 and sin 30 deg = 0.5: (r - r cos - h sin, 0, h + r sin - h cos).
+    let at_r12_h5 = Vec3::new(-0.892_304_8, 0.0, 6.669_873_0);
+    let at_r20_h5 = Vec3::new(0.179_491_9, 0.0, 10.669_873_0);
+    let at_r20_h8 = Vec3::new(-1.320_508_1, 0.0, 11.071_796_8);
+    assert!(near(plane(&s, "Expr").origin, at_r12_h5), "{:?}", plane(&s, "Expr"));
+    // The saved origin keeps the expressions; plain numbers stay numbers.
+    let saved = |s: &Session, name: &str| {
+        let f = s.doc.features.iter().find(|f| f.name == name).unwrap_or_else(|| panic!("no {name}"));
+        serde_json::to_value(&f.kind).unwrap()["plane"]["axis_origin"].clone()
+    };
+    assert_eq!(saved(&s, "Expr"), json!(["r", "0 mm", "h"]));
+    assert_eq!(saved(&s, "Numbers"), json!([12.0, 0.0, 5.0]));
+    run(&mut s, "parameters.change", json!({"name": "r", "expression": "20 mm"}));
+    assert!(near(plane(&s, "Expr").origin, at_r20_h5), "{:?}", plane(&s, "Expr"));
+    assert!(near(plane(&s, "Numbers").origin, at_r12_h5), "{:?}", plane(&s, "Numbers"));
+    run(&mut s, "parameters.rename", json!({"name": "h", "new_name": "height"}));
+    run(&mut s, "parameters.change", json!({"name": "height", "expression": "8 mm"}));
+    assert!(near(plane(&s, "Expr").origin, at_r20_h8), "{:?}", plane(&s, "Expr"));
+    assert_eq!(saved(&s, "Expr"), json!(["r", "0 mm", "height"]));
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(near(plane(&reopened, "Expr").origin, at_r20_h8), "{:?}", plane(&reopened, "Expr"));
+}
+
+/// A design saved before the axis origin took expressions can hold a coordinate of exactly 1e9 mm,
+/// the largest number a design file allows. Such a plane rebuilds as it did then, with and
+/// without `direction_only`; an origin past 1e9 mm is still refused.
+#[test]
+fn plane_at_angle_far_numeric_axis_origin_of_an_older_design_rebuilds() {
+    use solidcraft_doc::{FeatureKind, PlaneRef};
+    let mut s = Session::default();
+    let axis = |origin: Value| json!({"origin": origin, "dir": [1, 0, 0]});
+    run(&mut s, "construct.plane.at_angle", json!({"base": "XY", "axis": axis(json!([5, 0, 0])), "angle": "90 deg", "name": "Far"}));
+    run(
+        &mut s,
+        "construct.plane.at_angle",
+        json!({"base": "XY", "axis": axis(json!([5, 0, 0])), "angle": "90 deg", "direction_only": true, "name": "FarDirection"}),
+    );
+    // As the older design holds them: the origin exactly 1e9 mm along the axis.
+    for name in ["Far", "FarDirection"] {
+        let id = s.doc.features.iter().find(|f| f.name == name).unwrap_or_else(|| panic!("no {name}")).id;
+        let FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { axis_origin, .. } } = &mut s.doc_mut().feature_mut(id).unwrap().kind else {
+            panic!("{name} is not a Plane at Angle")
+        };
+        *axis_origin = solidcraft_doc::point_expr(Vec3::new(1e9, 0.0, 0.0));
+    }
+    let saved = s.doc.to_json();
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+    for name in ["Far", "FarDirection"] {
+        let f = reopened.doc.features.iter().find(|f| f.name == name).unwrap_or_else(|| panic!("no {name}"));
+        assert_eq!(serde_json::to_value(&f.kind).unwrap()["plane"]["axis_origin"], json!([1e9, 0.0, 0.0]), "{name}");
+        // The axis is the X axis itself: XY turned a quarter turn about it stands on XZ.
+        let turned = plane(&reopened, name);
+        assert!(near(turned.origin, Vec3::ZERO) && parallel(turned.normal(), Vec3::Y), "{name}: {turned:?}");
+    }
+    // Past the largest number a design file holds, the origin is refused as before.
+    let mut s = reopened;
+    let before = s.doc.to_json();
+    let error = s
+        .execute("construct.plane.at_angle", &json!({"base": "XY", "axis": axis(json!(["1000000001 mm", 0, 0])), "angle": "90 deg"}))
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("out of range"), "{error}");
+    assert_eq!(s.doc.to_json(), before);
 }
 
 /// A construction plane named like an origin plane, as an older saved design can hold.
@@ -922,6 +1136,32 @@ fn offset_plane_through_a_point_follows_the_point() {
     assert!(s.execute("construct.plane.offset", &json!({"base": "XY", "offset": 5, "through": {"vertex": [0, 0, 0]}})).is_err());
 }
 
+#[test]
+fn offset_plane_redefine_maps_world_geometry_into_its_owning_component() {
+    use solidcraft_doc::{FeatureKind, PlaneRef};
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name":"Part","grounded":false}));
+    run(&mut s, "occurrence.move", json!({"occurrence":"Part:1","translate":[20,30,40],"axis":[0,1,0],"angle":"90 deg"}));
+    let base = json!({"origin":[0,0,0],"x_dir":[0,1,0],"y_dir":[0,0,1]});
+    let made = run(&mut s, "construct.plane.offset", json!({"base":base,"offset":5,"name":"Side"}));
+    let id = made["feature"].as_u64().unwrap();
+    let FeatureKind::ConstructionPlane { plane: PlaneRef::Offset { base: saved, .. } } = s.doc.feature(id).unwrap().kind.clone() else {
+        panic!("offset plane");
+    };
+    run(&mut s, "component.activate", json!({"component":0}));
+    run(&mut s, "timeline.redefine", json!({"feature":id,"command":"CONSTRUCT.PLANE.OFFSET","params":{"base":base,"offset":9}}));
+    let FeatureKind::ConstructionPlane { plane: PlaneRef::Offset { base: edited, .. } } = &s.doc.feature(id).unwrap().kind else {
+        panic!("offset plane");
+    };
+    assert_eq!(edited, &saved, "the explicit base returns to the feature's local frame");
+    assert!(near(plane(&s, "Side").origin, Vec3::X * 9.));
+    assert!(near(plane(&s, "Side").normal(), Vec3::X));
+    run(&mut s, "timeline.redefine", json!({"feature":id,"command":"construct.plane.offset","params":{"base":base,"through":{"point":[17,20,30]}}}));
+    assert!(near(plane(&s, "Side").origin, Vec3::X * 17.));
+    assert!(near(plane(&s, "Side").normal(), Vec3::X));
+    assert_eq!(s.active_component, 0);
+}
+
 /// Hiding the placement a component is shown at hides its construction geometry too, as it
 /// hides its bodies and sketches.
 #[test]
@@ -966,6 +1206,64 @@ fn construction_on_a_moved_body_moves_with_it() {
     assert!(near(point(&s, "PinTop"), Vec3::new(30.0, 0.0, 0.0)), "{:?}", point(&s, "PinTop"));
     let (o, d) = axis(&s, "Tether");
     assert!(on_line(o, d, Vec3::new(0.0, 0.0, 20.0)) && on_line(o, d, Vec3::new(0.0, 50.0, 20.0)), "{o:?} {d:?}");
+}
+
+/// #11469: a tangent plane picked on an inserted STL said only "no face at …", as if the pick
+/// had missed. A mesh body has no faces to pick; the error says the pick lies on one and what
+/// gives it faces (Convert Mesh), and a pick in empty space keeps the plain message.
+#[test]
+fn plane_tangent_on_a_mesh_body_says_it_has_no_faces() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-mesh-tangent-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let stl = dir.join("cube.stl");
+    let mut cube = Session::default();
+    run(&mut cube, "solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [0, 0, 0], "body_name": "Cube"}));
+    run(&mut cube, "file.export", json!({"path": stl.to_string_lossy()}));
+    let mut s = Session::default();
+    run(&mut s, "file.insert_mesh", json!({"path": stl.to_string_lossy()}));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mesh = s.world_state().unwrap().bodies.iter().find(|b| b.body.is_mesh()).map(|b| b.name.clone()).expect("a mesh body");
+
+    let on = s.execute("construct.plane.tangent", &json!({"face": {"face": [10, 10, 20]}, "name": "T"})).expect_err("a mesh has no face").to_string();
+    assert!(on.contains(&mesh) && on.contains("mesh") && on.contains("Convert Mesh"), "{on}");
+    let off = s.execute("construct.plane.tangent", &json!({"face": {"face": [100, 100, 100]}, "name": "T"})).expect_err("nothing there").to_string();
+    assert!(off.contains("no face at") && !off.contains("Convert Mesh"), "{off}");
+}
+
+/// #11469, the converted path the report followed ("convert STL to body"): a finely tessellated
+/// cylinder 200 mm tall, inserted as STL and converted, takes a tangent plane on a facet at the
+/// picked point, with the facet's normal.
+#[test]
+fn plane_tangent_on_a_converted_mesh_facet() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-mesh-converted-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let stl = dir.join("cyl.stl");
+    let mut src = Session::default();
+    run(&mut src, "solid.cylinder", json!({"base": [0, 0, 0], "radius": 60, "height": 200, "body_name": "Cyl"}));
+    run(&mut src, "file.export", json!({"path": stl.to_string_lossy()}));
+    let mut s = Session::default();
+    run(&mut s, "file.insert_mesh", json!({"path": stl.to_string_lossy()}));
+    let _ = std::fs::remove_dir_all(&dir);
+    let (name, mesh) =
+        s.world_state().unwrap().bodies.iter().find(|b| b.body.is_mesh()).map(|b| (b.name.clone(), b.body.clone())).expect("a mesh body");
+    // A side facet's centroid and normal, read from the mesh before it is converted.
+    let (pos, tris) = mesh.triangle_mesh().unwrap();
+    let (c, n) = tris
+        .iter()
+        .filter_map(|t| {
+            let [a, b, c] = t.map(|i| pos[i as usize]);
+            let n = (b - a).cross(c - a).normalized()?;
+            (n.z.abs() < 1e-6).then(|| ((a + b + c) * (1.0 / 3.0), n))
+        })
+        .next()
+        .expect("a side facet");
+    run(&mut s, "mesh.convert", json!({"body": name, "tolerance": "0.01 mm"}));
+    assert!(!s.world_state().unwrap().bodies.iter().any(|b| b.body.is_mesh()), "converted");
+    run(&mut s, "construct.plane.tangent", json!({"face": {"face": [c.x, c.y, c.z]}, "name": "T"}));
+    let t = plane(&s, "T");
+    assert!(parallel(t.normal(), n) && on_plane(&t, c), "{t:?} vs facet at {c:?} normal {n:?}");
 }
 
 /// A feature named exactly like a component origin item stays reachable: at every resolver that
@@ -1097,4 +1395,106 @@ fn planes_made_of_picks_in_a_moved_component_go_through_their_world_picks() {
             assert!(on_plane(&pl, p), "{cmd}: {p:?} on {pl:?}");
         }
     }
+}
+
+/// Snap points (#11228): a construction built from an edge's middle or a hole's centre keeps it
+/// as a reference on that edge or face, so it follows the model.
+#[test]
+fn snapped_centres_and_middles_follow_the_model() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "h", "expression": "20 mm"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": "h", "body_name": "Box"}));
+    run(&mut s, "solid.cylinder", json!({"base": [20, 15, -1], "radius": 4, "height": "h + 2 mm", "operation": "cut"}));
+    let snap = |of: Value, kind: &str, at: [f64; 3]| json!({"type": "snap", "of": of, "kind": kind, "at": at});
+    let top_front = json!({"type": "edge", "at": [10, 0, 20]});
+    run(&mut s, "construct.point.vertex", json!({"point": snap(top_front, "middle", [20.0, 0.0, 20.0]), "name": "Mid"}));
+    // The hole's wall: the centre of its top end, not its bottom one.
+    let wall = json!({"type": "face", "at": [24, 15, 10]});
+    run(&mut s, "construct.point.vertex", json!({"point": snap(wall, "centre", [20.0, 15.0, 20.0]), "name": "Top"}));
+    let side = json!({"type": "edge", "at": [40, 5, 20]});
+    run(&mut s, "construct.axis.two_points", json!({"a": snap(side, "middle", [40.0, 15.0, 20.0]), "b": {"vertex": [0, 0, 0]}, "name": "Diag"}));
+    run(&mut s, "parameters.change", json!({"name": "h", "expression": "50 mm"}));
+    assert!(near(point(&s, "Mid"), Vec3::new(20.0, 0.0, 50.0)), "{:?}", point(&s, "Mid"));
+    assert!(near(point(&s, "Top"), Vec3::new(20.0, 15.0, 50.0)), "{:?}", point(&s, "Top"));
+    let (o, d) = axis(&s, "Diag");
+    assert!(on_line(o, d, Vec3::new(40.0, 15.0, 50.0)) && on_line(o, d, Vec3::ZERO), "{o:?} {d:?}");
+    // A snap point of something with none of that kind is refused when it is built.
+    let bad = s.execute("construct.point.vertex", &json!({"point": snap(json!({"type": "origin"}), "middle", [0.0, 0.0, 0.0])}));
+    assert!(bad.is_err() || construction_points(&s).len() == 2, "{bad:?}");
+}
+
+/// #6959: a turn about a given `origin` carries the constructions built on the body about that
+/// origin too, not about the world origin, so they stay on the body.
+#[test]
+fn construction_on_a_body_turned_about_an_origin_turns_about_it_too() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 20, "body_name": "Pin"}));
+    run(&mut s, "construct.axis.through_cylinder", json!({"face": {"face": [5, 0, 10]}, "name": "PinAxis"}));
+    run(&mut s, "construct.point.center", json!({"of": {"edge": [5, 0, 20]}, "name": "PinTop"}));
+    // A quarter turn about Y through the top centre (0, 0, 20): that centre stays put and the
+    // axis lies along X at height 20. About the world origin the top would go to (20, 0, 0).
+    run(&mut s, "solid.move", json!({"bodies": ["Pin"], "origin": [0, 0, 20], "axis": [0, 1, 0], "angle": "90 deg"}));
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    assert!(near(point(&s, "PinTop"), Vec3::new(0.0, 0.0, 20.0)), "{:?}", point(&s, "PinTop"));
+    let (o, d) = axis(&s, "PinAxis");
+    assert!(parallel(d, Vec3::X) && on_line(o, d, Vec3::new(-20.0, 0.0, 20.0)), "{o:?} {d:?}");
+}
+
+/// Flat face snap points (#20677): picking the middle of an edge or the centre of a hole
+/// while hovering the flat face builds construction geometry and follows the model.
+#[test]
+fn flat_face_edge_middle_and_hole_centre_snaps_follow_the_model() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "h", "expression": "10 mm"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": "h", "body_name": "Box"}));
+    run(&mut s, "solid.cylinder", json!({"base": [20, 15, -1], "radius": 4, "height": "h + 2 mm", "operation": "cut"}));
+
+    let snap = |of: Value, kind: &str, at: [f64; 3]| json!({"type": "snap", "of": of, "kind": kind, "at": at});
+    // Top flat face of the box at Z=10
+    let top_face = json!({"type": "face", "at": [5, 5, 10]});
+
+    // 1. Hole centre snapped by picking from the flat top face:
+    run(&mut s, "construct.point.vertex", json!({"point": snap(top_face.clone(), "centre", [20.0, 15.0, 10.0]), "name": "HoleCentre"}));
+
+    // 2. Edge middle snapped by picking from the flat top face (front edge [0,0,10]-[40,0,10]):
+    run(&mut s, "construct.point.vertex", json!({"point": snap(top_face.clone(), "middle", [20.0, 0.0, 10.0]), "name": "FaceEdgeMid"}));
+
+    // 3. Plane offset through an edge middle snapped from a face (repro case from #20677):
+    run(
+        &mut s,
+        "construct.plane.offset",
+        json!({"base": "XY", "through": snap(top_face.clone(), "middle", [20.0, 0.0, 10.0]), "name": "OffsetPlane"}),
+    );
+
+    assert!(near(point(&s, "HoleCentre"), Vec3::new(20.0, 15.0, 10.0)), "{:?}", point(&s, "HoleCentre"));
+    assert!(near(point(&s, "FaceEdgeMid"), Vec3::new(20.0, 0.0, 10.0)), "{:?}", point(&s, "FaceEdgeMid"));
+    assert!(on_plane(&plane(&s, "OffsetPlane"), Vec3::new(20.0, 0.0, 10.0)));
+
+    // Follows the model when parameters change:
+    run(&mut s, "parameters.change", json!({"name": "h", "expression": "25 mm"}));
+    assert!(near(point(&s, "HoleCentre"), Vec3::new(20.0, 15.0, 25.0)), "{:?}", point(&s, "HoleCentre"));
+    assert!(near(point(&s, "FaceEdgeMid"), Vec3::new(20.0, 0.0, 25.0)), "{:?}", point(&s, "FaceEdgeMid"));
+    assert!(on_plane(&plane(&s, "OffsetPlane"), Vec3::new(20.0, 0.0, 25.0)));
+}
+
+/// Snapping SnapAt::Centre on a spherical cap face returns the center of the sphere,
+/// not the center of the circular boundary rim edge.
+#[test]
+fn spherical_cap_face_centre_snaps_to_sphere_centre_not_circular_rim_edge() {
+    let mut s = Session::default();
+    run(&mut s, "solid.sphere", json!({"radius": 10, "center": [0, 0, 0], "body_name": "Sphere"}));
+    // Cut off the bottom at Z < 6 with a box to create a spherical cap with a circular rim at Z = 6
+    run(&mut s, "solid.box", json!({"corner": [-15, -15, -15], "length": 30, "width": 30, "height": 21, "operation": "cut"}));
+
+    let snap = |of: Value, kind: &str, at: [f64; 3]| json!({"type": "snap", "of": of, "kind": kind, "at": at});
+    let cap_face = json!({"type": "face", "at": [0, 0, 10]});
+
+    // Centre snap on the spherical cap must resolve to the sphere's analytic centre (0, 0, 0),
+    // NOT the rim edge circle centre (0, 0, 6).
+    run(&mut s, "construct.point.vertex", json!({"point": snap(cap_face, "centre", [0.0, 0.0, 10.0]), "name": "SphereCentre"}));
+
+    let pt = point(&s, "SphereCentre");
+    assert!(near(pt, Vec3::new(0.0, 0.0, 0.0)), "expected sphere centre (0, 0, 0), got {:?}", pt);
+    assert!((pt.z - 6.0).abs() > 1.0, "incorrectly snapped to rim circle centre (0, 0, 6)");
 }

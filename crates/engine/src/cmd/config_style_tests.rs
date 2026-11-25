@@ -231,3 +231,21 @@ fn hostile_and_uncertified_face_targets_are_rejected() {
     assert!(s.execute("config.column", &json!({"component_appearance":0})).is_err());
     assert!(s.execute("config.column", &json!({"face_appearance":{"body":body,"point":[0,0,1e20]}})).is_err());
 }
+
+#[test]
+fn configuration_face_indices_verifies_exact_planar_faces() {
+    let mut s = Session::default();
+    let body_name = block(&mut s);
+    let state = s.model.state();
+    let mb = state.body(&body_name).unwrap();
+    let id = s.doc.features[0].id;
+    let target = ConfigFaceTarget {
+        body: body_name.clone(),
+        origin_feature: id,
+        name: format!("F{id}:+z"),
+        point: solidcore_record::Vec3::new(5., 5., 10.),
+        certificate: None,
+    };
+    let indices = s.doc.configuration_face_indices(mb, &target).unwrap();
+    assert!(!indices.is_empty());
+}

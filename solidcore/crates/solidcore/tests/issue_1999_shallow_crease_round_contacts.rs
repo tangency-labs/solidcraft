@@ -80,7 +80,7 @@ fn shallow_crease_round_contact_profiles() {
     use solidcore::kernel::UpstreamFixes;
     use solidcore::topology::brep::validation::{check_brep, CheckLevel};
     let mut invalid = Vec::new();
-    for profile in ["default", "half_degree", "new_blend", "all_fixes"] {
+    for profile in ["default", "new_blend", "all_fixes"] {
         for (turn, radius, multi) in [
             (2.5, 0.12, false),
             (0.6, 2.0, false),
@@ -93,9 +93,6 @@ fn shallow_crease_round_contact_profiles() {
             (1.9, 1.0, true),
         ] {
             let mut k = Kernel::default();
-            if profile == "half_degree" {
-                k.fixes.fillet_half_degree_crease = true;
-            }
             if profile == "new_blend" {
                 // The current generic-blend construction and supporting fillet fixes;
                 // leave unrelated boolean, sweep and validation fixes at default.
@@ -104,11 +101,9 @@ fn shallow_crease_round_contact_profiles() {
                         *k.fixes.flag_mut(name).unwrap() = true;
                     }
                 }
-                k.fixes.curve_check_zero_speed_tangent_end = true;
             }
             if profile == "all_fixes" {
                 k.fixes = UpstreamFixes::all();
-                k.fixes.geometric_g2_continuity = false;
             }
             if turn == 2.5 && radius == 0.12 {
                 let enabled: Vec<_> = k
@@ -181,7 +176,6 @@ fn new_blend_constructs_valid_shallow_crease_rounds() {
                 blend_face_log: Some(BlendFaceLog::default()),
                 ..Kernel::default()
             };
-            k.fixes.geometric_g2_continuity = false;
             k.tolerances.zone_tol_3d *= scale;
             let mut b = block_scaled(&mut k, turn, scale);
             // The builder starts with fixed 1e-5 entity tolerances. Scale those
@@ -283,7 +277,6 @@ fn new_blend_vertex_contact_boundary() {
                 fixes: UpstreamFixes::all(),
                 ..Kernel::default()
             };
-            k.fixes.geometric_g2_continuity = false;
             let mut b = block(&mut k, turn);
             let e = crease(&k, &b, turn);
             fillet_edges(&mut k, &mut b, &[e], radius, 1, 1, 1.0)
@@ -310,7 +303,6 @@ fn new_blend_contact_resolution_is_body_tolerance() {
             fixes: UpstreamFixes::all(),
             ..Kernel::default()
         };
-        k.fixes.geometric_g2_continuity = false;
         let mut b = block(&mut k, 2.5);
         for f in b.face_list().to_vec() {
             solidcore::topology::face::p3::set_tolerance(&mut b, f, entity_tol, false, false)

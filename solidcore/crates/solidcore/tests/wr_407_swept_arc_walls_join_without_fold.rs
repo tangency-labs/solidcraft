@@ -4,12 +4,15 @@
 //! r 52..64 over 90..270) overlap over a quarter turn and share the planes z = 0 and
 //! z = 60, and are joined.
 //!
-//! With the sweep's frame as upstream builds it (`sweep_frame_on_planar_path_normal`
-//! off), wall A's flat top is a B-spline 2.8e-5 off its plane, so it is not planar and
-//! its search domain reaches past the fold of its continuation. Upstream's
-//! `CoverCoincidentSurface` merges wall B's top onto that folded continuation and the
-//! join loses 5573 mm3. With `cover_refuses_folded_continuation` the cover across the
-//! fold is refused and the join has the closed-form volume
+//! With the sweep's frame as upstream built it, wall A's flat top was a B-spline 2.8e-5
+//! off its plane, so it was not planar and its search domain reached past the fold of its
+//! continuation; upstream's `CoverCoincidentSurface` merged wall B's top onto that folded
+//! continuation and the join lost 5573 mm3. WR-407's frame on the path plane's normal is
+//! the default, and so is its fold rule: without it the join was still wrong (the level-2
+//! check reported the merged face's B-spline net doubling back; its volume missed the
+//! closed form by 7744 mm3 while the queries dropped their statuses, and no longer does
+//! with the statuses passed on (WR-663), but the fold remained). The cover across
+//! the fold is refused and the join has the closed-form volume
 //! `V_A + V_B - overlap = 60 (pi/2)(56^2 - 44^2) + 60 (pi/2)(64^2 - 52^2) - 60 (pi/4)(56^2 - 52^2)`.
 //! The walls' radial faces are the sweep's approximation of the arcs, so the volume is
 //! held to 1 mm3 (the SolidCraft case's tolerance).
@@ -29,6 +32,7 @@ use solidcore::primitive::api_curves::{create_arc, create_line_segment};
 use solidcore::primitive::primitive_creation::SweepOptions;
 use solidcore::query::api_queries::brep_is_manifold_solid;
 use solidcore::sweep::api_brep::create_curve_sweep;
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::proto_topology::p1::api_transform::{api_rotate, TransformObject};
 use solidcore::{Brep, Kernel};
 
@@ -74,16 +78,16 @@ fn wall(k: &mut Kernel, turn: (Vec3, f64), radius: f64, start: f64, end: f64) ->
         orient_profile_perpendicular_to_path: false,
         move_to_profile: false,
         profile_at_path_start: false,
+        up: None,
     };
     create_curve_sweep(k, &refs, Some(&path), None, None, Some(&options))
         .unwrap()
         .brep
 }
 
-/// The two walls joined, with WR-407's fix `fixed`.
-fn joined(fixed: bool) -> (Kernel, Brep) {
+/// The two walls joined on the default kernel.
+fn joined() -> (Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.cover_refuses_folded_continuation = fixed;
     // XZ is XY turned 90 degrees about X; YZ is XY turned 120 degrees about (1, 1, 1).
     let a = wall(&mut k, (Vec3::X, 90.0), 50.0, 0.0, 180.0);
     let b = wall(&mut k, (Vec3::new(1.0, 1.0, 1.0), 120.0), 58.0, 90.0, 270.0);
@@ -107,10 +111,16 @@ fn closed_form() -> f64 {
         - 60.0 * (PI / 4.0) * ring(52.0, 56.0)
 }
 
+/// The default join is a valid solid (level 2 reports nothing, so no merged face's
+/// B-spline net doubles back) with the closed-form volume.
 #[test]
 fn wr_407_walls_join_to_the_closed_form_with_the_fix() {
-    let (k, mut b) = joined(true);
+    let (mut k, mut b) = joined();
     assert!(brep_is_manifold_solid(&b).unwrap());
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{lines:?}");
     let v = volume(&k, &mut b);
     assert!(
         (v - closed_form()).abs() < 1.0,
@@ -119,10 +129,75 @@ fn wr_407_walls_join_to_the_closed_form_with_the_fix() {
     );
 }
 
-/// Upstream merges onto the folded continuation: the join is short by 5573 mm3.
+/// Every face's UV trims lie in its surface's natural (knot) domain widened by `margin`,
+/// checked on the trims' control points (PROVEN for B-spline trims: each control point is
+/// read in homogeneous form `(x w, y w, z w, w)`, its weight must be positive, and its
+/// point `(x w / w, y w / w)` inside the widened domain; with positive weights a B-spline
+/// lies in the convex hull of its control points, and the widened domain is convex). A
+/// trim with no B-spline form, a weight that is not positive or a NaN fails. `margin`
+/// covers the one division's rounding. `Err` names the first trim that fails. An edge use
+/// with no UV trim gets one first, built as the volume's gap closure builds it
+/// (`get_or_create_uv_trim_curve`), so the trims checked are the ones the closure joins.
+fn trims_inside_domain(k: &Kernel, b: &mut Brep, margin: f64) -> Result<(), String> {
+    use solidcore::blend::fillet_section::certificate::NurbsCurve;
+    use solidcore::topology::brep::p1::faces;
+    use solidcore::topology::edgeuse::p1::{faceuse_loopuses, loopuse_edgeuses, uv_trim_curve};
+    use solidcore::topology::edgeuse::p3::get_or_create_uv_trim_curve;
+    for f in faces(b, None).unwrap() {
+        let face = b.face(f).unwrap();
+        let dom = face
+            .surface
+            .as_ref()
+            .unwrap()
+            .natural_uv_domain_with_nurb(k)
+            .unwrap();
+        let (u0, u1) = (dom.u_min() - margin, dom.u_max() + margin);
+        let (v0, v1) = (dom.v_min() - margin, dom.v_max() + margin);
+        let up = face.faceuse.unwrap();
+        for lu in faceuse_loopuses(b, up, false, None).unwrap() {
+            for eu in loopuse_edgeuses(b, lu).unwrap() {
+                if uv_trim_curve(b, eu).unwrap().0.is_none() {
+                    get_or_create_uv_trim_curve(k, b, eu, false, false, true)
+                        .unwrap()
+                        .status
+                        .unwrap();
+                }
+                let t = uv_trim_curve(b, eu)
+                    .unwrap()
+                    .0
+                    .unwrap_or_else(|| panic!("edge use {eu:?} of face {f:?} has no UV trim"));
+                let Some(bs) = t.b_spline_base() else {
+                    return Err(format!("face {f:?}: a trim with no B-spline form"));
+                };
+                let cn = NurbsCurve::of(bs).unwrap();
+                for p in cn.pw.chunks(4) {
+                    let &[xw, yw, _, w] = p else {
+                        return Err(format!("face {f:?}: a control point not homogeneous"));
+                    };
+                    // written so a NaN fails
+                    if w.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
+                        return Err(format!("face {f:?}: a control point's weight {w}"));
+                    }
+                    let (x, y) = (xw / w, yw / w);
+                    if !(x >= u0 && x <= u1 && y >= v0 && y <= v1) {
+                        return Err(format!(
+                            "face {f:?}: control point ({x}, {y}) outside [{u0}, {u1}] x \
+                             [{v0}, {v1}]"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The default join's trims each lie inside their surface's natural domain (to 1e-9, on
+/// their control points), so the gap closure's uv lines between them stay in the domain.
 #[test]
-fn wr_407_default_join_loses_the_folded_cover() {
-    let (k, mut b) = joined(false);
-    let v = volume(&k, &mut b);
-    assert!(closed_form() - v > 1000.0, "{v} against {}", closed_form());
+fn wr_407_default_join_keeps_its_trims_in_their_domains() {
+    let (k, mut b) = joined();
+    if let Err(e) = trims_inside_domain(&k, &mut b, 1e-9) {
+        panic!("a trim leaves its domain: {e}");
+    }
 }

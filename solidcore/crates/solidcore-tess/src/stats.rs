@@ -23,10 +23,9 @@ pub struct PlanStats {
     /// Edges that bound no face and could not be sampled: left out of the plan (an empty
     /// polyline), so the rest of the body is still meshed, each with why.
     pub unsampled_edges: Vec<RefusedEdge>,
-    /// Faces a memory bound of the planner limited: their grid thinned below the lines their
-    /// tolerance asked for, or their sag refinement stopped at the points it may add. Each is
-    /// still meshed, named here with the sag its triangles reach and the bounds that limited it,
-    /// so a mesh that leaves the tolerance is never so unreported.
+    /// Faces limited by a memory bound (a thinned grid or the refinement's point cap), or
+    /// measured outside the chord tolerance with a displaced shared boundary. Each is still
+    /// meshed and named here with the sag of its actual triangles and any bounds that limited it.
     pub over_tolerance: Vec<OverTolerance>,
     /// Edges whose sampling at a coarser facet angle, for a face crowded with segments, failed:
     /// each keeps its nodes at the rules' own level (valid, only finer), no face is refused, and
@@ -43,6 +42,57 @@ pub struct PlanStats {
     /// The other poles of higher order get the exact limit normal per triangle
     /// ([`crate::PoleRule`]).
     pub averaged_poles: Vec<crate::AveragedPole>,
+    /// The mesh path's ([`crate::mesh()`]) faces left short of its shape: a triangle sharper
+    /// than the spec's angle, or a bound that stopped the shaping. Each is meshed, named with
+    /// its smallest angle and what limited it. Apart from [`PlanStats::over_tolerance`], which
+    /// names the limits of sag refinement and measured residuals, as on the display path.
+    pub unshaped: Vec<Unshaped>,
+}
+
+/// A face the mesh path left short of its shape (see [`PlanStats::unshaped`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Unshaped {
+    /// The face's index in the record.
+    pub face: usize,
+    /// Its triangles' smallest angle in 3D (degrees).
+    pub smallest_angle: f64,
+    /// What limited it, each once, in the order met; empty where nothing did and a triangle is
+    /// still sharper than the spec's angle.
+    pub limits: Vec<ShapeLimit>,
+}
+
+/// What stopped the mesh path's shaping of a face ([`Unshaped::limits`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShapeLimit {
+    /// It added all the points a face may have (`MAX_MESH_REFINE`, 200 000) with a triangle
+    /// still too sharp, too long or off the surface.
+    Points,
+    /// Its lattice had more seeds than a face may have (`MAX_SEEDS`, 200 000): it was refined
+    /// from its boundary alone.
+    Seeds,
+    /// A point it would add encroaches on a boundary side, and the rounds of putting such points
+    /// on the edges (`MAX_SPLIT_ROUNDS`, 16) ran out: the side was kept whole.
+    Rounds,
+    /// A point it would add encroaches on a boundary side on no edge (a pole's collapsed side,
+    /// the line a seamless face is cut along), which no node can be put on: kept whole.
+    SidesOnNoEdge,
+    /// An extra shaping point would exceed the edge node budget. Its boundary is kept whole.
+    EdgeNodes,
+    /// The point it would add lies nearer a node than a quarter of the triangle's longest side
+    /// (where the surface's Delaunay rule could not be kept in (u, v)): not added, as it would
+    /// make a sliver.
+    Crowded,
+    /// A triangle smaller than refinement splits (the spec's chord over a thousand, squared) is
+    /// still too sharp.
+    Floor,
+    /// A triangle's sharpest corner is a corner of the boundary sharper than the spec's angle,
+    /// between two of its sides: no point inside the face widens it.
+    Corner,
+    /// A point it would add encroaches on a boundary side, for a triangle of boundary nodes alone
+    /// narrower than the spec's chord: the face is narrower than the chord there (two of its
+    /// curves within the chord of each other), which splitting sides cannot widen. The triangle
+    /// is left as it is.
+    Narrow,
 }
 
 /// An edge a bound of its sampling stopped (see [`PlanStats::edges_capped`]).
@@ -79,14 +129,13 @@ pub enum EdgeCap {
     Depth,
 }
 
-/// A face a memory bound limited (see [`PlanStats::over_tolerance`]).
+/// A face with a limit or residual of sag refinement (see [`PlanStats::over_tolerance`]).
 #[derive(Clone, Debug, PartialEq)]
 pub struct OverTolerance {
     /// The face's index in the record.
     pub face: usize,
-    /// The farthest its triangles lie from its surface (mm), measured as the sag refinement
-    /// measures them: at each triangle's middle and its sides' middles, along the surface's
-    /// normal there, wherever the surface evaluates.
+    /// The farthest its actual triangles lie from its surface (mm), at their middles and their
+    /// sides' middles, along the surface normal there, wherever the surface evaluates.
     pub sag: f64,
     /// The measurements `sag` could not make (one per middle per triangle, so a side shared by
     /// two triangles counts twice): the surface has no point there.
@@ -97,7 +146,7 @@ pub struct OverTolerance {
     /// made up what a thinned grid left (for [`Cap::Refine`], which stops with a side still
     /// over, normally not, unless a flip after the refinement laid that side down).
     pub within: bool,
-    /// The bounds that limited it, one or both.
+    /// The bounds that limited it. Empty for an uncapped residual with a displaced boundary.
     pub caps: Vec<Cap>,
 }
 

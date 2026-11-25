@@ -8,13 +8,13 @@ use std::collections::BTreeMap;
 
 use serde_json::{Map, Value, json};
 use solidcore_record::Vec3;
-use solidcraft_doc::joints;
 use solidcraft_doc::motion::MotionStudy;
 use solidcraft_doc::{Document, Mat, apply_point, mat_mul};
 use solidcraft_geom::Aabb3;
 
 use super::contact_sweep::{ContactGeometry, Member};
 use super::{drive_with_contact, joint_id, keyed, occurrences, path_world, study_index, traced_point, values_at};
+use crate::cmd::joints::active_joint_values;
 use crate::params::{bad, bool_, num};
 use crate::schema::motion::PartPlace;
 use crate::schema::motion_analysis::{CollidingPair, MotionInterference, MotionPlot, PlotSeries, PlottedPoint, StudyStop};
@@ -166,7 +166,8 @@ fn unwrap_degrees(v: &mut [f64]) {
 
 /// The joint values a plot follows: (joint id, value index).
 fn plotted(s: &Session, p: &Value, cmd: &str) -> Result<Vec<(u64, usize)>> {
-    let joints = &s.doc.assembly.joints;
+    let active = s.doc.active_assembly();
+    let joints = &active.assembly.joints;
     let ids: Vec<u64> = match p.get("joints") {
         None | Some(Value::Null) => joints.iter().filter(|j| !j.suppressed).map(|j| j.id).collect(),
         Some(Value::Array(list)) if list.len() <= MAX_SERIES => list.iter().map(|v| joint_id(s, Some(v), cmd)).collect::<Result<_>>()?,
@@ -206,7 +207,7 @@ pub(super) fn plot(s: &mut Session, p: &Value) -> Result<Value> {
     let mut taken = 0;
     let stop = play(s, &m, n, true, |t, _| {
         taken += 1;
-        let now = joints::joint_values(&t.doc.assembly);
+        let now = active_joint_values(&t.doc);
         for ((id, i), out) in series.iter().zip(values.iter_mut()) {
             out.push(now.get(id).and_then(|q| q.get(*i)).copied().unwrap_or(0.0));
         }
@@ -325,7 +326,7 @@ fn shared_volume(s: &Session, doc: &Document, a: u64, b: u64, booleans: &mut usi
         };
         for body in st.bodies.iter().filter(|x| doc.model_body_component(x) == comp && !x.body.is_mesh()) {
             let frame = doc.model_body_offset(body).map(|o| mat_mul(&m, o)).unwrap_or(m);
-            let local = body.mesh().bounds();
+            let local = body.body.exact_bounds().unwrap_or_else(|_| body.outline_bounds());
             let mut world = Aabb3::EMPTY;
             for c in 0..8 {
                 let pick = |bit: usize, lo: f64, hi: f64| if c & bit == 0 { lo } else { hi };
@@ -351,7 +352,12 @@ fn shared_volume(s: &Session, doc: &Document, a: u64, b: u64, booleans: &mut usi
                 solidcraft_kernel::transform_matrix(&ba.body, *fa).map_err(|e| failed(&e))?,
                 solidcraft_kernel::transform_matrix(&bb.body, *fb).map_err(|e| failed(&e))?,
             );
-            if let Some(shared) = solidcraft_kernel::boolean(&pa, &pb, solidcraft_kernel::BoolOp::Intersect).map_err(|e| failed(&e))? {
+            // SMLib's check of the shared part runs here: a part it refuses is not measured.
+            let shared = solidcraft_kernel::validating(solidcraft_kernel::Validation::EachStep, || {
+                solidcraft_kernel::boolean(&pa, &pb, solidcraft_kernel::BoolOp::Intersect)
+            })
+            .0;
+            if let Some(shared) = shared.map_err(|e| failed(&e))? {
                 total += solidcraft_kernel::measure(&shared).map_err(|e| failed(&e))?.volume;
             }
         }
