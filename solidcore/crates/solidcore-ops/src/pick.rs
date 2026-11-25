@@ -4,6 +4,7 @@
 //!
 //! - [`edges`]: per point, the body's edge nearest it.
 //! - [`vertices`]: per point, the body's vertex nearest it.
+//! - [`faces`]: per point, the body's face nearest it, as it is trimmed.
 //! - [`Body::face_at`]: the face a point lies on, by the kernel's classification.
 //! - [`Body::faces_on_one_surface`]: picks grown across the edges where the kernel proves one
 //!   surface continues.
@@ -17,8 +18,9 @@
 //! place. The points are taken in order and the first that misses ends the pick.
 //!
 //! Every distance is the kernel's (`query::api_queries::edge_closest_point`,
-//! `query::api_queries::vertex_distance`); ops compares them. An edge whose closest-point solve
-//! answers with a status (no point found) is passed over, as an edge the point cannot be near.
+//! `query::api_queries::vertex_distance`, `query::api_queries::face_closest_point_in_shape`);
+//! ops compares them. An edge or face whose closest-point solve answers with a status (no point
+//! found) is passed over, as one the point cannot be near.
 //! Indices are the body's native lists', as [`crate::blend`] takes them; a copy keeps the order
 //! ([`Body::copy`]).
 
@@ -26,17 +28,18 @@ use solidcore::query::api_queries as q;
 use std::collections::BTreeMap;
 
 use solidcore::error::EntityRef;
+use solidcore::geom::object::Shape;
 use solidcore::intersect::point_class::PointClassType;
-use solidcore::query::brep::BrepClassifier;
+use solidcore::query::brep::{BrepClassifier, BrepQuery, LiveBrepObjects};
 use solidcore::query::faces_continue::{faces_continue, Continues};
-use solidcore::topology::{edge, face, EdgeId, FaceId};
+use solidcore::topology::{edge, face, BrepId, EdgeId, FaceId};
 use solidcore::{Brep, Kernel, Point3};
 use solidcore_record::brep::Brep as Record;
 
 use crate::body::Body;
 use crate::measure::box_max_distance_to_point;
 use crate::order::{self, Order};
-use crate::session::{answer, read_body, Answer};
+use crate::session::{answer, read_body, with_body, Answer};
 use crate::{Error, Result};
 
 /// The largest tolerance a pick takes.
@@ -152,6 +155,53 @@ pub fn vertices(body: &Body, points: &[[f64; 3]], tolerance: f64) -> Result<Pick
                 return Ok(None);
             };
             Ok(Some(q::vertex_distance(b, v, p)?.value))
+        })
+    })
+}
+
+/// Per point of `points`, the index in `body`'s native face list of the face nearest it within
+/// `tolerance`, by the module's rule: each face's distance as it is trimmed
+/// (`SmApiFaceClosestPoint`), its shape made once for all the points. A face whose shape the
+/// kernel cannot make is passed over, as is one whose solve answers with a status. The kernel's
+/// solve may add UV trim curves to the body.
+///
+/// # Errors
+/// [`Error::Argument`] for a coordinate that is not finite or a tolerance not finite, positive
+/// and below [`MAX_TOLERANCE`]; the kernel's error from a closest-point solve that is no
+/// status; [`Error::Internal`] for a body a panic left unfinished.
+pub fn faces(body: &Body, points: &[[f64; 3]], tolerance: f64) -> Result<Picked> {
+    let points = checked(points, tolerance)?;
+    with_body("pick::faces", body, |k: &mut Kernel, b: &mut Brep| {
+        let id = BrepId::from_index(0);
+        let list = b.face_list().to_vec();
+        let mut shapes = Vec::with_capacity(list.len());
+        for &f in &list {
+            shapes.push(answer(Shape::new(
+                k,
+                &(id, &*b),
+                &[],
+                &[(id, f)],
+                &[],
+                &[],
+            ))?);
+        }
+        let body_tolerance = b.tolerance();
+        let query = BrepQuery::of_brep(b);
+        let identity = query.effective_identity();
+        let objects = LiveBrepObjects::new(b, &identity, None)?;
+        let k: &Kernel = k;
+        nearest(list.len(), &points, tolerance, body_tolerance, |x, p| {
+            let (Some(&f), Some(Some(shape))) = (list.get(x), shapes.get(x)) else {
+                return Ok(None);
+            };
+            Ok(answer(q::face_closest_point_in_shape(
+                k,
+                shape,
+                &objects,
+                (id, f),
+                p,
+            ))?
+            .map(|c| c.distance))
         })
     })
 }

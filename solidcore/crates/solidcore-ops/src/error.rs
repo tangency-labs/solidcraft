@@ -150,6 +150,25 @@ pub enum Error {
     /// A split that cut no face, where a tool ran into a face and ended inside it: its curve on
     /// the face is a crack, which cuts nothing off.
     ToolStopsShort,
+    /// Faces moved, but the tangent blends on them cannot follow them (taken off, the faces
+    /// moved, put back at their own sizes): `exact` where they would need a continuation that
+    /// cannot be made exactly, else where they cannot be put back as they were; `why` in the
+    /// kernel's words.
+    BlendsNotFollowed {
+        /// Whether the blends need a continuation that cannot be made exactly.
+        exact: bool,
+        /// The kernel's statement of why.
+        why: String,
+    },
+    /// A draft the kernel refused whose drafted face would cut through a face it does not meet
+    /// (the kernel's `drafted_through`): a hole's wall within the draft of the side.
+    DraftCutsThrough {
+        /// A point of the face cut through, between the drafted face's plane and its drafted
+        /// plane.
+        at: [f64; 3],
+        /// How far that point lies past the drafted plane.
+        depth: f64,
+    },
     /// A planar profile the kernel refuses, and why (`solidcore::prism::profile::check_regions`).
     Profile(solidcore::prism::profile::ProfileRefusal),
     /// A frame-stock path or its section the kernel refuses, including the curve index
@@ -288,6 +307,17 @@ pub enum Error {
     },
     /// The application cancelled the call.
     Cancelled,
+    /// The call spent the fuel it was given ([`crate::fuel`]): a deterministic budget of
+    /// work units, never of time. It gave no result; run again with more fuel
+    /// ([`crate::fuel::Fuel::Limit`], or [`crate::fuel::Fuel::Unlimited`]) to try harder.
+    OutOfFuel {
+        /// The ops call that ran out (its session call name).
+        op: &'static str,
+        /// The work units it spent.
+        spent: u64,
+        /// The work units it was given.
+        limit: u64,
+    },
     /// A body built from a record whose blend face's net its definition does not certify (the
     /// kernel's `DefinitionNotCertified`): the face, by its index in the body's face order, and
     /// the bound ε its definition states.
@@ -523,6 +553,8 @@ impl Error {
             Error::CurveDoesNotCut => "CurveDoesNotCut",
             Error::NotExact => "NotExact",
             Error::ToolStopsShort => "ToolStopsShort",
+            Error::BlendsNotFollowed { .. } => "BlendsNotFollowed",
+            Error::DraftCutsThrough { .. } => "DraftCutsThrough",
             Error::Profile(..) => "Profile",
             Error::FrameMember(..) => "FrameMember",
             Error::Degenerate => "Degenerate",
@@ -541,6 +573,7 @@ impl Error {
             Error::Invariant { .. } => "Invariant",
             Error::ContactUndecided { .. } => "ContactUndecided",
             Error::Cancelled => "Cancelled",
+            Error::OutOfFuel { .. } => "OutOfFuel",
             Error::DefinitionNotCertified { .. } => "DefinitionNotCertified",
             Error::Reentered => "Reentered",
             Error::NotOneFoot { .. } => "NotOneFoot",
@@ -1053,6 +1086,21 @@ impl std::fmt::Display for Error {
                 f,
                 "the tool ends inside the face it runs into, so it cuts nothing off"
             ),
+            Error::BlendsNotFollowed { exact: true, why } => write!(
+                f,
+                "the blends on the moved faces need a continuation that cannot be made exactly: {why}"
+            ),
+            Error::BlendsNotFollowed { exact: false, why } => write!(
+                f,
+                "the blends on the moved faces cannot be taken off and put back: {why}"
+            ),
+            Error::DraftCutsThrough {
+                at: [x, y, z],
+                depth,
+            } => write!(
+                f,
+                "a drafted face would cut through the face at ({x:.3}, {y:.3}, {z:.3}), which reaches {depth:.3} past it and meets no edge of it"
+            ),
             Error::Profile(r) => write!(
                 f,
                 "planar profile refused: {}",
@@ -1121,6 +1169,10 @@ impl std::fmt::Display for Error {
                 "contact with body {other} is undecided: the boundary distance is in [{lower}, {upper}]"
             ),
             Error::Cancelled => write!(f, "cancelled"),
+            Error::OutOfFuel { op, spent, limit } => write!(
+                f,
+                "{op}: gave up: spent {spent} of the {limit} work units it was given"
+            ),
             Error::Reentered => write!(
                 f,
                 "solidcore-ops was called from inside a call or the failure callback"
@@ -1224,6 +1276,15 @@ fn typed(e: SolidError) -> Error {
         SolidError::Unsupported { reason, .. } => Error::Unsupported(reason),
         SolidError::Unported { upstream, .. } => Error::Unported(upstream),
         SolidError::Cancelled { .. } => Error::Cancelled,
+        SolidError::OutOfFuel {
+            operation,
+            spent,
+            limit,
+        } => Error::OutOfFuel {
+            op: operation,
+            spent,
+            limit,
+        },
         e @ SolidError::PortInvariant { operation, reason } => Error::Invariant {
             class: e.kind(),
             defect: true,
