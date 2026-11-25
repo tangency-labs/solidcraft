@@ -1105,7 +1105,7 @@ impl Body {
         }
     }
 
-    /// For each edge of `self`, its incident face indices and exact polyline points.
+    /// For each edge of `self`, the faces it bounds (each once) and its exact polyline points.
     pub fn edge_faces_and_points(&self) -> Vec<(Vec<u32>, Vec<Vec3>)> {
         if self.is_mesh() {
             return Vec::new();
@@ -1115,7 +1115,8 @@ impl Body {
             .edges
             .iter()
             .map(|e| {
-                let fs: Vec<u32> = e.uses.iter().map(|u| u.face).collect();
+                // Each face once: a seam bounds its one face from both sides.
+                let fs: Vec<u32> = crate::history::faces_of(e).into_iter().map(|f| f as u32).collect();
                 let pts = edge_points(e, chord).unwrap_or_default();
                 (fs, pts)
             })
