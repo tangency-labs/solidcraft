@@ -64,6 +64,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          or the bend's outer face tangent to the edge's face (below 90 deg the bend's end on that face)), flip?, body?, corner_relief_shape?: notch|round|rectangular|tear and corner_relief? (size across): \
          the relief at the corners these flanges make (default: the rule's); \
          then?: [{angle?, height, flip?}] further bends (at most 16), each a flange on the far edge of the one before, flip: true turns that bend the other way (edge only); \
+         profile?: sketch (one closed profile on the flange's plane, bottom line on the edge: the flange's outline past the bend, its holes cut-outs, its stretch of the edge and its height; one plain edge) or profile_sketch?: true (draw that sketch first, a rectangle edge-long and `height` high on the flange's face, four joined lines with no constraints or dimensions; edit it to reshape the flange) (edge only); \
          type?: base|edge|contour (default from the inputs); name?, body_name? (the new body). \
          Thickness, K-factor and bend radius come from the rule (sheet.manage_rules); passing them here is refused, \
          and so is the corner relief on a base or contour flange",
@@ -307,6 +308,59 @@ pub(crate) fn then_list(v: Option<&Value>) -> std::result::Result<Vec<ThenStep>,
 /// How many panels each sheet made from surfaces has: what a feature added is past them.
 fn surface_panel_counts(s: &Session) -> std::collections::BTreeMap<String, usize> {
     s.model.state().surface_sheets.iter().map(|sk| (sk.body.clone(), sk.sheet.panels.len())).collect()
+}
+
+/// Draw the profile sketch a flange from a profile starts with (#3516): the flange `plain` would
+/// be, as a rectangle on its panel's face on the sheet's surface, its bottom line on the line the
+/// bend's anchor marks (the edge, for a flange in the default position), as long as the bend and
+/// as far out as the flange reaches: four lines joined at their corners and nothing else, no
+/// constraints or dimensions, so it is free to be drawn over. Returns the sketch's feature id.
+fn draw_profile_sketch(s: &mut Session, p: &Value, plain: FeatureKind, cmd: &str) -> Result<u64> {
+    // The plain flange, in a scratch copy: where its panel lies.
+    let mut probe = s.scratch();
+    let before = surface_panel_counts(&probe);
+    add_feature(&mut probe, &json!({}), plain)?;
+    let st = probe.model.state();
+    let frame = st
+        .surface_sheets
+        .iter()
+        .find_map(|sk| {
+            let from = before.get(&sk.body).copied().unwrap_or(sk.sheet.panels.len());
+            (from..sk.sheet.panels.len()).find_map(|panel| sk.profile_frame(panel))
+        })
+        .ok_or_else(|| bad(cmd, "the flange's profile sketch could not be placed"))?;
+    let (plane, len, high) = frame;
+    let (o, x, y) = (plane.origin, plane.x, plane.y);
+    let base = match str_(p, "name") {
+        Some(n) => format!("{n} Profile"),
+        None => "Flange Profile".to_string(),
+    };
+    // A second flange drawn the same way gets "Flange Profile 2", and so on: feature names are unique.
+    let taken = |n: &str| s.doc.features.iter().any(|f| f.name == n);
+    let name = if taken(&base) { (2..).map(|k| format!("{base} {k}")).find(|n| !taken(n)).unwrap_or(base) } else { base };
+    let checkpoint = s.checkpoint();
+    let drawn = (|| -> Result<u64> {
+        let made = s.execute(
+            "sketch.create",
+            &json!({"plane": {"origin": [o.x, o.y, o.z], "x_dir": [x.x, x.y, x.z], "y_dir": [y.x, y.y, y.z]}, "name": name}),
+        )?;
+        let sk = made.get("sketch").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "the profile sketch was not made"))?;
+        // Four lines sharing their corners; `connect: false` keeps the corner at the sketch's
+        // origin from being made coincident with it.
+        s.execute("sketch.line", &json!({"points": [[0, 0], [len, 0], [len, high], [0, high]], "closed": true, "connect": false}))?;
+        s.execute("sketch.finish", &json!({}))?;
+        Ok(sk)
+    })();
+    match drawn {
+        Ok(sk) => {
+            s.drop_checkpoint(checkpoint);
+            Ok(sk)
+        }
+        Err(e) => {
+            s.restore_checkpoint(checkpoint)?;
+            Err(e)
+        }
+    }
 }
 
 /// Where to pick the far edges of the flanges the last feature made: a point on each, for the
@@ -561,23 +615,73 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
                 check_expr(s, c, Kind::Length, cmd, "corner_relief")?;
             }
             let flip = bool_(p, "flip").unwrap_or(false);
+            // The flange's profile sketch (#3516): one given by name, or a new one drawn for it.
+            let mut profile = match p.get("profile").filter(|v| !v.is_null()) {
+                Some(v) => Some(SketchId(sketch_id(s, Some(v), cmd, "profile")?)),
+                None => None,
+            };
+            let make_profile = bool_(p, "profile_sketch").unwrap_or(false);
+            if profile.is_some() || make_profile {
+                if profile.is_some() && make_profile {
+                    return Err(bad(cmd, "give `profile` (a sketch to use) or `profile_sketch: true` (draw one), not both"));
+                }
+                if edges.len() != 1 || edges.iter().any(|e| !e.segments.is_empty() || e.height.is_some() || e.angle.is_some()) {
+                    return Err(bad(cmd, "a flange from a profile sketch takes one edge, as a plain point, without segments"));
+                }
+                if !then.is_empty() {
+                    return Err(bad(cmd, "not supported yet: then on a flange from a profile sketch (bend its far edge in its own feature)"));
+                }
+                if height_from.is_some() {
+                    return Err(bad(cmd, "a flange from a profile sketch is as high as its profile: leave out height_from"));
+                }
+            }
+            let kind = |profile: Option<SketchId>| FeatureKind::SheetFlange {
+                edges: edges.clone(),
+                height: height.clone(),
+                angle: angle.clone(),
+                radius: radius.clone(),
+                position: position.clone(),
+                flip,
+                body: body.clone().map(BodyName),
+                corner_relief_shape: corner_relief_shape.clone(),
+                corner_relief: corner_relief.clone(),
+                height_from: height_from.clone(),
+                profile,
+            };
             let mut before = surface_panel_counts(s);
-            let mut reply = add_feature(
-                s,
-                p,
-                FeatureKind::SheetFlange {
-                    edges,
-                    height,
-                    angle,
-                    radius: radius.clone(),
-                    position: position.clone(),
-                    flip,
-                    body: body.clone().map(BodyName),
-                    corner_relief_shape,
-                    corner_relief,
-                    height_from: height_from.clone(),
-                },
-            )?;
+            // Drawing the profile, the sketch and the flange are one step to undo.
+            let undo_from = s.undo.len();
+            let checkpoint = make_profile.then(|| s.checkpoint());
+            if let Some(c) = checkpoint {
+                // The sketch is drawn whole or not at all (see `draw_profile_sketch`).
+                match draw_profile_sketch(s, p, kind(None), cmd) {
+                    Ok(sketch) => profile = Some(SketchId(sketch)),
+                    Err(e) => {
+                        s.drop_checkpoint(c);
+                        return Err(e);
+                    }
+                }
+            }
+            let mut reply = match (add_feature(s, p, kind(profile)), checkpoint) {
+                (Ok(made), checkpoint) => {
+                    if let Some(c) = checkpoint {
+                        s.drop_checkpoint(c);
+                    }
+                    made
+                }
+                // The sketch drawn for it goes with the flange that could not be made.
+                (Err(e), Some(c)) => {
+                    s.restore_checkpoint(c)?;
+                    return Err(e);
+                }
+                (Err(e), None) => return Err(e),
+            };
+            if make_profile && s.undo.len() > undo_from + 1 {
+                s.undo.truncate(undo_from + 1);
+                if let Some(first) = s.undo.last_mut() {
+                    first.label = "Flange".into();
+                }
+            }
             // The first bend owns the supplied name. Keep its identity and report the completed chain's result.
             let named_feature =
                 str_(p, "name").filter(|name| !name.trim().is_empty() && !then.is_empty()).map(|_| (reply["feature"].clone(), reply["name"].clone()));
@@ -599,6 +703,7 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
                         corner_relief_shape: None,
                         corner_relief: None,
                         height_from: height_from.clone(),
+                        profile: None,
                     },
                 )?;
             }

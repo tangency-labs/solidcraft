@@ -454,6 +454,20 @@ pub struct FlangeParams {
     /// `segments` is refused, naming where it goes, rather than ignored as an unknown key.
     #[serde(default)]
     pub segments: Option<Value>,
+    /// Edge: the flange's profile sketch, by id or name (#3516): one closed profile drawn on the
+    /// flange's plane with its bottom line on the edge. Past the bend the flange is that profile,
+    /// laid flat, its holes cut out; the bend runs along the edge as far as the profile does; the
+    /// flange is as high as the profile. One edge, a plain point, no `then` or `height_from`.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "IdOrName")]
+    pub profile: Option<IdOrName>,
+    /// Edge: draw the flange's profile sketch first (named after the flange, `<name> Profile`,
+    /// or `Flange Profile`, numbered where that is taken): a rectangle as long as the edge and
+    /// `height` high on the flange's outer face, four joined lines with no constraints or
+    /// dimensions, and build the flange from it; edit that sketch to change the flange's outline.
+    /// One undo step. Default: false.
+    #[serde(default)]
+    pub profile_sketch: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }

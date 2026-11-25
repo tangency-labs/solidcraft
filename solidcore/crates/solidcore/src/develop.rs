@@ -54,6 +54,10 @@
 //! | [`curve_through`]            | `develop::curve_through`             |
 //! | [`Refusal`]                  | `DevelopError` (typed: no strings)   |
 //!
+//! A profile flange's frame and where its profile lands on its edge ([`profile_frame`],
+//! [`edge_fractions`] and the rest of `flange_profile`) are `crates/doc`'s
+//! `sheet_surface_profile`, moved here too.
+//!
 //! Deviations: none (no upstream counterpart). No recursion: layouts and folds walk the joints
 //! breadth first, each joint once; root isolation, span crossings and refinements run on explicit
 //! stacks with fixed budgets. Work limits: [`MAX_PANELS`], [`MAX_JOINTS`].
@@ -63,6 +67,7 @@
 
 mod bead;
 mod chart;
+mod flange_profile;
 mod flat;
 mod fold;
 pub mod hermite;
@@ -78,6 +83,9 @@ pub use bead::{
     line_in_chart, segment_in_region, Bead, BeadAgainst, BeadFace, BeadForm, BeadOutline, BeadPart,
     BeadRefusal, BeadSection, FormEdge, FormFace, FormSurface, CREASE_TOL, MIN_BEAD_RADIUS,
     MIN_BEND_RISE,
+};
+pub use flange_profile::{
+    anchor_past_outer_sharp, edge_fractions, profile_frame, profile_tilt, shift_along, ProfileFrame,
 };
 pub use flat::{Development, EdgeFrom, FlatPanel, Mismatch, Trim, Zone};
 pub use fold::{fold, Bent, Fold};

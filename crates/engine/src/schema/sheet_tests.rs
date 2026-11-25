@@ -57,6 +57,8 @@ fn schemas_and_the_key_check_agree() {
             "height",
             "height_from",
             "position",
+            "profile",
+            "profile_sketch",
             "profiles",
             "radius",
             "reverse",

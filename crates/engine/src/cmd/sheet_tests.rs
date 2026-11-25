@@ -11022,3 +11022,447 @@ fn walls_beside_a_gap_in_a_regular_base_keep_the_plates_side_where_no_wall_meets
         }
     }
 }
+
+/// A 100 x 60 base (the default rule: 2.5 mm, K 0.44, R 2.5) and a flange profile drawn on the
+/// outer face of a flange turned up 90° on its y = 0 edge: that face is the plane y = 0 and the
+/// outer virtual sharp the line y = 0, z = 0, so the sketch's (x, y) are world (x, z) (#3516).
+fn profile_on_front(s: &mut Session, points: &[[f64; 2]], hole: Option<([f64; 2], f64)>) {
+    base(s, 100.0, 60.0);
+    run(s, "sketch.create", json!({"plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Shape"}));
+    run(s, "sketch.line", json!({"points": points, "closed": true}));
+    if let Some((center, radius)) = hole {
+        run(s, "sketch.circle.center", json!({"center": center, "radius": radius}));
+    }
+    run(s, "sketch.finish", json!({}));
+}
+
+/// The default rule's 90° bend: its setback (R + T)·tan 45° = 5, and the volume of its metal for
+/// each mm along it, a quarter ring from R to R + T: (π/4)·(5² − 2.5²) = 4.6875π.
+const PROFILE_SETBACK: f64 = 5.0;
+const PROFILE_BEND_PER_MM: f64 = 4.6875 * PI;
+
+#[test]
+fn a_drawn_profile_sketch_builds_the_same_flange_as_its_height_and_follows_the_angle() {
+    // The plain flange and the one from the profile sketch it draws are the same part, at 90°
+    // and at 50° (where the profile's plane leans).
+    for angle in [90.0, 50.0] {
+        let mut plain = Session::default();
+        base(&mut plain, 100.0, 60.0);
+        run(&mut plain, "sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 20, "angle": format!("{angle} deg")}));
+        let mut drawn = Session::default();
+        base(&mut drawn, 100.0, 60.0);
+        let undo = drawn.undo.len();
+        run(
+            &mut drawn,
+            "sheet.flange",
+            json!({"edges": [[50, 0, 2.5]], "height": 20, "angle": format!("{angle} deg"), "profile_sketch": true, "name": "Lip"}),
+        );
+        assert_eq!(drawn.undo.len(), undo + 1, "one undo step");
+        assert!(drawn.doc.find_feature("Lip Profile").is_some());
+        assert!(no_errors_or_warnings(&drawn), "{angle}°: {:?}", drawn.model.results);
+        let (a, b) = (volume(&mut plain), volume(&mut drawn));
+        assert!(rel(b, a) < 1e-9, "{angle}°: {b} for {a}");
+        assert_eq!(flat(&mut drawn)["flat_size_mm"], flat(&mut plain)["flat_size_mm"]);
+        // The sketch is four joined lines with no constraints or dimensions: its four corners free.
+        let sketch = run(&mut drawn, "sketch.inspect", json!({"sketch": "Lip Profile"}));
+        assert_eq!(sketch["dof"], 8, "{sketch}");
+        assert_eq!(sketch["curves"].as_array().map(Vec::len), Some(4), "{sketch}");
+        assert_eq!(sketch["constraints"].as_array().map(Vec::len), Some(0), "{sketch}");
+        // Undo takes the sketch and the flange away together.
+        run(&mut drawn, "edit.undo", json!({}));
+        assert!(drawn.doc.find_feature("Lip Profile").is_none());
+        assert!(rel(volume(&mut drawn), 15000.0) < 1e-9);
+    }
+}
+
+#[test]
+fn a_profile_sketch_shapes_the_flange_cuts_its_holes_and_reopens() {
+    // A tab 60 wide (x 20…80) and 20 high whose top corners are cut back 10 x 15: its sides run
+    // straight across the bend (z 0…5, the bend's (R + T)·tan 45°) and then taper.
+    let tab = [[20.0, 0.0], [80.0, 0.0], [80.0, 5.0], [70.0, 20.0], [30.0, 20.0], [20.0, 5.0]];
+    let square = [[20.0, 0.0], [80.0, 0.0], [80.0, 20.0], [20.0, 20.0]];
+    let mut a = Session::default();
+    profile_on_front(&mut a, &square, None);
+    run(&mut a, "sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 1, "profile": "Shape"}));
+    let mut b = Session::default();
+    profile_on_front(&mut b, &tab, Some(([50.0, 13.0], 3.0)));
+    run(&mut b, "sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 1, "profile": "Shape"}));
+    assert!(no_errors_or_warnings(&b), "{:?}", b.model.results);
+    let (va, vb) = (volume(&mut a), volume(&mut b));
+    // Two corners of 10 x 15 / 2 and a hole of radius 3, all through 2.5 mm.
+    let want = va - (2.0 * 75.0 + PI * 9.0) * 2.5;
+    assert!((vb - want).abs() < 1e-3, "{vb} for {want}");
+    // The bend is the profile's 60 mm, the flange as high as the profile (20 mm).
+    let f = flat(&mut b);
+    assert!((f["bends"][0]["length"].as_f64().unwrap_or(0.0) - 60.0).abs() < 1e-6, "{f}");
+    let want_y = 60.0 - 5.0 + FRAC_PI_2 * (2.5 + 0.44 * 2.5) + 15.0;
+    assert!((f["flat_size_mm"][1].as_f64().unwrap_or(0.0) - want_y).abs() < 1e-6, "{f}");
+    // The hole is a true circle in the flat pattern and the DXF.
+    assert!(
+        f["cutout_shapes"].as_array().is_some_and(|c| c.iter().any(|x| (x["circle"]["radius"].as_f64().unwrap_or(0.0) - 3.0).abs() < 1e-9)),
+        "{f}"
+    );
+    let dxf = run(&mut b, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_owned();
+    assert!(dxf_count(&dxf, |g| matches!(g, DxfShape::Circle { .. })) >= 1);
+    // It reopens as it was.
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&b.doc.to_json()).unwrap());
+    assert!((volume(&mut reopened) - vb).abs() < 1e-6);
+    assert_eq!(flat(&mut reopened), f);
+    let body = &b.model.state().bodies[0].body;
+    assert!(body.validity().is_empty() && body.shell_count() == 1);
+}
+
+/// A profile shorter than its edge gets the rule's bend relief at each end where the base runs on
+/// past the bend, and none at an end on the base's corner: the base, cut back to the bend's
+/// tangent line under the flange only, keeps its edge beside it.
+#[test]
+fn a_profile_flange_short_of_its_edge_gets_the_bend_relief_where_the_base_runs_on() {
+    // The default rule's relief is T = 2.5 wide and T/2 = 1.25 deep: a slot 2.5 along past the
+    // bend's end, from 1.25 inside the base's tangent line (y = 5 + 1.25 = 6.25) out through its
+    // edge (y = 0): 2.5 x 6.25 = 15.625 of the base's area each. The flange is 20 high from the
+    // outer sharp, 15 past its tangent line.
+    for (x0, x1, reliefs) in [(0.0, 35.0, 1.0), (5.0, 35.0, 2.0), (0.0, 100.0, 0.0)] {
+        let what = format!("profile x {x0}…{x1}");
+        let mut s = Session::default();
+        profile_on_front(&mut s, &[[x0, 0.0], [x1, 0.0], [x1, 20.0], [x0, 20.0]], None);
+        run(&mut s, "sheet.flange", json!({"edges": [[20, 0, 2.5]], "height": 1, "profile": "Shape"}));
+        assert!(no_errors_or_warnings(&s), "{what}: {:?}", s.model.results);
+        let l = x1 - x0;
+        let base = 6000.0 - PROFILE_SETBACK * l - reliefs * 2.5 * 6.25;
+        let want = 2.5 * (base + 15.0 * l) + PROFILE_BEND_PER_MM * l;
+        assert!(rel(volume(&mut s), want) < 1e-6, "{what}: {} vs {want}", volume(&mut s));
+        // The relief beside the end at x1 (where the base runs on, short of x = 100), and the
+        // base's edge kept past it.
+        if x1 < 100.0 {
+            assert!(!contains(&s, [x1 + 1.25, 3.0, 1.25]), "{what}: the relief past x = {x1}");
+            assert!(contains(&s, [x1 + 3.75, 3.0, 1.25]), "{what}: the base's edge past the relief");
+            assert!(contains(&s, [x1 + 1.25, 8.0, 1.25]), "{what}: the base past the relief's end");
+        }
+        if x0 > 0.0 {
+            assert!(!contains(&s, [x0 - 1.25, 3.0, 1.25]), "{what}: the relief before x = {x0}");
+            assert!(contains(&s, [x0 - 3.75, 3.0, 1.25]), "{what}: the base's edge before the relief");
+        }
+        // Under the flange the base ends at the bend: its outer sharp's corner is the bend's.
+        assert!(!contains(&s, [(x0 + x1) / 2.0, 0.5, 0.5]), "{what}: the base under the flange is cut back");
+        let f = flat(&mut s);
+        assert!((f["bends"][0]["length"].as_f64().unwrap_or(0.0) - l).abs() < 1e-6, "{what}: {f}");
+        assert_eq!(f["outline"].as_array().map(Vec::len), Some(1), "{what}: {f}");
+    }
+}
+
+#[test]
+fn a_profile_sketch_that_cannot_be_a_flange_is_refused() {
+    let cases: [(&[[f64; 2]], Option<([f64; 2], f64)>, &str); 8] = [
+        // Below the edge, into the base.
+        (&[[20.0, -3.0], [80.0, -3.0], [80.0, 20.0], [20.0, 20.0]], None, "runs 3.000 mm below the edge, into the base"),
+        // Past the end of the edge.
+        (&[[-10.0, 0.0], [80.0, 0.0], [80.0, 20.0], [-10.0, 20.0]], None, "runs 10.000 mm past the end of its edge"),
+        // A side leaning across the bend, out to its tangent line 5 up, is refused, naming the
+        // side as the sketch shows it and how far it leans by then (see `sheet_surface_profile`):
+        // a trapezoid narrowing 10 over 20 up each side leans 2.5 in on both (whichever side is read
+        // first is named); one side leaning in, one leaning out; a flange flared past the base's
+        // corners.
+        (
+            &[[20.0, 0.0], [80.0, 0.0], [70.0, 20.0], [30.0, 20.0]],
+            None,
+            "0.000) in the sketch), 2.500 mm in toward the middle by the bend's tangent line, 5.000 mm out from the edge. Draw that side square to the edge out to there; past it the profile may taper",
+        ),
+        (
+            &[[20.0, 0.0], [80.0, 0.0], [80.0, 20.0], [30.0, 20.0]],
+            None,
+            "not supported yet: the flange's profile leans across the bend at its left side (standing on the edge at (20.000, 0.000) in the sketch), 2.500 mm in toward the middle",
+        ),
+        (
+            &[[20.0, 0.0], [80.0, 0.0], [90.0, 20.0], [20.0, 20.0]],
+            None,
+            "leans across the bend at its right side (standing on the edge at (80.000, 0.000) in the sketch), 2.500 mm out past the end of the bottom line",
+        ),
+        (&[[0.0, 0.0], [100.0, 0.0], [110.0, 20.0], [-10.0, 20.0]], None, "2.500 mm out past the end of the bottom line by the bend's tangent line"),
+        // A side that stops short of the bend's tangent line, 5 out.
+        (
+            &[[20.0, 0.0], [80.0, 0.0], [80.0, 3.0], [85.0, 3.0], [85.0, 20.0], [20.0, 20.0]],
+            None,
+            "its right side (standing on the edge at (80.000, 0.000) in the sketch) must run on as one straight line until it is 5.000 mm out from the edge (the bend's tangent line), not stop 3.000 mm out",
+        ),
+        // A hole in the bend.
+        (&[[20.0, 0.0], [80.0, 0.0], [80.0, 20.0], [20.0, 20.0]], Some(([50.0, 4.0], 2.0)), "cuts into its bend at"),
+    ];
+    for (points, hole, why) in cases {
+        let mut s = Session::default();
+        profile_on_front(&mut s, points, hole);
+        let before = s.doc.to_json();
+        let e = s.execute("sheet.flange", &json!({"edges": [[50, 0, 2.5]], "height": 1, "profile": "Shape"})).unwrap_err();
+        assert!(e.to_string().contains(why), "{why}: {e}");
+        assert_eq!(s.doc.to_json(), before);
+    }
+    // Drawing a profile sketch for a flange that cannot be made leaves no sketch behind.
+    let mut s = Session::default();
+    base(&mut s, 100.0, 60.0);
+    let before = s.doc.to_json();
+    assert!(s.execute("sheet.flange", &json!({"edges": [[50, 0, 2.5]], "height": 1, "profile_sketch": true})).is_err());
+    assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
+fn deleting_a_flange_deletes_its_profile_sketch_and_undo_brings_both_back() {
+    // The profile sketch only shapes its flange, so it goes with it; one another feature also
+    // uses stays.
+    let mut s = Session::default();
+    base(&mut s, 100.0, 60.0);
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 20, "profile_sketch": true, "name": "Lip"}));
+    assert!(s.doc.find_feature("Lip Profile").is_some());
+    run(&mut s, "timeline.delete", json!({"feature": "Lip"}));
+    assert!(s.doc.find_feature("Lip").is_none() && s.doc.find_feature("Lip Profile").is_none());
+    assert!(rel(volume(&mut s), 15000.0) < 1e-9);
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.doc.find_feature("Lip").is_some() && s.doc.find_feature("Lip Profile").is_some());
+    // Shared with an extrude: the sketch stays when the flange goes.
+    run(&mut s, "solid.extrude", json!({"sketch": "Lip Profile", "distance": 1, "operation": "new_body", "name": "Copy"}));
+    run(&mut s, "timeline.delete", json!({"feature": "Lip"}));
+    assert!(s.doc.find_feature("Lip").is_none() && s.doc.find_feature("Lip Profile").is_some() && s.doc.find_feature("Copy").is_some());
+}
+
+#[test]
+fn each_drawn_profile_sketch_gets_a_name_of_its_own() {
+    // Two flanges that draw their profile sketch without a name: the second sketch is
+    // "Flange Profile 2", not a clash with the first.
+    let mut s = Session::default();
+    base(&mut s, 100.0, 60.0);
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 20, "profile_sketch": true}));
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 60, 2.5]], "height": 20, "profile_sketch": true}));
+    assert!(s.doc.find_feature("Flange Profile").is_some());
+    assert!(s.doc.find_feature("Flange Profile 2").is_some());
+}
+
+/// `profile` and `profile_sketch` are refused with segments, `then`, `height_from` or more than
+/// one edge, and together, naming why; nothing is made.
+#[test]
+fn a_profile_flange_with_what_it_cannot_take_is_refused() {
+    let square = [[20.0, 0.0], [80.0, 0.0], [80.0, 20.0], [20.0, 20.0]];
+    let cases = [
+        (json!({"edges": [[50, 0, 2.5], [50, 60, 2.5]], "height": 20, "profile": "Shape"}), "takes one edge"),
+        (
+            json!({"edges": [{"point": [50, 0, 2.5], "segments": [{"from": 0, "to": 0.5}, {"from": 0.5, "to": 1}]}], "height": 20, "profile": "Shape"}),
+            "takes one edge",
+        ),
+        (json!({"edges": [[50, 0, 2.5]], "height": 20, "profile": "Shape", "then": [{"height": 10}]}), "then on a flange from a profile sketch"),
+        (json!({"edges": [[50, 0, 2.5]], "height": 20, "profile": "Shape", "height_from": "inner"}), "leave out height_from"),
+        (json!({"edges": [[50, 0, 2.5]], "height": 20, "profile_sketch": true, "then": [{"height": 10}]}), "then on a flange from a profile sketch"),
+        (json!({"edges": [[50, 0, 2.5]], "height": 20, "profile": "Shape", "profile_sketch": true}), "not both"),
+    ];
+    for (p, why) in cases {
+        let mut s = Session::default();
+        profile_on_front(&mut s, &square, None);
+        let before = s.doc.to_json();
+        let e = s.execute("sheet.flange", &p).unwrap_err();
+        assert!(e.to_string().contains(why), "{p}: {e}");
+        assert_eq!(s.doc.to_json(), before, "{p}");
+    }
+}
+
+/// A profile sketch is read where it is drawn: one on a plane parallel to the flange's faces but
+/// on neither of them (in front of the flange, or inside its material), one whose bottom line lies
+/// above the edge (the flange would reach below it, down to the edge), and one with a second closed
+/// loop outside the outline the size of a hole inside it are each refused, saying why. The hole
+/// alone is fine.
+#[test]
+fn a_profile_sketch_off_the_flange_or_with_a_loose_loop_is_refused() {
+    let square = [[20.0, 0.0], [80.0, 0.0], [80.0, 20.0], [20.0, 20.0]];
+    let flange = json!({"edges": [[50, 0, 2.5]], "height": 1, "profile": "Shape"});
+    // The flange's outer face is the plane y = 0 and its other face y = 2.5 (inside).
+    for (y, ok) in [(-10.0, false), (1.25, false), (2.5, true)] {
+        let mut s = Session::default();
+        base(&mut s, 100.0, 60.0);
+        run(&mut s, "sketch.create", json!({"plane": {"origin": [0, y, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Shape"}));
+        run(&mut s, "sketch.line", json!({"points": square, "closed": true}));
+        run(&mut s, "sketch.finish", json!({}));
+        let before = s.doc.to_json();
+        match s.execute("sheet.flange", &flange) {
+            Ok(_) => assert!(ok, "y = {y}: built"),
+            Err(e) => {
+                assert!(!ok, "y = {y}: {e}");
+                assert!(e.to_string().contains(solidcraft_doc::PROFILE_OFF_PLANE), "y = {y}: {e}");
+                assert_eq!(s.doc.to_json(), before, "y = {y}");
+            }
+        }
+    }
+    let mut s = Session::default();
+    profile_on_front(&mut s, &[[20.0, 2.0], [80.0, 2.0], [80.0, 20.0], [20.0, 20.0]], None);
+    let e = s.execute("sheet.flange", &flange).unwrap_err();
+    assert!(e.to_string().contains("must start on the edge: its bottom line lies 2.000 mm above it"), "{e}");
+    // A hole of radius 3 inside, and a loop of radius 3 outside the outline, beside the flange.
+    let mut s = Session::default();
+    profile_on_front(&mut s, &square, Some(([50.0, 13.0], 3.0)));
+    run(&mut s, "sketch.edit", json!({"sketch": "Shape"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [90, 13], "radius": 3}));
+    run(&mut s, "sketch.finish", json!({}));
+    let before = s.doc.to_json();
+    let e = s.execute("sheet.flange", &flange).unwrap_err();
+    assert!(e.to_string().contains("must hold one closed profile (holes inside it are fine), not 2"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
+/// [`profile_on_front`]'s plate with a flange from a 100 x 40 profile on its front edge that holds
+/// a Ø10 hole at (60, 25) and a slot 8 wide from (15, 25) to (35, 25), two lines and two arcs: the
+/// flange's id, and the curves of the hole and the slot.
+fn holed_profile_flange(s: &mut Session) -> (u64, Vec<String>) {
+    profile_on_front(s, &[[0.0, 0.0], [100.0, 0.0], [100.0, 40.0], [0.0, 40.0]], None);
+    run(s, "sketch.edit", json!({"sketch": "Shape"}));
+    let circle = run(s, "sketch.circle.center", json!({"center": [60, 25], "radius": 5}));
+    let slot = run(s, "sketch.slot.center_to_center", json!({"p0": [15, 25], "p1": [35, 25], "width": 8}));
+    run(s, "sketch.finish", json!({}));
+    run(s, "sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 1, "profile": "Shape"}));
+    let flange = s.doc.features.last().map_or(0, |f| f.id);
+    let curves: Vec<String> =
+        circle["curves"].as_array().into_iter().chain(slot["curves"].as_array()).flatten().filter_map(|c| c.as_str().map(str::to_string)).collect();
+    assert_eq!(curves.len(), 5, "{circle} {slot}");
+    (flange, curves)
+}
+
+/// Each face of the sheet's body: its name (empty for none), whether it is exact, and its centroid.
+fn named_sheet_faces(s: &mut Session) -> Vec<(String, bool, solidcore_record::Vec3)> {
+    let body = s.model.state().bodies.first().map(|b| b.name.clone()).unwrap_or_default();
+    let r = run(s, "model.faces", json!({"body": body}));
+    r["faces"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|f| {
+            let c = &f["centroid"];
+            let at =
+                solidcore_record::Vec3::new(c[0].as_f64().unwrap_or(f64::NAN), c[1].as_f64().unwrap_or(f64::NAN), c[2].as_f64().unwrap_or(f64::NAN));
+            (f["name"].as_str().unwrap_or_default().to_string(), f["exact"].as_bool().unwrap_or(false), at)
+        })
+        .collect()
+}
+
+/// Every named face (`f`), edge (`e`) and vertex (`v`) of the sheet's body, with where it is: a
+/// face's centroid, an edge's middle, a vertex's point.
+fn sheet_names_by_place(s: &mut Session) -> Vec<(char, String, solidcore_record::Vec3)> {
+    let mut all: Vec<(char, String, solidcore_record::Vec3)> =
+        named_sheet_faces(s).into_iter().filter(|f| !f.0.is_empty()).map(|(n, _, at)| ('f', n, at)).collect();
+    let body = s.model.state().bodies.first().map(|b| b.name.clone()).unwrap_or_default();
+    let edges = run(s, "model.edges", json!({"body": body}));
+    for e in edges["edges"].as_array().into_iter().flatten() {
+        let (Some(name), Some(m)) = (e["name"].as_str().filter(|n| !n.is_empty()), e["mid"].as_array()) else { continue };
+        let at = solidcore_record::Vec3::new(m[0].as_f64().unwrap_or(f64::NAN), m[1].as_f64().unwrap_or(f64::NAN), m[2].as_f64().unwrap_or(f64::NAN));
+        all.push(('e', name.to_string(), at));
+    }
+    let state = s.model.state();
+    let b = state.body(&body).unwrap();
+    let points = &b.body.record().vertices;
+    for (name, v) in solidcraft_doc::naming::vertex_names(b).into_iter().zip(points) {
+        if !name.is_empty() {
+            all.push(('v', name, solidcore_record::Vec3::new(v.point[0], v.point[1], v.point[2])));
+        }
+    }
+    all
+}
+
+/// #3516 (#20573 is the base flange's twin): the walls of a profile flange's holes and slots are
+/// named after the curves of its profile sketch, `F<flange>:side:<curve>` (each piece of a wall
+/// numbered along its curve), as a cut's are, never counted among the flange's faces
+/// (`F<flange>:face:<k>`), which renumber when the part is edited. Every face is named exactly.
+#[test]
+fn a_profile_flanges_hole_and_slot_walls_are_named_after_their_profile_curves() {
+    let mut s = Session::default();
+    let (flange, curves) = holed_profile_flange(&mut s);
+    assert!(no_errors_or_warnings(&s), "{:?}", s.model.results);
+    let faces = named_sheet_faces(&mut s);
+    let inexact: Vec<_> = faces.iter().filter(|f| !f.1 || f.0.is_empty()).collect();
+    assert!(inexact.is_empty(), "named from no history: {inexact:?}");
+    // The walls: the faces whose middles lie in the hole or the slot, seen from the front.
+    let small = 1e-6;
+    let in_hole = |p: solidcore_record::Vec3| (p.x - 60.0).hypot(p.z - 25.0) < 5.0 + small;
+    let in_slot = |p: solidcore_record::Vec3| p.x > 11.0 - small && p.x < 39.0 + small && p.z > 21.0 - small && p.z < 29.0 + small;
+    let walls: Vec<&(String, bool, solidcore_record::Vec3)> = faces.iter().filter(|f| in_hole(f.2) || in_slot(f.2)).collect();
+    assert!(walls.len() >= 5, "{faces:?}");
+    let curve_of = |name: &str| {
+        let rest = name.strip_prefix(&format!("F{flange}:side:"))?;
+        Some(rest.split('#').next().unwrap_or(rest).to_string())
+    };
+    for (name, _, at) in &walls {
+        let curve = curve_of(name);
+        assert!(curve.as_ref().is_some_and(|c| curves.contains(c)), "the wall at {at:?} is `{name}`, not after a curve of {curves:?}");
+    }
+    // Each curve of the hole and the slot names a wall, the hole's by its circle.
+    for c in &curves {
+        assert!(walls.iter().any(|w| curve_of(&w.0).as_deref() == Some(c.as_str())), "no wall after `{c}`: {walls:?}");
+    }
+    assert!(walls.iter().filter(|w| in_hole(w.2)).all(|w| curve_of(&w.0).as_deref() == curves.first().map(String::as_str)), "{walls:?}");
+}
+
+/// #3516: an edit upstream of a profile flange's walls renames nothing it did not make: a hole
+/// added to the profile sketch, and a hole cut through the base before the flange. Every face,
+/// edge and vertex the part had keeps its name, compared where each is (a face the hole cuts
+/// into, where its name still names one face).
+#[test]
+fn a_profile_flanges_names_hold_when_holes_are_added_upstream() {
+    for edit in ["profile", "base"] {
+        let mut s = Session::default();
+        let (flange, _) = holed_profile_flange(&mut s);
+        let before = sheet_names_by_place(&mut s);
+        assert!(before.iter().any(|(k, n, _)| *k == 'f' && n.starts_with(&format!("F{flange}:side:"))), "{before:?}");
+        if edit == "profile" {
+            run(&mut s, "sketch.edit", json!({"sketch": "Shape"}));
+            run(&mut s, "sketch.circle.center", json!({"center": [85, 25], "radius": 4}));
+            run(&mut s, "sketch.finish", json!({}));
+        } else {
+            // Before the profile's sketch and the flange.
+            let at = s.doc.features.iter().position(|f| f.name == "Shape").unwrap();
+            run(&mut s, "timeline.rollback", json!({"position": at}));
+            run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Hole"}));
+            run(&mut s, "sketch.circle.center", json!({"center": [50, 30], "radius": 5}));
+            run(&mut s, "sketch.finish", json!({}));
+            run(&mut s, "solid.extrude", json!({"sketch": "Hole", "through_all": true, "operation": "cut", "direction": "symmetric"}));
+            run(&mut s, "timeline.rollback", json!({"position": "end"}));
+        }
+        assert!(no_errors_or_warnings(&s), "{edit}: {:?}", s.model.results);
+        let after = sheet_names_by_place(&mut s);
+        assert!(after.len() > before.len(), "{edit}: the hole adds faces, edges and vertices");
+        let mut renamed = Vec::new();
+        for (kind, name, at) in &before {
+            let now = after.iter().filter(|(k, _, p)| k == kind && p.dist(*at) < 1e-6).map(|(_, n, _)| n.as_str()).collect::<Vec<_>>();
+            // A face the new hole cuts into (the flange's caps, the base's) has moved its middle:
+            // it keeps its name, on one face.
+            let reshaped = *kind == 'f' && now.is_empty() && after.iter().filter(|(k, n, _)| *k == 'f' && n == name).count() == 1;
+            if now != [name.as_str()] && !reshaped {
+                renamed.push(format!("{kind} {name} at {at:?} is now {now:?}"));
+            }
+        }
+        assert!(renamed.is_empty(), "{edit}: {renamed:#?}");
+    }
+}
+
+/// #3516: a construction plane on the straight wall of a profile flange's slot stays on that wall
+/// when holes are added to the profile, one before the slot's wall among the flange's faces: the
+/// wall's name is its curve's, never its place among them.
+#[test]
+fn a_plane_on_a_profile_flanges_slot_wall_stays_on_it_when_the_profile_gains_holes() {
+    use solidcraft_doc::construct::ConstructGeom;
+    let mut s = Session::default();
+    let (flange, _) = holed_profile_flange(&mut s);
+    // The slot's straight wall below its middle, at z = 21.
+    let faces = named_sheet_faces(&mut s);
+    let (name, _, at) =
+        faces.iter().find(|f| (f.2.z - 21.0).abs() < 1e-6 && (f.2.x - 25.0).abs() < 1e-6).cloned().unwrap_or_else(|| panic!("{faces:?}"));
+    assert!(name.starts_with(&format!("F{flange}:side:")), "{name}");
+    run(&mut s, "construct.plane.offset", json!({"base": {"face": [at.x, at.y, at.z]}, "offset": 1, "name": "On Slot"}));
+    let plane = |s: &Session| {
+        let state = s.model.state();
+        match state.construct.iter().find(|c| c.name == "On Slot").map(|c| &c.geom) {
+            Some(ConstructGeom::Plane(p)) => *p,
+            other => panic!("construction plane: {other:?}"),
+        }
+    };
+    let was = plane(&s);
+    assert!((was.normal().z.abs() - 1.0).abs() < 1e-9 && ((was.origin.z - 21.0).abs() - 1.0).abs() < 1e-9, "{was:?}");
+    run(&mut s, "sketch.edit", json!({"sketch": "Shape"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [6, 25], "radius": 3}));
+    run(&mut s, "sketch.circle.center", json!({"center": [85, 25], "radius": 4}));
+    run(&mut s, "sketch.finish", json!({}));
+    assert!(no_errors_or_warnings(&s), "{:?}", s.model.results);
+    let now = plane(&s);
+    assert!(now.origin.dist(was.origin) < 1e-9 && now.normal().dist(was.normal()) < 1e-9, "moved off the slot's wall: {was:?} -> {now:?}");
+    assert!(named_sheet_faces(&mut s).iter().any(|f| f.0 == name && f.2.dist(at) < 1e-6), "`{name}` is no longer the slot's wall");
+}

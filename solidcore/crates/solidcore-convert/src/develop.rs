@@ -146,7 +146,9 @@ pub fn record_corner_relief(c: k::CornerRelief) -> r::CornerRelief {
     }
 }
 
-fn anchor(a: &r::Anchor) -> k::Anchor {
+/// The record's anchor as the kernel's.
+#[must_use]
+pub fn anchor(a: &r::Anchor) -> k::Anchor {
     k::Anchor {
         panel: a.panel,
         origin: vec2(a.origin),

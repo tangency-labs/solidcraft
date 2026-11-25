@@ -758,6 +758,9 @@ pub struct SolveApp {
     pub(crate) remembered_commands: Vec<dialogs::RememberedCommand>,
     /// Radius of the last new Fillet applied this session, for the next new Fillet dialog.
     pub(crate) last_fillet_radius: String,
+    /// The Flange window's last Profile Sketch choice for a new edge flange, read once from
+    /// egui's persisted memory (where it is kept across sessions) when the window first draws.
+    pub(crate) flange_profile_sketch: Option<bool>,
     /// The Change Parameters window, when open.
     pub params: Option<params_dialog::ParamsDialog>,
     /// The Design Properties window, when open.
@@ -1170,6 +1173,7 @@ impl SolveApp {
             snaps: Default::default(),
             remembered_commands: Vec::new(),
             last_fillet_radius: String::new(),
+            flange_profile_sketch: None,
             params: None,
             design_properties: None,
             sketch_report: None,

@@ -2234,3 +2234,260 @@ fn a_dragged_segment_round_trip_keeps_every_other_edge_byte_identical() {
     );
     assert_eq!(segment_rows(&h)[1], before[1], "edge 2 still comes back as it was");
 }
+
+/// The plate with its base flange, and the Flange window open on the edge picked at each of
+/// `edges` with Profile Sketch as given: the dialog as OK would send it.
+fn profile_dialog(edges: &[[f64; 3]], profile_sketch: bool) -> (SolveApp, crate::dialogs::Dialog) {
+    let mut app = plate(crate::ui_kit::LayoutMode::Floating);
+    app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    app.session.selection = edges.iter().filter_map(|p| edge_sel(&app.session, Vec3::new(p[0], p[1], p[2]))).collect();
+    assert_eq!(app.session.selection.len(), edges.len());
+    app.start("sheet.flange");
+    let mut d = app.dialog.clone().unwrap();
+    if let Kind::Sheet(Sm::Flange { height, profile_sketch: on, .. }) = &mut d.kind {
+        *height = "20 mm".into();
+        *on = profile_sketch;
+    }
+    (app, d)
+}
+
+/// The id of the feature named `name`.
+fn feature_named(app: &SolveApp, name: &str) -> u64 {
+    app.session.doc.find_feature(name).map(|f| f.id).unwrap_or_else(|| panic!("no feature `{name}`"))
+}
+
+/// An edge flange from a profile sketch offers Edit Profile Sketch in the History bar's, the
+/// Browser's and the viewport's menus, and it opens the flange's sketch; a plain flange has none
+/// (#3516).
+#[test]
+fn a_flange_from_a_profile_sketch_offers_edit_profile_sketch_in_its_menus() {
+    let mut app = plate(crate::ui_kit::LayoutMode::Floating);
+    app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    app.run("sheet.flange", json!({"edges": [[50, 60, 2.5]], "height": 20, "name": "Plain"})).unwrap();
+    app.run("sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 20, "profile_sketch": true, "name": "Lip"})).unwrap();
+    assert!(app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", app.session.model.results);
+    let (plain, lip, sketch) = (feature_named(&app, "Plain"), feature_named(&app, "Lip"), feature_named(&app, "Lip Profile"));
+    let edit = |items: &[crate::ui_kit::Item]| items.iter().find(|i| i.label == "Edit Profile Sketch").cloned();
+    // The History bar's menu.
+    let item = edit(&crate::timeline::feature_items(&app, lip)).expect("the History bar offers Edit Profile Sketch");
+    assert_eq!(item.params, Some(json!({"sketch": sketch})));
+    assert!(edit(&crate::timeline::feature_items(&app, plain)).is_none(), "a plain flange has no profile sketch");
+    // The Browser's feature row.
+    let item = edit(&crate::context_menu::items(&app, &crate::context_menu::Target::Feature { id: lip })).expect("the Browser offers it");
+    assert!(item.enabled);
+    assert_eq!(item.params, Some(json!({"sketch": sketch})));
+    let item = edit(&crate::context_menu::items(&app, &crate::context_menu::Target::Feature { id: plain }));
+    assert!(item.is_none_or(|i| !i.enabled), "a plain flange has no profile sketch");
+    // The viewport's menu on a face the flange made.
+    let body = app.session.model.state().bodies[0].name.clone();
+    let faces =
+        crate::open_meshing::session_world(&app.session).body(&body).map(|b| solidcraft_engine::doc::naming::face_names(b).len()).unwrap_or(0);
+    let state = app.session.model.state();
+    let model_body = state.body(&body).expect("the sheet body");
+    let face = (0..faces).find(|&i| crate::context_menu::face_feature(&app, model_body, i) == Some(lip)).expect("a face of the flange");
+    drop(state);
+    app.run("select.set", json!({"items": [{"type": "face", "body": body, "index": face, "point": [0, 0, 0]}]})).unwrap();
+    let item = edit(&crate::context_menu::items(&app, &crate::context_menu::Target::Viewport)).expect("the viewport offers it");
+    assert!(item.enabled);
+    assert_eq!(item.params, Some(json!({"sketch": sketch})));
+    crate::context_menu::run_item(&mut app, &item, egui::pos2(0.0, 0.0));
+    assert_eq!(app.session.active_sketch, Some(sketch), "Edit Profile Sketch opens the flange's sketch");
+}
+
+/// Review of #18498: no Preferences row. A new Flange window's Profile Sketch starts as the last
+/// one left it, unticked until chosen, and the choice is kept in egui's persisted memory, so it
+/// lasts across sessions. Ticked, OK on one plain edge draws the sketch and makes the flange from
+/// it (#3516).
+#[test]
+fn a_new_flange_window_starts_with_the_last_profile_sketch_choice_across_sessions() {
+    let session = || {
+        let mut h = crate::scenario::Harness::new();
+        h.app = plate(crate::ui_kit::LayoutMode::Floating);
+        h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+        h
+    };
+    let open = |h: &mut crate::scenario::Harness| -> bool {
+        h.app.dialog = None;
+        h.app.session.selection = edge_sel(&h.app.session, Vec3::new(50.0, 0.0, 2.5)).into_iter().collect();
+        h.app.start("sheet.flange");
+        h.frames(2);
+        match &h.app.dialog.as_ref().unwrap().kind {
+            Kind::Sheet(Sm::Flange { ty, profile_sketch, .. }) => {
+                assert_eq!(*ty, 1, "an edge flange");
+                *profile_sketch
+            }
+            other => panic!("{other:?}"),
+        }
+    };
+    let mut h = session();
+    assert!(!open(&mut h), "unticked until chosen");
+    let c = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert!(c[0].1.get("profile_sketch").is_none() && c[0].1.get("profile").is_none(), "{}", c[0].1);
+    if let Some(Kind::Sheet(Sm::Flange { profile_sketch, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *profile_sketch = true;
+    }
+    h.frames(2);
+    assert!(open(&mut h), "the next window starts as the last one left it");
+    // A new session whose egui memory is the one the last session kept.
+    let kept = h.ctx.memory(|m| m.clone());
+    let mut next = session();
+    next.ctx.memory_mut(|m| *m = kept);
+    assert!(open(&mut next), "the choice lasts across sessions");
+    let c = apply_commands(&next.app, next.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(c[0].1["profile_sketch"], json!(true), "{}", c[0].1);
+    let sketches = |app: &SolveApp| app.session.doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::Sketch { .. })).count();
+    let before = sketches(&next.app);
+    run_all(&mut next.app, c);
+    assert_eq!(sketches(&next.app), before + 1, "the flange's profile sketch is drawn");
+    let f = next.app.session.doc.features.last().unwrap();
+    assert!(matches!(f.kind, FeatureKind::SheetFlange { profile: Some(_), .. }), "the flange is made from it");
+    assert!(next.app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", next.app.session.model.results);
+    // Unticked again, the next window starts unticked.
+    if let Some(Kind::Sheet(Sm::Flange { profile_sketch, .. })) = next.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *profile_sketch = false;
+    }
+    next.frames(2);
+    assert!(!open(&mut next));
+}
+
+/// Review of #3516: an angle given to an edge since removed still goes with the edge left (the
+/// command gets it as an object, not a plain point), which the command refuses with a profile.
+/// The dialog says so instead of sending it; one plain edge stays fine.
+#[test]
+fn profile_sketch_refuses_an_edge_with_an_angle_of_its_own() {
+    let (app, mut d) = profile_dialog(&[[50.0, 0.0, 2.5], [50.0, 60.0, 2.5]], true);
+    let first = edge_point_list(&d.inputs)[0];
+    if let Kind::Sheet(Sm::Flange { own, .. }) = &mut d.kind {
+        let slot = own_slot(own, first);
+        own[slot].1 = "45 deg".into();
+    }
+    // The second edge is taken out of the picks.
+    d.inputs[0].items.truncate(1);
+    let edges = flange_edges_segmented(&d.inputs, own_of(&d), &[]).unwrap();
+    assert!(matches!(edges.as_slice(), [e] if e.is_object()), "the edge left goes with its own angle: {edges:?}");
+    assert_eq!(apply_commands(&app, &d).unwrap_err(), PROFILE_PLAIN_EDGE);
+    // Without its own angle it is one plain edge again.
+    if let Kind::Sheet(Sm::Flange { own, .. }) = &mut d.kind {
+        own.clear();
+    }
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!(c[0].1["edges"], json!([[50.0, 0.0, 2.5]]));
+    assert_eq!(c[0].1["profile_sketch"], json!(true));
+}
+
+/// The edge's own angle and height, as the dialog holds them.
+fn own_of(d: &crate::dialogs::Dialog) -> &[(Vec3, String, String)] {
+    match &d.kind {
+        Kind::Sheet(Sm::Flange { own, .. }) => own,
+        _ => &[],
+    }
+}
+
+/// Review of #3516: a ticked Profile Sketch is never dropped for a plain flange. Height From
+/// other than the outer sharp, several edges and further bends each get a message saying what to
+/// change, and with Profile Sketch cleared each makes its plain flange as before.
+#[test]
+fn profile_sketch_is_refused_not_dropped_where_it_cannot_be_made() {
+    let one = [[50.0, 0.0, 2.5]];
+    let two = [[50.0, 0.0, 2.5], [50.0, 60.0, 2.5]];
+    let cases: [(&[[f64; 3]], usize, bool, &str); 3] =
+        [(&one, 1, false, PROFILE_HEIGHT_FROM), (&two, 0, false, PROFILE_ONE_EDGE), (&one, 0, true, PROFILE_NO_BENDS)];
+    for (edges, from, bend, why) in cases {
+        let (mut app, mut d) = profile_dialog(edges, true);
+        if let Kind::Sheet(Sm::Flange { height_from, then, .. }) = &mut d.kind {
+            *height_from = from;
+            if bend {
+                then.push(("45 deg".into(), "10 mm".into(), false));
+            }
+        }
+        assert_eq!(apply_commands(&app, &d).unwrap_err(), why);
+        // Cleared, the plain flange goes as before.
+        if let Kind::Sheet(Sm::Flange { profile_sketch, .. }) = &mut d.kind {
+            *profile_sketch = false;
+        }
+        let c = apply_commands(&app, &d).unwrap();
+        assert!(c[0].1.get("profile_sketch").is_none(), "{}", c[0].1);
+        run_all(&mut app, c);
+        assert!(app.session.model.results.iter().all(|r| r.error.is_none()), "{why}: {:?}", app.session.model.results);
+        assert!(matches!(app.session.doc.features.last().unwrap().kind, FeatureKind::SheetFlange { profile: None, .. }));
+    }
+}
+
+/// Review of #3516: a flange from a profile sketch reopens with Profile Sketch ticked and keeps
+/// its sketch, drawing no other; cleared, the edit sends `profile: null` and the flange becomes a
+/// plain one. An edit of a plain flange offers no Profile Sketch (it can't draw one).
+#[test]
+fn an_edited_flange_keeps_or_clears_its_profile_sketch() {
+    let mut app = plate(crate::ui_kit::LayoutMode::Floating);
+    app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    app.run("sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 20, "profile_sketch": true, "name": "Lip"})).unwrap();
+    let (lip, sketch) = (feature_named(&app, "Lip"), feature_named(&app, "Lip Profile"));
+    let count = app.session.doc.features.len();
+    let mut e = edit_dialog(&app, lip, None).unwrap();
+    assert!(
+        matches!(&e.kind, Kind::Sheet(Sm::Flange { profile_sketch: true, editing: true, profile: Some(p), .. }) if *p == sketch),
+        "it reopens ticked, with its sketch"
+    );
+    let c = apply_commands(&app, &e).unwrap();
+    assert_eq!(c[0].0, "timeline.redefine");
+    assert_eq!(c[0].1["params"]["profile"], json!(sketch), "{}", c[0].1);
+    assert!(c[0].1["params"].get("profile_sketch").is_none(), "no second sketch: {}", c[0].1);
+    run_all(&mut app, c);
+    assert_eq!(app.session.doc.features.len(), count, "redefined in place, with no sketch drawn");
+    let profile_of = |app: &SolveApp| match app.session.doc.feature(lip).map(|f| &f.kind) {
+        Some(FeatureKind::SheetFlange { profile, .. }) => profile.map(|s| s.0),
+        _ => panic!("not a flange"),
+    };
+    assert_eq!(profile_of(&app), Some(sketch));
+    // Cleared: an explicit null, and the flange is a plain one.
+    if let Kind::Sheet(Sm::Flange { profile_sketch, .. }) = &mut e.kind {
+        *profile_sketch = false;
+    }
+    let c = apply_commands(&app, &e).unwrap();
+    assert_eq!(c[0].1["params"]["profile"], Value::Null, "{}", c[0].1);
+    run_all(&mut app, c);
+    assert_eq!(profile_of(&app), None, "the profile is cleared");
+    assert!(app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", app.session.model.results);
+    // A plain flange reopened: ticking Profile Sketch can't draw one in an edit, and says so.
+    let mut e = edit_dialog(&app, lip, None).unwrap();
+    assert!(matches!(&e.kind, Kind::Sheet(Sm::Flange { profile_sketch: false, editing: true, profile: None, .. })));
+    let c = apply_commands(&app, &e).unwrap();
+    assert!(c[0].1["params"].get("profile").is_none() && c[0].1["params"].get("profile_sketch").is_none(), "{}", c[0].1);
+    if let Kind::Sheet(Sm::Flange { profile_sketch, .. }) = &mut e.kind {
+        *profile_sketch = true;
+    }
+    assert_eq!(apply_commands(&app, &e).unwrap_err(), PROFILE_ONLY_NEW);
+}
+
+/// The window shows Profile Sketch for a new edge flange and for an edited flange that has a
+/// profile, and not for an edited plain flange.
+#[test]
+fn the_flange_window_shows_profile_sketch_where_it_applies() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    h.app.run("sheet.flange", json!({"edges": [[50, 60, 2.5]], "height": 20, "name": "Plain"})).unwrap();
+    h.app.run("sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 20, "profile_sketch": true, "name": "Lip"})).unwrap();
+    h.app.session.selection = edge_sel(&h.app.session, Vec3::new(0.0, 30.0, 2.5)).into_iter().collect();
+    h.app.start("sheet.flange");
+    h.frames(6);
+    assert!(h.widget("Profile Sketch").is_some(), "a new edge flange offers it");
+    h.step(&json!({"widget": "Profile Sketch"})).unwrap();
+    h.frames(2);
+    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Sheet(Sm::Flange { profile_sketch: true, .. })), "a click ticks it");
+    h.step(&json!({"click": {"handle": "dialog:cancel"}})).unwrap();
+    h.frames(3);
+    assert!(h.app.dialog.is_none());
+    for (name, shown) in [("Lip", true), ("Plain", false)] {
+        let id = h.app.session.doc.find_feature(name).map(|f| f.id).unwrap();
+        h.app.edit_feature(id);
+        h.frames(6);
+        assert_eq!(h.widget("Profile Sketch").is_some(), shown, "{name}");
+        h.step(&json!({"click": {"handle": "dialog:cancel"}})).unwrap();
+        h.frames(3);
+        assert!(h.app.dialog.is_none(), "{name}");
+    }
+}

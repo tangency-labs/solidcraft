@@ -155,6 +155,8 @@ sheet_contour
   sketches: [1]
   remap_refs: sketch
 sheet_flange
+  sketches: [2]
+  remap_refs: profile
   remap_bodies: body
 sheet_hem
   remap_bodies: body

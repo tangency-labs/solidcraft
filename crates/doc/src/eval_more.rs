@@ -1281,9 +1281,46 @@ pub(super) fn sheet_eval(
             st.surface_sheets.push(sheet);
             Ok(())
         }
-        FeatureKind::SheetFlange { edges, height, angle, radius, position, flip, body, height_from, corner_relief_shape, corner_relief }
+        FeatureKind::SheetFlange { edges, height, angle, radius, position, flip, body, height_from, corner_relief_shape, corner_relief, profile }
             if surface_flange_sheet(st, body, f, edges).is_some() =>
         {
+            // The profile sketch's one closed profile, where it lies now (#3516): the flange's
+            // outline, holes and stretch of the edge (see `SurfaceSheet::profile_flange_on`).
+            let outline = match profile {
+                Some(sk) => {
+                    if edges.len() != 1 || edges.iter().any(|e| !e.segments.is_empty()) {
+                        return Err(DocError::Invalid("a flange from a profile sketch takes one edge, without segments".into()));
+                    }
+                    if height_from.is_some() {
+                        return Err(DocError::Invalid("a flange from a profile sketch is as high as its profile: leave out height_from".into()));
+                    }
+                    let ss = st.sketch(sk.0).ok_or_else(|| DocError::Unknown(format!("sketch {sk}")))?;
+                    // The outline is the largest profile; a circle drawn inside it is also a
+                    // profile of its own (the disc filling the hole), which is no second outline.
+                    // A region is such a disc only where its boundary is one of the outline's
+                    // holes, the same pieces in the same place: a loop anywhere else, of whatever
+                    // size, is a second profile.
+                    let regions = select_profiles(ss, &ProfileSel::All)?;
+                    let area = |lp: &Loop2| lp.signed_area().abs();
+                    let main = regions
+                        .iter()
+                        .max_by(|a, b| area(&a.outer).total_cmp(&area(&b.outer)))
+                        .ok_or_else(|| DocError::Invalid("the flange's profile sketch has no closed profile".into()))?;
+                    let tol = 1e-7 * crate::sheet_surface_cuts::loop_box(&main.outer).size().len().max(1.0);
+                    let filling =
+                        |r: &Region2| r.holes.is_empty() && main.holes.iter().any(|h| crate::sheet_surface_cuts::same_loop(h, &r.outer, tol));
+                    let others = regions.iter().filter(|r| !std::ptr::eq(*r, main)).count();
+                    let fills = regions.iter().filter(|r| !std::ptr::eq(*r, main)).filter(|r| filling(r)).count();
+                    if fills != others {
+                        return Err(DocError::Invalid(format!(
+                            "the flange's profile sketch must hold one closed profile (holes inside it are fine), not {}",
+                            others + 1 - fills
+                        )));
+                    }
+                    Some((ss.plane, main.clone()))
+                }
+                None => None,
+            };
             // The sheet with a free edge at the first pick; else, for an edge split into
             // segments, the one with a curved edge there, where the split is refused for what it
             // is (see `surface_flange_sheet`).
@@ -1374,9 +1411,20 @@ pub(super) fn sheet_eval(
             let order = doc.feature_index(f.id).unwrap_or(usize::MAX);
             let mut made = Vec::with_capacity(picks.len());
             let mut square = Vec::with_capacity(picks.len());
+            // A profile's flange: its panel, and where its profile lies in the panel's chart.
+            let mut profile_panel = None;
             for (k, (edge, runs)) in picks.into_iter().enumerate() {
-                // One bend for each run: a split edge's butt where its runs meet.
-                let (joints, sides) = sk.flanges_on(edge, &runs, rr, position, from).map_err(named(k))?;
+                // One bend for each run: a split edge's butt where its runs meet. A profile's
+                // flange is one bend on the stretch its bottom line runs along, at the edge's
+                // angle and to its side.
+                let (joints, sides) = match (&outline, runs.first()) {
+                    (Some((plane, region)), Some(&(_, _, _, angle, side))) => {
+                        let (j, chart) = sk.profile_flange_on(edge, plane, region, angle, rr, position, side).map_err(named(k))?;
+                        profile_panel = sk.sheet.joints.get(j).map(|joint| (joint.b.panel, chart));
+                        (vec![j], Vec::new())
+                    }
+                    _ => sk.flanges_on(edge, &runs, rr, position, from).map_err(named(k))?,
+                };
                 square.push(sides);
                 if let Some((relief, size)) = own {
                     for &joint in &joints {
@@ -1402,6 +1450,18 @@ pub(super) fn sheet_eval(
             let made: Vec<usize> = made.into_iter().flatten().collect();
             sk.clear_of_neighbours(&made)?;
             tag_panels(&mut sk, Some(&before), n0, f.id, PanelsBy::Bends(&[]));
+            // The profile's holes are its panel's: their walls are named after the profile's
+            // curves, as a cut's are (see `SurfaceSheet::name_hole`), under the flange and the key
+            // its panel has just been given.
+            let drawn = profile.as_ref().and_then(|s| st.sketch(s.0)).zip(outline.as_ref().map(|(_, region)| region));
+            if let (Some((p, chart)), Some((ss, region))) = (profile_panel, drawn)
+                && let Some(panel) = sk.sheet.panels.get(p)
+            {
+                let (key, holes) = (panel.name.clone(), panel.region.holes.clone());
+                for hole in &holes {
+                    sk.name_hole(&key, hole, f.id, ss, std::slice::from_ref(region), &|q| chart.point(q));
+                }
+            }
             if let Some(slot) = st.surface_sheets.get_mut(i) {
                 *slot = sk;
             }
