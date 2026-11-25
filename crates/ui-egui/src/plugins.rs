@@ -971,6 +971,8 @@ fn plugin_card(app: &mut SolveApp, ui: &mut egui::Ui, dir: &Path, plugin: &Plugi
                 &mut on,
                 &labels,
                 |ui| {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    plugin_settings(app, ui, plugin, was_on);
                     ui.add_space(solidcraft_theme::Tokens::get().space_8);
                     ui_kit::icon_label_button(ui, &remove_label, "delete", can_remove, false)
                 },
@@ -1008,8 +1010,6 @@ fn plugin_card(app: &mut SolveApp, ui: &mut egui::Ui, dir: &Path, plugin: &Plugi
             app.preferences.disabled_plugins.insert(plugin.id.clone());
         }
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    plugin_settings(app, ui, plugin, on);
     crate::scenario::publish_target(&format!("prefs:plugin:{}:remove", plugin.id), remove.rect);
     if remove.clicked() {
         app.prefs_window.plugin_remove = Some((plugin.id.clone(), plugin.name.clone()));
@@ -1024,9 +1024,9 @@ fn plugin_card(app: &mut SolveApp, ui: &mut egui::Ui, dir: &Path, plugin: &Plugi
     }
 }
 
-/// The plugin's own settings, under its card. A background and a tint (`shaders@0.2`) each have a
-/// switch, and the one switched on its sliders; one of each is on at a time, and only while its
-/// plugin is on.
+/// The plugin's own settings, inside its card above Remove. A background and a tint (`shaders@0.2`)
+/// each have a switch, and the one switched on its sliders; one of each is on at a time, and only
+/// while its plugin is on.
 #[cfg(not(target_arch = "wasm32"))]
 fn plugin_settings(app: &mut SolveApp, ui: &mut egui::Ui, plugin: &Plugin, on: bool) {
     if plugin.shaders.is_empty() && plugin.tints.is_empty() && plugin.panels.is_empty() {
@@ -1933,6 +1933,27 @@ mod tests {
         assert_eq!((h.app.preferences.panel_shader.as_str(), h.app.preferences.background_shader.as_str()), ("frost/frost", ""));
         click_page(&mut h.app, &ctx, &dir, "prefs:panel_shader:frost/frost");
         assert_eq!(h.app.preferences.panel_shader, "", "and off again");
+    }
+
+    #[test]
+    fn a_plugins_settings_sit_inside_its_card_above_remove() {
+        let mut h = crate::scenario::Harness::new();
+        let dir = h.dir.join("public-plugins");
+        write(
+            &dir,
+            "skies",
+            r#"{"id":"skies","name":"skies","version":"1","description":"","capabilities":["shaders@0.1"],"shaders":[{"id":"dusk","name":"dusk","kind":"background","source":"dusk.wgsl"}]}"#,
+        );
+        crate::prefs::control(&mut h.app, &serde_json::json!({"open":"Plugins"})).unwrap();
+        let ctx = crate::fonts::test_context();
+        for _ in 0..3 {
+            page_frame(&mut h.app, &ctx, &dir, vec![]);
+        }
+        let card = crate::scenario::rect_of("prefs:plugin:skies:card").unwrap();
+        let row = crate::scenario::rect_of("prefs:background:skies/dusk").unwrap();
+        let remove = crate::scenario::rect_of("prefs:plugin:skies:remove").unwrap();
+        assert!(card.contains_rect(row), "the background switch {row:?} is inside the card {card:?}");
+        assert!(row.bottom() <= remove.top(), "and above Remove: {row:?} vs {remove:?}");
     }
 
     #[test]
