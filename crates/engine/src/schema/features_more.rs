@@ -19,9 +19,9 @@ use super::check::whole;
 use super::config::NameList;
 use super::motion::require;
 use super::types::{
-    AngleExpr, AxisDir, CoilEndCutParam, CoilSectionParam, CoilSectionPositionParam, DomeShapeParam, EmbossFacePoint, EmbossModeParam, FaceRef, FeatureCommon,
-    IdOrName, LengthExpr, NumberExpr, OperationParam, PlaneParam, Point3, PointExpr3, ProfilesParam, RibDirectionParam, SketchRef, StringList,
-    TouchingParam, feature_common, present,
+    AngleExpr, AxisDir, CoilEndCutParam, CoilSectionParam, CoilSectionPositionParam, DomeShapeParam, EmbossFacePoint, EmbossModeParam, FaceRef,
+    FeatureCommon, IdOrName, LengthExpr, NumberExpr, OperationParam, PlaneParam, Point3, PointExpr3, ProfilesParam, RibDirectionParam, SketchRef,
+    StringList, TouchingParam, feature_common, present,
 };
 use crate::params::{self, MAX_STRING_LIST};
 
