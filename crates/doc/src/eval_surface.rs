@@ -722,9 +722,10 @@ fn sheet_to_next(
     }
     let plane = &ss.plane;
     let toward = if extent.direction == crate::Direction::Negative { -1.0 } else { 1.0 };
-    // The bodies as this feature's component sees them, as To Object measures its target.
+    // The bodies as this feature's component sees them, as To Object measures its target. A
+    // component's envelope only stands in for its contents: it stops nothing.
     let tst = state_in_frame_pinned_to(doc, st, f.component, &extent.picked_placements)?;
-    let bodies: Vec<&kernel::Body> = tst.bodies.iter().map(|b| &b.body).filter(|b| !b.is_mesh()).collect();
+    let bodies: Vec<&kernel::Body> = tst.bodies.iter().filter(|b| !b.envelope).map(|b| &b.body).filter(|b| !b.is_mesh()).collect();
     if bodies.is_empty() {
         return Err(DocError::Invalid("a surface extrude To Next needs a body in its way, and the model has none".into()));
     }
