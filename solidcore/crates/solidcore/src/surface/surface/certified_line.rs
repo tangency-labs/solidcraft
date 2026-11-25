@@ -307,7 +307,12 @@
 //!   set. Opposite signs make a crossing, one sign touching (answer8, Q1). A branch
 //!   leaving the domain (a crossing just past the patch's edge), feet jumping between two
 //!   critical points (a saddle) or a second sheet in the hull the foot does not follow (a
-//!   fold) fail 1, 2 or 3.
+//!   fold) fail 1, 2 or 3. A stretch whose line parameters meet those of a box of the
+//!   component with a side on the knots' range or the solve's domain, where the solve does
+//!   not wrap, fails before any Krawczyk test: `U_k` would have to hold that box (3) and lie
+//!   strictly inside that border (1). Here and along a frame below such a stretch is halved
+//!   untested while it can be ([`held_on_a_border`]), and the stretch at the floor is
+//!   tested, for its reason.
 //! - **The same, where the closest-point foot is not certified at a stretch at the floor**
 //!   (a crease or a seam the solve wraps in the way: `G` holds `S_u` and `S_v`, which jump
 //!   there, and a closest point can sit on a crease for a whole range of `t` with `G` zero
@@ -470,7 +475,9 @@
 //! one solve's drop and components, past which nothing is dropped, the components are not
 //! built and the whole line is undecided, and [`MAX_DROP_ENCLOSURES`] side enclosures in
 //! one solve's drop; at most [`MAX_SIDE_PIECES`] piece and edge enclosures in one
-//! component's side test, [`MAX_FOOT_BOXES`] foot tests in each of its foot rules (and, along a
+//! component's side test, [`MAX_FOOT_BOXES`] foot tests in each of its foot rules (a
+//! stretch meeting a box on a border the rule's box may not reach is halved untested, at
+//! one test, and only the stretch at the floor is tested; and, along a
 //! frame, at most [`FRAME_TIGHTENINGS`] operators for each tight box: two a junction of the
 //! chain, one an end), [`MAX_COVER_RECTS`] leaves in its coverage test and [`MAX_ROOT_BOXES`] root boxes
 //! told apart.
@@ -4475,12 +4482,21 @@ fn by_foot(
     let mut work = vec![t];
     let mut chain: Vec<FootBox> = Vec::new();
     let whole = t;
+    let on_border = held_on_a_border(net, line, boxes);
     while let Some(t) = work.pop() {
         if budget == 0 {
             return Typed::Undecided(Why::Budget);
         }
         // (a stretch costs one test, whatever its Newton step does)
         budget = budget.saturating_sub(1);
+        // a stretch whose line parameters meet a box on a border has no foot box: halved
+        // untested while it can be, the stretch at the floor tested for its reason
+        let mid = t.mid();
+        if mid > t.lo && mid < t.hi && meets_a_held_border(&on_border, t) {
+            work.push(Ivl::new(mid, t.hi));
+            work.push(Ivl::new(t.lo, mid));
+            continue;
+        }
         let failed = match foot_box(net, line, leaves, boxes, t, start, &mut budget) {
             Ok(f) => {
                 if let Some(prev) = chain.last() {
@@ -4528,6 +4544,32 @@ fn by_foot(
         Contact::Crossing
     };
     Typed::Foot
+}
+
+/// The line parameters of every box among `boxes` (a component's) with a side on the
+/// border where neither foot rule's box may reach (module docs, "Typing"): the knots' range
+/// met with the solve's `(u, v)` domain, in a direction the solve does not wrap in. A foot
+/// box ([`foot_box`]) and a frame box ([`frame_box`]) of a stretch must hold every box
+/// whose line parameters meet the stretch and lie strictly inside that border, so a stretch
+/// meeting one of these has neither: both tests fail it before any Krawczyk test.
+fn held_on_a_border(net: &LineNet, line: &ScratchLine, boxes: &[PlacedBox]) -> Vec<Ivl> {
+    let [[u0, u1], [v0, v1]] = net.range;
+    let (lo, hi) = (line.solve_domain.min(), line.solve_domain.max());
+    let (bu, bv) = ([u0.max(lo.x), u1.min(hi.x)], [v0.max(lo.y), v1.min(hi.y)]);
+    let [wu, wv] = net.seams(&line.solve_domain).wrap;
+    boxes
+        .iter()
+        .filter(|b| {
+            (!wu && (b.u.lo <= bu[0] || b.u.hi >= bu[1]))
+                || (!wv && (b.v.lo <= bv[0] || b.v.hi >= bv[1]))
+        })
+        .map(|b| b.t)
+        .collect()
+}
+
+/// Whether the stretch `t` meets the line parameters of a box of [`held_on_a_border`].
+fn meets_a_held_border(on_border: &[Ivl], t: Ivl) -> bool {
+    on_border.iter().any(|b| b.lo <= t.hi && t.lo <= b.hi)
 }
 
 /// The frame of a component for the foot rule along a fixed direction (module docs,
@@ -5091,12 +5133,20 @@ fn by_frame(
     let mut work = vec![t];
     let mut chain: Vec<FrameBox> = Vec::new();
     let whole = t;
+    let on_border = held_on_a_border(net, line, boxes);
     while let Some(t) = work.pop() {
         if budget == 0 {
             return Err(Why::Budget);
         }
         // (a stretch costs one test, whatever its Newton step does)
         budget = budget.saturating_sub(1);
+        // (as in [`by_foot`]: no frame box holds a box on a border it does not wrap at)
+        let mid = t.mid();
+        if mid > t.lo && mid < t.hi && meets_a_held_border(&on_border, t) {
+            work.push(Ivl::new(mid, t.hi));
+            work.push(Ivl::new(t.lo, mid));
+            continue;
+        }
         let found = frame_box(
             net,
             line,
