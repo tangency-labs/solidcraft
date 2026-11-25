@@ -6552,3 +6552,30 @@ fn importer_plugins_always_ask_like_plugin_runs() {
     assert!(!crate::plugins::runs_plugin_code(session, "engine.execute", &json!({"command":"solid.box","params":{}})));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Denying a held call tells the agent plainly that nothing ran.
+#[test]
+fn a_denied_call_says_it_was_not_run() {
+    let (mut app, tx) = app_in_a_turn();
+    let denied = ask(&tx, "engine.execute", json!({"command": "file.save", "params": {"path": "/tmp/never.solidcraft"}, "allow_paths": ["/tmp"]}));
+    frame(&mut app);
+    let id = app.agent_chat.held[0].id;
+    approve(&mut app, id, false);
+    let r = denied.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+    assert_eq!(r["error"], "not run: the user declined this call", "{r}");
+    assert!(!r["error"].as_str().unwrap().contains("may have run"), "{r}");
+}
+
+/// The header offers Stop only while a turn (or the start) can be stopped, and the agent's own
+/// sign-in label only while it needs a login.
+#[test]
+fn the_header_shows_stop_and_login_only_when_they_apply() {
+    for state in [State::Off, State::Ready, State::NeedsAuth, State::Exited, State::Failed] {
+        assert!(!state.shows_stop(), "{state:?} has nothing to stop");
+    }
+    assert!(State::Busy.shows_stop() && State::Starting.shows_stop());
+    for state in [State::Off, State::Starting, State::Ready, State::Busy, State::Exited, State::Failed] {
+        assert!(!state.shows_auth_status(), "{state:?} is not asking for a login");
+    }
+    assert!(State::NeedsAuth.shows_auth_status());
+}

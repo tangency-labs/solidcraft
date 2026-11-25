@@ -520,7 +520,9 @@ fn quadric_of_surface(k: &Kernel, surface: &Surface, uv: Point2, tol: f64) -> Re
                 Err(e)
                     if matches!(
                         e,
-                        SolidError::Unported { .. } | SolidError::Cancelled { .. }
+                        SolidError::Unported { .. }
+                            | SolidError::Cancelled { .. }
+                            | SolidError::OutOfFuel { .. }
                     ) || e.is_not_certified() =>
                 {
                     return Err(e)
@@ -534,7 +536,9 @@ fn quadric_of_surface(k: &Kernel, surface: &Surface, uv: Point2, tol: f64) -> Re
                     Err(e)
                         if matches!(
                             e,
-                            SolidError::Unported { .. } | SolidError::Cancelled { .. }
+                            SolidError::Unported { .. }
+                                | SolidError::Cancelled { .. }
+                                | SolidError::OutOfFuel { .. }
                         ) || e.is_not_certified() =>
                     {
                         return Err(e)

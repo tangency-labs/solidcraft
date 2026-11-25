@@ -185,6 +185,7 @@ fn as_sm_err(e: SolidError, op: &'static str) -> SolidError {
         e if e.is_not_certified() => e,
         SolidError::Unported { .. }
         | SolidError::Cancelled { .. }
+        | SolidError::OutOfFuel { .. }
         | SolidError::InvalidInput { .. }
         | SolidError::PortInvariant { .. } => e,
         _ => Failure::new(op, BlendFailure::Solver(SolverFailure::JacobianNotLoaded))
@@ -2067,7 +2068,9 @@ pub(crate) fn seam_periods(k: &Kernel, surface: &Surface) -> Result<[Option<Exte
             Err(e)
                 if matches!(
                     e,
-                    SolidError::Unported { .. } | SolidError::Cancelled { .. }
+                    SolidError::Unported { .. }
+                        | SolidError::Cancelled { .. }
+                        | SolidError::OutOfFuel { .. }
                 ) || e.is_not_certified() =>
             {
                 return Err(e);
@@ -2116,7 +2119,9 @@ fn bool_status(r: Result<bool>) -> Result<bool> {
         Err(e)
             if matches!(
                 e,
-                SolidError::Unported { .. } | SolidError::Cancelled { .. }
+                SolidError::Unported { .. }
+                    | SolidError::Cancelled { .. }
+                    | SolidError::OutOfFuel { .. }
             ) || e.is_not_certified() =>
         {
             Err(e)
@@ -2135,7 +2140,9 @@ fn singularity_status(
         Err(e)
             if matches!(
                 e,
-                SolidError::Unported { .. } | SolidError::Cancelled { .. }
+                SolidError::Unported { .. }
+                    | SolidError::Cancelled { .. }
+                    | SolidError::OutOfFuel { .. }
             ) || e.is_not_certified() =>
         {
             Err(e)

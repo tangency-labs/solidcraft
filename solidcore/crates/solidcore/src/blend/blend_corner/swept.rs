@@ -252,12 +252,13 @@ fn not_two_blended(op: &'static str, given: usize) -> crate::error::SolidError {
 /// `SmBlendCorner::Classify`'s Swept part (the fork's e647dac and 1fcbdb7; reached with
 /// `GetSweptTurns()` on a Turn): whether the blend corner builds a Swept turn at `vertex`,
 /// two blended edge uses `solver_eus` among `all_eus`. `None` where it does; else the
-/// refusal: a sharp side edge the ball cannot pass ([`FilletErrorType::NoRoom`], naming the
-/// radius the edge must be rounded at first), and, not built yet
-/// ([`FilletErrorType::CornerUnsupported`]), a corner of four edges, rounds that share no
-/// face, rounds of different convexity, unequal, variable or non-circular rounds, a tangent
-/// side edge, and a side edge that is not a straight line square (within the fillet's
-/// tolerance over the radius) to both rounded edges with a planar common face.
+/// refusal: a sharp side edge the ball of equal constant rounds cannot pass
+/// ([`FilletErrorType::NoRoom`], naming the radius the edge must be rounded at first), and,
+/// not built yet ([`FilletErrorType::CornerUnsupported`]), a closed round meeting itself, a
+/// corner of four edges, rounds that share no face, rounds of different convexity, unequal,
+/// variable or non-circular rounds (at any side edge), a tangent side edge, and a side edge
+/// that is not a straight line square (within the fillet's tolerance over the radius) to both
+/// rounded edges with a planar common face.
 ///
 /// The ball can circle the side edge only where its own side of the faces there is the wide
 /// one. A concave round's ball lies in the air and a convex round's in the material; a concave
@@ -293,8 +294,13 @@ pub fn classify_swept(
             fit_edge: None,
         }))
     };
-    let &[eu1_, eu2_, ..] = solver_eus else {
-        return Err(not_two_blended(OP_CLASSIFY, solver_eus.len()));
+    // a closed round meeting itself at an angle (the closed Turn, #2349) has one blended edge
+    // use: no second round to turn round a side edge to, so it is not swept (Auto mitres it)
+    let (Some(&eu1_), Some(&eu2_)) = (solver_eus.first(), solver_eus.get(1)) else {
+        return refuse(
+            FilletErrorType::CornerUnsupported,
+            "Fillet Error: a swept turn is built between two rounds (not yet where one closed round meets itself)",
+        );
     };
     // a Swept turn is built at one side edge between the blends' other faces
     if all_eus.len() != 3 {
@@ -338,23 +344,8 @@ pub fn classify_swept(
             "Fillet Error: a swept turn is built between rounds of one convexity (not yet between a round that adds material and one that takes it off)",
         );
     }
-    let side_concave = is_concave_edge(k, b, side_edge)?;
-    if side_concave == concave[0] {
-        let radius = offset_radius(fs[0], 0, OP_CLASSIFY)?;
-        // no radius builds a swept turn past the side edge: its size is not the cause (the
-        // fork's pExec->NoteFitRadius(0.0, pEU1->GetEdge()))
-        let kind = if side_concave { "concave" } else { "convex" };
-        return Ok(Some(TurnRefusal {
-            error: FilletErrorType::NoRoom,
-            comment: format!(
-                "Fillet Error: a swept turn cannot pass the sharp {kind} corner edge between the rounds; round that edge at a radius of at least {} first",
-                fmt_g(radius)
-            ),
-            fit_edge: eu1::edge(b, eu1_)?,
-        }));
-    }
-
-    // what the exact torus needs
+    // what the exact torus needs, before a side edge's refusal names a size: unequal,
+    // variable or non-circular rounds are not swept at any side edge
     let tol = min(fs[0].approx_tol_3d, fs[1].approx_tol_3d);
     let mut radius = -1.0;
     for (f, eu) in fs.iter().zip([eu1_, eu2_]) {
@@ -376,6 +367,22 @@ pub fn classify_swept(
         }
         radius = r0;
     }
+    let side_concave = is_concave_edge(k, b, side_edge)?;
+    if side_concave == concave[0] {
+        // no radius builds a swept turn past the side edge: its size is not the cause (the
+        // fork's pExec->NoteFitRadius(0.0, pEU1->GetEdge())); the rounds' one radius, checked
+        // above, so the size named does not hang on which round comes first
+        let kind = if side_concave { "concave" } else { "convex" };
+        return Ok(Some(TurnRefusal {
+            error: FilletErrorType::NoRoom,
+            comment: format!(
+                "Fillet Error: a swept turn cannot pass the sharp {kind} corner edge between the rounds; round that edge at a radius of at least {} first",
+                fmt_g(radius)
+            ),
+            fit_edge: eu1::edge(b, eu1_)?,
+        }));
+    }
+
     if check_tangential_edgeuse_at_vertex(k, b, side, vertex, tangency_tol_deg)? {
         return refuse(
             FilletErrorType::CornerUnsupported,
