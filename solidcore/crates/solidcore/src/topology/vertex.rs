@@ -3086,7 +3086,10 @@ mod tests {
 
     /// #21882: a classification combine_in_brep onto the chain's middle vertex v1 with
     /// a propagated surf/surf/surf point `sss`.
-    fn sss_combine(edge1: u8, sss: Point3) -> (Kernel, Brep, [VertexId; 4], [EdgeId; 2]) {
+    fn sss_combine(
+        edge1: u8,
+        sss: Point3,
+    ) -> (Kernel, Brep, [VertexId; 4], [EdgeId; 2], [Point3; 2]) {
         use crate::intersect::point_class::{CombineBrep, PointClassType, PointClassification};
         use crate::nurbs::b_spline_curve::BSplineCurve;
         use crate::nurbs::crv_basic::Curve as NurbCurve;
@@ -3168,6 +3171,7 @@ mod tests {
             context: None,
             key_of: &crate::topology::loopuse::notify_ref,
         };
+        let before = [b.vertex(v[0]).unwrap().point, b.vertex(v[2]).unwrap().point];
         pc.combine_in_brep(
             &other,
             CombineBrep {
@@ -3179,7 +3183,7 @@ mod tests {
             },
         )
         .unwrap();
-        (k, b, v, e)
+        (k, b, v, e, before)
     }
 
     #[test]
@@ -3190,11 +3194,7 @@ mod tests {
                 Point3::new(20.0, 3.0, 4.0),
                 Point3::new(10.0, -10.0, 20.0),
             ] {
-                let (k, b, v, e) = sss_combine(edge1, sss);
-                let before: Vec<Point3> = [v[0], v[2]]
-                    .iter()
-                    .map(|&w| b.vertex(w).unwrap().point)
-                    .collect();
+                let (k, b, v, e, before) = sss_combine(edge1, sss);
                 let moved = b.vertex(v[1]).unwrap();
                 assert_eq!(moved.point, sss);
                 assert!(moved.tolerance <= ZONE_TOL_3D, "{}", moved.tolerance);
