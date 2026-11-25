@@ -33,7 +33,7 @@ use solidcore::Vec3;
 use crate::body::Body;
 use crate::measure::outer_faceuse;
 use crate::order::{self, Order};
-use crate::session::{answer, run_on, with_body};
+use crate::session::{answer, read_body, run_on, with_body};
 use crate::{Error, Result};
 
 /// Fewest and most stations along one edge: three are its two ends and its middle.
@@ -349,7 +349,7 @@ impl Body {
             return Err(Error::Argument);
         }
         let e = order::edge(order, edge)?;
-        with_body("edge_comb", self, |k, b| {
+        read_body("edge_comb", self, |k, b| {
             Ok(Ok(edge_comb(k, b, e, teeth)?
                 .into_iter()
                 .map(tooth)
@@ -379,7 +379,7 @@ impl Body {
             return Err(Error::Argument);
         }
         let f = order::face(order, face)?;
-        with_body("iso_comb", self, |k, b| {
+        read_body("iso_comb", self, |k, b| {
             match iso_comb(k, b, f, along_u, fixed, span, teeth) {
                 Ok(teeth) => Ok(Ok(teeth.into_iter().map(tooth).collect())),
                 Err(solidcore::SolidError::InvalidInput { .. }) => Ok(Err(Error::Argument)),

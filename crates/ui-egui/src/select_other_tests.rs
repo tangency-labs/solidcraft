@@ -1012,7 +1012,7 @@ fn hidden_edge_mode_is_scoped_and_invalidates_hover_without_pointer_motion() {
     assert!(pick_all(&h.app, &proj, pos).iter().any(target));
     for style in [0, 1, 2, 3] {
         h.app.ui.visual_style = style;
-        assert_eq!(pick_cached(&mut h.app, &proj, pos).iter().any(target), style >= 2, "style {style}");
+        assert!(pick_cached(&mut h.app, &proj, pos).iter().any(target), "style {style}");
     }
     h.app.session.visibility.hidden_bodies.push("Target".into());
     assert!(!pick_cached(&mut h.app, &proj, pos).iter().any(target));
@@ -1024,6 +1024,22 @@ fn hidden_edge_mode_is_scoped_and_invalidates_hover_without_pointer_motion() {
     h.app.session.section = Vec::new();
     h.call("ui.prefs", json!({"select_hidden_edges":false}));
     assert!(!pick_cached(&mut h.app, &proj, pos).iter().any(target));
+}
+
+#[test]
+fn edges_are_picked_through_faces_in_every_display_style_when_the_preference_is_on() {
+    use crate::viewport::{Hit, pick_all, pick_cached, projection};
+    let (mut h, pos) = covered_edge();
+    let proj = projection(&h.app, h.app.viewport.rect.unwrap());
+    let target = |hit: &Hit| matches!(hit, Hit::Edge { body, .. } if body == "Target");
+    for style in [0, 1, 2, 3] {
+        h.app.ui.visual_style = style;
+        h.app.preferences.select_hidden_edges = false;
+        assert_eq!(pick_cached(&mut h.app, &proj, pos).iter().any(target), style == 2, "off, style {style}");
+        h.app.preferences.select_hidden_edges = true;
+        assert!(pick_cached(&mut h.app, &proj, pos).iter().any(target), "on, style {style}");
+        assert!(pick_all(&h.app, &proj, pos).iter().any(target), "on, pick_all, style {style}");
+    }
 }
 
 #[test]

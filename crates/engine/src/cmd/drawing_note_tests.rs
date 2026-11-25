@@ -4,6 +4,7 @@ use solidcraft_doc::drawing_view::{ViewDirection, ViewOverrides};
 use solidcraft_geom::drawing_view::NamedView;
 
 use super::*;
+use crate::drawing_scene::tests::in_the_model;
 use crate::schema::tests::conforms;
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
@@ -310,6 +311,8 @@ fn a_note_with_three_leaders_follows_the_model_and_loses_only_its_own() {
 /// The branches edit takes out by number as the list is now, then adds after those that stay, in one
 /// undo step, keeping the note's id; one that changes nothing makes no step. A wrong number, a
 /// repeat or a 17th leader is refused before anything is looked up, and the note is left as it was.
+/// A number past the end is named before a repeat, as a dimension set's targets edit names it, and
+/// a list longer than the note's is refused without being sorted.
 #[test]
 fn a_notes_branches_edit_keeps_its_id_in_one_step() {
     let (mut s, _, view, [bracket, _]) = placed();
@@ -332,6 +335,8 @@ fn a_notes_branches_edit_keeps_its_id_in_one_step() {
     let refusals = [
         (json!({"remove": [2]}), "`branches.remove` numbers this note's branches, 0 to 1"),
         (json!({"remove": [1, 1]}), "names each branch once"),
+        (json!({"remove": [1, 1, 5]}), "`branches.remove` numbers this note's branches, 0 to 1"),
+        (json!({"remove": vec![0; 100_000]}), "names each branch once"),
         (json!({"add": vec![json!({"corner": {"point": [1e8, 0, 0], "path": [bracket]}}); 14]}), "at most 16 leaders, its anchor's included"),
         (json!({"add": [{"corner": {"point": [1e8, 0, 0], "path": [bracket]}}]}), "corner"),
         (json!({"add": [{"face": [0, 0, 0]}]}), "face"),
@@ -404,19 +409,13 @@ fn a_notes_fields_read_its_sheet_and_inspect_tells_a_lost_one() {
         let reply = run(s, INSPECT, json!({"note": note}));
         (reply["text"].clone(), reply["fields"].clone())
     };
-    let on_model = |s: &mut Session, id: &str, p: Value| {
-        let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
-        run(s, "drawing.close", json!({}));
-        run(s, id, p);
-        run(s, "drawing.open", drawing);
-    };
     let sheet = shown("shown", Some("Sheet 1"), "sheet", "name");
     let organization = shown("empty", None, "drawing", "organization");
     let steel = json!([shown("shown", Some("Steel"), "component", "material"), sheet.clone(), organization.clone()]);
     assert_eq!(inspect(&mut s), (json!("Material: Steel (Sheet 1)"), steel));
-    on_model(&mut s, "material.assign", json!({"bodies": ["Block"], "material": "Aluminum"}));
+    in_the_model(&mut s, "material.assign", json!({"bodies": ["Block"], "material": "Aluminum"}));
     assert_eq!(inspect(&mut s).0, json!("Material: Aluminum (Sheet 1)"));
-    on_model(&mut s, "component.delete", json!({"component": component}));
+    in_the_model(&mut s, "component.delete", json!({"component": component}));
     let lost = json!([shown("lost", None, "component", "material"), sheet, organization]);
     assert_eq!(inspect(&mut s), (json!("Material:  (Sheet 1)"), lost));
     // A note on plain text reads no field.
@@ -449,16 +448,10 @@ fn a_notes_sheet_metal_fields_follow_the_rule() {
     ]);
     let note = run(&mut s, ADD, json!({"anchor": {"sheet": "Sheet 1"}, "at": [20, 20], "content": content}))["note"].clone();
     let text = |s: &mut Session| run(s, INSPECT, json!({"note": note}))["text"].clone();
-    let on_model = |s: &mut Session, id: &str, p: Value| {
-        let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
-        run(s, "drawing.close", json!({}));
-        run(s, id, p);
-        run(s, "drawing.open", drawing);
-    };
     assert_eq!(text(&mut s), json!("T 1.50 mm Custom K 0.33 R 3.00 mm FLAT 82.98 mm x 80.00 mm"));
-    on_model(&mut s, "parameters.change", json!({"name": "Thick", "expression": "2 mm"}));
+    in_the_model(&mut s, "parameters.change", json!({"name": "Thick", "expression": "2 mm"}));
     assert_eq!(text(&mut s), json!("T 2.00 mm Custom K 0.33 R 3.00 mm FLAT 81.50 mm x 80.00 mm"));
-    on_model(&mut s, "sheet.manage_rules", json!({"name": "Custom", "k_factor": 0.5}));
+    in_the_model(&mut s, "sheet.manage_rules", json!({"name": "Custom", "k_factor": 0.5}));
     assert_eq!(text(&mut s), json!("T 2.00 mm Custom K 0.5 R 3.00 mm FLAT 82.57 mm x 80.00 mm"));
     let fields = run(&mut s, INSPECT, json!({"note": note}))["fields"].clone();
     assert_eq!(fields[0], json!({"source": "component", "key": "thickness", "state": "shown", "value": "2.00 mm"}), "{fields}");

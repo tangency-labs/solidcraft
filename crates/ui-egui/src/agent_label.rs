@@ -75,10 +75,10 @@ fn command_of(id: &str) -> Option<&'static solidcraft_engine::CommandSpec> {
 pub fn name_in(language: Locale, raw: &str) -> String {
     let id = tool_of(raw);
     if let Some(c) = solidcraft_engine::agent_tools::tool_command(id).and_then(solidcraft_engine::find_command) {
-        return language.label(c.label).to_string();
+        return language.command(c.id, c.label).to_string();
     }
     if let Some(c) = command_of(id) {
-        return language.label(c.label).to_string();
+        return language.command(c.id, c.label).to_string();
     }
     let methods = METHOD_MESSAGES.iter().find(|(m, _)| *m == id).map(|(_, message)| (*message).to_string());
     // The channel's own methods ("engine.batch") read as the tool they are.

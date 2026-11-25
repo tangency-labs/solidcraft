@@ -21,7 +21,7 @@
 use solidcore::error::offset::OffsetFailure;
 use solidcore::error::{ErrorKind, Reason};
 use solidcore::geom::attribute::{ids, Attribute, Behavior};
-use solidcore::offset::draft::{draft_surface, Draft, DraftRefusal};
+use solidcore::offset::draft::{draft_surface, refuse_closing_wall, Draft, DraftRefusal};
 use solidcore::offset::offset_executive::p2::{
     local_operation_simple, offset_brep_simple, OffsetOptions, ShellOptions,
 };
@@ -34,8 +34,13 @@ use solidcore::{Brep, EntityRef, FaceId, Kernel, SolidError, Vec3};
 use crate::body::{finish, Body, Expect};
 use crate::error::status as kernel_status;
 use crate::order::{self, Order};
-use crate::session::with_body;
+use crate::session::{read_body, with_body};
 use crate::{Error, OffsetRefusal, RecordEntity, Result, Unsoundness};
+
+/// A face a draft of plane faces would cut through without meeting it (a hole's wall within the
+/// draft of the side), for a client that drafts through the kernel's local operation itself and
+/// names that face when the operation refuses ([`drafted_through`]).
+pub use solidcore::offset::draft::{drafted_through, DraftedThrough};
 
 /// The largest offset distance or wall the operations take.
 const MAX_DISTANCE: f64 = 1e6;
@@ -55,6 +60,45 @@ fn status(e: SolidError, index: &dyn Fn(EntityRef) -> Option<RecordEntity>) -> E
 #[must_use]
 pub fn refusal(e: &SolidError) -> Option<Error> {
     typed(e, &|_| None)
+}
+
+/// (#20767) The wall check of a draft of `faces` of `b` by `angle` radians about the neutral
+/// plane through `neutral_origin` with normal `neutral_normal`, pulled along `pull`, as
+/// [`draft`] runs it before its local operation: a cone or cylinder about the pull whose
+/// drafted cone would reach another shell of the body (a cavity's wall) is refused with the
+/// largest angle that keeps the wall (the kernel's `OffsetFailure::DraftClosesWall`, which
+/// [`diagnostic`] gives as [`OffsetRefusal::DraftClosesWall`]). For a caller that drafts the
+/// faces itself (the kernel wrapper's `smlib_draft`).
+///
+/// # Errors
+///
+/// The kernel's `DraftClosesWall`; an invalid input for a neutral normal or pull not finite or
+/// not longer than 1e-12, or an origin or angle not finite; those of the kernel's check.
+pub fn refuse_draft_closing_wall(
+    k: &Kernel,
+    b: &Brep,
+    faces: &[FaceId],
+    neutral_origin: [f64; 3],
+    neutral_normal: [f64; 3],
+    pull: [f64; 3],
+    angle: f64,
+) -> solidcore::Result<()> {
+    let v = |a: [f64; 3]| Vec3::new(a[0], a[1], a[2]);
+    let the_draft = Draft::new(v(neutral_origin), v(neutral_normal), v(pull), angle)?;
+    refuse_closing_wall(k, b, faces, &the_draft)
+}
+
+impl Body {
+    /// Where a face of this body has an outline that touches itself ([`outline_touch`]): a
+    /// loop through one vertex twice (not a seam's end), or a vertex of one loop on another
+    /// loop of the face; the first such vertex's point, or `None`. What a shell that failed
+    /// without saying why can be told: an offset cannot keep such a face's outline.
+    ///
+    /// # Errors
+    /// The kernel's error; [`Error::Internal`] for a body a panic left unfinished.
+    pub fn outline_touch(&self) -> Result<Option<[f64; 3]>> {
+        read_body("outline_touch", self, |k, b| outline_touch(k, b))
+    }
 }
 
 /// (#18568) For a shell that failed without saying why: where a face of `b` has an outline
@@ -204,11 +248,16 @@ fn offset_refused(
                 largest: Some(largest),
             }
         }
+        // a rounded offset's tube that folds (#13685): the wall is the tube's radius
+        OffsetFailure::TubeFolds { largest, .. } => return Error::WallFolds { largest },
         OffsetFailure::WallsTouch { .. } => return Error::WallsTouch,
         OffsetFailure::EdgeVanishes { .. } => OffsetRefusal::EdgeVanishes,
         // (the kernel's fold kind also covers an offset not certified regular, which is no
         // fold: its own reason, #14783)
-        OffsetFailure::NotCertified { distance, .. } => OffsetRefusal::NotCertified { distance },
+        OffsetFailure::NotCertified { distance, .. }
+        | OffsetFailure::TubeNotCertified { distance, .. } => {
+            OffsetRefusal::NotCertified { distance }
+        }
         OffsetFailure::Collapses {
             distance, radius, ..
         } => OffsetRefusal::Collapses { distance, radius },
@@ -230,6 +279,10 @@ fn offset_refused(
         OffsetFailure::ExactCurveUncut => OffsetRefusal::ExactCurveUncut,
         OffsetFailure::FacesApart { .. } => OffsetRefusal::FacesApart,
         OffsetFailure::PastSide { largest, .. } => OffsetRefusal::PastSide { largest },
+        OffsetFailure::FaceCloses { largest, .. } => OffsetRefusal::FaceCloses { largest },
+        OffsetFailure::DraftClosesWall { largest, .. } => {
+            OffsetRefusal::DraftClosesWall { largest }
+        }
         OffsetFailure::ReachUncertified { .. } => OffsetRefusal::ReachUncertified,
         OffsetFailure::LoopGapUncertified { .. } => OffsetRefusal::LoopGapUncertified,
         OffsetFailure::Unsound { what } => match unsound(what, index) {
@@ -431,6 +484,7 @@ pub fn shell(body: &Body, order: &Order, open: &[usize], thickness: f64) -> Resu
 /// facing out; [`Error::NoRoom`] for faces moved in so far that the kernel's room test shows
 /// no material behind them, or a blend that no longer fits; [`Error::Unsupported`] for a blend that cannot be put back as it was;
 /// [`Error::NotExact`] for one that needs a continuation that cannot be made exactly;
+/// [`Error::BlendsNotFollowed`] for either of the last two where the kernel says why;
 /// [`Error::NoEffect`] for a move that moved nothing; the kernel's other refusals.
 pub fn offset_faces(body: &Body, order: &Order, faces: &[usize], distance: f64) -> Result<()> {
     if !distance_ok(distance) || faces.is_empty() {
@@ -465,12 +519,25 @@ pub fn offset_faces(body: &Body, order: &Order, faces: &[usize], distance: f64) 
         }
         let mut exec = OffsetFacesExecutive::new();
         if let Err(e) = exec.offset_faces(k, b, &picked, distance) {
+            // where the kernel says why the blends cannot follow, the refusal says it too
+            let why = exec.reason().trim();
+            let not_followed = |exact: bool, bare: Error| {
+                if why.is_empty() {
+                    bare
+                } else {
+                    Error::BlendsNotFollowed {
+                        exact,
+                        why: why.to_owned(),
+                    }
+                }
+            };
             return Ok(Err(match exec.refusal() {
                 OffsetFacesRefusal::NoRoom => Error::NoRoom,
-                OffsetFacesRefusal::Unsupported | OffsetFacesRefusal::NotPutBack => {
-                    Error::Unsupported("a blend on a moved face cannot be taken off and put back")
-                }
-                OffsetFacesRefusal::NotExact => Error::NotExact,
+                OffsetFacesRefusal::Unsupported | OffsetFacesRefusal::NotPutBack => not_followed(
+                    false,
+                    Error::Unsupported("a blend on a moved face cannot be taken off and put back"),
+                ),
+                OffsetFacesRefusal::NotExact => not_followed(true, Error::NotExact),
                 OffsetFacesRefusal::NoEffect => Error::NoEffect,
                 OffsetFacesRefusal::None => status(e, &in_order(order)),
             }));
@@ -481,7 +548,7 @@ pub fn offset_faces(body: &Body, order: &Order, faces: &[usize], distance: f64) 
 }
 
 /// The sheet `body` thickened by `thickness` along its normals, or (`symmetric`) moved back by
-/// half first: a closed solid ([`Expect::SOLID`], [`Error::NotSolid`] if not).
+/// half first: a closed solid ([`Expect::SOLID`], [`Error::NotSolidBecause`] if not).
 ///
 /// # Errors
 /// [`Error::Argument`] for a thickness not finite, zero or past 1e6, or a body that is a
@@ -617,8 +684,12 @@ fn refused(r: DraftRefusal) -> Error {
 /// neutral plane for a plane face;
 /// [`Error::Unsupported`] for a face the kernel cannot draft (what it is), or a face drafted past
 /// where its neighbours meet; [`Error::NoEffect`] for a draft that moved no face;
-/// [`Error::OffsetRefused`] for a face the kernel refuses with a reason; the kernel's other
-/// errors; those of [`finish`].
+/// [`Error::OffsetRefused`] for a face the kernel refuses with a reason (a drafted cone that
+/// would reach a cavity's wall: [`OffsetRefusal::DraftClosesWall`], the largest angle that keeps
+/// the wall); [`Error::DraftCutsThrough`] for a draft the kernel refuses without a reason of its
+/// own whose drafted face would cut through a face it does not meet ([`drafted_through`]); the
+/// kernel's other errors, its typed refusals passed on as they are;
+/// those of [`finish`].
 pub fn draft(
     body: &Body,
     order: &Order,
@@ -656,11 +727,29 @@ pub fn draft(
                 Err(e) => return Ok(Err(status(e, &in_order(order)))),
             }
         }
+        // a drafted cone that would reach a cavity's wall closes the wall: refused with the
+        // largest angle that keeps it, before anything changes
+        if let Err(e) = refuse_closing_wall(k, b, &picked, &the_draft) {
+            return Ok(Err(status(e, &in_order(order))));
+        }
         // the marks live for this call only: put on the picked faces, read and removed once the
         // kernel has moved them (a refused call puts the body back as it came in, unmarked)
+        // a face the drafted faces would cut through (a hole's wall within the draft of the
+        // side), read before the kernel edits the body and named if it then refuses; best
+        // effort: a check that fails itself leaves the kernel's own refusal, and never refuses
+        // a draft the kernel builds
+        let through = drafted_through(k, b, &picked, &surfaces).ok().flatten();
         mark_moved(b, &picked)?;
         if let Err(e) = local_operation_simple(k, b, &picked, surfaces) {
-            return Ok(Err(status(e, &in_order(order))));
+            // the cut through is named only where the kernel gives no reason of its own (a bare
+            // status): any refusal it words or types is its answer, passed on as it is
+            return Ok(Err(match (status(e, &in_order(order)), through) {
+                (Error::Status(_) | Error::Exception, Some(t)) => Error::DraftCutsThrough {
+                    at: [t.at.x, t.at.y, t.at.z],
+                    depth: t.depth,
+                },
+                (refused, _) => refused,
+            }));
         }
         if !moved_faces(b)? {
             return Ok(Err(Error::NoEffect));
