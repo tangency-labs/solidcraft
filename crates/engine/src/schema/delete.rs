@@ -36,6 +36,10 @@ pub struct SelectionDeleteParams {
     /// being edited) are named in `skipped`.
     #[serde(default)]
     pub items: Option<SelectionItems>,
+    /// Delete every shown body as well, by scope rather than by name: what Select All selected
+    /// (`selection.get` reports it as `all_bodies`). Locked bodies stay. Default: false.
+    #[serde(default)]
+    pub all_bodies: Option<bool>,
     /// `delete`: a view in `items` also takes the views projected or cut from it, which are
     /// otherwise refused, naming them. Read only for a drawing's objects.
     #[serde(default, skip_serializing_if = "Option::is_none")]
