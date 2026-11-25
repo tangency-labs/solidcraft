@@ -1,0 +1,14 @@
+{
+  "en": {
+    "appearance.favorites": "Favorites",
+    "appearance.keep_library": "Load this library whenever this panel opens"
+  },
+  "en-GB": {
+    "appearance.favorites": "Favourites",
+    "appearance.keep_library": "Load this library whenever this panel opens"
+  },
+  "de": {
+    "appearance.favorites": "Favoriten",
+    "appearance.keep_library": "Diese Bibliothek bei jedem Öffnen dieses Bereichs laden"
+  }
+}
