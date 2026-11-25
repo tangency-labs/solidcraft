@@ -499,8 +499,8 @@ fn render_live(_s: &mut Session, p: &Value) -> Result<Value> {
 fn render_select(s: &mut Session, p: &Value) -> Result<Value> {
     let request: RenderSelect = serde_json::from_value(p.clone()).map_err(|e| bad("view.render_select", e.to_string()))?;
     let result = serde_json::to_value(request).map_err(|e| bad("view.render_select", e.to_string()))?;
-    if !s.selection.is_empty() {
-        s.selection.clear();
+    if s.has_selection() {
+        s.clear_selection();
         s.refresh_display();
     }
     Ok(result)

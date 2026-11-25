@@ -62,6 +62,24 @@ crates/doc/src/drawing/dimension.rs:same_cylinder dot
 crates/doc/src/drawing/fold.rs:auxiliary_side dot
 crates/doc/src/drawing/fold.rs:axes cross
 crates/doc/src/drawing/fold.rs:axonometric cross
+crates/doc/src/drawing/line_maths.rs:LineCoords::across dot
+crates/doc/src/drawing/line_maths.rs:LineCoords::along dot
+crates/doc/src/drawing/line_maths.rs:covers normalized
+crates/doc/src/drawing/measure.rs:Cone::silhouettes cross,dot,normalized
+crates/doc/src/drawing/measure.rs:angle normalized
+crates/doc/src/drawing/measure.rs:axis normalized
+crates/doc/src/drawing/measure.rs:between atan2,cross,dot
+crates/doc/src/drawing/measure.rs:between_faces cross,dot,normalized
+crates/doc/src/drawing/measure.rs:between_silhouettes cross,dot
+crates/doc/src/drawing/measure.rs:chain dot
+crates/doc/src/drawing/measure.rs:crossing dot,normalized
+crates/doc/src/drawing/measure.rs:from_origin dot
+crates/doc/src/drawing/measure.rs:line_of dot
+crates/doc/src/drawing/measure.rs:linear dot,normalized
+crates/doc/src/drawing/measure.rs:on_view dot
+crates/doc/src/drawing/measure.rs:out_of_plane dot
+crates/doc/src/drawing/measure.rs:silhouette_side cross,normalized
+crates/doc/src/drawing/measure.rs:unit_axis normalized
 crates/doc/src/drawing/thread_lines.rs:along_line cross,dot
 crates/doc/src/drawing/thread_lines.rs:on_paper normalized
 crates/doc/src/drawing/thread_lines.rs:thread_lines cross,dot,normalized
@@ -107,7 +125,6 @@ crates/doc/src/eval.rs:level_start_reason dot
 crates/doc/src/eval.rs:line_in_sketch_plane dot,normalized
 crates/doc/src/eval.rs:mesh_content_digest triangles
 crates/doc/src/eval.rs:mirror_matrix dot
-crates/doc/src/eval.rs:move_turn_line dot
 crates/doc/src/eval.rs:nearest_object_face closest_on_triangle,cross,triangles
 crates/doc/src/eval.rs:new_surface_faces cross,dot
 crates/doc/src/eval.rs:off_its_face dot (only warns that a sketch's face point is off its face; no geometry is built from it)
@@ -239,7 +256,6 @@ crates/doc/src/joints_handles.rs:motion_axes cross,dot
 crates/doc/src/joints_reach.rs:Quat::to_zyz atan2,hypot
 crates/doc/src/joints_reach.rs:ball_turn_between atan2
 crates/doc/src/lineage.rs:order_legacy_family closest_on_triangle,triangles
-crates/doc/src/name_lookup.rs:FaceHit::along normalized,triangles
 crates/doc/src/name_lookup.rs:face_triangles triangles
 crates/doc/src/name_lookup.rs:incircle cross
 crates/doc/src/name_lookup.rs:nearest_on_face triangles
@@ -481,7 +497,6 @@ crates/engine/src/cmd/features.rs:extrude_reach dot
 crates/engine/src/cmd/features.rs:hole normalized
 crates/engine/src/cmd/features.rs:leaving normalized
 crates/engine/src/cmd/features.rs:move_bodies normalized
-crates/engine/src/cmd/features.rs:move_turn_about cross,normalized
 crates/engine/src/cmd/features_more.rs:align dot,normalized
 crates/engine/src/cmd/features_more.rs:emboss cross,dot,normalized,triangles
 crates/engine/src/cmd/features_more.rs:snap_point dot
@@ -613,11 +628,8 @@ crates/engine/src/cmd/view_pick.rs:kept_material_from dot,normalized
 crates/engine/src/cosmetic_threads.rs:segments_with_budget cross,dot,normalized,triangles
 crates/engine/src/cosmetic_threads.rs:trim dot
 crates/engine/src/drawing_balloon_paper.rs:leader normalized
-crates/engine/src/drawing_dimension_paper.rs:across_ends dot,normalized
+crates/engine/src/drawing_dimension_paper.rs:across_ends normalized
 crates/engine/src/drawing_dimension_paper.rs:angular atan2,dot,normalized
-crates/engine/src/drawing_dimension_paper.rs:chain dot
-crates/engine/src/drawing_dimension_paper.rs:line_direction normalized
-crates/engine/src/drawing_dimension_paper.rs:linear dot
 crates/engine/src/drawing_dimension_paper.rs:meet dot,normalized
 crates/engine/src/drawing_dimension_paper.rs:pieces dot
 crates/engine/src/drawing_dimension_paper.rs:radial normalized
@@ -715,18 +727,6 @@ crates/geom/src/drawing_break.rs:BreakMap::line dot
 crates/geom/src/drawing_break.rs:BreakMap::new dot
 crates/geom/src/drawing_break.rs:BreakMap::to_model dot
 crates/geom/src/drawing_break.rs:BreakMap::to_paper dot
-crates/geom/src/drawing_measure.rs:Cone::silhouettes cross,dot,normalized
-crates/geom/src/drawing_measure.rs:angle normalized
-crates/geom/src/drawing_measure.rs:between atan2,cross,dot
-crates/geom/src/drawing_measure.rs:between_faces cross,dot,normalized
-crates/geom/src/drawing_measure.rs:between_silhouettes cross,dot
-crates/geom/src/drawing_measure.rs:chain dot,normalized
-crates/geom/src/drawing_measure.rs:crossing dot,normalized
-crates/geom/src/drawing_measure.rs:linear dot,normalized
-crates/geom/src/drawing_measure.rs:on_view dot
-crates/geom/src/drawing_measure.rs:out_of_plane dot
-crates/geom/src/drawing_measure.rs:silhouette_side cross,normalized
-crates/geom/src/drawing_measure.rs:unit_axis normalized
 crates/geom/src/drawing_view.rs:basis_looking cross,dot,normalized
 crates/geom/src/drawing_view.rs:iso cross
 crates/geom/src/drawing_view.rs:projected_basis cross
@@ -971,8 +971,8 @@ crates/kernel/src/draft_corners.rs:run atan2,cross,dot
 crates/kernel/src/draft_corners.rs:tangent cross,dot,normalized
 crates/kernel/src/emboss.rs:OnForm::of atan2,cross,dot,normalized
 crates/kernel/src/emboss.rs:OnForm::on atan2,dot
+crates/kernel/src/emboss.rs:Wrap::exact_piece cross,dot,normalized (emboss wrap: wrapped_loop's flat side wall moved out unchanged, moves to solidcore with the rest of the wrap)
 crates/kernel/src/emboss.rs:Wrap::fitted dot
-crates/kernel/src/emboss.rs:Wrap::wrapped_loop cross,dot,normalized
 crates/kernel/src/emboss.rs:angle atan2,dot
 crates/kernel/src/emboss.rs:complete_wall dot
 crates/kernel/src/emboss.rs:cylinder_emboss_anchor dot,normalized
@@ -989,6 +989,12 @@ crates/kernel/src/emboss.rs:span dot
 crates/kernel/src/emboss.rs:validate_profiles cross
 crates/kernel/src/emboss.rs:wall_angles cross,dot
 crates/kernel/src/emboss.rs:wall_sector dot
+crates/kernel/src/emboss/chain.rs:Chain::build cross,dot (emboss wrap: tangent flat beside the wall, moves to solidcore with the rest of the wrap)
+crates/kernel/src/emboss/chain.rs:Chain::coords dot (emboss wrap: tangent flat beside the wall, moves to solidcore with the rest of the wrap)
+crates/kernel/src/emboss/chain.rs:Chain::flat_piece cross,dot,normalized (emboss wrap: tangent flat beside the wall, moves to solidcore with the rest of the wrap)
+crates/kernel/src/emboss/chain.rs:Chain::outline dot (emboss wrap: tangent flat beside the wall, moves to solidcore with the rest of the wrap)
+crates/kernel/src/emboss/flat.rs:line_ends dot,normalized (emboss wrap: tangent flat beside the wall, moves to solidcore with the rest of the wrap)
+crates/kernel/src/emboss/flat.rs:tangent_flats dot,normalized (emboss wrap: tangent flat beside the wall, moves to solidcore with the rest of the wrap)
 crates/kernel/src/fair.rs:Net::fair solve
 crates/kernel/src/fill.rs:Beside::across cross,normalized
 crates/kernel/src/fill.rs:Projection::pcurve dot
@@ -1174,7 +1180,7 @@ crates/kernel/src/surfaces.rs:imp::cutting_planes cross,normalized
 crates/kernel/src/surfaces.rs:imp::mitre dot,normalized
 crates/kernel/src/surfaces.rs:imp::turn_of atan2,cross,dot
 crates/kernel/src/surfaces.rs:nearest_face triangles
-crates/kernel/src/surfaces.rs:revolve_sheet cross,dot,normalized
+crates/kernel/src/surfaces.rs:revolved_sheet cross,dot,normalized
 crates/kernel/src/surfaces.rs:smooth_runs dot
 crates/kernel/src/surfaces.rs:swept_from dot
 crates/kernel/src/sweep_path.rs:controlled_stations cross,dot,normalized
@@ -1206,13 +1212,14 @@ crates/ui-egui/src/browser_canvas.rs:on_image dot
 crates/ui-egui/src/canvas.rs:MoveRotation::point cross
 crates/ui-egui/src/canvas.rs:along dot
 crates/ui-egui/src/canvas.rs:anchor normalized
-crates/ui-egui/src/canvas.rs:chamfer_face_dirs cross,dot,normalized
+crates/ui-egui/src/canvas.rs:chamfer_face_dirs dot
 crates/ui-egui/src/canvas.rs:drag_arrow_to normalized
 crates/ui-egui/src/canvas.rs:draw dot,normalized
 crates/ui-egui/src/canvas.rs:draw_move_rotation cross
 crates/ui-egui/src/canvas.rs:draw_revolve cross,dot
 crates/ui-egui/src/canvas.rs:edge_bisector normalized
 crates/ui-egui/src/canvas.rs:edge_concave dot
+crates/ui-egui/src/canvas.rs:edge_face_dirs cross,dot,normalized
 crates/ui-egui/src/canvas.rs:edge_sides cross,normalized,triangles
 crates/ui-egui/src/canvas.rs:measure_components normalized
 crates/ui-egui/src/canvas.rs:nearest_on_polyline dot

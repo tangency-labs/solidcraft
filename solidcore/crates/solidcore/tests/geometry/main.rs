@@ -33,6 +33,8 @@ mod curve_assert_valid;
 mod curve_length_bound;
 #[path = "../curve_length_holds_its_accuracy.rs"]
 mod curve_length_holds_its_accuracy;
+#[path = "../drop_clamped_sliver.rs"]
+mod drop_clamped_sliver;
 #[path = "../extend_short_arc_long_rulings.rs"]
 mod extend_short_arc_long_rulings;
 #[path = "../face_closest_point_live_box.rs"]
@@ -89,6 +91,8 @@ mod issue_16669_pole_trace_span_certified;
 mod issue_1672_torus_minus_z;
 #[path = "../issue_16735_trims_past_domain.rs"]
 mod issue_16735_trims_past_domain;
+#[path = "../issue_17062_ellipse_rounding_only_interval.rs"]
+mod issue_17062_ellipse_rounding_only_interval;
 #[path = "../issue_1767_bspline_surface_part.rs"]
 mod issue_1767_bspline_surface_part;
 #[path = "../issue_1799_tight_box_divides_at_knots.rs"]
