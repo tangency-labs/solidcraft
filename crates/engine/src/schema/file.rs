@@ -656,7 +656,7 @@ impl JsonSchema for OpenPath {
     }
 }
 
-/// Which way is up in a STEP, IGES, FreeCAD, Rhino or glTF file.
+/// Which way is up in a STEP, IGES, FreeCAD, Rhino, NX or glTF file.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UpParam(pub bool);
 
@@ -679,7 +679,7 @@ impl JsonSchema for UpParam {
     }
 }
 
-/// What the bodies of a STEP, IGES, FreeCAD or Rhino file are named after.
+/// What the bodies of a STEP, IGES, FreeCAD, Rhino or NX file are named after.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NamesParam(pub solidcraft_io::StepNames);
 
@@ -770,9 +770,9 @@ pub enum HistoryParam {
     Solids,
 }
 
-/// `reader` of `doc.open` and `file.insert_step`: which reader reads a STEP, IGES, FreeCAD or
-/// Rhino file, `solidcraft` (SolidCraft's own STEP or IGES reader, which keeps the STEP text; a
-/// FreeCAD or Rhino file restated as STEP by cadmpeg's writer first) or `cadmpeg` (cadmpeg's
+/// `reader` of `doc.open` and `file.insert_step`: which reader reads a STEP, IGES, FreeCAD, Rhino or
+/// NX file, `solidcraft` (SolidCraft's own STEP or IGES reader, which keeps the STEP text; a
+/// FreeCAD, Rhino or NX file restated as STEP by cadmpeg's writer first) or `cadmpeg` (cadmpeg's
 /// model read straight into B-rep records: a STEP or IGES file decoded by cadmpeg's STEP or IGES
 /// decoder), read as the handler reads it.
 #[derive(Clone, Copy, Debug)]
@@ -794,7 +794,7 @@ impl JsonSchema for ReaderParam {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
-            "description": "solidcraft (the default) is SolidCraft's own STEP or IGES reader, which keeps the STEP text (an IGES file is restated as STEP; a FreeCAD or Rhino file is restated as STEP by cadmpeg's STEP writer first); cadmpeg reads cadmpeg's model straight into B-rep records, with no STEP text in between (a STEP or IGES file decoded by cadmpeg's STEP or IGES decoder), to compare the two. Matching ignores case and surrounding spaces.",
+            "description": "solidcraft (the default) is SolidCraft's own STEP or IGES reader, which keeps the STEP text (an IGES file is restated as STEP; a FreeCAD, Rhino or NX file is restated as STEP by cadmpeg's STEP writer first); cadmpeg reads cadmpeg's model straight into B-rep records, with no STEP text in between (a STEP or IGES file decoded by cadmpeg's STEP or IGES decoder), to compare the two. Matching ignores case and surrounding spaces.",
             "type": "string",
             "enum": ["solidcraft", "cadmpeg"]
         })
@@ -808,7 +808,7 @@ fn linked_bodies_schema(_: &mut SchemaGenerator) -> Schema {
 /// Open a file as the design: a SolidCraft design (`.sc`, or a `.solidcraft` design from an
 /// earlier release), a `.dxf` or `.svg` drawing (a new, unsaved design with an XY sketch, with
 /// the units and defaults of `sketch.insert_dxf` and `sketch.insert_svg`), a STEP, IGES,
-/// FreeCAD, Rhino, 3MF, STL, OBJ or glTF file (a new design holding the file as a component
+/// FreeCAD, Rhino, NX, 3MF, STL, OBJ or glTF file (a new design holding the file as a component
 /// named after it, as `file.insert_step` and `file.insert_mesh` make), or a `.ply`, `.pcd`,
 /// `.e57`, `.xyz`, `.pts` or `.asc` point cloud (a new design holding it, as `pointcloud.insert`
 /// makes). The open design is replaced, unless it is not empty: the window opens the file in a
@@ -826,15 +826,15 @@ pub struct OpenParams {
     /// the command line and headless servers refuse it. Default: false.
     #[serde(default)]
     pub new_tab: Option<bool>,
-    /// For a STEP, IGES, FreeCAD, Rhino or glTF file only (refused for any other): which way is up
-    /// in the file. Default: z for STEP, IGES, FreeCAD and Rhino, y for glTF.
+    /// For a STEP, IGES, FreeCAD, Rhino, NX or glTF file only (refused for any other): which way is up
+    /// in the file. Default: z for STEP, IGES, FreeCAD, Rhino and NX, y for glTF.
     #[serde(default)]
     pub up: Option<UpParam>,
-    /// For a STEP, IGES, FreeCAD or Rhino file only (refused for any other): what the bodies are
+    /// For a STEP, IGES, FreeCAD, Rhino or NX file only (refused for any other): what the bodies are
     /// named after. Default: auto.
     #[serde(default)]
     pub names: Option<NamesParam>,
-    /// For a STEP, IGES, FreeCAD or Rhino file (ignored for other files): true puts an import that
+    /// For a STEP, IGES, FreeCAD, Rhino or NX file (ignored for other files): true puts an import that
     /// brings more than one item into the history (its Import feature and the rigid joints holding
     /// its parts) into a new history folder named `Group #N`. Default: false.
     #[serde(default)]
@@ -843,7 +843,7 @@ pub struct OpenParams {
     /// SolidCraft features, or only its solids as one Import feature. Default: features.
     #[serde(default)]
     pub history: Option<HistoryParam>,
-    /// For a STEP (`.step`, `.stp`), IGES (`.igs`, `.iges`), FreeCAD or Rhino file (ignored for
+    /// For a STEP (`.step`, `.stp`), IGES (`.igs`, `.iges`), FreeCAD, Rhino or NX file (ignored for
     /// other files): which reader reads it.
     /// Default: solidcraft.
     #[serde(default)]
@@ -1088,7 +1088,7 @@ pub struct OpenedPointCloud {
     pub param_warnings: Vec<String>,
 }
 
-/// What `doc.open` returns for a STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ or glTF file.
+/// What `doc.open` returns for a STEP, IGES, FreeCAD, Rhino, NX, 3MF, STL, OBJ or glTF file.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct OpenedFile {
     /// The file opened.
@@ -1162,7 +1162,7 @@ pub enum OpenResult {
     Drawing(OpenedDrawing),
     /// A point cloud.
     PointCloud(OpenedPointCloud),
-    /// A STEP, IGES, FreeCAD, Rhino or mesh file.
+    /// A STEP, IGES, FreeCAD, Rhino, NX or mesh file.
     File(OpenedFile),
     /// A file an importer plugin made into a new, unsaved design, with its loss report.
     Imported(crate::schema::plugin::ImportedDesign),

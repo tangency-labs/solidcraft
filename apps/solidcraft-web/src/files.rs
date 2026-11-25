@@ -575,7 +575,7 @@ fn input_picker(files: &Rc<Files>, intent: Intent) {
     let Ok(input) = doc.create_element("input").map(|e| e.unchecked_into::<web_sys::HtmlInputElement>()) else { return };
     input.set_type("file");
     // Everything the browser build opens, from the format registry: cadmpeg is pure Rust, so
-    // FreeCAD and Rhino files are part of it, and so are the DXF and SVG drawings Open and Insert take.
+    // FreeCAD, Rhino and experimental NX files are part of it, and so are the DXF and SVG drawings Open and Insert take.
     let extensions = solidcraft_engine::io::formats::open_extensions(true);
     input.set_accept(&disk::input_accept(&extensions, apple_touch()));
     // Attached (hidden) while it is open: some browsers ignore a click on a detached input.

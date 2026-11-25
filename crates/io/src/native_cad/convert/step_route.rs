@@ -1,4 +1,4 @@
-//! The STEP route a FreeCAD or Rhino file takes by default: cadmpeg decodes the file into its
+//! The STEP route a FreeCAD, Rhino or NX file takes by default: cadmpeg decodes the file into its
 //! neutral model and writes that as STEP AP214, which SolidCraft's STEP reader then reads and the
 //! Import feature keeps like any STEP file. The records route ([`crate::StepReader::Cadmpeg`],
 //! the Preferences switch "Import with cadmpeg", off by default) reads the same model straight
@@ -11,7 +11,7 @@ use cadmpeg_registry::{Format, build_encoder};
 
 use super::{ACCEPTED, decode_at, hide_body_members, policy};
 
-/// Restate a FreeCAD or Rhino file (`file` is its name) as STEP text, with the losses
+/// Restate a FreeCAD, Rhino or NX file (`file` is its name) as STEP text, with the losses
 /// and warnings cadmpeg reported. Panics inside cadmpeg become errors.
 pub fn native_cad_to_step(bytes: &[u8], file: &str) -> Result<(String, Vec<String>), String> {
     let name = std::path::Path::new(file).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| file.to_string());
@@ -47,7 +47,7 @@ pub(crate) fn invisible_items(step: &str) -> std::collections::HashSet<u64> {
 fn to_step(name: &str, bytes: &[u8]) -> Result<(String, Vec<String>), String> {
     let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
     if !crate::NATIVE_CAD_EXTS.contains(&ext.as_str()) {
-        return Err(format!("{name}: not supported (FreeCAD .FCStd and Rhino .3dm only)"));
+        return Err(format!("{name}: not supported (FreeCAD .FCStd, Rhino .3dm and experimental Siemens NX .prt only)"));
     }
     let (format, decoded) = decode_at(name, &ext, bytes, &ACCEPTED, DecodeDepth::Full)?;
     let policy = policy();
@@ -57,6 +57,9 @@ fn to_step(name: &str, bytes: &[u8]) -> Result<(String, Vec<String>), String> {
         return Err(format!("{name}: no geometry could be read from this {format} file"));
     }
     let mut warnings: Vec<String> = report.losses.iter().map(|l| format!("{}: {}", l.code, l.message)).collect();
+    if format == "nx" {
+        warnings.insert(0, crate::NX_IMPORT_WARNING.into());
+    }
 
     // Validate the neutral model, as cadmpeg's own conversion does.
     let arena = DecodeArena::new();

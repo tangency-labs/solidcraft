@@ -295,7 +295,7 @@ const STAGED_THUMBNAIL_TRIANGLES: usize = 1_000_000;
 /// How long a frame spends on a staged STEP import.
 const STAGED_FRAME_MS: f64 = 30.0;
 
-/// Files read in stages: STEP to insert or open (not IGES, FreeCAD or Rhino, which are first
+/// Files read in stages: STEP to insert or open (not IGES, FreeCAD, Rhino or NX, which are first
 /// restated as STEP), by the reader the request names, and designs to open (#10198).
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 fn staged_kind(request: &Request) -> bool {
@@ -521,6 +521,15 @@ pub fn begin(app: &mut SolveApp, path: &str, insert: bool) {
     let _ = begin_request(app, request);
 }
 
+/// Translate the NX notice without changing decoder diagnostics returned to scripts.
+pub(crate) fn import_warning_text(app: &SolveApp, warning: &str) -> String {
+    if warning == solidcraft_engine::io::NX_IMPORT_WARNING {
+        solidcraft_ui_text::Locale::for_language(&app.preferences.language).text("file_import.nx_experimental").to_string()
+    } else {
+        warning.to_string()
+    }
+}
+
 /// Insert PCB: insert the board the picked `path` belongs to, beside the window. On the `web`
 /// only a zip is taken: some browsers (iPhone, iPad) don't filter the picker, and one uploaded
 /// file would be read with whatever else was uploaded before.
@@ -536,7 +545,7 @@ pub(crate) fn insert_board(app: &mut SolveApp, path: &str, web: bool) {
     }
 }
 
-/// A STEP, IGES, FreeCAD or Rhino file the app opens or inserts gets a `Group #N` history folder
+/// A STEP, IGES, FreeCAD, Rhino or NX file the app opens or inserts gets a `Group #N` history folder
 /// while "Fold the History bar into groups" is on, and none while it is off (#8885), unless the
 /// caller chose (`folder`).
 pub(crate) fn step_folder_option(app: &SolveApp, path: &str, options: &mut serde_json::Map<String, Value>) {

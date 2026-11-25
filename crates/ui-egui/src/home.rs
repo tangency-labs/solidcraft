@@ -1126,6 +1126,7 @@ fn recent_kind(app: &SolveApp, path: &str) -> String {
         "glb" | "gltf" => "glTF",
         "fcstd" => "FreeCAD",
         "3dm" => "Rhino",
+        "prt" => "NX",
         "usd" | "usda" | "usdc" | "usdz" => "OpenUSD",
         other if !other.is_empty() => return other.to_ascii_uppercase(),
         _ => return app.tr("home.design_workspace").to_string(),

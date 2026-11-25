@@ -513,11 +513,11 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              titled \"Open .ext files with …\" list them).",
             object(
                 json!({
-                    "path": string("Path to a .sc (or .solidcraft), .step/.stp, .3mf, .stl, .obj, .glb, .gltf or OpenUSD (.usd, .usda, .usdc, .usdz) file"),
-                    "up": {"type": "string", "enum": ["z", "y"], "description": "STEP, glTF and OpenUSD only. z keeps the file's axes; y: the file has Y up, so its bodies are turned to stand Z up. Default: z for STEP, y for glTF, the stage's own up axis for OpenUSD"},
+                    "path": string("Path to a .sc (or .solidcraft), .step/.stp, .igs/.iges, .fcstd, .3dm, experimental NX .prt, .3mf, .stl, .obj, .glb, .gltf or OpenUSD (.usd, .usda, .usdc, .usdz) file"),
+                    "up": {"type": "string", "enum": ["z", "y"], "description": "STEP, IGES, FreeCAD, Rhino, experimental NX, glTF and OpenUSD only. z keeps the file's axes; y: the file has Y up, so its bodies are turned to stand Z up. Default: z for CAD files, y for glTF, the stage's own up axis for OpenUSD"},
                     "geometry": {"type": "string", "enum": ["meshes", "exact"], "description": "OpenUSD only. meshes (default): its meshes as mesh bodies; exact: its exact B-rep where it has one as B-rep bodies of an Import feature, and only its meshes with no B-rep as mesh bodies"},
                     "new_tab": {"type": "boolean", "description": "Open the file in a tab of its own, after the active one, and show it, even when the active design is empty, so the design that was open stays open. Desktop app only. Default: false: a design that is not empty is kept in its tab and the file gets one, an empty one is replaced"},
-                    "names": {"type": "string", "enum": ["auto", "solid", "product", "instance"], "description": "STEP, IGES, FreeCAD and Rhino. auto (default): keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's"},
+                    "names": {"type": "string", "enum": ["auto", "solid", "product", "instance"], "description": "STEP, IGES, FreeCAD, Rhino and experimental NX. auto (default): keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's"},
                 }),
                 &["path"],
             ),

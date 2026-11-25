@@ -60,16 +60,16 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&OPEN_CONTRACT)
         .output(output_schema_for::<OpenResult>)
         .params(concat!(
-            "path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf/.kicad_pro/.kicad_pcb file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ, glTF or KiCad PCB; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.pcd/.e57/.xyz/.pts/.asc point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); ",
+            "path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.prt/.3mf/.stl/.obj/.glb/.gltf/.kicad_pro/.kicad_pcb file (STEP, IGES, FreeCAD, Rhino, NX, 3MF, STL, OBJ, glTF or KiCad PCB; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.pcd/.e57/.xyz/.pts/.asc point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); ",
             "new_tab?: bool (true opens the file in a tab of its own after the active one and shows it, even when the active design is empty, so the design that was open stays open; default false: a design that is not empty is kept in its tab and the file gets one, an empty one is replaced; a design already open in a tab is shown instead; a person in the middle of a dialog or tool at the window gets the tab behind the active one, so check document.list; the desktop window only); ",
-            "up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); ",
-            "names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); ",
+            "up?: z|y for a STEP, IGES, FreeCAD, Rhino, NX or glTF file (see file.insert_step and file.insert_mesh); ",
+            "names?: auto|solid|product|instance for a STEP, IGES, FreeCAD, Rhino or NX file (see file.insert_step); ",
             "units?: for an STL or OBJ file (see file.insert_mesh); ",
             "origin?: bool for a mesh file (see file.insert_mesh); ",
-            "folder?: bool for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); ",
+            "folder?: bool for a STEP, IGES, FreeCAD, Rhino or NX file (see file.insert_step); ",
             "reuse_import?: bool (STEP/IGES: reuse an unchanged import from the local saved-model cache, default true; false recomputes without reading or writing the cache; → import_reused: bool, content_sha256: exact source digest); ",
             "history?: features|solids for a FreeCAD file (see file.insert_step); ",
-            "reader?: solidcraft|cadmpeg for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); ",
+            "reader?: solidcraft|cadmpeg for a STEP, IGES, FreeCAD, Rhino or NX file (see file.insert_step); ",
             "geometry?: meshes|exact for an OpenUSD file (see file.insert_mesh); ",
             "for a KiCad PCB: thickness?: board thickness in mm (default from the board); ",
             "components?: bool (default true); ",
@@ -99,14 +99,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&INSERT_STEP_CONTRACT)
         .output(output_schema_for::<StepInserted>)
         .params(concat!(
-            "path: STEP, IGES, FreeCAD .FCStd or Rhino .3dm file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_members?: the occurrences its rigid group holds, group?: the folder); ",
+            "path: STEP, IGES, FreeCAD .FCStd, Rhino .3dm or experimental Siemens NX .prt file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_members?: the occurrences its rigid group holds, group?: the folder); ",
             "folder?: bool (default false; true: an assembly's import, which has subcomponents, goes into a new history folder named `Group #N`); ",
             "flatten?: bool (default false; true: every solid comes in as a body of the import's own component, with no subcomponents, occurrences, joints or rigid group: a part placed several times is one body per placement where the file places it, and, as no component says which part a body belongs to, its name is prefixed with the outermost named part holding it (`R63: Terminal`), a placeholder name (empty, a bare number, or an exporter's `… STEP translator …`) giving way to its nearest named product's); ",
             "name? (the feature's and the component's); ",
             "up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); ",
             "names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); ",
             "history?: features|solids for a FreeCAD file (default features: its sketches and the Pad, Pocket, Revolution, Groove, Fillet, Chamfer and primitive features that use them are rebuilt as features in the new component, when every one can be and they build what the file holds → features_added, history: \"features\"; else, or with solids, the file's solids come in as an Import feature, and a warning says why the history was not rebuilt); ",
-            "reader?: solidcraft|cadmpeg for a .step/.stp, .igs/.iges, FreeCAD or Rhino file (default solidcraft: SolidCraft's own STEP or IGES reader, which keeps the STEP text (an IGES file restated as STEP), a FreeCAD or Rhino file's solids restated as STEP by cadmpeg's STEP writer first; cadmpeg: cadmpeg's model read straight into B-rep records, with no STEP text in between, a STEP or IGES file decoded by cadmpeg's STEP or IGES decoder, to compare the two; `flatten` works with either); ",
+            "reader?: solidcraft|cadmpeg for a .step/.stp, .igs/.iges, FreeCAD, Rhino or NX file (default solidcraft: SolidCraft's own STEP or IGES reader, which keeps the STEP text (an IGES file restated as STEP), a FreeCAD, Rhino or NX file's solids restated as STEP by cadmpeg's STEP writer first; cadmpeg: cadmpeg's model read straight into B-rep records, with no STEP text in between, a STEP or IGES file decoded by cadmpeg's STEP or IGES decoder, to compare the two; `flatten` works with either); ",
             "matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it, its translation column (entries 4, 8 and 12) numbers or length expressions: one that names a parameter is kept, and the import follows the parameter when it changes (a grounded one stays); a scale, shear or mirror is refused before the file is read); ",
             "tolerance? (see occurrence.move; envelope?: \"box\" (also add the import's envelope, a hidden box around every body it placed, in its component, as solid.bounding_solid with `component` makes it → envelope: the body; inspect.clearance and inspect.interference check it instead of the parts with `envelopes: true`)",
             "link?: bool (default true: keep a STEP source link for Update Links; false keeps an independent copy; without a disk path the web app keeps a copy); ",
@@ -471,9 +471,9 @@ struct StepOptions {
     /// file's assembly structure.
     flatten: bool,
     /// `reader: "cadmpeg"`: the file is read by cadmpeg into records, a STEP or IGES file by
-    /// cadmpeg's STEP or IGES decoder and a FreeCAD or Rhino file's solids straight from cadmpeg's
-    /// model; `solidcraft` (the default) is SolidCraft's own STEP or IGES reader (for FreeCAD and
-    /// Rhino, of the STEP that cadmpeg's writer restates them as).
+    /// cadmpeg's STEP or IGES decoder and a FreeCAD, Rhino or NX file's solids straight from cadmpeg's
+    /// model; `solidcraft` (the default) is SolidCraft's own STEP or IGES reader (for FreeCAD, Rhino and
+    /// NX, of the STEP that cadmpeg's writer restates them as).
     reader: solidcraft_io::StepReader,
 }
 
@@ -1162,7 +1162,7 @@ fn insert_step(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.insert_step";
     let path = path_arg(p, cmd)?;
     if !solidcraft_io::is_step_path(path) {
-        return Err(bad(cmd, "only STEP, IGES, FreeCAD and Rhino files (.step, .stp, .igs, .iges, .fcstd, .3dm) can be inserted"));
+        return Err(bad(cmd, "only STEP, IGES, FreeCAD, Rhino and NX files (.step, .stp, .igs, .iges, .fcstd, .3dm, .prt) can be inserted"));
     }
     let mut options = step_options(p, cmd)?;
     // The translation column may be length expressions that name parameters (#8192): the

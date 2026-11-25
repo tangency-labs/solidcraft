@@ -1,7 +1,7 @@
 //! File formats. Designs use JSON or versioned containers (`.sc`; `.solidcraft` still opens); the authoritative
 //! document rebuilds on load and optional display caches remain provisional. Bodies export
 //! as STL (binary or ASCII), OBJ, STEP and 3MF, and assemblies as URDF ([`urdf()`]); STEP, IGES,
-//! FreeCAD and Rhino files import as a base feature (see [`step_import_feature`]), 3MF and
+//! FreeCAD, Rhino and NX files import as a base feature (see [`step_import_feature`]), 3MF and
 //! STL files as mesh bodies (see [`mesh_import_feature`]), PLY, PCD, E57 and XYZ files as point
 //! clouds (see [`read_point_cloud`]), and KiCad boards as a mesh substrate with referenced STEP
 //! component models.
@@ -90,6 +90,7 @@ pub use native_cad::CadmpegOptions;
 pub use native_cad::DecalPlan;
 pub use native_cad::Hidden;
 pub use native_cad::NATIVE_CAD_EXTS;
+pub use native_cad::NX_IMPORT_WARNING;
 pub use native_cad::NativeDesign;
 pub use native_cad::OpticsPlan;
 pub use native_cad::RecordsRead;
@@ -607,7 +608,7 @@ pub fn step_import_feature_named(bytes: &[u8], file: &str, names: StepNames) -> 
     step_import_feature_read(bytes, file, names, StepReader::SolidCraft)
 }
 
-/// [`step_import_feature_named`], a STEP, IGES, FreeCAD or Rhino file read by `reader`.
+/// [`step_import_feature_named`], a STEP, IGES, FreeCAD, Rhino or NX file read by `reader`.
 pub fn step_import_feature_read(bytes: &[u8], file: &str, names: StepNames, reader: StepReader) -> Result<StepFeature> {
     let _span = solidcraft_profile::span("import", "step_import_feature_named");
     limits::check(limits::Kind::Step, bytes.len() as u64).map_err(IoError::Invalid)?;
@@ -697,7 +698,7 @@ pub fn usd_import_feature(bytes: &[u8], file: &str, names: StepNames) -> Result<
     Ok((records_import_feature(read, file, names)?, y_up))
 }
 
-/// A file read with [`StepReader::Cadmpeg`] (FreeCAD, Rhino or STEP) into an Import feature that
+/// A file read with [`StepReader::Cadmpeg`] (STEP, IGES, FreeCAD, Rhino or NX) into an Import feature that
 /// keeps the B-rep records cadmpeg's neutral model was read into (no STEP text). A FreeCAD body's
 /// hidden intermediate shapes (each pad and pocket, the tool shapes, sketch faces, which FreeCAD
 /// shows only through its body's own shape) are not built, unless nothing else is; a Rhino file's

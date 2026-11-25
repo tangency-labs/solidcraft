@@ -1,25 +1,30 @@
 //! Other CAD formats read through [cadmpeg](https://github.com/cadmpeg/cadmpeg): FreeCAD
-//! `.FCStd` files are read, and Rhino `.3dm` and OpenUSD files read and written
-//! ([`usd`], [`cadmpeg_export`]); STEP and IGES files are read when the cadmpeg reader is
-//! chosen ([`cadmpeg_step_records`], [`cadmpeg_iges_records`]) and written through it. cadmpeg decodes the file into its neutral model (CADIR). By default
+//! `.FCStd` and experimental Siemens NX `.prt` files are read, and Rhino `.3dm` and OpenUSD
+//! files read and written ([`usd`], [`cadmpeg_export`]); STEP and IGES files are read when
+//! the cadmpeg reader is chosen ([`cadmpeg_step_records`], [`cadmpeg_iges_records`]) and
+//! written through it. cadmpeg decodes the file into its neutral model (CADIR). By default
 //! cadmpeg's STEP writer restates that as STEP, which the Import feature then reads and keeps like
 //! any STEP file ([`native_cad_to_step`]); with [`crate::StepReader::Cadmpeg`] (the Preferences
 //! switch "Import with cadmpeg", off by default) the model is read straight into B-rep records
 //! ([`cadir_records`]) and the Import feature keeps those records, with no STEP text in between.
 //!
-//! Only codecs for open formats are compiled in (the workspace enables cadmpeg-registry's
-//! `fcstd`, `iges`, `rhino`, `step` and `usd` features alone). cadmpeg's codecs for commercial formats, and its
-//! `sat` codec (a ShapeManager stream decoder that reads ACIS as one dialect), are not built.
+//! The workspace enables cadmpeg-registry's `fcstd`, `iges`, `nx`, `rhino`, `step` and `usd` features.
+//! Other commercial-format codecs and the `sat` codec (a ShapeManager stream decoder that
+//! reads ACIS as one dialect) are not built. NX support is partial: only geometry the decoder
+//! can transfer becomes an Import feature; source sketches and feature history are not rebuilt.
 //!
 //! This module is the cadmpeg seam: the one place cadmpeg is called, returning the STEP text, the
 //! records or the exported bytes plus warnings; an export writes the design into cadmpeg's model
 //! directly (`cadir_out`) and cadmpeg's writer writes the file (`export`). A cadmpeg-based STEP reader could be added here later and chosen by a setting, to
 //! compare with our own STEP reader, without changing that reader.
 
-/// File extensions read through cadmpeg (lower case).
-pub const NATIVE_CAD_EXTS: [&str; 2] = ["fcstd", "3dm"];
+/// Human-readable diagnostic also used by hosts to select the translated NX notice.
+pub const NX_IMPORT_WARNING: &str = "Experimental Siemens NX geometry import: support is partial; sketches and feature history are not imported.";
 
-/// Is this a FreeCAD or Rhino file name (any case)?
+/// File extensions read through cadmpeg (lower case).
+pub const NATIVE_CAD_EXTS: [&str; 3] = ["fcstd", "3dm", "prt"];
+
+/// Is this a FreeCAD, Rhino or NX file name (any case)?
 pub fn is_native_cad_path(path: &str) -> bool {
     std::path::Path::new(path).extension().and_then(|e| e.to_str()).is_some_and(|e| NATIVE_CAD_EXTS.iter().any(|x| e.eq_ignore_ascii_case(x)))
 }
@@ -123,7 +128,7 @@ fn next_end_section(text: &str, from: usize) -> Option<usize> {
     None
 }
 
-/// Read a FreeCAD or Rhino file (`file` is its name) into an import kept as B-rep records,
+/// Read a FreeCAD, Rhino or NX file (`file` is its name) into an import kept as B-rep records,
 /// with what cadmpeg could not bring over, and whether its contents are a FreeCAD design. Panics
 /// inside cadmpeg or the reader become errors.
 pub fn native_cad_records(bytes: &[u8], file: &str) -> Result<RecordsRead, String> {
@@ -695,7 +700,7 @@ mod convert {
     use cadmpeg_registry::{DETECTION_PREFIX_LEN, InputCatalog, ResolveSourceError, ResolvedSource, forced_input};
 
     /// The codecs we accept (cadmpeg codec ids), whatever else the registry recognises.
-    const ACCEPTED: [&str; 2] = ["fcstd", "rhino"];
+    const ACCEPTED: [&str; 3] = ["fcstd", "rhino", "nx"];
 
     pub(super) mod step_route;
 
@@ -885,7 +890,7 @@ mod convert {
     pub(super) fn records(name: &str, bytes: &[u8]) -> Result<super::RecordsRead, String> {
         let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
         if !super::NATIVE_CAD_EXTS.contains(&ext.as_str()) {
-            return Err(format!("{name}: not supported (FreeCAD .FCStd and Rhino .3dm only)"));
+            return Err(format!("{name}: not supported (FreeCAD .FCStd, Rhino .3dm and experimental Siemens NX .prt only)"));
         }
         records_of(name, &ext, bytes, &ACCEPTED)
     }
@@ -949,6 +954,9 @@ mod convert {
             return Err(format!("{name}: no geometry could be read from this {format} file"));
         }
         let mut warnings: Vec<String> = report.losses.iter().map(|l| format!("{}: {}", l.code, l.message)).collect();
+        if format == "nx" {
+            warnings.insert(0, super::NX_IMPORT_WARNING.into());
+        }
 
         // Validate the neutral model, as cadmpeg's own conversion does.
         let arena = DecodeArena::new();

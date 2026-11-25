@@ -7,6 +7,8 @@ const BLOCK_FCSTD: &[u8] = include_bytes!("fixtures/block.FCStd");
 /// (`fixtures/make_block_3dm.py`).
 const BLOCK_3DM: &[u8] = include_bytes!("fixtures/block.3dm");
 
+/// Analytic box encoded by our synthetic NX container/Parasolid generator; no commercial CAD.
+const BLOCK_PRT: &[u8] = include_bytes!("fixtures/block.prt");
 /// A PartDesign body from sketches: a 40 × 20 × 10 mm pad, a 6 mm hole pocketed through it and
 /// its four vertical edges filleted 2 mm (`fixtures/make_bracket_fcstd.py`, FreeCAD 26.3).
 const BRACKET_FCSTD: &[u8] = include_bytes!("fixtures/bracket.FCStd");
@@ -24,7 +26,7 @@ const PLATE_FCSTD: &[u8] = include_bytes!("fixtures/plate.FCStd");
 /// STEP text, which these importers refuse.
 const STEP_TEXT: &str = "ISO-10303-21;\nHEADER;\nENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n";
 
-/// Both readers of a FreeCAD or Rhino file: the STEP route (the default) and the records.
+/// Both readers of a FreeCAD, Rhino or NX file: the STEP route (the default) and the records.
 const READERS: [crate::StepReader; 2] = [crate::StepReader::SolidCraft, crate::StepReader::Cadmpeg];
 
 /// `bytes` (a file called `file`) read into an Import feature by `reader`.
@@ -70,11 +72,14 @@ fn imports_the_block(bytes: &[u8], file: &str) {
 
 #[test]
 fn extensions() {
-    assert!(is_native_cad_path("a/Part.FCStd") && is_native_cad_path("x.3DM") && is_native_cad_path("y.fcstd"));
+    assert!(is_native_cad_path("a/Part.FCStd") && is_native_cad_path("x.3DM") && is_native_cad_path("y.fcstd") && is_native_cad_path("part.PRT"));
     for other in ["c.sat", "c.sab", "c.smt", "c.smb", "c.f3d", "c.sldprt", "c.step", "fcstd"] {
         assert!(!is_native_cad_path(other), "{other}");
     }
-    assert!(crate::is_step_path("c.FCStd") && crate::is_step_path("c.3dm"), "read as an Import feature like STEP and IGES");
+    assert!(
+        crate::is_step_path("c.FCStd") && crate::is_step_path("c.3dm") && crate::is_step_path("c.prt"),
+        "read as an Import feature like STEP and IGES"
+    );
 }
 
 #[test]
@@ -82,6 +87,16 @@ fn freecad_box_imports_as_a_solid() {
     let bytes = BLOCK_FCSTD;
     assert!(bytes.starts_with(b"PK"), "an FCStd file is a ZIP archive");
     imports_the_block(bytes, "block.FCStd");
+}
+
+#[test]
+fn nx_box_imports_as_a_solid_with_an_experimental_warning() {
+    assert!(BLOCK_PRT.starts_with(b"SPLMSSTR"));
+    imports_the_block(BLOCK_PRT, "block.prt");
+    for reader in READERS {
+        let sf = read(BLOCK_PRT, "block.PRT", reader);
+        assert!(sf.warnings.iter().any(|w| w == NX_IMPORT_WARNING), "{reader:?}: {:?}", sf.warnings);
+    }
 }
 
 #[test]
@@ -102,13 +117,13 @@ fn a_file_name_with_umlauts_names_the_product() {
     );
 }
 
-/// Only FreeCAD and Rhino contents are read: STEP text, garbage, a bad ZIP and empty input are
-/// refused with a message, as are ACIS, ShapeManager and commercial formats whatever their bytes.
+/// Only the enabled CAD codecs are read: STEP text, garbage, a bad ZIP and empty input are
+/// refused with a message, as are ACIS, ShapeManager and other commercial formats whatever their bytes.
 #[test]
 fn other_contents_are_refused() {
     let step = STEP_TEXT;
     let fcstd = BLOCK_FCSTD;
-    let cases: [(&[u8], &str); 9] = [
+    let cases: [(&[u8], &str); 13] = [
         (step.as_bytes(), "x.3dm"),
         (step.as_bytes(), "x.fcstd"),
         (b"\0\0garbage", "x.3dm"),
@@ -118,6 +133,10 @@ fn other_contents_are_refused() {
         (b"ASM BinaryFile4", "x.smb"),
         (fcstd, "x.f3d"),
         (fcstd, "x.sldprt"),
+        (b"", "empty.prt"),
+        (b"SPLMSSTR", "truncated.prt"),
+        (b"NX garbage", "broken.prt"),
+        (step.as_bytes(), "renamed.prt"),
     ];
     for (bytes, name) in cases {
         let e = native_cad_records(bytes, name).expect_err(name);
@@ -129,11 +148,11 @@ fn other_contents_are_refused() {
     imports_the_block(BLOCK_3DM, "renamed.FCStd");
 }
 
-/// Truncated, bit-flipped and garbage-tailed variants of valid FreeCAD and Rhino files give an
+/// Truncated, bit-flipped and garbage-tailed variants of valid FreeCAD, Rhino and NX files give an
 /// error or a solid, never a panic.
 #[test]
 fn hostile_native_cad_never_panics() {
-    for (good, name) in [(BLOCK_FCSTD, "hostile.FCStd"), (BLOCK_3DM, "hostile.3dm")] {
+    for (good, name) in [(BLOCK_FCSTD, "hostile.FCStd"), (BLOCK_3DM, "hostile.3dm"), (BLOCK_PRT, "hostile.prt")] {
         let mut cases: Vec<Vec<u8>> = (0..good.len()).step_by((good.len() / 60).max(1)).map(|n| good[..n].to_vec()).collect();
         for i in (0..good.len()).step_by((good.len() / 80).max(1)) {
             let mut b = good.to_vec();
@@ -212,6 +231,21 @@ fn a_zip_bomb_is_refused() {
     assert!(bytes.len() < 2 << 20, "{} bytes", bytes.len());
     assert!(native_cad_records(&bytes, "bomb.FCStd").is_err());
     assert!(native_cad_to_step(&bytes, "bomb.FCStd").is_err());
+}
+
+/// A valid empty NX container must not succeed as an empty imported component.
+#[test]
+fn an_nx_container_without_geometry_is_refused() {
+    let mut bytes = b"SPLMSSTR".to_vec();
+    bytes.resize(25, 0);
+    bytes[8] = 6;
+    bytes[17..23].copy_from_slice(&35u64.to_le_bytes()[..6]);
+    bytes.extend_from_slice(b"HEADER\0\0\0\0FOOTER\0\0\0\0\0\0\0\0");
+    for reader in READERS {
+        let error =
+            crate::step_import_feature_read(&bytes, "empty.prt", crate::StepNames::default(), reader).err().expect("empty NX must be refused");
+        assert!(error.to_string().contains("no geometry"), "{reader:?}: {error}");
+    }
 }
 
 /// Records of which not one body can be made are refused as a file with no solids is, with the
