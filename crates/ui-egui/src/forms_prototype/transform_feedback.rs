@@ -34,9 +34,9 @@ pub(super) fn gizmo_value(change: crate::gizmo::Change, drag: &Drag, handle: cra
         crate::gizmo::Change::Translate(delta) if drag.scale => {
             let factors = if handle == crate::gizmo::Handle::Ball {
                 let (r, u, _) = camera.basis();
-                solidcore_ops::form_transform::uniform_factors(delta, drag.length, r, u)
+                solidcraft_kernel::services::form_transform::uniform_factors(delta, drag.length, r, u)
             } else {
-                solidcore_ops::form_transform::scale_factors(delta, drag.length, drag.basis)
+                solidcraft_kernel::services::form_transform::scale_factors(delta, drag.length, drag.basis)
             };
             Value::Scale(factors)
         }
@@ -86,7 +86,7 @@ pub(super) fn text(app: &SolveApp, snapshot: Snapshot) -> String {
     let length = |v: f64| crate::prefs::format_length(if v.abs() < 1e-12 { 0.0 } else { v }, &app.session.doc.units, app.preferences.length_decimals);
     let value = match snapshot.value {
         Value::Move(delta) => {
-            let (magnitude, components) = solidcore_ops::form_transform::translation_measure(delta, snapshot.basis);
+            let (magnitude, components) = solidcraft_kernel::services::form_transform::translation_measure(delta, snapshot.basis);
             let components = components.map(length);
             locale.format(
                 "forms.feedback.move",

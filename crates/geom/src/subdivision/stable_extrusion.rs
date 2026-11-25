@@ -1,10 +1,10 @@
 //! Quad extrusion without compacting control IDs or changing surviving face slots.
 use super::{Cage, EdgeCrease, Result, VertexCrease, bad, key};
-use solidcore_ops::form_cage::{self as kernel, ExtrusionSelection};
 use solidcore_record::Vec3;
+use solidcraft_kernel_services::form_cage::{self as kernel, ExtrusionSelection};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub use solidcore_ops::form_cage::ExtrusionWall as Wall;
+pub use solidcraft_kernel_services::form_cage::ExtrusionWall as Wall;
 
 pub struct Extrusion {
     pub cage: Cage,

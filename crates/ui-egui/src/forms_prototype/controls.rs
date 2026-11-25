@@ -416,7 +416,7 @@ pub(super) fn topology(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                 };
                 let direction = app.forms_prototype.axis.vector(constraint_axes(app, dirs)).unwrap_or(dirs[2]);
-                let d = solidcore_ops::form_transform::translate(Vec3::ZERO, direction, distance);
+                let d = solidcraft_kernel::services::form_transform::translate(Vec3::ZERO, direction, distance);
                 // Numeric extrusion has the same evaluated-surface displacement
                 // contract as dragging. Keep legacy raw topology commands intact.
                 let (faces, edges) = if tool == "extrude_faces" { (faces, Vec::new()) } else { (Vec::new(), edges) };
@@ -535,7 +535,7 @@ fn transform(app: &mut SolveApp, ctx: &egui::Context) {
         .points
         .iter()
         .zip(&targets.weights)
-        .map(|(&point, &weight)| solidcore_ops::form_transform::numeric(point, center, dirs, t, r, s, weight).map(|p| [p.x, p.y, p.z]))
+        .map(|(&point, &weight)| solidcraft_kernel::services::form_transform::numeric(point, center, dirs, t, r, s, weight).map(|p| [p.x, p.y, p.z]))
         .collect();
     let Some(positions) = positions else {
         app.set_status(app.tr("forms.prototype.invalid_number").to_owned(), true);

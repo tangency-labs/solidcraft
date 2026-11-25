@@ -24,7 +24,7 @@ impl TrimWall {
     }
 
     fn validate_delta(&self) -> Result<()> {
-        solidcore_ops::form_subdivision::validate_trim_wall_delta(self.delta).map_err(|error| bad(&error.to_string()))
+        solidcraft_kernel_services::form_subdivision::validate_trim_wall_delta(self.delta).map_err(|error| bad(&error.to_string()))
     }
 
     pub(super) fn append_preview(&self, surface: &mut SurfacePreview, logical: &mut Cage) -> Result<()> {
@@ -40,9 +40,9 @@ impl TrimWall {
         if base.len() < 2 || surface.vertices.len() != logical.points.len() {
             return Err(bad("trim preview control slots disagree with the active skin"));
         }
-        let geometry = solidcore_ops::form_subdivision::trim_wall(&base, [logical.point(a)?, logical.point(b)?], self.delta)
+        let geometry = solidcraft_kernel_services::form_subdivision::trim_wall(&base, [logical.point(a)?, logical.point(b)?], self.delta)
             .map_err(|error| bad(&error.to_string()))?;
-        let solidcore_ops::form_subdivision::TrimWallGeometry { top, normals, controls } = geometry;
+        let solidcraft_kernel_services::form_subdivision::TrimWallGeometry { top, normals, controls } = geometry;
         let top_start = *top.first().ok_or_else(|| bad("empty trim preview path"))?;
         let top_end = *top.last().ok_or_else(|| bad("empty trim preview path"))?;
 
@@ -119,7 +119,7 @@ impl Hierarchy {
     pub fn move_trim_rim(&self, delta: Vec3) -> Result<Self> {
         let mut out = self.clone();
         let wall = out.trim_wall.as_mut().ok_or_else(|| bad("missing derived trim wall"))?;
-        wall.delta = solidcore_ops::form_subdivision::move_trim_wall(wall.delta, delta).map_err(|error| bad(&error.to_string()))?;
+        wall.delta = solidcraft_kernel_services::form_subdivision::move_trim_wall(wall.delta, delta).map_err(|error| bad(&error.to_string()))?;
         Ok(out)
     }
 }

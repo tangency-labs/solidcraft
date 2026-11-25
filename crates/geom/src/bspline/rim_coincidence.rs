@@ -1,6 +1,6 @@
 //! Adapt fitted rim definitions to the shared kernel's continuous gap proof.
 use super::{CurveN, SplineError, SplineResult};
-use solidcore_ops::rational_rim::{self as kernel, Curve};
+use solidcraft_kernel_services::rational_rim::{self as kernel, Curve};
 
 fn curve(source: &CurveN<4>) -> Curve<'_> {
     Curve { degree: source.degree, knots: &source.knots, ctrl: &source.ctrl }

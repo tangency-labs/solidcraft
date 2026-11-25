@@ -89,6 +89,9 @@ pub struct HostOptions {
     /// Content toolbar space, separate from the shared title and tabs. The
     /// content/body split may fit transiently within the bounded outer host.
     pub content_header_height: f32,
+    /// Panels that Float leaves where they show, at their shown size; any other
+    /// panel floats at the free area's top-left corner at its saved size.
+    pub float_in_place: Vec<InstanceId>,
 }
 impl Default for HostOptions {
     fn default() -> Self {
@@ -96,6 +99,7 @@ impl Default for HostOptions {
             metrics: HostMetrics { inline_max_height: solidcraft_theme::PANEL_INLINE_MAX_HEIGHT, ..HostMetrics::default() },
             geometry: HostGeometryPolicy::default(),
             content_header_height: solidcraft_theme::Tokens::get().control_height,
+            float_in_place: Vec::new(),
         }
     }
 }
@@ -138,6 +142,7 @@ pub struct HostFrameControl {
     pub role: InputRole,
     pub accessible_name: String,
     pub enabled: bool,
+    pub ink: LogicalRect,
 }
 
 #[derive(Clone, Debug)]
@@ -325,6 +330,21 @@ fn validate_requested_opacity(opacity: Option<f32>) -> PanelResult<()> {
 }
 
 impl WorkspacePanelHost {
+    #[cfg(test)]
+    pub(crate) fn set_float_in_place(&mut self, panels: Vec<InstanceId>) {
+        self.options.float_in_place = panels;
+    }
+
+    /// Where Float starts from for `instance`: its card as shown, while it is expanded and
+    /// listed in `HostOptions::float_in_place`.
+    fn float_from(&self, runtime: &PanelRuntime, instance: &InstanceId, layout: &HostLayout) -> Option<LogicalRect> {
+        if !self.options.float_in_place.contains(instance) {
+            return None;
+        }
+        let section = runtime.layout().layout().containing(instance).ok()?;
+        layout.sections.iter().find(|card| card.section == section.id && !card.collapsed).map(|card| card.outer)
+    }
+
     /// Override host paint opacity for this runtime only, without changing saved layout.
     pub fn set_requested_opacity(&mut self, opacity: Option<f32>) -> PanelResult<()> {
         validate_requested_opacity(opacity)?;
@@ -335,6 +355,14 @@ impl WorkspacePanelHost {
             self.options.geometry.surface_alpha = None;
         }
         Ok(())
+    }
+
+    /// Puts the panel's `action` at the right end of its header, next to the menu, also when
+    /// the header is one row with the content (the bottom History).
+    pub(crate) fn set_header_action_trailing(&mut self, instance: InstanceId, action: ControlId) {
+        if self.options.geometry.trailing_header_actions.entry(instance).or_default().insert(action) {
+            self.invalidate_geometry();
+        }
     }
 
     pub(crate) fn set_header_action_visible(&mut self, instance: InstanceId, action: ControlId, visible: bool) {
@@ -453,6 +481,17 @@ impl WorkspacePanelHost {
             self.options.metrics = metrics;
         }
         Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_wide_grab(&mut self, wide: bool) {
+        let (docked_grab_width, floating_grab_reach) =
+            if wide { (super::layout::DOCKED_GRAB_WIDTH, super::layout::FLOATING_GRAB_REACH) } else { (0.0, 0.0) };
+        if (docked_grab_width, floating_grab_reach) != (self.options.metrics.docked_grab_width, self.options.metrics.floating_grab_reach) {
+            self.invalidate_geometry();
+            self.options.metrics.docked_grab_width = docked_grab_width;
+            self.options.metrics.floating_grab_reach = floating_grab_reach;
+        }
     }
 
     pub fn new(options: HostOptions) -> PanelResult<Self> {
@@ -601,6 +640,7 @@ impl WorkspacePanelHost {
                     &HostSharedAction::Collapse,
                     &self.native_capabilities,
                     frame.layout.capacity,
+                    None,
                     &frame.layout.geometry_policy.identity_reservations,
                 )?;
                 prepare_host_layout(runtime.layout(), &runtime_scope(runtime), &frame.layout, candidate.clone())?;
@@ -621,6 +661,7 @@ impl WorkspacePanelHost {
                         &HostSharedAction::Move(zone),
                         &self.native_capabilities,
                         frame.layout.capacity,
+                        self.float_from(runtime, &instance, &frame.layout),
                         &frame.layout.geometry_policy.identity_reservations,
                     ) && prepare_host_layout(runtime.layout(), &runtime_scope(runtime), &frame.layout, candidate.clone()).is_ok()
                     {
@@ -883,6 +924,15 @@ impl WorkspacePanelHost {
                 self.egui_context.as_ref().is_some_and(|ctx| egui::containers::AreaState::load(ctx, area).is_some_and(|state| state.size.is_some()));
             if !measured {
                 unmeasured_instances.push(section.instance.clone());
+                let grabs: Vec<_> = layout
+                    .controls
+                    .iter()
+                    .filter(|control| matches!(&control.target, HostPointerTarget::Resize { section: id, .. } if *id == section.section))
+                    .map(|control| control.target.clone())
+                    .collect();
+                for target in &grabs {
+                    super::layout::release_grab(&layout.controls, target, &mut layout.input, &mut layout.occlusion);
+                }
                 layout.controls.retain(|control| match &control.target {
                     HostPointerTarget::Header { instance }
                     | HostPointerTarget::Surface { instance }
@@ -1095,6 +1145,7 @@ impl WorkspacePanelHost {
                 role: control.role,
                 accessible_name: name,
                 enabled,
+                ink: control.ink,
             });
         }
         let focused = runtime.layout().interaction().focused.clone();
@@ -1220,6 +1271,11 @@ impl WorkspacePanelHost {
             for target in &hidden {
                 if let HostControlTarget::Pointer(HostPointerTarget::Surface { instance }) = target {
                     unpainted_instances.push(instance.clone());
+                }
+            }
+            for target in &hidden {
+                if let HostControlTarget::Pointer(pointer) = target {
+                    super::layout::release_grab(&frame.layout.controls, pointer, &mut frame.layout.input, &mut frame.layout.occlusion);
                 }
             }
             frame.layout.controls.retain(|control| !hidden.contains(&HostControlTarget::Pointer(control.target.clone())));
@@ -1985,7 +2041,17 @@ impl WorkspacePanelHost {
             };
             let horizontal = panel.zone != Zone::Bottom;
             let extent = if horizontal { panel.outer.size.height } else { panel.outer.size.width };
-            let response = ui_kit::panel_host_sash(ui, control.id, egui_rect(control.bounds), &control.accessible_name, horizontal, extent);
+            let axis = if horizontal { ui_kit::SashAxis::Horizontal } else { ui_kit::SashAxis::Vertical };
+            let response = ui_kit::panel_host_sash(
+                ui,
+                control.id,
+                egui_rect(control.bounds),
+                egui_rect(control.ink),
+                &control.accessible_name,
+                axis,
+                extent,
+                true,
+            );
             if allow_actions && response.double_clicked() {
                 pointer_events.push((response.id, HostPointerEvent::DoubleClick { target: target.clone() }));
             }
@@ -2601,11 +2667,13 @@ impl PanelHost for WorkspaceContentHost<'_> {
         });
         let content_context = paint_context.as_ref().unwrap_or(context);
         let start = self.drag_cards.as_ref().map(|_| shape_count(self.ui.ctx(), layer));
-        ui_kit::panel_host_surface(
+        let reach = if section.zone == Zone::Floating && !section.collapsed { self.layout.metrics.floating_grab_reach } else { 0.0 };
+        ui_kit::panel_host_surface_reaching(
             self.ui,
             panel_id,
             paint_bounds,
             section.peek || section.zone == Zone::Floating,
+            reach,
             appearance.fill,
             matches!(appearance.contrast, Some(ContrastOutcome::RetainReadableFallback { .. })).then(|| style.palette(appearance)),
             |ui, content_clip| {
@@ -2633,6 +2701,9 @@ impl PanelHost for WorkspaceContentHost<'_> {
                         self.layout.source_state.layout.section(&section.section).ok().map(|section| section.tabs.as_slice()).unwrap_or_default();
                     paint_drop_tabs(ui, paint_section, dragged, index, order, self.metadata, self.layout.direction);
                 }
+                let floating = section.zone == Zone::Floating;
+                let floating_reach = if floating { self.layout.metrics.floating_grab_reach } else { 0.0 };
+                let mut top_handles_done = false;
                 for control in self.controls.iter() {
                     let HostControlTarget::Pointer(target) = &control.target else {
                         continue;
@@ -2649,6 +2720,20 @@ impl PanelHost for WorkspaceContentHost<'_> {
                     };
                     if !belongs {
                         continue;
+                    }
+                    if !top_handles_done && !matches!(target, HostPointerTarget::Header { .. }) {
+                        top_handles_done = true;
+                        paint_resize_handles(
+                            ui,
+                            self.controls,
+                            &section.section,
+                            &section.instance,
+                            paint_section.outer.size,
+                            chrome_offset,
+                            true,
+                            floating,
+                            floating_reach,
+                        );
                     }
                     if tab_drop.is_some() && matches!(target, HostPointerTarget::Tab { .. } | HostPointerTarget::TabOverflow { .. }) {
                         continue;
@@ -2798,13 +2883,16 @@ impl PanelHost for WorkspaceContentHost<'_> {
                                 apply_action(self.layout.revision, vec![Mutation::Close { instance: instance.clone() }]),
                                 control.id,
                             )),
-                            HostPointerTarget::HeaderAction { instance, action } if clicked => self.commands.push(HostCommand::WidgetLayout(
-                                apply_action(
-                                    self.layout.revision,
-                                    vec![Mutation::HeaderAction { instance: instance.clone(), action: action.clone() }],
-                                ),
-                                control.id,
-                            )),
+                            HostPointerTarget::HeaderAction { instance, action } if clicked => {
+                                self.frame_content.header_action_clicked(instance, action, response.rect);
+                                self.commands.push(HostCommand::WidgetLayout(
+                                    apply_action(
+                                        self.layout.revision,
+                                        vec![Mutation::HeaderAction { instance: instance.clone(), action: action.clone() }],
+                                    ),
+                                    control.id,
+                                ))
+                            }
                             HostPointerTarget::HeaderAction { instance, .. } if secondary => {
                                 if let Some(at) = response.interact_pointer_pos() {
                                     self.frame_content.header_action_context_menu(instance, at);
@@ -2955,6 +3043,7 @@ impl PanelHost for WorkspaceContentHost<'_> {
                                                 id: response.id,
                                                 target,
                                                 bounds: logical_rect(visible),
+                                                ink: logical_rect(visible),
                                                 role: InputRole::Action,
                                                 accessible_name: action.label.clone(),
                                                 enabled: action.enabled && response.enabled(),
@@ -2990,22 +3079,30 @@ impl PanelHost for WorkspaceContentHost<'_> {
                 }
                 // Resize must be above content on the card's actual UI/layer. Its
                 // published bounds and scoped ID remain the layout authority's.
-                for control in self.controls.iter() {
-                    if let HostControlTarget::Pointer(HostPointerTarget::Resize { section: id, edge }) = &control.target
-                        && *id == section.section
-                    {
-                        let horizontal = !matches!(edge, HostResizeEdge::Left | HostResizeEdge::Right);
-                        let extent = if horizontal { paint_section.outer.size.height } else { paint_section.outer.size.width };
-                        ui_kit::panel_host_sash(
-                            ui,
-                            control.id,
-                            egui_rect(control.bounds).translate(chrome_offset),
-                            &control.accessible_name,
-                            horizontal,
-                            extent,
-                        );
-                    }
+                if !top_handles_done {
+                    paint_resize_handles(
+                        ui,
+                        self.controls,
+                        &section.section,
+                        &section.instance,
+                        paint_section.outer.size,
+                        chrome_offset,
+                        true,
+                        floating,
+                        floating_reach,
+                    );
                 }
+                paint_resize_handles(
+                    ui,
+                    self.controls,
+                    &section.section,
+                    &section.instance,
+                    paint_section.outer.size,
+                    chrome_offset,
+                    false,
+                    floating,
+                    floating_reach,
+                );
                 if let Some(focused) = ui.memory(|memory| memory.focused())
                     && let Some(bookmark) = self
                         .content_reports
@@ -3332,6 +3429,7 @@ impl WorkspacePanelHost {
                                 &shared,
                                 &native,
                                 frame.layout.capacity,
+                                self.float_from(runtime, instance, &frame.layout),
                                 &frame.layout.geometry_policy.identity_reservations,
                             )
                             .ok()?;
@@ -3530,6 +3628,55 @@ fn menu_row(ui: &mut egui::Ui, id: egui::Id, label: &str, icon: ui_kit::Icon<'_>
     response.backing_on_hover_text(label)
 }
 
+/// Paints the handles of one card in two passes: `header_side` ones before the header controls, the rest after content.
+fn paint_resize_handles(
+    ui: &mut egui::Ui,
+    controls: &[HostFrameControl],
+    section: &SectionId,
+    instance: &InstanceId,
+    outer: Size,
+    chrome_offset: egui::Vec2,
+    header_side: bool,
+    floating: bool,
+    floating_reach: f32,
+) {
+    let clip = ui.clip_rect();
+    if floating_reach > 0.0 {
+        ui.set_clip_rect(clip.expand(floating_reach));
+    }
+    let mut before_menu = true;
+    for control in controls {
+        if matches!(&control.target, HostControlTarget::Pointer(HostPointerTarget::Menu { instance: id }) if id == instance) {
+            before_menu = false;
+        }
+        let HostControlTarget::Pointer(HostPointerTarget::Resize { section: id, edge }) = &control.target else {
+            continue;
+        };
+        if id != section || (floating && before_menu) != header_side {
+            continue;
+        }
+        let axis = match edge {
+            HostResizeEdge::Left | HostResizeEdge::Right => ui_kit::SashAxis::Vertical,
+            HostResizeEdge::Top | HostResizeEdge::Bottom => ui_kit::SashAxis::Horizontal,
+            HostResizeEdge::TopLeft | HostResizeEdge::BottomRight => ui_kit::SashAxis::NorthwestSoutheast,
+            HostResizeEdge::TopRight | HostResizeEdge::BottomLeft => ui_kit::SashAxis::NortheastSouthwest,
+        };
+        let extent = if axis == ui_kit::SashAxis::Vertical { outer.width } else { outer.height };
+        let keyboard = !floating || *edge == HostResizeEdge::BottomRight;
+        ui_kit::panel_host_sash(
+            ui,
+            control.id,
+            egui_rect(control.bounds).translate(chrome_offset),
+            egui_rect(control.ink).translate(chrome_offset),
+            &control.accessible_name,
+            axis,
+            extent,
+            keyboard,
+        );
+    }
+    ui.set_clip_rect(clip);
+}
+
 fn record_control(frame: &mut HostFrame, response: &egui::Response, target: HostControlTarget, name: &str, enabled: bool, clip: egui::Rect) {
     let bounds = response.rect.intersect(clip);
     if bounds.is_positive() && bounds.is_finite() {
@@ -3537,6 +3684,7 @@ fn record_control(frame: &mut HostFrame, response: &egui::Response, target: Host
             id: response.id,
             target,
             bounds: logical_rect(bounds),
+            ink: logical_rect(bounds),
             role: InputRole::Action,
             accessible_name: name.to_owned(),
             enabled: enabled && response.enabled(),
@@ -3667,12 +3815,21 @@ fn shared_label(
         .to_owned()
 }
 
+/// A card floated from `shown`: lifted up and in by a step so it reads as floating, as wide
+/// as it was but leaving that step free on both sides of `capacity`. Allocation clamps it in.
+fn floated(shown: LogicalRect, capacity: LogicalRect) -> (Point, Size) {
+    let step = solidcraft_theme::Tokens::get().space_24;
+    let width = shown.size.width.min(capacity.size.width - 2.0 * step).max(1.0);
+    (Point { x: shown.origin.x + step, y: shown.origin.y - step }, Size { width, height: shown.size.height })
+}
+
 fn shared_action(
     runtime: &PanelRuntime,
     instance: &InstanceId,
     action: &HostSharedAction,
     native: &HostCapabilities,
     capacity: LogicalRect,
+    float_from: Option<LogicalRect>,
     reservations: &HostIdentityReservations,
 ) -> PanelResult<LayoutAction> {
     let service = runtime.layout();
@@ -3705,11 +3862,14 @@ fn shared_action(
             let location = if zone.docked() {
                 SectionLocation::Dock { zone: *zone }
             } else if *zone == Zone::Floating {
-                SectionLocation::Floating { origin: capacity.origin }
+                SectionLocation::Floating { origin: float_from.map_or(capacity.origin, |shown| floated(shown, capacity).0) }
             } else {
                 return Err(error(Rule::Capability, "window movement needs native pop-out"));
             };
-            let size = section.size;
+            let size = match float_from {
+                Some(shown) if *zone == Zone::Floating => floated(shown, capacity).1,
+                _ => section.size,
+            };
             vec![
                 Mutation::Move { instance: instance.clone(), destination: Destination::NewSection { section: id, index, location, size } },
                 Mutation::Focus { instance: instance.clone() },
@@ -3720,7 +3880,7 @@ fn shared_action(
                 return Err(error(Rule::FeatureDisabled, "panel cannot pop out"));
             }
             if cfg!(target_arch = "wasm32") {
-                return shared_action(runtime, instance, &HostSharedAction::Move(Zone::Floating), native, capacity, reservations);
+                return shared_action(runtime, instance, &HostSharedAction::Move(Zone::Floating), native, capacity, float_from, reservations);
             }
             if !native.native_windows {
                 return Err(error(Rule::Capability, "native panel windows unavailable"));

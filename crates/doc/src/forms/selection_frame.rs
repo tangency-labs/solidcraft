@@ -28,28 +28,30 @@ pub(super) fn spend(remaining: &mut usize, work: usize) -> Option<()> {
     Some(())
 }
 fn unit(v: Vec3) -> Option<Vec3> {
-    solidcore_ops::form_curves::selection_unit(v)
+    solidcraft_kernel::services::form_curves::selection_unit(v)
 }
 pub(super) fn normal(du: Vec3, dv: Vec3) -> Option<Vec3> {
-    solidcore_ops::form_curves::selection_normal(du, dv)
+    solidcraft_kernel::services::form_curves::selection_normal(du, dv)
 }
 fn axes(x: Vec3, z: Vec3) -> Option<[Vec3; 3]> {
-    solidcore_ops::form_curves::selection_axes(x, z)
+    solidcraft_kernel::services::form_curves::selection_axes(x, z)
 }
 fn bisector(normals: &BTreeMap<usize, Vec3>) -> Option<Vec3> {
     let z = unit(normals.values().copied().fold(Vec3::ZERO, |sum, n| sum + n))?;
-    normals.values().all(|n| solidcore_ops::form_curves::component_along(*n, z) > 1e-6).then_some(z)
+    normals.values().all(|n| solidcraft_kernel::services::form_curves::component_along(*n, z) > 1e-6).then_some(z)
 }
 fn insert_normal(normals: &mut BTreeMap<usize, Vec3>, sample: &EdgeSample) -> Option<()> {
     let first = normals.entry(sample.chart).or_insert(sample.normal);
-    (solidcore_ops::form_curves::component_along(*first, sample.normal) >= SAME_DIRECTION).then_some(())
+    (solidcraft_kernel::services::form_curves::component_along(*first, sample.normal) >= SAME_DIRECTION).then_some(())
 }
 fn edge_samples(samples: &[EdgeSample]) -> Option<(Vec3, BTreeMap<usize, Vec3>)> {
     let first = samples.first()?;
     let x = unit(first.tangent)?;
     let mut normals = BTreeMap::new();
     for sample in samples {
-        if first.point.dist(sample.point) > 1e-7 || solidcore_ops::form_curves::component_along(unit(sample.tangent)?, x) < SAME_DIRECTION {
+        if first.point.dist(sample.point) > 1e-7
+            || solidcraft_kernel::services::form_curves::component_along(unit(sample.tangent)?, x) < SAME_DIRECTION
+        {
             return None;
         }
         insert_normal(&mut normals, sample)?;
@@ -197,5 +199,5 @@ fn face_axes(
         direction[d] = along_u[d] * (hi - lo) / width;
     }
     let (_, du, dv) = surface.derivs(at)?;
-    solidcore_ops::form_curves::selection_frame(du, dv, direction)
+    solidcraft_kernel::services::form_curves::selection_frame(du, dv, direction)
 }

@@ -3,7 +3,7 @@
 //! A hit needs a certified material witness before every possible different
 //! identity. Unsupported and unresolved native faces remain possible blockers.
 mod face;
-use solidcore_ops::ray_tensor as tensor;
+use solidcraft_kernel_services::ray_tensor as tensor;
 
 use solidcore_record::brep::Brep;
 use std::borrow::Borrow;

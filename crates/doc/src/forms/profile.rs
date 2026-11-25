@@ -81,8 +81,8 @@ impl Profile {
                 mesh.push_triangle(triangle, if self.partition { id as u32 } else { u32::MAX });
             }
         }
-        mesh.normals =
-            solidcore_ops::form_subdivision::vertex_normals(&mesh.positions, mesh.triangle_indices()).map_err(|e| invalid(e.to_string()))?;
+        mesh.normals = solidcraft_kernel::services::form_subdivision::vertex_normals(&mesh.positions, mesh.triangle_indices())
+            .map_err(|e| invalid(e.to_string()))?;
         let boundaries = cage
             .edges()
             .map_err(|e| invalid(e.to_string()))?
@@ -332,7 +332,7 @@ impl Profile {
                     let after = grid_frame(&rest, self.segments, i)?;
                     // Preserve sculpted lengths in millimetres. Stretch and
                     // shear rotate the material frame without scaling details.
-                    solidcore_ops::form_curves::transport_detail(*new, delta, before, after)
+                    solidcraft_kernel::services::form_curves::transport_detail(*new, delta, before, after)
                 };
             }
         }
@@ -383,7 +383,7 @@ impl Profile {
                 let delta = *point - *old;
                 let before = grid_frame(&self.rest, self.segments, index)?;
                 let after = grid_frame(&rest, self.segments, index)?;
-                solidcore_ops::form_curves::transport_detail(*new, delta, before, after)
+                solidcraft_kernel::services::form_curves::transport_detail(*new, delta, before, after)
             };
         }
         profile.rest = rest;
@@ -725,7 +725,7 @@ fn grid_frame(points: &[Vec3], [u, v]: [usize; 2], index: usize) -> Result<[Vec3
     let at = |id| points.get(id).copied().ok_or_else(|| invalid("missing Form Surface tangent sample"));
     let tangent = at(index + 1)? - at(index - 1)?;
     let across = at(index + u + 1)? - at(index - u - 1)?;
-    solidcore_ops::form_curves::guide_frame(tangent, across).ok_or_else(|| invalid("singular Form Surface guide frame"))
+    solidcraft_kernel::services::form_curves::guide_frame(tangent, across).ok_or_else(|| invalid("singular Form Surface guide frame"))
 }
 impl crate::walk::Walk for Profile {
     fn walk_refs<'a>(&'a self, f: &mut dyn FnMut(crate::walk::RefItem<'a>)) {

@@ -142,7 +142,7 @@ pub(super) fn patches(cage: &Cage) -> Result<Vec<Option<NurbsSurface>>> {
         for (point, index) in controls.iter_mut().zip(net) {
             *point = cage.point(index.ok_or_else(|| bad("incomplete regular patch"))?)?;
         }
-        let points = solidcore_ops::form_subdivision::regular_bezier(controls);
+        let points = solidcraft_kernel_services::form_subdivision::regular_bezier(controls);
         out.push(Some(
             NurbsSurface::new([3, 3], [vec![0., 0., 0., 0., 1., 1., 1., 1.], vec![0., 0., 0., 0., 1., 1., 1., 1.]], &points, &[1.0; 16])
                 .map_err(|e| bad(&e.to_string()))?,

@@ -1,7 +1,7 @@
 //! Thin portable ordered-solve façade for the fill assemblers.
 use crate::bspline::SplineError;
-use solidcore_ops::ordered_solve as ops;
-pub(crate) use solidcore_ops::ordered_solve::{Band, Normal};
+use solidcraft_kernel_services::ordered_solve as ops;
+pub(crate) use solidcraft_kernel_services::ordered_solve::{Band, Normal};
 impl From<ops::Failure> for SplineError {
     fn from(error: ops::Failure) -> Self {
         let text = match error {

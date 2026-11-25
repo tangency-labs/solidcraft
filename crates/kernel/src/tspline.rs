@@ -465,7 +465,7 @@ mod tests {
                     let exact = CurveEval::new(edge.parameters()).unwrap();
                     for f in [0.0, 0.13, 0.57, 0.91, 1.0] {
                         let t = edge.interval[0] * (1.0 - f) + edge.interval[1] * f;
-                        let uv = solidcraft_geom::brep::pcurve::eval(&edge_use.pcurve, t).unwrap();
+                        let uv = crate::services::pcurve::eval(&edge_use.pcurve, t).unwrap();
                         let lifted = support.derivs(uv[0], uv[1]).unwrap().0;
                         assert!(lifted.dist(exact.point(t).unwrap()) < 1e-10);
                     }
@@ -516,7 +516,7 @@ mod tests {
             let edge = &record.edges[use_.edge as usize];
             let t = f64::midpoint(edge.interval[0], edge.interval[1]);
             let p = solidcraft_geom::brep::eval::CurveEval::new(edge.parameters()).unwrap().point(t).unwrap();
-            let [u, v] = solidcraft_geom::brep::pcurve::eval(&use_.pcurve, t).unwrap();
+            let [u, v] = crate::services::pcurve::eval(&use_.pcurve, t).unwrap();
             assert!(exact.derivs(u, v).unwrap().0.dist(p) < 2e-7);
         }
     }
@@ -617,7 +617,7 @@ mod tests {
                         let curve = CurveEval::new(edge.parameters()).unwrap();
                         for f in [0.0, 0.13, 0.57, 0.91, 1.0] {
                             let t = edge.interval[0] * (1.0 - f) + edge.interval[1] * f;
-                            let uv = solidcraft_geom::brep::pcurve::eval(&edge_use.pcurve, t).unwrap();
+                            let uv = crate::services::pcurve::eval(&edge_use.pcurve, t).unwrap();
                             assert!(support.point(uv).unwrap().dist(curve.point(t).unwrap()) < 1e-10);
                         }
                     }
@@ -661,7 +661,7 @@ mod tests {
                         for fraction in [0.0, 0.13, 0.57, 0.91, 1.0] {
                             let t = edge.interval[0] * (1.0 - fraction) + edge.interval[1] * fraction;
                             let point = curve.point(t).unwrap();
-                            let uv = solidcraft_geom::brep::pcurve::eval(&edge_use.pcurve, t).unwrap();
+                            let uv = crate::services::pcurve::eval(&edge_use.pcurve, t).unwrap();
                             assert!(support.point(uv).unwrap().dist(point) < 1e-7);
                             if edge.uses.len() == 1 {
                                 assert!(original_curves.iter().any(|old| {

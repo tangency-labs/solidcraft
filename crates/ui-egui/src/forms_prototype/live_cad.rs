@@ -298,7 +298,7 @@ impl ExactSelection {
             let inverse =
                 solidcraft_engine::doc::mat_inverse(&self.definition.placement.matrix()).ok_or("the CAD source placement is not invertible")?;
             let matrix = solidcraft_engine::doc::mat_mul(&placement.matrix(), &inverse);
-            if solidcraft_engine::geom::brep::placement::Rigid::of_matrix(&matrix).is_none() {
+            if solidcraft_kernel::services::Rigid::of_matrix(&matrix).is_none() {
                 return Err("exact CAD placement requires the topology-preserving rigid path".into());
             }
             // The rigid-record path preserves native parameter and topology
@@ -599,7 +599,7 @@ pub(super) fn restore_fixed_profile_handles(app: &mut SolveApp) {
         // Profile.preview has one mesh vertex per logical control. Restore the
         // same derived geometry for rendering and ray tests, not just markers.
         let mesh = &mut surface.mesh;
-        if let Ok(normals) = solidcore_ops::form_subdivision::vertex_normals(&mesh.positions, mesh.triangle_indices()) {
+        if let Ok(normals) = solidcraft_kernel::services::form_subdivision::vertex_normals(&mesh.positions, mesh.triangle_indices()) {
             mesh.normals = normals;
         }
         surface.index = solidcraft_engine::geom::MeshIndex::new(mesh);

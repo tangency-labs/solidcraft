@@ -642,6 +642,12 @@ marker_params!(
     "Move the history marker right after a feature, or to a number of features from the start, or to the end: the features after it are not built, and the selection is cleared. `timeline.rollback` does the same."
 );
 
+/// `timeline.step_back` and `timeline.step_forward` take no parameters: the marker steps one
+/// feature from where it is now.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct TimelineStepParams {}
+
 /// What `timeline.rollback` and `timeline.roll_to` return.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct TimelineMarkerResult {
@@ -1617,8 +1623,8 @@ mod tests {
         MarkerPosition, NewName, PaletteParams, RedoParams, RedoResult, RepeatParams, RestoreCheckpointParams, SelectModeParams, SelectModeResult,
         SetFields, TimelineComputeAllParams, TimelineComputeAllResult, TimelineDeleteParams, TimelineDeleteResult, TimelineDependentsParams,
         TimelineDependentsResult, TimelineEditParams, TimelineEditResult, TimelineInspectParams, TimelineInspectResult, TimelineMarkerResult,
-        TimelineRenameParams, TimelineRenameResult, TimelineRollToParams, TimelineRollbackParams, TimelineSuppressParams, TimelineSuppressResult,
-        ToggleVisibilityParams, UndoParams, UndoResult,
+        TimelineRenameParams, TimelineRenameResult, TimelineRollToParams, TimelineRollbackParams, TimelineStepParams, TimelineSuppressParams,
+        TimelineSuppressResult, ToggleVisibilityParams, UndoParams, UndoResult,
     };
     use super::{
         TimelineGroupMade, TimelineGroupParams, TimelineGroupRenamed, TimelineMoveManyParams, TimelineMoveToGroupParams, TimelineMoved,
@@ -1684,6 +1690,7 @@ mod tests {
         assert_keys(input_schema_for::<TimelineRenameParams>(), &["feature", "name"]);
         assert_keys(input_schema_for::<TimelineRollbackParams>(), &["feature", "position"]);
         assert_keys(input_schema_for::<TimelineRollToParams>(), &["feature", "position"]);
+        assert_keys(input_schema_for::<TimelineStepParams>(), &[]);
         assert_keys(input_schema_for::<TimelineDependentsParams>(), &["feature"]);
         assert_keys(input_schema_for::<TimelineSuppressParams>(), &["feature", "features", "groups", "suppressed"]);
         assert_keys(input_schema_for::<TimelineEditParams>(), &["feature", "set"]);
@@ -2120,6 +2127,7 @@ mod tests {
             }
         };
         takes(input_schema_for::<TimelineComputeAllParams>(), &[(json!({}), true)]);
+        takes(input_schema_for::<TimelineStepParams>(), &[(json!({}), true), (json!({"position": 1}), false)]);
         takes(
             input_schema_for::<TimelineDeleteParams>(),
             &[

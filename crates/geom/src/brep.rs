@@ -2,20 +2,15 @@
 //! from its coordinates. Evaluation ([`eval`]), exact NURBS forms of analytic geometry
 //! ([`form`]), pcurves ([`pcurve`]), the record's geometric checks ([`check`]: frames, planes,
 //! placements; [`geometry`]: that the geometry agrees with the topology), what its labels mean
-//! in their own parameters ([`label`]), rigid and affine motions ([`placement`]) and splitting
-//! edges ([`split_edges`]). The record itself is data: see SolidCraft's docs/native-brep.md.
+//! in their own parameters ([`label`]) and splitting edges ([`split_edges`]). Rigid and affine
+//! motions of a record are the kernel adapter's (`solidcraft_kernel`). The record itself is data: see SolidCraft's docs/native-brep.md.
 
 // `eval` and `form` name the record's geometry through their parent (`super::Curve`).
-use solidcore_record::brep::{Curve, Curve2, Frame, Surface};
+use solidcore_record::brep::{Curve, Frame, Surface};
 
 pub mod eval;
 pub mod form;
 pub mod normal_section;
-pub mod placement;
 pub mod ray;
 mod split;
-pub use solidcore_ops::pcurve;
 pub use split::split_edges;
-
-#[cfg(test)]
-mod tests;

@@ -81,7 +81,7 @@ impl Network {
         }
         let clearance = chords
             .iter()
-            .map(|branches| solidcore_ops::form_pipe::clearance(branches).map_err(|error| bad(&error.to_string())))
+            .map(|branches| solidcraft_kernel_services::form_pipe::clearance(branches).map_err(|error| bad(&error.to_string())))
             .collect::<Result<Vec<_>>>()?;
         let mut cage = Cage::default();
         let mut ports = BTreeMap::<usize, Vec<junction::Port>>::new();
@@ -91,7 +91,7 @@ impl Network {
             let path = if chain.closed {
                 source_path.clone()
             } else {
-                solidcore_ops::form_pipe::trim(source_path, clearance[chain.nodes[0]], clearance[chain.nodes[1]])
+                solidcraft_kernel_services::form_pipe::trim(source_path, clearance[chain.nodes[0]], clearance[chain.nodes[1]])
                     .map_err(|error| bad(&error.to_string()))?
             };
             let caps = chain.nodes.map(|node| self.degree[node] == 1);
@@ -106,7 +106,8 @@ impl Network {
                     let node = chain.nodes[end];
                     if self.degree[node] > 2 {
                         ports.entry(node).or_default().push(junction::Port {
-                            direction: solidcore_ops::form_pipe::outward_port(sweep.tangents[end], end).map_err(|error| bad(&error.to_string()))?,
+                            direction: solidcraft_kernel_services::form_pipe::outward_port(sweep.tangents[end], end)
+                                .map_err(|error| bad(&error.to_string()))?,
                             ring: sweep.ends[end].iter().map(|v| v + offset).collect(),
                             radius,
                             reverse: end == 1,

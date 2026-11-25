@@ -2,7 +2,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 
 use schemars::JsonSchema;
@@ -42,6 +42,9 @@ pub const MAX_MEMORY_MIB: usize = 4096;
 /// The user's Max plugin fuel remains the default for packages without an approval.
 pub const MAX_APPROVED_FUEL: u64 = 10_000_000_000_000;
 
+pub mod shader;
+pub mod theme;
+
 pub type Result<T> = std::result::Result<T, HostError>;
 
 /// An open document session and its committed history state, kept outside authored document data.
@@ -77,10 +80,12 @@ impl std::fmt::Display for DesignToken {
 pub mod conditions;
 pub mod dialog;
 mod input;
+mod schema_order;
 mod schema_refs;
 pub mod swatches;
 pub mod ui;
 pub use input::check_input;
+pub use input::check_input_field;
 pub use input::prepare_input;
 pub use input::strict_input_schema;
 
@@ -174,12 +179,14 @@ pub const CAPABILITIES: &[(&str, (u32, u32))] = &[
     ("evaluate", (0, 2)),
     ("formats", (0, 2)),
     ("forms", (0, 1)),
+    ("shaders", (0, 2)),
     ("storage", (0, 1)),
+    ("themes", (0, 1)),
     ("ui", (0, 1)),
 ];
 /// Older versions of [`CAPABILITIES`] the host still serves: plugins built against
 /// `craft:plugin@0.1.0` ([`WIT_0_1`]) run unchanged.
-pub const OLDER_CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 1)), ("evaluate", (0, 1)), ("formats", (0, 1))];
+pub const OLDER_CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 1)), ("evaluate", (0, 1)), ("formats", (0, 1)), ("shaders", (0, 1))];
 /// The WIT versions a host runs, newest first: [`API`]'s and the frozen 0.1 one.
 pub const WIT_VERSIONS: &[&str] = &["0.2.0", "0.1.0"];
 /// `craft:plugin@0.1.0`, unchanged, for plugins built before 0.2.
@@ -552,6 +559,11 @@ pub struct Entry {
     /// The entry's options, as an object schema. A format slot's options are drawn as a form
     /// before the import or export.
     pub input_schema: Value,
+    /// Property names in declaration order, keyed by the object schema's JSON Pointer (the
+    /// empty string for the root). Host metadata keeps that order across entry round trips;
+    /// ordinary JSON maps remain sorted. Missing keys use the dialog's usual field order.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub input_property_order: BTreeMap<String, Vec<String>>,
     /// Opt in to the read-only dialog-provider export (dialog@0.1).
     pub dialog_hook: bool,
     pub slots: Vec<UiSlot>,
@@ -598,8 +610,12 @@ struct DeclaredEntry {
     /// still opens a new design.
     #[serde(default)]
     effect: Option<Effect>,
-    #[serde(default = "empty_input_schema")]
-    input_schema: Value,
+    #[serde(default)]
+    #[schemars(with = "Value")]
+    input_schema: schema_order::InputSchema,
+    // Present in a host's serialized Entry; plugin authors only declare schema properties.
+    #[serde(default)]
+    input_property_order: Option<BTreeMap<String, Vec<String>>>,
     #[serde(default)]
     dialog_hook: bool,
     #[serde(default)]
@@ -618,6 +634,7 @@ impl From<EntryDeclaration> for Entry {
                 needs_plugin_data: false,
                 effect: Effect::Edit,
                 input_schema: empty_input_schema(),
+                input_property_order: BTreeMap::new(),
                 dialog_hook: false,
                 slots: Vec::new(),
                 job: false,
@@ -634,7 +651,8 @@ impl From<EntryDeclaration> for Entry {
                     (EntryKind::Exporter, None) => Effect::Read,
                     (EntryKind::Command, None) => Effect::Edit,
                 },
-                input_schema: value.input_schema,
+                input_schema: value.input_schema.value,
+                input_property_order: value.input_property_order.unwrap_or(value.input_schema.property_order),
                 dialog_hook: value.dialog_hook,
                 slots: value.slots,
                 job: value.job,
@@ -658,6 +676,35 @@ pub struct Manifest {
     pub capabilities: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime: Option<RuntimeManifest>,
+    /// View backgrounds and tints (`shaders@0.2`); a plugin may ship shaders and no runtime.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shaders: Vec<shader::Shader>,
+    /// Colour themes for the theme picker (`themes@0.1`); a plugin may ship themes and no runtime.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub themes: Vec<theme::ThemeDecl>,
+    /// Where newer versions are published. SolidCraft before 0.49 refuses the field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updates: Option<Updates>,
+}
+
+/// The plugin's GitHub repository, `owner/repo`: its latest release is the update.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Updates {
+    pub github: String,
+}
+
+/// A GitHub `owner/repo`: an owner of 1..39 letters, digits and hyphens, and a repository of
+/// 1..100 letters, digits, `-`, `_` and `.`, other than `.` and `..`.
+pub fn valid_github_repo(text: &str) -> bool {
+    let Some((owner, repo)) = text.split_once('/') else { return false };
+    (1..=39).contains(&owner.len())
+        && owner.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-')
+        && !owner.starts_with('-')
+        && (1..=100).contains(&repo.len())
+        && repo.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_' | b'.'))
+        && repo != "."
+        && repo != ".."
 }
 
 /// A read-only entry called after a coalesced design or linked-file invalidation. Listeners refresh
@@ -717,17 +764,37 @@ impl RuntimeManifest {
             return Err(invalid("runtime.module", "must be one lowercase .wasm file name"));
         }
         if self.entries.is_empty() || self.entries.len() > 32 {
-            return Err(invalid("runtime.entries", "requires 1..32 distinct ids"));
+            return Err(invalid("runtime.entries", format!("declares {} entries; a plugin has 1 to 32", self.entries.len())));
         }
         let mut names = BTreeSet::new();
         for entry in &self.entries {
-            if !valid_id(&entry.name) || !names.insert(&entry.name) {
-                return Err(invalid("runtime.entries", "requires 1..32 distinct ids"));
+            // The name as written, quoted and cut short: it comes from an untrusted manifest. A cut
+            // name says so and gives its length, as its first 64 characters may be valid alone.
+            let length = entry.name.chars().count();
+            let shown = match length {
+                0..=64 => format!("{:?}", entry.name),
+                _ => format!("{:?}… ({length} characters)", entry.name.chars().take(64).collect::<String>()),
+            };
+            if !valid_id(&entry.name) {
+                return Err(invalid(
+                    "runtime.entries",
+                    format!(
+                        "entry {shown} is not a valid name: use 1 to 64 lowercase letters, digits and dashes, not starting or ending with a dash (no underscores or capitals)"
+                    ),
+                ));
+            }
+            if !names.insert(&entry.name) {
+                return Err(invalid("runtime.entries", format!("entry {shown} is declared more than once")));
             }
             validate_kind(self, entry)?;
             let field = format!("runtime.entries.{}.input_schema", entry.name);
             if !entry.input_schema.is_object() || entry.input_schema.get("type").and_then(Value::as_str) != Some("object") {
                 return Err(invalid(&field, "entry inputs must be an object schema"));
+            }
+            if let Some(order) = entry.input_schema.get("x-solidcraft-field-order")
+                && order.as_str() != Some("declared")
+            {
+                return Err(invalid(format!("{field}.x-solidcraft-field-order"), "must be \"declared\" when present"));
             }
             validate_list_inputs(&entry.input_schema, &field)?;
             conditions::validate_conditions(&entry.input_schema)?;
@@ -972,7 +1039,9 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
         return Err(HostError::LimitExceeded { limit: "manifest size exceeds 64 KiB".into() });
     }
     // A plugin from before capabilities names its API in `runtime.api`: say so plainly.
-    let mut parsed = serde_json::from_slice::<Value>(text).ok();
+    // Read with each schema's declared property order stored beside it: expansion below works on
+    // a sorted JSON value, and a schema's order would be alphabetical by then.
+    let mut parsed = serde_json::from_slice::<schema_order::MarkedManifest>(text).ok().map(|marked| marked.0);
     if let Some(value) = &parsed {
         if let Some(api) = value.get("runtime").and_then(|runtime| runtime.get("api")) {
             let api = api.as_str().map(|api| api.chars().take(64).collect::<String>()).unwrap_or_else(|| "an older plugin API".into());
@@ -996,7 +1065,10 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
         _ => None,
     };
     let mut manifest: Manifest = match expanded {
-        Some(value) => serde_json::from_value(value),
+        Some(mut value) => {
+            schema_order::take_orders(&mut value);
+            serde_json::from_value(value)
+        }
         None => serde_json::from_slice(text),
     }
     .map_err(|error| invalid("manifest", error.to_string()))?;
@@ -1025,6 +1097,11 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
         return Err(invalid("description", "requires at most 240 printable characters"));
     }
     check_capabilities(&manifest.capabilities, app)?;
+    if let Some(updates) = &manifest.updates
+        && !valid_github_repo(&updates.github)
+    {
+        return Err(invalid("updates.github", "must be a GitHub repository, owner/repo"));
+    }
     if let Some(runtime) = &manifest.runtime {
         if runtime.entries.iter().any(|entry| entry.dialog_hook) && !manifest.capabilities.iter().any(|c| c.starts_with("dialog@")) {
             return Err(invalid("capabilities", "a dialog hook needs the dialog capability: dialog@0.1"));
@@ -1058,6 +1135,34 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
     }
     if manifest.runtime.as_ref().and_then(|runtime| runtime.ui.as_ref()).is_some() && !has_ui {
         return Err(invalid("runtime.ui", "panel declarations require ui@0.1"));
+    }
+    if !manifest.shaders.is_empty() {
+        if !manifest.capabilities.iter().any(|capability| capability.starts_with("shaders@")) {
+            return Err(invalid(
+                "capabilities",
+                "a plugin with shaders needs the shaders capability: \"capabilities\": [\"shaders@0.2\"] (backgrounds alone may say \"shaders@0.1\")",
+            ));
+        }
+        // Tints, settings and chosen pictures came with 0.2: a 0.1 plugin keeps exactly what 0.1 offered.
+        let newer = manifest.shaders.iter().any(|s| {
+            s.kind != shader::ShaderKind::Background || !s.settings.is_empty() || s.textures.iter().any(|t| t.choose.is_some()) || s.state.is_some()
+        });
+        if newer && !manifest.capabilities.iter().any(|capability| capability == "shaders@0.2") {
+            return Err(invalid(
+                "capabilities",
+                "tints, shader settings, chosen pictures and state grids need \"shaders@0.2\"; update SolidCraft or the plugin",
+            ));
+        }
+        shader::validate(&manifest.shaders)?;
+    }
+    let themed = manifest.capabilities.iter().any(|capability| capability.starts_with("themes@"));
+    if !manifest.themes.is_empty() {
+        if !themed {
+            return Err(invalid("capabilities", "a plugin with themes needs the themes capability: \"capabilities\": [\"themes@0.1\"]"));
+        }
+        theme::validate(&manifest.themes)?;
+    } else if themed {
+        return Err(invalid("themes", "the themes capability needs at least one theme"));
     }
     Ok(manifest)
 }

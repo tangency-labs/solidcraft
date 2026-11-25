@@ -58,8 +58,8 @@ impl Network {
             return Err(bad("pipe source edge identities must be distinct"));
         }
         let paths: Vec<_> = edges.iter().map(|edge| edge.points.as_slice()).collect();
-        let geometry = solidcore_ops::form_pipe::prepare_network(&paths).map_err(|error| bad(&error.to_string()))?;
-        let solidcore_ops::form_pipe::NetworkGeometry { paths, nodes, ends } = geometry;
+        let geometry = solidcraft_kernel_services::form_pipe::prepare_network(&paths).map_err(|error| bad(&error.to_string()))?;
+        let solidcraft_kernel_services::form_pipe::NetworkGeometry { paths, nodes, ends } = geometry;
         let mut adjacency = BTreeMap::<usize, Vec<usize>>::new();
         for (id, (edge, points)) in edges.iter_mut().zip(paths).enumerate() {
             edge.points = points;
@@ -103,7 +103,7 @@ impl Network {
             .collect::<Option<Vec<_>>>()
             .ok_or_else(|| bad("pipe chain lost a source edge"))?;
         let minimum = if chain.nodes[0] == chain.nodes[1] { 3 } else { 1 };
-        solidcore_ops::form_pipe::sample(&paths, samples, minimum).map_err(|error| bad(&error.to_string()))
+        solidcraft_kernel_services::form_pipe::sample(&paths, samples, minimum).map_err(|error| bad(&error.to_string()))
     }
 }
 

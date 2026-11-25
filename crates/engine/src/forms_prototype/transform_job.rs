@@ -268,9 +268,16 @@ mod tests {
                 let targets: Vec<_> = ids
                     .iter()
                     .map(|&id| {
-                        let point =
-                            solidcore_ops::form_transform::numeric(points[id], center, source_form.placement.axes, translation, rotation, scale, 1.0)
-                                .unwrap();
+                        let point = solidcraft_kernel::services::form_transform::numeric(
+                            points[id],
+                            center,
+                            source_form.placement.axes,
+                            translation,
+                            rotation,
+                            scale,
+                            1.0,
+                        )
+                        .unwrap();
                         [point.x, point.y, point.z]
                     })
                     .collect();

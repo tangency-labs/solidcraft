@@ -3,8 +3,8 @@ use solidcraft_geom::prelude::*;
 use solidcraft_geom::tess::EvaluateMesh as _;
 use solidcraft_kernel::{Body, BoolOp};
 
-use solidcore_tess::EvalSurface;
-use solidcore_tess::TessPlan;
+use solidcraft_kernel::services::tess::EvalSurface;
+use solidcraft_kernel::services::tess::TessPlan;
 use solidcraft_viewport_gpu::{GpuError, PackedPlans, SHADER, TessGpu, VERTEX_STRIDE, open_headless};
 
 /// The adapter policy this crate's GPU tests run under: the host's, from its environment.
@@ -696,7 +696,7 @@ fn plans_pack_to_the_same_bytes() {
 fn a_plan_with_pole_nodes_is_refused_by_name() {
     let mut plan = gpu_form(&synthetic_plans()[0]);
     let face = plan.faces.get_mut(1).map(|f| {
-        f.poles.push(solidcore_tess::PoleNode { node: 0, rule: solidcore_tess::PoleRule::Averaged });
+        f.poles.push(solidcraft_kernel::services::tess::PoleNode { node: 0, rule: solidcraft_kernel::services::tess::PoleRule::Averaged });
         f.face
     });
     assert_eq!(face, Some(1));

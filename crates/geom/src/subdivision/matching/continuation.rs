@@ -62,7 +62,7 @@ pub fn refine_g2(cage: &Cage, levels: usize) -> Result<Cage> {
                 }
             }
             let outside = outside.ok_or_else(|| bad("the refined opening has no exterior neighbor"))?;
-            if !solidcore_ops::form_curves::stations_agree(refined_full.point(outside)?, point, 1e-8) {
+            if !solidcraft_kernel_services::form_curves::stations_agree(refined_full.point(outside)?, point, 1e-8) {
                 return Err(bad("the refined stencil cannot preserve this G2 continuation"));
             }
         }

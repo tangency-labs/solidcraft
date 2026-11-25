@@ -1,8 +1,8 @@
 //! Raw, clamped native tensor charts and closed raw pcurve trims.
 use super::tensor::{self as ray, Control, Interval as I, MAX_DEGREE, ProofError, RayProof};
-use solidcore_ops::ray_spline::{Axis, Grid, MAX_CONTROLS, MAX_SPANS, Span, SplineError, reserved, trim_parity};
 use solidcore_record::brep::blend::BlendDefinition;
 use solidcore_record::brep::{Brep, Curve2, Face, Loop, Surface, Vertex};
+use solidcraft_kernel_services::ray_spline::{Axis, Grid, MAX_CONTROLS, MAX_SPANS, Span, SplineError, reserved, trim_parity};
 
 const MAX_TRIM_EDGES: usize = 4_096;
 

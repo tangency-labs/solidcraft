@@ -351,7 +351,7 @@ pub(super) fn occludes(app: &SolveApp, origin: Vec3, direction: Vec3, depth: f64
         let Some((hit, _)) = entry.index.as_ref().and_then(|index| index.face_hit(&entry.mesh, origin, direction)) else { return false };
         // Only arithmetic roundoff at a coincident hit is allowed, independent of fit
         // tolerance, camera pixel size or a world-space geometry/display lift.
-        solidcore_ops::forms_view_queries::occludes(origin, depth, hit)
+        solidcraft_kernel::services::forms_view_queries::occludes(origin, depth, hit)
     })
 }
 

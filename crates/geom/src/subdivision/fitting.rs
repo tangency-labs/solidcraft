@@ -3,8 +3,8 @@
 use super::{Cage, Result, bad};
 use crate::bspline::NurbsSurface;
 use crate::prelude::*;
-use solidcore_ops::form_subdivision::{converged_limit, crease_limit, smooth_limit};
 use solidcore_record::Vec3;
+use solidcraft_kernel_services::form_subdivision::{converged_limit, crease_limit, smooth_limit};
 use std::collections::{BTreeMap, BTreeSet};
 
 mod regular;
@@ -414,7 +414,7 @@ fn fit_grid(samples: &[Vec3], n: usize) -> Result<NurbsSurface> {
     fit_grid_parameters(samples, &parameters)
 }
 fn fit_grid_parameters(samples: &[Vec3], parameters: &[f64]) -> Result<NurbsSurface> {
-    let fit = solidcore_ops::form_cage::fit_cubic_tensor(samples, parameters).map_err(|error| bad(&error.to_string()))?;
+    let fit = solidcraft_kernel_services::form_cage::fit_cubic_tensor(samples, parameters).map_err(|error| bad(&error.to_string()))?;
     let points = fit.controls.into_iter().map(|[x, y, z]| Vec3::new(x, y, z)).collect::<Vec<_>>();
     NurbsSurface::new([3, 3], [fit.knots.clone(), fit.knots], &points, &vec![1.0; points.len()]).map_err(|e| bad(&e.to_string()))
 }

@@ -255,7 +255,10 @@ pub(crate) fn restore(doc: Document, draft: Option<&[u8]>, path: Option<&str>) -
 }
 
 pub(crate) fn restore_validating(doc: Document, draft: Option<&[u8]>, path: Option<&str>, validation: crate::kernel::Validation) -> Result<Session> {
-    let mut session = Session::opened_at_validating(doc, None, path, validation);
+    restore_draft(Session::opened_at_validating(doc, None, path, validation), draft)
+}
+
+pub(crate) fn restore_draft(mut session: Session, draft: Option<&[u8]>) -> Result<Session> {
     let base_dirty = if let Some(bytes) = draft {
         let (form, dirty) = Draft::restore(&session, bytes)?;
         session.active_component = form.authoring_component;
@@ -371,6 +374,7 @@ struct SavedSource {
     visibility: crate::Visibility,
     dimension_values: crate::DimensionValues,
     path: Option<String>,
+    linked_bodies: bool,
     form: Option<FormRevision>,
 }
 
@@ -379,6 +383,7 @@ impl SavedSource {
         (Arc::ptr_eq(&self.doc, &s.doc) || *self.doc == *s.doc)
             && self.visibility == s.visibility
             && self.path == s.path
+            && self.linked_bodies == s.linked_bodies
             && self.form == form_revision(s)
     }
 }
@@ -398,7 +403,11 @@ impl Snapshot {
     fn write(self) -> Result<Vec<String>> {
         let io = |e: std::io::Error| EngineError::Other(format!("autosave: {e}"));
         let (doc, left_out) = drawing::openable(&self.source.doc);
-        let bytes = encode(&crate::as_saved(&doc, &self.source.visibility, &self.source.dimension_values), self.draft)?;
+        let mut design = crate::as_saved(&doc, &self.source.visibility, &self.source.dimension_values);
+        if !self.source.linked_bodies {
+            design.to_mut().linked_bodies_left_out = true;
+        }
+        let bytes = encode(&design, self.draft)?;
         solidcraft_io::write_atomic(&file(&self.dir, &self.id, solidcraft_io::DESIGN_EXT), &bytes, false).map_err(io)?;
         let entry = Entry {
             id: self.id.clone(),
@@ -463,6 +472,7 @@ impl Autosaver {
                 visibility: s.visibility.clone(),
                 dimension_values: s.dimension_values.clone(),
                 path: s.path.clone(),
+                linked_bodies: s.linked_bodies,
                 form: form_revision(s),
             },
             draft: capture_draft(s),

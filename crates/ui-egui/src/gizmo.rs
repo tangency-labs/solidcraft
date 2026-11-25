@@ -320,14 +320,14 @@ fn snap(v: f64, step: f64, free: bool) -> f64 {
 /// Screen-aligned axes in the plane normal to the gizmo's view ray.
 pub(crate) fn view_plane_basis(proj: &Proj, at: Pos2) -> Option<[Vec3; 2]> {
     let (right, _, _) = proj.cam.basis();
-    solidcore_ops::form_transform::view_plane_basis(proj.ray(at).1, right)
+    solidcraft_kernel::services::form_transform::view_plane_basis(proj.ray(at).1, right)
 }
 
 fn snap_plane(delta: Vec3, basis: [Vec3; 2], step: f64, free: bool) -> Vec3 {
     if free || step <= 0.0 {
         return delta;
     }
-    solidcore_ops::form_transform::SnapFrame::plane(basis).and_then(|frame| frame.quantise(delta, step)).unwrap_or(delta)
+    solidcraft_kernel::services::form_transform::SnapFrame::plane(basis).and_then(|frame| frame.quantise(delta, step)).unwrap_or(delta)
 }
 
 /// Discard a suspended pointer gesture without reporting a final model change.
@@ -504,7 +504,7 @@ pub(crate) fn show_mode(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
                 Handle::Ring(i) => {
                     let q = on_plane(proj, from, c, t.frame[i])? - c;
                     let (e1, e2) = t.basis(i);
-                    s.last = solidcore_ops::forms_view_queries::ring_angle(q, e1, e2);
+                    s.last = solidcraft_kernel::services::forms_view_queries::ring_angle(q, e1, e2);
                 }
                 _ => s.grab = on_plane(proj, from, c, plane_normal(h))?,
             }
@@ -532,7 +532,9 @@ pub(crate) fn show_mode(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     let change = match st.handle {
         Handle::Axis(i) => {
             let v = match st.head_on {
-                Some((from, dir, scale)) => f64::from(solidcore_ops::forms_view_queries::pixel_component((p - from).into(), dir.into())) * scale,
+                Some((from, dir, scale)) => {
+                    f64::from(solidcraft_kernel::services::forms_view_queries::pixel_component((p - from).into(), dir.into())) * scale
+                }
                 None => along(proj, p, st.center, t.frame[i]).map(|v| v - st.t0).unwrap_or(0.0),
             };
             Change::Translate(t.frame[i] * snap(v, step, free))
@@ -540,7 +542,7 @@ pub(crate) fn show_mode(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         Handle::Ring(i) => {
             if let Some(q) = on_plane(proj, p, st.center, t.frame[i]).map(|q| q - st.center) {
                 let (e1, e2) = t.basis(i);
-                let th = solidcore_ops::forms_view_queries::ring_angle(q, e1, e2);
+                let th = solidcraft_kernel::services::forms_view_queries::ring_angle(q, e1, e2);
                 let mut d = th - st.last;
                 while d > std::f64::consts::PI {
                     d -= std::f64::consts::TAU;

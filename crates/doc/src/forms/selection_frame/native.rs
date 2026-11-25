@@ -76,10 +76,9 @@ pub(super) fn frames(definition: &Definition, body: &Body, owners: Option<&[usiz
 }
 
 fn agrees(normals: &BTreeMap<usize, Vec3>) -> bool {
-    normals
-        .values()
-        .next()
-        .is_some_and(|first| normals.values().all(|other| solidcore_ops::form_curves::component_along(*first, *other) >= SAME_DIRECTION))
+    normals.values().next().is_some_and(|first| {
+        normals.values().all(|other| solidcraft_kernel::services::form_curves::component_along(*first, *other) >= SAME_DIRECTION)
+    })
 }
 fn agreed_axes(samples: &[EdgeSample]) -> Option<[Vec3; 3]> {
     let (x, normals) = edge_samples(samples)?;
@@ -272,7 +271,7 @@ impl<'a> Eval<'a> {
             let chart = use_.face as usize;
             let uv = self.station_uv(chart, DisplayGuidePoint::Edge { edge: id, parameter }, false, remaining)?;
             let (on, _, _, normal) = self.surface_jet(chart, uv, remaining)?;
-            if on.dist(station) > tolerance || solidcore_ops::form_curves::component_along(tangent, normal).abs() > 1e-4 {
+            if on.dist(station) > tolerance || solidcraft_kernel::services::form_curves::component_along(tangent, normal).abs() > 1e-4 {
                 return None;
             }
             samples.push(EdgeSample { chart, point: station, tangent, normal });
@@ -304,7 +303,7 @@ impl<'a> Eval<'a> {
             // the guide's directional derivative, not the trim tangent.
             let mut samples = self.intrinsic(segment.face, edge, parameter, 1.0, remaining)?;
             for sample in &mut samples {
-                if solidcore_ops::form_curves::component_along(tangent, sample.normal).abs() > 1e-4 {
+                if solidcraft_kernel::services::form_curves::component_along(tangent, sample.normal).abs() > 1e-4 {
                     return None;
                 }
                 sample.tangent = tangent;

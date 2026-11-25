@@ -40,7 +40,7 @@ impl ExtrusionResponse {
         }
         let delta = displacement - self.reference;
         let coefficients = if let Some(axis) = self.axis {
-            let along = solidcore_ops::form_curves::component_along(delta, axis);
+            let along = solidcraft_kernel::services::form_curves::component_along(delta, axis);
             if (delta - axis * along).len() > 1e-9 * delta.len().max(1.0) {
                 return Err(error("extrusion feedback moved outside its fixed axis"));
             }
@@ -78,8 +78,9 @@ impl ExtrusionResponse {
                 fixed.next();
             }
         }
-        preview.mesh.normals = solidcore_ops::form_subdivision::vertex_normals(&preview.mesh.positions, preview.mesh.triangle_indices())
-            .map_err(|e| error(e.to_string()))?;
+        preview.mesh.normals =
+            solidcraft_kernel::services::form_subdivision::vertex_normals(&preview.mesh.positions, preview.mesh.triangle_indices())
+                .map_err(|e| error(e.to_string()))?;
         Ok(preview)
     }
 }
@@ -107,7 +108,8 @@ impl Form {
         checkpoint: bool,
         axis: Vec3,
     ) -> Result<ExtrusionResponse> {
-        let axis = solidcore_ops::form_curves::segment_direction(axis).ok_or_else(|| error("extrusion feedback axis must be finite and nonzero"))?;
+        let axis = solidcraft_kernel::services::form_curves::segment_direction(axis)
+            .ok_or_else(|| error("extrusion feedback axis must be finite and nonzero"))?;
         self.prepare_surface_extrusion_response(faces, edges, displacement, checkpoint, Some(axis))
     }
 

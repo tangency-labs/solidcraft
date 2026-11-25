@@ -1723,8 +1723,8 @@ mod tests {
             homogeneous: vec![[1.0, 0.0, 1.0], [1.0, 1.0, 0.5_f64.sqrt()], [0.0, 1.0, 1.0]],
         };
         let pieces = pcurve_pieces(&curve, [0.2, 0.8], &mut 1_000_000).unwrap();
-        let a = solidcraft_engine::geom::brep::pcurve::eval(&curve, 0.2).unwrap();
-        let b = solidcraft_engine::geom::brep::pcurve::eval(&curve, 0.8).unwrap();
+        let a = solidcraft_kernel::services::pcurve::eval(&curve, 0.2).unwrap();
+        let b = solidcraft_kernel::services::pcurve::eval(&curve, 0.8).unwrap();
         let start = uv_endpoint(&pieces, true).unwrap();
         let end = uv_endpoint(&pieces, false).unwrap();
         assert!((start[0] - a[0]).abs() < 1e-12 && (start[1] - a[1]).abs() < 1e-12);
@@ -1752,8 +1752,8 @@ mod tests {
         let pieces = pcurve_pieces(&curve, [0.0, 1.0], &mut 1_000_000).unwrap();
         let start = uv_endpoint(&pieces, true).unwrap();
         let end = uv_endpoint(&pieces, false).unwrap();
-        assert_eq!(start, solidcraft_engine::geom::brep::pcurve::eval(&curve, drift).unwrap());
-        assert_eq!(end, solidcraft_engine::geom::brep::pcurve::eval(&curve, 1.0).unwrap());
+        assert_eq!(start, solidcraft_kernel::services::pcurve::eval(&curve, drift).unwrap());
+        assert_eq!(end, solidcraft_kernel::services::pcurve::eval(&curve, 1.0).unwrap());
         assert!(end[0] < 1.0, "do not extend a canonical clamped read to a different saved endpoint");
     }
     #[test]

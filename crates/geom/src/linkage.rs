@@ -35,15 +35,15 @@
 use crate::brep::eval::SurfaceEval;
 #[cfg(test)]
 use crate::prelude::*;
-pub use solidcore_ops::form_fill::linkage::{Jet, MAX_CONTINUITY, Target};
 use solidcore_record::Vec3;
+pub use solidcraft_kernel_services::form_fill::linkage::{Jet, MAX_CONTINUITY, Target};
 
 /// Read the exact source partials; the kernel constructs its directed height jet.
 pub fn surface_jet(s: &SurfaceEval, uv: [f64; 2], normal: Vec3, leave: Vec3, order: usize) -> Option<Jet> {
     if !(2..=MAX_CONTINUITY).contains(&order) {
         return None;
     }
-    solidcore_ops::form_fill::linkage::from_partials(&s.partials(uv[0], uv[1])?, normal, leave, order)
+    solidcraft_kernel_services::form_fill::linkage::from_partials(&s.partials(uv[0], uv[1])?, normal, leave, order)
 }
 
 #[cfg(test)]

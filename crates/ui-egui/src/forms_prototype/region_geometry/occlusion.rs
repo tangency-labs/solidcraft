@@ -617,7 +617,8 @@ impl Snapshot {
         charge(budget, 1)?;
         let (o, d) = self.proj.ray(p);
         let (near, _) = self.proj.ray(p + egui::vec2(2.0, 0.0));
-        let Some(visibility) = solidcore_ops::forms_view_queries::visibility(point, o, d, near, self.fit, self.proj.cam.fov > 0.0) else {
+        let Some(visibility) = solidcraft_kernel::services::forms_view_queries::visibility(point, o, d, near, self.fit, self.proj.cam.fov > 0.0)
+        else {
             return Ok(false);
         };
         if !visibility.own_surface_visible(self.own_hit(p, budget)?) {
@@ -627,7 +628,7 @@ impl Snapshot {
         for source in self.sources.iter().skip(1) {
             charge(budget, 1)?;
             if let Some((hit, _)) = source.index.raycast_bounded(&source.mesh, origin, direction, budget).map_err(str::to_owned)?
-                && solidcore_ops::forms_view_queries::occludes(origin, depth, hit)
+                && solidcraft_kernel::services::forms_view_queries::occludes(origin, depth, hit)
             {
                 return Ok(false);
             }

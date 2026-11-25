@@ -2,7 +2,7 @@
 //! switches come from the file's self-described record, not evaluated triangles.
 use super::*;
 
-use solidcore_ops::{affine, mesh_edit};
+use solidcraft_kernel::services::{affine, mesh_edit};
 
 fn point(matrix: &Matrix, point: Vec3) -> Result<Vec3> {
     let point = affine::point(matrix, point);

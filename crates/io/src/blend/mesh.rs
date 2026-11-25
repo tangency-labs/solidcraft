@@ -216,7 +216,7 @@ fn to_affine(matrix: Matrix) -> Matrix {
 }
 
 fn mul(a: Matrix, b: Matrix) -> Result<Matrix> {
-    solidcore_ops::affine::then(&to_affine(b), &to_affine(a)).map(to_affine).map_err(|_| bad("invalid object transform composition"))
+    solidcraft_kernel::services::affine::then(&to_affine(b), &to_affine(a)).map(to_affine).map_err(|_| bad("invalid object transform composition"))
 }
 fn rotation(axis: usize, angle: f64) -> Matrix {
     let mut m = identity();
@@ -258,7 +258,7 @@ fn axis_angle(axis: &[f64], angle: f64) -> Result<Matrix> {
     if !axis.is_finite() {
         return Err(bad("non-finite rotation axis"));
     }
-    let Some(axis) = solidcore_ops::form_curves::segment_direction(axis) else { return Ok(identity()) };
+    let Some(axis) = solidcraft_kernel::services::form_curves::segment_direction(axis) else { return Ok(identity()) };
     let (sin, cos) = (angle * 0.5).sin_cos();
     quaternion(&[cos, axis.x * sin, axis.y * sin, axis.z * sin])
 }
@@ -413,9 +413,10 @@ pub(super) fn read(f: &File<'_>) -> Result<Import> {
             let source_cage = cage(object, f.view(f.block(object.ptr("data")?)?, "Mesh")?, &mut shape_budget)?;
             let (mut cage, levels) = modifiers(object, source_cage)?;
             let matrix = to_affine(m);
-            let reverse = solidcore_ops::mesh_edit::reverses_winding(&matrix, 1e-18).ok_or_else(|| bad("singular object transform"))?;
+            let reverse = solidcraft_kernel::services::mesh_edit::reverses_winding(&matrix, 1e-18).ok_or_else(|| bad("singular object transform"))?;
             for point in &mut cage.points {
-                *point = solidcore_ops::mesh_edit::placed_point(&matrix, *point, unit).ok_or_else(|| bad("non-finite object transform"))?;
+                *point =
+                    solidcraft_kernel::services::mesh_edit::placed_point(&matrix, *point, unit).ok_or_else(|| bad("non-finite object transform"))?;
             }
             if reverse {
                 for face in &mut cage.faces {

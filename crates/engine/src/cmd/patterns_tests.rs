@@ -160,6 +160,35 @@ fn feature_pattern_plate() -> Session {
 }
 
 #[test]
+fn a_hole_pattern_keeps_each_copied_wall_with_its_sketch_point() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 80, "width": 60, "height": 8, "corner": [0, 0, 0], "body_name": "Plate"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 8, "name": "HolePoints"}));
+    for x in [20, 50] {
+        run(&mut s, "sketch.point", json!({"point": [x, 15]}));
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "HolePoints", "points": ["p1", "p2"], "diameter": 4, "name": "Holes"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"features": ["Holes"], "dir1": [0, 1, 0], "count1": 2, "spacing1": 20}));
+    let copy_wall = |s: &mut Session, x: f64| {
+        let result = run(s, "model.faces", json!({"body": "Plate"}));
+        let face = result["faces"].as_array().unwrap().iter().find(|face| {
+            let axis = &face["cylinder"]["origin"];
+            axis[0].as_f64().is_some_and(|at| (at - x).abs() < 1e-6) && axis[1].as_f64().is_some_and(|at| (at - 35.0).abs() < 1e-6)
+        });
+        face.and_then(|face| face["name"].as_str()).map(str::to_string)
+    };
+    let left = copy_wall(&mut s, 20.0).unwrap();
+    let right = copy_wall(&mut s, 50.0).unwrap();
+    assert!(left.contains(":point:p1:") && right.contains(":point:p2:"), "{left}, {right}");
+    run(&mut s, "sketch.edit", json!({"sketch": "HolePoints"}));
+    run(&mut s, "sketch.delete", json!({"entities": ["p1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    assert_eq!(copy_wall(&mut s, 20.0), None);
+    assert_eq!(copy_wall(&mut s, 50.0), Some(right));
+}
+
+#[test]
 fn rectangular_hole_pattern_warns_for_copies_that_miss_and_clears_after_edit() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length":40,"width":30,"height":10,"corner":[0,0,0],"body_name":"Plate"}));
@@ -801,6 +830,129 @@ fn component_pattern_follows_its_count_parameter() {
     run(&mut s, "parameters.change", json!({"name": "n", "expression": "4"}));
     assert_eq!(names(&s).len(), 4, "{:?}", names(&s));
     assert!(s.doc.occurrences.iter().any(|o| o.id == first_copy), "survivor keeps its id after grow again");
+}
+
+#[test]
+fn inactive_component_patterns_keep_their_occurrences_and_joints() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 8, "width": 8, "height": 8, "name": "Base"}));
+    run(&mut s, "component.create", json!({"name": "Unit"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let pattern_params = json!({"components": ["Unit"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 30});
+    let pattern = run(&mut s, "solid.pattern.rectangular", pattern_params.clone());
+    let feature = pattern["feature"].as_u64().expect("pattern feature");
+    let copy = pattern["occurrences"][0].as_u64().expect("copy");
+    let made_joint = run(&mut s, "joint.as_built", json!({"type": "rigid", "a": 0, "b": copy}));
+    let joint_id = made_joint["joint"].as_u64().expect("joint");
+    let joints = s.doc.assembly.joints.clone();
+    let marker = s.doc.feature_index(feature).expect("pattern position");
+    let shown = |s: &mut Session, expected| {
+        assert_eq!(s.occurrence_placement(&[copy]).is_ok(), expected);
+        let children = s.occurrence_children(&[]).expect("active root children");
+        assert_eq!(children.len(), if expected { 2 } else { 1 });
+        assert_eq!(children.iter().any(|child| child.occurrence == copy), expected);
+        let measured = run(s, "inspect.measure", json!({}));
+        assert_eq!(measured["body_count"], if expected { 3 } else { 2 });
+        let mass = s.mass_properties().expect("active assembly mass");
+        assert_eq!(mass.occurrences.iter().any(|row| row.occurrence == copy), expected);
+        let solved = run(s, "joint.solve", json!({}));
+        assert_eq!(solved["errors"], json!([]));
+        let dof = solved["dof"].as_array().expect("degrees of freedom");
+        assert_eq!(dof.iter().any(|entry| entry["occurrence"] == copy), expected);
+    };
+
+    // A saved rollback still contains, but does not place or solve, the Pattern's copies.
+    s.visibility.shown_component_origins.push(vec![copy]);
+    run(&mut s, "timeline.roll_to", json!({"position": marker}));
+    shown(&mut s, false);
+    assert_eq!(s.doc.assembly.joints, joints);
+    assert_eq!(s.visibility.shown_component_origins, vec![vec![copy]]);
+    let mut s = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).expect("rolled-back design"));
+    shown(&mut s, false);
+    run(&mut s, "timeline.roll_to", json!({"position": "end"}));
+    shown(&mut s, true);
+    assert_eq!(s.doc.assembly.joints, joints);
+
+    // Edit Feature rolls the scratch design behind the later pattern while building the edit.
+    run(&mut s, "timeline.redefine", json!({"feature": "Base", "command": "solid.box", "params": {"length":9, "width":8, "height":8}}));
+    shown(&mut s, true);
+    assert_eq!(s.doc.assembly.joints, joints);
+
+    let mut larger = pattern_params.clone();
+    larger["count1"] = json!(3);
+    run(&mut s, "timeline.redefine", json!({"feature": feature, "command": "solid.pattern.rectangular", "params": larger}));
+    assert!(s.occurrence_placement(&[copy]).is_ok());
+    assert_eq!(s.doc.assembly.joints, joints);
+    assert_eq!(run(&mut s, "inspect.measure", json!({}))["body_count"], 4);
+
+    let extra_copy = s.doc.active_occurrences().last().expect("new copy").id;
+    assert_ne!(extra_copy, copy);
+    let extra = run(&mut s, "joint.as_built", json!({"type": "rigid", "a": 0, "b": extra_copy}));
+    assert!(extra["joint"].is_number());
+    run(&mut s, "timeline.redefine", json!({"feature": feature, "command": "solid.pattern.rectangular", "params": pattern_params}));
+    assert!(!s.doc.occurrences.iter().any(|o| o.id == extra_copy));
+    assert_eq!(s.doc.assembly.joints, joints);
+    shown(&mut s, true);
+
+    run(&mut s, "timeline.suppress", json!({"feature": feature, "suppressed": true}));
+    shown(&mut s, false);
+    assert_eq!(s.doc.assembly.joints, joints);
+    run(&mut s, "timeline.suppress", json!({"feature": feature, "suppressed": false}));
+    assert!(s.occurrence_placement(&[copy]).is_ok());
+    assert_eq!(s.doc.assembly.joints, joints);
+    run(&mut s, "timeline.suppress", json!({"feature": feature, "suppressed": true}));
+
+    // Deleting the inactive feature really removes its placements and their references.
+    run(&mut s, "timeline.delete", json!({"feature": feature}));
+    assert!(!s.doc.occurrences.iter().any(|o| o.id == copy));
+    assert!(!s.doc.assembly.joints.iter().any(|joint| joint.id == joint_id));
+    shown(&mut s, false);
+}
+
+#[test]
+fn an_inactive_pattern_does_not_drive_an_active_joints_reported_value() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Unit", "grounded": false}));
+    let seed = s.doc.occurrences.first().expect("seed occurrence").id;
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let pattern = run(&mut s, "solid.pattern.rectangular", json!({"components": ["Unit"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 30}));
+    let copy = pattern["occurrences"][0].as_u64().expect("copy");
+    let driver = run(&mut s, "joint.as_built", json!({"type": "slider", "a": 0, "b": copy}))["joint"].as_u64().expect("driver");
+    let follower = run(&mut s, "joint.as_built", json!({"type": "slider", "a": 0, "b": seed}))["joint"].as_u64().expect("follower");
+    run(&mut s, "joint.motion_link", json!({"a": driver, "b": follower, "ratio": 1, "offset": 7}));
+    let check = |s: &mut Session, expected: f64| {
+        let listed = run(s, "joint.list", json!({}));
+        let row = listed["joints"].as_array().unwrap().iter().find(|row| row["id"] == follower).expect("listed follower");
+        assert_eq!(row["values"][0]["value"], expected);
+        let inspected = run(s, "joint.inspect", json!({"joint": follower}));
+        assert_eq!(inspected["joints"][0]["values"][0]["value"], expected);
+    };
+    check(&mut s, 7.0);
+    run(&mut s, "timeline.suppress", json!({"feature": pattern["feature"], "suppressed": true}));
+    check(&mut s, 0.0);
+    let target = solidcraft_doc::joints::Reach {
+        occurrence: seed,
+        point: solidcore_record::Vec3::ZERO,
+        to: solidcore_record::Vec3::new(0.0, 0.0, 3.0),
+        axis: None,
+        joints: None,
+    };
+    let reached = solidcraft_doc::joints::reach(&s.doc, &s.model.state(), &target).unwrap();
+    assert_eq!(reached.values.keys().copied().collect::<Vec<_>>(), [follower]);
+    run(&mut s, "timeline.suppress", json!({"feature": pattern["feature"], "suppressed": false}));
+    check(&mut s, 7.0);
+
+    // Replacing the dormant link preserves the active slider's solved position, even though
+    // the old link would have driven it to 7 mm if its pattern were active.
+    run(&mut s, "timeline.suppress", json!({"feature": pattern["feature"], "suppressed": true}));
+    run(&mut s, "component.create", json!({"name": "Rotor", "activate": false, "grounded": false}));
+    let spin = run(&mut s, "joint.as_built", json!({"type": "revolute", "a": 0, "b": "Rotor"}))["joint"].as_u64().expect("revolute driver");
+    let before = s.occurrence_placement(&[seed]).unwrap().world;
+    run(&mut s, "joint.screw", json!({"a": spin, "b": follower, "link": 0, "pitch": 2}));
+    check(&mut s, 0.0);
+    assert_eq!(s.occurrence_placement(&[seed]).unwrap().world, before);
 }
 
 /// A component pattern's copies placed again on a rebuild read the spacing as the first copies
@@ -2755,6 +2907,79 @@ fn a_body_pattern_with_no_copies_is_still_added() {
     run(&mut s, "material.assign", json!({"bodies":["Base"],"material":"Steel"}));
     run(&mut s, "solid.pattern.rectangular", json!({"bodies":["Base"],"dir1":[1,0,0],"count1":1,"spacing1":30}));
     assert_eq!(s.model.state().bodies.len(), 1);
+}
+
+/// Regression (#21245): editing a body pattern via `timeline.edit` copies source material and
+/// appearance onto newly created copies (from `count1 = 1` or more copies), preserves an
+/// existing copy's explicit override, and applies a newly chosen seed body's material/appearance.
+#[test]
+fn editing_a_body_pattern_keeps_source_material_and_appearance_on_copies() {
+    // 1) Increasing count1 via timeline.edit copies material & appearance while keeping overrides.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "center": [0, 0, 5], "operation": "new", "body_name": "Base"}));
+    run(&mut s, "solid.cylinder", json!({"diameter": 6, "height": 20, "base": [0, 50, 0], "operation": "new", "body_name": "Post"}));
+    run(&mut s, "material.assign", json!({"bodies": ["Base"], "material": "Steel"}));
+    run(&mut s, "appearance.assign", json!({"bodies": ["Base"], "color": [40, 120, 200]}));
+    run(&mut s, "material.assign", json!({"bodies": ["Post"], "material": "Brass"}));
+    run(&mut s, "appearance.assign", json!({"bodies": ["Post"], "color": [200, 30, 30]}));
+    let blue = s.doc.appearances.bodies.get("Base").cloned().expect("Base has appearance");
+    let red = s.doc.appearances.bodies.get("Post").cloned().expect("Post is red");
+    let pat = run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Base"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 30}))["feature"]
+        .as_u64()
+        .unwrap();
+    // Override Base (2) manually; it must stay Brass/green when count1 rises to 4.
+    run(&mut s, "material.assign", json!({"bodies": ["Base (2)"], "material": "Brass"}));
+    run(&mut s, "appearance.assign", json!({"bodies": ["Base (2)"], "color": [20, 180, 60]}));
+    let green = s.doc.appearances.bodies.get("Base (2)").cloned().expect("Base (2) is green");
+
+    run(&mut s, "timeline.edit", json!({"feature": pat, "set": {"pattern.count1": 4}}));
+    assert_eq!(s.doc.materials.get("Base (2)").map(String::as_str), Some("Brass"));
+    assert_eq!(s.doc.appearances.bodies.get("Base (2)"), Some(&green));
+    for copy in ["Base (3)", "Base (4)"] {
+        assert_eq!(s.doc.materials.get(copy).map(String::as_str), Some("Steel"), "{copy}");
+        assert_eq!(s.doc.appearances.bodies.get(copy), Some(&blue), "{copy}");
+    }
+
+    // 2) Starting from count1 = 1 (no initial copies), raising count1 to 3 copies onto new copies.
+    let mut one = Session::default();
+    run(&mut one, "solid.box", json!({"length": 10, "width": 10, "height": 10, "center": [0, 0, 5], "operation": "new", "body_name": "Base"}));
+    run(&mut one, "material.assign", json!({"bodies": ["Base"], "material": "Aluminum"}));
+    let single = run(&mut one, "solid.pattern.rectangular", json!({"bodies": ["Base"], "dir1": [1, 0, 0], "count1": 1, "spacing1": 30}))["feature"]
+        .as_u64()
+        .unwrap();
+    run(&mut one, "timeline.edit", json!({"feature": single, "set": {"pattern.count1": 3}}));
+    for copy in ["Base (2)", "Base (3)"] {
+        assert_eq!(one.doc.materials.get(copy).map(String::as_str), Some("Aluminum"), "{copy}");
+    }
+
+    // 3) Changing the seed body via timeline.edit copies the new seed body's material and look.
+    run(&mut s, "timeline.edit", json!({"feature": pat, "set": {"bodies": ["Post"], "pattern.count1": 3}}));
+    for copy in ["Post (2)", "Post (3)"] {
+        assert_eq!(s.doc.materials.get(copy).map(String::as_str), Some("Brass"), "{copy}");
+        assert_eq!(s.doc.appearances.bodies.get(copy), Some(&red), "{copy}");
+    }
+
+    // 4) Switching to an unstyled seed body while keeping explicit copy names clears stale
+    // material and appearance entries from the previous seed.
+    let mut clear = Session::default();
+    run(&mut clear, "solid.box", json!({"length": 10, "width": 10, "height": 10, "center": [0, 0, 5], "operation": "new", "body_name": "Styled"}));
+    run(&mut clear, "solid.box", json!({"length": 10, "width": 10, "height": 10, "center": [0, 40, 5], "operation": "new", "body_name": "Plain"}));
+    run(&mut clear, "material.assign", json!({"bodies": ["Styled"], "material": "Steel"}));
+    run(&mut clear, "appearance.assign", json!({"bodies": ["Styled"], "color": [40, 120, 200]}));
+    let named_pat =
+        run(&mut clear, "solid.pattern.rectangular", json!({"bodies": ["Styled"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 30}))["feature"]
+            .as_u64()
+            .unwrap();
+    run(&mut clear, "timeline.edit", json!({"feature": named_pat, "set": {"body_names": ["CopyA", "CopyB"]}}));
+    run(&mut clear, "timeline.edit", json!({"feature": named_pat, "set": {"bodies": ["Styled"]}}));
+    // Re-seed from Styled -> CopyA/CopyB carry Steel and appearance; now switch to Plain.
+    run(&mut clear, "material.assign", json!({"bodies": ["CopyA", "CopyB"], "material": "Steel"}));
+    run(&mut clear, "appearance.assign", json!({"bodies": ["CopyA", "CopyB"], "color": [40, 120, 200]}));
+    run(&mut clear, "timeline.edit", json!({"feature": named_pat, "set": {"bodies": ["Plain"], "body_names": ["CopyA", "CopyB"]}}));
+    for copy in ["CopyA", "CopyB"] {
+        assert_eq!(clear.doc.materials.get(copy), None, "{copy}");
+        assert_eq!(clear.doc.appearances.bodies.get(copy), None, "{copy}");
+    }
 }
 
 /// #12199: a path whose curves are listed out of chain order is the same path as in chain order.

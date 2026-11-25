@@ -67,7 +67,7 @@ impl Cage {
     pub fn extrude_faces(&self, selected: &[usize], delta: Vec3) -> Result<Self> {
         self.validate()?;
         let selected = self.selected_faces(selected)?;
-        if !solidcore_ops::form_subdivision::extrusion_delta(delta) {
+        if !solidcraft_kernel_services::form_subdivision::extrusion_delta(delta) {
             return Err(bad("extrusion needs a finite nonzero displacement"));
         }
         let mut out = self.clone();
@@ -78,7 +78,7 @@ impl Cage {
             for &v in face {
                 if let std::collections::btree_map::Entry::Vacant(entry) = duplicates.entry(v) {
                     entry.insert(out.points.len());
-                    out.points.push(solidcore_ops::form_cage::displaced(self.point(v)?, delta).map_err(|e| bad(&e.to_string()))?);
+                    out.points.push(solidcraft_kernel_services::form_cage::displaced(self.point(v)?, delta).map_err(|e| bad(&e.to_string()))?);
                 }
             }
             for (&a, &b) in face.iter().zip(face.iter().cycle().skip(1)).take(face.len()) {
@@ -96,7 +96,7 @@ impl Cage {
     }
     pub fn extrude_edges(&self, selected: &[[usize; 2]], delta: Vec3) -> Result<Self> {
         let topology = self.topology()?;
-        if selected.is_empty() || selected.len() > self.points.len() || !solidcore_ops::form_subdivision::extrusion_delta(delta) {
+        if selected.is_empty() || selected.len() > self.points.len() || !solidcraft_kernel_services::form_subdivision::extrusion_delta(delta) {
             return Err(bad("select boundary edges and a nonzero extrusion"));
         }
         let mut out = self.clone();
@@ -114,7 +114,7 @@ impl Cage {
             for v in [a, b] {
                 if let std::collections::btree_map::Entry::Vacant(entry) = duplicates.entry(v) {
                     entry.insert(out.points.len());
-                    out.points.push(solidcore_ops::form_cage::displaced(self.point(v)?, delta).map_err(|e| bad(&e.to_string()))?);
+                    out.points.push(solidcraft_kernel_services::form_cage::displaced(self.point(v)?, delta).map_err(|e| bad(&e.to_string()))?);
                 }
             }
             let face = &self.faces[edge.faces[0]];
@@ -225,7 +225,7 @@ impl Cage {
         }
         let first = *set.first().ok_or_else(|| bad("empty weld"))?;
         let controls = set.iter().map(|&id| self.point(id)).collect::<Result<Vec<_>>>()?;
-        let center = solidcore_ops::form_subdivision::centroid(controls.into_iter()).map_err(|e| bad(&e.to_string()))?;
+        let center = solidcraft_kernel_services::form_subdivision::centroid(controls.into_iter()).map_err(|e| bad(&e.to_string()))?;
         let mut out = self.clone();
         out.points[first] = center;
         for f in &mut out.faces {
@@ -299,7 +299,8 @@ impl Cage {
         if self.points.len().saturating_mul(2) > super::MAX_POINTS || self.faces.len().saturating_mul(2) + walls > super::MAX_FACES {
             return Err(bad("thickened cage exceeds the editing budget"));
         }
-        let moved = solidcore_ops::form_cage::offset_controls(&self.points, &self.faces, distance).map_err(|error| bad(&error.to_string()))?;
+        let moved =
+            solidcraft_kernel_services::form_cage::offset_controls(&self.points, &self.faces, distance).map_err(|error| bad(&error.to_string()))?;
         let mut out = self.clone();
         let n = self.points.len();
         out.vertex_creases.extend(self.vertex_creases.iter().map(|c| super::VertexCrease { vertex: c.vertex + n, sharpness: c.sharpness }));

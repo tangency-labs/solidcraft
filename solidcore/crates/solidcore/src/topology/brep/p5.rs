@@ -846,10 +846,27 @@ pub(crate) fn delete_topological_vertex_joining(
             delete_topological_vertex_joining(k, b, editing_enabled, vertex, edge, Some(env))
         });
     };
-    let mut notifications = Some(env);
     require_editing(editing_enabled)?;
-    crate::error::ignore_status(notify_pre_edit(k, b, notifications.as_deref_mut()))?;
+    crate::error::ignore_status(notify_pre_edit(k, b, Some(env)))?;
     let vertex = vertex.ok_or_else(|| named(TopologyFailure::NoVertexGiven))?;
+    let join = prepare_vertex_join(k, b, vertex, edge)?;
+    apply_vertex_join(k, b, vertex, join, env)
+}
+
+/// The surviving edge either extends its own curve or takes the joined curve.
+struct VertexJoin {
+    survivor: EdgeId,
+    deleted: EdgeId,
+    curve: Option<Curve>,
+    interval: Extent1d,
+}
+
+fn prepare_vertex_join(
+    k: &Kernel,
+    b: &Brep,
+    vertex: VertexId,
+    edge: Option<EdgeId>,
+) -> Result<VertexJoin> {
     let edges = vertex::edges(b, vertex, None)?;
     let [first, last] = edges.as_slice() else {
         return Err(named(TopologyFailure::VertexNotOnTwoEdges {
@@ -935,15 +952,15 @@ pub(crate) fn delete_topological_vertex_joining(
             }
         }
     }
-    if same_geometry {
+    let (curve, interval) = if same_geometry {
         let far = if join_survivor {
             deleted_interval.max()
         } else {
             deleted_interval.min()
         };
-        let mut grown = b.edge(survivor)?.interval;
-        grown.add_value(far);
-        crate::topology::edge::set_interval(b, survivor, &grown)?;
+        let mut interval = survivor_interval;
+        interval.add_value(far);
+        (None, interval)
     } else {
         // Upstream casts each copy to `SmBSplineCurve` and calls `Trim` through the
         // result unchecked, so an edge curve of another kind (an `SmCrvOnSurf`) is a null
@@ -988,47 +1005,111 @@ pub(crate) fn delete_topological_vertex_joining(
         {
             surviving_copy = analytic;
         }
-        set_joined_edge_curve(k, b, survivor, None, true, notifications.as_deref_mut())?;
         let interval = surviving_copy.natural_interval();
-        set_joined_edge_curve(
-            k,
-            b,
-            survivor,
-            Some(surviving_copy),
-            true,
-            notifications.as_deref_mut(),
-        )?;
+        (Some(surviving_copy), interval)
+    };
+    Ok(VertexJoin {
+        survivor,
+        deleted,
+        curve,
+        interval,
+    })
+}
+
+fn apply_vertex_join(
+    k: &mut Kernel,
+    b: &mut Brep,
+    vertex: VertexId,
+    join: VertexJoin,
+    env: &mut EditNotifyEnv<'_>,
+) -> Result<EdgeId> {
+    let VertexJoin {
+        survivor,
+        deleted,
+        curve,
+        interval,
+    } = join;
+    if let Some(curve) = curve {
+        set_joined_edge_curve(k, b, survivor, None, true, Some(env))?;
+        set_joined_edge_curve(k, b, survivor, Some(curve), true, Some(env))?;
         crate::topology::edge::set_interval(b, survivor, &interval)?;
-        set_edge_curve_owner(b, survivor, notifications.as_deref_mut())?;
+        set_edge_curve_owner(b, survivor, Some(env))?;
+    } else {
+        crate::topology::edge::set_interval(b, survivor, &interval)?;
     }
     for eu in crate::topology::edge::edgeuses(b, survivor, None, None)? {
         let eu = b.edgeuse_mut(eu)?;
         eu.uv_trim_curve = None;
         eu.drop_curve_fail = None;
     }
-    crate::error::ignore_status(notify_edge_merge(
-        k,
-        b,
-        survivor,
-        deleted,
-        notifications.as_deref_mut(),
-    ))?;
+    crate::error::ignore_status(notify_edge_merge(k, b, survivor, deleted, Some(env)))?;
     let surviving_vertex = crate::topology::edge::other_vertex(b, deleted, Some(vertex))?
         .ok_or_else(|| broken_link(NO_FAR_VERTEX))?;
-    squeeze_edge(
-        k,
-        b,
-        notifications.as_deref_mut(),
-        deleted,
-        surviving_vertex,
-    )?;
-    crate::error::ignore_status(notify_edge_pre_edit(k, b, survivor, notifications))?;
+    squeeze_edge(k, b, Some(env), deleted, surviving_vertex)?;
+    crate::error::ignore_status(notify_edge_pre_edit(k, b, survivor, Some(env)))?;
     if !crate::topology::edge::is_wire(b, survivor)? {
         for eu in crate::topology::edge::edgeuses(b, survivor, None, None)? {
             get_or_create_uv_trim_curve(k, b, eu)?;
         }
     }
     Ok(survivor)
+}
+
+/// A constructed rim can keep its join only if remaking its UV trims and covering the
+/// final line both fit its existing tolerances. `false` rolls the entire rim edit back.
+fn join_vertex_without_growth(
+    k: &mut Kernel,
+    b: &mut Brep,
+    vertex: VertexId,
+    env: &mut EditNotifyEnv<'_>,
+) -> Result<bool> {
+    let Some(join) = crate::error::ignored(prepare_vertex_join(k, b, vertex, None))? else {
+        return Ok(true);
+    };
+    let budget = b.edge(join.survivor)?.tolerance;
+    crate::error::ignore_status(notify_pre_edit(k, b, Some(env)))?;
+    let e = apply_vertex_join(k, b, vertex, join, env)?;
+    let edge = b.edge(e)?;
+    // Dropping a trim may widen the edge (and its vertices) or change its interval.
+    if !bound_within_tolerance(edge.tolerance, budget) {
+        return Ok(false);
+    }
+    let Some(ends) = joined_line_ends(k, edge_curve(b, e)?, edge.interval)? else {
+        return Ok(true);
+    };
+    let (Some(a), Some(z)) = (
+        crate::topology::edge::start_vertex(b, e)?,
+        crate::topology::edge::end_vertex(b, e)?,
+    ) else {
+        return Ok(false);
+    };
+    for v in [a, z] {
+        let v = b.vertex(v)?;
+        let (gap, needed) = joined_line_end_gaps(k, v.point, ends);
+        if !(gap <= budget && needed <= v.tolerance) {
+            return Ok(false);
+        }
+    }
+    Ok(a != z)
+}
+
+fn joined_line_ends(k: &Kernel, curve: &Curve, interval: Extent1d) -> Result<Option<[Point3; 2]>> {
+    if !matches!(curve.kind(), crate::curve::curve::CurveKind::Line(_)) {
+        return Ok(None);
+    }
+    Ok(Some([
+        curve.evaluate_point(k, interval.min())?,
+        curve.evaluate_point(k, interval.max())?,
+    ]))
+}
+
+/// The outward-rounded distance an edge must cover, and the vertex tolerance that covers it.
+fn joined_line_end_gaps(k: &Kernel, point: Point3, ends: [Point3; 2]) -> (f64, f64) {
+    let rounded = |q: Point3| {
+        point.distance(q) + crate::nurbs::math::gamma(8) * (point.length() + q.length())
+    };
+    let gap = rounded(ends[0]).min(rounded(ends[1]));
+    (gap, crate::geom::tol::zone_tol3d(k, 2.0 * gap))
 }
 
 /// Not upstream (#15718): an edge that took over a deleted topological vertex's two edges
@@ -1052,7 +1133,6 @@ pub(crate) fn delete_topological_vertex_joining(
 /// nothing is grown then; those of the topology walks and the curve evaluations.
 pub(crate) fn cover_joined_line_gaps(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
     use crate::boolean::topology_intersector::p1::{first_reaching, Growth};
-    use crate::curve::curve::CurveKind;
     use crate::nurbs::math::gamma;
     if !b.edge_list().contains(&e) {
         return Ok(());
@@ -1061,13 +1141,9 @@ pub(crate) fn cover_joined_line_gaps(k: &Kernel, b: &mut Brep, e: EdgeId) -> Res
     let Some(curve) = ed.curve.as_ref() else {
         return Ok(());
     };
-    if !matches!(curve.kind(), CurveKind::Line(_)) {
+    let Some(ends) = joined_line_ends(k, curve, ed.interval)? else {
         return Ok(());
-    }
-    let ends = [
-        curve.evaluate_point(k, ed.interval.min())?,
-        curve.evaluate_point(k, ed.interval.max())?,
-    ];
+    };
     let edge_tolerance = ed.tolerance;
     let (Some(start), Some(end)) = (
         crate::topology::edge::start_vertex(b, e)?,
@@ -1078,14 +1154,12 @@ pub(crate) fn cover_joined_line_gaps(k: &Kernel, b: &mut Brep, e: EdgeId) -> Res
     if start == end {
         return Ok(());
     }
-    let rounded = |p: Vec3, q: Vec3| p.distance(q) + gamma(8) * (p.length() + q.length());
     let mut grow = Vec::new();
     let mut edge_gap: f64 = 0.0;
     for v in [start, end] {
         let point = b.vertex(v)?.point;
-        let gap = rounded(point, ends[0]).min(rounded(point, ends[1]));
+        let (gap, tolerance) = joined_line_end_gaps(k, point, ends);
         edge_gap = edge_gap.max(gap);
-        let tolerance = crate::geom::tol::zone_tol3d(k, 2.0 * gap);
         if tolerance > b.vertex(v)?.tolerance {
             grow.push((v, point, tolerance));
         }
@@ -2651,7 +2725,7 @@ pub fn remove_topological_with_notifications(
             remove_topological_with_notifications(k, b, keep_edges, keep_vertices, Some(env))
         });
     };
-    remove_topological_in(k, b, keep_edges, keep_vertices, None, env)
+    remove_topological_in(k, b, keep_edges, keep_vertices, None, env).map(drop)
 }
 
 /// Removes only the named redundant joins and their vertices. A local extension
@@ -2662,9 +2736,30 @@ pub(crate) fn remove_topological_joins(
     edges: &[EdgeId],
     vertices: &[VertexId],
 ) -> Result<()> {
-    plain_edit(k, b, |k, b, env| {
-        remove_topological_in(k, b, None, None, Some((edges, vertices)), env)
-    })
+    if edges.is_empty() && vertices.is_empty() {
+        return Ok(());
+    }
+    // A missing trim can also be created on another edge of the face while testing a
+    // rim or completing a seam. A refusal restores the geometry, topology and attributes
+    // together, after the edit has returned its notification records to the body.
+    let edge_budgets: Vec<_> = b.edges().iter().map(|(e, r)| (e, r.tolerance)).collect();
+    let vertex_budgets: Vec<_> = b.vertices().iter().map(|(v, r)| (v, r.tolerance)).collect();
+    b.with_rollback_untouched(
+        |b| {
+            let fits = plain_edit(k, b, |k, b, env| {
+                remove_topological_in(k, b, None, None, Some((edges, vertices)), env)
+            })?;
+            Ok(fits
+                && edge_budgets
+                    .iter()
+                    .all(|&(e, t)| b.edges().get(e).is_none_or(|r| r.tolerance <= t))
+                && vertex_budgets
+                    .iter()
+                    .all(|&(v, t)| b.vertices().get(v).is_none_or(|r| r.tolerance <= t)))
+        },
+        |result| matches!(result, Ok(true)),
+    )
+    .map(drop)
 }
 
 fn remove_topological_in(
@@ -2674,8 +2769,7 @@ fn remove_topological_in(
     keep_vertices: Option<&[VertexId]>,
     joins: Option<(&[EdgeId], &[VertexId])>,
     env: &mut EditNotifyEnv<'_>,
-) -> Result<()> {
-    let mut notifications = Some(env);
+) -> Result<bool> {
     let previous = set_editing_enabled(b, true);
     let mut joined = Vec::new();
     let result = (|| {
@@ -2760,8 +2854,7 @@ fn remove_topological_in(
             }
             // Return the kept surface's current owner after the deletion. Its
             // former face id can become stale when DeleteEdge merges the faces.
-            let current_face =
-                delete_edge_keep_surface(k, b, edge, keep, notifications.as_deref_mut())?;
+            let current_face = delete_edge_keep_surface(k, b, edge, keep, Some(env))?;
             let domain = topological.merged_face_domain.unwrap_or_default();
             crate::topology::face::p2::set_uv_domain(b, current_face, &domain)?;
             // (#16866) `IsTopological`'s cover may have taken in a face straddling the kept
@@ -2769,12 +2862,7 @@ fn remove_topological_in(
             // gets the seam a face on a periodic surface has, or its loops' UV trims jump by
             // the period and the check finds their orientation wrong. A merged face with no
             // seam crossed or missing is left as it is.
-            crate::topology::face::p1::complete_merged_face_seam(
-                k,
-                b,
-                notifications.as_deref_mut(),
-                current_face,
-            )?;
+            crate::topology::face::p1::complete_merged_face_seam(k, b, Some(env), current_face)?;
         }
         let vertices = match joins {
             Some((_, vertices)) => vertices.to_vec(),
@@ -2785,7 +2873,7 @@ fn remove_topological_in(
                 continue;
             }
             if vertex::is_loop_vertex(b, vertex)? {
-                delete_vertex(k, b, vertex, notifications.as_deref_mut())?;
+                delete_vertex(k, b, vertex, Some(env))?;
                 continue;
             }
             if crate::error::ignored(vertex::is_topological_vertex(k, b, vertex))?.unwrap_or(false)
@@ -2793,14 +2881,13 @@ fn remove_topological_in(
                 if keep_vertices.is_some_and(|keep| keep.contains(&vertex)) {
                     continue;
                 }
-                if let Some(survivor) = crate::error::ignored(delete_topological_vertex_joining(
-                    k,
-                    b,
-                    true,
-                    Some(vertex),
-                    None,
-                    notifications.as_deref_mut(),
-                ))? {
+                if joins.is_some() {
+                    if !join_vertex_without_growth(k, b, vertex, env)? {
+                        return Ok(false);
+                    }
+                } else if let Some(survivor) = crate::error::ignored(
+                    delete_topological_vertex_joining(k, b, true, Some(vertex), None, Some(env)),
+                )? {
                     joined.push(survivor);
                 }
             }
@@ -2808,7 +2895,7 @@ fn remove_topological_in(
         for e in joined {
             cover_joined_line_gaps(k, b, e)?;
         }
-        Ok(())
+        Ok(true)
     })();
     // Upstream restores in a destructor.
     set_editing_enabled(b, previous);
@@ -3663,6 +3750,15 @@ fn transform_in(
     }) {
         turn_to_nurbs(k, b, notifications.as_deref_mut())?;
     }
+    // #19910: a rigid move rounds every control point it moves, so a tolerance proved to cover
+    // a trim can fall short of it after the move by that rounding; the trims as they are
+    // before the move, to raise each edge that needs it after
+    // ([`crate::topology::edgeuse::p3::cover_moved_trims`])
+    let trims_before = if scale.is_none_or(|s| s.approx_eq(Vec3::new(1.0, 1.0, 1.0))) {
+        crate::topology::edgeuse::p3::trims_before_move(k, b, &brep_edges(b)?)?
+    } else {
+        None
+    };
     let vertices = brep_vertices(b)?;
     for &vertex in &vertices {
         let mut point = b.vertex(vertex)?.point;
@@ -3775,6 +3871,9 @@ fn transform_in(
                 use_.edge_ccw_edge_gap = crate::heal::gap::EdgeEdgeGap::new();
             }
         }
+    }
+    if let Some(before) = trims_before {
+        crate::topology::edgeuse::p3::cover_moved_trims(k, b, &before, placement.matrix())?;
     }
     // WR-507 (#1520): a scale of 1 (a rotation or reflection) is no scale, and a scale s
     // keeps each tolerance at least its own times s; upstream sets every one to the body
@@ -4030,6 +4129,91 @@ mod tests {
     fn status_box(k: &mut Kernel) -> Brep {
         crate::primitive::api_primitives::create_box(k, Point3::new(0.0, 0.0, 0.0), 1.0, 2.0, 3.0)
             .expect("box")
+    }
+
+    /// Two straight wire edges meet exactly at the origin. Extending the longer one along
+    /// the x axis misses the shorter one's far end (1, gap, 0) by at least `gap`. The
+    /// middle vertex allows the join; the surviving edge and far vertex have their own
+    /// budgets, respectively the gap and twice the gap.
+    #[test]
+    fn a_targeted_line_join_keeps_the_existing_edge_and_vertex_tolerances() {
+        use crate::curve::line::Line;
+        use crate::geom::attribute::{AttributeStore, ObjectKey};
+        use crate::topology::api_files::write_brep_to_file;
+        use crate::topology::brep_data_write::FromBrepEnv;
+        use crate::topology::edge;
+        use crate::topology::topology::NotifyRecords;
+
+        let bytes = |k: &Kernel, b: &Brep| {
+            let env = FromBrepEnv {
+                attributes: &AttributeStore::default(),
+                records: &NotifyRecords::new(),
+                key_of: &crate::topology::loopuse::notify_ref,
+                curve_key: &|_| ObjectKey(0),
+                uv_curve_key: &|_| ObjectKey(0),
+                surface_key: &|_| ObjectKey(0),
+            };
+            write_brep_to_file(k, Some(b), &env, false).unwrap()
+        };
+        let gap = 1e-4;
+        for (targeted, edge_budget, vertex_budget, joins) in [
+            (true, 0.5 * gap, 3.0 * gap, false),
+            (true, 2.0 * gap, 1.5 * gap, false),
+            (true, 2.0 * gap, 3.0 * gap, true),
+            (false, 0.5 * gap, 1.5 * gap, true),
+        ] {
+            let mut k = Kernel::default();
+            let mut b = Brep::new_with_infinite_region().unwrap();
+            let line = |a, z| {
+                let mut line = Line::from_points(a, z, 3);
+                line.ensure_nurb(None).unwrap();
+                Curve::from(line)
+            };
+            let long = line(Point3::new(-3.0, 0.0, 0.0), Point3::ZERO);
+            let interval = long.natural_interval();
+            let survivor = create_wire_edge_from_curve(&mut k, &mut b, long, interval).unwrap();
+            let middle = edge::end_vertex(&b, survivor).unwrap().unwrap();
+            let far = Point3::new(1.0, gap, 0.0);
+            let short = line(Point3::ZERO, far);
+            let short_interval = short.natural_interval();
+            let region = b.infinite_region().unwrap();
+            let (other, end) = plain_edit(&mut k, &mut b, |k, b, env| {
+                make_wire_edge_vertex(
+                    k,
+                    b,
+                    env,
+                    region,
+                    middle,
+                    short,
+                    short_interval,
+                    OrientType::Same,
+                    far,
+                )
+            })
+            .unwrap();
+            edge::set_tolerance(&mut b, survivor, edge_budget, false, true).unwrap();
+            vertex::set_tolerance(&mut b, middle, 10.0 * gap, false, false).unwrap();
+            vertex::set_tolerance(&mut b, end, vertex_budget, false, false).unwrap();
+            let original = bytes(&k, &b);
+
+            if targeted {
+                remove_topological_joins(&mut k, &mut b, &[], &[middle]).unwrap();
+            } else {
+                remove_topological_edges_and_vertices(&mut k, &mut b, None, None).unwrap();
+            }
+            assert_eq!(b.vertex(middle).is_err(), joins);
+            assert_eq!(b.edge(other).is_err(), joins);
+            if targeted {
+                assert_eq!(b.edge(survivor).unwrap().tolerance, edge_budget);
+                assert_eq!(b.vertex(end).unwrap().tolerance, vertex_budget);
+            } else {
+                assert!(b.edge(survivor).unwrap().tolerance >= gap);
+                assert!(b.vertex(end).unwrap().tolerance >= 2.0 * gap);
+            }
+            if !joins {
+                assert_eq!(bytes(&k, &b), original);
+            }
+        }
     }
 
     /// #20373: an edge the join itself raised (`UpdateObjectTolerance`), with

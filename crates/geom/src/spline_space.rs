@@ -21,7 +21,7 @@ use crate::bspline::{HPoint, SplineError, SplineResult, invalid};
 use solidcore_record::Vec3;
 
 /// Most basis functions a space used for interpolation may have (its systems are solved densely).
-pub const MAX_SPACE_DIMENSION: usize = solidcore_ops::spline_space::MAX_SPACE_DIMENSION;
+pub const MAX_SPACE_DIMENSION: usize = solidcraft_kernel_services::spline_space::MAX_SPACE_DIMENSION;
 
 /// Values a spline can carry: numbers and points (vectors).
 pub trait Linear: Copy {
@@ -111,8 +111,8 @@ impl Linear for HPoint {
     }
 }
 
-pub(crate) fn failure(error: solidcore_ops::spline_space::SplineFailure) -> SplineError {
-    use solidcore_ops::spline_space::SplineFailure;
+pub(crate) fn failure(error: solidcraft_kernel_services::spline_space::SplineFailure) -> SplineError {
+    use solidcraft_kernel_services::spline_space::SplineFailure;
     match error {
         SplineFailure::InvalidInput => SplineError::Invalid("spline-space arguments are invalid".into()),
         SplineFailure::InvalidKnots => SplineError::Invalid("the knot spaces are invalid or incompatible".into()),
@@ -134,16 +134,16 @@ fn value<T: Linear>([x, y, z, w]: [f64; 4]) -> T {
 
 /// Opaque clamped space; numerical operators are owned by SolidCore.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Space(solidcore_ops::spline_space::Space);
+pub struct Space(solidcraft_kernel_services::spline_space::Space);
 impl Space {
     pub fn new(degree: usize, knots: Vec<f64>) -> SplineResult<Self> {
-        solidcore_ops::spline_space::Space::new(degree, knots).map(Self).map_err(failure)
+        solidcraft_kernel_services::spline_space::Space::new(degree, knots).map(Self).map_err(failure)
     }
     pub fn polynomial(degree: usize, a: f64, b: f64) -> SplineResult<Self> {
-        solidcore_ops::spline_space::Space::polynomial(degree, a, b).map(Self).map_err(failure)
+        solidcraft_kernel_services::spline_space::Space::polynomial(degree, a, b).map(Self).map_err(failure)
     }
     pub fn with_breaks(degree: usize, breaks: &[f64]) -> SplineResult<Self> {
-        solidcore_ops::spline_space::Space::with_breaks(degree, breaks).map(Self).map_err(failure)
+        solidcraft_kernel_services::spline_space::Space::with_breaks(degree, breaks).map(Self).map_err(failure)
     }
     pub fn degree(&self) -> usize {
         self.0.degree()
@@ -170,20 +170,20 @@ impl Space {
         self.0.refined(breaks).map(Self).map_err(failure)
     }
 }
-pub use solidcore_ops::spline_space::Cond;
+pub use solidcraft_kernel_services::spline_space::Cond;
 /// A factored interpolation operator retaining the application's borrowed-space interface.
 #[derive(Clone, Debug)]
 pub struct Interpolant {
     space: Space,
-    operator: solidcore_ops::spline_space::Interpolant,
+    operator: solidcraft_kernel_services::spline_space::Interpolant,
 }
 impl Interpolant {
     pub fn new(space: Space, conds: Vec<Cond>) -> SplineResult<Self> {
-        let operator = solidcore_ops::spline_space::Interpolant::new(space.0.clone(), conds).map_err(failure)?;
+        let operator = solidcraft_kernel_services::spline_space::Interpolant::new(space.0.clone(), conds).map_err(failure)?;
         Ok(Self { space, operator })
     }
     pub fn lowest(conds: Vec<Cond>, a: f64, b: f64) -> SplineResult<Self> {
-        let operator = solidcore_ops::spline_space::Interpolant::lowest(conds, a, b).map_err(failure)?;
+        let operator = solidcraft_kernel_services::spline_space::Interpolant::lowest(conds, a, b).map_err(failure)?;
         let space = Space(operator.space());
         Ok(Self { space, operator })
     }
@@ -195,7 +195,7 @@ impl Interpolant {
     }
     pub fn fit<T: Linear>(&self, data: &[T]) -> SplineResult<Vec<T>> {
         if data.len() != self.conds().len() {
-            return Err(failure(solidcore_ops::spline_space::SplineFailure::InvalidCount));
+            return Err(failure(solidcraft_kernel_services::spline_space::SplineFailure::InvalidCount));
         }
         self.operator.fit(&raw(data)).map(|v| v.into_iter().map(value).collect()).map_err(failure)
     }
@@ -203,9 +203,9 @@ impl Interpolant {
 /// Carry values into an exactly containing spline space through the kernel.
 pub fn embed<T: Linear>(from: &Space, ctrl: &[T], to: &Space) -> SplineResult<Vec<T>> {
     if ctrl.len() != from.count() {
-        return Err(failure(solidcore_ops::spline_space::SplineFailure::InvalidCount));
+        return Err(failure(solidcraft_kernel_services::spline_space::SplineFailure::InvalidCount));
     }
-    solidcore_ops::spline_space::embed(&from.0, &raw(ctrl), &to.0).map(|v| v.into_iter().map(value).collect()).map_err(failure)
+    solidcraft_kernel_services::spline_space::embed(&from.0, &raw(ctrl), &to.0).map(|v| v.into_iter().map(value).collect()).map_err(failure)
 }
 
 /// A monotone piecewise cubic Hermite function through `(xₖ, yₖ)`, both strictly increasing

@@ -18,6 +18,7 @@
 pub mod agreement;
 pub mod check;
 pub mod collapse;
+pub mod constraint;
 pub mod curve;
 pub mod folded;
 pub mod form;
@@ -25,6 +26,7 @@ pub mod form_guide_curves;
 pub mod form_transform;
 pub mod forms_view_queries;
 pub mod geometry;
+pub mod hole_stacks;
 pub mod label;
 pub mod normal_section;
 pub mod outline;

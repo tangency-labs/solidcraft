@@ -1,6 +1,6 @@
 //! Quantise a gesture's exact translation delta in its frozen constraint frame.
 use super::*;
-use solidcore_ops::form_transform::SnapFrame;
+use solidcraft_kernel::services::form_transform::SnapFrame;
 use solidcraft_ui_kit::BackingTooltipExt as _;
 
 pub(super) struct State {

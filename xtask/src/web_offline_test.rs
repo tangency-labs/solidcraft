@@ -1479,7 +1479,13 @@ impl Cdp {
         let mut message = Vec::new();
         loop {
             let mut h = [0u8; 2];
-            self.stream.read_exact(&mut h).map_err(|e| format!("DevTools: {e}"))?;
+            self.stream.read_exact(&mut h).map_err(|e| match e.kind() {
+                // The read timeout ran out: Linux reports it as EAGAIN, which reads as a socket fault.
+                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
+                    format!("DevTools: the page sent no reply within {LAUNCH_TIMEOUT:?}; the app may have stopped (a wasm panic shows in the browser console)")
+                }
+                _ => format!("DevTools: {e}"),
+            })?;
             let (fin, opcode) = (h[0] & 0x80 != 0, h[0] & 0x0f);
             let len = match h[1] & 0x7f {
                 126 => {

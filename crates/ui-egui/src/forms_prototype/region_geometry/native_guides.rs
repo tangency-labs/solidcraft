@@ -281,7 +281,7 @@ fn intrinsic_edge_pieces(body: &Body, edge: usize, range: [f64; 2], remaining: &
     Ok(pieces)
 }
 fn source_curve(source: &Curve, range: [f64; 2], remaining: &mut usize) -> Result<Vec<Vec<HPoint>>> {
-    solidcore_ops::form_guide_curves::source_curve(source, range, remaining)
+    solidcraft_kernel::services::form_guide_curves::source_curve(source, range, remaining)
         .map(|pieces| pieces.into_iter().map(|piece| piece.into_iter().map(|[x, y, z, w]| HPoint { x, y, z, w }).collect()).collect())
 }
 

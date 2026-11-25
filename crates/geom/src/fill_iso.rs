@@ -165,9 +165,9 @@ const GAUSS6: [(f64, f64); 6] = [
 /// The curve itself runs on [0, 1].
 pub type QuadCapPiece = ([f64; 2], crate::bspline::CurveN<4>);
 
-pub use solidcore_ops::form_fill::quad_cap::CapSupport;
+pub use solidcraft_kernel_services::form_fill::quad_cap::CapSupport;
 
-const CAP_MAX_PIECES: usize = solidcore_ops::form_fill::quad_cap::MAX_PIECES;
+const CAP_MAX_PIECES: usize = solidcraft_kernel_services::form_fill::quad_cap::MAX_PIECES;
 
 /// A single G0 tensor cap for four explicit, ordered source sides. Its directed
 /// ranges and homogeneous source coefficients are transferred to the kernel;
@@ -188,7 +188,7 @@ pub fn quad_cap_support(sides: [&[QuadCapPiece]; 4]) -> SplineResult<CapSupport<
     }
     let sides = sides.map(|side| {
         side.iter()
-            .map(|(range, curve)| solidcore_ops::form_fill::quad_cap::Piece {
+            .map(|(range, curve)| solidcraft_kernel_services::form_fill::quad_cap::Piece {
                 range: *range,
                 degree: curve.degree,
                 knots: &curve.knots,
@@ -197,8 +197,9 @@ pub fn quad_cap_support(sides: [&[QuadCapPiece]; 4]) -> SplineResult<CapSupport<
             .collect::<Vec<_>>()
     });
     let [bottom, right, top, left] = &sides;
-    let support = solidcore_ops::form_fill::quad_cap::support([bottom, right, top, left]).map_err(|error| SplineError::Invalid(error.to_string()))?;
-    let surface = |tensor: solidcore_ops::form_fill::Tensor| {
+    let support = solidcraft_kernel_services::form_fill::quad_cap::support([bottom, right, top, left])
+        .map_err(|error| SplineError::Invalid(error.to_string()))?;
+    let surface = |tensor: solidcraft_kernel_services::form_fill::Tensor| {
         let controls = tensor.controls.into_iter().map(|[x, y, z, w]| HPoint { x, y, z, w }).collect();
         NurbsSurface::from_homogeneous(tensor.degree, tensor.knots, controls)
     };
@@ -600,7 +601,7 @@ fn on_side(side: &[SidePiece], g: f64) -> Option<(usize, f64)> {
 struct Patch {
     spaces: [Space; 2],
     net: Vec<Vec3>,
-    basis: solidcore_ops::form_fill::TensorBasis,
+    basis: solidcraft_kernel_services::form_fill::TensorBasis,
     rational: bool,
     /// The patch collapses along `u = 0` (a three-sided patch).
     pole: bool,
@@ -1143,9 +1144,13 @@ impl Quilt {
 fn coons(spaces: [Space; 2], c0: &[HPoint], c1: &[HPoint], d0: &[HPoint], d1: &[HPoint], pole: bool) -> SplineResult<Patch> {
     let sides = [c0, c1, d0, d1].map(|row| row.iter().map(|p| [p.x, p.y, p.z, p.w]).collect::<Vec<_>>());
     let [c0, c1, d0, d1] = &sides;
-    let net = solidcore_ops::form_fill::coons([spaces[0].degree(), spaces[1].degree()], [spaces[0].knots(), spaces[1].knots()], [c0, c1, d0, d1])
-        .map_err(|e| SplineError::Unsupported(e.to_string()))?;
-    let basis = solidcore_ops::form_fill::TensorBasis::new(
+    let net = solidcraft_kernel_services::form_fill::coons(
+        [spaces[0].degree(), spaces[1].degree()],
+        [spaces[0].knots(), spaces[1].knots()],
+        [c0, c1, d0, d1],
+    )
+    .map_err(|e| SplineError::Unsupported(e.to_string()))?;
+    let basis = solidcraft_kernel_services::form_fill::TensorBasis::new(
         [spaces[0].degree(), spaces[1].degree()],
         [spaces[0].knots().to_vec(), spaces[1].knots().to_vec()],
         net.weights,
@@ -1672,7 +1677,7 @@ fn solve(mut quilt: Quilt, stations: &[Station], spec: &IsoSpec) -> SplineResult
     // smaller than the requested guide accuracy, including on large parts or at
     // tighter tolerances; refining the same biased problem cannot fix that bias.
     let controls = quilt.patches.iter().flat_map(|patch| patch.net.iter().copied());
-    let regularization = solidcore_ops::form_fill::guide_regularization(controls, spec.points, spec.tol);
+    let regularization = solidcraft_kernel_services::form_fill::guide_regularization(controls, spec.points, spec.tol);
     for round in 0..rounds {
         let mut rows: Vec<Row> = smooth.clone();
         for s in stations {

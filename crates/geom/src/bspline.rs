@@ -11,7 +11,7 @@
 //! Input is hostile: every constructor checks finiteness and sizes and returns
 //! [`SplineError`] instead of panicking; no function here indexes with an unchecked number.
 
-pub use solidcore::eval::plan::basis::{Side, basis_derivatives, binomial, local_basis, local_basis_array};
+pub use solidcore_tess::eval::basis::{Side, basis_derivatives, binomial, local_basis, local_basis_array};
 use std::ops::{Add, AddAssign, Mul, Sub};
 
 use solidcore_record::Vec3;
@@ -182,7 +182,7 @@ pub fn check_knots(knots: &[f64]) -> SplineResult<()> {
 /// c₂·N[last p+2 merged knots]` (Sederberg et al. 2004, §3; the single-function case of the
 /// NURBS Book eq. 5.10). `None` when `k` is outside the support or the knots are too few.
 pub fn split_basis(knots: &[f64], k: f64) -> Option<(f64, f64)> {
-    solidcore_ops::parameter_line::split_basis(knots, k)
+    solidcraft_kernel_services::parameter_line::split_basis(knots, k)
 }
 
 /// The two knot vectors of a split basis function (see [`split_basis`]): `k` merged into
@@ -201,7 +201,7 @@ pub fn split_knots<T: Copy + PartialOrd>(knots: &[T], k: T) -> [Vec<T>; 2] {
 /// every surviving piece is a Bernstein polynomial `N[a…a, b…b]` (Sederberg et al. 2004, §3;
 /// NURBS Book §5.4, decomposition into Bézier segments).
 pub fn basis_bezier(knots: &[f64], a: f64, b: f64) -> SplineResult<Vec<f64>> {
-    solidcore_ops::parameter_line::basis_bezier(knots, a, b).map_err(parameter_line::error)
+    solidcraft_kernel_services::parameter_line::basis_bezier(knots, a, b).map_err(parameter_line::error)
 }
 
 /// Ulps of the domain's magnitude a parameter may lie past a spline's domain end and still be
@@ -523,7 +523,7 @@ impl NurbsSurface {
 
     /// The point at `(u, v)`, which must lie in the domain.
     pub fn eval(&self, u: f64, v: f64) -> SplineResult<Vec3> {
-        solidcore_ops::form_fill::rechart::point(self.degree, &self.knots, self.count, &self.ctrl, [u, v], |h| [h.x, h.y, h.z, h.w])
+        solidcraft_kernel_services::form_fill::rechart::point(self.degree, &self.knots, self.count, &self.ctrl, [u, v], |h| [h.x, h.y, h.z, h.w])
             .ok_or_else(|| SplineError::Invalid(format!("the surface cannot be evaluated at ({u}, {v})")))
     }
 
@@ -1255,7 +1255,8 @@ impl<const N: usize> CurveN<N> {
     /// (global interpolation, The NURBS Book A9.1: clamped, interior knots by averaging the
     /// parameters).
     pub fn interpolate(params: &[f64], points: &[[f64; N]], degree: usize) -> SplineResult<CurveN<N>> {
-        let fit = solidcore_ops::form_cage::interpolate_curve(params, points, degree).map_err(|error| SplineError::Invalid(error.to_string()))?;
+        let fit = solidcraft_kernel_services::form_cage::interpolate_curve(params, points, degree)
+            .map_err(|error| SplineError::Invalid(error.to_string()))?;
         Ok(CurveN { degree, knots: fit.knots, ctrl: fit.controls })
     }
 
@@ -1266,8 +1267,8 @@ impl<const N: usize> CurveN<N> {
             return None;
         }
         let t = t.clamp(*self.knots.get(p)?, *self.knots.get(n)?);
-        let span = solidcore::eval::plan::span_of(&self.knots, p, n, t);
-        let b = solidcore::eval::plan::basis_ders(&self.knots, span, p, t)?;
+        let span = solidcore_tess::eval::span_of(&self.knots, p, n, t);
+        let b = solidcore_tess::eval::basis_ders(&self.knots, span, p, t)?;
         let (mut x, mut dx) = ([0.0; N], [0.0; N]);
         let ctrl = self.ctrl.get(span - p..=span)?;
         for ((c, n), dn) in ctrl.iter().zip(&b[0]).zip(&b[1]) {

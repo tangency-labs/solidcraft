@@ -23,8 +23,8 @@ impl Default for Parameters {
     }
 }
 impl Parameters {
-    fn family(&self) -> Result<solidcore_ops::form_cage::Primitive> {
-        use solidcore_ops::form_cage::Primitive;
+    fn family(&self) -> Result<solidcraft_kernel_services::form_cage::Primitive> {
+        use solidcraft_kernel_services::form_cage::Primitive;
         Ok(match self.kind.as_str() {
             "box" => Primitive::Box,
             "plane" | "face" => Primitive::Plane,
@@ -38,13 +38,14 @@ impl Parameters {
         })
     }
     pub fn validate(&self) -> Result<()> {
-        solidcore_ops::form_cage::validate(self.dimensions, self.segments, self.radii, &self.path).map_err(|error| bad(&error.to_string()))?;
+        solidcraft_kernel_services::form_cage::validate(self.dimensions, self.segments, self.radii, &self.path)
+            .map_err(|error| bad(&error.to_string()))?;
         self.family()?;
         Ok(())
     }
     pub fn build(&self) -> Result<Cage> {
-        let solidcore_ops::form_cage::CageGeometry { points, faces } =
-            solidcore_ops::form_cage::build(self.family()?, self.dimensions, self.segments, self.radii, &self.path)
+        let solidcraft_kernel_services::form_cage::CageGeometry { points, faces } =
+            solidcraft_kernel_services::form_cage::build(self.family()?, self.dimensions, self.segments, self.radii, &self.path)
                 .map_err(|error| bad(&error.to_string()))?;
         let cage = Cage { points, faces, ..Default::default() };
         cage.validate()?;

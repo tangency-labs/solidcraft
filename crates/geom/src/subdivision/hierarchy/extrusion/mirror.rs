@@ -61,7 +61,7 @@ fn offsets(vertices_by_leaf: &BTreeMap<usize, BTreeSet<usize>>, requested: &[usi
         let partner = symmetry.partners.get(vertex).ok_or_else(|| bad("missing extrusion mirror partner"))?;
         let &mirrored = vertex_component.get(partner).ok_or_else(|| bad("incomplete mirrored extrusion region"))?;
         if component == mirrored {
-            let tangent = solidcore_ops::form_subdivision::mirror_tangent(delta, symmetry.axis)
+            let tangent = solidcraft_kernel_services::form_subdivision::mirror_tangent(delta, symmetry.axis)
                 .ok_or_else(|| bad("an extrusion joined at the mirror plane needs displacement along the plane"))?;
             displacements.insert(component, tangent);
         } else {

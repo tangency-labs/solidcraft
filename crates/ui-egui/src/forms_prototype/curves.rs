@@ -1,6 +1,6 @@
 //! Shared source-curve preparation and picking for Forms and Insert Point.
 use super::*;
-use solidcore_ops::forms_view_queries::{self, BoundsIndex, MAX_CURVES, Projection};
+use solidcraft_kernel::services::forms_view_queries::{self, BoundsIndex, MAX_CURVES, Projection};
 
 type Curve = solidcraft_engine::doc::forms::EdgeCurve;
 pub(super) const HIT_PIXELS: f32 = 9.0;

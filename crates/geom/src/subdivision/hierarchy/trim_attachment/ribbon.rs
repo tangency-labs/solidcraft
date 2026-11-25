@@ -26,7 +26,7 @@ pub(super) fn ruled_patch(skin: &NurbsSurface, [a, b]: [[f64; 2]; 2], delta: Vec
         }
     }
     let seam = seam.into_iter().map(|p| [p.x, p.y, p.z, p.w]).collect::<Vec<_>>();
-    let controls = solidcore_ops::form_cage::ruled_strip(&seam, delta)
+    let controls = solidcraft_kernel_services::form_cage::ruled_strip(&seam, delta)
         .map_err(|e| bad(&e.to_string()))?
         .into_iter()
         .map(|[x, y, z, w]| HPoint { x, y, z, w })

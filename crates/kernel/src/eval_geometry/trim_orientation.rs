@@ -180,7 +180,7 @@ pub(super) fn positive_loop(face: &b::Face, body: &Body) -> Result<usize> {
             raw.push((&use_.pcurve, edge.interval, use_.forward));
         }
         let first = raw.first().ok_or_else(|| invalid("empty face trim"))?;
-        let origin = solidcraft_geom::brep::pcurve::eval(first.0, first.1[0]).ok_or_else(|| invalid("trim start has no parameters"))?;
+        let origin = crate::services::pcurve::eval(first.0, first.1[0]).ok_or_else(|| invalid("trim start has no parameters"))?;
         let curves = raw.into_iter().map(|(c, r, f)| Rational::new(c, r, f, origin)).collect::<Result<Vec<_>>>()?;
         let mut connectors = Interval::point(0.0);
         for (previous, next) in curves.iter().zip(curves.iter().cycle().skip(1)).take(curves.len()) {

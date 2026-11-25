@@ -1014,7 +1014,7 @@ fn show_gizmo(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, pr
         let pixels = proj
             .to_screen(t.center)
             .zip(proj.to_screen(t.center + right))
-            .map_or(1.0, |(a, b)| solidcore_ops::forms_view_queries::pixel_distance(a.into(), b.into()).max(1e-6));
+            .map_or(1.0, |(a, b)| solidcraft_kernel::services::forms_view_queries::pixel_distance(a.into(), b.into()).max(1e-6));
         app.forms_prototype.gizmo_drag = Some(Drag {
             indices: targets.indices,
             points: targets.points,
@@ -1083,10 +1083,12 @@ fn show_gizmo(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, pr
             .zip(&d.weights)
             .map(|(&p, &weight)| {
                 let q = match readout {
-                    transform_feedback::Value::Scale(factors) => solidcore_ops::form_transform::scale(p, d.anchor, d.basis, factors, weight),
-                    transform_feedback::Value::Move(delta) => solidcore_ops::form_transform::translate(p, delta, weight),
+                    transform_feedback::Value::Scale(factors) => {
+                        solidcraft_kernel::services::form_transform::scale(p, d.anchor, d.basis, factors, weight)
+                    }
+                    transform_feedback::Value::Move(delta) => solidcraft_kernel::services::form_transform::translate(p, delta, weight),
                     transform_feedback::Value::Rotate { axis, angle } => {
-                        solidcore_ops::form_transform::rotate(p, d.anchor, d.basis[axis], angle, weight)?
+                        solidcraft_kernel::services::form_transform::rotate(p, d.anchor, d.basis[axis], angle, weight)?
                     }
                 };
                 Some([q.x, q.y, q.z])
@@ -1176,7 +1178,11 @@ fn displacement(d: &Drag, pos: Pos2) -> Option<Vec3> {
         if screen.length_sq() < 1.0 {
             return None;
         }
-        Some(axis * f64::from(solidcore_ops::forms_view_queries::pixel_component((pos - d.start).into(), screen.into()) / screen.length_sq()) * 10.0)
+        Some(
+            axis * f64::from(
+                solidcraft_kernel::services::forms_view_queries::pixel_component((pos - d.start).into(), screen.into()) / screen.length_sq(),
+            ) * 10.0,
+        )
     } else {
         let hit = |at| crate::gizmo::on_plane(&d.proj, at, d.anchor, d.proj.cam.back());
         Some(hit(pos)? - hit(d.start)?)
@@ -1244,7 +1250,7 @@ fn pull_with_modifiers(app: &mut SolveApp, pos: Pos2, mods: egui::Modifiers) {
         .iter()
         .zip(&d.weights)
         .map(|(&p, &weight)| {
-            let q = solidcore_ops::form_transform::translate(p, delta, weight);
+            let q = solidcraft_kernel::services::form_transform::translate(p, delta, weight);
             [q.x, q.y, q.z]
         })
         .collect();
@@ -2420,7 +2426,7 @@ mod tests {
                 .iter()
                 .zip(&targets.weights)
                 .map(|(&p, &w)| {
-                    let p = solidcore_ops::form_transform::translate(p, Vec3::Z * distance, w);
+                    let p = solidcraft_kernel::services::form_transform::translate(p, Vec3::Z * distance, w);
                     [p.x, p.y, p.z]
                 })
                 .collect();
@@ -2460,7 +2466,7 @@ mod tests {
             .iter()
             .zip(&targets.weights)
             .map(|(&p, &w)| {
-                let q = solidcore_ops::form_transform::translate(p, Vec3::Z * 0.1, w);
+                let q = solidcraft_kernel::services::form_transform::translate(p, Vec3::Z * 0.1, w);
                 [q.x, q.y, q.z]
             })
             .collect();

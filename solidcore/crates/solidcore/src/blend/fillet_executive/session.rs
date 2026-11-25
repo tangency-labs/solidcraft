@@ -391,9 +391,13 @@ struct SessionObjects<'target> {
     /// session took them, put back by `Drop` if handing the session's back fails.
     attributes_before: (AttributeStore, AttributeStore),
     merge_attributes: Option<Vec<AttributeHandle>>,
-    /// WR-459: the target's edges, each with its end vertices, and faces before filleting,
-    /// kept by the clean-up.
-    cleanup_kept: Option<(CleanupKeptEdges, BTreeSet<FaceId>)>,
+    /// WR-459: the target's edges, each with its end vertices, before filleting, kept by
+    /// the clean-up.
+    cleanup_kept: Option<CleanupKeptEdges>,
+    /// WR-459 (#17169): the marks ([`ids::FILLET_TARGET_FACE`]) the session set on the
+    /// target's faces before filleting, which the clean-up reads to leave the target's own
+    /// faces, and which are removed when filleting ends.
+    cleanup_face_marks: Vec<AttributeHandle>,
     /// WR-661: the target's boundary (lamina edges) and faces before filleting, which an
     /// open result must keep to be kept ([`finish::OpenInput`]).
     open_input: finish::OpenInput,
@@ -406,9 +410,9 @@ struct SessionObjects<'target> {
     target_serial: u64,
     self_intersection_handler: Option<MakeSurfaceBlendSih>,
     curve_blend_self_intersection_handler: Option<MakeCurveBlendSih>,
-    /// The fork's `m_bSweptTurns` (`SetSweptTurns`; WR-697): a blend corner's Turn is
-    /// Swept, not Mitred.
-    swept_turns: bool,
+    /// How a blend corner's Turn is made ([`FilletSession::set_turns`]; the fork's
+    /// `m_bSweptTurns`, WR-697, is [`TurnChoice::Swept`]).
+    turns: crate::blend::blend_corner::TurnChoice,
     /// Not upstream (#10876): note the blend corner's Roll-over corners the corners step
     /// refuses ([`FilletSession::set_roll_over_classify`]).
     roll_over_classify: bool,
@@ -893,7 +897,9 @@ impl crate::blend::blend_corner::chamfer::ChamferSolvers for SweptSessionSolvers
             SolverObject::ConstantRadius(s) if !FilletSolverOps::offset_radii_can_change(&**s)? => {
                 Some(ChamferSizeKind::Offsets)
             }
-            SolverObject::ConstantDistance(s) => Some(ChamferSizeKind::Chord(s.distance())),
+            SolverObject::ConstantDistance(s) if s.solver.station_setback().is_none() => {
+                Some(ChamferSizeKind::Chord(s.distance()))
+            }
             _ => None,
         };
         Ok(Some((slot.base(), size)))
@@ -1847,6 +1853,7 @@ impl<'target> FilletSession<'target> {
                 attributes_before,
                 merge_attributes: None,
                 cleanup_kept: None,
+                cleanup_face_marks: Vec::new(),
                 open_input: finish::OpenInput::default(),
                 vertices_before: BTreeSet::new(),
                 extended_surfaces: BTreeMap::new(),
@@ -1854,7 +1861,7 @@ impl<'target> FilletSession<'target> {
                 target_serial,
                 self_intersection_handler: None,
                 curve_blend_self_intersection_handler: None,
-                swept_turns: false,
+                turns: crate::blend::blend_corner::TurnChoice::Mitre,
                 roll_over_classify: false,
                 roll_overs: Vec::new(),
                 roll_over_ends: Vec::new(),
@@ -2377,7 +2384,7 @@ impl<'target> FilletSession<'target> {
             target,
             solvers,
             corners,
-            swept_turns,
+            turns,
             set_back_vertices,
             chamfer_corner,
             set_back_fills,
@@ -2386,7 +2393,7 @@ impl<'target> FilletSession<'target> {
             roll_over_ends,
             ..
         } = &mut self.objects;
-        let swept_turns = *swept_turns;
+        let turns = *turns;
         let roll_over_classify = *roll_over_classify;
         let roll_over_ends = &*roll_over_ends;
         let chamfer_corner = *chamfer_corner;
@@ -2664,16 +2671,18 @@ impl<'target> FilletSession<'target> {
                     });
                 }
                 // The fork's (WR-697, e647dac): with GetSweptTurns() a blend corner's
-                // Turn is Swept, or refused with its reason (SmBlendCorner::Classify)
+                // Turn is Swept, or refused with its reason (SmBlendCorner::Classify); with
+                // Auto (not upstream) it is Swept where that classification builds it and
+                // stays Mitred where it does not
                 if let Some(blend) = corner.blend.as_mut().filter(|blend| {
-                    swept_turns && blend.event == crate::blend::blend_corner::BlendCornerEvent::Turn
+                    turns != crate::blend::blend_corner::TurnChoice::Mitre
+                        && blend.event == crate::blend::blend_corner::BlendCornerEvent::Turn
                 }) {
-                    blend.turn = crate::blend::blend_corner::BlendTurn::Swept;
                     let lookup = SweptSessionSolvers {
                         solvers: solvers.as_slice(),
                         executive: Some(executive),
                     };
-                    if let Some(refusal) = crate::blend::blend_corner::swept::classify_swept(
+                    let refusal = crate::blend::blend_corner::swept::classify_swept(
                         k,
                         target,
                         vertex,
@@ -2681,7 +2690,12 @@ impl<'target> FilletSession<'target> {
                         corner.all_eus.as_deref().unwrap_or_default(),
                         crate::math::rad_to_deg(corner.tangency_tol_radians),
                         &lookup,
-                    )? {
+                    )?;
+                    match refusal {
+                        None => blend.turn = crate::blend::blend_corner::BlendTurn::Swept,
+                        // Auto: the Turn the Swept construction does not build is Mitred
+                        Some(_) if turns == crate::blend::blend_corner::TurnChoice::Auto => {}
+                        Some(refusal) => {
                         let location = crate::topology::vertex::point(target, vertex).ok();
                         return Ok(CornerCreation::Refused {
                             location,
@@ -2692,6 +2706,7 @@ impl<'target> FilletSession<'target> {
                             }),
                             fit: None,
                         });
+                    }
                     }
                 }
                 let id = FilletCornerId(
@@ -3064,7 +3079,19 @@ impl<'target> FilletSession<'target> {
     /// turn the blend corner does not build is refused with its reason. Set it before
     /// [`Self::do_fillet`] (the corners are made there).
     pub fn set_swept_turns(&mut self, swept: bool) {
-        self.objects.swept_turns = swept;
+        self.set_turns(if swept {
+            crate::blend::blend_corner::TurnChoice::Swept
+        } else {
+            crate::blend::blend_corner::TurnChoice::Mitre
+        });
+    }
+
+    /// How the blend corners' Turns are made ([`crate::blend::blend_corner::TurnChoice`]):
+    /// Mitred (the default), Swept (refused where the Swept construction does not build, as
+    /// [`Self::set_swept_turns`]), or Auto, each Turn Swept where it builds and Mitred where
+    /// not. Set it before [`Self::do_fillet`] (the corners are made there).
+    pub fn set_turns(&mut self, turns: crate::blend::blend_corner::TurnChoice) {
+        self.objects.turns = turns;
     }
 
     /// Not upstream (#10876): note the blend corner's Roll-over corners

@@ -66,7 +66,7 @@ impl SelectionGuides {
             Self::Native(native) => {
                 let inverse = crate::mat_inverse(&old.matrix()).ok_or_else(|| DocError::Invalid("invalid native guide placement".into()))?;
                 let matrix = crate::mat_mul(&new.matrix(), &inverse);
-                if solidcraft_geom::brep::placement::Rigid::of_matrix(&matrix).is_none() {
+                if solidcraft_kernel::services::Rigid::of_matrix(&matrix).is_none() {
                     return Err(DocError::Invalid("exact native guide placement requires the topology-preserving rigid path".into()));
                 }
                 let body = kernel::transform_matrix(&native.body, matrix)?;

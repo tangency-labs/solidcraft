@@ -26,7 +26,9 @@ pub(super) fn visible(app: &SolveApp, proj: &Proj, point: Vec3) -> bool {
     // A subpixel depth bias must not hide every surface point or curved boundary.
     let fit = controls::tolerance(app).unwrap_or(0.01);
     let (near, _) = proj.ray(p + egui::vec2(2.0, 0.0));
-    let Some(visibility) = solidcore_ops::forms_view_queries::visibility(point, o, d, near, fit, proj.cam.fov > 0.0) else { return false };
+    let Some(visibility) = solidcraft_kernel::services::forms_view_queries::visibility(point, o, d, near, fit, proj.cam.fov > 0.0) else {
+        return false;
+    };
     let hit = if let Some((mesh, index)) = live_cad::occlusion(app) {
         index.face_hit(mesh, o, d)
     } else {
@@ -56,7 +58,8 @@ pub(super) fn nearest_with(app: &SolveApp, proj: &Proj, pos: Pos2, mode: Pick) -
                 let p = control_position(app, i, p)?;
                 let q = proj.to_screen(p)?;
                 let distance = q.distance_sq(pos);
-                (distance < 100.0 && visible(app, proj, p)).then(|| (distance, solidcore_ops::forms_view_queries::distance2(p, proj.cam.eye()), i))
+                (distance < 100.0 && visible(app, proj, p))
+                    .then(|| (distance, solidcraft_kernel::services::forms_view_queries::distance2(p, proj.cam.eye()), i))
             })
             .collect();
         candidates.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
@@ -76,7 +79,7 @@ pub(super) fn nearest_with(app: &SolveApp, proj: &Proj, pos: Pos2, mode: Pick) -
                 let curve = boundary_curve(app, i, initial);
                 for segment in curve.windows(2) {
                     let Some((distance2, point)) =
-                        solidcore_ops::forms_view_queries::segment_hit(projection, [pos.x, pos.y], [segment[0], segment[1]])
+                        solidcraft_kernel::services::forms_view_queries::segment_hit(projection, [pos.x, pos.y], [segment[0], segment[1]])
                     else {
                         continue;
                     };

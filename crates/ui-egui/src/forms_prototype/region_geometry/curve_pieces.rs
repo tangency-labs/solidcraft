@@ -16,7 +16,7 @@ pub(super) struct BezierPiece {
 /// general B-spline span's controls as a Bezier polygon.
 /// The budget is shared with projection and region classification by the caller.
 pub(super) fn bezier_pieces(curve: &CurveN<4>, remaining: &mut usize) -> Result<Vec<BezierPiece>, &'static str> {
-    solidcore_ops::form_guide_curves::bezier_pieces(curve.degree, &curve.knots, &curve.ctrl, remaining).map(|pieces| {
+    solidcraft_kernel::services::form_guide_curves::bezier_pieces(curve.degree, &curve.knots, &curve.ctrl, remaining).map(|pieces| {
         pieces
             .into_iter()
             .map(|piece| BezierPiece {

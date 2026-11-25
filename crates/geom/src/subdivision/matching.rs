@@ -233,8 +233,10 @@ pub fn quadratic_extension(cage: &Cage) -> Result<Cage> {
     let mut out = cage.clone();
     let start = out.points.len();
     for ((&v, &a), &b) in ring.iter().zip(&inner).zip(&second) {
-        out.points
-            .push(solidcore_ops::form_match::quadratic_extension(cage.point(v)?, cage.point(a)?, cage.point(b)?).map_err(|e| bad(&e.to_string()))?);
+        out.points.push(
+            solidcraft_kernel_services::form_match::quadratic_extension(cage.point(v)?, cage.point(a)?, cage.point(b)?)
+                .map_err(|e| bad(&e.to_string()))?,
+        );
     }
     for i in 0..ring.len() {
         let next = (i + 1) % ring.len();
@@ -358,7 +360,7 @@ fn score(r: &Report, c: &Config) -> f64 {
     score.sqrt()
 }
 fn closest(point: Vec3, station: &Station, at: impl Fn(f64) -> Result<Target>) -> Result<Target> {
-    solidcore_ops::form_match::closest(point, station.interval, at, |target| target.point)
+    solidcraft_kernel_services::form_match::closest(point, station.interval, at, |target| target.point)
 }
 struct CheckContext<'a, F> {
     stations: &'a [Station],
@@ -372,13 +374,16 @@ fn measure<F: Fn(f64) -> Result<Target>>(jets: &[SurfaceJet], check: &CheckConte
     let config = check.config;
     let mut out = Report { position_mm: 0.0, tangent_deg: 0.0, curvature_relative: 0.0, iterations, controls: check.controls };
     for ((jet, original_target), station) in jets.iter().zip(check.targets).zip(check.stations) {
-        let target = if station.vertex || solidcore_ops::form_match::retain_station(jet.point, original_target.point, config.tolerances.position_mm) {
+        let target = if station.vertex
+            || solidcraft_kernel_services::form_match::retain_station(jet.point, original_target.point, config.tolerances.position_mm)
+        {
             *original_target
         } else {
             closest(jet.point, station, check.at)?
         };
-        let convert = |j: &SurfaceJet| solidcore_ops::form_match::Jet { point: j.point, du: j.du, dv: j.dv, duu: j.duu, duv: j.duv, dvv: j.dvv };
-        let target = solidcore_ops::form_match::Target {
+        let convert =
+            |j: &SurfaceJet| solidcraft_kernel_services::form_match::Jet { point: j.point, du: j.du, dv: j.dv, duu: j.duu, duv: j.duv, dvv: j.dvv };
+        let target = solidcraft_kernel_services::form_match::Target {
             corner: target.corner,
             point: target.point,
             tangent: target.tangent,
@@ -386,7 +391,7 @@ fn measure<F: Fn(f64) -> Result<Target>>(jets: &[SurfaceJet], check: &CheckConte
             support: convert(&target.support),
         };
         let [position, tangent, curvature] =
-            solidcore_ops::form_match::residual(convert(jet), target, config.order, check.diagonal).map_err(|e| bad(&e.to_string()))?;
+            solidcraft_kernel_services::form_match::residual(convert(jet), target, config.order, check.diagonal).map_err(|e| bad(&e.to_string()))?;
         out.position_mm = out.position_mm.max(position);
         out.tangent_deg = out.tangent_deg.max(tangent);
         out.curvature_relative = out.curvature_relative.max(curvature);

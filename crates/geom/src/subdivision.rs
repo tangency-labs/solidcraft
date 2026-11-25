@@ -16,7 +16,7 @@ pub mod stable_extrusion;
 pub mod symmetry;
 pub mod topology_tools;
 
-pub use solidcore_ops::form_cage::{MAX_FACES, MAX_POINTS};
+pub use solidcraft_kernel_services::form_cage::{MAX_FACES, MAX_POINTS};
 pub const MAX_LEVELS: usize = 4;
 // CAD fitting evaluates a denser grid without exposing it as an editable cage or GPU preview.
 const MAX_EVAL_FACES: usize = 500_000;
@@ -220,14 +220,14 @@ impl Cage {
         let edges: Vec<_> = t
             .edges
             .iter()
-            .map(|edge| solidcore_ops::form_subdivision::StepEdge {
+            .map(|edge| solidcraft_kernel_services::form_subdivision::StepEdge {
                 vertices: [edge.a, edge.b],
                 faces: [edge.faces.first().copied(), edge.faces.get(1).copied()],
                 sharpness: sharp.get(&key(edge.a, edge.b)).copied().unwrap_or(0.0),
             })
             .collect();
         let corners: Vec<_> = (0..self.points.len()).map(|vertex| vertex_sharp.get(&vertex).copied().unwrap_or(0.0)).collect();
-        let points = solidcore_ops::form_subdivision::step_points(&self.points, &self.faces, &edges, &t.incident, &corners)
+        let points = solidcraft_kernel_services::form_subdivision::step_points(&self.points, &self.faces, &edges, &t.incident, &corners)
             .map_err(|e| bad(&e.to_string()))?;
         let edge_start = self.points.len();
         let face_start = edge_start + t.edges.len();
@@ -242,7 +242,7 @@ impl Cage {
                 faces.push(vec![v, edge_start + a, face_start + fi, edge_start + b]);
             }
         }
-        let decay = solidcore_ops::form_subdivision::decay_sharpness;
+        let decay = solidcraft_kernel_services::form_subdivision::decay_sharpness;
         let mut edge_creases = Vec::new();
         for c in &self.edge_creases {
             let s = decay(c.sharpness);
@@ -313,7 +313,8 @@ impl Cage {
                 mesh.push_triangle(tri.map(|v| v as u32), roots.get(fi).copied().ok_or_else(|| bad("missing logical face"))? as u32);
             }
         }
-        mesh.normals = solidcore_ops::form_subdivision::vertex_normals(&mesh.positions, mesh.triangle_indices()).map_err(|e| bad(&e.to_string()))?;
+        mesh.normals = solidcraft_kernel_services::form_subdivision::vertex_normals(&mesh.positions, mesh.triangle_indices())
+            .map_err(|e| bad(&e.to_string()))?;
         let index = crate::MeshIndex::new(&mesh);
         Ok(SurfacePreview { mesh, vertices, boundaries, index })
     }
@@ -349,11 +350,17 @@ pub fn primitive(kind: &str, size: f64, spans: usize) -> Result<Cage> {
     if !matches!(kind, "box" | "plane" | "sphere") {
         return Err(bad("unknown primitive"));
     }
-    use solidcore_ops::form_cage::{CageGeometry, Primitive};
+    use solidcraft_kernel_services::form_cage::{CageGeometry, Primitive};
     let CageGeometry { points, faces } = if kind == "sphere" {
-        solidcore_ops::form_cage::radial_box(size, spans)
+        solidcraft_kernel_services::form_cage::radial_box(size, spans)
     } else {
-        solidcore_ops::form_cage::build(if kind == "plane" { Primitive::Plane } else { Primitive::Box }, [size; 3], [spans; 3], [0.0; 2], &[])
+        solidcraft_kernel_services::form_cage::build(
+            if kind == "plane" { Primitive::Plane } else { Primitive::Box },
+            [size; 3],
+            [spans; 3],
+            [0.0; 2],
+            &[],
+        )
     }
     .map_err(|e| bad(&e.to_string()))?;
     let cage = Cage { points, faces, ..Default::default() };

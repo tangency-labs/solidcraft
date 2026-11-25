@@ -1,6 +1,6 @@
 //! Map topology-qualified control responses to SolidCore Match constraints.
 use super::*;
-use solidcore_ops::form_match as kernel;
+use solidcraft_kernel_services::form_match as kernel;
 
 pub(super) struct Response {
     values: Vec<Vec<[f64; 6]>>,

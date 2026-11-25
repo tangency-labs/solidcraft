@@ -952,7 +952,7 @@ pub(super) fn pointer(app: &mut SolveApp, ui: &egui::Ui, proj: &Proj, input: &cr
                                     .filter_map(|p| {
                                         let a = proj.to_screen(p[0])?;
                                         let b = proj.to_screen(p[1])?;
-                                        Some(solidcore_ops::forms_view_queries::pixel_segment_distance(pos.into(), a.into(), b.into()))
+                                        Some(solidcraft_kernel::services::forms_view_queries::pixel_segment_distance(pos.into(), a.into(), b.into()))
                                     })
                                     .min_by(f32::total_cmp)?;
                                 (distance < 10.0).then_some((distance, index))

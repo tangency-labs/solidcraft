@@ -254,7 +254,7 @@ pub(super) fn apply(object: View<'_, '_>, mesh: View<'_, '_>, points: &mut [Vec3
                 continue;
             }
             for (i, p) in points.iter_mut().enumerate() {
-                *p = solidcore_ops::mesh_edit::deform(*p, point(numbers, &keys[key], i)?, Vec3::ZERO, weight)
+                *p = solidcraft_kernel::services::mesh_edit::deform(*p, point(numbers, &keys[key], i)?, Vec3::ZERO, weight)
                     .ok_or_else(|| bad("non-finite absolute shape-key result"))?;
             }
         }
@@ -291,7 +291,7 @@ pub(super) fn apply(object: View<'_, '_>, mesh: View<'_, '_>, points: &mut [Vec3
         for (i, p) in points.iter_mut().enumerate() {
             let weight = influence * mask.map_or(1.0, |weights| weights[i]);
             if weight != 0.0 {
-                *p = solidcore_ops::mesh_edit::deform(*p, point(numbers, key, i)?, point(numbers, reference, i)?, weight)
+                *p = solidcraft_kernel::services::mesh_edit::deform(*p, point(numbers, key, i)?, point(numbers, reference, i)?, weight)
                     .ok_or_else(|| bad("non-finite relative shape-key result"))?;
             }
         }

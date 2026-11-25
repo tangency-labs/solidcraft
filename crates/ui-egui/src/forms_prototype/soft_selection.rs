@@ -1,6 +1,6 @@
 //! Proportional transforms use authored logical adjacency and evaluated world points.
 use super::*;
-use solidcore_ops::form_transform::MAX_WEIGHT_POINTS;
+use solidcraft_kernel::services::form_transform::MAX_WEIGHT_POINTS;
 use solidcraft_ui_kit::BackingTooltipExt as _;
 use std::collections::BTreeMap;
 
@@ -66,8 +66,8 @@ pub(super) fn weights(
     radius: f64,
     kind: usize,
 ) -> Result<BTreeMap<usize, f64>, String> {
-    use solidcore_ops::form_transform::WeightError;
-    solidcore_ops::form_transform::weights(points, faces, seeds, editable, locked, radius, kind).map_err(|error| {
+    use solidcraft_kernel::services::form_transform::WeightError;
+    solidcraft_kernel::services::form_transform::weights(points, faces, seeds, editable, locked, radius, kind).map_err(|error| {
         message(match error {
             WeightError::InvalidRadius => "forms.soft.invalid_radius",
             WeightError::InvalidSource => "forms.soft.invalid_source",

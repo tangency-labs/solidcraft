@@ -6,9 +6,10 @@
 //! [`solidcore::Transform::uniform_scaling`], [`solidcore::Transform::reflection`],
 //! [`solidcore::Transform::concat`], [`solidcore::Transform::inverse`]); ops checks the
 //! numbers and passes them on. Beside them, how far a point or a box reaches along a direction
-//! ([`distance_along`], [`span_along`]), as the kernel measures it, a point under a map
-//! ([`apply_point`]), the quads a pinned picture is drawn on ([`picture_frame`],
-//! [`lifted_quad`], [`parallelogram_point`]), and a direction turned to the sense of another
+//! ([`distance_along`], [`span_along`]), whether a forward ray meets a padded box
+//! ([`ray_meets_box`]), as the kernel measures it, a point under a map
+//! ([`apply_point`]), parallelograms on a plane ([`rect_of_aspect`], [`fit_aspect`],
+//! [`offset_quad`], [`parallelogram_point`]), and a direction turned to the sense of another
 //! ([`same_sense`]).
 
 use solidcore::geom::affine_fit;
@@ -59,6 +60,28 @@ pub fn rotation(point: [f64; 3], axis: [f64; 3], angle: f64) -> Result<Matrix> {
     taken(Transform::rotation(vec3(point), vec3(axis), angle))
 }
 
+/// Whether a map is a rotation or reflection and a translation, with the caller's
+/// axis and homogeneous-entry tolerances. Non-finite maps or invalid tolerances are false.
+pub fn is_rigid(matrix: &Matrix, axis_tol: f64, affine_tol: f64) -> bool {
+    Transform { m: *matrix }.is_rigid(axis_tol, affine_tol)
+}
+
+/// The change between two source placements in a sketch's orthonormal plane frame.
+/// Returns none for an unchanged map, a singular source frame, a tilt or an in-plane
+/// reflection. A normal translation does not change the projected shape.
+pub fn projection_motion(
+    seen: &Matrix,
+    now: &Matrix,
+    origin: [f64; 3],
+    x: [f64; 3],
+    y: [f64; 3],
+) -> Option<([[f64; 2]; 2], [f64; 2])> {
+    let inverse = Transform { m: *seen }.inverse().ok()?;
+    let moved = inverse.concat(&Transform { m: *now });
+    let (a, b) = moved.plane_motion(vec3(origin), vec3(x), vec3(y), 1e-9, 1e-12)?;
+    Some((a, b.to_array()))
+}
+
 /// The orthonormal axes along `x` and in the plane of `x` and `y` (on `y`'s side),
 /// using the kernel's [`Transform::orthonormal_frame`]. If `y` is parallel to `x` or has
 /// no length, the kernel chooses a perpendicular direction. This restores a unit frame after
@@ -72,6 +95,28 @@ pub fn orthonormal_axes(x: [f64; 3], y: [f64; 3]) -> Result<[[f64; 3]; 2]> {
     }
     let [x, y] = Transform::orthonormal_frame(vec3(x), vec3(y)).map_err(|_| Error::Argument)?;
     Ok([[x.x, x.y, x.z], [y.x, y.y, y.z]])
+}
+
+/// A plane's axes `x` and `y` with the coordinates smaller than `noise` dropped, each unit
+/// again, through [`Transform::axis_squared_frame`]: a flat face's plane, tilted only by
+/// rounding, made exactly square to the world axes it lies along. `None` when the kernel finds
+/// nothing sound to give (axes not finite, of no length or parallel once cleaned, or a bad
+/// `noise`); the caller keeps its own axes then.
+pub fn axis_squared_axes(x: [f64; 3], y: [f64; 3], noise: f64) -> Option<[[f64; 3]; 2]> {
+    let [x, y] = Transform::axis_squared_frame(vec3(x), vec3(y), noise)?;
+    Some([[x.x, x.y, x.z], [y.x, y.y, y.z]])
+}
+
+/// Signed angle about unit `normal`, from unit `start` to unit `end`, in radians.
+/// Calls [`Vec3::signed_unit_angle`], including its positive choice for a half turn.
+///
+/// # Errors
+/// [`Error::Refused`] for non-finite, non-unit or non-perpendicular directions,
+/// retaining the kernel routine and reason.
+pub fn signed_unit_angle(normal: [f64; 3], start: [f64; 3], end: [f64; 3]) -> Result<f64> {
+    vec3(normal)
+        .signed_unit_angle(vec3(start), vec3(end))
+        .map_err(crate::error::status)
 }
 
 /// Carry planar axes by a rigid `matrix`, keeping UV scales and keeping square source
@@ -258,19 +303,19 @@ pub fn apply_point(matrix: &Matrix, point: [f64; 3]) -> [f64; 3] {
     p
 }
 
-/// The corners of a picture pinned to points of a plane, in that plane's coordinates, through
-/// [`solidcore::math::picture_frame`]: its bottom edge from `bl` to `br`, its top-left corner
+/// The corners of a parallelogram on a plane, in that plane's coordinates, through
+/// [`solidcore::math::rect_of_aspect`]: its bottom edge from `bl` to `br`, its top-left corner
 /// `top_left` when it may stretch, else `aspect` (height over width) times as high as wide with
 /// its top on the left of the bottom edge. Bottom-left, bottom-right, top-right, top-left;
 /// `None` for corners that give no area.
-pub fn picture_frame(
+pub fn rect_of_aspect(
     bl: [f64; 2],
     br: [f64; 2],
     top_left: Option<[f64; 2]>,
     aspect: f64,
 ) -> Option<[[f64; 2]; 4]> {
     let on = |[x, y]: [f64; 2]| Vec3::new(x, y, 0.0);
-    let corners = solidcore::math::picture_frame(
+    let corners = solidcore::math::rect_of_aspect(
         on(bl),
         on(br),
         top_left.map(on),
@@ -280,23 +325,23 @@ pub fn picture_frame(
     Some(corners.map(|p| [p.x, p.y]))
 }
 
-/// How a picture `aspect` (height over width) times as high as wide fits a frame pinned at `bl`,
-/// `br` and `tl`, through [`solidcore::math::picture_fit`]: its width, and whether the frame
+/// How a rectangle `aspect` (height over width) times as high as wide fits a frame pinned at `bl`,
+/// `br` and `tl`, through [`solidcore::math::fit_aspect`]: its width, and whether the frame
 /// stretches it. `None` for a frame with no area.
-pub fn picture_fit(bl: [f64; 3], br: [f64; 3], tl: [f64; 3], aspect: f64) -> Option<(f64, bool)> {
-    solidcore::math::picture_fit(vec3(bl), vec3(br), vec3(tl), aspect)
+pub fn fit_aspect(bl: [f64; 3], br: [f64; 3], tl: [f64; 3], aspect: f64) -> Option<(f64, bool)> {
+    solidcore::math::fit_aspect(vec3(bl), vec3(br), vec3(tl), aspect)
 }
 
-/// A quad's unit normal, its corners lifted along that normal and its corners lifted against it,
-/// as [`lifted_quad`] returns them.
-pub type LiftedQuad = ([f64; 3], [[f64; 3]; 4], [[f64; 3]; 4]);
+/// A quad's unit normal, its corners moved along that normal and its corners moved against it,
+/// as [`offset_quad`] returns them.
+pub type OffsetQuad = ([f64; 3], [[f64; 3]; 4], [[f64; 3]; 4]);
 
-/// A quad lifted `lift` clear of its own plane on both sides, through
-/// [`solidcore::math::lifted_quad`]: the quad's unit normal (bottom edge cross left edge), its
+/// A quad offset `lift` from its own plane on both sides, through
+/// [`solidcore::math::offset_quad`]: the quad's unit normal (bottom edge cross left edge), its
 /// corners moved `lift` along that normal and its corners moved `lift` against it. `None` for
 /// numbers not finite or corners with no area.
-pub fn lifted_quad(corners: [[f64; 3]; 4], lift: f64) -> Option<LiftedQuad> {
-    let (n, front, back) = solidcore::math::lifted_quad(corners.map(vec3), lift)?;
+pub fn offset_quad(corners: [[f64; 3]; 4], lift: f64) -> Option<OffsetQuad> {
+    let (n, front, back) = solidcore::math::offset_quad(corners.map(vec3), lift)?;
     let arr = |p: Vec3| [p.x, p.y, p.z];
     Some((arr(n), front.map(arr), back.map(arr)))
 }
@@ -331,14 +376,38 @@ pub fn span_along(
     Ok(span)
 }
 
+/// Whether the forward ray from `origin` along `direction` (`t >= 0`) meets the box from `min` to
+/// `max` inflated by a conservative margin derived from its size and `tolerance`, through
+/// [`Extent3d::meets_ray`]. Conservative on non-finite inputs (returns `true`).
+#[must_use]
+pub fn ray_meets_box(
+    min: [f64; 3],
+    max: [f64; 3],
+    origin: [f64; 3],
+    direction: [f64; 3],
+    tolerance: f64,
+) -> bool {
+    let [min_x, min_y, min_z] = min;
+    let [max_x, max_y, max_z] = max;
+    Extent3d::from_bounds(min_x, min_y, min_z, max_x, max_y, max_z).meets_ray(
+        vec3(origin),
+        vec3(direction),
+        tolerance,
+    )
+}
+
 /// The axis-aligned box around the corners of the box `lo`..`hi` moved by `matrix`, through
-/// [`Transform::moved_box`]: it holds the moved box, a little larger for a turn. An empty box
+/// [`Transform::transformed_box`]: it holds the moved box, a little larger for a turn. An empty box
 /// (`lo` above `hi` on an axis) comes back as it is.
 ///
 /// # Errors
 /// [`Error::Argument`] for a matrix with a number not finite, a NaN bound (an empty box's
 /// too), or a corner of a non-empty box that is not finite or does not map to finite numbers.
-pub fn moved_box(matrix: &Matrix, lo: [f64; 3], hi: [f64; 3]) -> Result<([f64; 3], [f64; 3])> {
+pub fn transformed_box(
+    matrix: &Matrix,
+    lo: [f64; 3],
+    hi: [f64; 3],
+) -> Result<([f64; 3], [f64; 3])> {
     if !finite(matrix.as_flattened()) || lo.iter().chain(&hi).any(|v| v.is_nan()) {
         return Err(Error::Argument);
     }
@@ -348,7 +417,7 @@ pub fn moved_box(matrix: &Matrix, lo: [f64; 3], hi: [f64; 3]) -> Result<([f64; 3
     if !finite(&lo) || !finite(&hi) {
         return Err(Error::Argument);
     }
-    let (a, b) = Transform { m: *matrix }.moved_box(vec3(lo), vec3(hi));
+    let (a, b) = Transform { m: *matrix }.transformed_box(vec3(lo), vec3(hi));
     let (a, b) = ([a.x, a.y, a.z], [b.x, b.y, b.z]);
     if !finite(&a) || !finite(&b) {
         return Err(Error::Argument);
@@ -383,9 +452,78 @@ pub fn same_sense(direction: [f64; 3], like: [f64; 3]) -> Option<[f64; 3]> {
     Some([d.x, d.y, d.z])
 }
 
+/// Express a planar point in units of an axis-aligned chord, with its nose at x = 0, through the
+/// kernel's [`solidcore::prism::transform::chord_coordinates`].
+///
+/// # Errors
+/// [`crate::Error::Refused`] for a non-finite input, invalid chord or non-finite result.
+pub fn chord_coordinates(
+    point: solidcore_record::Vec2,
+    leading_x: f64,
+    trailing_x: f64,
+) -> Result<solidcore_record::Vec2> {
+    solidcore::prism::transform::chord_coordinates(
+        solidcore_convert::vec2(point),
+        leading_x,
+        trailing_x,
+    )
+    .map(solidcore_convert::record_vec2)
+    .map_err(crate::error::status)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A face's plane tilted by rounding comes back square to the axes; one tilted for real
+    /// keeps its axes; parallel axes give `None`.
+    #[test]
+    fn plane_axes_tilted_by_rounding_come_back_square() {
+        assert_eq!(
+            axis_squared_axes([1.0, 0.0, 2e-15], [0.0, 1.0, -1e-15], 1e-12),
+            Some([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+        );
+        assert_eq!(
+            axis_squared_axes([0.6, 0.0, 0.8], [0.0, 1.0, 0.0], 1e-12),
+            Some([[0.6, 0.0, 0.8], [0.0, 1.0, 0.0]])
+        );
+        assert_eq!(
+            axis_squared_axes([1.0, 0.0, 0.0], [1.0, 0.0, 0.0], 1e-12),
+            None
+        );
+    }
+
+    #[test]
+    fn projection_motion_undoes_seen_before_applying_now() {
+        let seen = translation([3.0, 4.0, 0.0]).unwrap();
+        let now = [
+            [0.0, 1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [10.0, 20.0, 0.0, 1.0],
+        ];
+        let motion = |seen: &Matrix, now: &Matrix| {
+            projection_motion(seen, now, [0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0])
+        };
+        let (a, b) = motion(&seen, &now).unwrap();
+        // Old point (3,4) is the source origin. It now projects to (10,20).
+        assert_eq!(a, [[0.0, -1.0], [1.0, 0.0]]);
+        assert_eq!(b, [14.0, 17.0]);
+        assert_eq!(
+            [
+                a[0][0] * 3.0 + a[0][1] * 4.0 + b[0],
+                a[1][0] * 3.0 + a[1][1] * 4.0 + b[1]
+            ],
+            [10.0, 20.0]
+        );
+        assert!(motion(&seen, &seen).is_none());
+        let mut singular = seen;
+        singular[0] = [0.0; 4];
+        assert!(motion(&singular, &now).is_none());
+        let mut hostile = now;
+        hostile[3][1] = f64::INFINITY;
+        assert!(motion(&seen, &hostile).is_none());
+    }
 
     #[test]
     fn a_direction_takes_the_sense_of_another_and_none_without_length() {
@@ -405,6 +543,30 @@ mod tests {
         assert_eq!(same_sense([0.0; 3], [0.0, 1.0, 0.0]), None);
         assert_eq!(same_sense([0.0, 1.0, 0.0], [0.0; 3]), None);
         assert_eq!(same_sense([f64::NAN, 1.0, 0.0], [0.0, 1.0, 0.0]), None);
+    }
+
+    #[test]
+    fn signed_unit_angle_keeps_the_axis_order_and_half_turn_direction() {
+        let (normal, start, end) = ([0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        assert_eq!(
+            signed_unit_angle(normal, start, end).unwrap(),
+            std::f64::consts::FRAC_PI_2
+        );
+        assert_eq!(
+            signed_unit_angle(normal, end, start).unwrap(),
+            -std::f64::consts::FRAC_PI_2
+        );
+        assert_eq!(
+            signed_unit_angle(normal, start, [-1.0, -5e-13, 0.0]).unwrap(),
+            std::f64::consts::PI
+        );
+        assert_eq!(
+            signed_unit_angle(start, normal, start),
+            Err(Error::Refused {
+                operation: "geom::vector3d::Vec3::signed_unit_angle",
+                reason: "expected unit directions perpendicular to a unit normal",
+            })
+        );
     }
 
     /// The mirror in the plane y = 0.
@@ -474,23 +636,23 @@ mod tests {
     }
 
     #[test]
-    fn a_moved_box_holds_the_moved_box_and_refuses_numbers_not_finite() {
+    fn transformed_box_holds_the_moved_box_and_refuses_numbers_not_finite() {
         let turn = then(
             &rotation([0.0; 3], [0.0, 0.0, 1.0], std::f64::consts::FRAC_PI_2).unwrap(),
             &translation([10.0, 20.0, 30.0]).unwrap(),
         )
         .unwrap();
-        let (lo, hi) = moved_box(&turn, [0.0; 3], [1.0, 2.0, 3.0]).unwrap();
+        let (lo, hi) = transformed_box(&turn, [0.0; 3], [1.0, 2.0, 3.0]).unwrap();
         assert!(near(lo, [8.0, 20.0, 30.0], 1e-12) && near(hi, [10.0, 21.0, 33.0], 1e-12));
         let empty = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
-        assert_eq!(moved_box(&turn, empty.0, empty.1).unwrap(), empty);
-        assert!(moved_box(&turn, [f64::NAN, 0.0, 0.0], [1.0; 3]).is_err());
+        assert_eq!(transformed_box(&turn, empty.0, empty.1).unwrap(), empty);
+        assert!(transformed_box(&turn, [f64::NAN, 0.0, 0.0], [1.0; 3]).is_err());
         // a NaN on one axis is refused even when another axis is reversed (empty)
-        assert!(moved_box(&IDENTITY, [1.0, f64::NAN, 0.0], [0.0, 1.0, 1.0]).is_err());
-        assert!(moved_box(&IDENTITY, [1.0, 0.0, 0.0], [0.0, 1.0, f64::NAN]).is_err());
+        assert!(transformed_box(&IDENTITY, [1.0, f64::NAN, 0.0], [0.0, 1.0, 1.0]).is_err());
+        assert!(transformed_box(&IDENTITY, [1.0, 0.0, 0.0], [0.0, 1.0, f64::NAN]).is_err());
         let mut bad = IDENTITY;
         bad[3][0] = f64::NAN;
-        assert!(moved_box(&bad, [0.0; 3], [1.0; 3]).is_err());
+        assert!(transformed_box(&bad, [0.0; 3], [1.0; 3]).is_err());
     }
 
     #[test]
@@ -585,49 +747,52 @@ mod tests {
     /// A picture 2:1 on a 40 mm bottom edge is 20 mm high, on the edge's left; a top-left point
     /// stretches it; corners on one line give none.
     #[test]
-    fn a_picture_frame_follows_its_bottom_edge_and_its_shape_or_top_corner() {
+    fn rect_of_aspect_follows_its_bottom_edge_and_its_shape_or_top_corner() {
         assert_eq!(
-            picture_frame([0.0, 0.0], [40.0, 0.0], None, 0.5),
+            rect_of_aspect([0.0, 0.0], [40.0, 0.0], None, 0.5),
             Some([[0.0, 0.0], [40.0, 0.0], [40.0, 20.0], [0.0, 20.0]])
         );
         assert_eq!(
-            picture_frame([0.0, 0.0], [40.0, 0.0], Some([0.0, 30.0]), 0.5),
+            rect_of_aspect([0.0, 0.0], [40.0, 0.0], Some([0.0, 30.0]), 0.5),
             Some([[0.0, 0.0], [40.0, 0.0], [40.0, 30.0], [0.0, 30.0]])
         );
-        assert_eq!(picture_frame([0.0, 0.0], [0.0, 0.0], None, 0.5), None);
+        assert_eq!(rect_of_aspect([0.0, 0.0], [0.0, 0.0], None, 0.5), None);
         assert_eq!(
-            picture_frame([0.0, 0.0], [40.0, 0.0], Some([20.0, 0.0]), 0.5),
+            rect_of_aspect([0.0, 0.0], [40.0, 0.0], Some([20.0, 0.0]), 0.5),
             None
         );
-        assert_eq!(picture_frame([f64::NAN, 0.0], [40.0, 0.0], None, 0.5), None);
+        assert_eq!(
+            rect_of_aspect([f64::NAN, 0.0], [40.0, 0.0], None, 0.5),
+            None
+        );
     }
 
     /// A 2:1 picture on a 40 mm edge in the XZ plane fits a frame 20 mm high, and one 30 mm high
     /// stretches it; a top-left corner on the bottom edge's line gives no frame.
     #[test]
-    fn a_picture_fits_a_frame_of_its_shape_and_a_taller_one_stretches_it() {
+    fn fit_aspect_fits_a_frame_of_its_shape_and_a_taller_one_stretches_it() {
         let (bl, br) = ([0.0, 0.0, 0.0], [40.0, 0.0, 0.0]);
         assert_eq!(
-            picture_fit(bl, br, [0.0, 0.0, 20.0], 0.5),
+            fit_aspect(bl, br, [0.0, 0.0, 20.0], 0.5),
             Some((40.0, false))
         );
         assert_eq!(
-            picture_fit(bl, br, [0.0, 0.0, 30.0], 0.5),
+            fit_aspect(bl, br, [0.0, 0.0, 30.0], 0.5),
             Some((40.0, true))
         );
-        assert_eq!(picture_fit(bl, br, [20.0, 0.0, 0.0], 0.5), None);
+        assert_eq!(fit_aspect(bl, br, [20.0, 0.0, 0.0], 0.5), None);
     }
 
     /// A 10 mm square at z = 5 lifted 0.2 mm: the front 0.2 mm above, the back 0.2 mm below.
     #[test]
-    fn a_lifted_quad_lies_either_side_of_its_plane() {
+    fn an_offset_quad_lies_either_side_of_its_plane() {
         let square = [
             [0.0, 0.0, 5.0],
             [10.0, 0.0, 5.0],
             [10.0, 10.0, 5.0],
             [0.0, 10.0, 5.0],
         ];
-        let (n, front, back) = lifted_quad(square, 0.2).unwrap();
+        let (n, front, back) = offset_quad(square, 0.2).unwrap();
         assert_eq!(n, [0.0, 0.0, 1.0]);
         assert!(front
             .iter()
@@ -637,8 +802,8 @@ mod tests {
             .iter()
             .zip(square)
             .all(|(b, s)| near(*b, [s[0], s[1], 4.8], 1e-12)));
-        assert_eq!(lifted_quad([[1.0, 1.0, 1.0]; 4], 0.2), None);
-        assert_eq!(lifted_quad(square, f64::NAN), None);
+        assert_eq!(offset_quad([[1.0, 1.0, 1.0]; 4], 0.2), None);
+        assert_eq!(offset_quad(square, f64::NAN), None);
         assert_eq!(
             parallelogram_point([1.0, 0.0, 0.0], [4.0, 0.0, 0.0], [0.0, 2.0, 0.0], 0.5, 0.25),
             [3.0, 0.5, 0.0]
@@ -670,5 +835,46 @@ mod tests {
             span_along([0.0; 3], [f64::MAX; 3], o, d),
             Err(Error::Argument)
         );
+    }
+
+    #[test]
+    fn ray_meets_box_handles_hits_misses_and_non_finite_inputs() {
+        let (min, max) = ([0.0, 0.0, 0.0], [10.0, 10.0, 10.0]);
+        assert!(ray_meets_box(
+            min,
+            max,
+            [5.0, 5.0, 50.0],
+            [0.0, 0.0, -1.0],
+            1e-6
+        ));
+        assert!(ray_meets_box(
+            min,
+            max,
+            [5.0, 5.0, 5.0],
+            [1.0, 0.0, 0.0],
+            1e-6
+        ));
+        assert!(!ray_meets_box(
+            min,
+            max,
+            [5.0, 5.0, 50.0],
+            [0.0, 0.0, 1.0],
+            1e-6
+        ));
+        assert!(!ray_meets_box(
+            min,
+            max,
+            [25.0, 5.0, 50.0],
+            [0.0, 0.0, -1.0],
+            1e-6
+        ));
+        let nan_min = [f64::NAN, 0.0, 0.0];
+        assert!(ray_meets_box(
+            nan_min,
+            max,
+            [5.0, 5.0, 50.0],
+            [0.0, 0.0, -1.0],
+            1e-6
+        ));
     }
 }

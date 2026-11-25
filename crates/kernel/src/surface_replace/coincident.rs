@@ -5,8 +5,8 @@
 //! is composed back to `[base, skin]`, including the 2D Boolean's edge tags.
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::services::pcurve::{EdgeUse, exact_pcurves};
 use solidcore_record::brep::{self as b};
-use solidcraft_geom::brep::pcurve::{EdgeUse, exact_pcurves};
 
 use crate::history::{Change, EdgeOrigin};
 use crate::surfaces::Parts;

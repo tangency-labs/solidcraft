@@ -9,13 +9,17 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+solidcraft-kernel-services = { workspace = true }
 solidcore-record = { workspace = true }
 solidcore-ops = { workspace = true }
 solidcore-tess = { workspace = true }
 solidcraft-geom = { workspace = true }
+solidcraft-kernel-api = { workspace = true }
 solidcraft-smlib = { workspace = true }
 solidcraft-profile = { workspace = true }
 solidcore-step = { workspace = true }
+# CADIR read and write, for io (`services::cadir`).
+solidcore-cadir = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

@@ -74,7 +74,7 @@ fn rechart_tensor_at_depth(
         let edge = record.edges.get(piece.edge)?;
         let edge_use = rim.iter().find(|edge_use| edge_use.edge as usize == piece.edge)?;
         let t = on_record(edge.interval[0], edge.interval[1], piece.interval, piece.forward, t);
-        solidcraft_geom::brep::pcurve::eval(&edge_use.pcurve, t)
+        crate::services::pcurve::eval(&edge_use.pcurve, t)
     };
     let attempted = rechart::fit(source, &edges, wire, &boundary_uv, tolerance).and_then(|(fill, deviation)| {
         let sheet = quilt_body(body, record, &pieces, &fill, face_tolerance(body))?;

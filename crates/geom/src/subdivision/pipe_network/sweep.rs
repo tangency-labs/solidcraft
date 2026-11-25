@@ -15,7 +15,7 @@ pub fn swept_path(points: &[Vec3], radius: f64, density: usize, closed: bool, ca
 }
 
 pub(super) fn tube(points: &[Vec3], radius: f64, density: usize, closed: bool, caps: [bool; 2]) -> Result<Sweep> {
-    let sweep = solidcore_ops::form_pipe::sweep(points, radius, density, closed, caps).map_err(|error| bad(&error.to_string()))?;
+    let sweep = solidcraft_kernel_services::form_pipe::sweep(points, radius, density, closed, caps).map_err(|error| bad(&error.to_string()))?;
     let cage = Cage { points: sweep.cage.points, faces: sweep.cage.faces, ..Default::default() };
     cage.validate()?;
     Ok(Sweep { cage, ends: sweep.ends, tangents: sweep.tangents })

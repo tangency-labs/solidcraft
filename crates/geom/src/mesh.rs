@@ -864,7 +864,7 @@ fn smooth_seam(mesh: &Mesh, i: usize, cos: f64) -> bool {
     sample.iter().all(|&q| matches!((normal_near(*a, q), normal_near(*b, q)), (Some(na), Some(nb)) if na.dot(nb) > cos))
 }
 
-pub(crate) use solidcore_ops::forms_view_queries::RayFrame;
+pub(crate) use solidcraft_kernel_services::forms_view_queries::RayFrame;
 
 /// Point-in-mesh queries in bulk: for each of `Mesh::contains`'s three ray directions, the
 /// triangles binned on a grid in the plane square to it, so a ray tests only the triangles
@@ -945,5 +945,5 @@ fn ray_crosses(a: Vec3, b: Vec3, c: Vec3, o: Vec3, dir: Vec3) -> bool {
 /// the half-open edge ownership above still decides shared-edge and shared-vertex crossings.
 fn ray_meets_triangle_bounds(a: Vec3, b: Vec3, c: Vec3, o: Vec3, dir: Vec3) -> bool {
     let coordinates = |p: Vec3| [p.x, p.y, p.z];
-    solidcore_ops::ray_tensor::ray_meets_triangle_bounds([a, b, c].map(coordinates), coordinates(o), coordinates(dir))
+    solidcraft_kernel_services::ray_tensor::ray_meets_triangle_bounds([a, b, c].map(coordinates), coordinates(o), coordinates(dir))
 }
