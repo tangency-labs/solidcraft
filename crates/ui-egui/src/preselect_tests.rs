@@ -1702,17 +1702,16 @@ fn curvature_canvas_value_uses_equivalent_radius_when_created_and_reopened() {
     }
 }
 
-/// The radius arrow points into the body: dragging toward the material grows the round.
+/// The radius arrow points into the body: dragging toward the material grows the round. A
+/// chamfer's arrow runs along the face its distance is measured on (see `blend_arrow_tests`).
 #[test]
-fn fillet_and_chamfer_arrows_point_into_the_body() {
-    for id in ["solid.fillet", "solid.chamfer"] {
-        let mut app = boxed();
-        let e = edge(&app, Vec3::new(20.0, 0.0, 20.0));
-        let d = start(&mut app, vec![e], id);
-        let (_, dir) = crate::canvas::anchor(&app, &d).unwrap();
-        let dir = dir.unwrap();
-        assert!(dir.y > 0.5 && dir.z < -0.5, "{id}: {dir:?}");
-    }
+fn fillet_arrow_points_into_the_body() {
+    let mut app = boxed();
+    let e = edge(&app, Vec3::new(20.0, 0.0, 20.0));
+    let d = start(&mut app, vec![e], "solid.fillet");
+    let (_, dir) = crate::canvas::anchor(&app, &d).unwrap();
+    let dir = dir.unwrap();
+    assert!(dir.y > 0.5 && dir.z < -0.5, "{dir:?}");
 }
 
 #[test]

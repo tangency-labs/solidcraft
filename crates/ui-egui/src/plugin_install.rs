@@ -181,6 +181,11 @@ pub(crate) fn permission_lines(plugin: &Value) -> Vec<String> {
         1 => lines.push(tr("plugin_install.command_one").to_string()),
         n => lines.push(format("plugin_install.commands", &[("count", &n.to_string())])),
     }
+    // Backgrounds for the 3D view (shaders@0.1), drawn only when picked in Preferences.
+    let shaders = list(plugin.get("shaders"));
+    if !shaders.is_empty() {
+        lines.push(format("plugin_install.shaders", &[("names", &shaders.join(", "))]));
+    }
     lines
 }
 
@@ -402,7 +407,7 @@ mod tests {
             lines,
             [
                 "Change application settings and use application diagnostics.",
-                "Open, recover or switch designs.",
+                "Open, recover or switch designs, and see where the open design is saved.",
                 "Read or write files within the approved folders.",
                 "Inspect, install, remove or run other plugins.",
                 "source (read)",

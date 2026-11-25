@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use egui::{Pos2, Rect, pos2, vec2};
 use serde_json::{Value, json};
 
-use solidcore_ops::affine::{clipped_line_box_interval, line_halfspace_interval, line_parameter_from_start, line_point_at};
+use solidcraft_kernel::services::affine::{clipped_line_box_interval, line_halfspace_interval, line_parameter_from_start, line_point_at};
 use solidcore_record::Vec3;
 use solidcraft_engine::SectionPlane;
 use solidcraft_engine::doc::{apply_point, is_identity};
