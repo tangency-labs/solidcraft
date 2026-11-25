@@ -586,7 +586,7 @@ fn edge_geom(
 ) -> Result<Vec<LinkGeom>> {
     Ok(match kind {
         LinkKind::Intersect => match section()? {
-            EdgeSection::Crossings(points) => points,
+            EdgeSection::Meets(geom) => geom,
             EdgeSection::InPlane => planar()?.unwrap_or_else(|| fit_world(plane, &pts)),
             EdgeSection::Mesh => section_of_polyline(plane, &pts),
         },
@@ -614,32 +614,47 @@ fn edge_curves(body: Option<&crate::ModelBody>, e: usize) -> Vec<WireCurve> {
 
 /// Where a body edge meets a sketch plane.
 enum EdgeSection {
-    /// The points where its exact curve crosses or touches the plane, in the plane's coordinates.
-    Crossings(Vec<LinkGeom>),
+    /// The points where its exact curve crosses or touches the plane, and the parts of it lying
+    /// in the plane, in the plane's coordinates.
+    Meets(Vec<LinkGeom>),
     /// It lies in the plane: it meets the plane along its whole length.
     InPlane,
     /// A mesh body's edge: its display polyline is the edge.
     Mesh,
 }
 
-/// Where edge `e` of `body` meets `plane`: the kernel's crossings of the curve it evaluates the
-/// edge on (an intersection curve's NURBS form). The kernel counts a contact at either end of
-/// the edge and gives no crossings for a curve lying in the plane, so an edge with none whose
-/// two vertices are in the plane (each within its own tolerance) lies in it.
+/// Where edge `e` of `body` meets `plane`: the kernel's section of the curve it evaluates the
+/// edge on (an intersection curve's NURBS form), which tells an edge lying in the plane from
+/// one crossing it and counts a contact at either end of the edge. A part of the edge lying in
+/// the plane is projected exactly, as a whole edge lying in it is.
 fn edge_section(body: &crate::ModelBody, e: usize, plane: &Plane) -> Result<EdgeSection> {
+    use solidcraft_kernel::services::curve::PlaneSection;
     if body.body.is_mesh() {
         return Ok(EdgeSection::Mesh);
     }
-    let record = body.body.record();
-    let edge = record.edges.get(e).ok_or_else(|| lost("the edge"))?;
-    let hits =
-        solidcraft_kernel::services::curve::plane_crossings(edge.parameters(), edge.interval, plane).map_err(|e| DocError::Invalid(e.to_string()))?;
-    if !hits.is_empty() {
-        return Ok(EdgeSection::Crossings(hits.into_iter().map(LinkGeom::Point).collect()));
+    let edge = body.body.record().edges.get(e).ok_or_else(|| lost("the edge"))?;
+    let curve = edge.parameters();
+    let (points, parts) =
+        match solidcraft_kernel::services::curve::plane_section(curve, edge.interval, plane).map_err(|e| DocError::Invalid(e.to_string()))? {
+            PlaneSection::InPlane => return Ok(EdgeSection::InPlane),
+            PlaneSection::Meets { points, in_plane } => (points, in_plane),
+        };
+    let mut geom: Vec<LinkGeom> = points.into_iter().map(LinkGeom::Point).collect();
+    for part in parts {
+        let projected = solidcraft_kernel::services::spline_projection::projected_part(
+            curve,
+            part.interval,
+            part.ends,
+            plane,
+            body.body.planar_edges_tolerance(),
+            solidcraft_sketch::MAX_SPLINE_POINTS,
+            solidcraft_sketch::MAX_COORD,
+        )
+        .map_err(|e| DocError::Invalid(e.to_string()))?
+        .ok_or_else(|| DocError::Invalid(format!("exact projection is not supported for the part of native edge {e} in the sketch plane")))?;
+        geom.extend(projection_links(projected)?);
     }
-    let on_plane =
-        |v: &u32| record.vertices.get(*v as usize).is_some_and(|v| plane.height(Vec3::new(v.point[0], v.point[1], v.point[2])).abs() <= v.tolerance);
-    Ok(if edge.vertices.iter().all(on_plane) { EdgeSection::InPlane } else { EdgeSection::Crossings(Vec::new()) })
+    Ok(EdgeSection::Meets(geom))
 }
 
 /// The sketch segments `segs` of `ss` projected along the sketch normal `normal` (turned toward
