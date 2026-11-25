@@ -64,6 +64,7 @@ use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
+use crate::nurbs::srf_basic::{WEIGHT_MAX, WEIGHT_MIN};
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::Surface;
 use crate::topology::edgeuse::p1 as eu1;
@@ -1105,6 +1106,16 @@ pub fn exact_mitre_curve(
                 u1 * ws[2],
             ];
             let den = bernstein_product_21(ws, l);
+            // A pole of the fraction at (or within rounding of) an end of the span leaves a
+            // weight no rational B-spline holds (`[WEIGHT_MIN, WEIGHT_MAX]`): the samples
+            // are then not a linear fractional coordinate (the one along the spine taken as
+            // the one across it), so the other is tried, as where `l[1] <= 0`
+            if den
+                .iter()
+                .any(|&wj| !(WEIGHT_MIN..=WEIGHT_MAX).contains(&wj))
+            {
+                continue;
+            }
             let along_c = bernstein_product_21(n, l);
             let across_c = bernstein_product_21(ws, num);
             let mut uv_points = Vec::new();

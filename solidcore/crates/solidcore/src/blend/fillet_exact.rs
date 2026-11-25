@@ -1,13 +1,11 @@
-//! Which constant rounds are exact (opt-in, not upstream): a blend's faces as the natural
+//! Which constant rounds are exact (not upstream): a blend's faces as the natural
 //! quadrics they lie on, the one classification of the curve the rolling ball's centre runs
 //! on (the spine) from their kinds and placement, and the dispatch of a classified round to
 //! its exact builder.
 //!
 //! Not in the pinned upstream: the SolidCraft fork's `source/SMLib/src/SmFilletExact.cpp`
 //! and `source/SMLib/inc/SmFilletExact.h` (tangency-labs/smlib@b5f2867, in its final form at
-//! tangency-labs/smlib@7ac037e), behind
-//! [`UpstreamFixes::fillet_exact_round_classes`](crate::kernel::UpstreamFixes::fillet_exact_round_classes)
-//! (WR-669).
+//! tangency-labs/smlib@7ac037e; WR-669), in place of upstream's analytic try-chain.
 //!
 //! | Rust                               | Fork                                       |
 //! |------------------------------------|--------------------------------------------|
@@ -42,6 +40,13 @@
 //! and the ball-zone end loop uses the base surface saved with its focal offset.
 //!
 //! Deviations:
+//! - **The class holds along the whole trace (#18913, not in the fork).** The class is
+//!   read at one station, and the exact surface replaces the trace, whose end stations
+//!   the corners and rails are built from. A trace whose end runs past a support's edge
+//!   onto its extension, where that support is not its quadric (a wall of extrusion
+//!   extended along its tangent), has its end centre off the offset quadric; no surface
+//!   of the class passes through it, so such a round is traced
+//!   ([`trace_ends_on_class`]).
 //! - **A round of the ball's radius as a face (solidcore #2403, not in the fork).** A
 //!   torus is read too ([`QuadricKind::Torus`]), so that one moved in by its tube
 //!   radius is its tube-centre circle
@@ -66,9 +71,6 @@
 //!   exactly by [`rational::calc_rational_spine_fillet_geom`] (tangency-labs/smlib@0061c41,
 //!   1b5f1e7, dda3b5d); a nodal-quartic round whose trace ends at the node stays traced,
 //!   as the fork's.
-//! - **A chamfer round a circle** (a linear section, class circle) is traced unless
-//!   `fillet_chamfer_cone_on_arc` (WR-421) is on as well: the fork revolves it
-//!   unconditionally; here that revolution stays behind its own flag.
 //! - **A point spine with a noncircular section (#2905).** The spherical builders
 //!   require a circular section; other sections stay with their own traced generator.
 //! - **Recognisers' statuses.** `SmSphere::IsNurbSurfaceSphere` returning `TRUE` without a
@@ -199,6 +201,31 @@ fn bspline_part<'a>(k: &Kernel, surface: &'a Surface) -> Result<Option<&'a BSpli
         SurfaceKind::BallPatch(pb) => Some(pb.net()),
         _ => None,
     })
+}
+
+/// Not the fork (#18913): `uv` clamped into `surface`'s natural domain, or `uv` itself
+/// when it lies inside. A traced section may sit on a support's extension past the
+/// domain (a rail run on past its face, WR-609/610). There a B-spline's `EvaluatePoint`
+/// extrapolates its end span while `EvaluateNormal` reads the derivatives of the end
+/// knot, so the two disagree. The quadric a surface lies on, and the side its normal
+/// points to, is the same at every point of its domain, so it is read inside it. A
+/// plane (evaluated exactly everywhere) and a surface of no built domain keep `uv`.
+///
+/// # Errors
+///
+/// Those of making the surface's NURB.
+fn in_natural_domain(k: &Kernel, surface: &Surface, uv: Point2) -> Result<Point2> {
+    if matches!(surface.kind(), SurfaceKind::Plane(_)) {
+        return Ok(uv);
+    }
+    let domain = surface.natural_uv_domain_with_nurb(k)?;
+    Ok(
+        if domain.min.x <= domain.max.x && domain.min.y <= domain.max.y {
+            domain.clamp_point(uv)
+        } else {
+            uv
+        },
+    )
 }
 
 /// `pSurface->EvaluatePoint(crUV)` and `EvaluateNormal(crUV, TRUE, TRUE)`.
@@ -456,6 +483,7 @@ impl TorusData {
 fn quadric_of_surface(k: &Kernel, surface: &Surface, uv: Point2, tol: f64) -> Result<BlendQuadric> {
     let mut q = BlendQuadric::default();
 
+    let uv = in_natural_domain(k, surface, uv)?;
     let (p, n) = point_and_normal(k, surface, uv)?;
 
     let Some(bss) = bspline_part(k, surface)? else {
@@ -622,7 +650,8 @@ impl BlendQuadric {
             return Ok(Self::default());
         }
 
-        // the offset there, along the base's normal
+        // the offset there, along the base's normal (#18913: inside the base's domain)
+        let uv = in_natural_domain(k, base, uv)?;
         let (p, n) = point_and_normal(k, base, uv)?;
         let q = surface.evaluate_point(k, uv)?;
         Ok(base_q.offset((q - p).dot(n), tol))
@@ -1990,7 +2019,8 @@ pub fn arc_section_implicit(
 /// offsets' meridians cross, the crossing nearest the classified centre); for the conic,
 /// conic-pair and nodal-quartic classes the canal surface of the ball's radius about
 /// `leader`, the round's rational centre line (its parameter the net's through `map`),
-/// which must lie on both offsets. `None` for
+/// which must lie on both offsets, or be proved within the tolerance the class was read
+/// within of one it is not on (supports only that close to the class). `None` for
 /// a traced round, a blend classified without its inputs, offsets whose meridians do not
 /// cross and a rational class without its leader.
 pub fn class_surface(
@@ -2035,6 +2065,7 @@ pub fn class_surface(
                 map: *map,
                 offsets: [blend.offsets[0].implicit(), blend.offsets[1].implicit()],
                 radius: r,
+                within: blend.inputs.map_or(0.0, |i| i.tol),
             });
         }
         BlendSpine::Traced => None,
@@ -3509,6 +3540,46 @@ fn generator_type(ops: &dyn FilletSolverOps) -> Option<FilletSurfaceGeneratorTyp
         .map(crate::blend::fillet_solver::p1::FilletSurfaceGenerator::fillet_surface_generator_type)
 }
 
+/// Not the fork (#18913): whether the ball's centre at each of the trace's `ends` lies
+/// on both of `blend`'s offset quadrics within `tol` (an offset of no quadric is not
+/// read). The class is read at one station; a trace that runs on past a support's edge
+/// onto its extension, where that support is not its quadric (a wall of extrusion
+/// extended along its tangent), ends off the offset quadric, and the surface of the class
+/// does not pass through the stations the corners and rails are built from.
+///
+/// # Errors
+///
+/// Those of `SetupOffsetValues` and the offset evaluations.
+fn trace_ends_on_class(
+    ops: &mut dyn FilletSolverOps,
+    k: &Kernel,
+    blend: &ExactBlend,
+    ends: [&TsectPnt; 2],
+    tol: f64,
+) -> Result<bool> {
+    use crate::blend::fillet_solver::p2::eval_offset;
+    for t in ends {
+        ops.setup_offset_values(t, None)?;
+        for (rail, (o, srf)) in blend
+            .offsets
+            .iter()
+            .zip([SrfIndex::First, SrfIndex::Second])
+            .enumerate()
+        {
+            if o.kind == QuadricKind::None {
+                continue;
+            }
+            let centre = eval_offset(k, ops.solver_mut(), rail, t.uv_pos(srf))?;
+            // written to accept: a distance that is not a number is not on the class
+            let on_class = o.distance(centre) <= tol;
+            if !on_class {
+                return Ok(false);
+            }
+        }
+    }
+    Ok(true)
+}
+
 /// [`calc_exact_fillet_geom`]'s build by the class (`CalcExactFilletGeom`), without the
 /// definition kept.
 #[allow(clippy::too_many_arguments)]
@@ -3526,6 +3597,11 @@ fn exact_fillet_geom_of_class(
     let (Some(first), Some(last)) = (tsects.first(), tsects.last()) else {
         return Ok(false);
     };
+    if blend.spine != BlendSpine::Traced
+        && !trace_ends_on_class(ops, k, blend, [first, last], b.tolerance())?
+    {
+        return Ok(false);
+    }
     match blend.spine {
         BlendSpine::Line => {
             // a chamfer on a straight spine is traced (its line from rail to rail is the
@@ -3558,14 +3634,7 @@ fn exact_fillet_geom_of_class(
             Ok(true)
         }
         BlendSpine::Circle => {
-            // not the fork: a linear section's revolution stays behind WR-421's flag
-            if generator_type(ops).ok_or_else(|| {
-                SolidError::blend(OP, BlendFailure::InputMissing(BlendInput::SurfaceGenerator))
-            })? == FilletSurfaceGeneratorType::Linear
-                && !k.fixes.fillet_chamfer_cone_on_arc
-            {
-                return Ok(false);
-            }
+            // a linear section's revolution is its cone (WR-421), as the fork builds it
             FilletSolver::calc_circle_spine_fillet_geom(
                 ops,
                 k,

@@ -90,6 +90,16 @@ fn read_bytes(k: &mut Kernel, bytes: Vec<u8>, rebuild: bool) -> SolidResult<Brep
     Ok(body)
 }
 
+/// The body a runner's `.smb` file source reads to, as [`read_file`] reads it: for tests
+/// that hold a case's result to its input body.
+///
+/// # Errors
+///
+/// The file's or the reader's error, as text.
+pub fn read_source_file(k: &mut Kernel, path: &str) -> Result<Brep, String> {
+    read_file_or_fail(k, path).map_err(|e| e.to_string())
+}
+
 /// [`read_file`] where a Rust read failure is reported as a harness failure: for
 /// runners whose file sources the C++ side always reads (a failed Rust read is then
 /// a Rust divergence the case reports, never a deferral).

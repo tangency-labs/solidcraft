@@ -1,7 +1,7 @@
 //! tangency-labs/solidcore#420 (WR-421): a chamfer as wide as the corner rounds it runs
 //! round. `CalcTorusFilletGeom` only handled a circular section, so a linear one went to
 //! the offset trace, which collapses to a point where the neighbouring round's offset
-//! reaches its axis. `fixes.fillet_chamfer_cone_on_arc` revolves the linear section into a
+//! reaches its axis. WR-421 (no longer a flag) revolves the linear section into a
 //! cone. The case is the fork's capi test: a 40 x 40 x 20 plate with its vertical edges
 //! rounded R1, its bottom loop chamfered 1.
 #![allow(
@@ -48,9 +48,8 @@ fn edges_where(k: &Kernel, b: &Brep, keep: impl Fn(Point3) -> bool) -> Vec<EdgeI
 
 /// The plate's volume after its corners are rounded, after its bottom loop is chamfered,
 /// and the chamfer's result.
-fn chamfered_plate(fix: bool) -> (f64, f64, solidcore::Result<()>) {
+fn chamfered_plate() -> (f64, f64, solidcore::Result<()>) {
     let mut k = Kernel::default();
-    k.fixes.fillet_chamfer_cone_on_arc = fix;
     let mut plate = create_box(&mut k, Point3::new(-20.0, -20.0, 0.0), 40.0, 40.0, 20.0).unwrap();
     let corners = edges_where(&k, &plate, |m| (m.z - 10.0).abs() < 1e-6);
     fillet_edges(&mut k, &mut plate, &corners, 1.0, 1, 1, 1.0).unwrap();
@@ -66,16 +65,12 @@ fn the_chamfer_runs_round_the_corner_rounds_with_the_fix() {
     // a quarter about the axis: (pi / 2) / 3
     let removed = 4.0 * 38.0 * 0.5 + 4.0 * (PI / 2.0) / 3.0;
 
-    let (rounded, after, r) = chamfered_plate(true);
+    let (rounded, after, r) = chamfered_plate();
     r.unwrap();
     assert!(
         (after - (rounded - removed)).abs() < 1e-7 * rounded,
         "{rounded} {after}"
     );
-
-    // upstream traces the offset intersection, which collapses to a point, and fails
-    let (_, _, r) = chamfered_plate(false);
-    assert!(r.is_err(), "upstream should fail: {r:?}");
 }
 
 // ---- #2486: a chamfer on a cylinder against a plane by its definition ---------------------
@@ -133,12 +128,12 @@ fn definitions(b: &Brep) -> Vec<ProceduralBlend> {
         .collect()
 }
 
-/// Each kind of chamfer of the cylinder's top rim is the chord by its definition, its
-/// sizes kept, certified; the body loses the triangle of legs a (along the top) and b
-/// (down the side) turned about the axis at its centroid's radius 5 - a/3; the record
-/// round trips and re-certifies.
+/// Each kind of chamfer of the cylinder's top rim is the cone it is (WR-421, the only path
+/// since #18913): one new face, an `SmCone` beside the side's, and no blend by its definition; the body loses
+/// the triangle of legs a (along the top) and b (down the side) turned about the axis at its
+/// centroid's radius 5 - a/3 (Pappus, exact for the cone's ruled section).
 #[test]
-fn issue_2486_rim_chamfers_on_a_cylinder_are_chords_by_their_definitions() {
+fn issue_2486_rim_chamfers_on_a_cylinder_are_their_cones() {
     let kinds = [
         ChamferSize::Distances([1.0, 1.0]),
         ChamferSize::Distances([1.0, 1.5]),
@@ -150,26 +145,31 @@ fn issue_2486_rim_chamfers_on_a_cylinder_are_chords_by_their_definitions() {
     for size in kinds {
         let (k, mut b, plane_first, r) = chamfered_rim(size);
         r.unwrap();
-        let defs = definitions(&b);
-        assert_eq!(defs.len(), 1, "{size:?}: one chamfer face");
-        let pb = &defs[0];
-        assert_eq!(pb.order(), 0, "{size:?}");
-        assert_eq!(pb.chamfer().unwrap().size, size, "{size:?}");
         assert!(
-            pb.bound() > 0.0 && pb.bound() < 1e-5,
-            "{size:?}: {}",
-            pb.bound()
+            definitions(&b).is_empty(),
+            "{size:?}: no chamfer by its definition"
+        );
+        let cones = b
+            .face_list()
+            .iter()
+            .filter(|&&f| {
+                matches!(
+                    b.face(f).unwrap().surface.as_ref().unwrap().kind(),
+                    SurfaceKind::Cone(_)
+                )
+            })
+            .count();
+        // the cylinder's side is an `SmCone` of half-angle 0 too
+        assert_eq!(
+            cones, 2,
+            "{size:?}: the side and one chamfer face, the cone"
         );
         let d = ChamferDefinition::new(size, 0.5 * PI).unwrap().setbacks();
         let [a, bb] = if plane_first { d } else { [d[1], d[0]] };
         let want = PI * 25.0 * 10.0 - 2.0 * PI * (5.0 - a / 3.0) * a * bb / 2.0;
         let v = volume(&k, &mut b);
-        eprintln!("{size:?}: bound {:e}, volume {v} want {want}", pb.bound());
+        eprintln!("{size:?}: volume {v} want {want}");
         assert!((v - want).abs() <= 1e-6 * want, "{size:?}: {v} vs {want}");
-        let rec = to_record(&k, pb).unwrap();
-        let back = rebuild(&k, &rec).unwrap();
-        assert!(back.same_definition(&k, pb).unwrap(), "{size:?}");
-        assert_eq!(to_record(&k, &back).unwrap(), rec);
     }
 }
 
@@ -195,11 +195,10 @@ fn issue_2486_a_rim_chamfer_whose_offset_folds_is_refused_naming_its_fit() {
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 
 /// The cube of #9522 (x, y -15..15, z 0..30) with its four vertical edges rounded R5, then
-/// its bottom loop of four lines and four arcs chamfered `d` with
-/// `fillet_chamfer_cone_on_arc`: the kernel, the body and the chamfer's result.
+/// its bottom loop of four lines and four arcs chamfered `d` (its arcs' chamfers cones,
+/// WR-421): the kernel, the body and the chamfer's result.
 fn chamfered_rounded_cube(d: f64) -> (Kernel, Brep, solidcore::Result<()>) {
     let mut k = Kernel::default();
-    k.fixes.fillet_chamfer_cone_on_arc = true;
     let mut cube = create_box(&mut k, Point3::new(-15.0, -15.0, 0.0), 30.0, 30.0, 30.0).unwrap();
     let corners = edges_where(&k, &cube, |m| (m.z - 15.0).abs() < 1e-6);
     assert_eq!(corners.len(), 4);
@@ -284,7 +283,6 @@ fn issue_2546_chamfers_within_the_resolution_of_the_rounds_are_refused_naming_th
     }
     // the session's note names both sizes
     let mut k = Kernel::default();
-    k.fixes.fillet_chamfer_cone_on_arc = true;
     let mut cube = create_box(&mut k, Point3::new(-15.0, -15.0, 0.0), 30.0, 30.0, 30.0).unwrap();
     let corners = edges_where(&k, &cube, |m| (m.z - 15.0).abs() < 1e-6);
     fillet_edges(&mut k, &mut cube, &corners, 5.0, 1, 1, 1.0).unwrap();

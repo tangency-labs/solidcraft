@@ -1216,6 +1216,23 @@ impl ExecutiveAccess<Handle> for Access {
             cascade_to_boundaries,
         )
     }
+    // the fixture builds no corner, so no patch face meets a fillet
+    fn stitch_faces_keeping_fillet_edges(
+        &mut self,
+        k: &mut Kernel,
+        brep: Handle,
+        tolerance: f64,
+        corners: &[Handle],
+    ) -> SolidResult<StitchAttempt> {
+        if !corners.is_empty() {
+            return missing();
+        }
+        self.stitch_faces(k, brep, tolerance, None, false)
+    }
+    // the fixture's handles name no solver whose trace could be extended
+    fn extend_trace_to_its_rails(&mut self, _: &mut Kernel, _: Handle) -> SolidResult<()> {
+        missing()
+    }
     fn stitch_faces(
         &mut self,
         k: &mut Kernel,

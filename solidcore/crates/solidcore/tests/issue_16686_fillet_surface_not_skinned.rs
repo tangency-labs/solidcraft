@@ -4,19 +4,19 @@
 //! processed, and a later step fails on the rails it never made (a null pointer, 1006, was
 //! how the goldens case `sweep4-native-crash-sphere_diff_3cylinders-e30-r0.1` ended). The
 //! solver's geometry step now fails, as `CreateFilletBrep` reports a failed `CalcFilletGeom`:
-//! `SM_FILERR_EDGE_PROBLEM` (4) with status 10 at the edge.
+//! `SM_FILERR_EDGE_PROBLEM` (4) with status 10 at the edge. That refusal's own sequences
+//! are pinned by `fillet_solver::p4`'s `UnmadeGeometry` and `c4_trace` unit tests.
 //!
-//! The case is the goldens one `sweep5-sphere_diff_3cylinders-e29-r1.0`:
+//! The case was the goldens one `sweep5-sphere_diff_3cylinders-e29-r1.0`:
 //! `Fillet/sphere_diff_3cylinders.smb`, edge 29 rounded r 1 (circular cross section, G1,
-//! thumbweight 1). Edge 30 at r 0.1 no longer reaches the skinning: since #16373's
-//! projection changes its trace stops earlier, where the fillet touches the base surface's
-//! boundary a second time (upstream's own error, solver status left `Unprocessed`; MEASURED),
-//! and #16373 moved that row from 1006 to 1001. Edge 29 at r 1 still fails to skin
-//! (MEASURED: the flush's error is "the fillet surface could not be skinned"). It is not a
-//! regression case for the trace's refusal: with that refusal disabled the case still ends
-//! with the same (4, 10) note (MEASURED), and no goldens case now reaches a skinning
-//! failure whose outcome the refusal changes. The refusal's own sequences are pinned by
-//! `fillet_solver::p4`'s `UnmadeGeometry` and `c4_trace` unit tests.
+//! thumbweight 1), which failed to skin. Its supports are two cylinders whose offsets meet
+//! in a rational class only within the body's tolerance (offset radii 23.00935363769532
+//! and ...313, axes tilted 1.2e-7), and the exact round is now made on a spine proved
+//! within that tolerance of both offsets (`surface::implicit::spine_near_offsets`), so the
+//! round no longer reaches the skinning: it builds. The test now pins that build at r 1,
+//! 0.5 and 0.1: no error note, every round face recertified, one face more, the B-rep check
+//! reporting exactly the input's own findings (three seam warnings of the read body, none
+//! new), and material only removed.
 
 #![allow(
     clippy::unwrap_used,
@@ -26,11 +26,12 @@
 )] // test helpers
 
 use solidcore::blend::fillet_executive::session::FilletSession;
-use solidcore::blend::fillet_geom::p1::{FilStatus, FilletSolverId};
-use solidcore::geom::attribute::AttributeStore;
+use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::topology::brep::p1;
 use solidcore::topology::brep::p10::TopologyEnv;
 use solidcore::topology::brep::p7::read_from_file;
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::{Brep, Kernel};
@@ -65,23 +66,46 @@ fn read(k: &mut Kernel, rel: &str) -> Option<Brep> {
     Some(b)
 }
 
-#[test]
-fn a_fillet_surface_that_cannot_be_skinned_fails_the_solver_s_geometry() {
-    let mut k = Kernel::default();
-    let Some(mut b) = read(&mut k, "Fillet/sphere_diff_3cylinders.smb") else {
-        return;
+/// The body's volume, integrated to 1e-11.
+fn volume(k: &Kernel, b: &mut Brep) -> f64 {
+    let store = AttributeStore::default();
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &|_| ObjectKey(0),
     };
-    let edge = p1::edges(&b, None).unwrap()[29];
-    let mut s = FilletSession::new(&mut k, &mut b).unwrap();
-    s.prepare_constant_radius_edges(&mut k, &[edge], 1.0, 1, 1, 1.0)
-        .unwrap();
-    let result = s.do_fillet(&mut k);
-    assert!(result.is_err(), "{result:?}");
-    // the trace could not skin the fillet surface
-    let solver = s.solver(FilletSolverId(0)).unwrap();
-    assert_eq!(solver.base().status, FilStatus::SurfSkinningFailure);
-    // reported where the solver's geometry is made, not by a later step on unmade rails
-    let info = s.error_info();
-    assert_eq!((info.code, info.status), (4, 10), "{info:?}");
-    assert_eq!(info.comment, "Fillet Surface Computation Failure");
+    brep_volume(k, b, 1e-11, &attrs).unwrap()
+}
+
+#[test]
+fn the_round_whose_surface_could_not_be_skinned_builds_on_its_exact_class() {
+    for r in [1.0, 0.5, 0.1] {
+        let mut k = Kernel::default();
+        let Some(mut b) = read(&mut k, "Fillet/sphere_diff_3cylinders.smb") else {
+            return;
+        };
+        let before = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+        let faces = p1::faces(&b, None).unwrap().len();
+        let v0 = volume(&k, &mut b);
+        let edge = p1::edges(&b, None).unwrap()[29];
+        {
+            let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+            s.prepare_constant_radius_edges(&mut k, &[edge], r, 1, 1, 1.0)
+                .unwrap();
+            let result = s.do_fillet(&mut k);
+            assert!(result.is_ok(), "r {r}: {result:?}");
+            assert_eq!(s.error_info().code, 0, "r {r}: {:?}", s.error_info());
+        }
+        // every round face's exact class proved again on the result
+        solidcore::surface::procedural_blend::recertify_faces(&k, &b).unwrap();
+        // the session leaves the port's cached topology to its caller, as the API's
+        // fillets refresh it before they return
+        b.refresh_cached_topology();
+        assert_eq!(p1::faces(&b, None).unwrap().len(), faces + 1, "r {r}");
+        let after = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+        assert_eq!(after.lines(), before.lines(), "r {r}");
+        // a convex edge's round only removes material: the drop is more than the two
+        // integrations' requested accuracy (relative, so taken at the larger volume)
+        let v = volume(&k, &mut b);
+        assert!(v0 - v > 2e-11 * v0, "r {r}: {v0} -> {v}");
+    }
 }

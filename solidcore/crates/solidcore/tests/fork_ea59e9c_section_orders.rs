@@ -818,15 +818,13 @@ fn on_the_default_kernel_the_variable_round_lies_on_its_cone() {
 }
 
 /// Upstream traces a chord round a circle: 3.07e-5 off the cone it should lie on, where the
-/// fork builds the cone (`fillet_chamfer_cone_on_arc`). The default kernel builds the chord
-/// as its definition: each station's chord runs between the feet on the plane and on the
-/// boss, at the same offsets all round the circle, so it is a ruling of that cone and the
-/// chamfer passes the case's grade (on the cone to 1e-9, its volume and seams).
+/// fork builds the cone (WR-421, the only path since #18913). The default kernel builds that
+/// cone: the chamfer is one `SmCone` face, no blend by its definition, and it passes the
+/// case's grade (on the cone to 1e-9, its volume and seams).
 #[test]
-fn the_boss_root_s_chord_is_exact_as_its_definition_and_with_the_cone_on_the_arc() {
+fn the_boss_root_s_chord_is_the_cone_on_the_arc() {
     let case = named(BOSS_CHAMFER);
     assert_passes(&case, &mut Kernel::default());
-    // the chamfer face is a chamfer by its definition, its net proved within its bound
     let mut k = Kernel::default();
     let mut b = (case.build)(&mut k).unwrap();
     let before = b.face_list().to_vec();
@@ -835,27 +833,21 @@ fn the_boss_root_s_chord_is_exact_as_its_definition_and_with_the_cone_on_the_arc
         panic!("the boss root's chamfer is a chord")
     };
     chord(&mut k, &mut b, e, d).unwrap();
-    let mut chamfers = 0;
+    let mut cones = 0;
     for &f in b.face_list() {
         if before.contains(&f) {
             continue;
         }
         let s = b.face(f).unwrap().surface.clone().unwrap();
-        if let SurfaceKind::ProceduralBlend(pb) = s.kind() {
-            assert!(pb.chamfer().is_some(), "{f:?} is not a chamfer");
-            let proved = pb.recertify(&k).unwrap();
-            assert!(
-                proved <= pb.bound(),
-                "{f:?}: {proved:e} past {:e}",
-                pb.bound()
-            );
-            chamfers += 1;
+        assert!(
+            !matches!(s.kind(), SurfaceKind::ProceduralBlend(_)),
+            "{f:?} is a blend by its definition"
+        );
+        if matches!(s.kind(), SurfaceKind::Cone(_)) {
+            cones += 1;
         }
     }
-    assert!(chamfers >= 1, "no chamfer by its definition");
-    let mut k = Kernel::default();
-    k.fixes.fillet_chamfer_cone_on_arc = true;
-    assert_passes(&case, &mut k);
+    assert_eq!(cones, 1, "the chamfer is the cone on the arc");
 }
 
 /// The grading sees what it's for: a wrong volume, a wrong exact blend and a wrong order of

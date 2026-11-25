@@ -32,9 +32,7 @@ use solidcore::{Brep, Kernel};
 
 /// The cliff overflow's flags (as `wr631_cliff_overflow_construction`).
 fn kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.fillet_trace_reaches_rails = true;
-    k
+    Kernel::default()
 }
 
 fn volume(k: &Kernel, b: &mut Brep) -> f64 {

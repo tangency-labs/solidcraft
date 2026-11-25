@@ -1,4 +1,4 @@
-//! WR-669 (`fixes.fillet_exact_round_classes`), the SolidCraft fork's tangency-labs/smlib@0061c41
+//! WR-669 (no longer a flag), the SolidCraft fork's tangency-labs/smlib@0061c41
 //! and 1b5f1e7: a constant round whose spine is a plane conic is the exact rational surface
 //! of the ball's arcs, where upstream (and the flag before these commits) traces and fits it.
 //!
@@ -239,9 +239,8 @@ fn cylinder_flux(
 
 /// The plate (top face z = 0) and the r3 peg through the origin tilted 30 degrees from z,
 /// from 10 below the plate's face to 15 above it along its axis, the rim rounded r1.
-fn plate_and_peg(exact: bool) -> (Kernel, Brep, f64, Vec<(Surface, bool)>) {
+fn plate_and_peg() -> (Kernel, Brep, f64, Vec<(Surface, bool)>) {
     let mut k = Kernel::default();
-    k.fixes.fillet_exact_round_classes = exact;
     let plate = create_box(&mut k, Point3::new(-20.0, -20.0, -20.0), 40.0, 40.0, 20.0).unwrap();
     let mut peg = create_cylinder(&mut k, Point3::new(0.0, 0.0, -10.0), R, 25.0).unwrap();
     tilt(&mut k, &mut peg, 30f64.to_radians());
@@ -307,7 +306,7 @@ fn an_oblique_plane_and_cylinder_round_is_the_exact_rational_ball_sweep() {
     let union = 40.0 * 40.0 * 20.0 + PI * R * R * 15.0;
     let (spine, added, area) = plate_and_peg_round(30f64.to_radians());
 
-    let (k, mut b, before, rounds) = plate_and_peg(true);
+    let (k, mut b, before, rounds) = plate_and_peg();
     assert!((before - union).abs() < 1e-9 * union, "{before} != {union}");
     assert_eq!(rounds.len(), 2);
     assert!(
@@ -329,25 +328,11 @@ fn an_oblique_plane_and_cylinder_round_is_the_exact_rational_ball_sweep() {
     );
 }
 
-/// Without the fix the round is traced: a procedural blend whose net is a skin through its
-/// stations' sections (the ball's exact circles, so rational too), off the ball between them
-/// where the exact sweep is on it to 1e-12.
-#[test]
-fn upstream_traces_the_oblique_plane_and_cylinder_round() {
-    let (spine, _, _) = plate_and_peg_round(30f64.to_radians());
-    let (k, _, _, rounds) = plate_and_peg(false);
-    assert_eq!(rounds.len(), 2);
-    let off = off_spine(&k, &rounds, &spine);
-    eprintln!("the traced fit is off the ball by {off:e}");
-    assert!(off > 1e-9, "the traced fit is off the ball by only {off:e}");
-}
-
 /// The r3 pole up z from -12 to 8 and the 45 degree cone tilted 15 degrees, its apex
 /// 3 / sin 45 from the origin, from 1 below the apex to 20 below it; the concave conic
 /// where the cone leaves the pole rounded r1.
-fn pole_and_cone(exact: bool) -> (Kernel, Brep, f64, Vec<(Surface, bool)>) {
+fn pole_and_cone() -> (Kernel, Brep, f64, Vec<(Surface, bool)>) {
     let mut k = Kernel::default();
-    k.fixes.fillet_exact_round_classes = exact;
     let alpha = 45f64.to_radians();
     let d = R / alpha.sin();
     let pole = create_cylinder(&mut k, Point3::new(0.0, 0.0, -12.0), R, 20.0).unwrap();
@@ -413,7 +398,7 @@ fn pole_and_cone_round() -> (impl Fn(f64) -> Point3, f64, f64) {
 #[test]
 fn two_quadrics_touching_one_ball_round_exactly_on_their_conic() {
     let (spine, added, area) = pole_and_cone_round();
-    let (k, mut b, before, rounds) = pole_and_cone(true);
+    let (k, mut b, before, rounds) = pole_and_cone();
     assert_eq!(rounds.len(), 2);
     assert!(
         rounds.iter().all(|(_, rational)| *rational),
@@ -432,18 +417,6 @@ fn two_quadrics_touching_one_ball_round_exactly_on_their_conic() {
         "{before} + {added} != {after} (off {:e})",
         after - before - added
     );
-}
-
-/// Without the fix the round is traced, its net off the ball between its stations (as for
-/// the peg).
-#[test]
-fn upstream_traces_the_round_between_two_quadrics_touching_one_ball() {
-    let (spine, _, _) = pole_and_cone_round();
-    let (k, _, _, rounds) = pole_and_cone(false);
-    assert_eq!(rounds.len(), 2);
-    let off = off_spine(&k, &rounds, &spine);
-    eprintln!("the traced fit is off the ball by {off:e}");
-    assert!(off > 1e-9, "the traced fit is off the ball by only {off:e}");
 }
 
 // ---- #2485: an exact round is a blend by its definition, its net the exact surface ----
@@ -499,7 +472,7 @@ fn surface_bits(k: &Kernel, s: &Surface) -> Vec<[u64; 3]> {
 #[test]
 fn the_conic_rounds_are_their_definitions() {
     let (spine, added, _) = plate_and_peg_round(30f64.to_radians());
-    let (k, mut b, before, rounds) = plate_and_peg(true);
+    let (k, mut b, before, rounds) = plate_and_peg();
     let checked = exact_round_checks(&k, &b);
     assert_eq!(checked.len(), 2);
     assert!(
@@ -539,7 +512,7 @@ fn the_conic_rounds_are_their_definitions() {
 
 #[test]
 fn the_conic_pair_rounds_are_their_definitions() {
-    let (k, b, _, _) = pole_and_cone(true);
+    let (k, b, _, _) = pole_and_cone();
     let checked = exact_round_checks(&k, &b);
     assert_eq!(checked.len(), 2);
     assert!(
@@ -560,7 +533,6 @@ fn a_round_on_a_boss_tilted_a_few_degrees_is_its_definition() {
     for deg in [0.25_f64, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0] {
         let tau = deg.to_radians();
         let mut k = Kernel::default();
-        k.fixes.fillet_exact_round_classes = true;
         let block = create_box(&mut k, Point3::new(-20.0, -20.0, -10.0), 40.0, 40.0, 10.0).unwrap();
         let mut peg = create_cylinder(&mut k, Point3::new(0.0, 0.0, -5.0), boss, 15.0).unwrap();
         tilt(&mut k, &mut peg, tau);

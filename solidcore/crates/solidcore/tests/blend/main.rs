@@ -125,6 +125,8 @@ mod issue_16686_fillet_surface_not_skinned;
 mod issue_16735_volume_moves_are_the_old_leak;
 #[path = "../issue_17633_crease_along_edge_geometry.rs"]
 mod issue_17633_crease_along_edge_geometry;
+#[path = "../issue_18913_round_section_is_a_meridian.rs"]
+mod issue_18913_round_section_is_a_meridian;
 #[path = "../issue_1945_fork_1207_step4.rs"]
 mod issue_1945_fork_1207_step4;
 #[path = "../issue_1980_cliff_overflow_edge_attributes.rs"]

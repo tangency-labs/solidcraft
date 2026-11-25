@@ -5358,8 +5358,7 @@ impl SessionObjects<'_> {
     }
 }
 
-/// The fork's `SmFilletPatchStitchCallback` (tangency-labs/smlib@1072d1b, behind
-/// [`crate::kernel::UpstreamFixes::fillet_patch_keeps_fillet_edges`]; WR-546, #1377):
+/// The fork's `SmFilletPatchStitchCallback` (tangency-labs/smlib@1072d1b; WR-546, #1377):
 /// the stitch of the fillet body keeps a fillet's own edge where a corner's patch meets
 /// it. An N-sided patch's faces are bounded by their surfaces' isoparametric curves,
 /// the approximations the patch was fitted to, as far from the fillet's surface as the
@@ -9326,13 +9325,19 @@ mod tests {
     fn do_fillet_does_not_keep_a_stale_missing_corner_note() {
         let run = |stale: bool| {
             let mut k = Kernel::default();
-            let mut body =
-                crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 1.0, 1.0)
-                    .unwrap();
+            let mut body = crate::primitive::api_primitives::create_box(
+                &mut k,
+                Point3::ZERO,
+                10.0,
+                20.0,
+                30.0,
+            )
+            .unwrap();
             let edge = crate::topology::brep::p1::edges(&body, None).unwrap()[0];
             let mut session = FilletSession::new(&mut k, &mut body).unwrap();
+            let law = FilletLaw::linear(0.5, STALE_CASE_RADIUS, None);
             session
-                .prepare_constant_radius_edges(&mut k, &[edge], STALE_CASE_RADIUS, 1, 1, 1.0)
+                .prepare_variable_radius_edges(&mut k, &[edge], 0.5, law, 1, 1)
                 .unwrap();
             if stale {
                 session.executive.error.code = FilletErrorType::CornerUnsupported as i32;
@@ -9344,17 +9349,77 @@ mod tests {
             (e.code, e.comment.clone(), e.no_room, e.vertex)
         };
         let baseline = run(false);
-        // the fillet surface computation failure (code 4): neither a no-room refusal nor
-        // an unsupported corner
-        assert_eq!(baseline.0, 4, "{baseline:?}");
+        // a failure that is neither a no-room refusal nor an unsupported corner
+        assert_ne!(baseline.0, 0, "{baseline:?}");
+        assert_ne!(baseline.0, FilletErrorType::NoRoom as i32, "{baseline:?}");
+        assert_ne!(
+            baseline.0,
+            FilletErrorType::CornerUnsupported as i32,
+            "{baseline:?}"
+        );
         assert_eq!(baseline.2, None, "{baseline:?}");
         assert_eq!(run(true), baseline);
     }
 
-    /// The radius of [`do_fillet_does_not_keep_a_stale_missing_corner_note`]'s round on one
-    /// edge of the unit cube: five times the faces, so the fillet surface fails (code 4,
-    /// not a no-room refusal) and the edge has no corner to note.
-    const STALE_CASE_RADIUS: f64 = 5.0;
+    /// A round of one edge of the unit cube wider than its faces (r 1 < r < 5) is trimmed
+    /// at its creases in place: the faces either side go and the round meets the faces
+    /// beyond. The trim binds its geometry under the session's identities, which are
+    /// rebound to the body's own as the merge's are, so the body passes the B-rep check
+    /// (before, every edge the trim made failed `SmBrep` test #61, its curve owned by
+    /// another identity than its edge's).
+    ///
+    /// The body is the cube less what lies outside the round's cylinder (axis the edge
+    /// moved (r, r) in), so its volume is the area of the unit square inside the disc of
+    /// radius r about (r, r): the circle crosses y = 1 at x = a = r - sqrt(2r - 1), and
+    /// with u = x - r and F(u) = (u sqrt(r^2 - u^2) + r^2 asin(u / r)) / 2,
+    /// V = (1 - r)(1 - a) + F(1 - r) - F(a - r).
+    #[test]
+    fn a_round_wider_than_its_faces_trims_at_its_creases_into_a_valid_body() {
+        for r in [1.0001, 1.5, 2.0] {
+            let mut k = Kernel::default();
+            let mut body =
+                crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 1.0, 1.0)
+                    .unwrap();
+            let edge = crate::topology::brep::p1::edges(&body, None).unwrap()[0];
+            {
+                let mut session = FilletSession::new(&mut k, &mut body).unwrap();
+                session
+                    .prepare_constant_radius_edges(&mut k, &[edge], r, 1, 1, 1.0)
+                    .unwrap();
+                session.do_fillet(&mut k).unwrap();
+            }
+            // the session leaves the port's cached topology to its caller, as the API's
+            // fillets refresh it before they return
+            body.refresh_cached_topology();
+            let check = crate::topology::brep::validation::check_brep(
+                &mut k,
+                &mut body,
+                crate::topology::brep::validation::CheckLevel::Level2,
+            )
+            .unwrap();
+            assert!(check.is_valid(), "r {r}: {:?}", check.lines());
+            assert_eq!(body.face_list().len(), 5, "r {r}");
+            let f = |u: f64| (u * (r * r - u * u).sqrt() + r * r * (u / r).asin()) / 2.0;
+            let a = r - (2.0 * r - 1.0).sqrt();
+            let want = (1.0 - r) * (1.0 - a) + f(1.0 - r) - f(a - r);
+            let got =
+                crate::mass::integrator::properties::brep_volume_default(&k, &mut body, 1e-11)
+                    .unwrap();
+            // the integration's requested accuracy, 1e-11, plus the rounding of `want`
+            // (a few dozen operations on values below 4: under 1e-14)
+            assert!(
+                (got - want).abs() <= 1e-11 + 1e-14,
+                "r {r}: {got} vs {want}"
+            );
+        }
+    }
+
+    /// The end radius of [`do_fillet_does_not_keep_a_stale_missing_corner_note`]'s round, a
+    /// linear law from 0.5 on one edge of a 10 x 20 x 30 box: over thirty times the box, so
+    /// the round fails (not a no-room refusal) and the edge has no corner to note. (The
+    /// unit cube's r 5 that was the case is now refused as no room: the round trims at its
+    /// creases and keeps nothing, `OverflowKeepsNothing`.)
+    const STALE_CASE_RADIUS: f64 = 1000.0;
 
     /// What a fillet of the three edges at the unit cube's corner at the origin, rounded by
     /// 0.2, reports when `spoil` is done to its session once it is prepared: the returned

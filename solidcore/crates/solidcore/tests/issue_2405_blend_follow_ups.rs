@@ -36,14 +36,12 @@ use solidcore::topology::face::p2 as face2;
 use solidcore::topology::{edge, EdgeId};
 use solidcore::{Brep, Kernel};
 
-/// Every fix, with or without `fillet_exact_round_classes`.
-fn all_fixes(exact_classes: bool) -> Kernel {
+/// Every fix.
+fn all_fixes() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if exact_classes || name != "fillet_exact_round_classes" {
-            *f.flag_mut(name).unwrap() = true;
-        }
+        *f.flag_mut(name).unwrap() = true;
     }
     k.fixes = f;
     k
@@ -176,7 +174,7 @@ fn round_cones(b: &Brep, e: &[Vec3; 3]) -> Vec<(usize, solidcore::surface::cone:
 /// axis is that line and its radius r.
 #[test]
 fn the_exact_rounds_cylinder_is_on_its_exact_spine() {
-    let mut k = all_fixes(true);
+    let mut k = all_fixes();
     let rad = 2.0;
     let (b, _n, e, c) = oblique_corner(&mut k, rad);
     let cones = round_cones(&b, &e);

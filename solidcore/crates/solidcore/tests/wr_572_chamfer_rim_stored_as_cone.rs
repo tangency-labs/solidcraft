@@ -1,6 +1,6 @@
 //! Regression test for WR-572 (tangency-labs/solidcore#1503; the fork's
 //! tangency-labs/smlib@b5743ec, capi test `chamfered_hole_rim_is_a_cone`): with
-//! `fillet_chamfer_cone_on_arc` (WR-421) `CalcTorusFilletGeom` revolves a chamfer's
+//! WR-421's cone on the arc (always on since #18913) `CalcTorusFilletGeom` revolves a chamfer's
 //! linear section about the rim's axis, but keeps the revolution as an
 //! `SmSurfOfRevolution`, which reads back as a rational B-spline, not the cone it is.
 //! The port passes the revolution's NURBS form through `CopyAndAddAnalytics` and stores
@@ -40,7 +40,6 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 /// The holed cube chamfered with WR-421 on: the volume before, the kernel and the body.
 fn chamfered() -> (f64, Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.fillet_chamfer_cone_on_arc = true;
     let cube = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
     let hole = create_cylinder(&mut k, Point3::new(5.0, 5.0, -1.0), 2.0, 12.0).unwrap();
     let mut body = boolean_difference(&mut k, cube, hole).unwrap();

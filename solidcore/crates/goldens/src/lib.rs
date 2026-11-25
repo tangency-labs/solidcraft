@@ -75,6 +75,7 @@ pub use compare::REL_TOL;
 pub use output::Deferred;
 pub use output::Output;
 pub use output::Topology;
+pub use own_reader::read_source_file;
 pub use rng::Rng;
 pub use runner::RunOptions;
 pub use runner::UnitDiff;

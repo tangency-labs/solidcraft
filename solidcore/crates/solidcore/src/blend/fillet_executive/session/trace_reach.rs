@@ -4,8 +4,7 @@
 //! Upstream: not in SMLib at the pinned commit. SolidCraft's fork (tangency-labs/smlib,
 //! rev `68fb9162`) adds the static `sm_ExtendTraceToItsRails` (`SmFilletExecutive.cpp`)
 //! in commit `a9277fd` (WR-609) and calls it for every solver before the corners'
-//! vertices in commit `6e77631` (WR-610). It runs only with the opt-in
-//! `Kernel::fixes.fillet_trace_reaches_rails`.
+//! vertices in commit `6e77631` (WR-610).
 //!
 //! | Rust | Upstream (fork) |
 //! |------|-----------------|
@@ -247,7 +246,6 @@ mod tests {
     #[test]
     fn a_failed_law_evaluation_is_its_error_not_a_reach() {
         let mut k = Kernel::default();
-        k.fixes.fillet_trace_reaches_rails = true;
         let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 20.0, 30.0).unwrap();
         // the top edge at x = 0, 20 long
         let e = b

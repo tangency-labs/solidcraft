@@ -47,13 +47,9 @@ use solidcore::Kernel;
 const SOLIDCRAFT_C494A18: &[&str] = &[
     "bspline_trim_preserves_uv_spans",
     "edgeuse_convexity_propagates_step_off_failure",
-    "fillet_chamfer_cone_on_arc",
-    "fillet_exact_round_classes",
     "fillet_knife_edge_rounds",
-    "fillet_patch_keeps_fillet_edges",
     "fillet_rail_trim_at_near_knot",
     "fillet_refuse_face_consuming_blends",
-    "fillet_trace_reaches_rails",
     "join_touching_loops",
     "linear_sweep_arc_is_cylinder",
     "local_surface_intersect_guards_max_boundary_retry",

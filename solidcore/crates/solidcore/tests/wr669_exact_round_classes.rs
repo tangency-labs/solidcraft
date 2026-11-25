@@ -1,4 +1,4 @@
-//! WR-669 (`fixes.fillet_exact_round_classes`, the SolidCraft fork's tangency-labs/smlib@b5f2867
+//! WR-669 (no longer a flag; the SolidCraft fork's tangency-labs/smlib@b5f2867
 //! and 7ac037e): a constant round is exact by one classification of its spine from its
 //! faces' kinds and placement, in place of upstream's try-chain (planes and cones only,
 //! cylinder then torus, each gated on the edge's shape).
@@ -80,9 +80,8 @@ fn revolved_faces(b: &Brep) -> usize {
 
 /// The r5 ball about the origin with the r2 cylinder up the z axis from z = 0 to 10
 /// standing out of it, the concave edge where they meet (z = sqrt 21) rounded r1.
-fn ball_and_peg(exact: bool) -> (Kernel, Brep, f64, solidcore::Result<()>) {
+fn ball_and_peg() -> (Kernel, Brep, f64, solidcore::Result<()>) {
     let mut k = Kernel::default();
-    k.fixes.fillet_exact_round_classes = exact;
     let ball = create_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), 5.0).unwrap();
     let peg = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 2.0, 10.0).unwrap();
     let mut b = boolean_union(&mut k, ball, peg).unwrap();
@@ -146,7 +145,7 @@ fn revolved_off_spine(k: &Kernel, b: &Brep) -> f64 {
 
 #[test]
 fn a_round_between_a_ball_and_a_coaxial_peg_is_revolved_and_exact() {
-    let (k, mut b, before, r) = ball_and_peg(true);
+    let (k, mut b, before, r) = ball_and_peg();
     r.unwrap();
     assert_eq!(
         revolved_faces(&b),
@@ -164,24 +163,16 @@ fn a_round_between_a_ball_and_a_coaxial_peg_is_revolved_and_exact() {
     );
 }
 
-#[test]
-fn upstream_traces_the_round_between_a_ball_and_a_peg() {
-    let (_, b, _, r) = ball_and_peg(false);
-    r.unwrap();
-    assert_eq!(revolved_faces(&b), 0, "upstream fits the traced round");
-}
-
 /// A 25 x 25 x 10 tray, bottom edges R2, then the vertical edges R2 (the corner ball where
 /// two bottom rounds meet: the point class) as in tangency-labs/solidcore#416.
-fn tray(exact: bool) -> (f64, f64, solidcore::Result<()>) {
-    let (rounded, after, r, _, _) = tray_body(exact);
+fn tray() -> (f64, f64, solidcore::Result<()>) {
+    let (rounded, after, r, _, _) = tray_body();
     (rounded, after, r)
 }
 
 /// [`tray`], also the kernel and the tray.
-fn tray_body(exact: bool) -> (f64, f64, solidcore::Result<()>, Kernel, Brep) {
+fn tray_body() -> (f64, f64, solidcore::Result<()>, Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.fillet_exact_round_classes = exact;
     let mut tray = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 25.0, 25.0, 10.0).unwrap();
     let bottom = edges_where(&k, &tray, |m| m.z.abs() < 1e-6);
     fillet_edges(&mut k, &mut tray, &bottom, 2.0, 1, 1, 1.0).unwrap();
@@ -201,15 +192,7 @@ fn the_point_class_makes_the_corner_ball() {
     // each vertical edge loses (1 - pi/4) 4 along 8, each corner the octant of the two
     // bottom rounds' crossing (16/3) less the corner ball's (4 pi / 3)
     let removed = 4.0 * (32.0 * (1.0 - PI / 4.0) + 16.0 / 3.0 - 4.0 * PI / 3.0);
-    let (rounded, after, r) = tray(true);
-    r.unwrap();
-    assert!(
-        (after - (rounded - removed)).abs() < 1e-7 * after,
-        "{rounded} {after}"
-    );
-    // without the exact classes the corner goes through the ball patch (WR-420/541),
-    // where upstream failed 1001: the same body
-    let (rounded, after, r) = tray(false);
+    let (rounded, after, r) = tray();
     r.unwrap();
     assert!(
         (after - (rounded - removed)).abs() < 1e-7 * after,
@@ -220,15 +203,14 @@ fn the_point_class_makes_the_corner_ball() {
 /// A 20 x 20 x 4 plate with an r3 boss 6 high at its centre, the boss's foot (plane square
 /// to the cylinder's axis: the circle class) and one plate edge (two planes: the line
 /// class) rounded r1.
-fn plate_and_boss(exact: bool) -> (f64, usize) {
-    let (k, mut b) = plate_and_boss_body(exact);
+fn plate_and_boss() -> (f64, usize) {
+    let (k, mut b) = plate_and_boss_body();
     (volume(&k, &mut b), revolved_faces(&b))
 }
 
 /// [`plate_and_boss`]'s body.
-fn plate_and_boss_body(exact: bool) -> (Kernel, Brep) {
+fn plate_and_boss_body() -> (Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.fillet_exact_round_classes = exact;
     let plate = create_box(&mut k, Point3::new(-10.0, -10.0, 0.0), 20.0, 20.0, 4.0).unwrap();
     let boss = create_cylinder(&mut k, Point3::new(0.0, 0.0, 2.0), 3.0, 8.0).unwrap();
     let mut b = boolean_union(&mut k, plate, boss).unwrap();
@@ -247,8 +229,7 @@ fn plate_and_boss_body(exact: bool) -> (Kernel, Brep) {
 
 #[test]
 fn line_and_circle_rounds_the_chain_made_exact_are_unchanged() {
-    let (exact, n_exact) = plate_and_boss(true);
-    let (chain, n_chain) = plate_and_boss(false);
+    let (exact, n_exact) = plate_and_boss();
     // plate 1600 + boss 36 pi 6; the foot's round adds 2 pi int_3^4 rho (1 - sqrt(1 -
     // (rho - 4)^2)) drho = 2 pi (7/2 - (4 pi / 4 - 1/3)); the plate edge's takes 20 (1 - pi/4)
     let foot = 2.0 * PI * (3.5 - (PI - 1.0 / 3.0));
@@ -257,8 +238,7 @@ fn line_and_circle_rounds_the_chain_made_exact_are_unchanged() {
         (exact - expected).abs() < 1e-9 * expected,
         "{exact} != {expected}"
     );
-    assert!((exact - chain).abs() < 1e-9 * exact, "{exact} != {chain}");
-    assert_eq!((n_exact, n_chain), (1, 1));
+    assert_eq!(n_exact, 1);
 }
 
 // ---- #2485: an exact round is a blend by its definition, its net the exact surface ----
@@ -368,7 +348,7 @@ fn assert_points_within(
 
 #[test]
 fn the_line_and_circle_rounds_are_their_definitions() {
-    let (k, mut b) = plate_and_boss_body(true);
+    let (k, mut b) = plate_and_boss_body();
     let mut classes = assert_definitions(&k, &b);
     classes.sort_by_key(|c| c.name());
     assert_eq!(classes, vec![ExactClass::Circle, ExactClass::Line]);
@@ -382,7 +362,7 @@ fn the_line_and_circle_rounds_are_their_definitions() {
 
 #[test]
 fn the_revolved_round_on_a_ball_is_its_definition() {
-    let (k, mut b, before, r) = ball_and_peg(true);
+    let (k, mut b, before, r) = ball_and_peg();
     r.unwrap();
     assert_eq!(assert_definitions(&k, &b), vec![ExactClass::Circle]);
     let after = volume_to(&k, &mut b, 1e-7);
@@ -394,7 +374,7 @@ fn the_revolved_round_on_a_ball_is_its_definition() {
 #[test]
 fn the_corner_balls_are_their_definitions() {
     let removed = 4.0 * (32.0 * (1.0 - PI / 4.0) + 16.0 / 3.0 - 4.0 * PI / 3.0);
-    let (rounded, after, r, k, b) = tray_body(true);
+    let (rounded, after, r, k, b) = tray_body();
     r.unwrap();
     assert!((after - (rounded - removed)).abs() < 1e-7 * after);
     let classes = assert_definitions(&k, &b);
@@ -404,7 +384,7 @@ fn the_corner_balls_are_their_definitions() {
 
 #[test]
 fn the_offset_of_a_line_round_is_an_exact_cylinder() {
-    let (k, b) = plate_and_boss_body(true);
+    let (k, b) = plate_and_boss_body();
     let (f, _) = exact_rounds(&b)
         .into_iter()
         .find(|(_, c)| *c == ExactClass::Line)
@@ -427,7 +407,7 @@ fn the_offset_of_a_line_round_is_an_exact_cylinder() {
 
 #[test]
 fn a_moved_exact_round_is_certified_again() {
-    let (k, b) = plate_and_boss_body(true);
+    let (k, b) = plate_and_boss_body();
     for (f, _) in exact_rounds(&b) {
         let mut s = face::surface(&b, f).unwrap().unwrap().copy(&k).unwrap();
         let mut place = solidcore::geom::axis2_placement::Axis2Placement::default();
@@ -610,7 +590,7 @@ fn a_box_chamfer_offsets_to_the_chamfer_on_the_offset_faces() {
 /// re-certified: its offset surface lies on the class's surface of the offset supports.
 #[test]
 fn the_offset_of_a_circle_round_is_its_round_of_r_plus_minus_d() {
-    let (k, b) = plate_and_boss_body(true);
+    let (k, b) = plate_and_boss_body();
     let (f, _) = exact_rounds(&b)
         .into_iter()
         .find(|(_, c)| *c == ExactClass::Circle)
@@ -813,5 +793,37 @@ fn a_round_on_a_short_rib_s_cone_reads_back_from_its_record() {
             }
         }
         assert_eq!(rounds, 2, "{sweep} degrees");
+    }
+}
+
+/// A negative-radius preview of box edges (the goldens' `preview0006`: the offsets on the
+/// faces' other side) is the line class's cylinder of radius `|r|`: the class's round
+/// keeps the ball's radius as the distance it is, where a signed `r` reached
+/// `create_cone_patch` as a negative radius and the preview failed 1001.
+#[test]
+fn a_negative_radius_preview_is_the_cylinder_of_its_magnitude() {
+    use solidcore::blend::fillet_executive::api::fillet_preview;
+    use solidcore::topology::brep::p1;
+    let r = -2.2690769714339276;
+    let mut k = Kernel::default();
+    let mut b = create_box(
+        &mut k,
+        Point3::new(0.0, 0.0, 0.0),
+        32.075664333395515,
+        14.557948535168304,
+        35.445177795673864,
+    )
+    .unwrap();
+    let all = p1::edges(&b, None).unwrap();
+    let sel: Vec<EdgeId> = [0, 8, 3, 1].iter().map(|&i| all[i]).collect();
+    let preview = fillet_preview(&mut k, &mut b, &sel, r).unwrap();
+    assert_eq!(preview.len(), sel.len());
+    for s in &preview {
+        let s = s.as_ref().expect("a preview surface");
+        let SurfaceKind::Cone(c) = s.kind() else {
+            panic!("the preview is a {:?}", s.kind());
+        };
+        assert!(c.is_cylinder());
+        assert_eq!(c.base_radius(), r.abs(), "the cylinder's radius");
     }
 }

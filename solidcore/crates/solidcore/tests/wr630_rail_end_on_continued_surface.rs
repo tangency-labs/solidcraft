@@ -4,7 +4,7 @@
 //!
 //! A 40 x 20 x 10 box's top front edge (at y = 0, z = 10) rounded r10.05: on the 10 high
 //! front face the rail lies 10.05 below the top, 0.05 past the face's bottom edge (a cliff).
-//! With `fillet_trace_reaches_rails` the rail meets each end's vertical side edge's line
+//! With WR-610's run-on the rail meets each end's vertical side edge's line
 //! there, 0.05 past the edge's end. Clamped, the rail's end lands on the side edge's
 //! bottom vertex (z = 0), as upstream did; continued, it stays on the rail (z = -0.05).
 
@@ -24,7 +24,6 @@ use solidcore::Kernel;
 /// The lowest z of the fillet's corner vertices on the front face (y = 0).
 fn lowest_rail_end() -> f64 {
     let mut k = Kernel::default();
-    k.fixes.fillet_trace_reaches_rails = true;
     let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 20.0, 10.0).unwrap();
     let e = b
         .edges()

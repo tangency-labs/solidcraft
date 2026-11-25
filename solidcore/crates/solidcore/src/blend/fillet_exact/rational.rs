@@ -1,4 +1,4 @@
-//! The exact surface of a constant round whose spine is a plane conic (opt-in, not
+//! The exact surface of a constant round whose spine is a plane conic (not
 //! upstream): the spine as rational quadratic segments lying on both offsets, the contacts
 //! and the ball's arc between them as Bernstein polynomials in the spine's parameter, and
 //! the round as the rational B-spline surface they make.
@@ -9,9 +9,7 @@
 //! Not in the pinned upstream: the SolidCraft fork's `source/SMLib/src/SmFilletExact.cpp`
 //! and `source/SMLib/inc/SmFilletSolver.h` (tangency-labs/smlib@0061c41, with the conic-pair
 //! dispatch of tangency-labs/smlib@1b5f1e7 and the nodal quartic and conic span direction
-//! of tangency-labs/smlib@dda3b5d), behind
-//! [`UpstreamFixes::fillet_exact_round_classes`](crate::kernel::UpstreamFixes::fillet_exact_round_classes)
-//! (WR-669).
+//! of tangency-labs/smlib@dda3b5d; WR-669).
 //!
 //! | Rust                                   | Fork                                              |
 //! |----------------------------------------|---------------------------------------------------|
@@ -1014,6 +1012,31 @@ pub fn calc_rational_spine_fillet_geom(
         .fillet_surface_generator_type()
         == FilletSurfaceGeneratorType::Circular;
 
+    // the ball's centre at the trace's interior point farthest from both its ends, if any
+    // stands clear of them (the round passes through it)
+    let mut interior: Option<(f64, Point3)> = None;
+    if let [_, inner @ .., _] = tsects {
+        let mut centres = Vec::new();
+        for t in inner {
+            ops.setup_offset_values(t, None)?;
+            centres.push(eval_offset(
+                k,
+                ops.solver_mut(),
+                0,
+                t.uv_pos(SrfIndex::First),
+            )?);
+        }
+        ops.setup_offset_values(first, None)?;
+        let a = eval_offset(k, ops.solver_mut(), 0, first.uv_pos(SrfIndex::First))?;
+        ops.setup_offset_values(last, None)?;
+        let z = eval_offset(k, ops.solver_mut(), 0, last.uv_pos(SrfIndex::First))?;
+        for c in centres {
+            let clear = min2(c.distance(a), c.distance(z));
+            if clear > b.tolerance() && interior.is_none_or(|(best, _)| clear > best) {
+                interior = Some((clear, c));
+            }
+        }
+    }
     // the ball's centre at the trace's ends, and the edge's direction there
     ops.setup_offset_values(first, None)?;
     let start = eval_offset(k, ops.solver_mut(), 0, first.uv_pos(SrfIndex::First))?;
@@ -1087,10 +1110,23 @@ pub fn calc_rational_spine_fillet_geom(
                 dir = if tan.dot(edge_dir) >= 0.0 { 1.0 } else { -1.0 };
                 span = dir * 2.0 * PI;
             } else {
-                // the arc t0 -> t1 one way or the other, by where the edge's middle lies
-                // round the quadric's axis
-                let mid =
-                    ellipse_param_about_axis(&kc, blend.point, blend.dir, &q, &q_face, edge_mid)?;
+                // the arc t0 -> t1 one way or the other: the way through the ball's centre at
+                // a point of the trace between its ends (on the conic, its parameter exact);
+                // with no such point, by where the edge's middle lies round the quadric's
+                // axis. Not the fork's (#18913): the edge's middle reads round the axis at its
+                // own angle, which the ball's centres miss by the angle the ball's contact
+                // turns up the wall; on an arc shorter than twice that the way round is lost.
+                let mid = match interior {
+                    Some((_, c)) => conic_param(&kc, c),
+                    None => ellipse_param_about_axis(
+                        &kc,
+                        blend.point,
+                        blend.dir,
+                        &q,
+                        &q_face,
+                        edge_mid,
+                    )?,
+                };
                 let within = |a: f64, span: f64, t: f64| {
                     let mut d = (t - a) * if span >= 0.0 { 1.0 } else { -1.0 };
                     d -= 2.0 * PI * (d / (2.0 * PI)).floor();
@@ -2010,6 +2046,61 @@ mod tests {
                 crate::surface::implicit::curve_on_quadrics(&curve, &[a.implicit(), b.implicit()])
                     .unwrap(),
                 "segment {i} is not identically on both offsets"
+            );
+        }
+    }
+
+    /// tangency-labs/solidcraft#16686: supports only within the tolerance of their class
+    /// (here the second cylinder's radius 1e-9 larger than the spine was made for) have no
+    /// spine on both offsets exactly. The spine is refused as on them, and proved within
+    /// the tolerance of the one it is off: every point of it is exactly 1e-9 from that
+    /// cylinder. The proof is a bound (twice the residual over a lower bound of the gradient,
+    /// plus the segments' slack), so a tolerance ten times that admits it; one of half that
+    /// cannot be proved, as no bound is below the true distance.
+    #[test]
+    fn a_spine_off_an_offset_by_less_than_the_tolerance_is_proved_near_it() {
+        let cyl = |point: Point3, dir: Vec3, radius: f64| BlendQuadric {
+            kind: QuadricKind::Cylinder,
+            point,
+            dir,
+            radius,
+            angle: 0.0,
+            side: 1.0,
+            tube: 0.0,
+        };
+        let a = cyl(Point3::ZERO, Vec3::new(0.0, 0.0, 1.0), 3.5);
+        let b = cyl(Point3::new(0.0, 2.0, 0.0), Vec3::new(1.0, 0.0, 0.0), 1.5);
+        let node = Point3::new(0.0, 3.5, 0.0);
+        let on = |phi: f64| {
+            let y = 2.0 + 1.5 * phi.cos();
+            Point3::new((3.5f64 * 3.5 - y * y).sqrt(), y, 1.5 * phi.sin())
+        };
+        let arc = nodal_quartic(
+            &a,
+            &b,
+            node,
+            on(0.3) - node,
+            on(2.0 * PI - 0.3) - node,
+            false,
+        )
+        .unwrap();
+        let off = 1e-9;
+        let wider = cyl(b.point, b.dir, b.radius + off);
+        for i in 0..16 {
+            let lo = f64::from(i) / 16.0;
+            let hi = f64::from(i + 1) / 16.0;
+            let curve = segment_curve(&arc.segment(lo, hi));
+            let offsets = [a.implicit(), wider.implicit()];
+            // without the distance: refused
+            assert!(!crate::surface::implicit::curve_on_quadrics(&curve, &offsets).unwrap());
+            assert!(
+                crate::surface::implicit::spine_near_offsets(&curve, &offsets, 10.0 * off).unwrap(),
+                "segment {i} is not proved within {:e}",
+                10.0 * off
+            );
+            assert!(
+                !crate::surface::implicit::spine_near_offsets(&curve, &offsets, 0.5 * off).unwrap(),
+                "segment {i} is proved nearer than it is"
             );
         }
     }

@@ -8,9 +8,10 @@
 //!
 //! With `offset_extension_from_base` and `offset_extension_as_itself` (the least set under which
 //! it shows, with the bands' check that is no longer a flag; any one of them off and the round
-//! builds), the arc's round followed by the front edge's fails in the rollover
+//! builds), the arc's round followed by the front edge's failed in the rollover
 //! (`SM_ERR_NULL_POINTER` from `blend::fillet_solver::p5`) and noted nothing: code 0 and no
-//! comment. It now notes `SM_FILERR_EDGE_PROBLEM` (4) with what failed.
+//! comment. It then noted `SM_FILERR_EDGE_PROBLEM` (4) with what failed, and since the
+//! exact round it builds ([`the_rollover_pair_builds`]).
 //!
 //! A round that fails after it has edited the body puts the body back as it came in: two of the
 //! three join edges of two cylinders joined at an angle.
@@ -309,21 +310,32 @@ fn every_failure_notes_its_status() {
     }
 }
 
-/// With the three fixes the arc's round followed by the front edge's fails in the rollover and
-/// notes it: `SM_FILERR_EDGE_PROBLEM` with what failed, not code 0. Since
-/// tangency-labs/solidcraft#16686 the trace's flush that fails there fails the solver's
-/// geometry step, which notes it as upstream's step does ("Fillet Surface Computation
-/// Failure", at the solver's edge); before, the failure surfaced later unnoted, and the
-/// session noted it with the error's text after a ": ".
+/// With the three fixes the arc's round followed by the front edge's failed in the rollover
+/// and, since tangency-labs/solidcraft#16686, noted it as the solver's geometry step
+/// ("Fillet Surface Computation Failure", code 4). The exact round now builds that second
+/// round (its fillet surface no longer goes through the trace that failed), so the pair is
+/// a build: both rounds return, the stitched body passes the level-2 check with no line,
+/// each round adds faces, and none of the pair's rounds fails. Rounds that still fail keep
+/// noting why ([`every_failure_notes_its_status`]).
 #[test]
-fn the_rollover_failure_notes_its_status() {
-    let failed = failures(arc_top(), LONG);
-    let (which, code, comment, _) = failed
-        .first()
-        .expect("the second round fails with the three fixes");
-    assert_eq!(*which, "second");
-    assert_eq!(*code, 4, "{comment}");
-    assert_eq!(comment, "Fillet Surface Computation Failure");
+fn the_rollover_pair_builds() {
+    let mut k = kernel();
+    let part = arc_part(&mut k);
+    let faces0 = part.face_list().len();
+    let c1 = chain(&k, &part, arc_top());
+    let (step, lines) = round(&mut k, part, &c1).unwrap_or_else(|e| panic!("first: {e:?}"));
+    assert!(lines.is_empty(), "first: {lines:?}");
+    let faces1 = step.face_list().len();
+    assert!(faces1 > faces0, "first: {faces0} -> {faces1}");
+    let c2 = chain(&k, &step, LONG);
+    let (done, lines) = round(&mut k, step, &c2).unwrap_or_else(|e| panic!("second: {e:?}"));
+    assert!(lines.is_empty(), "second: {lines:?}");
+    assert!(
+        done.face_list().len() > faces1,
+        "second: {faces1} -> {}",
+        done.face_list().len()
+    );
+    assert!(failures(arc_top(), LONG).is_empty());
 }
 
 /// Every vertex's point and tolerance; every edge's tolerance, its curve's points at the start,

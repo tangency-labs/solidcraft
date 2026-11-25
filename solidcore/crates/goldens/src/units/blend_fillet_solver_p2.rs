@@ -745,7 +745,8 @@ fn fillet_geom_model(
 
 /// The replayed solve of a `rail_eu` case (#18325's certificates,
 /// `tests/issue_18325_moved_rows.rs`): the side edge use's UV trim curve and the solve's
-/// parameter boxes as `rail_edgeuse_intersect` sets them up, and the kernel's own residual
+/// parameter boxes as `rail_edgeuse_intersect` sets them up (its
+/// `rail_edgeuse_search_box`, WR-610's widening included), and the kernel's own residual
 /// `F(x)` (`RailUvCurveIntersectEnfo::evaluate` over the case's solver) at each point of
 /// `xs`; `None` for another op or a B-rep that does not build.
 ///
@@ -785,7 +786,7 @@ pub fn rail_eu_scene(
     .map_err(err)?
     .status
     .map_err(err)?;
-    let trim = solidcore::topology::edgeuse::p1::uv_trim_curve(&c.brep, side)
+    let mut trim = solidcore::topology::edgeuse::p1::uv_trim_curve(&c.brep, side)
         .map_err(err)?
         .0
         .cloned()
@@ -799,15 +800,21 @@ pub fn rail_eu_scene(
             .map(|s| s.surface.base_surface().clone())
             .ok_or_else(|| harness("no offset surface"))
     };
-    // as `rail_edgeuse_intersect`: the rail's base domain with the offset extension, the
-    // other base's as the TestSolver's `load_initial_values` reads it
-    let rail_base = base(&fs, rail.min(1))?;
-    let mut rail_domain = rail_base.natural_uv_domain_with_nurb(&k).map_err(err)?;
-    fs.setup_offset_extension(&k, &rail_base, &mut rail_domain)
-        .map_err(err)?;
+    // the kernel's own search box (`rail_edgeuse_search_box`): the trim's interval as
+    // WR-610 widens it (with the trim continued past its ends, WR-654) and the rail's
+    // base domain with the offset extension; the other base's as the TestSolver's
+    // `load_initial_values` reads it
+    let (ivl, rail_domain) = FilletSolver::rail_edgeuse_search_box(
+        &mut fs,
+        &k,
+        &mut c.brep,
+        rail.min(1),
+        side,
+        &mut trim,
+    )
+    .map_err(err)?;
     let other_domain = base(&fs, 1 - rail.min(1))?.natural_uv_domain_if_built();
     let domains = [rail_domain, other_domain];
-    let ivl = trim.natural_interval();
     let mut residuals = Vec::new();
     for x in xs {
         let mut f = vec![0.0; 5 + cfg.extra];
@@ -828,7 +835,8 @@ pub fn rail_eu_scene(
 pub struct RailEuScene {
     /// The side edge use's UV trim curve.
     pub trim: Curve,
-    /// Its natural interval, the edge parameter's box.
+    /// The edge parameter's box: the trim's natural interval, widened along a straight
+    /// side edge's line (WR-610).
     pub interval: Extent1d,
     /// The UV boxes of the rail's and the other offset surface's parameters.
     pub domains: [Extent2d; 2],

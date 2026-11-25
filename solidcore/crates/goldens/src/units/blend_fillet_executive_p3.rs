@@ -548,6 +548,23 @@ impl ExecutiveAccess<Handle> for Access {
             cascade_to_boundaries,
         )
     }
+    // the fixture builds no corner, so no patch face meets a fillet
+    fn stitch_faces_keeping_fillet_edges(
+        &mut self,
+        k: &mut Kernel,
+        brep: Handle,
+        tolerance: f64,
+        corners: &[Handle],
+    ) -> SolidResult<StitchAttempt> {
+        if !corners.is_empty() {
+            return missing();
+        }
+        self.stitch_faces(k, brep, tolerance, None, false)
+    }
+    // the fixture's handles name no solver whose trace could be extended
+    fn extend_trace_to_its_rails(&mut self, _: &mut Kernel, _: Handle) -> SolidResult<()> {
+        missing()
+    }
     fn stitch_faces(
         &mut self,
         k: &mut Kernel,
@@ -572,20 +589,6 @@ impl ExecutiveAccess<Handle> for Access {
             None,
             allow_spine_edges,
         ))
-    }
-    fn stitch_faces_keeping_fillet_edges(
-        &mut self,
-        k: &mut Kernel,
-        brep: Handle,
-        tolerance: f64,
-        corners: &[Handle],
-    ) -> SolidResult<StitchAttempt> {
-        // (the fixture's handles name no corners) with no corner there is no patch face,
-        // and the patch callback keeps the default choice for every glued pair
-        if !corners.is_empty() {
-            return missing();
-        }
-        ExecutiveAccess::stitch_faces(self, k, brep, tolerance, None, false)
     }
     // (the fixture's handles name no solvers) with no blend, none takes a face
     fn solvers_faces_outlast(&mut self, _: &mut Kernel, solvers: &[Handle]) -> SolidResult<bool> {
@@ -1105,9 +1108,10 @@ mod tests {
     }
 
     /// WR-546: the stitch with `SmFilletPatchStitchCallback`
-    /// (`stitch_body_keeping_fillet_edges`).
+    /// (`stitch_body_keeping_fillet_edges`), which runs with every flag off: with no
+    /// corner it is the default stitch, so the record is not deferred and succeeds.
     #[test]
     fn patch_stitch_hook_answers_with_no_corner() {
-        reaches_hook_as_with_flags_off(|f| f.fillet_patch_keeps_fillet_edges = true);
+        reaches_hook_as_with_flags_off(|_| {});
     }
 }

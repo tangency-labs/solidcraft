@@ -216,18 +216,15 @@ use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::{edge, EdgeId, VertexId};
 use solidcore::{Brep, Kernel};
 
-/// Every fix but `fillet_exact_round_classes`. The pins are
-/// the fork's; `fillet_exact_round_classes` carries a solidcore-native change the fork does
-/// not have (#2419, WR-669 addendum: a line round's cylinder on its exact spine), which moves
-/// the volumes by about 1e-10. `SmFace::SwapUV`'s exact transpose of a swapped face's trims
-/// (WR-729, no longer a flag) moves them by at most 6e-12, within [`PIN_TOL`].
+/// Every fix. The pins are the fork's; the exact round classes (WR-669, no longer a flag)
+/// carry a solidcore-native change the fork does not have (#2419, WR-669 addendum: a line
+/// round's cylinder on its exact spine). `SmFace::SwapUV`'s exact transpose of a swapped
+/// face's trims (WR-729, no longer a flag) moves them by at most 6e-12, within [`PIN_TOL`].
 fn all_fixes() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "fillet_exact_round_classes" {
-            *f.flag_mut(name).unwrap() = true;
-        }
+        *f.flag_mut(name).unwrap() = true;
     }
     k.fixes = f;
     k
@@ -389,20 +386,12 @@ fn counts(b: &Brep) -> (usize, usize, usize) {
 }
 
 /// Kernel settings for diagnostic dumps.
-fn dump_kernel(exact_classes: bool) -> Kernel {
-    let mut k = all_fixes();
-    k.fixes.fillet_exact_round_classes = exact_classes;
-    k
+fn dump_kernel() -> Kernel {
+    all_fixes()
 }
 
-fn dump_blend(
-    dims: [f64; 3],
-    at: &[[f64; 3]],
-    radii: &[f64],
-    ask: Option<&SetbackAsk>,
-    exact_classes: bool,
-) -> String {
-    let mut k = dump_kernel(exact_classes);
+fn dump_blend(dims: [f64; 3], at: &[[f64; 3]], radii: &[f64], ask: Option<&SetbackAsk>) -> String {
+    let mut k = dump_kernel();
     let r = blend_box(&mut k, dims, at, radii, ask);
     dump_blended(k, r)
 }
@@ -430,28 +419,13 @@ fn dump_blended(mut k: Kernel, mut r: Blended) -> String {
 #[test]
 #[ignore = "prints the blends for a local comparison with the fork driver"]
 fn dump_blends() {
-    // Match #2491's fork-parity profile; the exact-spine redesign is not in this fork.
-    dump_blend_matrix(false);
+    dump_blend_matrix();
 }
 
-/// Isolate the class-dependent cylinder construction for the same thirteen inputs.
-/// This enables the solidcore-native exact spine, outside #2491's fork-parity profile.
-#[test]
-#[ignore = "diagnostic only: exact-spine construction is outside the fork-parity profile"]
-fn diagnose_class_dependent_executive() {
-    dump_blend_matrix(true);
-}
-
-fn dump_blend_matrix(exact_classes: bool) {
+fn dump_blend_matrix() {
     print!(
         "{}",
-        dump_blend(
-            [40.0, 30.0, 20.0],
-            &UNEQUAL_AT,
-            &[2.0, 3.0, 4.0],
-            None,
-            exact_classes
-        )
+        dump_blend([40.0, 30.0, 20.0], &UNEQUAL_AT, &[2.0, 3.0, 4.0], None)
     );
     for (sb, ease) in [(8.0, 0.0), (20.0, 0.0), (0.0, 0.0), (5.0, 0.0), (8.0, 2.0)] {
         println!("== setback {sb} ease {ease}");
@@ -461,8 +435,7 @@ fn dump_blend_matrix(exact_classes: bool) {
                 [60.0, 40.0, 20.0],
                 &ASKED_AT,
                 &[5.0; 3],
-                Some(&asked(sb, ease)),
-                exact_classes
+                Some(&asked(sb, ease))
             )
         );
     }
@@ -470,28 +443,16 @@ fn dump_blend_matrix(exact_classes: bool) {
         println!("== short {sb}");
         print!(
             "{}",
-            dump_blend(
-                [20.0; 3],
-                &SHORT_AT,
-                &[2.0, 3.0, 4.0],
-                Some(&short(sb)),
-                exact_classes
-            )
+            dump_blend([20.0; 3], &SHORT_AT, &[2.0, 3.0, 4.0], Some(&short(sb)))
         );
     }
     println!("== shrink");
     print!(
         "{}",
-        dump_blend(
-            [20.0, 20.0, 5.5],
-            &SHRINK_AT,
-            &[2.0, 3.0, 4.0],
-            None,
-            exact_classes
-        )
+        dump_blend([20.0, 20.0, 5.5], &SHRINK_AT, &[2.0, 3.0, 4.0], None)
     );
     println!("== concave");
-    let mut k = dump_kernel(exact_classes);
+    let mut k = dump_kernel();
     let b = notched(&mut k, 10.0);
     let r = blend_body(&mut k, b, &CONCAVE_AT, &[1.0, 1.5, 2.0], None);
     print!("{}", dump_blended(k, r));
@@ -502,8 +463,7 @@ fn dump_blend_matrix(exact_classes: bool) {
             [20.0; 3],
             &[[10.0, 0.0, 20.0], [20.0, 10.0, 20.0], [20.0, 0.0, 10.0]],
             &[2.0, 2.0, 3.0],
-            None,
-            exact_classes
+            None
         )
     );
 }

@@ -5,7 +5,7 @@
 //! surfaces' isoparametric curves. Upstream's stitch keeps, of a section half and the
 //! patch's edge, the one nearer the other's faces: two near-equal distances, so a
 //! section half could come out as the approximation, 1.4e-5 off the round. With
-//! `fillet_patch_keeps_fillet_edges` every edge between the patch and a round is the
+//! WR-546's stitch (always on since #18913) every edge between the patch and a round is the
 //! round's own edge and lies on it. Since solidcore#2933 this marked corner between planes
 //! is the blend corner's Setback, whose fill meets the rounds on their own sections, and the
 //! check holds for it; the flag's N x N branch is reached only by an N x N corner (beside a
@@ -45,7 +45,6 @@ fn face_middle_from_origin(k: &Kernel, b: &Brep, f: FaceId) -> f64 {
 #[test]
 fn wr_546_setback_patch_meets_the_rounds_on_their_own_edges() {
     let mut k = Kernel::default();
-    k.fixes.fillet_patch_keeps_fillet_edges = true;
     let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 40.0, 40.0).unwrap();
     let edges: Vec<_> = b.edges().ids().collect();
     assert_eq!(edges.len(), 12);

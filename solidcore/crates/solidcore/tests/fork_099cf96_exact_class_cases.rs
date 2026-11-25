@@ -23,8 +23,8 @@
 //! | `sphere_plane` | status 1001 | status 1001 |
 //! | `tee_is_fitted` | 1.47e-3 off, tolerance 1e-3 | 1.47e-3 off, tolerance 1e-3 |
 //!
-//! Those two columns were checked on the default kernel and with `fillet_exact_round_classes`
-//! alone while the default was the pinned corner; the blend corner, always built since #2400,
+//! Those two columns were checked on the default kernel and with the exact round classes
+//! (then the flag `fillet_exact_round_classes`, retired in #18913) alone while the default was the pinned corner; the blend corner, always built since #2400,
 //! builds `sphere_plane` (its End at a smooth vertex, as the fork since smlib#124) and, on
 //! the default kernel with the exact classes but no other fix, builds the pipes (traced, and
 //! failing a validity test), so neither profile has these marks now. Since #2864 the ball's
@@ -617,9 +617,7 @@ fn solidcraft_kernel() -> Kernel {
 }
 
 fn exact_kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.fillet_exact_round_classes = true;
-    k
+    Kernel::default()
 }
 
 #[test]

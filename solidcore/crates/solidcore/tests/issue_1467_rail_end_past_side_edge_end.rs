@@ -4,7 +4,7 @@
 //!
 //! Each rail on the 10 high face lies `r - 10` below the face's bottom edge, so it meets
 //! the vertical side edge at each end of the round on the edge's line, `r - 10` past the
-//! edge's end (found there by `fillet_trace_reaches_rails`, WR-610). Upstream's
+//! edge's end (found there by WR-610's run-on, always on since #18913). Upstream's
 //! `CalcRailIntEdgeuse` evaluates that end on the face's surface clamped to its domain: it lands on the side edge's bottom vertex, off the
 //! fillet by `(r - 10)^2 / 2r` (1.24e-4 at r10.05), under the corner's ten tolerances, so
 //! the Nx1 corner takes it as meeting the side edge and builds an end rib off the fillet,
@@ -38,9 +38,7 @@ use solidcore::Kernel;
 
 /// The flags the fork's cliff overflow (#960) runs with here.
 fn kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.fillet_trace_reaches_rails = true;
-    k
+    Kernel::default()
 }
 
 /// The area of the section a round of radius `r` removes between perpendicular faces `w`

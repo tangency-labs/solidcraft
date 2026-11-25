@@ -734,6 +734,110 @@ fn edge_clear_of_segment(
         || all(&|_, h| h < -clear))
 }
 
+/// Not upstream (#21463): whether the cap edge's place on the side face `s_face` (S), the
+/// segment from W (the side edge's far vertex `far`) on along the edge's line to the rail's
+/// end `r` (R, which the solve found on that line past W), is proved to leave S: a straight
+/// boundary edge of S with no end at W crosses the open segment, its two ends on opposite
+/// sides of the segment's line by more than the body's tolerance and the rounding of their
+/// coordinates in the segment's frame (as [`edge_clear_of_segment`] counts it), and its
+/// crossing with that line inside the segment by more than that and the crossing's own
+/// rounding. The cap edge there would run off S through a hole or notch in it, so the
+/// corner's end patch cannot close on S. `false` where that is not proved: R within the
+/// tolerance of W, a curved boundary edge, an edge that only comes near the segment, or a
+/// point not dropped onto S.
+///
+/// # Errors
+/// Those of the topology queries, the drop, the evaluations and the recogniser.
+pub(crate) fn cap_segment_proved_to_leave_side(
+    k: &Kernel,
+    target: &Brep,
+    s_face: FaceId,
+    far: VertexId,
+    r: Point3,
+) -> Result<bool> {
+    use crate::nurbs::math::gamma;
+    let tol = target.tolerance();
+    let w = crate::topology::vertex::point(target, far)?;
+    let length = (r - w).length();
+    if length.is_nan() || length <= tol {
+        return Ok(false);
+    }
+    let Ok(u) = (r - w).unitize() else {
+        return Ok(false);
+    };
+    let surface = need(
+        target.face(s_face)?.surface.as_ref(),
+        "side face without surface",
+    )?
+    .clone_for_evaluation()?;
+    let domain = surface.natural_uv_domain_with_nurb(k)?;
+    let dropped = surface.drop_point::<crate::surface::surface::p4::NoObject>(
+        k,
+        r,
+        &domain,
+        &crate::surface::surface::p5::DropPointOptions::default(),
+    )?;
+    if !dropped.success {
+        return Ok(false);
+    }
+    let normal = surface.evaluate_normal(
+        k,
+        dropped.result_uv,
+        crate::nurbs::knots::Side::Left,
+        crate::nurbs::knots::Side::Left,
+    )?;
+    let Ok(across) = normal.cross(u).unitize() else {
+        return Ok(false);
+    };
+    let frame = SegmentFrame {
+        w,
+        along: u,
+        across,
+        length,
+        tol,
+    };
+    for edge_id in crate::topology::face::p4::edges(target, s_face, None, false, None)? {
+        if edge::start_vertex(target, edge_id)? == Some(far)
+            || edge::end_vertex(target, edge_id)? == Some(far)
+        {
+            continue;
+        }
+        let Some(curve) = edge::curve(target, edge_id)?.cloned() else {
+            continue;
+        };
+        if curve.is_line(k, 3, CURVE_TOL)?.is_none() {
+            continue;
+        }
+        let ivl = edge::interval(target, edge_id)?;
+        let (p0, p1) = (
+            curve.evaluate_point(k, ivl.min())?,
+            curve.evaluate_point(k, ivl.max())?,
+        );
+        let size = [p0, p1, w]
+            .iter()
+            .flat_map(|p| [p.x.abs(), p.y.abs(), p.z.abs()])
+            .fold(length, f64::max);
+        let err = gamma(16) * size;
+        let clear = tol + err;
+        let ((a0, h0), (a1, h1)) = (frame.coords(p0), frame.coords(p1));
+        if !(a0.is_finite() && h0.is_finite() && a1.is_finite() && h1.is_finite()) {
+            continue;
+        }
+        let opposite = (h0 > clear && h1 < -clear) || (h0 < -clear && h1 > clear);
+        if !opposite {
+            continue;
+        }
+        // where the edge's line crosses the segment's line, a0 + (a1 - a0) h0 / (h0 - h1),
+        // with the quotient's and the products' rounding on top of the coordinates'
+        let at = a0 + (a1 - a0) * (h0 / (h0 - h1));
+        let margin = clear + gamma(8) * (a0.abs() + a1.abs()) + err;
+        if at > margin && at < frame.length - margin {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// The tolerance [`rail_passes_side_edge_end`] recognises a side edge's curve as a line
 /// within, as [`crate::blend::fillet_tangent_rollover`] recognises the filleted edge's.
 const CURVE_TOL: f64 = 1.0e-8;

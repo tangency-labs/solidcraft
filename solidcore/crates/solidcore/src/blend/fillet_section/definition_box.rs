@@ -808,7 +808,8 @@ mod tests {
     use super::*;
 
     /// tangency-labs/solidcraft#14284: `wr698`'s `circle_root` (a pipe of radius 10 lying
-    /// along a 60 x 40 x 10 plate 4 degrees off x, its root rounded r 2 as its definition)
+    /// 4 degrees off x on a drum of radius 100 and length 60, its root rounded r 2 as its
+    /// definition)
     /// ends where the pipe ends, so at the round's u end a foot lies on the pipe's net's v end.
     /// Over a box at that end the definition's feet box crosses the pipe's domain end: without
     /// a support continued it is refused `FootPastDomainEnd` (what it was, as `SM_ERR`, before);
@@ -823,7 +824,7 @@ mod tests {
         let (u0, u1) = (knot(&net.u, net.p as isize), knot(&net.u, net.nu as isize));
         let (v0, v1) = (knot(&net.v, net.q as isize), knot(&net.v, net.nv as isize));
         // a box at the round's u end along its rail on v's start (the pipe's side or the
-        // plate's), as the margin of its edge's last piece asks
+        // drum's), as the margin of its edge's last piece asks
         let (ua, ub) = (u1 - 0.002, u1);
         let ku = span(&net.u, net.p, net.nu, 0.5 * (ua + ub));
         let mut crossed = 0;
@@ -909,19 +910,29 @@ mod tests {
         );
     }
 
-    /// `wr698`'s `circle_root`: a pipe of radius 10 lying along a 60 x 40 x 10 plate 4
-    /// degrees off x, its root rounded r 2; the round, a definition on the pipe and the plate.
+    /// `wr698`'s `circle_root`: a pipe of radius 10 lying 4 degrees off x on a drum (a
+    /// cylinder of radius 100 along x, its top at z = 10), its root rounded r 2; the round,
+    /// a definition on the pipe and the drum. (On a plate, the round of a plane and a
+    /// cylinder is the exact conic class's since the exact round classes are the only path,
+    /// #18913; the drum's and the pipe's axes are skew, so no class reads the pair and the
+    /// round is traced.)
     #[allow(clippy::unwrap_used, clippy::expect_used)]
     fn wr698_circle_root() -> (Kernel, Surface) {
         use crate::blend::fillet_executive::api::fillet_edges;
         use crate::boolean::api_brep::boolean_union;
         use crate::geom::axis2_placement::Axis2Placement;
         use crate::math::{Point3, Vec3};
-        use crate::primitive::api_primitives::{create_box, create_cylinder};
+        use crate::primitive::api_primitives::create_cylinder;
         use crate::query::api_queries::{edge_closest_point, get_edges};
         use crate::topology::face;
         let mut k = Kernel::default();
-        let plate = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 10.0).unwrap();
+        let mut drum = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 100.0, 60.0).unwrap();
+        let drum_place = Axis2Placement::new(
+            Point3::new(0.0, 23.0, -90.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+        );
+        crate::topology::brep::p5::transform(&mut k, &mut drum, &drum_place, None, false).unwrap();
         let mut pipe = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 60.0).unwrap();
         let phi = 4.0_f64.to_radians();
         let place = Axis2Placement::new(
@@ -930,8 +941,8 @@ mod tests {
             Vec3::new(0.0, 1.0, 0.0),
         );
         crate::topology::brep::p5::transform(&mut k, &mut pipe, &place, None, false).unwrap();
-        let mut b = boolean_union(&mut k, plate, pipe).unwrap();
-        let q = Point3::new(30.0, 29.2, 10.0);
+        let mut b = boolean_union(&mut k, drum, pipe).unwrap();
+        let q = Point3::new(30.0, 29.2, 9.8);
         let root = get_edges(&b)
             .unwrap()
             .into_iter()
@@ -953,7 +964,7 @@ mod tests {
                 s.procedural_blend()
                     .is_some_and(|d| (0..2).all(|i| d.support(i).is_some()))
             })
-            .expect("the round, a definition on the pipe and the plate")
+            .expect("the round, a definition on the pipe and the drum")
             .clone();
         (k, def)
     }

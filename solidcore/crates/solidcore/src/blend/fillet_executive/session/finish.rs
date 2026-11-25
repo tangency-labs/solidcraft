@@ -1289,7 +1289,14 @@ impl FilletSession<'_> {
             // with the sheet's boundary)
             let sectioned = session.executive.open_ends.iter().any(|end| end.section);
             if open_setback || sectioned || session.executive.cliff_overflow {
+                // the trim sews in place under the session's identities, as the merge
+                // inserts: its owners are rebound to the target's naming as the merge's
+                // are (#18913: a round past its faces failed `SmBrep` test #61)
+                let recorded = session.objects.target.geometry_owner_keys().clone();
                 let result = session.trim_at_creases(k);
+                // (also after an error: the owners are normalised either way)
+                let normalized = session.normalize_target_owners(&recorded);
+                let result = result.and(normalized);
                 session.objects.target.set_editing_enabled(editing);
                 if let Some(output) = error_out {
                     output.assign(&session.executive.error);
@@ -1322,21 +1329,28 @@ impl FilletSession<'_> {
         // afterwards (`Brep::owner_identity`)
         let recorded = self.objects.target.geometry_owner_keys().clone();
         let result = self.merge_fillet_in_place(k);
-        // (not upstream: owners are pointers there) the insertion names the geometry
-        // it binds to the target's edges and faces by the session's kernel identity
-        // of the entity; rebind it to the same entity's identity in the target's
-        // naming, as the piecewise merge does, so the curve owner test of
-        // `SmEdge::ValidateGeometry` (`SmBrep` test #61) finds its edge
-        // (tangency-labs/solidcore#423). Also after an error.
+        // Also after an error.
+        let normalized = self.normalize_target_owners(&recorded);
+        result.and(normalized)
+    }
+
+    /// (not upstream: owners are pointers there) the insertion and the trim at creases
+    /// name the geometry they bind to the target's edges and faces by the session's
+    /// kernel identity of the entity; rebind it to the same entity's identity in the
+    /// target's naming (for a caller-named target, the key `recorded` before the edit),
+    /// as the piecewise merge does, so the curve owner test of `SmEdge::ValidateGeometry`
+    /// (`SmBrep` test #61) finds its edge (tangency-labs/solidcore#423).
+    fn normalize_target_owners(
+        &mut self,
+        recorded: &std::collections::BTreeMap<EntityRef, crate::geom::object::ObjectRef>,
+    ) -> Result<()> {
         let naming = self.objects.target.naming();
         let serial = self.objects.target_serial;
         let session_owner = |e| p3::topology_ref(serial, e);
-        let restored =
-            super::piecewise::normalize_session_owners(self.objects.target, session_owner, |e| {
-                super::piecewise::naming_owner(naming, recorded.get(&e).copied(), e)
-                    .unwrap_or_else(|| session_owner(e))
-            });
-        result.and(restored)
+        super::piecewise::normalize_session_owners(self.objects.target, session_owner, |e| {
+            super::piecewise::naming_owner(naming, recorded.get(&e).copied(), e)
+                .unwrap_or_else(|| session_owner(e))
+        })
     }
 
     /// The in-place (non-piecewise) body of [`Self::merge_fillet`].
@@ -1799,33 +1813,40 @@ mod ball_fit_tests {
 
     /// A fillet body whose building failed at a stage is not built, as before (the same
     /// failure, status and error info), keeping the executive's failure as its cause, which
-    /// keeps the stage's error (#13790): the closed corner of a disc's rim round past its
-    /// wall, without the trace reaching its rails (WR-610), whose vertex geometry fails.
+    /// keeps the stage's error (#13790): a vertex of a 10 cube whose three edges are rounded
+    /// 3, 3 and 9.9. The 9.9 round leaves 0.1 of each face it rolls on, so the 3 rounds
+    /// beside it cross it before the setback corner and its fill fails, a blend larger than
+    /// its faces allow (#18913: the disc's rim round past its wall this test used builds
+    /// since its trace reaches its rails, WR-610).
     #[test]
     fn a_fillet_body_not_built_keeps_the_executives_failure() {
         let mut k = Kernel::default();
-        k.fixes.fillet_trace_reaches_rails = false;
         let mut body =
-            crate::primitive::api_primitives::create_cylinder(&mut k, Point3::ZERO, 13.0, 2.0)
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 10.0, 10.0, 10.0)
                 .unwrap();
-        let rim = p1::edges(&body, None)
-            .unwrap()
-            .into_iter()
-            .find(|&e| {
-                let interval = edge::interval(&body, e).unwrap();
-                let curve = edge::curve(&body, e).unwrap().unwrap();
-                (0..=8).all(|i| {
-                    let p = curve
-                        .evaluate_point(&k, interval.evaluate(f64::from(i) / 8.0))
-                        .unwrap();
-                    (p.z - 2.0).abs() < 1e-9
+        // the edge through the vertex (10, 10, 10) along `axis`, by its midpoint
+        let along = |k: &Kernel, body: &Brep, axis: usize| {
+            p1::edges(body, None)
+                .unwrap()
+                .into_iter()
+                .find(|&e| {
+                    let interval = edge::interval(body, e).unwrap();
+                    let curve = edge::curve(body, e).unwrap().unwrap();
+                    let p = curve.evaluate_point(k, interval.evaluate(0.5)).unwrap();
+                    [p.x, p.y, p.z].iter().enumerate().all(|(i, v)| {
+                        let want = if i == axis { 5.0 } else { 10.0 };
+                        (v - want).abs() < 1e-9
+                    })
                 })
-            })
-            .unwrap();
+                .unwrap()
+        };
+        let rounds = [(0, 3.0), (1, 3.0), (2, 9.9)].map(|(axis, r)| (along(&k, &body, axis), r));
         let mut session = FilletSession::new(&mut k, &mut body).unwrap();
-        session
-            .prepare_constant_radius_edges(&mut k, &[rim], 2.5, 1, 1, 1.0)
-            .unwrap();
+        for (e, r) in rounds {
+            session
+                .prepare_constant_radius_edges(&mut k, &[e], r, 1, 1, 1.0)
+                .unwrap();
+        }
         let e = session.do_fillet(&mut k).unwrap_err();
         let info = session.error_info().clone();
         // as before: the session's failure, its status and the corner's note
@@ -1834,10 +1855,11 @@ mod ball_fit_tests {
         assert_eq!(e.blend_failure(), bare.blend_failure(), "{e:?}");
         assert_eq!(e.sm_status(), Some(1001), "{e:?}");
         assert_eq!(refusable(&e), refusable(&bare), "{e:?}");
-        assert_eq!(info.code, 3);
+        assert_eq!(info.code, 8);
         assert_eq!(
             info.comment,
-            "Fillet Corner Error: Unable to Compute Geometry"
+            "Fillet Error: the rounds beside an edge at a setback corner cross past the room on \
+             that edge: the blends are larger than their faces allow"
         );
         // now keeping the executive's failure, which keeps the corner's error
         let executive = e.cause().expect("the executive's failure is kept");
@@ -1853,6 +1875,11 @@ mod ball_fit_tests {
         assert_eq!(executive.sm_status(), Some(1001));
         let stage = executive.cause().expect("the stage's error is kept");
         assert!(!stage.is_unported_or_cancelled(), "{stage:?}");
+        assert_eq!(
+            stage.operation(),
+            "SmBlendCorner::BuildSetBackFill",
+            "{stage:?}"
+        );
         assert_eq!(
             e.to_string(),
             format!("{bare}; caused by {executive}"),

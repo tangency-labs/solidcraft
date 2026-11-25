@@ -79,8 +79,8 @@
 //! - **Iteration.** No recursion. Loops are bounded: two surfaces, two rails of two
 //!   edge uses, the G1 knots and points, ten trace passes, twenty cusp skips, three
 //!   drop tolerances.
-//! - **Exact round classes (WR-669, #2085).** With `fixes.fillet_exact_round_classes`, the
-//!   try-chain (`c3_try_analytic`) is replaced by the SolidCraft fork's classification
+//! - **Exact round classes (WR-669, #2085).** Upstream's analytic try-chain (:1955-2011) is
+//!   replaced by the SolidCraft fork's classification
 //!   (tangency-labs/smlib@b5f2867, 7ac037e): `ClassifyExactBlend` and
 //!   `CalcExactFilletGeom` (`blend::fillet_exact`), whose failures are errors.
 
@@ -500,13 +500,9 @@ impl FilletSolver {
         // :1872-1920 no points; drop near-duplicate end points
         c2_clean_ends(ops, &mut cx, &mut st)?;
 
-        // :1955-2011 analytic fillet (WR-669, opt-in: the round's exact class instead)
-        let exact = if cx.k.fixes.fillet_exact_round_classes {
-            c3_exact_by_class(ops, &mut cx, &mut st)?
-        } else {
-            c3_try_analytic(ops, &mut cx, &mut st)?
-        };
-        if exact {
+        // :1955-2011 analytic fillet (not upstream, WR-669: the round's exact class in place
+        // of the try-chain)
+        if c3_exact_by_class(ops, &mut cx, &mut st)? {
             return Ok(());
         }
 
@@ -2213,61 +2209,9 @@ mod tests_c2 {
 // (chunk-local imports go inside the functions: never edit the shared `use` block)
 // =====================================================================================
 
-/// :1955-2011: under `CanMakeAnalytic()`, the base surfaces as B-splines (one offset
-/// level unwrapped, `NER`), `sm_TestAnalyticSurface` on both, then
-/// `CalcCylinderFilletGeom` and `CalcTorusFilletGeom`. `true` when one succeeded
-/// (`return SM_SUCCESS`); their failures fall through to the trace.
-fn c3_try_analytic(
-    ops: &mut dyn FilletSolverOps,
-    cx: &mut Cx<'_>,
-    st: &mut CalcState,
-) -> Result<bool> {
-    use super::p1::{test_analytic_surface, AnalyticTestSurface};
-
-    // when building a fillet that can be analytic
-    if !ops.can_make_analytic()? {
-        return Ok(false);
-    }
-
-    // get filletEdge->Surface1, then filletEdge->Surface2 (each NER)
-    let base1 = c3_bspline_base(&st.base_surfaces[0], 0)?;
-    let base2 = c3_bspline_base(&st.base_surfaces[1], 1)?;
-
-    // when both surfaces are analytic (planes or cones); `&&` short-circuits as
-    // upstream's does (the second test only runs when the first passes)
-    let both_analytic = test_analytic_surface(cx.k, AnalyticTestSurface::Surface(base1))?
-        && test_analytic_surface(cx.k, AnalyticTestSurface::Surface(base2))?;
-    if !both_analytic {
-        return Ok(false);
-    }
-
-    // try making a cylindrical fillet to store in m_vFilletGeoms[0]; quit when this
-    // succeeds (a failure falls through, an unported callee does not)
-    match calc_cylinder_fillet_geom(ops, cx, &mut st.store, &st.tsect_pnts) {
-        Ok(()) => return Ok(true),
-        Err(e) if e.is_unported_or_cancelled() => return Err(e),
-        Err(_) => {}
-    }
-
-    // try making a torus fillet to store in m_vFilletGeoms[0]; quit when this succeeds
-    match calc_torus_fillet_geom(ops, cx, &mut st.store, &st.tsect_pnts) {
-        Ok(()) => return Ok(true),
-        Err(e) if e.is_unported_or_cancelled() => return Err(e),
-        Err(_) => {}
-    }
-
-    // WR-420 (fork addition): where the centre line collapses to a point, the corner
-    // ball's patch
-    let tsects = st.store.snapshot(cx.fillets, &st.tsect_pnts)?;
-    match FilletSolver::calc_sphere_fillet_geom(ops, cx.k, cx.target, cx.fillets, &tsects, None) {
-        Ok(()) => Ok(true),
-        Err(e) if e.is_unported_or_cancelled() => Err(e),
-        Err(_) => Ok(false),
-    }
-}
-
 /// Not upstream (WR-669, the SolidCraft fork's tangency-labs/smlib@b5f2867 and 7ac037e,
-/// opt-in `fixes.fillet_exact_round_classes`): in place of the try-chain, the round's exact
+/// in place of upstream's try-chain at :1955-2011, `CanMakeAnalytic` then
+/// `CalcCylinderFilletGeom` and `CalcTorusFilletGeom`), the round's exact
 /// class from its faces' kinds and placement at the first point
 /// (`ClassifyExactBlend(*sTsectPnts[0])`), and its exact surface by that class
 /// (`CalcExactFilletGeom(.., NULL, FALSE)`); a round of no exact class is traced. Every
@@ -2289,32 +2233,6 @@ fn c3_exact_by_class(
     calc_exact_fillet_geom(
         ops, cx.k, cx.target, cx.fillets, &blend, &tsects, None, false,
     )
-}
-
-/// :1960-1977: `SM_CAST_PTR(SmBSplineSurface, pBaseSrf)`, else (another level of
-/// offset surface) `SM_CAST_PTR(SmBSplineSurface, pOffsetSurf->GetBaseSurface())`;
-/// `NER` when the base is not an offset surface or its base not a B-spline.
-fn c3_bspline_base(base: &Surface, side: usize) -> Result<&Surface> {
-    if is_bspline_surface(base) {
-        return Ok(base);
-    }
-    // If the base surface is not an SmBSplineSurface, maybe it's another level of
-    // offset surface; check one more level.
-    let SurfaceKind::OffsetSurface(offset) = base.kind() else {
-        return Err(fail(SolverFailure::BaseSurfaceNotBSpline {
-            side,
-            kind: base.type_string(),
-        }));
-    };
-    let inner = offset.base_surface();
-    if is_bspline_surface(inner) {
-        Ok(inner)
-    } else {
-        Err(fail(SolverFailure::BaseSurfaceNotBSpline {
-            side,
-            kind: inner.type_string(),
-        }))
-    }
 }
 
 /// :2028-2034: `st.trace.domains` = the base surfaces' natural domains after
@@ -2464,7 +2382,6 @@ mod tests_c3 {
     use crate::curve::line::Line;
     use crate::intersect::surface_intersector::p1::IntersectionPointType;
     use crate::nurbs::b_spline_surface::BSplineSurface;
-    use crate::surface::offset_surface;
 
     fn bilinear(p: [[f64; 3]; 4]) -> Surface {
         let [a, b, c, d] = p.map(Vec3::from);
@@ -2487,31 +2404,6 @@ mod tests_c3 {
                 [0.0, 1.0, 1.0],
             ]),
         )
-    }
-
-    /// The planes of [`planes`] as `SmPlane`s (`sm_TestAnalyticSurface` accepts a
-    /// plane without the planarity test).
-    fn analytic_planes() -> (Surface, Surface) {
-        use crate::geom::vector2d::Vec2;
-        use crate::surface::plane::Plane;
-        let domain = planes().0.natural_uv_domain_if_built();
-        let plane = |x: [f64; 3], y: [f64; 3]| {
-            Surface::from(Plane::new(
-                Vec3::new(0.0, 0.0, 0.0),
-                Vec3::from(x),
-                Vec3::from(y),
-                Vec2::new(1.0, 1.0),
-                &domain,
-            ))
-        };
-        (
-            plane([1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
-            plane([0.0, 1.0, 0.0], [0.0, 0.0, 1.0]),
-        )
-    }
-
-    fn offset(k: &Kernel, d: f64, base: &Surface) -> Surface {
-        Surface::from(offset_surface::OffsetSurface::new(k, d, base.clone(), false, 0).unwrap())
     }
 
     fn solver(k: &Kernel, a: &Surface, b: &Surface) -> ConstantRadiusAssistedFs {
@@ -2575,74 +2467,6 @@ mod tests_c3 {
             error_info: None,
         };
         f(&mut cx)
-    }
-
-    #[test]
-    fn analytic_planes_reach_the_cylinder_attempt() {
-        let k = Kernel::default();
-        let (a, b) = planes();
-        let mut fs = solver(&k, &a, &b);
-        let (pa, pb) = analytic_planes();
-        let mut st = state(line(), [pa, pb]);
-        // CalcCylinderFilletGeom and CalcTorusFilletGeom (blend.fillet_solver_p2) run
-        // and fail on this bare solver (no fillet geometry): no analytic fillet
-        let r = with_cx(&k, |cx| c3_try_analytic(&mut fs, cx, &mut st));
-        assert!(matches!(r, Ok(false)), "{r:?}");
-    }
-
-    #[test]
-    fn analytic_needs_can_make_analytic() {
-        let k = Kernel::default();
-        let (a, b) = planes();
-        // the base solver: OffsetRadiiCanChange TRUE, so CanMakeAnalytic FALSE
-        let mut fs = solver(&k, &a, &b).solver;
-        let mut st = state(line(), [a, b]);
-        let r = with_cx(&k, |cx| c3_try_analytic(&mut fs, cx, &mut st));
-        assert!(matches!(r, Ok(false)));
-    }
-
-    #[test]
-    fn bspline_base_unwraps_one_offset_level() {
-        let k = Kernel::default();
-        let (a, _) = planes();
-        assert!(std::ptr::eq(
-            c3_bspline_base(&a, 0).unwrap(),
-            std::ptr::from_ref(&a)
-        ));
-
-        let once = offset(&k, 0.5, &a);
-        let inner = c3_bspline_base(&once, 0).unwrap();
-        assert!(matches!(inner.kind(), SurfaceKind::BSpline(_)));
-
-        let twice = offset(&k, 0.5, &once);
-        let e = c3_bspline_base(&twice, 1).unwrap_err();
-        assert_eq!(
-            e,
-            fail(SolverFailure::BaseSurfaceNotBSpline {
-                side: 1,
-                kind: once.type_string(),
-            })
-        );
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
-    }
-
-    #[test]
-    fn analytic_through_an_offset_base() {
-        let k = Kernel::default();
-        let (a, b) = planes();
-        let mut fs = solver(&k, &a, &b);
-        let (pa, pb) = analytic_planes();
-        let mut st = state(line(), [offset(&k, 0.5, &pa), pb]);
-        let r = with_cx(&k, |cx| c3_try_analytic(&mut fs, cx, &mut st));
-        assert!(matches!(r, Ok(false)), "{r:?}");
-
-        let (pa, pb) = analytic_planes();
-        let mut st = state(line(), [pa, offset(&k, 0.5, &offset(&k, 0.5, &pb))]);
-        let r = with_cx(&k, |cx| c3_try_analytic(&mut fs, cx, &mut st));
-        assert_eq!(
-            r.unwrap_err().upstream_status(),
-            Some(crate::error::SM_ERR_NULL_POINTER)
-        );
     }
 
     #[test]
@@ -4798,29 +4622,6 @@ mod tests_c6 {
 // =====================================================================================
 // STUBS: calls into units that are not ported (one helper each; chunks call these)
 // =====================================================================================
-
-/// `CalcCylinderFilletGeom(sTsectPnts)` (default `pFG = NULL`).
-fn calc_cylinder_fillet_geom(
-    ops: &mut dyn FilletSolverOps,
-    cx: &mut Cx<'_>,
-    store: &mut TsectStore,
-    points: &[TsRef],
-) -> Result<()> {
-    // the points are read only (a snapshot of sTsectPnts)
-    let tsects = store.snapshot(cx.fillets, points)?;
-    FilletSolver::calc_cylinder_fillet_geom(ops, cx.k, cx.target, cx.fillets, &tsects, None)
-}
-
-/// `CalcTorusFilletGeom(sTsectPnts)` (default `pFG = NULL`).
-fn calc_torus_fillet_geom(
-    ops: &mut dyn FilletSolverOps,
-    cx: &mut Cx<'_>,
-    store: &mut TsectStore,
-    points: &[TsRef],
-) -> Result<()> {
-    let tsects = store.snapshot(cx.fillets, points)?;
-    FilletSolver::calc_torus_fillet_geom(ops, cx.k, cx.target, cx.fillets, &tsects, None)
-}
 
 /// `RecordFilletError(eErrorType, sTsectPnts, pMessage)` (upstream ignores its
 /// status: call through `ignore_status`, which still propagates `Unported`).

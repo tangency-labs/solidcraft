@@ -1,0 +1,9 @@
+Updates: WR-609, WR-610
+
+#### WR-609 and WR-610 (update, 2026-11-24). `fillet_trace_reaches_rails` is removed
+
+`CreateFilletBrep` always sets each solver's trace reach before the corners (`sm_ExtendTraceToItsRails`), so a blend wider than its faces is traced to its rails, and `RailEdgeuseIntersect` always runs a straight side edge on along its line (on a plane, cylinder or cone), so a rail meeting that line past the edge's end is found. The clamped trace and the unrun-on intersection are deleted. Removed: the field `UpstreamFixes::fillet_trace_reaches_rails`, the preset line, its `fixes` entries and the old branches.
+
+- **Goldens:** the four flags are retired together (#18913), so their moved rows are proved together: 177 rows in six units (`blend.fillet_executive_p3` 138, `topology.brep_cutting` 19, `primitive.api_trim_ops` 9, `blend.fillet_solver_p2` 6, `topology.api_projection` 3, `topology.api_files` 2). Each is checked by `crates/goldens/tests/issue_18913_moved_rows_are_proven.rs`, which replays it and certifies the result: a Level 2 check of the body, every analytic face and every line or conic edge on its closed-form support, and the mass properties against a certified enclosure or a closed form. All other units pass unchanged.
+- **Defaults:** SolidCraft's preset already had the flag on, so the shipped result does not change. The comparison SMLib keeps upstream's path.
+- **Tests:** `wr609_trace_reaches_rails`, `wr610_779cb9b_rail_meets_seam_line_past_its_end` and `issue_1467_rail_end_past_side_edge_end` run on the default kernel; the five moved `rail_eu` rows of `blend.fillet_solver_p2` (no rail point found before) have each root enclosed by Cramer's rule in outward-rounded intervals; the `finish` test whose disc rim now builds takes a 10 cube vertex rounded 3, 3 and 9.9, failing at `SmBlendCorner::BuildSetBackFill` as on main.

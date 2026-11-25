@@ -29,16 +29,12 @@ use solidcore::Kernel;
 /// The fixes SolidCraft's core turns on at this case (`crates/smlib/src/core.rs` `fixes()`),
 /// less those retired since (their behaviour is now the default).
 const SOLIDCRAFT_FIXES: &[&str] = &[
-    "fillet_chamfer_cone_on_arc",
     "uv_trim_corner_end_points_only",
     "bspline_trim_preserves_uv_spans",
     "offset_extension_from_base",
-    "fillet_patch_keeps_fillet_edges",
     "fillet_knife_edge_rounds",
     "linear_sweep_arc_is_cylinder",
-    "fillet_trace_reaches_rails",
     "offset_extension_as_itself",
-    "fillet_exact_round_classes",
     "edgeuse_convexity_propagates_step_off_failure",
     "keep_exact_pcurves",
     "closed_smooth_pole_tangent_limit",
