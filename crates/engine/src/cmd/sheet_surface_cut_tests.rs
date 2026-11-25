@@ -1637,7 +1637,9 @@ fn a_clean_plate_passes_the_generic_shop_check() {
     let mut s = plate();
     run(&mut s, "solid.hole", json!({"position": [50, 30, T], "diameter": 6}));
     let before = s.doc.to_json();
-    let reply = run(&mut s, "sheet.check_shop", json!({"shop": "generic"}));
+    // The flat DXF is checked as exported on one layer: by default its outline and the hole are on
+    // two (OUTLINE, CUT), which the generic profile's file rules ask against.
+    let reply = run(&mut s, "sheet.check_shop", json!({"shop": "generic", "dxf": {"layers": "single"}}));
     assert_eq!(s.doc.to_json(), before, "read-only");
     assert_eq!((reply["shop"]["id"].as_str(), reply["shop"]["name"].as_str()), (Some("generic"), Some("Generic")));
     assert_eq!(reply["thickness"].as_f64(), Some(T));
@@ -1741,6 +1743,51 @@ fn a_short_flange_is_a_shop_finding_with_the_reach_from_the_bend() {
     // PCBWay's 4 T = 8 mm: a finding only for a side under 8 mm.
     let reply = run(&mut s, "sheet.check_shop", json!({"shop": "pcbway"}));
     assert_eq!(shop_findings(&reply, "flange.min").len(), [below, above].iter().filter(|r| **r + 1e-9 < 8.0).count(), "{reply}");
+}
+
+/// The flat DXF's file rules are read from what the export would write: a plate with a bend and a
+/// cut-out puts its outline and the hole on two layers (CUT, OUTLINE) with the bend line on its
+/// own; SendCutSend wants one cut layer and a line at each bend. The options the call names move
+/// the findings the way the export's would, and each finding names the option that fixes it.
+#[test]
+fn the_flat_dxf_is_checked_for_the_options_it_would_be_exported_with() {
+    let mut s = plate();
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, T]], "height": 20}));
+    run(&mut s, "solid.hole", json!({"position": [50, 40, T], "diameter": 6}));
+    let check = |s: &mut Session, shop: &str, dxf: Value, id: &str| {
+        let reply = run(s, "sheet.check_shop", json!({"shop": shop, "dxf": dxf}));
+        shop_findings(&reply, id).into_iter().map(|f| f["message"].as_str().unwrap_or("").to_string()).collect::<Vec<_>>()
+    };
+    // By default: two cut layers, the bend line apart from them.
+    let single = check(&mut s, "sendcutsend", json!({}), "file.dxf_single_layer");
+    assert_eq!(single.len(), 1, "{single:?}");
+    assert!(single[0].contains("on 2 layers (CUT and OUTLINE)") && single[0].contains("export with layers: single"), "{}", single[0]);
+    assert!(check(&mut s, "sendcutsend", json!({}), "file.dxf_bend_lines").is_empty());
+    // With layers: single, the cut layer is one, and the bend line is on it too.
+    let one = check(&mut s, "sendcutsend", json!({"layers": "single"}), "file.dxf_single_layer");
+    assert_eq!(one.len(), 1, "{one:?}");
+    assert!(one[0].contains("the 1 bend line(s) are on the cut layer too"), "{}", one[0]);
+    let lines = check(&mut s, "sendcutsend", json!({"layers": "single"}), "file.dxf_bend_lines");
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(lines[0].contains("export with layers: roles"), "{}", lines[0]);
+    // Without the bend lines: one layer is met, and the bend line is missing.
+    let off = json!({"layers": "single", "bend_lines": false});
+    assert!(check(&mut s, "sendcutsend", off.clone(), "file.dxf_single_layer").is_empty());
+    let missing = check(&mut s, "sendcutsend", off, "file.dxf_bend_lines");
+    assert_eq!(missing.len(), 1, "{missing:?}");
+    assert!(missing[0].contains("leaves out the 1 bend line(s)") && missing[0].contains("export with bend_lines: true"), "{}", missing[0]);
+    // The sheet has no junction cut and every contour closes; text is outlines until notes are asked.
+    assert!(check(&mut s, "sendcutsend", json!({}), "file.dxf_closed_contours").is_empty());
+    assert!(check(&mut s, "pcbway", json!({}), "file.text_outlined").is_empty());
+    let notes = check(&mut s, "pcbway", json!({"bend_notes": true}), "file.text_outlined");
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(notes[0].contains("1 note(s) as text entities") && notes[0].contains("export without bend_notes"), "{}", notes[0]);
+    // JLCCNC states no flat file rule: said, not passed.
+    let reply = run(&mut s, "sheet.check_shop", json!({"shop": "jlccnc"}));
+    assert!(reply["not_checked"].as_array().unwrap().iter().any(|n| n["rule"] == "file.dxf_single_layer"), "{reply}");
+    // A bad option is refused with its name.
+    let bad = s.execute("sheet.check_shop", &json!({"shop": "generic", "dxf": {"layers": "many"}})).expect_err("accepted").to_string();
+    assert!(bad.contains("layers") || bad.contains("roles"), "{bad}");
 }
 
 /// A profile as an object, a built-in id in any case, and what is refused.

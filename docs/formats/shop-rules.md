@@ -43,6 +43,10 @@ what the numbers are for (`laser cutting`) in the messages. The ids are a closed
 | `hole.to_edge` | a hole's least distance to an edge, cut-out or other hole | `limits` |
 | `hole.to_bend` | a hole's least distance to a bend | `limits` |
 | `flange.min` | the shortest flange: the reach of each side of every bend | `limits` |
+| `file.dxf_single_layer` | every cut contour of the flat DXF on one layer | `sources` |
+| `file.dxf_closed_contours` | the flat DXF's contours closed, none cut twice | `sources` |
+| `file.dxf_bend_lines` | the flat DXF's bend lines: `bend_lines`: `present` (a line at each bend) or `absent` | `bend_lines`, `sources` |
+| `file.text_outlined` | text in the flat DXF as outlines, not text entities | `sources` |
 | `thread.modelling` | `wanted`: `plain` (a plain hole, the thread on the order) or `modelled` | `wanted`, `sources` |
 | `hardware.modelling` | `wanted`: `plain` (named on the order) or `modelled` | `wanted`, `sources` |
 
@@ -74,6 +78,13 @@ the panel to the panel's far boundary, taken over the bend's length less one thi
 (so a rounded or chamfered corner does not decide it). A hole inside the panel does not shorten it;
 a cut-out through to the panel's edge does. A boundary of free-form curves is not measured and is
 listed as not checked. A finding is at the bend's middle.
+
+The four `file.dxf_*` and `file.text_outlined` rules are held against the flat DXF `sheet.export_dxf`
+would write, read from the export's own layout, for the options `sheet.check_shop` is given in `dxf`
+(`layers`, `bend_lines`, `bend_notes`, `hardware_notes`; the export's defaults when it has none).
+Each finding names the export option that fixes it. Letters in the flat are always outlines; only
+the notes beside bends, beads and hardware are text entities. A DXF profile that restyles the layers
+is not considered.
 
 A **stock** entry is `{"materials"?, "thicknesses_mm" or "min_mm"/"max_mm", "sources"}`: a sheet is
 stock when within 0.01 mm of a listed thickness, or in the range.

@@ -189,6 +189,51 @@
             }
           ],
           "wanted": "plain"
+        },
+        {
+          "id": "file.dxf_single_layer",
+          "sources": [
+            {
+              "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/Laser-Cutting.html",
+              "read": "2026-11-25",
+              "says": "cut paths go on one designated cut layer"
+            },
+            {
+              "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
+              "read": "2026-11-25",
+              "says": "all cut geometry goes on a single layer"
+            }
+          ]
+        },
+        {
+          "id": "file.dxf_closed_contours",
+          "sources": [
+            {
+              "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/Laser-Cutting.html",
+              "read": "2026-11-25",
+              "says": "every cut path is closed; duplicate, overlapping and intersecting entities are deleted"
+            },
+            {
+              "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
+              "read": "2026-11-25",
+              "says": "all cut paths are closed, with no intersecting or overlapping lines"
+            }
+          ]
+        },
+        {
+          "id": "file.text_outlined",
+          "sources": [
+            {
+              "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/Laser-Cutting.html",
+              "read": "2026-11-25",
+              "says": "text is converted to vector outlines"
+            },
+            {
+              "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
+              "read": "2026-11-25",
+              "says": "text is sent as outlines"
+            }
+          ]
         }
       ]
     },
@@ -381,6 +426,36 @@
             }
           ],
           "wanted": "plain"
+        },
+        {
+          "id": "file.dxf_single_layer",
+          "sources": [
+            {
+              "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/Laser-Cutting.html",
+              "read": "2026-11-25",
+              "says": "cut paths go on one designated cut layer"
+            }
+          ]
+        },
+        {
+          "id": "file.dxf_closed_contours",
+          "sources": [
+            {
+              "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/Laser-Cutting.html",
+              "read": "2026-11-25",
+              "says": "every cut path is closed; duplicate, overlapping and intersecting entities are deleted"
+            }
+          ]
+        },
+        {
+          "id": "file.text_outlined",
+          "sources": [
+            {
+              "url": "https://www.pcbway.com/rapid-prototyping/Sheet-metal/Laser-Cutting.html",
+              "read": "2026-11-25",
+              "says": "text is converted to vector outlines"
+            }
+          ]
         }
       ]
     },
@@ -1030,6 +1105,47 @@
             }
           ],
           "wanted": "plain"
+        },
+        {
+          "id": "file.dxf_single_layer",
+          "sources": [
+            {
+              "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
+              "read": "2026-11-25",
+              "says": "all cut geometry goes on a single layer"
+            }
+          ]
+        },
+        {
+          "id": "file.dxf_closed_contours",
+          "sources": [
+            {
+              "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
+              "read": "2026-11-25",
+              "says": "all cut paths are closed, with no intersecting or overlapping lines"
+            }
+          ]
+        },
+        {
+          "id": "file.text_outlined",
+          "sources": [
+            {
+              "url": "https://sendcutsend.com/guidelines/sheet-cutting/",
+              "read": "2026-11-25",
+              "says": "text is sent as outlines"
+            }
+          ]
+        },
+        {
+          "id": "file.dxf_bend_lines",
+          "bend_lines": "present",
+          "sources": [
+            {
+              "url": "https://sendcutsend.com/services/cnc-bending/",
+              "read": "2026-11-25",
+              "says": "a flat 2D file marks the centre of each bend with a line, dashed in a DXF; a 3D file needs none"
+            }
+          ]
         }
       ]
     }

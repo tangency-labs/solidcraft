@@ -100,3 +100,42 @@ fn a_malformed_profile_is_refused_with_the_reason_and_never_panics() {
     assert!(read_file(br#"{"format": "other", "version": 1, "profiles": []}"#).is_err());
     assert!(read_file(br#"{"format": "solidcraft-shop-rules", "version": 2, "profiles": []}"#).is_err());
 }
+
+/// The file rules take sources, and `bend_lines` belongs to `file.dxf_bend_lines` alone, which needs it.
+#[test]
+fn the_dxf_rules_take_sources_and_bend_lines_belongs_to_one_of_them() {
+    let source = json!([{"url": "https://example.com/rules", "read": "2026-11-25", "says": "a flat file has them"}]);
+    let with = |rule: Value| {
+        let mut v = minimal();
+        v["rules"] = json!([rule]);
+        Profile::from_value(&v)
+    };
+    assert!(with(json!({"id": "file.dxf_bend_lines", "bend_lines": "present", "sources": source.clone()})).is_ok());
+    assert!(with(json!({"id": "file.dxf_bend_lines", "bend_lines": "absent", "sources": source.clone()})).is_ok());
+    assert!(with(json!({"id": "file.dxf_single_layer", "sources": source.clone()})).is_ok());
+    assert!(with(json!({"id": "file.dxf_closed_contours", "sources": source.clone()})).is_ok());
+    assert!(with(json!({"id": "file.text_outlined", "sources": source.clone()})).is_ok());
+    let e = with(json!({"id": "file.dxf_bend_lines", "sources": source.clone()})).unwrap_err().to_string();
+    assert!(e.contains("bend_lines"), "{e}");
+    let e = with(json!({"id": "file.dxf_single_layer", "bend_lines": "present", "sources": source.clone()})).unwrap_err().to_string();
+    assert!(e.contains("bend_lines"), "{e}");
+    assert!(with(json!({"id": "file.dxf_bend_lines", "bend_lines": "sometimes", "sources": source.clone()})).is_err());
+    assert!(with(json!({"id": "file.text_outlined"})).is_err(), "a rule without a source is refused");
+    // `from` belongs to the bend rules: a flange's minimum takes it, a hole's diameter does not.
+    let limit = |from: Value| json!({"value": 2.0, "relative_to": "thickness", "from": from, "sources": source.clone()});
+    assert!(with(json!({"id": "flange.min", "limits": [limit(json!("bend_line"))]})).is_ok());
+    assert!(with(json!({"id": "hole.min_diameter", "limits": [limit(json!("bend_line"))]})).is_err());
+}
+
+/// Which built-in profiles ask for what of a flat DXF, as the research of 2026-11-25 read them.
+#[test]
+fn the_built_in_profiles_name_the_dxf_rules_their_shops_state() {
+    let has = |shop: &str, id: RuleId| profile(shop).unwrap().rule(id).is_some();
+    for id in [RuleId::DxfSingleLayer, RuleId::DxfClosedContours, RuleId::TextOutlined] {
+        assert!(has("generic", id) && has("pcbway", id) && has("sendcutsend", id), "{}", id.as_str());
+        assert!(!has("jlccnc", id), "JLCCNC's pages state no flat file rule: {}", id.as_str());
+    }
+    let scs = profile("sendcutsend").unwrap().rule(RuleId::DxfBendLines).unwrap();
+    assert_eq!(scs.bend_lines, Some(BendLines::Present));
+    assert!(!has("pcbway", RuleId::DxfBendLines) && !has("generic", RuleId::DxfBendLines), "only SendCutSend states bend lines");
+}

@@ -11,7 +11,7 @@
 use solidcraft_kernel::services::prism::loop_circle;
 
 use crate::sheet_hardware::{clearance, mm};
-use crate::shop_rules::{Limit, Measured, Profile, Rule, RuleId, Wanted};
+use crate::shop_rules::{BendLines, Limit, Measured, Profile, Rule, RuleId, Wanted};
 use crate::{Document, FeatureKind, SurfaceSheet};
 
 /// How near a hole is to a bend.
@@ -75,6 +75,32 @@ pub struct Flange {
     pub at: [f64; 2],
 }
 
+/// What the flat DXF a part would export holds, as far as the shops' file rules ask: read from the
+/// export's own layout (`sheet.export_dxf`'s), for the options the export is asked with.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DxfFacts {
+    /// The layers the cut contours are on: the outline, the cut-outs, letters cut through, the
+    /// perforation's holes and the junction cuts. Layer `0` when everything is on one.
+    pub cut_layers: Vec<String>,
+    /// How many bends the flat has.
+    pub bends: usize,
+    /// How many bend lines the file draws (none when they are left out).
+    pub bend_lines: usize,
+    /// The bend lines are on a layer with the cut contours.
+    pub bend_lines_with_cuts: bool,
+    /// Junction cuts of split edges, each drawn as a line out and back: not a closed contour, and
+    /// cut twice.
+    pub slits: usize,
+    /// Cut contours the DXF writer cannot write as closed shapes.
+    pub unclosed: usize,
+    /// Notes written as text entities: beside bends and beads, and beside hardware holes.
+    pub text_notes: usize,
+    /// The export is asked for `layers: single`.
+    pub single_layer: bool,
+    /// Which notes the export is asked for: `bend_notes` and `hardware_notes`.
+    pub notes_asked: Vec<&'static str>,
+}
+
 /// What the rules ask about a part.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Part {
@@ -100,6 +126,9 @@ pub struct Part {
     pub flanges: Vec<Flange>,
     /// Why some flanges were not measured, when they were not.
     pub flange_gaps: Vec<String>,
+    /// What the flat DXF would hold; none when it was not read (the file rules are then listed as
+    /// not checked).
+    pub dxf: Option<DxfFacts>,
 }
 
 /// Reads `sheet` of `doc` for the rules: `bodies` are all the design's bodies and `flat_size` the
@@ -303,6 +332,11 @@ pub fn check(profile: &Profile, part: &Part) -> Report {
             not_checked(&mut r, id, format!("{}'s pages give no value for it", profile.name));
             continue;
         };
+        let dxf_rule = matches!(id, RuleId::DxfSingleLayer | RuleId::DxfClosedContours | RuleId::DxfBendLines | RuleId::TextOutlined);
+        if dxf_rule && part.dxf.is_none() {
+            not_checked(&mut r, id, "the flat DXF was not read, so its file rules were not looked at".to_string());
+            continue;
+        }
         r.checked.push(id.as_str().to_string());
         let severity = if rule.disagreement { Severity::Warning } else { Severity::Error };
         let ctx = Ctx { shop: &profile.name, part, rule, severity };
@@ -317,6 +351,10 @@ pub fn check(profile: &Profile, part: &Part) -> Report {
             RuleId::ThreadModelling => threads(&ctx, &mut r),
             RuleId::HardwareModelling => hardware(&ctx, &mut r),
             RuleId::FlangeMin => flange_min(&ctx, &mut r),
+            RuleId::DxfSingleLayer => dxf_single_layer(&ctx, &mut r),
+            RuleId::DxfClosedContours => dxf_closed_contours(&ctx, &mut r),
+            RuleId::DxfBendLines => dxf_bend_lines(&ctx, &mut r),
+            RuleId::TextOutlined => text_outlined(&ctx, &mut r),
         }
     }
     r
@@ -578,6 +616,102 @@ fn flange_min(ctx: &Ctx<'_>, r: &mut Report) {
     }
     for why in &ctx.part.flange_gaps {
         not_checked(r, ctx.rule.id, why.clone());
+    }
+}
+
+/// The layers named for a message: `CUT and OUTLINE`.
+fn layer_list(layers: &[String]) -> String {
+    match layers {
+        [] => "no layer".to_string(),
+        [one] => one.clone(),
+        [init @ .., last] => format!("{} and {last}", init.join(", ")),
+    }
+}
+
+fn dxf_single_layer(ctx: &Ctx<'_>, r: &mut Report) {
+    let Some(d) = &ctx.part.dxf else { return };
+    if d.cut_layers.len() > 1 {
+        let keep = if d.bend_lines > 0 { " (with bend_lines: false as well, to keep the bend lines off it)" } else { "" };
+        r.findings.push(ctx.finding(format!(
+            "the DXF would put the cut contours on {} layers ({}); {} wants all cut geometry on one layer: export with layers: single{keep}{}",
+            d.cut_layers.len(),
+            layer_list(&d.cut_layers),
+            ctx.who(),
+            ctx.note()
+        )));
+    } else if d.bend_lines_with_cuts {
+        r.findings.push(ctx.finding(format!(
+            "with layers: single the {} bend line(s) are on the cut layer too, where {} would cut them: export with bend_lines: false{}",
+            d.bend_lines,
+            ctx.who(),
+            ctx.note()
+        )));
+    }
+}
+
+fn dxf_closed_contours(ctx: &Ctx<'_>, r: &mut Report) {
+    let Some(d) = &ctx.part.dxf else { return };
+    if d.slits > 0 {
+        r.findings.push(ctx.finding(format!(
+            "{} cut(s) along the junction of a split edge are drawn in the DXF as a line out and back, not as a closed contour; {} wants closed contours and no line cut twice{}",
+            d.slits,
+            ctx.who(),
+            ctx.note()
+        )));
+    }
+    if d.unclosed > 0 {
+        r.findings.push(ctx.finding(format!(
+            "{} cut contour(s) cannot be written to the DXF as closed shapes; {} wants closed contours{}",
+            d.unclosed,
+            ctx.who(),
+            ctx.note()
+        )));
+    }
+}
+
+fn dxf_bend_lines(ctx: &Ctx<'_>, r: &mut Report) {
+    let Some(d) = &ctx.part.dxf else { return };
+    match ctx.rule.bend_lines.unwrap_or(BendLines::Present) {
+        BendLines::Present => {
+            if d.bends > 0 && d.bend_lines == 0 {
+                r.findings.push(ctx.finding(format!(
+                    "the DXF leaves out the {} bend line(s); {} wants a line at the centre of each bend in a flat file: export with bend_lines: true{}",
+                    d.bends,
+                    ctx.who(),
+                    ctx.note()
+                )));
+            } else if d.bend_lines_with_cuts {
+                r.findings.push(ctx.finding(format!(
+                    "with layers: single the {} bend line(s) are on the cut layer, not apart from the cuts; {} wants them marked as bends: export with layers: roles{}",
+                    d.bend_lines,
+                    ctx.who(),
+                    ctx.note()
+                )));
+            }
+        }
+        BendLines::Absent => {
+            if d.bend_lines > 0 {
+                r.findings.push(ctx.finding(format!(
+                    "the DXF draws {} bend line(s); {} would cut them: export with bend_lines: false{}",
+                    d.bend_lines,
+                    ctx.who(),
+                    ctx.note()
+                )));
+            }
+        }
+    }
+}
+
+fn text_outlined(ctx: &Ctx<'_>, r: &mut Report) {
+    let Some(d) = &ctx.part.dxf else { return };
+    if d.text_notes > 0 {
+        let asked = d.notes_asked.join(" and ");
+        r.findings.push(ctx.finding(format!(
+            "the DXF would carry {} note(s) as text entities, not as outlines; {} wants text as outlines: export without {asked} (letters in the flat are always outlines){}",
+            d.text_notes,
+            ctx.who(),
+            ctx.note()
+        )));
     }
 }
 

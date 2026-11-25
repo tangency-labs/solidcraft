@@ -2532,7 +2532,7 @@ fn editing_hardware_refuses_a_selection_that_makes_more_than_one_command() {
 
 // ---- Check Against Shop Rules (#20113) ----
 
-/// A plate with one hole of `diameter` mm, and the Shop Check dialog open on it, drawn.
+/// A plate with one hole of `diameter` mm (none for 0), and the Shop Check dialog open on it, drawn.
 fn shop_check_on(diameter: f64) -> crate::scenario::Harness {
     let mut h = crate::scenario::Harness::new();
     h.app.home.open = false;
@@ -2541,7 +2541,9 @@ fn shop_check_on(diameter: f64) -> crate::scenario::Harness {
     h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
     h.app.run("sketch.finish", json!({})).unwrap();
     h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
-    h.app.run("solid.hole", json!({"position": [50, 30, 2.5], "diameter": diameter})).unwrap();
+    if diameter > 0.0 {
+        h.app.run("solid.hole", json!({"position": [50, 30, 2.5], "diameter": diameter})).unwrap();
+    }
     h.app.start("sheet.check_shop");
     h.frames(4);
     h
@@ -2569,7 +2571,9 @@ fn shop_check_dialog_shows_a_too_small_hole_and_switching_shop_runs_it_again() {
     assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::Sheet(Sm::ShopCheck { .. }))));
     assert!(!h.app.dialog.as_ref().is_some_and(|d| d.previews()), "a computed panel, nothing to preview");
     let texts = shop_check_texts(&mut h);
-    assert!(texts.iter().any(|t| t == "1 error against Generic"), "{texts:?}");
+    // The 0.6 mm hole, and the flat DXF's two cut layers (the outline, and the hole on CUT), which
+    // the shops that read a flat file want on one.
+    assert!(texts.iter().any(|t| t == "2 errors against Generic"), "{texts:?}");
     assert!(texts.iter().any(|t| t.starts_with("Error: ") && t.contains("0.6 mm")), "{texts:?}");
     // The generic rule cites each shop's page, so its links are numbered.
     assert!(texts.iter().any(|t| t == "Source" || t.starts_with("Source ")), "the finding links its source: {texts:?}");
@@ -2585,7 +2589,8 @@ fn shop_check_dialog_shows_a_too_small_hole_and_switching_shop_runs_it_again() {
 
 #[test]
 fn shop_check_dialog_says_a_clean_part_passes_and_changes_nothing() {
-    let mut h = shop_check_on(6.0);
+    // No cut-out: the flat DXF has the outline layer only.
+    let mut h = shop_check_on(0.0);
     let (undo, design) = (h.app.session.undo.len(), h.app.session.doc.to_json());
     let texts = shop_check_texts(&mut h);
     assert!(texts.iter().any(|t| t == "The part passes Generic's rules."), "{texts:?}");

@@ -1746,6 +1746,17 @@ fn hardware_note(h: &solidcraft_doc::sheet::SheetHardware) -> String {
 /// `o.curves` says. A DXF profile writes it its own way: its layer, colour and linetype for each
 /// role, and the roles it turns off left out.
 fn surface_dxf(s: &Session, sk: &solidcraft_doc::SurfaceSheet, o: &DxfOptions, profile: Option<&solidcraft_io::DxfExportProfile>) -> Result<String> {
+    flat_drawing(s, sk, o)?.dxf(o, profile)
+}
+
+/// What the flat DXF of `sk` would hold, as far as the shops' file rules ask, for the options `o`:
+/// read from the same layout the export writes (`sheet.check_shop`, #20113).
+pub(super) fn dxf_facts(s: &Session, sk: &solidcraft_doc::SurfaceSheet, o: &DxfOptions) -> Result<solidcraft_doc::shop_check::DxfFacts> {
+    Ok(flat_drawing(s, sk, o)?.facts(o))
+}
+
+/// The drawing of a sheet's flat pattern `sk` as the export writes it.
+fn flat_drawing(s: &Session, sk: &solidcraft_doc::SurfaceSheet, o: &DxfOptions) -> Result<FlatDrawing> {
     let sk = &sk.shown();
     let rule = s.doc.sheet_rule(Some(&sk.rule));
     let display = sheet::AngleDisplay::parse(&rule.angle_display).unwrap_or_default();
@@ -1771,7 +1782,16 @@ fn surface_dxf(s: &Session, sk: &solidcraft_doc::SurfaceSheet, o: &DxfOptions, p
         thickness: sk.thickness,
         beads,
     };
-    drawing.dxf(o, profile)
+    Ok(drawing)
+}
+
+/// The pass a flat's loop is written in: inner contours, markings, pockets, the outline.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Pass {
+    Cut,
+    Etch,
+    Pocket,
+    Outline,
 }
 
 /// What a flat pattern's DXF draws: the flat material, the pockets machined in it, which of its
@@ -1808,8 +1828,9 @@ struct FlatBead {
 }
 
 impl FlatDrawing {
-    fn dxf(&self, o: &DxfOptions, profile: Option<&solidcraft_io::DxfExportProfile>) -> Result<String> {
-        use solidcraft_io::{DxfFile, DxfPathStyle, DxfShape};
+    /// The loops in the order they are written, each with the pass it is in and the layer of its
+    /// role (before `layers: single` puts everything on layer 0).
+    fn layout(&self, o: &DxfOptions) -> Vec<(Pass, &solidcore_record::Loop2, String)> {
         let (regions, pockets, letters) = (&self.regions, &self.pockets, &self.letters);
         let pocket_layer = |p: &solidcraft_doc::sheet::SheetPocket| {
             let side = if p.z0 == 0.0 {
@@ -1831,14 +1852,6 @@ impl FlatDrawing {
                 probe.is_some_and(|p| regions.iter().enumerate().any(|(i, other)| i != j && other.outer.contains(p)))
             })
             .collect();
-        // The loops, in the order they are written: inner contours, markings, pockets, the outline.
-        #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-        enum Pass {
-            Cut,
-            Etch,
-            Pocket,
-            Outline,
-        }
         let mut loops: Vec<(Pass, &solidcore_record::Loop2, String)> = Vec::new();
         for (j, r) in regions.iter().enumerate() {
             for (k, lp) in std::iter::once(&r.outer).chain(&r.holes).enumerate() {
@@ -1867,6 +1880,66 @@ impl FlatDrawing {
             }
         }
         loops.sort_by_key(|(pass, ..)| *pass);
+        loops
+    }
+
+    /// What the file would hold for the shop rules, for the options `o` (#20113): the layers the
+    /// cut contours are on, the bend lines, the junction cuts and the notes written as text.
+    fn facts(&self, o: &DxfOptions) -> solidcraft_doc::shop_check::DxfFacts {
+        use solidcraft_io::DxfPathStyle;
+        let name = |layer: &str| if o.one_layer { "0".to_string() } else { layer.to_string() };
+        let mut cut_layers: Vec<String> = Vec::new();
+        let mut unclosed = 0;
+        for (pass, lp, layer) in self.layout(o) {
+            if matches!(pass, Pass::Cut | Pass::Outline) {
+                let layer = name(&layer);
+                if !cut_layers.contains(&layer) {
+                    cut_layers.push(layer);
+                }
+                let style = match o.curves {
+                    DxfCurves::Exact => DxfPathStyle::Exact,
+                    DxfCurves::Arcs => DxfPathStyle::Arcs { tolerance_mm: solidcraft_kernel::PLANAR_FIT_TOL },
+                };
+                if flat_loop_shapes(lp, style).is_err() {
+                    unclosed += 1;
+                }
+            }
+        }
+        // The perforation's holes are cut, and so are the junction cuts, on the outline's layer.
+        for (used, layer) in [(!self.perforation.is_empty(), "PERFORATION"), (!self.slits.is_empty(), "OUTLINE")] {
+            let layer = name(layer);
+            if used && !cut_layers.contains(&layer) {
+                cut_layers.push(layer);
+            }
+        }
+        cut_layers.sort();
+        let bend_lines = if o.no_bend_lines { 0 } else { self.bends.len() };
+        let bead_notes = if o.bend_notes.is_some() { self.beads.iter().filter(|b| b.note.is_some()).count() } else { 0 };
+        let bend_text = if o.bend_notes.is_some() { self.bends.len() } else { 0 };
+        let hardware_text = if o.hardware_notes.is_some() { self.hardware.len() } else { 0 };
+        let mut notes_asked = Vec::new();
+        if bend_text + bead_notes > 0 {
+            notes_asked.push("bend_notes");
+        }
+        if hardware_text > 0 {
+            notes_asked.push("hardware_notes");
+        }
+        solidcraft_doc::shop_check::DxfFacts {
+            cut_layers,
+            bends: self.bends.len(),
+            bend_lines,
+            bend_lines_with_cuts: o.one_layer && bend_lines > 0,
+            slits: self.slits.len(),
+            unclosed,
+            text_notes: bend_text + bead_notes + hardware_text,
+            single_layer: o.one_layer,
+            notes_asked,
+        }
+    }
+
+    fn dxf(&self, o: &DxfOptions, profile: Option<&solidcraft_io::DxfExportProfile>) -> Result<String> {
+        use solidcraft_io::{DxfFile, DxfPathStyle, DxfShape};
+        let loops = self.layout(o);
         // Slits (two lines each) and rolls (one line each) are planned like bends: at most two
         // entities and a bend's few values apiece.
         // A bead's five lines and its note fit in four bends' allowance.

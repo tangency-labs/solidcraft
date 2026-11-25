@@ -19,6 +19,32 @@ pub struct CheckShopParams {
     /// The shop: a built-in profile's id (`generic`, `pcbway`, `jlccnc`, `sendcutsend`), the path
     /// of a profile file (ends in `.json`), or a profile object (`docs/formats/shop-rules.md`).
     pub shop: ShopParam,
+    /// What the flat DXF is exported with, for the file rules (`file.dxf_single_layer`,
+    /// `file.dxf_closed_contours`, `file.dxf_bend_lines`, `file.text_outlined`): the options
+    /// `sheet.export_dxf` takes. Default: its defaults (layers by role, bend lines, no notes).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "DxfCheckParams")]
+    pub dxf: Option<DxfCheckParams>,
+}
+
+/// The options of the DXF the file rules are checked for, as `sheet.export_dxf` takes them.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct DxfCheckParams {
+    /// roles: the layer for each role. single: everything on layer 0. Default: roles.
+    #[serde(default)]
+    pub layers: Option<super::sheet::DxfLayersParam>,
+    /// The bend lines are drawn. Default: true.
+    #[serde(default)]
+    pub bend_lines: Option<bool>,
+    /// A note beside each bend line, a text entity. Default: false.
+    #[serde(default)]
+    pub bend_notes: Option<bool>,
+    /// A note beside each press-in hardware hole, a text entity; not with `layers: single`.
+    /// Default: false.
+    #[serde(default)]
+    pub hardware_notes: Option<bool>,
 }
 
 /// A check's `shop`: a built-in id or a file's path, or a profile as an object. The command reads

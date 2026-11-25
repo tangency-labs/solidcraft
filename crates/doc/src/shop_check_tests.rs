@@ -232,3 +232,133 @@ fn a_flange_rule_can_be_measured_from_the_bend_line() {
     assert!(f[0].message.contains("(from the bend line)"), "{}", f[0].message);
     assert!(r.not_checked.iter().any(|n| n.rule == "flange.min" && n.why.contains("not measured")));
 }
+
+/// A part with two bends whose flat DXF the export would write with its defaults: the outline and
+/// the cut-outs on two layers, the bend lines on theirs.
+fn drawn() -> DxfFacts {
+    DxfFacts {
+        cut_layers: vec!["CUT".into(), "OUTLINE".into()],
+        bends: 2,
+        bend_lines: 2,
+        bend_lines_with_cuts: false,
+        slits: 0,
+        unclosed: 0,
+        text_notes: 0,
+        single_layer: false,
+        notes_asked: Vec::new(),
+    }
+}
+
+fn filed(dxf: DxfFacts) -> Part {
+    Part { dxf: Some(dxf), ..bracket() }
+}
+
+/// Two cut layers are a finding for a shop that wants one, with the option that fixes it; one
+/// layer is not; a shop that states no file rule is told so.
+#[test]
+fn cut_contours_on_two_layers_are_a_finding_that_names_the_export_option() {
+    let r = run("sendcutsend", &filed(drawn()));
+    let f = rule(&r, "file.dxf_single_layer");
+    assert_eq!(f.len(), 1);
+    assert!(f[0].message.starts_with("the DXF would put the cut contours on 2 layers (CUT and OUTLINE); SendCutSend wants all cut geometry on one layer: export with layers: single"), "{}", f[0].message);
+    assert!(f[0].message.contains("bend_lines: false"), "{}", f[0].message);
+    assert_eq!(f[0].severity, Severity::Error);
+    assert!(f[0].sources.iter().all(|u| u.starts_with("https://")) && !f[0].sources.is_empty());
+    let mut one = drawn();
+    one.cut_layers = vec!["0".into()];
+    one.single_layer = true;
+    one.bend_lines = 0;
+    assert!(rule(&run("sendcutsend", &filed(one.clone())), "file.dxf_single_layer").is_empty());
+    // Single layer with the bend lines still drawn: they are on the cut layer.
+    one.bend_lines = 2;
+    one.bend_lines_with_cuts = true;
+    let f = rule(&run("pcbway", &filed(one)), "file.dxf_single_layer").into_iter().cloned().collect::<Vec<_>>();
+    assert_eq!(f.len(), 1);
+    assert!(
+        f[0].message.contains("the 2 bend line(s) are on the cut layer too") && f[0].message.contains("export with bend_lines: false"),
+        "{}",
+        f[0].message
+    );
+    let jlc = run("jlccnc", &filed(drawn()));
+    assert!(rule(&jlc, "file.dxf_single_layer").is_empty());
+    assert!(jlc.not_checked.iter().any(|n| n.rule == "file.dxf_single_layer" && n.why.contains("JLCCNC's pages give no value")));
+}
+
+/// A junction cut is a line out and back; a contour the writer cannot close is another finding.
+#[test]
+fn contours_that_are_not_closed_are_findings() {
+    assert!(rule(&run("generic", &filed(drawn())), "file.dxf_closed_contours").is_empty());
+    let mut d = drawn();
+    d.slits = 2;
+    d.unclosed = 1;
+    let f = rule(&run("generic", &filed(d)), "file.dxf_closed_contours").into_iter().cloned().collect::<Vec<_>>();
+    assert_eq!(f.len(), 2);
+    assert!(f[0].message.starts_with("2 cut(s) along the junction of a split edge are drawn in the DXF as a line out and back"), "{}", f[0].message);
+    assert!(f[1].message.starts_with("1 cut contour(s) cannot be written to the DXF as closed shapes"), "{}", f[1].message);
+}
+
+/// SendCutSend wants a line at each bend in a flat file: leaving them out is a finding when the
+/// part has bends, and not when it has none; on the cut layer they are not apart from the cuts. A
+/// shop that wants none is held to the opposite.
+#[test]
+fn bend_lines_are_wanted_when_the_part_has_bends() {
+    let mut d = drawn();
+    assert!(rule(&run("sendcutsend", &filed(d.clone())), "file.dxf_bend_lines").is_empty());
+    d.bend_lines = 0;
+    let f = rule(&run("sendcutsend", &filed(d.clone())), "file.dxf_bend_lines").into_iter().cloned().collect::<Vec<_>>();
+    assert_eq!(f.len(), 1);
+    assert!(
+        f[0].message.starts_with("the DXF leaves out the 2 bend line(s); SendCutSend wants a line at the centre of each bend")
+            && f[0].message.ends_with("export with bend_lines: true"),
+        "{}",
+        f[0].message
+    );
+    d.bends = 0;
+    assert!(rule(&run("sendcutsend", &filed(d)), "file.dxf_bend_lines").is_empty(), "a flat part needs none");
+    let mut single = drawn();
+    single.cut_layers = vec!["0".into()];
+    single.single_layer = true;
+    single.bend_lines_with_cuts = true;
+    let f = rule(&run("sendcutsend", &filed(single.clone())), "file.dxf_bend_lines").into_iter().cloned().collect::<Vec<_>>();
+    assert_eq!(f.len(), 1);
+    assert!(f[0].message.contains("export with layers: roles"), "{}", f[0].message);
+    // A shop that would cut the lines.
+    let none = Profile::from_value(&serde_json::json!({
+        "name": "Acme",
+        "rules": [{"id": "file.dxf_bend_lines", "bend_lines": "absent",
+            "sources": [{"url": "https://example.com/rules", "read": "2026-11-25", "says": "no bend lines in the file"}]}]
+    }))
+    .unwrap();
+    let f = rule(&check(&none, &filed(drawn())), "file.dxf_bend_lines").into_iter().cloned().collect::<Vec<_>>();
+    assert_eq!(f.len(), 1);
+    assert!(f[0].message.contains("draws 2 bend line(s); Acme would cut them: export with bend_lines: false"), "{}", f[0].message);
+    let mut off = drawn();
+    off.bend_lines = 0;
+    assert!(rule(&check(&none, &filed(off)), "file.dxf_bend_lines").is_empty());
+}
+
+/// Notes are text entities: asking for them is a finding for a shop that wants outlines.
+#[test]
+fn notes_written_as_text_are_a_finding() {
+    assert!(rule(&run("pcbway", &filed(drawn())), "file.text_outlined").is_empty());
+    let mut d = drawn();
+    d.text_notes = 3;
+    d.notes_asked = vec!["bend_notes", "hardware_notes"];
+    let f = rule(&run("pcbway", &filed(d)), "file.text_outlined").into_iter().cloned().collect::<Vec<_>>();
+    assert_eq!(f.len(), 1);
+    assert!(
+        f[0].message.contains("3 note(s) as text entities") && f[0].message.contains("export without bend_notes and hardware_notes"),
+        "{}",
+        f[0].message
+    );
+}
+
+/// With no DXF read, the file rules are listed as not checked, never passed.
+#[test]
+fn the_file_rules_are_not_checked_without_the_dxf() {
+    let r = run("sendcutsend", &bracket());
+    for id in ["file.dxf_single_layer", "file.dxf_closed_contours", "file.dxf_bend_lines", "file.text_outlined"] {
+        assert!(!r.checked.contains(&id.to_string()), "{id}");
+        assert!(r.not_checked.iter().any(|n| n.rule == id && n.why.contains("not read")), "{id}");
+    }
+}

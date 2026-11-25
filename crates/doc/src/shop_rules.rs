@@ -84,11 +84,23 @@ pub enum RuleId {
     /// Whether press-in hardware is modelled or named on the order.
     #[serde(rename = "hardware.modelling")]
     HardwareModelling,
+    /// The flat DXF has every cut contour on one layer.
+    #[serde(rename = "file.dxf_single_layer")]
+    DxfSingleLayer,
+    /// The flat DXF has closed contours only, none cut twice.
+    #[serde(rename = "file.dxf_closed_contours")]
+    DxfClosedContours,
+    /// The flat DXF draws the bend lines (or leaves them out).
+    #[serde(rename = "file.dxf_bend_lines")]
+    DxfBendLines,
+    /// The flat DXF has its text as outlines, not text entities.
+    #[serde(rename = "file.text_outlined")]
+    TextOutlined,
 }
 
 impl RuleId {
     /// Every rule, in the order a report lists them.
-    pub const ALL: [RuleId; 10] = [
+    pub const ALL: [RuleId; 14] = [
         RuleId::OneBody,
         RuleId::UniformThickness,
         RuleId::StockThickness,
@@ -99,6 +111,10 @@ impl RuleId {
         RuleId::FlangeMin,
         RuleId::ThreadModelling,
         RuleId::HardwareModelling,
+        RuleId::DxfSingleLayer,
+        RuleId::DxfClosedContours,
+        RuleId::DxfBendLines,
+        RuleId::TextOutlined,
     ];
 
     /// The rule's id as a profile and a report write it.
@@ -114,6 +130,10 @@ impl RuleId {
             RuleId::FlangeMin => "flange.min",
             RuleId::ThreadModelling => "thread.modelling",
             RuleId::HardwareModelling => "hardware.modelling",
+            RuleId::DxfSingleLayer => "file.dxf_single_layer",
+            RuleId::DxfClosedContours => "file.dxf_closed_contours",
+            RuleId::DxfBendLines => "file.dxf_bend_lines",
+            RuleId::TextOutlined => "file.text_outlined",
         }
     }
 
@@ -249,6 +269,16 @@ pub enum Wanted {
     Modelled,
 }
 
+/// Whether a shop wants the bend lines in a flat DXF.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BendLines {
+    /// A line at the centre of each bend, when the part has bends.
+    Present,
+    /// None: the shop would cut them.
+    Absent,
+}
+
 /// One rule of a profile.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -272,6 +302,9 @@ pub struct Rule {
     /// The pages of a rule without limits or stock.
     #[serde(default)]
     pub sources: Vec<Source>,
+    /// `file.dxf_bend_lines`: whether the shop wants the bend lines.
+    #[serde(default)]
+    pub bend_lines: Option<BendLines>,
     /// The shop's pages give different values: the strictest is used, and a finding is a warning.
     #[serde(default)]
     pub disagreement: bool,
@@ -410,6 +443,9 @@ impl Rule {
         }
         if let Some(p) = &self.process {
             text(&format!("{name}: process"), p, MAX_NAME)?;
+        }
+        if (self.id == RuleId::DxfBendLines) != self.bend_lines.is_some() {
+            return refuse(format!("{name}: `bend_lines` (present or absent) belongs to file.dxf_bend_lines, and only to it"));
         }
         let numeric = self.id.has_limits();
         if !numeric && !self.limits.is_empty() {
