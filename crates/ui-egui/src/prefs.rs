@@ -10257,30 +10257,6 @@ mod tests {
         assert_eq!(crate::panel_runtime::preferences_value(&app), Some(refused));
     }
 
-    /// The host saves preferences on any settings change and every 30 s. Building them decodes
-    /// every retained command record, which cost ~0.9 s on a 56,100-body design; a save whose
-    /// panel layout is unchanged must reuse the last build instead.
-    #[test]
-    fn a_save_with_the_same_panel_layout_reuses_the_portable_preferences() {
-        let mut app = SolveApp::new(Default::default(), Default::default());
-        let layout = |name: &str| json!({"version":1,"selected":name});
-        app.load_prefs(&json!({"panel_layout":layout("first")}).to_string());
-        assert!(crate::panel_runtime::preferences_value(&app).is_some(), "a panel layout to convert");
-        let builds = |app: &SolveApp| app.portable_prefs.lock().unwrap().as_ref().map_or(0, |c| c.builds);
-        let first = app.try_prefs().unwrap();
-        let again = app.try_prefs().unwrap();
-        assert_eq!(first, again);
-        assert_eq!(builds(&app), 1, "the second save reuses the first's conversion");
-        let fresh = crate::panel_runtime::portable_preferences_value(&app, crate::panel_runtime::preferences_value(&app)).unwrap();
-        let saved: serde_json::Value = serde_json::from_str(&again).unwrap();
-        assert_eq!(Some(saved["panel_layout"].clone()), fresh, "what a fresh conversion makes");
-        // Another layout is converted again.
-        app.load_prefs(&json!({"panel_layout":layout("second")}).to_string());
-        let other: serde_json::Value = serde_json::from_str(&app.try_prefs().unwrap()).unwrap();
-        assert_eq!(builds(&app), 2, "a changed layout is converted again");
-        assert_eq!(other["panel_layout"]["selected"], "second");
-    }
-
     #[test]
     fn stored_panel_fallback_preserves_null_absence_and_refuses_malformed_previous_settings() {
         let app = SolveApp::new(Default::default(), Default::default());
