@@ -482,7 +482,12 @@ pub fn command_for(app: &SolveApp, key: &str) -> Option<&'static str> {
                 && solidcraft_engine::find_command(id).is_some_and(|c| crate::render_workspace::interactive_command_info(app, c).enabled)
         })
         .collect();
-    let mine = enabled.iter().find(|id| scope(id) == here);
+    // Saved custom keys must take precedence over a newly introduced default in the
+    // same mode. Existing preferences may already bind M to a different sketch tool.
+    let mine = enabled
+        .iter()
+        .find(|id| scope(id) == here && app.keymap.custom.get(**id).is_some_and(|keys| keys.iter().any(|binding| binding == key)))
+        .or_else(|| enabled.iter().find(|id| scope(id) == here));
     if app.preferences.sketch_keys_only && here != Scope::Render {
         mine.or_else(|| enabled.iter().find(|id| runs_everywhere(id))).copied()
     } else {
@@ -1163,6 +1168,22 @@ fn outcome(app: &SolveApp, ui: &mut egui::Ui) -> Option<&'static str> {
     chosen
 }
 
+/// Opens Preferences › Keyboard Shortcuts on one command, already waiting for its new key.
+pub fn open_for(app: &mut SolveApp, id: &str) {
+    if solidcraft_engine::find_command(id).is_none() {
+        return;
+    }
+    app.prefs_window.shell.clear_search();
+    crate::prefs::open_at(app, crate::prefs::PAGE_SHORTCUTS);
+    app.keymap.read_only = false;
+    app.keymap.filter = id.to_string();
+    app.keymap.recorder = Recorder::default();
+    app.keymap.capturing = Some(id.to_string());
+    app.keymap.slot = 0;
+    app.keymap.conflict = None;
+    app.keymap.message = None;
+}
+
 /// Stop waiting for a key (the dialog closed).
 pub fn stop_capture(app: &mut SolveApp) {
     app.keymap.capturing = None;
@@ -1183,6 +1204,22 @@ pub fn capturing(app: &SolveApp) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn existing_custom_sketch_mirror_key_outweighs_new_move_default() {
+        let mut a = app();
+        a.run("sketch.create", json!({"plane":"XY","name":"S"})).unwrap();
+        assert_eq!(command_for(&a, "M"), Some("sketch.move"), "fresh sketch uses the new Move default");
+        // A preference saved before Move acquired M still owns that key (#18794).
+        a.keymap.load(&json!({"sketch.mirror":"M"}));
+        assert!(commands_for(&a, "M").contains(&"sketch.mirror"), "the custom key was loaded");
+        assert_eq!(command_for(&a, "M"), Some("sketch.mirror"), "saved binding takes precedence");
+        let persisted = a.keymap.prefs();
+        a.keymap.load(&persisted);
+        assert_eq!(command_for(&a, "M"), Some("sketch.mirror"), "precedence survives a reload");
+        a.keymap.custom.remove("sketch.mirror");
+        assert_eq!(command_for(&a, "M"), Some("sketch.move"), "reset restores the new default");
+    }
 
     #[test]
     fn shortcut_recording_row_uses_selection_and_read_only_rows_have_no_hover() {
@@ -1426,6 +1463,17 @@ mod tests {
 
     fn app() -> SolveApp {
         SolveApp::new(solidcraft_engine::Session::default(), Default::default())
+    }
+
+    #[test]
+    fn open_for_leaves_any_preferences_search_and_filters_to_the_command() {
+        let mut a = app();
+        a.prefs_window.shell.filter = "grid".into();
+        open_for(&mut a, "solid.extrude");
+        assert!(a.prefs_window.shell.filter.is_empty());
+        assert_eq!(a.prefs_window.shell.section, crate::prefs::PAGE_SHORTCUTS);
+        assert_eq!(a.keymap.filter, "solid.extrude");
+        assert_eq!(a.keymap.capturing.as_deref(), Some("solid.extrude"));
     }
 
     #[test]
@@ -1911,7 +1959,9 @@ mod tests {
         let e = bind(&mut a, "solid.revolve", "M", false).unwrap_err();
         assert!(e.contains("already used by Move/Copy"), "{e}");
         bind(&mut a, "solid.revolve", "M", true).unwrap();
-        assert_eq!(commands_for(&a, "M"), vec!["solid.revolve"]);
+        // Sketch Move retains M: its sketch scope does not clash with model Revolve.
+        assert_eq!(commands_for(&a, "M"), vec!["sketch.move", "solid.revolve"]);
+        assert_eq!(command_for(&a, "M"), Some("solid.revolve"));
         assert_eq!(effective(&a, "solid.move"), None);
         assert!(bind(&mut a, "solid.revolve", "Ctrl+Z", false).is_err(), "reserved");
         // Kept between runs.

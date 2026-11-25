@@ -45,7 +45,6 @@ solidcraft-viewport = { workspace = true }
 # into an image; both already in the tree (ui-egui, render).
 tiny-skia = { workspace = true }
 png = { workspace = true }
-solidcore-ops = { workspace = true }
 solidcraft-views = { workspace = true }
 solidcore-record = { workspace = true }
 solidcraft-color = { workspace = true }
@@ -76,7 +75,6 @@ log = { workspace = true }
 web-time = { workspace = true }
 
 [dev-dependencies]
-solidcore-ops = { workspace = true }
 solidcraft-profile = { workspace = true, features = ["enabled"] }
 # Model-cache tests also run in a source tarball build (no git commit).
 solidcraft-io = { workspace = true, features = ["dxf-legacy-baseline-tests", "trust-unknown-source"] }
