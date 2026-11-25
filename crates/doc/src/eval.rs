@@ -2373,7 +2373,7 @@ impl Document {
 }
 
 /// The values features are evaluated with: the parameters, and the design's length unit.
-fn evaluation_values(doc: &Document) -> (BTreeMap<String, Value>, BTreeMap<String, String>) {
+pub(crate) fn evaluation_values(doc: &Document) -> (BTreeMap<String, Value>, BTreeMap<String, String>) {
     let (mut vals, perr) = doc.param_values();
     if let Some((Kind::Length, scale)) = expr::unit_info(doc.units.trim())
         && scale != 1.0
@@ -5729,8 +5729,34 @@ fn fingerprints_digest(results: &[FeatureResult]) -> u64 {
 /// so).
 pub(crate) const DESIGN_LEN: &str = "\u{1}design_len";
 
-/// An expression's value. A length that comes out unit-less without being a bare number (a
-/// unit-less parameter used as a length) is in the design's units.
+/// The Move `f`'s translation, rotation pivot (the origin when unset), axis (Z when unset) and
+/// angle, its expressions read, with a turn picked on an edge or round face put where that
+/// geometry is in `st`, the model just before the Move (#17974). The one reading for the bodies it
+/// moves, their constructions and a hole callout that follows them.
+pub(crate) fn move_motion(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    st: &ModelState,
+    f: &Feature,
+    warning: &mut Option<String>,
+) -> Result<(Vec3, Vec3, Vec3, f64)> {
+    let FeatureKind::Move { translate, rotate_axis, rotate_about, origin, angle, .. } = &f.kind else {
+        return Err(DocError::Invalid("not a move".into()));
+    };
+    let t = Vec3::new(val(vals, &translate[0], Kind::Length)?, val(vals, &translate[1], Kind::Length)?, val(vals, &translate[2], Kind::Length)?);
+    let angle = match angle {
+        Some(a) => val(vals, a, Kind::Angle)?,
+        None => 0.0,
+    };
+    let axis = rotate_axis.map(Vec3::from).unwrap_or(Vec3::Z);
+    let origin = origin.as_ref().map(|p| point(vals, p)).transpose()?.unwrap_or(Vec3::ZERO);
+    let (origin, axis) = match rotate_about {
+        Some(about) => move_turn_line(doc, st, f.component, about, origin, axis, warning)?,
+        None => (origin, axis),
+    };
+    Ok((t, origin, axis, angle))
+}
+
 /// A point given as length expressions.
 fn point(vals: &BTreeMap<String, Value>, p: &crate::PointExpr) -> Result<Vec3> {
     let [x, y, z] = p;
@@ -5748,6 +5774,8 @@ fn direction(vals: &BTreeMap<String, Value>, d: &crate::DirExpr) -> Result<Vec3>
     crate::unit_direction(v).ok_or_else(|| DocError::Invalid("the axis is zero: give it a direction [x, y, z] that isn't [0, 0, 0]".into()))
 }
 
+/// An expression's value. A length that comes out unit-less without being a bare number (a
+/// unit-less parameter used as a length) is in the design's units.
 pub(crate) fn val(vals: &BTreeMap<String, Value>, e: &str, k: Kind) -> Result<f64> {
     val_with(vals, e, k, None)
 }
@@ -8456,8 +8484,9 @@ fn backticked<S: AsRef<str>>(ids: &[S]) -> String {
     ids.iter().map(|id| format!("`{}`", id.as_ref())).collect::<Vec<_>>().join(", ")
 }
 
-struct HoleSpot<'a> {
-    at: Vec3,
+/// Where a hole drills, and the sketch point it drills at (none for a hole at a position).
+pub(crate) struct HoleSpot<'a> {
+    pub(crate) at: Vec3,
     point: Option<&'a str>,
 }
 
@@ -8493,7 +8522,7 @@ fn hole_point_role(id: &str) -> String {
 /// Where a hole feature drills (each on the surface) and in which direction: at its sketch
 /// points perpendicular to the sketch (into the material), else at its position. A point gone
 /// from the sketch drops only its own hole ([`hole_points_gone`]); with none left it fails.
-fn hole_spots<'a>(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, f: &'a Feature) -> Result<(Vec<HoleSpot<'a>>, Vec3)> {
+pub(crate) fn hole_spots<'a>(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, f: &'a Feature) -> Result<(Vec<HoleSpot<'a>>, Vec3)> {
     let FeatureKind::Hole { position, at, direction, points, .. } = &f.kind else { return Err(DocError::Invalid("not a hole".into())) };
     let (mut spots, dir) = match points {
         Some(sp) if !sp.single => {
@@ -8554,7 +8583,7 @@ fn sketch_plane_follows_face(doc: &Document, sketch: u64) -> bool {
 
 /// A hole's depth: down to the To Object (where the hole's axis meets the face there, else the
 /// point's depth along the axis), else as given.
-fn hole_depth_to(st: &ModelState, at: &Vec3, dir: Vec3, to: &Option<Vec3>, depth: &Option<crate::Expr>) -> Result<Option<crate::Expr>> {
+pub(crate) fn hole_depth_to(st: &ModelState, at: &Vec3, dir: Vec3, to: &Option<Vec3>, depth: &Option<crate::Expr>) -> Result<Option<crate::Expr>> {
     let Some(t) = to else { return Ok(depth.clone()) };
     let mut d = (*t - *at).dot(dir);
     // The face at the To point, met along the axis.
@@ -15794,25 +15823,14 @@ fn eval_feature_kind(
             st.bodies.push(envelope);
             Ok(())
         }
-        FeatureKind::Move { bodies, translate, rotate_axis, rotate_about, origin, angle, copy, copy_frames } => {
+        FeatureKind::Move { bodies, copy, copy_frames, .. } => {
             if !copy_frames.is_empty()
                 && (!*copy || copy_frames.len() != bodies.len() || copy_frames.iter().any(|m| !crate::valid_transfer_matrix(m)))
             {
                 return Err(DocError::Invalid("invalid Move copy placements".into()));
             }
-            let t =
-                Vec3::new(val(vals, &translate[0], Kind::Length)?, val(vals, &translate[1], Kind::Length)?, val(vals, &translate[2], Kind::Length)?);
-            let ang = match angle {
-                Some(a) => val(vals, a, Kind::Angle)?,
-                None => 0.0,
-            };
-            let axis = rotate_axis.map(Vec3::from).unwrap_or(Vec3::Z);
-            let origin = origin.as_ref().map(|p| point(vals, p)).transpose()?.unwrap_or(Vec3::ZERO);
             // A turn picked on an edge follows the edge where it is now (#17974).
-            let (origin, axis) = match rotate_about {
-                Some(about) => move_turn_line(doc, st, f.component, about, origin, axis, warning)?,
-                None => (origin, axis),
-            };
+            let (t, origin, axis, ang) = move_motion(doc, vals, st, f, warning)?;
             // With `copy` set, the source body is kept in place and the transform lands on a new
             // body pushed beside it instead of replacing it.
             let mut output = 0;

@@ -181,6 +181,7 @@ pub mod frame;
 mod frame_end_cap;
 mod frame_gusset;
 mod frame_rotate_member;
+mod hole_callout;
 pub(crate) mod inspect;
 mod interference;
 pub(crate) mod joints;
@@ -691,6 +692,7 @@ fn gather_command_specs() -> Vec<&'static CommandSpec> {
     v.extend(print_face::COMMANDS.iter());
     v.extend(metadata::COMMANDS.iter());
     v.extend(inspect::COMMANDS.iter());
+    v.extend(hole_callout::COMMANDS.iter());
     v.extend(compare::COMMANDS.iter());
     v.extend(compare_picture::COMMANDS.iter());
     v.extend(silhouette::COMMANDS.iter());
