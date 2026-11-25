@@ -722,7 +722,7 @@ pub(crate) fn scale_point(ctx: &Ctx, g: &GeoRef) -> Result<Vec3> {
         GeoRef::Face { at, name } => {
             let (b, fi, p) = face_of(ctx.st, *at, name)?;
             if let Some(c) = kernel::cylinder_face_at(&b.body, p) {
-                let s = solidcore_ops::affine::distance_along(c.axis_point.into(), c.axis.vec().into(), p.into());
+                let s = solidcraft_kernel::services::affine::distance_along(c.axis_point.into(), c.axis.vec().into(), p.into());
                 let end = if (s - c.start).abs() <= (c.end - s).abs() { c.start } else { c.end };
                 return Ok(c.axis_point + c.axis * end);
             }
