@@ -590,6 +590,7 @@ view.pan_mode                     the view: camera only: crates/ui-egui/src/nav_
 view.parts_library                the view: a panel shown or hidden; crates/ui-egui/src/parts_library.rs::tests::the_command_opens_and_closes_the_card
 view.perspective                  the view: camera, layout, display
 view.pick                         read-only ray pick, no geometry made: tested in crates/engine/src/cmd/view_pick.rs and solidcore/crates/solidcore-ops/tests/measure.rs
+view.plane_size                   construction plane display size only: crates/engine/src/construct_tests.rs::a_construction_plane_keeps_the_size_it_is_given
 view.previous_tab                 the view: camera, layout, display
 view.rename                       the view: camera, layout, display
 view.render_browser               the view: camera, layout, display
