@@ -1076,7 +1076,7 @@ fn uvp(q: [f64; 2]) -> Point2 {
 
 #[allow(clippy::too_many_lines)]
 fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let mut pool = build_pool(&s.objects)?;
     if let Some(face) = &s.face {
         add_face(&k, &mut pool, face)?;
@@ -3208,5 +3208,77 @@ mod dump {
         let mut rng = Rng::new(CaseContext::seed_for("intersect.curve_class_p1", i));
         let v = Runner.generate(&mut rng).unwrap();
         println!("{}", serde_json::to_string(&v).unwrap());
+    }
+
+    /// The rows the global surface point solve's target bound moved (#20438), each with the
+    /// hash ([`crate::rng::fnv1a64`] of its golden line) of main's row, which the replay
+    /// below gives back with every dropped answer kept.
+    #[rustfmt::skip]
+    const TARGET_BOUNDED: &[(&str, u64)] = &[
+        ("gen0029", 0x5a60_4319_02bc_eb2c), ("gen0330", 0x4b36_cce6_a23e_2bda), ("gen0463", 0x7f7e_117d_de5e_51d4), ("gen0515", 0x43ff_6114_6e28_c437), ("gen0562", 0x63e5_6f95_a555_d218),
+        ("gen0619", 0xf42f_7dbb_cbec_68ea), ("gen0924", 0x92ad_6fd2_945b_7583), ("gen1147", 0xd82d_f86f_270f_45f3), ("gen1312", 0xe493_1c18_8750_a64d), ("gen1510", 0x6c55_e671_7d64_371d),
+        ("gen1724", 0xd567_01fa_87db_cdc1), ("gen1733", 0x033b_8ce3_f6e8_bac2), ("gen1737", 0xa911_d5f7_84e9_112c), ("gen1874", 0x00f4_61eb_71a1_f256), ("gen1947", 0x1736_e3b6_e08c_3940),
+    ];
+
+    /// #20438: the gaps' global solve (`sm_GetCCISurfaceGaps`, a target of 1) now drops a
+    /// drop farther than the target, and the point then fails to drop, as the tree solve
+    /// answers. Each moved row is replayed through the target bound's seam
+    /// ([`solidcore::surface::surface::replay::TargetBoundHook`]): with every dropped
+    /// answer kept the row is main's (it moved only through the bound), and with them
+    /// dropped it is the committed line; each dropped answer is a minimize whose surface is
+    /// proven farther than `|target| + tol` over the whole solve domain
+    /// ([`crate::certify::domain_lower_bound`]): no point of it within the target.
+    #[test]
+    fn target_bounded_rows_moved_only_through_certified_drops() {
+        use solidcore::geom::global_solver::SolverOperation;
+        use solidcore::surface::surface::replay::ReplaySeam;
+        use std::sync::{Arc, Mutex};
+
+        let golden = crate::golden::read(&crate::golden::default_dir(), Runner.id()).unwrap();
+        let hash = |v: &Value| crate::rng::fnv1a64(&serde_json::to_string(v).unwrap());
+        let mut dropped = 0usize;
+        let mut unproven = Vec::new();
+        for &(name, main) in TARGET_BOUNDED {
+            let case = crate::case::regression_case(&Runner, name);
+            let kept = crate::replay_seam::with_installed(
+                ReplaySeam::target_bound(Box::new(|_| false)),
+                || Runner.run_rust(&case),
+            )
+            .unwrap();
+            let kept = hash(&crate::golden::encode(name, &kept));
+            eprintln!("{name}: kept row hash {kept:#018x}");
+            assert_eq!(kept, main, "{name}: with the dropped answers kept the row is not main's");
+            let certs = Arc::new(Mutex::new(Vec::<(bool, String)>::new()));
+            let c = Arc::clone(&certs);
+            let row = crate::replay_seam::with_installed(
+                ReplaySeam::target_bound(Box::new(move |b| {
+                    let want = b.target.abs() + b.tol;
+                    let k = Kernel::default();
+                    let lo = crate::certify::domain_lower_bound(&k, b.surface, b.domain, b.point, want);
+                    let proved = b.operation == SolverOperation::Minimize && lo.is_some_and(|lo| lo > want);
+                    let line = format!("{:?} value {:e} target {:e} tol {:e} lower {lo:?}", b.operation, b.value, b.target, b.tol);
+                    c.lock().unwrap().push((proved, line));
+                    true
+                })),
+                || Runner.run_rust(&case),
+            )
+            .unwrap();
+            assert_eq!(
+                Some(&crate::golden::encode(name, &row)),
+                golden.get(name),
+                "{name}: the committed line is not this branch's row"
+            );
+            let certs = certs.lock().unwrap();
+            assert!(!certs.is_empty(), "{name}: no answer dropped");
+            for (proved, line) in certs.iter() {
+                eprintln!("{name}: dropped {line}, proved {proved}");
+                dropped += 1;
+                if !proved {
+                    unproven.push(format!("{name}: {line}"));
+                }
+            }
+        }
+        assert!(unproven.is_empty(), "not certified beyond the target: {unproven:?}");
+        assert_eq!(dropped, 15, "the dropped answers moved");
     }
 }
