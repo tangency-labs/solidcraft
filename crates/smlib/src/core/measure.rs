@@ -3,25 +3,24 @@
 //! (`smlib_flat_api.cpp`) and `smlib_brep_check` (`smlib_check.cpp`) do on the C++ kernel, here
 //! composed from solidcore's ports of the same SMLib routines.
 //!
-//! [`check`] fails with "not supported yet" while a test it reaches is unported in solidcore.
+//! The bounds, the manifold and solid-count tests, point classification, the edge/face gap and
+//! the check are solidcore-ops' ([`solidcore_ops::Body`]); mass properties and area are composed
+//! here. [`check`] fails with "not supported yet" while a test it reaches is unported in
+//! solidcore.
 
-use solidcore::geom::assert_array::{AssertArray, AssertReport, obj_type_string};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
-use solidcore::geom::tol::{SmallTopoType, context_xsect_tol_3d};
-use solidcore::heal::gap::GapFunction;
 use solidcore::mass::integrator::properties::{MassPropertyBehavior, PropertyAttributes, brep_properties_in_box, face_properties};
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
-use solidcore::query::api_queries::{brep_bounding_box, brep_is_manifold_solid, brep_material_census, face_bounding_box};
+use solidcore::query::api_queries::{brep_bounding_box, face_bounding_box};
 use solidcore::topology::brep::p1 as bl;
-use solidcore::topology::brep::validation::{CheckLevel as SolidcoreCheckLevel, check_brep_scoped};
 use solidcore::topology::face::p2::{PPF_AREA, PPF_AREA_FIRST_MOMENTS};
-use solidcore::topology::{FaceId, FaceuseId, NamingScheme};
+use solidcore::topology::{FaceId, FaceuseId};
 use solidcore::{Kernel, Point3, SolidError, Vec3};
 
+use solidcore_ops::PointLocation;
 use solidcore_ops::check::ValidityScope;
-use solidcore_ops::measure::{LocateFailure, Located, locate_points};
 
-use super::blend::status;
+use super::call::{ops_as, ops_on};
 use super::{Body, with_body};
 use crate::check::{CheckLevel, CheckReport};
 use crate::measure::{MassProperties, PointClass};
@@ -160,45 +159,28 @@ pub(crate) fn area(body: &Body, relative_accuracy: f64) -> Result<f64> {
     with_body("area", body, |k, b| faces_area(k, b, accuracy, Point3::new(0.0, 0.0, 0.0), false, false).map(|(a, _)| a))
 }
 
-/// `smlib_brep_bounds`: `SmBrep::CalculateTightBoundingBox`.
+/// `smlib_brep_bounds`: `SmBrep::CalculateTightBoundingBox` ([`Body::bounds`]); no box (not
+/// finite, or its corners out of order) is the capi's rejected input.
 pub(crate) fn bounds(body: &Body) -> Result<([f64; 3], [f64; 3])> {
-    with_body("bounds", body, |k, b| {
-        let x = brep_bounding_box(k, b, true)?;
-        let (lo, hi) = (x.min(), x.max());
-        let (lo, hi) = ([lo.x, lo.y, lo.z], [hi.x, hi.y, hi.z]);
-        if !finite(&lo) || !finite(&hi) || lo.iter().zip(&hi).any(|(a, b)| a > b) {
-            return Err(invalid("no box"));
-        }
-        Ok((lo, hi))
-    })
+    ops_as(
+        "bounds",
+        &[("brep", body)],
+        |call, e, detail| match e {
+            solidcore_ops::Error::Status(solidcore_ops::error::INVALID_INPUT) => Error::Rejected { operation: OP, reason: "no box" },
+            e => super::call::error(call, e, detail),
+        },
+        || body.bounds(),
+    )
 }
 
 /// `smlib_brep_edge_face_distance`: SMLib's own edge/face gap (`SmEdgeuse::CalcMaxEdgeFaceGap`'s
-/// `SmCrvSrfGapFunction` with 20 samples, its largest sample). Indices in the body's edge and
-/// face order.
+/// `SmCrvSrfGapFunction` with 20 samples, its largest sample: [`Body::edge_face_largest_gap`]).
+/// Indices in the body's edge and face order.
 pub(crate) fn edge_face_distance(body: &Body, edge: usize, face: usize) -> Result<f64> {
-    let found = with_body("edge_face_distance", body, |k, b| {
-        let (Some(&e), Some(&f)) = (bl::edges(b, None)?.get(edge), bl::faces(b, None)?.get(face)) else {
-            return Ok(None);
-        };
-        let interval = b.edge(e)?.interval;
-        let (Some(curve), Some(surface)) = (b.edge(e)?.curve.as_ref(), b.face(f)?.surface.as_ref()) else {
-            return Err(invalid("edge without curve or face without surface"));
-        };
-        if !(interval.max() > interval.min()) {
-            return Err(invalid("empty edge interval"));
-        }
-        // SmTol::GetXSectTol3d(brep's context): the process context. The tolerance only
-        // classifies the samples; it does not change the distances.
-        let tol = context_xsect_tol_3d(k, None, SmallTopoType::NormalSize);
-        let mut gaps = GapFunction::crv_srf(tol, curve, &interval, surface, 20);
-        let d = gaps.max_gap_sample(k, false)?.length();
-        if !d.is_finite() {
-            return Err(invalid("non-finite gap"));
-        }
-        Ok(Some(d))
-    })?;
-    found.ok_or(Error::Argument)
+    ops_on("edge_face_distance", &[("brep", body)], || {
+        let order = body.own_order();
+        body.edge_face_largest_gap(&order, edge, face)
+    })
 }
 
 /// A proved upper bound on the distance from the record curve `curve` (a spline or rational
@@ -236,7 +218,7 @@ pub(crate) fn classify_point(body: &Body, p: [f64; 3]) -> Result<PointClass> {
     if !finite(&p) {
         return Err(Error::Argument);
     }
-    with_body("classify_point", body, |k, b| Ok(point_class(locate_points(k, b, &[p]).pop().unwrap_or(Err(LocateFailure::Unclassified)))))?
+    classify_points(body, &[p])?.pop().unwrap_or(Err(Error::Status(SM_ERR)))
 }
 
 /// [`classify_point`] for each of `points`, through one classification of the body
@@ -247,23 +229,18 @@ pub(crate) fn classify_points(body: &Body, points: &[[f64; 3]]) -> Result<Vec<Re
     if points.iter().all(|p| !finite(p)) {
         return Ok(points.iter().map(|_| Err(Error::Argument)).collect());
     }
-    with_body("classify_points", body, |k, b| Ok(locate_points(k, b, points).into_iter().map(point_class).collect()))
+    let located = ops_on("classify_points", &[("brep", body)], || body.locate_points(points))?;
+    Ok(located.into_iter().map(|l| point_class(l.map_err(|e| super::call::error("classify_point", e, None)))).collect())
 }
 
 /// [`classify_point`]'s class of a point the modelling layer placed. A region the kernel is unsure
 /// of is material (the capi's `IsVoid() == TRUE` test), where `solidcore_ops`' own
 /// `Body::classify_point` refuses it.
-fn point_class(l: std::result::Result<Located, LocateFailure>) -> Result<PointClass> {
-    match l {
-        Ok(Located::OnBoundary) => Ok(PointClass::OnBoundary),
-        Ok(Located::InRegion { material: Some(false), .. }) => Ok(PointClass::Outside),
-        Ok(Located::InRegion { material: Some(true) | None, .. }) => Ok(PointClass::Inside),
-        Err(LocateFailure::NotFinite) => Err(Error::Argument),
-        // Its status, as the capi passes it on (no ray finding a region is SM_ERR).
-        Err(LocateFailure::Classify(e)) => Err(status(e)),
-        Err(LocateFailure::Region(e)) => Err(Error::Solidcore(format!("classify_point: {e}"))),
-        // Point3DClassify reports only the four classes on success: SM_ERR.
-        Err(LocateFailure::Unclassified) => Err(Error::Status(SM_ERR)),
+fn point_class(l: Result<PointLocation>) -> Result<PointClass> {
+    match l? {
+        PointLocation::OnBoundary => Ok(PointClass::OnBoundary),
+        PointLocation::Outside => Ok(PointClass::Outside),
+        PointLocation::Inside | PointLocation::Unsure { .. } => Ok(PointClass::Inside),
     }
 }
 
@@ -272,82 +249,35 @@ const SM_ERR: i32 = 1001;
 
 /// `smlib_brep_is_manifold_solid`: `SmApiBrepIsManifoldSolid`.
 pub(crate) fn is_manifold_solid(body: &Body) -> Result<bool> {
-    with_body("is_manifold_solid", body, |_, b| brep_is_manifold_solid(b))
+    ops_on("is_manifold_solid", &[("brep", body)], || body.is_manifold_solid())
 }
 
 /// `smlib_brep_solid_count`: the solids of `SmApiBrepMaterialCensus` (its voids are dropped).
 pub(crate) fn solid_count(body: &Body) -> Result<usize> {
-    with_body("solid_count", body, |_, b| brep_material_census(b).map(|(solids, _voids)| solids))
-}
-
-/// SMLib's `SM_SUCCESS`, the status `SmBrep::ValidatePointers` returns when it finds nothing.
-const SM_SUCCESS: i32 = 1000;
-
-/// The capi's `text()`: an empty string reads as `?`.
-fn text(s: &str) -> &str {
-    if s.is_empty() { "?" } else { s }
-}
-
-/// The capi's `line()`: `<reporting type>::Test #<n> <name>: <message> [owner <type>]`, the owner
-/// tag only when the report names the owner's type.
-fn report_line(r: &AssertReport) -> String {
-    let msg = r.format_log_message();
-    let mut s = format!("{}::Test #{} {}: {}", text(obj_type_string(r.reporting_type)), r.test_index, text(r.name), text(&msg));
-    if let Some(owner) = r.owner_type_string.filter(|o| !o.is_empty()) {
-        s.push_str(" [owner ");
-        s.push_str(owner);
-        s.push(']');
-    }
-    s
-}
-
-/// The capi's `collect()`: appends the failed reports of `list`, one line each, and counts them;
-/// SMLib's warnings ([`AssertReport::is_warning`]: `SmBrep` test 21, "Suspicious Shell Count", a
-/// body of several faces with one shell each, is one) are neither.
-fn collect(list: &AssertArray, out: &mut String, failures: &mut usize) {
-    for r in list.reports().iter().filter(|r| !r.ok && !r.is_warning()) {
-        *failures += 1;
-        out.push_str(&report_line(r));
-        out.push('\n');
-    }
-}
-
-/// Why [`check`] could not run.
-enum Refusal {
-    /// A test solidcore has not ported (its [`SolidError::Unported`]).
-    Unported(&'static str, &'static str),
-    /// A body whose geometry owners' identities the check cannot know: a
-    /// [`NamingScheme::Unknown`] body.
-    Naming(NamingScheme),
-}
-
-impl<T> super::dump::Answer for std::result::Result<T, Refusal> {
-    fn refusal(&self) -> Option<String> {
-        self.is_err().then(|| "the check could not run".to_string())
-    }
+    ops_on("solid_count", &[("brep", body)], || body.solid_count())
 }
 
 /// `smlib_brep_check` (`smlib_check.cpp`): `SmBrep::ValidatePointers` at `level`, then, when it
 /// failed nothing, `SmBrep::AssertValid` at `level` over the whole topology graph, with every
 /// failed test as one line of the report and the capi's own lines for a failed status without a
-/// report. solidcore's [`check_brep`] runs the same two calls.
+/// report. solidcore-ops' [`Body::check_scoped`] runs the same two calls and builds the same lines.
 ///
 /// The geometry owners are named as the body's naming scheme names them: `check_brep` reads a
-/// [`NamingScheme::Caller`] body's keys from where its maker recorded them (solidcore#1585: an
+/// `NamingScheme::Caller` body's keys from where its maker recorded them (solidcore#1585: an
 /// array import through `make_topology_from_data`, `api_brep_copy`); where it recorded none, the
-/// arena identities the binders name such an entity by. A [`NamingScheme::Unknown`] body would be
+/// arena identities the binders name such an entity by. A `NamingScheme::Unknown` body would be
 /// checked under arena identities no maker uses: every edge would fail `SmBrep` test 61 on the
 /// owner of its curve.
 ///
-/// A test solidcore has not ported yet (its [`SolidError::Unported`]), or a body whose geometry
+/// A test solidcore has not ported yet (its `SolidError::Unported`), or a body whose geometry
 /// owners' identities the check cannot know, fails the check with "not supported yet": the check
 /// never reports a body valid on fewer tests than the C++ kernel runs.
 pub(crate) fn check(body: &Body, level: CheckLevel) -> Result<CheckReport> {
     check_with(body, level, false)
 }
 
-/// [`check`], stopped by the token over this thread's work when `stoppable` (a body the caller
-/// consumes: [`super::with_own_body`]).
+/// [`check`]; `stoppable` is kept for its callers: solidcore-ops checks a copy, so the token over
+/// this thread's work stops it either way.
 pub(crate) fn check_with(body: &Body, level: CheckLevel, stoppable: bool) -> Result<CheckReport> {
     check_scoped(body, level, stoppable, ValidityScope::Body)
 }
@@ -356,53 +286,25 @@ pub(crate) fn check_with(body: &Body, level: CheckLevel, stoppable: bool) -> Res
 /// stitch produced.
 pub(crate) fn check_scoped(body: &Body, level: CheckLevel, stoppable: bool, scope: ValidityScope) -> Result<CheckReport> {
     let lv = match level {
-        CheckLevel::Basic => SolidcoreCheckLevel::Level0,
-        CheckLevel::Geometry => SolidcoreCheckLevel::Level1,
-        CheckLevel::All => SolidcoreCheckLevel::Level2,
+        CheckLevel::Basic => solidcore_ops::check::CheckLevel::Basic,
+        CheckLevel::Geometry => solidcore_ops::check::CheckLevel::Geometry,
+        CheckLevel::All => solidcore_ops::check::CheckLevel::All,
     };
-    let checked = |k: &mut Kernel, b: &mut solidcore::topology::Brep| {
-        let naming = b.naming();
-        if naming == NamingScheme::Unknown {
-            return Ok(Err(Refusal::Naming(naming)));
+    // solidcore-ops checks a copy, so the token over this thread's work stops it whether or not
+    // the body is the caller's to consume (`stoppable`): a stopped check leaves the body as it was.
+    let _ = stoppable;
+    let c = ops_as("check", &[("brep", body)], refused, || body.check_scoped(lv, scope))?;
+    Ok(CheckReport { failures: c.failures, text: c.text })
+}
+
+/// The check's refusal as the capi words it: a test solidcore has not ported, or a body whose
+/// geometry owners' identities the check cannot know, is "not supported yet".
+fn refused(call: &'static str, e: solidcore_ops::Error, detail: Option<String>) -> Error {
+    match e {
+        solidcore_ops::Error::Unported(upstream) => {
+            Error::Solidcore(format!("smlib_brep_check: {upstream}: not supported yet: solidcore has not ported it"))
         }
-        match check_brep_scoped(k, b, lv, scope) {
-            Err(SolidError::Unported { upstream, unit }) => Ok(Err(Refusal::Unported(upstream, unit))),
-            r => r.map(Ok),
-        }
-    };
-    let ran = if stoppable { super::with_own_body("check", body, checked) } else { with_body("check", body, checked) };
-    let c = match ran? {
-        Ok(c) => c,
-        Err(Refusal::Unported(upstream, unit)) => {
-            return Err(Error::Solidcore(format!("smlib_brep_check: {upstream}: not supported yet: solidcore has not ported it (unit {unit})")));
-        }
-        Err(Refusal::Naming(n)) => {
-            return Err(Error::Solidcore(format!(
-                "smlib_brep_check: not supported yet: the body names its geometry owners by its maker's keys (NamingScheme::{n:?}), which the check cannot know"
-            )));
-        }
-    };
-    let mut text = String::new();
-    let mut failures = 0usize;
-    collect(&c.pointer_reports, &mut text, &mut failures);
-    if c.pointers_status != SM_SUCCESS && failures == 0 {
-        failures += 1;
-        text.push_str(&format!("SmBrep::ValidatePointers failed with status {}\n", c.pointers_status));
+        solidcore_ops::Error::Unsupported(why) => Error::Solidcore(format!("smlib_brep_check: not supported yet: {why}")),
+        e => super::call::error(call, e, detail),
     }
-    if failures > 0 {
-        // The capi does not run AssertValid after a failed pointer check. check_brep runs it when
-        // the status failed without a report; that result is dropped here, as the capi never
-        // computes it.
-        text.push_str("AssertValid skipped: ValidatePointers failed\n");
-    } else {
-        let Some(ok) = c.assert_valid else {
-            return Err(Error::Solidcore("smlib_brep_check: AssertValid did not run after a clean pointer check".into()));
-        };
-        collect(&c.reports, &mut text, &mut failures);
-        if !ok && failures == 0 {
-            failures += 1;
-            text.push_str("SmBrep::AssertValid failed without a report\n");
-        }
-    }
-    Ok(CheckReport { failures, text })
 }
