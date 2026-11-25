@@ -9,7 +9,7 @@ use serde::de::Error as _;
 use serde::{Deserialize, Deserializer};
 use serde_json::{Value, json};
 use solidcore_record::{Vec2, Vec3};
-use solidcraft_doc::{Expr, Operation, ThinSide, Touching};
+use solidcraft_doc::{Expr, OffsetEdges, Operation, ThinSide, Touching};
 
 use super::check::{keyed, whole};
 use crate::params;
@@ -689,6 +689,14 @@ keyword_param!(
     "Whether the profiles are raised from the face (emboss, the default) or sunk into it (deboss). Any case."
 );
 keyword_param!(
+    /// `solid.dome`'s `shape`.
+    DomeShapeParam,
+    "shape",
+    &["elliptical", "spherical"],
+    "elliptical or spherical",
+    "The dome's meridian: elliptical (a quarter ellipse, the default; on a circle, a half ellipsoid of revolution) or spherical (the sphere through the rim and the apex, on a circle). Any case."
+);
+keyword_param!(
     /// `surface.ruled`'s `mode`.
     RuledModeParam,
     "mode",
@@ -800,6 +808,63 @@ impl JsonSchema for TouchingParam {
         enum_schema(
             &["separate", "one_body"],
             "What a join makes of pieces that share no face: separate (the default) makes each piece that touches another only along an edge or at a point a body of its own and keeps pieces that touch nothing in one body; one_body keeps every piece in one body.",
+        )
+    }
+}
+
+/// Combine's `offset_faces`: 1 to 1000 faces of the tools, each as [`FaceRef`] reads it (a point
+/// on the face or its name), as the handler's `face::face_ref` reads them.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ToolFacesParam(pub Vec<FaceRef>);
+
+/// Combine's message for an `offset_faces` that isn't a list of 1 to 1000 faces.
+const TOOL_FACES_MESSAGE: &str = "`offset_faces` must list 1…1000 points on tool faces";
+
+impl<'de> Deserialize<'de> for ToolFacesParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        let faces = v.as_array().filter(|a| !a.is_empty() && a.len() <= 1000).ok_or_else(|| D::Error::custom(whole(TOOL_FACES_MESSAGE)))?;
+        faces.iter().map(|f| FaceRef::deserialize(f).map_err(D::Error::custom)).collect::<Result<Vec<_>, _>>().map(ToolFacesParam)
+    }
+}
+
+impl JsonSchema for ToolFacesParam {
+    fn schema_name() -> Cow<'static, str> {
+        "ToolFaces".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let face = generator.subschema_for::<FaceRef>();
+        json_schema!({
+            "description": "The tool faces that move, one entry on each: a point on the face or its name.",
+            "type": "array", "items": face, "minItems": 1, "maxItems": 1000
+        })
+    }
+}
+
+/// What a grown tool's convex edges become, as `OffsetEdges::parse` reads it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OffsetEdgesParam(pub OffsetEdges);
+
+/// Combine's message for an `offset_edges` it doesn't know.
+const OFFSET_EDGES_MESSAGE: &str = "`offset_edges` must be sharp or round";
+
+impl<'de> Deserialize<'de> for OffsetEdgesParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::String(s) => OffsetEdges::parse(&s).map(OffsetEdgesParam).ok_or_else(|| D::Error::custom(whole(OFFSET_EDGES_MESSAGE))),
+            _ => Err(D::Error::custom(whole(OFFSET_EDGES_MESSAGE))),
+        }
+    }
+}
+
+impl JsonSchema for OffsetEdgesParam {
+    fn schema_name() -> Cow<'static, str> {
+        "OffsetEdges".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        enum_schema(
+            &["sharp", "round"],
+            "What a grown tool's convex edges become: sharp (the default) extends the grown faces until they meet; round rounds each convex edge with the offset as its radius.",
         )
     }
 }
@@ -1308,7 +1373,7 @@ impl JsonSchema for RailFitParam {
 /// rails to count; `None` leaves the count to the handler. `default_sketch`: a rail may
 /// leave its `sketch` out. A key a rail doesn't take, which the handler ignores, is refused too.
 pub(super) fn guide_rails_problem(v: &Value, count_for: Option<&str>, default_sketch: bool) -> Option<String> {
-    let Value::Array(given) = v else { return Some(whole("`rails` must list one or two rails: [{sketch, curves: [ids]}]")) };
+    let Value::Array(given) = v else { return Some(whole("`rails` must list guide rails: [{sketch, curves: [ids]}]")) };
     if let Some(what) = count_for
         && !(1..=2).contains(&given.len())
     {

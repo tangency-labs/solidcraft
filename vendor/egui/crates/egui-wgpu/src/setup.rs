@@ -274,7 +274,12 @@ impl WgpuSetupCreateNew {
                         // never less than 8192, so a window spanning large monitors still fits.
                         max_texture_dimension_2d: adapter.limits().max_texture_dimension_2d.max(8192),
                         ..base_limits
-                    },
+                    }
+                    // SolidCraft: never ask for more than the adapter offers. Older drivers
+                    // (Debian 11's Mesa 20.3, for one) report less than wgpu's defaults, e.g.
+                    // 2 colour attachments, and requesting the defaults refused the device so no
+                    // window opened. A GPU at or above the defaults gets the same request as before.
+                    .or_worse_values_from(&adapter.limits()),
                     // SolidCraft: without it only the sample counts WebGPU guarantees (1x, 4x)
                     // are allowed, even where the adapter supports 2x and 8x.
                     required_features: adapter.features()

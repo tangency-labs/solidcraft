@@ -309,6 +309,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::SurfaceSweep { .. } => "surface_sweep",
         FeatureKind::SurfaceLoft { .. } => "surface_loft",
         FeatureKind::SurfaceOffset { .. } => "surface_offset",
+        FeatureKind::SurfaceMidsurface { .. } => "surface_offset",
         FeatureKind::SurfaceRuled { .. } => "surface_ruled",
         FeatureKind::SurfaceUntrim { .. } => "surface_untrim",
         FeatureKind::SurfaceBlend { .. } => "surface_blend",
@@ -349,6 +350,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::Loft { .. } => "loft",
         FeatureKind::Sweep { .. } => "sweep",
         FeatureKind::Shell { .. } => "shell",
+        FeatureKind::Dome { .. } => "dome",
         FeatureKind::Draft { .. } => "draft",
         FeatureKind::Split { .. } => "split",
         FeatureKind::Move { .. } => "move",
@@ -648,6 +650,7 @@ pub(crate) fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
     }
     if let Some(sketch) = TimelineKind::of(&feature.kind).profile_sketch() {
         v.push(rule.one(Item::action("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({ "sketch": sketch.0 }))));
+        v.push(rule.one(Item::action("ui.editDimensions", "Edit Dimensions", "dimension").with(json!({ "sketch": sketch.0 }))));
     }
     // Its own message, not a literal: no catalog held the literal, so the item stayed English
     // in every language (#8301).
@@ -1609,6 +1612,15 @@ impl history_bar::Contents for BarSteps<'_> {
 /// (Preferences › Layout), the first body is also found there, as Find in Browser on a body
 /// does: the rows down to it open.
 pub(crate) fn find_in_browser(app: &mut SolveApp, ids: &[u64]) {
+    // A construction plane, axis or point is found in its Construction folder (#15355).
+    if let [id] = ids
+        && app.session.doc.feature(*id).is_some_and(|f| {
+            matches!(f.kind, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })
+        })
+    {
+        crate::browser::reveal_construction(app, *id);
+        return;
+    }
     let st = crate::open_meshing::session_world(&app.session);
     let mut bodies: Vec<String> = Vec::new();
     let mut items: Vec<serde_json::Value> = Vec::new();
