@@ -4920,6 +4920,15 @@ impl SolveApp {
         if agent_chat::shown(self) {
             agent_chat::settings::dialog(self, ui.ctx());
         }
+        if self.session.forms_prototype.is_some() {
+            panel_runtime::hide_app_host(self);
+            dim_view::set_model_drawn(Vec::new());
+            ui_kit::Container::new(ui.ctx(), ui_kit::Surface::Viewport).central().show(ui, |ui| forms_prototype::show(self, ui));
+            messages::show(self, ui.ctx());
+            prefs::show(self, ui.ctx());
+            shortcut_box::show(self, ui.ctx());
+            return;
+        }
         if self.home.open {
             let workspace = ui.available_rect_before_wrap();
             panel_runtime::hide_app_host(self);
@@ -5024,10 +5033,7 @@ impl SolveApp {
     }
 
     fn show_workspace(&mut self, ui: &mut egui::Ui) {
-        if self.session.forms_prototype.is_some() {
-            dim_view::set_model_drawn(Vec::new());
-            forms_prototype::show(self, ui);
-        } else if view_tiles::shown(self) && (self.preferences.workspace_follows_view || !drawing_workspace::active(self)) {
+        if view_tiles::shown(self) && (self.preferences.workspace_follows_view || !drawing_workspace::active(self)) {
             view_tiles::show(self, ui);
         } else if self.docs.views.active().kind == solidcraft_views::ViewKind::Sheet && !dialogs_sheet::flat_active(self) {
             dim_view::set_model_drawn(Vec::new());
