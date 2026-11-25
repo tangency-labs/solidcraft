@@ -617,7 +617,7 @@ mod tests {
             assert_eq!(fit.patches.len(), cage.faces.len());
             assert!(fit.sampled_deviation <= 0.01);
             assert!(fit.patches.iter().all(|p| p.count().iter().all(|&n| n <= 33)));
-            eprintln!(
+            crate::note!(
                 "root fit: {} faces, level{}, controls{:?}, deviation{}",
                 fit.patches.len(),
                 fit.subdivision_level,

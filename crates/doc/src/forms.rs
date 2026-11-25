@@ -178,7 +178,7 @@ fn convert_source_with_preview(
     let collapsed = site.map(|site| collapse::stitch(&mut source, site)).transpose()?;
     let FittedSource { fit, sheets, trimmed_roots, quad_caps } = &source;
     #[cfg(test)]
-    eprintln!("Forms fit ({} patches): {:?}", fit.patches.len(), timing.elapsed());
+    solidcraft_geom::note!("Forms fit ({} patches): {:?}", fit.patches.len(), timing.elapsed());
     // Caps add sewing operands. The fitted skin's patches, charts and owners stay aligned.
     let sheet_roots = if quad_caps.is_empty() {
         std::borrow::Cow::Borrowed(fit.patch_roots.as_slice())
@@ -201,7 +201,7 @@ fn convert_source_with_preview(
         }
     };
     #[cfg(test)]
-    eprintln!("Forms stitch: {:?}", timing.elapsed());
+    solidcraft_geom::note!("Forms stitch: {:?}", timing.elapsed());
     if body.is_mesh() {
         return Err(DocError::Invalid("Forms CAD conversion returned a mesh instead of a B-rep".into()));
     }
@@ -223,7 +223,7 @@ fn convert_source_with_preview(
     if closed {
         let issues = body.validity();
         #[cfg(test)]
-        eprintln!("Forms validity: {:?}", timing.elapsed());
+        solidcraft_geom::note!("Forms validity: {:?}", timing.elapsed());
         if !issues.is_empty() {
             return Err(DocError::Invalid(format!("Forms CAD solid failed validation: {}", issues.join("; "))));
         }
@@ -1126,7 +1126,7 @@ mod tests {
         let mut display_profile = profile.clone();
         display_profile.partition = false;
         let fit = display_profile.fit(&state, &cage, &Placement::default(), 0.01).unwrap();
-        eprintln!("nine-corner Surface fixture: {} native patch faces", fit.patch.face_count());
+        solidcraft_geom::note!("nine-corner Surface fixture: {} native patch faces", fit.patch.face_count());
         if fit.patch.face_count() > 1 {
             let native = serde_json::to_value(fit.patch.record()).unwrap();
             let edges = cage.edges().unwrap();
@@ -1171,7 +1171,7 @@ mod tests {
                 );
             }
             assert!(near_misses > 0, "the fixture must contain a guide that passes near but misses the valence-nine centre");
-            eprintln!("nine-corner common centre {centre:?}: {incident_faces} incident faces, {near_misses} off-centre guides");
+            solidcraft_geom::note!("nine-corner common centre {centre:?}: {incident_faces} incident faces, {near_misses} off-centre guides");
             let key = |point: solidcore_record::Vec3| [point.x.to_bits(), point.y.to_bits(), point.z.to_bits()];
             let side = |a, b| {
                 let (a, b) = (key(a), key(b));
@@ -3138,7 +3138,7 @@ mod tests {
         };
         let started = std::time::Instant::now();
         let (body, report) = convert(&definition, 0.01).unwrap();
-        eprintln!("basic extrusion CAD conversion: {:?}, {} patches", started.elapsed(), report.patches);
+        solidcraft_geom::note!("basic extrusion CAD conversion: {:?}, {} patches", started.elapsed(), report.patches);
         assert!(report.solid && !body.is_mesh() && !body.is_surface());
         assert!(report.sampled_deviation_mm <= 0.01);
         assert_eq!(report.patch_roots.len(), body.face_count());

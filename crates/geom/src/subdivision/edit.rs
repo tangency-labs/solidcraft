@@ -1081,7 +1081,7 @@ mod tests {
                 Ok(Target { corner: false, point, tangent: Vec3::new(-s, c, 0.0), normal: jet.normal().unwrap(), support: jet })
             };
             let result = match_opening(&cage, &config, target, 0.01).unwrap_or_else(|e| panic!("curved={curved}: {e}"));
-            eprintln!("G2 curved={curved}: {:?}", result.report);
+            crate::note!("G2 curved={curved}: {:?}", result.report);
             assert!(result.report.position_mm <= 0.001);
             assert!(result.report.tangent_deg <= 0.1);
             assert!(result.report.curvature_relative <= 0.01);

@@ -239,7 +239,7 @@ impl Query {
             SelectionGuides::Unmapped(error) => return Err(error.clone()),
         }
         #[cfg(test)]
-        eprintln!(
+        solidcraft_engine::geom::note!(
             "region edge stage completed: entry={stage_entry}, exit={}, top8=[{}]",
             *work,
             costs.iter().map(EdgeCost::summary).collect::<Vec<_>>().join("; ")
@@ -292,29 +292,29 @@ impl Query {
         if result.is_ok() {
             return;
         }
-        eprintln!(
+        solidcraft_engine::geom::note!(
             "region edge failed budget: {}; result={result:?}; top8=[{}]",
             cost.summary(),
             costs.iter().map(EdgeCost::summary).collect::<Vec<_>>().join("; ")
         );
-        eprintln!("region actual edge own-ray memo: {}", self.visibility.own_ray_cache_diagnostic_for_test());
+        solidcraft_engine::geom::note!("region actual edge own-ray memo: {}", self.visibility.own_ray_cache_diagnostic_for_test());
         // One diagnostic replay of the SAME complete restrictions, camera,
         // region and callbacks; it does not change the live query's budget or
         // answer. Root-only certificates cannot distinguish cumulative cost.
         if let Err(error) = self.visibility.clear_own_ray_cache_for_test() {
-            eprintln!("region cold edge replay unavailable: {error}");
+            solidcraft_engine::geom::note!("region cold edge replay unavailable: {error}");
             return;
         }
         let mut fresh = QUERY_WORK;
         let replay = self.edge_takes(pieces, &mut fresh);
-        eprintln!(
+        solidcraft_engine::geom::note!(
             "region fresh full-edge replay: edge={:?}, route={}, original_visibility_entry={}, result={replay:?}, used={}, remaining={fresh}",
             cost.edge,
             cost.route,
             cost.after_extraction,
             QUERY_WORK - fresh,
         );
-        eprintln!("region cold edge replay own-ray memo: {}", self.visibility.own_ray_cache_diagnostic_for_test());
+        solidcraft_engine::geom::note!("region cold edge replay own-ray memo: {}", self.visibility.own_ray_cache_diagnostic_for_test());
     }
 
     #[cfg(test)]
@@ -325,14 +325,19 @@ impl Query {
     #[cfg(test)]
     fn trace_failed_certificates_uncached(&self, edge: [usize; 2], pieces: &[Vec<HPoint>]) {
         for (piece, controls) in pieces.iter().take(4).enumerate() {
-            eprintln!("region visibility diagnostic edge={edge:?}, piece={piece}: {}", self.visibility.certificate_diagnostic(controls));
+            solidcraft_engine::geom::note!(
+                "region visibility diagnostic edge={edge:?}, piece={piece}: {}",
+                self.visibility.certificate_diagnostic(controls)
+            );
             if matches!(edge, [59, 75] | [157, 158] | [155, 158]) {
                 for depth in [4_i32, 12, 20, 24] {
                     let width = 0.5_f64.powi(depth);
                     for start in [0.0, 0.5, 1.0 - width] {
                         let restriction = solidcraft_engine::geom::bspline::bezier_segment(controls, start, start + width);
                         let detail = restriction.map_or_else(|error| error.to_string(), |controls| self.visibility.certificate_diagnostic(&controls));
-                        eprintln!("region deep certificate diagnostic edge={edge:?}, piece={piece}, depth={depth}, start={start:.10}: {detail}");
+                        solidcraft_engine::geom::note!(
+                            "region deep certificate diagnostic edge={edge:?}, piece={piece}, depth={depth}, start={start:.10}: {detail}"
+                        );
                     }
                 }
             }
@@ -360,7 +365,7 @@ impl Query {
                 let visible = point.map(|point| self.visibility.visible(point, &mut probe_work));
                 probes.push(format!("{station}/8:inside={inside},visible={visible:?}"));
             }
-            eprintln!(
+            solidcraft_engine::geom::note!(
                 "region exact witness diagnostic edge={edge:?}, piece={piece}, {}: {}",
                 self.visibility.certificate_diagnostic(controls),
                 probes.join("; ")
@@ -424,7 +429,7 @@ impl Query {
         let after_preparation = *work;
         if window && let Some(error) = uncertain.take() {
             #[cfg(test)]
-            eprintln!(
+            solidcraft_engine::geom::note!(
                 "region face preparation/containment failed: native_count={}, first8={:?}, entry={admission}, exit={}, result={error}; no qualified complete group replay",
                 native.len(),
                 native.iter().take(8).collect::<Vec<_>>(),
@@ -434,7 +439,7 @@ impl Query {
         }
         if prepared.is_empty() {
             #[cfg(test)]
-            eprintln!(
+            solidcraft_engine::geom::note!(
                 "region face has no prepared group: native_count={}, first8={:?}, entry={admission}, exit={}, error={uncertain:?}",
                 native.len(),
                 native.iter().take(8).collect::<Vec<_>>(),
@@ -452,7 +457,7 @@ impl Query {
         );
         #[cfg(test)]
         if visibility.is_err() {
-            eprintln!(
+            solidcraft_engine::geom::note!(
                 "region face failed budget: native_count={}, first8={:?}, prepared_count={}, entry={admission}, after_preparation={after_preparation}, exit={}, preparation_spent={}, visibility_spent={}, result={visibility:?}",
                 native.len(),
                 native.iter().take(8).collect::<Vec<_>>(),
@@ -461,9 +466,9 @@ impl Query {
                 admission.saturating_sub(after_preparation),
                 after_preparation.saturating_sub(*work),
             );
-            eprintln!("region actual face own-ray memo: {}", self.visibility.own_ray_cache_diagnostic_for_test());
+            solidcraft_engine::geom::note!("region actual face own-ray memo: {}", self.visibility.own_ray_cache_diagnostic_for_test());
             if let Err(error) = self.visibility.clear_own_ray_cache_for_test() {
-                eprintln!("region cold face replay unavailable: {error}");
+                solidcraft_engine::geom::note!("region cold face replay unavailable: {error}");
                 return visibility;
             }
             let mut fresh = QUERY_WORK;
@@ -475,17 +480,17 @@ impl Query {
                 &mut |point, budget| self.visibility.visible(point, budget),
                 &mut |controls, budget| self.visibility.occludes_hull(controls, budget),
             );
-            eprintln!(
+            solidcraft_engine::geom::note!(
                 "region fresh full-face-group replay: native_count={}, first8={:?}, prepared_count={}, original_visibility_entry={after_preparation}, prior_preparation_uncertainty={uncertain:?}, result={replay:?}, used={}, remaining={fresh}",
                 native.len(),
                 native.iter().take(8).collect::<Vec<_>>(),
                 prepared.len(),
                 QUERY_WORK - fresh,
             );
-            eprintln!("region cold face replay own-ray memo: {}", self.visibility.own_ray_cache_diagnostic_for_test());
+            solidcraft_engine::geom::note!("region cold face replay own-ray memo: {}", self.visibility.own_ray_cache_diagnostic_for_test());
             self.visibility.without_own_ray_cache_for_test(|| {
                 for face in &prepared {
-                    eprintln!(
+                    solidcraft_engine::geom::note!(
                         "region face visibility diagnostic: {}",
                         face.visibility_diagnostic(
                             &self.projection,

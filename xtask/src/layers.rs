@@ -1,4 +1,4 @@
-//! Dependency layering rules (plan/architecture.md Â§3).
+//! Dependency layering rules (plan/architecture.md §3).
 //!
 //! Adapted from CADCraft's xtask (MIT OR Apache-2.0), see ATTRIBUTION.md.
 //!
@@ -73,7 +73,7 @@ pub const TABLE: &[(&str, Class)] = &[
     ("gpu", Class::Layer(5)),
     ("mcp", Class::Layer(5)),
     ("testkit", Class::Testkit),
-    // App-agnostic plugin contracts and the component runtime (RFC 0002 Â§6b).
+    // App-agnostic plugin contracts and the component runtime (RFC 0002 §6b).
     ("craft-plugin", Class::Shared),
     ("craft-plugin-wasm", Class::Shared),
     // the sRGB transfer rule and the surface-analysis palette, read by the renderer and the theme (#13291)
@@ -236,7 +236,7 @@ impl std::fmt::Display for Violation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Violation::Unregistered { krate } => {
-                write!(f, "{krate}: unknown workspace crate; register it in xtask/src/layers.rs TABLE (see plan/architecture.md Â§3)")
+                write!(f, "{krate}: unknown workspace crate; register it in xtask/src/layers.rs TABLE (see plan/architecture.md §3)")
             }
             Violation::Upward { krate, dep, from, to, kind } => {
                 write!(f, "{krate} (L{from}) -> {dep} (L{to}) [{kind:?}]: may only depend on strictly lower layers")
@@ -257,7 +257,7 @@ impl std::fmt::Display for Violation {
                 write!(f, "{krate}: shared crate must depend only on other shared crates, solidcore and external crates, not workspace crate {dep}")
             }
             Violation::PluginDependsOnSolidCraft { krate, via, dep } => {
-                write!(f, "{krate}: plugin host reaches SolidCraft crate `{dep}` through {via}; plugin crates must be app-agnostic (RFC 0002 Â§6b)")
+                write!(f, "{krate}: plugin host reaches SolidCraft crate `{dep}` through {via}; plugin crates must be app-agnostic (RFC 0002 §6b)")
             }
         }
     }
@@ -423,7 +423,7 @@ pub fn from_metadata(meta: &Value, root: Option<&std::path::Path>) -> Result<Vec
 /// The allowlist of today's direct uses of solidcore's inner crates.
 pub const SEAM_LIST: &str = "xtask/solidcore-seam.txt";
 
-/// The solidcore crates apps may use, one a line (solidcore docs/layers.md Â§1). After vendoring
+/// The solidcore crates apps may use, one a line (solidcore docs/layers.md §1). After vendoring
 /// solidcore owns the list at `solidcore/public-crates.txt`; the rule reads that first and falls
 /// back to the xtask copy, so cutover changes no code.
 pub const SEAM_PUBLIC: &[&str] = &["solidcore/public-crates.txt", "xtask/solidcore-public.txt"];

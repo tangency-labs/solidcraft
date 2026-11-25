@@ -829,8 +829,8 @@ fn a_disc_scaled_and_sheared_is_a_plane_bounded_by_an_ellipse() {
 }
 
 mod native_ray {
-    use super::super::ray::{ClipDepth, Front, Scene};
     use solidcore_record::brep::*;
+    use solidcraft_geom::brep::ray::{ClipDepth, Front, Scene};
 
     type Wire = [[f64; 2]; 4];
 

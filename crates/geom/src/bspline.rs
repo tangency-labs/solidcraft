@@ -803,7 +803,7 @@ pub(crate) mod tests {
         let mut work = 2_000_000;
         let exact = rational_rim_gap(&first, &same, [false, true], 1e-7, &mut work).unwrap().unwrap();
         assert!(exact < 1e-8);
-        eprintln!("mixed partitions and degrees: upper bound {exact:e} mm, work {}", 2_000_000 - work);
+        crate::note!("mixed partitions and degrees: upper bound {exact:e} mm, work {}", 2_000_000 - work);
         assert!(rational_rim_gap(&first, &same, [true, false], 1e-7, &mut 2_000_000).unwrap().unwrap() < 1e-8);
         assert_eq!(rational_rim_gap(&first, &same, [false, false], 1e-7, &mut 2_000_000).unwrap(), None);
 
@@ -812,7 +812,7 @@ pub(crate) mod tests {
         let expected = offset.into_iter().map(|x| x * x).sum::<f64>().sqrt();
         let gap = rational_rim_gap(&first, &moved, [false, true], 0.0006, &mut 2_000_000).unwrap().unwrap();
         assert!(gap >= expected - 1e-12 && gap < expected + 1e-8, "gap={gap}");
-        eprintln!("known translated rim: exact {expected:e} mm, certified upper {gap:e} mm");
+        crate::note!("known translated rim: exact {expected:e} mm, certified upper {gap:e} mm");
         assert_eq!(rational_rim_gap(&first, &moved, [false, true], 0.0005, &mut 2_000_000).unwrap(), None);
     }
 
