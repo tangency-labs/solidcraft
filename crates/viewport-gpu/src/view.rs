@@ -2064,7 +2064,7 @@ fn class_gpu(
 }
 
 impl BlockGpu {
-    fn update(device: &wgpu::Device, old: Option<BlockGpu>, bytes: Arc<BlockBytes>, uploaded: &mut u64) -> BlockGpu {
+    fn update(device: &wgpu::Device, queue: &wgpu::Queue, old: Option<BlockGpu>, bytes: Arc<BlockBytes>, uploaded: &mut u64) -> BlockGpu {
         let fits = bytes.vertices.len() as u64 <= device.limits().max_buffer_size;
         let same_vertices = old.as_ref().is_some_and(|o| Arc::ptr_eq(&o.bytes.vertices, &bytes.vertices));
         let vertices = if !fits || bytes.vertices.is_empty() {
@@ -2077,7 +2077,7 @@ impl BlockGpu {
             *uploaded += bytes.vertices.len() as u64;
             // A buffer the device refuses (the product preview's upload error scope reports it)
             // leaves the block undrawn rather than panicking.
-            buffer_init(device, "sc_block_vertices", &bytes.vertices, wgpu::BufferUsages::VERTEX)
+            buffer_write(device, queue, "sc_block_vertices", &bytes.vertices, wgpu::BufferUsages::VERTEX)
         };
         let mut class = |class: TriClass| {
             let old_pair = old.as_ref().and_then(|o| o.class(class).map(|c| (c, o.bytes.runs(class))));
@@ -2095,7 +2095,7 @@ impl BlockGpu {
         };
         let mut fresh = |data: &[u8], label: &str| {
             *uploaded += data.len() as u64;
-            upload(device, label, data, LINE_SIZE)
+            upload_write(device, queue, label, data, LINE_SIZE)
         };
         let lines = keep(old.as_ref(), |b| &b.lines, |b| b.lines.as_ref()).or_else(|| fresh(&bytes.lines, "sc_block_lines"));
         let hidden = keep(old.as_ref(), |b| &b.hidden, |b| b.hidden.as_ref()).or_else(|| fresh(&bytes.hidden, "sc_block_hidden"));
@@ -2576,7 +2576,7 @@ impl Batches {
         {
             self.uploads = UploadStats::default();
             self.planned = match tess {
-                Some((tess, encoder)) => self.planned(device, tess, encoder, &sc.planned, donor.as_deref_mut()),
+                Some((tess, encoder)) => self.planned(device, queue, tess, encoder, &sc.planned, donor.as_deref_mut()),
                 None => Vec::new(),
             };
             // On a device that draws them indirectly, the meshes go into the arena (only those it
@@ -2665,7 +2665,7 @@ impl Batches {
                         shared.or(mine)
                     }
                 };
-                self.blocks.insert(block.key, BlockGpu::update(device, old, block.bytes.clone(), &mut geometry));
+                self.blocks.insert(block.key, BlockGpu::update(device, queue, old, block.bytes.clone(), &mut geometry));
                 order.push(block.key);
             }
             self.block_order = order;
@@ -3038,6 +3038,7 @@ impl Batches {
     fn planned(
         &mut self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         tess: &crate::TessGpu,
         encoder: &mut wgpu::CommandEncoder,
         bodies: &[PlannedBody],
@@ -3066,8 +3067,10 @@ impl Batches {
             open = !std::hash::Hasher::finish(&h).is_multiple_of(CHUNK_SPLIT) && chunks.last().is_some_and(|c| c.len() < MAX_CHUNK_BODIES);
         }
         let key = |c: &[&PlannedBody]| c.iter().map(|b| Arc::as_ptr(&b.plan) as usize).collect::<Vec<usize>>();
-        self.resident.retain(|k, _| chunks.iter().any(|c| key(c) == *k));
-        self.chunk_colors.retain(|k, _| chunks.iter().any(|c| key(c) == *k));
+        // Looked up, not searched for: a large model has thousands of chunks.
+        let live: std::collections::HashSet<Vec<usize>> = chunks.iter().map(|c| key(c)).collect();
+        self.resident.retain(|k, _| live.contains(k));
+        self.chunk_colors.retain(|k, _| live.contains(k));
         let mut out = Vec::with_capacity(chunks.len());
         for chunk in &chunks {
             let k = key(chunk);
@@ -3117,7 +3120,7 @@ impl Batches {
                 }
             }
             self.uploads.planned += bytes.len() as u64;
-            if let Some((colors, _)) = upload(device, "sc_planned_colors", &bytes, 4).and_then(|c| c.parts.into_iter().next()) {
+            if let Some((colors, _)) = upload_write(device, queue, "sc_planned_colors", &bytes, 4).and_then(|c| c.parts.into_iter().next()) {
                 let (class, closed) = chunk.first().map_or((TriClass::Opaque, true), |b| (b.class, b.closed));
                 self.chunk_colors.insert(key(chunk), (looks, colors.clone()));
                 out.push(PlannedDraw { mesh, colors, class, closed, plans: key(chunk) });
@@ -4642,6 +4645,17 @@ fn upload(device: &wgpu::Device, label: &str, bytes: &[u8], stride: usize) -> Op
 }
 
 fn upload_with(device: &wgpu::Device, label: &str, bytes: &[u8], stride: usize, usage: wgpu::BufferUsages) -> Option<Batch> {
+    batch(device, bytes, stride, |part| buffer_init(device, label, part, usage))
+}
+
+/// As [`upload`], written through `queue` ([`buffer_write`]): for what a scene uploads again and
+/// again as the view changes.
+fn upload_write(device: &wgpu::Device, queue: &wgpu::Queue, label: &str, bytes: &[u8], stride: usize) -> Option<Batch> {
+    batch(device, bytes, stride, |part| buffer_write(device, queue, label, part, wgpu::BufferUsages::VERTEX))
+}
+
+/// `bytes` of `stride` in as many buffers made by `buffer` as the device's limit takes.
+fn batch(device: &wgpu::Device, bytes: &[u8], stride: usize, buffer: impl Fn(&[u8]) -> Option<wgpu::Buffer>) -> Option<Batch> {
     if bytes.len() < stride || stride == 0 {
         return None;
     }
@@ -4649,7 +4663,7 @@ fn upload_with(device: &wgpu::Device, label: &str, bytes: &[u8], stride: usize, 
     let parts = bytes
         .chunks(chunk)
         .filter(|part| part.len() >= stride)
-        .map(|part| Some((buffer_init(device, label, part, usage)?, u32::try_from(part.len() / stride).unwrap_or(0))))
+        .map(|part| Some((buffer(part)?, u32::try_from(part.len() / stride).unwrap_or(0))))
         .collect::<Option<Vec<_>>>()?;
     Some(Batch { parts, chunk })
 }
@@ -4718,6 +4732,17 @@ fn spilled_lines(sc: &GpuScene, spill: Spill) -> Option<(Vec<u8>, Vec<u8>)> {
 /// upload can fail and leave the previous picture in place.
 fn buffer_init(device: &wgpu::Device, label: &str, contents: &[u8], usage: wgpu::BufferUsages) -> Option<wgpu::Buffer> {
     match crate::buffer_init(device, label, contents, usage) {
+        Ok(buffer) => Some(buffer),
+        Err(error) => {
+            refused(error.to_string());
+            None
+        }
+    }
+}
+
+/// As [`buffer_init`], written through `queue` ([`crate::buffer_write`]).
+fn buffer_write(device: &wgpu::Device, queue: &wgpu::Queue, label: &str, contents: &[u8], usage: wgpu::BufferUsages) -> Option<wgpu::Buffer> {
+    match crate::buffer_write(device, queue, label, contents, usage) {
         Ok(buffer) => Some(buffer),
         Err(error) => {
             refused(error.to_string());
