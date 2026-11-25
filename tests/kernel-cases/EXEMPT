@@ -591,6 +591,7 @@ view.render_stage                 the view: camera, layout, display
 view.ribbon_tabs_only             the view: camera, layout, display
 view.right                        the view: camera, layout, display
 view.save                         the view: camera, layout, display
+view.scale_bar                    display-only preference: crates/engine/src/cmd/view_navigation.rs and crates/ui-egui/src/scale_bar.rs
 view.set_compass                  per-view UI visibility, no geometry
 view.shots_strip                  the view: camera, layout, display
 view.spin                         the view: camera, layout, display

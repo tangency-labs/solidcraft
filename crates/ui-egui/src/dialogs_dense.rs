@@ -961,8 +961,15 @@ fn round_size_row(ui: &mut egui::Ui, fields: &mut [(&'static str, String)]) {
 
 /// The coil's section, where the section sits on the diameter, the way it turns and where it
 /// starts (#3862). A default stays out of the parameters, so OK on an unchanged edit keeps the coil.
-fn coil_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>) -> bool {
+/// A sketch profile is the section, so only the turn and Flip rows show with one (#17870).
+fn coil_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, from_sketch: bool) -> bool {
     const POSITIONS: [(&str, &str); 3] = [("Inside", "inside"), ("Center", "center"), ("Outside", "outside")];
+    // Flip winds the coil the other way along its axis, e.g. down from a sketch profile (#17870).
+    let options: &[(&str, &str)] = &[("Clockwise", "clockwise"), ("Flip", "flip")];
+    if from_sketch {
+        extra_options(ui, "coil_options", extra, options);
+        return false;
+    }
     form_row(ui, "Section", |ui| extra_segments(ui, extra, "section", &[("Circular", "circular"), ("Square", "square")]));
     form_row(ui, "Section position", |ui| {
         let current =
@@ -989,7 +996,7 @@ fn coil_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>) -> b
             extra.insert("start_angle".into(), json!(angle));
         }
     }
-    extra_options(ui, "coil_options", extra, &[("Clockwise", "clockwise")]);
+    extra_options(ui, "coil_options", extra, options);
     enter
 }
 
@@ -1319,7 +1326,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 };
             }
             if *cmd == "solid.coil" {
-                enter |= coil_rows(ui, &mut d.extra);
+                enter |= coil_rows(ui, &mut d.extra, from_sketch);
             }
             if at.is_none() {
                 enter |= crate::primitive_placement::rows(ui, &app.session, cmd, &mut d.extra);
@@ -1354,7 +1361,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 }
             });
         }
-        Kind::Surface(k) => enter |= crate::dialogs_surface::rows(ui, k),
+        Kind::Surface(k) => enter |= crate::dialogs_surface::rows(ui, k, &mut d.inputs, &mut d.active),
         Kind::Sheet(k) => enter |= crate::dialogs_sheet::rows(app, ui, k, &mut d.inputs),
         Kind::Plastic(k) => enter |= crate::dialogs_plastic::rows(app, ui, k, &d.inputs),
         Kind::Frame(_) => enter |= crate::dialogs_frame::rows(app, ui, d),

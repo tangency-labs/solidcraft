@@ -373,6 +373,7 @@ fn resolve_uncached(
                         let edges: Vec<usize> = projection_face_edges(target, &mesh, f, plane)?.into_iter().filter(|e| !skip.contains(e)).collect();
                         let (g, names) = projected_edges_named(target, &mesh, plane, &edges)?;
                         let before = g.len();
+                        let g = closed_by_silhouettes(target, plane, f as usize, g);
                         let g = if certified_planar_construction(target, f as usize) { merge_family_lines(g)? } else { g };
                         edge_names = names_kept(names, before, &g);
                         g
@@ -1138,6 +1139,7 @@ fn resolve_named_face(
         let edges: Vec<usize> = projection_face_edges(target, &mesh, index, plane)?.into_iter().filter(|e| !skip.contains(e)).collect();
         let (geom, names) = projected_edges_named(target, &mesh, plane, &edges)?;
         let before = geom.len();
+        let geom = closed_by_silhouettes(target, plane, index as usize, geom);
         let geom = merge_split_circles(geom);
         let geom = if certified_planar_construction(target, index as usize) { merge_family_lines(geom)? } else { geom };
         edge_names = names_kept(names, before, &geom);
@@ -1276,9 +1278,14 @@ pub fn resolve_face_indices(
         }
         let (pieces, names) = projected_edges_named(body, &mesh, plane, &edges)?;
         // Only a single face's pieces are named: a family's edges are its outline, not one face's.
-        if indices.len() == 1 {
-            edge_names = names;
-        }
+        let pieces = if let [index] = indices {
+            let before = pieces.len();
+            let pieces = closed_by_silhouettes(body, plane, *index, pieces);
+            edge_names = names_kept(names, before, &pieces);
+            pieces
+        } else {
+            pieces
+        };
         geometry.extend(pieces);
     }
     if kind != LinkKind::Intersect && (indices.len() > 1 || indices.first().is_some_and(|index| certified_planar_construction(body, *index))) {
@@ -2571,6 +2578,16 @@ fn project_sketch_curve(sk: &Sketch, from: &Plane, ci: usize, to: &Plane) -> Res
                 )?
             }
         }
+        // A circle or arc seen edge on is the line it covers, out to its own extremes: samples of
+        // it fall short of them, by up to its chord tolerance (#17482).
+        Some(CurveKind::Circle { .. } | CurveKind::Arc { .. }) if edge_on => {
+            match solidcraft_kernel::services::conic_projection::project_arcs(from, to, &sk.segs(ci), solidcraft_sketch::MAX_COORD)
+                .map_err(|e| DocError::Invalid(e.to_string()))?
+            {
+                Some(geometry) => projection_links(geometry)?,
+                None => sampled(),
+            }
+        }
         Some(CurveKind::Conic { a, b, apex, rho }) if parallel => match (sk.point(*a), sk.point(*apex), sk.point(*b)) {
             (Some(a), Some(x), Some(b)) => vec![LinkGeom::Conic { a: map(a), apex: map(x), b: map(b), rho: *rho }],
             _ => Vec::new(),
@@ -3002,6 +3019,59 @@ fn exact_silhouette_traced(body: &crate::ModelBody, plane: &Plane) -> Option<Vec
     out.extend(sils);
     let out = solidcraft_kernel::services::outline::meet_at_shared_ends(out, 8.0 * def.report.max_trim_chord + size * 1e-7);
     Some(solidcraft_kernel::services::outline::drop_coincident(out, (size * 1e-9).max(1e-7)).into_iter().map(link_of_piece).collect())
+}
+
+/// The ends of `g` (none for a closed curve or a point).
+fn piece_ends(g: &LinkGeom) -> Option<[Vec2; 2]> {
+    match g {
+        LinkGeom::Line(a, b) | LinkGeom::Arc { a, b, .. } | LinkGeom::Conic { a, b, .. } => Some([*a, *b]),
+        LinkGeom::Spline { pts, periodic: false, .. } => Some([*pts.first()?, *pts.last()?]),
+        _ => None,
+    }
+}
+
+/// `geom`, the projected edges of curved face `face` of `body`, closed with the face's exact
+/// silhouettes where its edges leave the outline open: a cylinder's side seen across its axis
+/// projects its rims as two lines, and the silhouettes are the sides between them (#21295). Only
+/// a silhouette both of whose ends close open ends of `geom` is taken: the kernel traces one
+/// silhouette for all the faces on a surface, and one that lies on a neighbouring face meets
+/// this face's edges nowhere. `geom` as it is when it has no open end, the face is planar or
+/// meshed, or the kernel cannot trace its silhouette exactly.
+fn closed_by_silhouettes(body: &crate::ModelBody, plane: &Plane, face: usize, geom: Vec<LinkGeom>) -> Vec<LinkGeom> {
+    use solidcraft_geom::hlr;
+    let size = body.body.size().max(1e-9);
+    let tol = size * 1e-6;
+    let ends: Vec<Vec2> = geom.iter().filter_map(piece_ends).flatten().collect();
+    let open: Vec<Vec2> = ends.iter().copied().filter(|p| ends.iter().filter(|q| q.dist(*p) <= tol).count() == 1).collect();
+    if open.is_empty() || body.body.is_mesh() || body.body.planar_face(face).is_some() {
+        return geom;
+    }
+    let Some(def) = body.body.outline_prepared() else { return geom };
+    let opts = hlr::Options { trim_samples: solidcraft_kernel::OUTLINE_TRIM_SAMPLES, threads: 1, ..hlr::Options::default() };
+    let view = hlr::View { x: plane.x, y: plane.y, d: plane.normal() };
+    let placed = hlr::Placement { body: 0, rotation: [Vec3::X, Vec3::Y, Vec3::Z], translation: Vec3::ZERO - plane.origin };
+    let Ok(silhouettes) = hlr::silhouettes(def, &placed, &view, &opts) else { return geom };
+    let closes = |p: Vec2| open.iter().any(|q| q.dist(p) <= tol);
+    let mut sides = Vec::new();
+    for s in silhouettes {
+        if s.face != face || !matches!(s.accuracy, solidcraft_geom::section::CurveAccuracy::Analytic) {
+            continue;
+        }
+        let Some(pieces) = s.geometry.iter().map(LinkGeom::from_seg).collect::<Option<Vec<_>>>() else { continue };
+        let pieces = solidcraft_kernel::services::outline::tidy_silhouette(pieces.into_iter().map(outline_piece).collect());
+        let pieces: Vec<LinkGeom> = pieces.into_iter().map(link_of_piece).collect();
+        let (Some(first), Some(last)) = (pieces.first().and_then(piece_ends), pieces.last().and_then(piece_ends)) else { continue };
+        if closes(first[0]) && closes(last[1]) {
+            sides.extend(pieces);
+        }
+    }
+    if sides.is_empty() {
+        return geom;
+    }
+    let mut out: Vec<_> = geom.into_iter().map(outline_piece).collect();
+    out.extend(sides.into_iter().map(outline_piece));
+    let out = solidcraft_kernel::services::outline::meet_at_shared_ends(out, tol);
+    solidcraft_kernel::services::outline::drop_coincident(out, (size * 1e-9).max(1e-7)).into_iter().map(link_of_piece).collect()
 }
 
 /// The outline of a body seen along the sketch normal: mesh edges between triangles facing the

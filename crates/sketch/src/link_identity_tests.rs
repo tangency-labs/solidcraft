@@ -423,6 +423,26 @@ fn face_with_two_inner_loops_meeting_at_one_corner_projects_and_refreshes() {
 }
 
 #[test]
+fn corner_face_with_a_hole_level_with_a_corner_refreshes_unchanged() {
+    // A hole whose centre is level with the block's bottom edge (#21213): the circle's seam
+    // point lies on that edge's line, which is no vertex of the circle and decides nothing.
+    // A square hole with corners on that line has real vertices there: the other edges decide.
+    let square = |x: f64, y: f64| {
+        let p = [Vec2::new(x, y), Vec2::new(x + 4.0, y), Vec2::new(x + 4.0, y + 4.0), Vec2::new(x, y + 4.0)];
+        (0..4).map(|i| LinkGeom::Line(p[i], p[(i + 1) % 4])).collect::<Vec<_>>()
+    };
+    let holes = [vec![LinkGeom::Circle(Vec2::new(40.0, 10.0), 2.0)], vec![LinkGeom::Circle(Vec2::new(5.0, 35.0), 2.0)], square(38.0, 10.0)];
+    for (n, hole) in holes.into_iter().enumerate() {
+        let mut with_hole = corner_face(30.0);
+        with_hole.extend(hole);
+        let mut sk = Sketch::new();
+        let link = sk.add_link(LinkKind::Project, face(), &with_hole).unwrap();
+        assert!(!sk.update_link(&link, &with_hole).unwrap(), "hole {n}");
+        assert!(!sk.link(&link).unwrap().lost, "hole {n}");
+    }
+}
+
+#[test]
 fn corner_face_reread_within_rounding_keeps_its_saved_points_and_a_real_move_follows() {
     // The face of a sweep cut that two touching profiles made reads back a few billionths of a
     // millimetre off what the sketch saved, and the next feature (a sweep from that sketch,

@@ -343,6 +343,40 @@ fn projection_keeps_missing_and_self_reference_errors_distinct() {
     }
 }
 
+/// A circle or arc seen edge on projects to the line it covers, out to its own extremes. Sampled,
+/// the 12 mm circle of #17482 ended 1 µm short (-40.99901 for -41), and a revolve cut starting
+/// there left a 0.236 mm sliver face that a 1 mm round could not cross.
+#[test]
+fn a_circle_or_arc_seen_edge_on_projects_to_its_exact_extent() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY", "name":"Source"}));
+    let circle = run(&mut s, "sketch.circle.center", json!({"center":[-35, 0], "radius":6}))["created"]["curves"][0].clone();
+    // From 60 to 300 degrees, through the far side at 180 degrees: -41 to -32 along x.
+    let arc =
+        run(&mut s, "sketch.arc.center_point", json!({"center":[-35, 0], "start":[-32, 27f64.sqrt()], "sweep":240}))["created"]["curves"][0].clone();
+    run(&mut s, "sketch.finish", json!({}));
+    for (curve, want) in [(circle, [-41.0, -29.0]), (arc, [-41.0, -32.0])] {
+        let target = run(&mut s, "sketch.create", json!({"plane":"XZ"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.project", json!({"refs":[{"sketch":"Source", "curve":curve}]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let sk = s.doc.sketch(target).unwrap();
+        let lines: Vec<[f64; 2]> = sk
+            .curves
+            .iter()
+            .filter_map(|c| match c.kind {
+                solidcraft_sketch::CurveKind::Line { a, b } => {
+                    let (a, b) = (sk.point(a).unwrap(), sk.point(b).unwrap());
+                    assert!(a.y.abs() < 1e-9 && b.y.abs() < 1e-9, "{curve}: off the plane's line: {a:?} {b:?}");
+                    Some(if a.x < b.x { [a.x, b.x] } else { [b.x, a.x] })
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(lines.len(), 1, "{curve}: one line, not {:?}", sk.curves);
+        assert!((lines[0][0] - want[0]).abs() < 1e-9 && (lines[0][1] - want[1]).abs() < 1e-9, "{curve}: {:?}, want {want:?}", lines[0]);
+    }
+}
+
 #[test]
 fn sketch_on_face_projects_its_edges_and_follows_edits() {
     let mut s = Session::default();
@@ -4777,4 +4811,41 @@ fn constraints_only_between_projections_are_explained_when_refusal_is_requested(
     let r = run(&mut s, "sketch.dimension", json!({"entities":[edge],"if_redundant":"driven"}));
     assert_eq!(r["driven"], true, "{r}");
     assert!((r["measured"].as_f64().unwrap() - 40.0).abs() < 1e-6, "{r}");
+}
+
+/// A cylinder's side face projected along a direction across its axis is the rectangle its rims
+/// and silhouettes bound: the rims seen edge-on gave two lines with nothing between them, and the
+/// link was marked lost for crossing boundaries (#21295).
+#[test]
+fn a_cylinders_side_face_projected_across_its_axis_is_its_outline() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 15}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": "30 mm", "operation": "new_body"}));
+    run(&mut s, "component.create", json!({"activate": true}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ"}));
+    let r = run(&mut s, "sketch.project", json!({"refs": [{"body": "Body1", "face": [15, 0, 15]}], "projection_link": true}));
+    assert_eq!(r["links"][0]["curves"].as_array().map(Vec::len), Some(4), "the rims and the sides, at once: {r}");
+    let si = inspect(&mut s);
+    let links = si["links"].as_array().unwrap();
+    assert!(links.iter().all(|l| l["lost"] != json!(true)), "{r} {si}");
+    assert_eq!(si["profiles"].as_array().unwrap().len(), 1, "{si}");
+    // Its corners, at x = ±15 and z 0 and 30 (the sketch's y may run either way along Z).
+    let mut corners: Vec<[f64; 2]> = si["points"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|p| p["link"].is_string())
+        .map(|p| [p["at"][0].as_f64().unwrap(), p["at"][1].as_f64().unwrap().abs()])
+        .collect();
+    corners.sort_by(|a, b| a[0].total_cmp(&b[0]).then(a[1].total_cmp(&b[1])));
+    corners.dedup_by(|a, b| (a[0] - b[0]).abs() < 1e-9 && (a[1] - b[1]).abs() < 1e-9);
+    assert_eq!(corners.len(), 4, "{corners:?}");
+    for (p, want) in corners.iter().zip([[-15.0, 0.0], [-15.0, 30.0], [15.0, 0.0], [15.0, 30.0]]) {
+        assert!((p[0] - want[0]).abs() < 1e-9 && (p[1] - want[1]).abs() < 1e-9, "{corners:?}");
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    let timeline = run(&mut s, "document.inspect", json!({}))["timeline"].clone();
+    assert!(timeline.as_array().unwrap().iter().all(|e| e.get("warning").is_none_or(Value::is_null)), "{timeline}");
 }

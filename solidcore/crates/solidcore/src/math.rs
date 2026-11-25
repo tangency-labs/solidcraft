@@ -896,6 +896,38 @@ impl Transform {
         ))
     }
 
+    /// The rigid map from world coordinates into the frame of the plane through `origin` with
+    /// x axis along `x` and y axis on `y`'s side in the plane of the two (each any length):
+    /// the unit axes `x̂`, `n = unit(x̂ × y)` and `ŷ = n × x̂` become X, Z and Y, and `origin`
+    /// the origin. A point's Z after the map is its level above the plane along its normal.
+    /// The linear part's columns are `x̂`, `ŷ` and `n` (the transpose of the frame's rows),
+    /// its translation `-(origin·x̂, origin·ŷ, origin·n)`.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for an origin or axis not finite, or an `x` or `x̂ × y` whose squared
+    /// length is below [`EFF_ZERO_SQ`] (an axis of no length, or axes along one line).
+    pub fn into_plane_frame(origin: Point3, x: Vec3, y: Vec3) -> crate::error::Result<Self> {
+        use crate::error::SolidError;
+        if !(finite3(origin) && finite3(x) && finite3(y)) {
+            return Err(SolidError::invalid_input(
+                OP_MAPS,
+                "a plane's numbers not finite",
+            ));
+        }
+        let none =
+            |_| SolidError::invalid_input(OP_MAPS, "a plane's axes of no length or along one line");
+        let x = x.unitize().map_err(none)?;
+        let n = x.cross(y).unitize().map_err(none)?;
+        let y = n.cross(x);
+        Ok(Self::from_axes(
+            Vec3::new(x.x, y.x, n.x),
+            Vec3::new(x.y, y.y, n.y),
+            Vec3::new(x.z, y.z, n.z),
+            Vec3::new(-origin.dot(x), -origin.dot(y), -origin.dot(n)),
+        ))
+    }
+
     /// The map that undoes this one: `p = (p' - t) A⁻¹`, its linear part `A⁻¹` (the adjugate
     /// over the determinant: with `a`, `b`, `c` the rows of `A`, row `i` holds the `i`-th
     /// components of `b × c`, `c × a` and `a × b`, over `a · (b × c)`) and its translation
@@ -1207,6 +1239,51 @@ mod tests {
             Point3::ZERO,
             Vec3::new(f64::NAN, 1.0, 0.0)
         )));
+        assert!(bad(Transform::into_plane_frame(
+            Point3::ZERO,
+            Vec3::ZERO,
+            Vec3::Y
+        )));
+        assert!(bad(Transform::into_plane_frame(
+            Point3::ZERO,
+            Vec3::X,
+            Vec3::new(-3.0, 0.0, 0.0)
+        )));
+        assert!(bad(Transform::into_plane_frame(
+            Point3::new(f64::NAN, 0.0, 0.0),
+            Vec3::X,
+            Vec3::Y
+        )));
+    }
+
+    /// Into a plane's frame: the plane's origin goes to the origin, a point along its x axis
+    /// to X, along its normal to Z (its level above the plane), and the map is rigid. The
+    /// plane through (3, 4, 5) with x = 2Z and y = (1, -1, 0) has the unit normal
+    /// x̂ × ŷ = (1, 1, 0)/√2; a skew `y` in that plane gives the same frame.
+    #[test]
+    fn into_a_planes_frame_its_normal_is_z() {
+        let o = Point3::new(3.0, 4.0, 5.0);
+        let s = std::f64::consts::FRAC_1_SQRT_2;
+        let n = Vec3::new(s, s, 0.0);
+        let skew = Vec3::new(1.0, -1.0, 7.0);
+        for y in [Vec3::new(1.0, -1.0, 0.0), skew] {
+            let t = Transform::into_plane_frame(o, Vec3::new(0.0, 0.0, 2.0), y).unwrap();
+            let near = |a: Point3, b: Point3| (a - b).length() < 1e-12;
+            assert!(near(t.transform_point(o), Point3::ZERO));
+            assert!(near(
+                t.transform_point(o + Vec3::Z * 2.5),
+                Point3::new(2.5, 0.0, 0.0)
+            ));
+            assert!(near(
+                t.transform_point(o + n * 4.0),
+                Point3::new(0.0, 0.0, 4.0)
+            ));
+            assert!(near(
+                t.transform_point(o + Vec3::new(s, -s, 0.0)),
+                Point3::new(0.0, 1.0, 0.0)
+            ));
+            assert!(t.is_regular(0.0).is_yes());
+        }
     }
 
     #[test]
