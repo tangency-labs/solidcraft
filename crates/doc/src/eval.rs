@@ -70,6 +70,8 @@ pub struct ModelBody {
     /// once and kept, so a solve that works the cam's table out again does not mesh the body
     /// again (#3389).
     cam_mesh: Arc<OnceLock<Arc<Mesh>>>,
+    /// The body's edges as polylines ([`ModelBody::edge_lines`]), drawn once and shared by clones.
+    edge_lines: Arc<OnceLock<kernel::EdgeLines>>,
     /// For a mirrored copy: its faces as a world state shows them, a rigid move of the source's
     /// [`placed_mesh::OppositeHand`]. Display only: the model reads the copy's own triangles.
     mirrored_mesh: Option<Arc<placed_mesh::PlacedMesh>>,
@@ -231,6 +233,7 @@ impl ModelBody {
             faces: Default::default(),
             mesh_placement: None,
             cam_mesh: Arc::new(OnceLock::new()),
+            edge_lines: Arc::new(OnceLock::new()),
             mirrored_mesh: None,
             opposite_hand: Arc::new(OnceLock::new()),
             plan: Arc::new(Default::default()),
@@ -673,6 +676,12 @@ impl ModelBody {
     /// table out again does not mesh the body again (#3389). `make` meshes the body: the
     /// profile is a decision made on a mesh (`xtask/mesh-decisions.txt`), so the meshing stays
     /// with the cam.
+    /// The body's edges as polylines, for the edge nearest a point ([`kernel::Body::edge_lines`]):
+    /// drawn once, as the display mesh is, not again for every point a design names.
+    pub(crate) fn edge_lines(&self) -> &kernel::EdgeLines {
+        self.edge_lines.get_or_init(|| self.body.edge_lines())
+    }
+
     pub(crate) fn cam_mesh(&self, make: impl FnOnce() -> kernel::Result<Mesh>) -> Result<Arc<Mesh>> {
         if let Some(mesh) = self.cam_mesh.get() {
             return Ok(mesh.clone());
