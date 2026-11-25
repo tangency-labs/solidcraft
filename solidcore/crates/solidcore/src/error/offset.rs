@@ -1252,6 +1252,7 @@ impl OffsetFailure {
             | Self::LaminaEdgeOtherSide
             | Self::LoopGapUncertified { .. }
             | Self::LooseTangentEdge { .. }
+            | Self::NotCertified { .. }
             | Self::OffsetBaseKindUnsupported { .. }
             | Self::PastSide { .. }
             | Self::PeriodicBranchAmbiguous
@@ -1314,7 +1315,7 @@ impl OffsetFailure {
             | Self::GapCornerBlendNotMade { .. }
             | Self::Inconsistent(_)
             | Self::VertexArcsNotOneSphere => ErrorKind::Failed,
-            Self::Folds { .. } | Self::NotCertified { .. } => ErrorKind::OffsetFolds,
+            Self::Folds { .. } => ErrorKind::OffsetFolds,
             Self::LoopsCross { .. } => ErrorKind::OffsetLoopsCross,
             Self::Missing(_) => ErrorKind::Missing,
             Self::WallsTouch { .. } => ErrorKind::OffsetWallsTouch,
@@ -2468,7 +2469,7 @@ mod tests {
                     face,
                     distance: 2.0,
                 },
-                ErrorKind::OffsetFolds,
+                ErrorKind::Unsupported,
                 false,
                 false,
                 false,
