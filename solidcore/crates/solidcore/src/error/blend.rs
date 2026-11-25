@@ -2764,6 +2764,11 @@ impl core::fmt::Display for BlendFailure {
                 "{}: this corner of weld beads meeting at a vertex is not built yet (#17916)",
                 self.class()
             ),
+            Self::WeldNotBuilt(WeldGap::ConcaveNotProved) => write!(
+                f,
+                "{}: a concave weld bead is built only on planes and on the outside of cylinders, cones and spheres so far; on this face its arc is not proved to stay off the face",
+                self.class()
+            ),
             Self::WeldNotBuilt(WeldGap::CurvedJoint) => write!(
                 f,
                 "{}: the exact weld bead is built only along a straight edge between two planes; the bead body builds on any joint",
@@ -3180,6 +3185,10 @@ mod tests {
             // a weld bead not built yet: neither a defect nor a refusal
             (
                 BlendFailure::WeldNotBuilt(WeldGap::BeadsMeetAtVertex),
+                ErrorKind::Unsupported,
+            ),
+            (
+                BlendFailure::WeldNotBuilt(WeldGap::ConcaveNotProved),
                 ErrorKind::Unsupported,
             ),
             (

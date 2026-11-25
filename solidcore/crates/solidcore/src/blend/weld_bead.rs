@@ -133,8 +133,9 @@ fn toes_on_faces(
                 hi = mid;
             }
         }
-        // a toe holds up to the face's tolerance past its edge: the fit named keeps it on the
-        // face itself
+        // a toe holds up to the face's tolerance past its edge: the fit named is that much
+        // less, which puts the toe on the face itself where the face's edge is square to the
+        // toe's travel and no farther past it than the tolerance elsewhere
         let fit = (lo - target.face(face)?.tolerance).max(0.0);
         // a leg below the body's resolution is refused before the toes are read
         // (`setback_below_resolution`), so a retry at it would not build: no leg fits
@@ -855,13 +856,15 @@ fn sagitta_fit_of(refused: &SolidError) -> Option<f64> {
 /// corner, an outside corner whose floor (the face both beads lie on) is not a plane or whose
 /// walls are not square to it within the weld's fit tolerance, an inside corner below 90
 /// degrees whose walls are not both planes, beads not on one floor, and a bead so short that
-/// it lies wholly behind the other's wall; the foot blend's refusals, typed and with the size
-/// that builds (a toe off its face: checked on every edge built together, with the legs'
-/// sizes, before anything that depends on the sagitta; no toe at the leg, found while a bead
-/// is built; an arc that would cut into a face: the smallest sagitta that fits over the edges
-/// built together, naming that edge, so a retry at it is not refused for a leg or a toe off
-/// its face on any of them. It is read at each joint's check stations, so a retry can be
-/// refused again with a smaller one); those of the closing.
+/// it lies wholly behind the other's wall; the same naming the edge for a concave bead on a
+/// face where the arc's bound is not proved ([`WeldGap::ConcaveNotProved`]: any face but a
+/// plane and the outside of a cylinder, a cone or a sphere); the foot blend's refusals, typed
+/// and with the size that builds (a toe off its face: checked on every edge built together,
+/// with the legs' sizes, before anything that depends on the sagitta; no toe at the leg,
+/// found while a bead is built; an arc that would cut into a face: the smallest sagitta that
+/// fits over the edges built together, naming that edge, so a retry at it is not refused for
+/// a leg or a toe off its face on any of them. It is read at each joint's check stations, so
+/// a retry can be refused again with a smaller one); those of the closing.
 #[allow(clippy::too_many_arguments)]
 pub fn bead_body(
     k: &mut Kernel,
@@ -976,6 +979,11 @@ fn beads_together(
         blend.toes_on_faces_except(k, target, legs, &params, &|p: Point3| {
             cuts.iter().any(|c| c.holds(p, slack))
         })?;
+        // a concave arc only on supports where its bound is proved: refused here, before
+        // any joint's sagitta is read against its size
+        if sagitta < 0.0 {
+            blend.sagitta_that_fits(k, legs, sagitta, &params)?;
+        }
         joints.push((legs, blend, params));
     }
     for (i, (legs, blend, params)) in joints.into_iter().enumerate() {
