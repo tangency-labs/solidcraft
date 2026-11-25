@@ -714,6 +714,29 @@ pub fn sketch_point_position(st: &ModelState, sketch: u64, point: &str) -> Optio
     ss.sketch.wires.get(ss.sketch.wire_index(wire)?)?.fit.get(index).copied()
 }
 
+/// The point a Scale grows its bodies about, from its pick as the model is now: a flat face's
+/// middle, a hole's or shaft's round end nearest the pick (a round edge's centre), else the point
+/// [`point`] finds. A named face or edge that is gone fails, asking for it to be picked again.
+pub(crate) fn scale_point(ctx: &Ctx, g: &GeoRef) -> Result<Vec3> {
+    match g {
+        GeoRef::Face { at, name } => {
+            let (b, fi, p) = face_of(ctx.st, *at, name)?;
+            if let Some(c) = kernel::cylinder_face_at(&b.body, p) {
+                let s = solidcraft_kernel::services::affine::distance_along(c.axis_point.into(), c.axis.vec().into(), p.into());
+                let end = if (s - c.start).abs() <= (c.end - s).abs() { c.start } else { c.end };
+                return Ok(c.axis_point + c.axis * end);
+            }
+            let tol = (b.body.size() * 2e-3).max(1e-3);
+            let f = b.body.faces(tol).ok().and_then(|fs| fs.into_iter().find(|f| f.index == fi));
+            match f {
+                Some(f) if f.plane_normal.is_some() && f.centroid.is_finite() => Ok(f.centroid),
+                _ => Err(bad("this face has no centre to scale about: pick a flat or round face, a vertex or a point")),
+            }
+        }
+        _ => point(ctx, g),
+    }
+}
+
 /// An edge or face of the model as a line: along a straight edge, through the centre of a
 /// circular edge along its normal, or the axis of a cylinder, cone or torus face.
 fn model_line(st: &ModelState, g: &GeoRef) -> Result<(Vec3, Vec3)> {
@@ -872,7 +895,8 @@ fn along(ctx: &Ctx, g: &GeoRef, t: f64) -> Result<(Vec3, Vec3)> {
 
 /// A picked edge or sketch curve as the path segments that are its curve exactly, from the end
 /// the drawn curve starts at: a body edge's record curve ([`kernel::edge_path`]), a planar sketch
-/// curve's exact pieces, a 3D sketch curve's arc, spline, line or linked exact curves. Only a
+/// curve's exact pieces, a 3D sketch curve's arc, spline (through its fit points or over its
+/// control points), line or linked exact curves. Only a
 /// curve that exists as points alone runs along them: an intersection edge (its record holds no
 /// exact curve, only the surfaces and a leader near it), a 3D curve known only as its points
 /// (projected onto a face, iso curves), a spline above the exact pieces' degree.
@@ -902,6 +926,9 @@ fn path_segs(ctx: &Ctx, g: &GeoRef) -> Result<Vec<kernel::PathSeg>> {
                 if let Some(arc) = &wire.arc {
                     let angle = solidcraft_sketch::arc_sweep(arc);
                     return Ok(vec![kernel::PathSeg::Arc { a: arc.start, center: arc.center, axis: arc.normal, angle }]);
+                }
+                if let Some(c) = wire.control_curve() {
+                    return Ok(kernel::curve_path(&c.curve, c.interval)?);
                 }
                 if wire.fit.len() >= 3 {
                     let spline = kernel::PathPiece::Spline { fit: wire.fit.clone(), reversed: false };

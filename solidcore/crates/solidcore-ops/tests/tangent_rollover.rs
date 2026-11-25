@@ -1380,7 +1380,7 @@ fn corner_round(b: &Body, r4: f64, corpus: bool) -> Result<(), Error> {
 ///   The rail and the lobe's edge END there, 3.9e-8 apart: the rounds meet, they do not cross
 ///   (the corner round's material is at x >= -36, z <= 5, the foot round's at x <= -36,
 ///   z >= 5; they share only the side's segment from R to W on z = 5).
-///   - Without the corpus's fixes the round builds, as it does past W by more
+///   - The round builds, with the corpus's fixes or without them, as it does past W by more
 ///     ([`a_corner_round_whose_rail_ends_past_the_top_under_the_foot_round_builds`]): valid at
 ///     the full check, its rails on edges and its cap edge on z = 5 next to R, and the
 ///     kernel's certified enclosure of its volume, at most [`NEXT_TO_W_ENCLOSURE`] wide, holds
@@ -1391,9 +1391,13 @@ fn corner_round(b: &Body, r4: f64, corpus: bool) -> Result<(), Error> {
 ///     from R) under the vertex's tolerance, and the lobe's edge kept 4.6e-5 under a trim that
 ///     upstream's corner fix (`sm_FixUVTrimCurves`) had moved 1e-3 off its curve, uncovered.
 ///     Its tolerance now covers its trim (#18166), and the joint at R is seen.
-///   - With them it is still refused as crossing at R, as on main. By the geometry above that
-///     refusal is a false one (the rounds meet at R); it is pinned here as main's outcome so
-///     that a change to it is seen, not as the right answer.
+///     The clean-up after filleting leaves the target's own edges and faces (WR-459, the
+///     default since #21270): the rail and the lobe's edge then keep their tolerances
+///     (4e-5, 4.6e-5) and end at that vertex, left at W with its tolerance 2e-3, 1e-3 from
+///     where they meet at R. They meet at the vertex all the same: within its tolerance, the
+///     zone in which the topology has its edges meet (`boundary_crossings`), so that is
+///     their joint, as the geometry above says, not a crossing (#21270: refused as crossing
+///     at R before, the false refusal this test pinned as main's outcome with the corpus).
 /// - 5e-6 past it, within the body's tolerance (1e-5), R is not past W: the rail ends on the
 ///   top's edge as on main, and the round builds valid (its volume, MEASURED, 1.4e-5 from the
 ///   closed form, which the end at W within the tolerance does not bound).
@@ -1406,8 +1410,7 @@ fn a_corner_round_whose_rail_meets_the_top_next_to_w_builds_where_the_rounds_mee
         let b = arm_boss_foot_only();
         let before = b.volume(1e-9).unwrap();
         match (corpus, corner_round(&b, r4, corpus)) {
-            (true, Err(Error::RoundsCross { .. })) => {}
-            (false, Ok(())) => {
+            (_, Ok(())) => {
                 let report = b.check(CheckLevel::All).unwrap();
                 assert!(report.is_valid(), "r4 {r4} corpus {corpus}: {report}");
                 let expected = before + 5.0 * r4 * r4 * (1.0 - PI / 4.0);

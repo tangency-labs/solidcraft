@@ -49,7 +49,7 @@
 //! toe. The crest height is `h`, the blend runs `o` past each toe. With half the chord `a` and
 //! `x = a + o`: `R + r = (x² + h²) / 2h`, `R = a (R + r) / x`. `o = 0` is the plain convex
 //! face. Every arc is a polyline arc, the chord between its ends and its bulge
-//! (`prism::path_export::bulge_arc`); none is more than half a circle, so a convex face higher
+//! (`prism::arc_conversion::bulge_arc`); none is more than half a circle, so a convex face higher
 //! than half the distance between its toes is refused. The blend runs along the chord's line,
 //! so it is built only where the sides beyond the toes on that side do: [`Channel::depth_normal`]
 //! given and square to the chord. Elsewhere it is refused ([`FillFailure::BlendedToesOffChord`]).
@@ -90,7 +90,7 @@ use std::f64::consts::{PI, TAU};
 use crate::error::{Failure, Fit, FitMeasure, Reason, Result, SolidError};
 use crate::kernel::Kernel;
 use crate::math::{Point2, Vec2};
-use crate::prism::path_export::{bulge_arc, Vertex};
+use crate::prism::arc_conversion::{bulge_arc, Vertex};
 use crate::prism::profile::{
     check_regions, loop_crosses, near_miss, on_arc, on_seg, smallest_arc_sweep, Loop2,
     ProfileRefusal, Region2, Seg2, MAX_ARC_RADIUS, MAX_SEGMENTS,
@@ -752,7 +752,7 @@ pub fn close(p: Point2, q: Point2, contour: Contour) -> Option<Vec<Seg2>> {
 
 /// The arc from `p` to `q` whose middle stands `sagitta` off the chord, on the left of the run
 /// when positive, on its right when negative: the polyline arc of bulge `-2 sagitta / chord`
-/// (`prism::path_export::bulge_arc`; a positive bulge turns counter-clockwise, bulging right
+/// (`prism::arc_conversion::bulge_arc`; a positive bulge turns counter-clockwise, bulging right
 /// of the run). `None` past half a circle (`|sagitta|` more than half the chord).
 fn sagitta_arc(p: Point2, q: Point2, sagitta: f64) -> Option<Seg2> {
     let bulge = -2.0 * sagitta / (q - p).length();

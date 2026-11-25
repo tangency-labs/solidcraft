@@ -15,20 +15,20 @@
 //! queries it is built from, [`profile::loop_crosses`] and [`fill::arc_clearance`]: they decide
 //! at the near-miss tolerance ([`profile::near_miss`]), not at a proved bound.
 
-pub mod export_geometry;
+pub mod arc_conversion;
+pub mod bounds;
 pub mod extrude;
 pub mod fill;
 pub mod fit;
 pub mod gusset;
-pub mod import_geometry;
 pub mod measure;
 pub mod member;
-pub mod path_export;
 pub mod placement;
 pub mod profile;
 pub mod read;
 pub mod recognition;
 pub mod sheet;
+pub mod transform;
 
 #[cfg(test)]
 mod tests;
