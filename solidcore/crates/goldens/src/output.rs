@@ -248,14 +248,10 @@ pub fn blend_status(e: &SolidError) -> Option<i32> {
 }
 
 /// The upstream status number the goldens record for a pointer check: `SM_SUCCESS` (1000)
-/// for [`PointerCheck::Passed`], `SM_ERR` (1001) for [`PointerCheck::Failed`] and the early
-/// boolean return (0) for [`PointerCheck::StoppedEarly`], as `ValidatePointers` returned them,
+/// for `PointerCheck::Passed`, `SM_ERR` (1001) for `PointerCheck::Failed` and the early
+/// boolean return (0) for `PointerCheck::StoppedEarly`, as `ValidatePointers` returned them,
 /// so the recorded rows stay as they are. The golden re-bless (#21874) replaces this
 /// conversion with the typed value.
-///
-/// [`PointerCheck::Passed`]: solidcore::topology::brep::validation::PointerCheck::Passed
-/// [`PointerCheck::Failed`]: solidcore::topology::brep::validation::PointerCheck::Failed
-/// [`PointerCheck::StoppedEarly`]: solidcore::topology::brep::validation::PointerCheck::StoppedEarly
 #[must_use]
 pub fn pointer_check_status(c: solidcore::topology::brep::validation::PointerCheck) -> i32 {
     use solidcore::topology::brep::validation::PointerCheck;
@@ -263,6 +259,22 @@ pub fn pointer_check_status(c: solidcore::topology::brep::validation::PointerChe
         PointerCheck::Passed => solidcore::error::SM_SUCCESS,
         PointerCheck::Failed => solidcore::error::SM_ERR,
         PointerCheck::StoppedEarly => 0,
+    }
+}
+
+/// The upstream status number the goldens record for a point-solve step
+/// (`FindNextStep`): 0 for a step that did not fail, `SM_ERR_NOT_CONVERGING` (1022) for a
+/// failed `TerminationReason::UnableToConverge` and `SM_ERR_OUTSIDE_OF_DOMAIN` (1020) for
+/// a failed `TerminationReason::OutOfBounds`, the only failures the step returns, so the
+/// recorded rows stay as they are. The golden re-bless (#21874) replaces this conversion with
+/// the typed value.
+#[must_use]
+pub fn next_step_status(step: solidcore::surface::surface_point_solve::p3::NextStep) -> i32 {
+    use solidcore::geom::local_solve_nd::TerminationReason;
+    match (step.failed, step.reason) {
+        (false, _) => 0,
+        (true, TerminationReason::OutOfBounds) => solidcore::error::SM_ERR_OUTSIDE_OF_DOMAIN,
+        (true, _) => solidcore::error::SM_ERR_NOT_CONVERGING,
     }
 }
 
