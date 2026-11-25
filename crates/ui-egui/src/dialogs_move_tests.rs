@@ -317,6 +317,106 @@ fn tab_in_the_box_goes_to_the_next_axis() {
     assert!((b.min.y - 12.0).abs() < 1e-6 && b.min.x.abs() < 1e-6, "moved along Y: {b:?}");
 }
 
+/// Move/Copy of sketch geometry has the same box: Tab steps X to Y, and dragging the Y arrow
+/// shows Y, so typing then edits Y alone.
+#[test]
+fn sketch_move_box_follows_the_dragged_arrow_and_tab() {
+    let mut h = crate::scenario::Harness::new();
+    let sketch = h.app.run("sketch.create", json!({"plane": "XY", "name": "Flat"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.session.visibility.origin_hidden = Some(true);
+    let point = h.app.run("sketch.point", json!({"point": [10, 5]})).unwrap()["point"].as_str().unwrap().to_string();
+    h.app.run("sketch.point", json!({"point": [-30, -20]})).unwrap();
+    h.call("ui.view", json!({"view": "top"}));
+    h.call("ui.view", json!({"view": "fit"}));
+    h.settle();
+    h.step(&json!({"start": "sketch.move"})).unwrap();
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchPoint { id: format!("{sketch}:{point}") }];
+    h.frames(3);
+    let label = |h: &mut crate::scenario::Harness| h.app.dialog.as_mut().and_then(|d| d.primary()).map(|p| p.0);
+    assert_eq!(label(&mut h), Some("X Distance"));
+    h.step(&json!({"key": "Tab"})).unwrap();
+    h.frames(2);
+    assert_eq!(label(&mut h), Some("Y Distance"), "Tab steps from X to Y");
+    h.step(&json!({"key": "Tab", "shift": true})).unwrap();
+    h.frames(2);
+    assert_eq!(label(&mut h), Some("X Distance"), "Shift+Tab goes back");
+
+    let [ax, ay] = h.at(&json!({"handle": "move_y"})).unwrap();
+    h.call("ui.drag", json!({"x0": ax, "y0": ay, "x1": ax, "y1": ay - 40.0, "steps": 8}));
+    h.frames(2);
+    let d = h.app.dialog.as_mut().unwrap();
+    let (label, kind, value) = d.primary().unwrap();
+    assert_eq!((label, kind), ("Y Distance", ValueKind::Length), "the box shows the dragged Y arrow's value");
+    *value = "7 mm".into();
+    let Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { x, y, .. }) = &d.kind else { panic!("not a sketch move") };
+    assert_eq!((x.as_str(), y.as_str()), ("0 mm", "7 mm"), "typing edits Y alone");
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.settle();
+    let st = h.app.session.model.state();
+    let p = st.sketch(sketch).unwrap().sketch.points.iter().find(|q| q.id == point).unwrap().pos;
+    assert!((p.x - 10.0).abs() < 1e-6 && (p.y - 12.0).abs() < 1e-6, "moved along Y: {p:?}");
+}
+
+/// Dragging a sketch move's ring shows its Angle in the box, the field Tab then steps from.
+#[test]
+fn sketch_move_ring_drag_shows_the_angle() {
+    use solidcraft_engine::Sel;
+    let mut h = crate::scenario::Harness::new();
+    let sketch = h.app.run("sketch.create", json!({"plane": "XY", "name": "Flat"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.session.visibility.origin_hidden = Some(true);
+    let point = h.app.run("sketch.point", json!({"point": [10, 5]})).unwrap()["point"].as_str().unwrap().to_string();
+    h.app.run("sketch.point", json!({"point": [-30, -20]})).unwrap();
+    h.call("ui.view", json!({"view": "top"}));
+    h.call("ui.view", json!({"view": "fit"}));
+    h.settle();
+    h.step(&json!({"start": "sketch.move"})).unwrap();
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchPoint { id: format!("{sketch}:{point}") }];
+    h.frames(3);
+    let [rx, ry] = h.at(&json!({"handle": "move_rz"})).unwrap();
+    h.call("ui.drag", json!({"x0": rx, "y0": ry, "x1": rx + 40.0, "y1": ry, "steps": 8}));
+    h.frames(2);
+    let d = h.app.dialog.as_mut().unwrap();
+    let (label, kind, _) = d.primary().unwrap();
+    assert_eq!((label, kind), ("Angle", ValueKind::Angle), "the box shows the dragged ring's angle");
+}
+
+/// Tab in Move/Copy of sketch geometry cycles the fields its sketch has and wraps from the last
+/// back to X: X, Y, Angle in a flat sketch; X, Y, Z, Angle in a 3D sketch, where Z is also there.
+#[test]
+fn sketch_move_tab_cycles_the_fields_its_sketch_has() {
+    use solidcraft_engine::Sel;
+    for three_d in [false, true] {
+        let mut h = crate::scenario::Harness::new();
+        let sketch = h.app.run("sketch.create", json!({"plane": "XY", "name": "Flat"})).unwrap()["sketch"].as_u64().unwrap();
+        h.app.session.visibility.origin_hidden = Some(true);
+        if three_d {
+            h.app.run("sketch.options", json!({"sketch_3d": true})).unwrap();
+        }
+        let point = h.app.run("sketch.point", json!({"point": [10, 5]})).unwrap()["point"].as_str().unwrap().to_string();
+        h.app.run("sketch.point", json!({"point": [-30, -20]})).unwrap();
+        h.call("ui.view", json!({"view": "top"}));
+        h.call("ui.view", json!({"view": "fit"}));
+        h.settle();
+        h.step(&json!({"start": "sketch.move"})).unwrap();
+        h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::SketchPoint { id: format!("{sketch}:{point}") }];
+        h.frames(3);
+        let label = |h: &mut crate::scenario::Harness| h.app.dialog.as_mut().and_then(|d| d.primary()).map(|p| p.0);
+        let mut seen = vec![label(&mut h)];
+        // Four fields in a 3D sketch, three in a flat one: the fourth Tab must land back on X.
+        for _ in 0..if three_d { 4 } else { 3 } {
+            h.step(&json!({"key": "Tab"})).unwrap();
+            h.frames(2);
+            seen.push(label(&mut h));
+        }
+        let expected: Vec<Option<&str>> = if three_d {
+            vec![Some("X Distance"), Some("Y Distance"), Some("Z Distance"), Some("Angle"), Some("X Distance")]
+        } else {
+            vec![Some("X Distance"), Some("Y Distance"), Some("Angle"), Some("X Distance")]
+        };
+        assert_eq!(seen, expected, "three_d={three_d}: Tab order, wrapping from Angle back to X");
+    }
+}
+
 fn component_selection_fixture() -> crate::scenario::Harness {
     let mut h = crate::scenario::Harness::new();
     for (command, params) in [

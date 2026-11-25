@@ -1697,7 +1697,7 @@ impl Dialog {
             Kind::Sheet(k) => return k.primary(&self.inputs),
             Kind::Surface(k) => return k.primary(),
             Kind::Plastic(k) => return k.primary(),
-            Kind::SketchModify(k) => return k.primary(),
+            Kind::SketchModify(k) => return k.primary(move_field),
             _ => return None,
         })
     }

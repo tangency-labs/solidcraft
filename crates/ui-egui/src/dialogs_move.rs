@@ -1046,28 +1046,31 @@ pub(crate) fn rotation_axis(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Vec3)> 
 
 /// Apply a triad drag to the dialog's values (added to the values when the drag began).
 /// Which value the canvas box shows and types into, for the types that translate: X, Y or Z
-/// (0 to 2), or, in Free Move, the angle about X, Y or Z (3 to 5). Kept in `extra` as
-/// `value_field`; X at first.
+/// (0 to 2), or the angle about X, Y or Z (3 to 5). Kept in `extra` as `value_field`; X at
+/// first. Move/Copy of sketch geometry uses it too: X, Y, Z in a 3D sketch, and its Angle,
+/// which turns about the sketch's normal (5).
 pub fn value_field(d: &Dialog) -> usize {
-    let Kind::Move { mode, .. } = &d.kind else { return 0 };
-    let n = fields(*mode);
-    d.extra.get("value_field").and_then(Value::as_u64).map_or(0, |f| f as usize).min(n.saturating_sub(1))
+    let fields = fields(d);
+    let f = d.extra.get("value_field").and_then(Value::as_u64).map_or(0, |f| f as usize);
+    if fields.contains(&f) { f } else { fields[0] }
 }
 
-/// How many values the box can show for a move type (see [`value_field`]).
-fn fields(mode: usize) -> usize {
-    match mode {
-        FREE => 6,
-        TRANSLATE | POINT_TO_POSITION => 3,
-        _ => 1,
+/// The values the box can show, in Tab order (see [`value_field`]).
+fn fields(d: &Dialog) -> &'static [usize] {
+    match &d.kind {
+        Kind::Move { mode: FREE, .. } => &[0, 1, 2, 3, 4, 5],
+        Kind::Move { mode: TRANSLATE | POINT_TO_POSITION, .. } => &[0, 1, 2],
+        Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { three_d: true, .. }) => &[0, 1, 2, 5],
+        Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { .. }) => &[0, 1, 5],
+        _ => &[0],
     }
 }
 
 /// Show the next (`step` 1) or previous (`step` -1) value in the box, round the type's values.
 pub fn step_value_field(d: &mut Dialog, step: i64) {
-    let Kind::Move { mode, .. } = &d.kind else { return };
-    let n = fields(*mode) as i64;
-    let next = (value_field(d) as i64 + step).rem_euclid(n.max(1));
+    let fields = fields(d);
+    let at = fields.iter().position(|f| *f == value_field(d)).unwrap_or(0) as i64;
+    let next = fields[(at + step).rem_euclid(fields.len() as i64) as usize];
     d.extra.insert("value_field".into(), json!(next));
 }
 
@@ -1075,14 +1078,12 @@ pub fn step_value_field(d: &mut Dialog, step: i64) {
 /// (#4776). A plane square or the ball moves along two or three axes and leaves it as it is.
 pub fn show_handle_value(d: &mut Dialog, handle: crate::gizmo::Handle) {
     let field = match handle {
-        crate::gizmo::Handle::Axis(i) => Some(i.min(2)),
-        crate::gizmo::Handle::Ring(i) => Some(3 + i.min(2)),
-        _ => None,
+        crate::gizmo::Handle::Axis(i) => i.min(2),
+        crate::gizmo::Handle::Ring(i) => 3 + i.min(2),
+        _ => return,
     };
-    if let (Some(f), Kind::Move { mode, .. }) = (field, &d.kind)
-        && f < fields(*mode)
-    {
-        d.extra.insert("value_field".into(), json!(f));
+    if fields(d).contains(&field) {
+        d.extra.insert("value_field".into(), json!(field));
     }
 }
 
