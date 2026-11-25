@@ -1535,6 +1535,9 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     if bodies_hidden(app) {
         v.push(act("ui.showAll", "Show All Bodies", "eye"));
     }
+    if id == 0 {
+        v.push(cmd(app, "browser.visibility", app.tr("ui.hide_all_sketches")).with(json!({ "folder": "sketches", "visible": false })));
+    }
     v.push(act("ui.isolate", "Isolate", "body").with(json!({ "bodies": names })).on(!bodies.is_empty() && id != 0));
     v.push(zoom_item(bodies.iter().map(|name| Sel::Body { name: name.clone() }).collect(), !bodies.is_empty()));
     v.push(Item::sep());

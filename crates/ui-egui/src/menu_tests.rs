@@ -892,6 +892,33 @@ fn expand_and_collapse_all_open_the_browser_tree_from_the_design_menu() {
 }
 
 #[test]
+fn hide_all_sketches_from_the_design_menu_is_one_undo_step() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    let sketch = |app: &mut SolveApp, name, x| {
+        let id = app.run("sketch.create", json!({"plane": "XY", "name": name})).unwrap()["sketch"].as_u64().unwrap();
+        app.run("sketch.circle.center", json!({"center": [x, 0], "radius": 5})).unwrap();
+        app.run("sketch.finish", json!({})).unwrap();
+        id
+    };
+    let root_sketch = sketch(&mut app, "RootSketch", 0);
+    let component = app.run("component.create", json!({"name": "Part"})).unwrap()["component"].as_u64().unwrap();
+    let nested_sketch = sketch(&mut app, "PartSketch", 20);
+    app.run("component.activate", json!({"component": 0})).unwrap();
+    assert_eq!(app.session.doc.feature(root_sketch).unwrap().component, 0);
+    assert_eq!(app.session.doc.feature(nested_sketch).unwrap().component, component);
+
+    let shown = |app: &SolveApp| [root_sketch, nested_sketch].map(|id| solidcraft_engine::view::sketch_shown(&app.session, id));
+    assert_eq!(shown(&app), [true, true]);
+    let undo = app.session.undo.len();
+    act(&mut app, &Target::Component { id: 0 }, "Hide All Sketches");
+    assert_eq!(shown(&app), [false, false]);
+    assert_eq!(app.session.undo.len(), undo + 1);
+
+    app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(shown(&app), [true, true]);
+}
+
+#[test]
 fn delete_key_handles_every_kind_and_asks_about_dependents() {
     use solidcraft_engine::Sel;
     let mut app = sample_app();
