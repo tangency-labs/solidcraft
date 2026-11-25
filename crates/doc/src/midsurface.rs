@@ -8,15 +8,17 @@
 //! the exact faces: the overlap is an exact region boolean, "is anything in between?" an exact
 //! ray, a rim's width the exact points of its edges against the wall (solidcore's
 //! `mid_sheet::wall_holds`). The geometry itself (facing faces, joints, areas, projections) is
-//! solidcore's (`solidcore_ops::{face_pair, mid_joint, mid_sheet}`); this module chooses and
+//! solidcore's (`solidcraft_kernel::services::{face_pair, mid_joint, mid_sheet}`); this module chooses and
 //! sequences.
 
-use solidcore_ops::face_pair::{CylinderFace, OutwardPlane, axial_range_in, facing_cylinders, facing_planes, material_toward_axis, round_directions};
-use solidcore_ops::mid_joint::{move_edge_onto_line, planes_meeting};
-use solidcore_ops::mid_sheet::{self as ms, Frame, Wall};
 use solidcore_record::brep::Loop as Bounds;
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_geom::prelude::*;
+use solidcraft_kernel::services::face_pair::{
+    CylinderFace, OutwardPlane, axial_range_in, facing_cylinders, facing_planes, material_toward_axis, round_directions,
+};
+use solidcraft_kernel::services::mid_joint::{move_edge_onto_line, planes_meeting};
+use solidcraft_kernel::services::mid_sheet::{self as ms, Frame, Wall};
 use solidcraft_kernel::{Body, BoolOp, FaceSurface, face_surface, offset_surface, patch_region, planar_regions_boolean, smooth_picks, stitch};
 
 use crate::sheet_surface_convert::{cylinder_chart, cylinder_chart_in, face_region, planar_face};
@@ -208,7 +210,7 @@ fn frame_of(p: &Plane) -> Frame {
     Frame { origin: array(p.origin), x: array(p.x), y: array(p.y) }
 }
 
-fn ops_err(what: &str) -> impl Fn(solidcore_ops::Error) -> DocError + '_ {
+fn ops_err(what: &str) -> impl Fn(solidcraft_kernel::services::Error) -> DocError + '_ {
     move |e| DocError::Invalid(format!("midsurface: {what}: {e}"))
 }
 
