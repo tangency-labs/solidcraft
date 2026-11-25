@@ -9,7 +9,6 @@ use sha2::{Digest, Sha256};
 use solidcraft_engine::panels::*;
 use solidcraft_engine::plugin::ui::{DesignKind, DockZone, WorkspaceSpec};
 
-use crate::panel_runtime::*;
 use crate::{SolveApp, plugins};
 
 type HookReply = Result<solidcraft_engine::plugin::PanelUpdates, String>;

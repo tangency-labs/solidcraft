@@ -1406,6 +1406,7 @@ mod tests {
             images: Default::default(),
             declarations: runtime.ui.unwrap(),
             swatches: Default::default(),
+            shaders: Vec::new(),
         }
     }
 
