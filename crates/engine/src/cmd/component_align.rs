@@ -207,25 +207,31 @@ pub(super) fn align(s: &mut Session, p: &Value) -> Result<Value> {
         if !valid_position(&next) {
             return Err(bad(cmd, "alignment transform exceeds supported numeric range"));
         }
-        updates.push((placement.occurrence, next));
+        updates.push((placement.occurrence, next, local_delta));
     }
 
-    let moved: Vec<u64> = updates.iter().map(|(id, _)| *id).collect();
+    let moved: Vec<u64> = updates.iter().map(|(id, _, _)| *id).collect();
     // Placements inside a component placed more than once move in every placement of it: the
     // command still runs (as occurrence.move does), and says so for the dialog's warning.
     let shared: Vec<&Vec<u64>> = paths.iter().filter(|path| s.occurrence_shared(path)).collect();
     if capture {
-        if world_move != IDENTITY || updates.iter().any(|(id, _)| s.pending_moves.contains_key(id)) {
-            for (id, next) in updates {
-                s.pending_moves.remove(&id);
+        if world_move != IDENTITY || updates.iter().any(|(id, _, _)| s.pending_moves.contains_key(id)) {
+            for (id, next, _) in updates {
+                s.clear_pending_move(id);
                 if let Some(x) = s.doc_mut().occurrences.iter_mut().find(|x| x.id == id) {
+                    let prev = x.transform;
                     x.transform = next;
+                    x.adjust_base_for_direct_move(&prev, &next);
                 }
             }
         }
     } else {
-        for (id, next) in updates {
+        for (id, next, local_delta) in updates {
+            let doc_transform = s.doc.occurrences.iter().find(|o| o.id == id).map(|o| o.transform).unwrap_or(IDENTITY);
+            let prior_uncaptured = s.uncaptured_moves().get(&id).copied();
             s.pending_moves.insert(id, next);
+            let step = crate::occurrences::captured_move_from_delta(id, solidcraft_doc::MoveSpace::Local, &local_delta, None);
+            s.record_pending_move(id, doc_transform, prior_uncaptured, None, next, step);
         }
         s.revision += 1;
     }

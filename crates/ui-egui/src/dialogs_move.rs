@@ -453,34 +453,80 @@ fn matrix_rows(m: &Mat) -> Vec<f64> {
     (0..3).flat_map(|r| (0..4).map(move |c| m[c][r])).collect()
 }
 
-/// What OK runs. Each component picked without Create Copy moves by its placement: captured
-/// when Capture All Positions is ticked, which then captures the other pending moves too, and
-/// pending when it is not. The bodies picked (or, with Create Copy, the bodies and components)
-/// move by solid.move. Empty when only components are picked, nothing moved them and nothing is
-/// left to capture: OK then just closes.
+/// Whether a JSON string or array of strings references any user/model parameter.
+fn has_param_ref(v: &Value) -> bool {
+    match v {
+        Value::String(s) => !solidcraft_engine::doc::expr::references(s).is_empty(),
+        Value::Array(items) => items.iter().any(has_param_ref),
+        _ => false,
+    }
+}
+
+fn check_no_inline_defs(d: &Dialog) -> Result<(), String> {
+    let Kind::Move { mode, x, y, z, rx, ry, rz, angle } = &d.kind else { return Ok(()) };
+    let fields: &[(&str, &str)] = match *mode {
+        FREE => &[("X Distance", x), ("Y Distance", y), ("Z Distance", z), ("X Angle", rx), ("Y Angle", ry), ("Z Angle", rz)],
+        TRANSLATE => &[("X Distance", x), ("Y Distance", y), ("Z Distance", z)],
+        ROTATE => &[("Angle", angle)],
+        POINT_TO_POSITION => &[("X", x), ("Y", y), ("Z", z)],
+        _ => &[],
+    };
+    for (label, text) in fields {
+        crate::length_input::no_definition(text, label)?;
+    }
+    Ok(())
+}
+
+/// What OK runs. Each component picked without Create Copy moves by its placement: when Capture
+/// All Positions is ticked, the moved occurrences and any other pending moves or driven joints
+/// are captured into a single `CapturePosition` timeline feature (and coalesced into one Undo
+/// step by `adopt_dialog`); when it is not ticked, the moves stay pending until Capture Position.
+/// The bodies picked (or, with Create Copy, the bodies and components) move by solid.move. Empty
+/// when only components are picked, nothing moved them and nothing is left to capture: OK then
+/// just closes.
 pub fn commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, String> {
-    let p = params(app, d)?;
     let places = placements(d);
+    let (bodies, components) = targets(app, d);
+    if !places.is_empty() || (bodies.is_empty() && !components.is_empty()) {
+        check_no_inline_defs(d)?;
+    }
+    let p = params(app, d)?;
     let mut out = Vec::new();
     if !places.is_empty() {
         let m = transform(app, &p)?;
         let capture = captures(d);
-        // Captured by the move itself, so one Undo takes it back to where it was. Capturing it
-        // afterwards would leave Undo with it pending where it was moved to.
+        let chained = chain(d).is_some();
+        let has_expr = !chained && ["translate", "origin", "angle"].into_iter().filter_map(|k| p.get(k)).any(has_param_ref);
         let mut moved = Vec::new();
-        if !is_identity(&m) {
-            let matrix = matrix_rows(&m);
+        if !is_identity(&m) || has_expr {
+            let matrix = chained.then(|| matrix_rows(&m));
             for path in &places {
                 let Some(&occurrence) = path.last() else { continue };
                 moved.push(occurrence);
-                out.push((
-                    "occurrence.move".to_string(),
-                    json!({ "occurrence": occurrence, "path": path, "space": "world", "matrix": matrix, "tolerance": 1e-6, "capture": capture }),
-                ));
+                let mut cmd_params = json!({
+                    "occurrence": occurrence,
+                    "path": path,
+                    "space": "world",
+                    "capture": false,
+                });
+                if let Some(ref matrix) = matrix {
+                    cmd_params["matrix"] = json!(matrix);
+                    cmd_params["tolerance"] = json!(1e-6);
+                } else if let Some(obj) = cmd_params.as_object_mut() {
+                    // MoveKeys uses #[schemars(deny_unknown_fields)]: never forward solid.move-only keys
+                    // ("about", "bodies", "occurrences", "copy").
+                    for k in ["translate", "origin", "axis", "angle"] {
+                        if let Some(v) = p.get(k) {
+                            obj.insert(k.to_string(), v.clone());
+                        }
+                    }
+                }
+                out.push(("occurrence.move".to_string(), cmd_params));
             }
         }
-        // Capture All Positions: the components moved before, and not captured, too.
-        if capture && app.session.pending_moves.keys().any(|id| !moved.contains(id)) {
+        // Capture All Positions: record moved components and any pre-existing pending moves/joints
+        // into one editable CapturePosition timeline feature.
+        if capture && (!moved.is_empty() || !app.session.uncaptured_moves().is_empty() || app.session.uncaptured_joint_count() > 0) {
             out.push(("component.capture_position".to_string(), json!({})));
         }
     }
@@ -525,7 +571,8 @@ pub(crate) fn preview(app: &SolveApp, d: &Dialog, cmds: &mut Vec<(String, Value)
 /// The picked components whose positions are pending (moved, not captured yet): Revert Position
 /// puts just these back.
 pub(crate) fn revertible(app: &SolveApp, d: &Dialog) -> Vec<u64> {
-    placements(d).iter().filter_map(|path| path.last().copied()).filter(|id| app.session.pending_moves.contains_key(id)).collect()
+    let uncaptured = app.session.uncaptured_moves();
+    placements(d).iter().filter_map(|path| path.last().copied()).filter(|id| uncaptured.contains_key(id)).collect()
 }
 
 /// Whether OK has nothing to run (see [`commands`]).
@@ -884,7 +931,9 @@ fn step(app: &SolveApp, d: &Dialog) -> Result<Step, String> {
         FREE => {
             let a = [ang(app, rx)?, ang(app, ry)?, ang(app, rz)?];
             let turned: Vec<usize> = (0..3).filter(|i| a[*i].abs() > 1e-12).collect();
-            if turned.is_empty() {
+            let zero_param: Vec<usize> =
+                (0..3).filter(|i| a[*i].abs() <= 1e-12 && !solidcraft_engine::doc::expr::references([rx, ry, rz][*i]).is_empty()).collect();
+            if turned.is_empty() && zero_param.is_empty() {
                 p["translate"] = json!([x, y, z]);
                 // A rotation kept from an edited move about another axis.
                 for k in ["axis", "angle", "origin"] {
@@ -892,19 +941,30 @@ fn step(app: &SolveApp, d: &Dialog) -> Result<Step, String> {
                         p[k] = v.clone();
                     }
                 }
+            } else if !zero_param.is_empty() && turned.len() + zero_param.len() > 1 {
+                return Err(if turned.is_empty() {
+                    "cannot combine multiple zero-valued angle expressions into a single axis-angle move".into()
+                } else {
+                    "cannot combine a non-zero angle with a zero-valued angle expression into a single axis-angle move".into()
+                });
             } else {
                 let piv = pivot(app, d).ok_or("select bodies first")?;
                 let r = gizmo::turn_of(a, order(d));
                 let (axis, th) = gizmo::axis_angle(&r);
                 p["origin"] = if items(d, 1).is_empty() { d.extra.get("origin").cloned().unwrap_or_else(|| num(piv)) } else { num(piv) };
                 p["translate"] = json!([x, y, z]);
-                match turned.as_slice() {
+                let single = match turned.as_slice() {
+                    [i] => Some(*i),
+                    [] => zero_param.first().copied(),
+                    _ => None,
+                };
+                match single {
                     // A single turn keeps its angle expression and pivot independently.
-                    [i] => {
-                        p["axis"] = json!([[1, 0, 0], [0, 1, 0], [0, 0, 1]][*i]);
-                        p["angle"] = json!([rx, ry, rz][*i]);
+                    Some(i) => {
+                        p["axis"] = json!([[1, 0, 0], [0, 1, 0], [0, 0, 1]][i]);
+                        p["angle"] = json!([rx, ry, rz][i]);
                     }
-                    _ => {
+                    None => {
                         p["axis"] = json!([axis.x, axis.y, axis.z]);
                         p["angle"] = json!(deg(th));
                     }

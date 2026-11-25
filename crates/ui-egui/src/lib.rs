@@ -56,6 +56,7 @@ mod dialog_descriptor;
 pub mod dialogs;
 pub mod dialogs_appearance;
 pub mod dialogs_assembly;
+pub mod dialogs_capture;
 pub mod dialogs_constrain;
 pub mod dialogs_coupling;
 pub mod dialogs_end_cap;
@@ -3532,6 +3533,7 @@ impl SolveApp {
                         FeatureKind::BodyTransfer { .. } => language.text("ui.feature_kind.body_transfer"),
                         FeatureKind::ConstructionAxis { .. } => language.text("ui.feature_kind.construction_axis"),
                         FeatureKind::ConstructionPoint { .. } => language.text("ui.feature_kind.construction_point"),
+                        FeatureKind::CapturePosition { .. } => language.text("cmd.component_capture_position"),
                         _ => f.kind.base_name(),
                     };
                     self.set_status(language.format("ui.feature_nothing_to_edit", &[("kind", kind)]), false);

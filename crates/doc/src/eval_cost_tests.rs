@@ -197,6 +197,8 @@ fn joint_face_measurements_are_shared_across_motion_samples_and_snap_kinds() {
         exprs: Default::default(),
         offset_xy: [0.0; 2],
         captured: None,
+        base_values: None,
+        base_exprs: Vec::new(),
         constraint: None,
         dynamics: Vec::new(),
     });
@@ -1144,6 +1146,8 @@ fn a_cams_profile_is_meshed_once() {
         exprs: Default::default(),
         offset_xy: [0.0; 2],
         captured: None,
+        base_values: None,
+        base_exprs: Vec::new(),
         constraint: None,
     };
     let profile = CamProfile::Edges { occurrence, picks: vec![Vec3::new(5.0, 0.0, 10.0)], names: Vec::new() };

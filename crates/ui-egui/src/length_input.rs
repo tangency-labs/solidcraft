@@ -191,6 +191,23 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
         D::Pipe { diameter, wall, .. } => vec![diameter, wall],
         D::Stock { margin } => vec![margin],
         D::Move { x, y, z, .. } => vec![x, y, z],
+        D::CapturePosition(c) => {
+            let mut values = Vec::new();
+            for m in &mut c.moves {
+                values.extend([&mut m.x, &mut m.y, &mut m.z]);
+                if m.has_origin {
+                    values.extend([&mut m.ox, &mut m.oy, &mut m.oz]);
+                }
+            }
+            for j in &mut c.joints {
+                for (i, v) in j.dofs.iter_mut().enumerate() {
+                    if !j.is_angle.get(i).copied().unwrap_or(false) && j.initial_dofs.get(i).is_some_and(|init| init != v) {
+                        values.push(v);
+                    }
+                }
+            }
+            values
+        }
         D::Hole { diameter, depth, cb_diameter, cb_depth, cs_diameter, opts, .. } => {
             vec![diameter, depth, cb_diameter, cb_depth, cs_diameter, &mut opts.bridge]
         }

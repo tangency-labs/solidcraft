@@ -94,6 +94,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::FrameTrim(_) => Some("frame.trim"),
         Kind::Gusset(_) => Some("frame.gusset"),
         Kind::FramePlate(_) => Some("frame.plate"),
+        Kind::CapturePosition(_) => Some("component.capture_position"),
         Kind::Pulley(_) => Some("pulley.insert"),
         Kind::Plastic(k) => match k {
             crate::dialogs_plastic::Pl::SnapFit { .. } => Some("plastic.snap_fit"),
@@ -1503,6 +1504,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::FrameTrim(k) => enter |= crate::dialogs_frame::trim_rows(ui, k),
         Kind::Gusset(k) => enter |= crate::dialogs_gusset::rows(app, ui, k),
         Kind::FramePlate(k) => enter |= crate::dialogs_frame_plate::rows(app, ui, k),
+        Kind::CapturePosition(k) => enter |= crate::dialogs_capture::rows(app, ui, k),
         Kind::Assembly(k) => enter |= crate::dialogs_assembly::rows(app, ui, k, &mut d.inputs, &mut d.active),
         Kind::Measure { result, show, .. } => measure_rows(app, ui, result.as_ref(), show),
         Kind::Section { offset, flip, hatch, add, edit } => {
