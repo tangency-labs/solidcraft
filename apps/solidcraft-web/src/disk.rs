@@ -393,11 +393,7 @@ mod web {
 
     async fn write_handle(handle: &FileSystemFileHandle, bytes: &[u8]) -> Result<(), String> {
         ensure_readwrite(handle).await?;
-        let w: web_sys::FileSystemWritableFileStream =
-            JsFuture::from(handle.create_writable()).await.map_err(err)?.dyn_into().map_err(|_| "no writable stream".to_string())?;
-        JsFuture::from(w.write_with_u8_array(bytes).map_err(err)?).await.map_err(err)?;
-        JsFuture::from(w.close()).await.map_err(err)?;
-        Ok(())
+        crate::files::write_handle(handle, bytes).await
     }
 
     async fn handle_for(id: &str) -> Result<FileSystemFileHandle, String> {
