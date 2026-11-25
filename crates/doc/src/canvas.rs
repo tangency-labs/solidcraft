@@ -114,7 +114,7 @@ impl Canvas {
         let aspect = if pw == 0 { 1.0 } else { f64::from(ph) / f64::from(pw) };
         // The kernel's frame: both edges long enough and not along one line.
         let xy = |p: Vec2| [p.x, p.y];
-        let [bl, br, tr, tl] = solidcore_ops::affine::picture_frame(xy(bl), xy(br), tl.map(xy), aspect)?.map(|[x, y]| Vec2::new(x, y));
+        let [bl, br, tr, tl] = solidcraft_kernel::services::affine::rect_of_aspect(xy(bl), xy(br), tl.map(xy), aspect)?.map(|[x, y]| Vec2::new(x, y));
         Some(if self.flip { [br, bl, tl, tr] } else { [bl, br, tr, tl] })
     }
     /// The image file.

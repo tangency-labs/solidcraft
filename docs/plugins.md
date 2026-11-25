@@ -133,15 +133,18 @@ notifications.
 
 Handlers run on the command worker, away from the window thread, with their own
 budget: at most 1,000,000 fuel, 16 MiB memory, 512 KiB stack and 100 ms execution time, further
-limited by their requested budgets. They may refresh caches or panel data.
+limited by their requested budgets. They may refresh caches.
 Editing, file writes and starting jobs are refused with existing typed permission
 errors. A failure is shown in Preferences › Plugins and never fails the action
 that triggered the notification. Each invocation uses a fresh guest instance.
 Handler results use the existing 1 MiB JSON reply limit; retained panel data is
 limited to 16 MiB in total. Exceeding either limit reports a typed limit error.
 
-A handler of a plugin that declares `ui@0.1` may refresh that plugin's panel data with
-`ui.set-data` (see Docked panels below).
+A handler cannot refresh its plugin's docked panel yet. It runs on a scratch copy of the
+session, so a `ui.set-data` call it makes does not reach the open panel; only the handler's JSON
+reply is kept (up to the limits above), and no panel reads it. Until the panel contract lands
+(#19516, phase 3 of RFC 0015), give the panel a Refresh button whose entry reads the design and
+calls `ui.set-data`, as the entries a panel runs do (see Docked panels below).
 
 ## Classifying points and reading surface normals
 
@@ -804,10 +807,16 @@ component's own imports and exports, and serves the frozen 0.1 WIT
 (`crates/craft-plugin/wit-0.1/plugin.wit`) to those. A component that names a version the host does
 not run, or two versions at once, is refused before any of its code runs.
 
+`shaders@0.1` lets a plugin draw the 3D view's background with a WGSL shader the host checks,
+wraps and limits; it needs no runtime. See [plugin shaders](plugin-shaders.md) and
+[RFC 0015, amendment 1](rfcs/0015-plugin-ui-workspaces.md#amendment-1-shaders).
+
 ## Docked panels
 
 Add `"ui@0.1"` alongside `"commands@0.2"`, declare `runtime.ui`, and target `panel-plugin` in
-`crates/craft-plugin/wit/plugin.wit`. The `ui` and `ui-provider` records follow
+`crates/craft-plugin/wit/plugin.wit`. The `panel-plugin` world includes `command-plugin`, bringing
+`storage`, `forms` and `design-state` to panel plugins. Plugins that also provide a dialog field hook
+can target `panel-dialog-plugin`, which adds `export dialog-provider`. The `ui` and `ui-provider` records follow
 [RFC 0015 section 1](rfcs/0015-plugin-ui-workspaces.md#1-panels). The manifest declarations are
 listed during installation. The component's `ui-provider.describe` must return those declarations.
 The host owns the controls, theme, docking and plugin badge; plugins ship data and layouts.
