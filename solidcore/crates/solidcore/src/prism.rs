@@ -20,6 +20,7 @@ pub mod bounds;
 pub mod extrude;
 pub mod fill;
 pub mod fit;
+pub mod flange;
 pub mod gusset;
 pub mod measure;
 pub mod member;

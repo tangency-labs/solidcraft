@@ -12,6 +12,7 @@
 use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, PI, TAU};
 
 use super::extrude::{extrude_region, symmetric_offset_intervals, symmetric_offset_probe_points};
+use super::flange::flange_reach;
 use super::measure::{equivalent, section};
 use super::placement::LoopPlacement;
 use super::profile::rational_curve;
@@ -3503,4 +3504,199 @@ fn gusset_plan_keeps_the_joint_offset_contacts_and_fabrication_cuts() {
     }
     let negative = gusset::plan([&a, &b], dimensions, Placement::Negative).unwrap();
     assert_eq!((negative.start, negative.end), (-6.0, 0.0));
+}
+
+/// A straight-sided loop through `pts`, each segment a line to the next point.
+fn lines(pts: &[(f64, f64)]) -> Loop2 {
+    let corners: Vec<Point2> = pts.iter().map(|&(x, y)| p(x, y)).collect();
+    Loop2 {
+        segs: corners
+            .iter()
+            .zip(corners.iter().cycle().skip(1))
+            .map(|(&a, &b)| Seg2::Line { a, b })
+            .collect(),
+    }
+}
+
+fn plain(outer: Loop2) -> Region2 {
+    Region2 {
+        outer,
+        holes: Vec::new(),
+    }
+}
+
+/// The bend zone of the flange tests: along the x axis from 0 to 10, a millimetre either side of
+/// its centre line, which runs from (0, 0) to (10, 0). The flange stands above it (the left of the
+/// line), a base panel below.
+fn zone() -> Region2 {
+    plain(lines(&[(0.0, -1.0), (10.0, -1.0), (10.0, 1.0), (0.0, 1.0)]))
+}
+
+fn reach_above(panel: &Region2, inset: f64) -> Option<(f64, f64)> {
+    flange_reach(panel, &zone(), p(0.0, 0.0), p(10.0, 0.0), true, inset)
+        .map(|r| (r.from_edge, r.from_line))
+}
+
+fn near(got: Option<(f64, f64)>, edge: f64) {
+    let (e, l) = got.expect("a reach");
+    assert!((e - edge).abs() < 1e-9, "from the edge {e}, not {edge}");
+    assert!(
+        (l - (edge + 1.0)).abs() < 1e-9,
+        "from the line {l}, not {}",
+        edge + 1.0
+    );
+}
+
+/// A rectangular flange reaches its height from the edge of the zone and one more millimetre
+/// (the zone's half width) from the bend's centre line; the base on the other side of the bend,
+/// asked from its own side, reaches its own height.
+#[test]
+fn flange_reach_of_a_rectangle_is_its_height() {
+    let flange = plain(lines(&[(0.0, 1.0), (10.0, 1.0), (10.0, 21.0), (0.0, 21.0)]));
+    near(reach_above(&flange, 0.0), 20.0);
+    let base = plain(lines(&[
+        (0.0, -31.0),
+        (10.0, -31.0),
+        (10.0, -1.0),
+        (0.0, -1.0),
+    ]));
+    let below = flange_reach(&base, &zone(), p(0.0, 0.0), p(10.0, 0.0), false, 0.0).unwrap();
+    assert!((below.from_edge - 30.0).abs() < 1e-9 && (below.from_line - 31.0).abs() < 1e-9);
+    // A panel on the other side of the line is no flange of this side.
+    assert_eq!(
+        flange_reach(&base, &zone(), p(0.0, 0.0), p(10.0, 0.0), true, 0.0),
+        None
+    );
+    assert_eq!(reach_above(&base, 0.0), None);
+}
+
+/// A flange whose far edge slants reaches as far as its short side.
+#[test]
+fn flange_reach_of_a_tapered_flange_is_its_short_side() {
+    let flange = plain(lines(&[(0.0, 1.0), (10.0, 1.0), (10.0, 9.0), (0.0, 16.0)]));
+    near(reach_above(&flange, 0.0), 8.0);
+}
+
+/// A notch cut through to the far edge shortens the reach to the notch's floor; a hole inside the
+/// panel does not.
+#[test]
+fn flange_reach_counts_a_notch_to_the_edge_and_not_a_hole() {
+    let notched = plain(lines(&[
+        (0.0, 1.0),
+        (10.0, 1.0),
+        (10.0, 21.0),
+        (6.0, 21.0),
+        (6.0, 15.0),
+        (4.0, 15.0),
+        (4.0, 21.0),
+        (0.0, 21.0),
+    ]));
+    near(reach_above(&notched, 0.0), 14.0);
+    let holed = Region2 {
+        outer: lines(&[(0.0, 1.0), (10.0, 1.0), (10.0, 21.0), (0.0, 21.0)]),
+        holes: vec![lines(&[(4.0, 3.0), (4.0, 7.0), (6.0, 7.0), (6.0, 3.0)])],
+    };
+    near(reach_above(&holed, 0.0), 20.0);
+}
+
+/// A wall slanting in over the panel shortens the reach near it to nothing; leaving the ends of
+/// the bend out keeps it from deciding the least.
+#[test]
+fn flange_reach_inset_leaves_the_corners_out() {
+    let chamfered = plain(lines(&[(0.0, 1.0), (10.0, 1.0), (8.0, 21.0), (2.0, 21.0)]));
+    near(reach_above(&chamfered, 0.0), 0.0);
+    near(reach_above(&chamfered, 2.0), 20.0);
+    // Insets that meet leave the middle point.
+    near(reach_above(&chamfered, 9.0), 20.0);
+    assert_eq!(reach_above(&chamfered, -1.0), None);
+    assert_eq!(reach_above(&chamfered, f64::NAN), None);
+}
+
+/// Arcs are exact: a round tip reaches its shoulders' height; a round bite out of the far edge
+/// reaches to its lowest point, which is in no end of the arc.
+#[test]
+fn flange_reach_of_arcs_is_exact() {
+    let round = plain(Loop2 {
+        segs: vec![
+            Seg2::Line {
+                a: p(0.0, 1.0),
+                b: p(10.0, 1.0),
+            },
+            Seg2::Line {
+                a: p(10.0, 1.0),
+                b: p(10.0, 11.0),
+            },
+            Seg2::Arc {
+                center: p(5.0, 11.0),
+                radius: 5.0,
+                start: 0.0,
+                sweep: PI,
+            },
+            Seg2::Line {
+                a: p(0.0, 11.0),
+                b: p(0.0, 1.0),
+            },
+        ],
+    });
+    near(reach_above(&round, 0.0), 10.0);
+    let bitten = plain(Loop2 {
+        segs: vec![
+            Seg2::Line {
+                a: p(0.0, 1.0),
+                b: p(10.0, 1.0),
+            },
+            Seg2::Line {
+                a: p(10.0, 1.0),
+                b: p(10.0, 21.0),
+            },
+            Seg2::Line {
+                a: p(10.0, 21.0),
+                b: p(8.0, 21.0),
+            },
+            Seg2::Arc {
+                center: p(5.0, 21.0),
+                radius: 3.0,
+                start: 0.0,
+                sweep: -PI,
+            },
+            Seg2::Line {
+                a: p(2.0, 21.0),
+                b: p(0.0, 21.0),
+            },
+            Seg2::Line {
+                a: p(0.0, 21.0),
+                b: p(0.0, 1.0),
+            },
+        ],
+    });
+    near(reach_above(&bitten, 0.0), 17.0);
+}
+
+/// A free-form boundary has no closed form: no reach, never a guess.
+#[test]
+fn flange_reach_of_a_free_form_boundary_is_none() {
+    let curved = plain(Loop2 {
+        segs: vec![
+            Seg2::Line {
+                a: p(0.0, 1.0),
+                b: p(10.0, 1.0),
+            },
+            Seg2::Cubic {
+                p0: p(10.0, 1.0),
+                p1: p(12.0, 8.0),
+                p2: p(-2.0, 8.0),
+                p3: p(0.0, 1.0),
+            },
+        ],
+    });
+    assert_eq!(reach_above(&curved, 0.0), None);
+    let flange = plain(lines(&[(0.0, 1.0), (10.0, 1.0), (10.0, 21.0), (0.0, 21.0)]));
+    assert_eq!(
+        flange_reach(&flange, &zone(), p(0.0, 0.0), p(0.0, 0.0), true, 0.0),
+        None
+    );
+    assert_eq!(
+        flange_reach(&flange, &zone(), p(f64::NAN, 0.0), p(10.0, 0.0), true, 0.0),
+        None
+    );
 }

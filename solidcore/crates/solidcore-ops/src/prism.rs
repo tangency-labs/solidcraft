@@ -29,6 +29,7 @@ use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 
 pub use solidcore::error::fill::{FillFailure, FillSide};
 pub use solidcore::prism::fill::{Contour, FillNote, FillOptions};
+pub use solidcore::prism::flange::FlangeReach;
 pub use solidcore::prism::measure::Interval;
 pub use solidcore::prism::placement::LoopPlacement;
 pub use solidcore::prism::profile::{tapered_flange_ends, ProfileRefusal};
@@ -447,6 +448,42 @@ pub fn loop_holds(lp: &Loop2, p: Vec2) -> Option<bool> {
 #[must_use]
 pub fn segment_distance(seg: &Seg2, p: Vec2) -> Option<f64> {
     convert::seg2(seg).distance_to(convert::vec2(p))
+}
+
+/// How far the flange stands from a bend in a flat pattern: the least reach, square to the bend, from
+/// the edge of the bend's `zone` across a panel to the panel's far boundary, over the bend's centre
+/// line from `start` to `end` less `inset` at each end ([`solidcore::prism::flange::flange_reach`]).
+/// `panels` are the flat's material less its bends' zones (the planar boolean of the flat and the
+/// zones); `left` is the side of the line (as it runs from `start` to `end`) the flange is on. A
+/// panel's holes do not stop the reach; a cut-out through to its edge does. Of the panels that
+/// stand on the zone's edge on that side, the least.
+///
+/// `None` when no panel stands there, or a boundary is free-form (no closed form), or an input is
+/// no length.
+#[must_use]
+pub fn flange_reach(
+    panels: &[Region2],
+    zone: &Region2,
+    start: Vec2,
+    end: Vec2,
+    left: bool,
+    inset: f64,
+) -> Option<FlangeReach> {
+    let zone = convert::region2(zone);
+    let (start, end) = (convert::vec2(start), convert::vec2(end));
+    let mut least: Option<FlangeReach> = None;
+    for panel in panels {
+        let panel = convert::region2(panel);
+        let Some(reach) =
+            solidcore::prism::flange::flange_reach(&panel, &zone, start, end, left, inset)
+        else {
+            continue;
+        };
+        if least.is_none_or(|l| reach.from_edge < l.from_edge) {
+            least = Some(reach);
+        }
+    }
+    least
 }
 
 /// Whether the circles `a` and `b` (centre and radius) are one hole: their centres and their radii
