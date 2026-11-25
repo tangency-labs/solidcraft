@@ -3875,7 +3875,6 @@ mod tests {
                     )
                     .unwrap();
                     assert!(!output.split);
-                    assert_eq!(output.status(), SM_ERR);
                     assert_eq!(k.context.doing_boolean(), previous);
                 }
                 b.set_editing_enabled(false);
@@ -4097,8 +4096,8 @@ mod tests {
             })
             .unwrap();
             assert_eq!(
-                (result.status(), result.edges, result.vertex),
-                (SM_ERR, None, vertex)
+                (result.split, result.edges, result.vertex),
+                (false, None, vertex)
             );
             b.set_editing_enabled(false);
             let disabled = make_vertex_split_edge(&mut k, &mut b, e, p, &mut env, &|_, kind| {
@@ -4108,7 +4107,7 @@ mod tests {
                 }
             })
             .unwrap();
-            assert_eq!(disabled.status(), SM_ERR);
+            assert!(!disabled.split);
             assert_eq!((disabled.edges, disabled.vertex), (None, None));
         }
         assert!(!k.context.doing_boolean());
@@ -4123,8 +4122,8 @@ mod tests {
             })
             .unwrap();
             assert_eq!(
-                (outside.status(), outside.edges, outside.vertex),
-                (SM_ERR, None, None)
+                (outside.split, outside.edges, outside.vertex),
+                (false, None, None)
             );
             assert!(k.context.doing_boolean());
         }
@@ -4144,7 +4143,7 @@ mod tests {
         // With parts 1 and 2 wired, a wire split completes, its final B-rep ADD
         // notification included.
         let out = result.unwrap();
-        assert_eq!(out.status(), 0);
+        assert!(out.split);
         let edges = out.edges.unwrap();
         assert!(edges.contains(&e));
         assert!(out.vertex.is_some());

@@ -380,7 +380,7 @@ mod tests {
     fn chain_validation_identifies_the_check_that_refused_the_edit() {
         let input = validation::Standing {
             check: validation::BrepCheck {
-                pointers: crate::topology::brep::validation::PointerCheck::Passed,
+                pointers: validation::PointerCheck::Passed,
                 pointer_reports: AssertArray::new(),
                 assert_valid: Some(true),
                 reports: AssertArray::new(),
