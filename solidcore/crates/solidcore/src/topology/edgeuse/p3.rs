@@ -4611,12 +4611,15 @@ mod tests {
         }
     }
 
-    /// The face's parameter box is narrower than the edge's lift across a periodic seam (an
-    /// import's face before its seams are completed): the trim still covers the whole edge.
+    /// A closed NURBS wall whose face box leaves out the stretch of the period an edge crosses
+    /// (an import's face before its seams are completed): the point-drop trim still covers the
+    /// whole edge, continuing across the seam, instead of the part inside the box.
     #[test]
     fn point_drop_over_a_face_box_narrower_than_the_edge_covers_the_whole_edge() {
-        use crate::nurbs::b_spline_curve::p1::NurbCircleParam;
-        use crate::primitive::api_primitives::{create_cylinder, create_cylinder_surface};
+        use crate::nurbs::b_spline_curve::p1::{KnotType, NurbCircleParam};
+        use crate::nurbs::b_spline_surface::p1::{BSplineSurfaceForm, CanonicalSurfaceData};
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::primitive::api_primitives::create_cylinder;
 
         let mut k = Kernel::default();
         let mut b = create_cylinder(&mut k, Vec3::ZERO, 5.0, 3.0).unwrap();
@@ -4625,7 +4628,44 @@ mod tests {
             .iter()
             .find_map(|(eu, u)| u.edge.map(|e| (eu, e)))
             .unwrap();
-        let surface = Surface::from(create_cylinder_surface(&k, Vec3::ZERO, 5.0, 3.0).unwrap());
+        // The rational circle of radius 5 in u (a quarter turn per knot span), straight in v.
+        let (r, w) = (5.0, std::f64::consts::FRAC_1_SQRT_2);
+        let ring = [
+            (r, 0.0, 1.0),
+            (r, r, w),
+            (0.0, r, 1.0),
+            (-r, r, w),
+            (-r, 0.0, 1.0),
+            (-r, -r, w),
+            (0.0, -r, 1.0),
+            (r, -r, w),
+            (r, 0.0, 1.0),
+        ];
+        let mut points = Vec::new();
+        let mut weights = Vec::new();
+        for (x, y, weight) in ring {
+            for z in [0.0, 3.0] {
+                points.push(Point3::new(x, y, z));
+                weights.push(weight);
+            }
+        }
+        let surface = Surface::from(
+            BSplineSurface::create_canonical(&CanonicalSurfaceData {
+                u_degree: 2,
+                v_degree: 1,
+                control_points: &points,
+                form: BSplineSurfaceForm::Unspecified,
+                u_multiplicities: &[3, 2, 2, 2, 3],
+                v_multiplicities: &[2, 2],
+                u_knots: &[0.0, 1.0, 2.0, 3.0, 4.0],
+                v_knots: &[0.0, 3.0],
+                knot_type: KnotType::Unspecified,
+                weights: Some(&weights),
+                uv_domain: None,
+            })
+            .unwrap(),
+        );
+        // The rim at v = 0 from 10 degrees before the seam to 10 degrees past it.
         let curve = Curve::from(
             BSplineCurve::create_circle_segment(
                 3,
@@ -4639,11 +4679,11 @@ mod tests {
         );
         let interval = curve.natural_interval();
         let natural = surface.natural_uv_domain_with_nurb(&k).unwrap();
-        // a box over the first part of the period: the arc's first half lies outside it
+        // the box leaves out the first and the last tenth of the period, where the rim runs
         let narrow = crate::geom::extent2d::Extent2d::from_bounds(
-            natural.u_min(),
+            natural.u_min() + 0.1 * natural.x_length(),
             natural.v_min(),
-            natural.u_min() + 0.25 * natural.x_length(),
+            natural.u_max() - 0.1 * natural.x_length(),
             natural.v_max(),
         );
         let mut fail = DropCurveFail::default();
@@ -4660,6 +4700,15 @@ mod tests {
             span.max(),
             interval.min(),
             interval.max()
+        );
+        // and it is one lift: its ends are a fifth of a period apart, not a period or none
+        let first = made.curve.evaluate_point(&k, interval.min()).unwrap();
+        let last = made.curve.evaluate_point(&k, interval.max()).unwrap();
+        assert!(
+            (last.x - first.x - 4.0 * 20.0 / 360.0).abs() < 0.05,
+            "the lift runs from u = {} to {}",
+            first.x,
+            last.x
         );
     }
 

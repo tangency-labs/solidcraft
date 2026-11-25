@@ -1604,6 +1604,20 @@ fn periodic_seam_completion_keeps_every_trim_over_its_edge_interval() {
     let why = crate::pcurve::import_check_failure(&short).unwrap();
     assert!(why.contains("the completed record is invalid"), "{why}");
     assert!(crate::pcurve::import_check_failure(&completed).is_none());
+    // A trim that starts a rounding error off its edge's interval is moved onto it.
+    let mut rounded = completed.clone();
+    let Loop::Edges { edges } = &mut rounded.faces[0].loops[0] else {
+        panic!("the wall's first loop is an edge loop");
+    };
+    let edge_interval = completed.edges[edges[0].edge as usize].interval;
+    let (Curve2::Spline { knots, .. } | Curve2::RationalSpline { knots, .. }) =
+        &mut edges[0].pcurve;
+    for t in knots.iter_mut().filter(|t| **t == edge_interval[0]) {
+        *t += 5.5e-17;
+    }
+    assert_ne!(knots[0], edge_interval[0]);
+    crate::pcurve::snap_trim_ends(&mut rounded);
+    assert_eq!(rounded, completed);
     let (body, _) = Body::from_record(&completed, true).unwrap();
     let check = body.check(CheckLevel::All).unwrap();
     assert!(check.is_valid(), "{check}");

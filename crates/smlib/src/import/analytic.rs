@@ -177,15 +177,7 @@ fn trimmed(brep: &b::Brep, f: &b::Face) -> R<[[f64; 2]; 2]> {
         let b::Loop::Edges { edges } = l else { return Err(Unsupported::Invalid("a vertex loop on a cylinder's face")) };
         for u in edges {
             let interval = brep.edges.get(u.edge as usize).ok_or(Unsupported::Invalid("edge"))?.interval;
-            let boxed = pcurve_box(&u.pcurve, interval);
-            if boxed.is_none() {
-                let (kind, knots, n) = match &u.pcurve {
-                    b::Curve2::Spline { knots, points } => ("spline", knots, points.len()),
-                    b::Curve2::RationalSpline { knots, homogeneous } => ("rational", knots, homogeneous.len()),
-                };
-                eprintln!("L9DBG pcurve_box failed: edge {} interval {interval:?} {kind} knots n={} first={:?} last={:?} ctrl n={n} knots_head={:?}", u.edge, knots.len(), knots.first(), knots.last(), &knots[..knots.len().min(8)]);
-            }
-            let [ru, rv] = boxed.ok_or(Unsupported::Invalid("a pcurve that does not evaluate"))?;
+            let [ru, rv] = pcurve_box(&u.pcurve, interval).ok_or(Unsupported::Invalid("a pcurve that does not evaluate"))?;
             for (k, r) in [ru, rv].into_iter().enumerate() {
                 lo[k] = lo[k].min(r[0]);
                 hi[k] = hi[k].max(r[1]);

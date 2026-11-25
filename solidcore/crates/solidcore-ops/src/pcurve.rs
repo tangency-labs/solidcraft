@@ -160,7 +160,7 @@ pub fn complete_periodic_seams_noted(
     // consecutive uses lie either side of the cut with no seam edge between them (a vertex sits
     // on the cut), the pieces end a whole period apart and the record no longer agrees with
     // itself: the same checks refuse that completion too.
-    let (completed, order) = match to_record(&mut kernel, &mut body) {
+    let (mut completed, order) = match to_record(&mut kernel, &mut body) {
         Ok(made) => made,
         Err(e) => {
             return Ok((
@@ -172,6 +172,7 @@ pub fn complete_periodic_seams_noted(
             ));
         }
     };
+    snap_trim_ends(&mut completed);
     if let Some(why) = import_check_failure(&completed) {
         return Ok((None, Some(why)));
     }
@@ -193,6 +194,46 @@ pub fn complete_periodic_seams_noted(
 /// [`crate::record_check::agreement`]).
 pub(crate) fn passes_import_checks(record: &solidcore_record::brep::Brep) -> bool {
     import_check_failure(record).is_none()
+}
+
+/// Moves the end knots of each trim that lies within rounding of its edge's interval onto the
+/// interval's ends. A trim built over an edge whose parameter range starts a rounding error
+/// off the record's (a seam's cut leaves `5.6e-17` where the record says `0`) passes the
+/// record's checks, which allow a millionth, yet a reader that asks for the trim over exactly
+/// the edge's interval finds it starts after it.
+pub(crate) fn snap_trim_ends(record: &mut solidcore_record::brep::Brep) {
+    use solidcore_record::brep::{Curve2, Loop};
+    const ROUNDING: f64 = 1e-9;
+    let intervals: Vec<[f64; 2]> = record.edges.iter().map(|e| e.interval).collect();
+    for face in &mut record.faces {
+        for l in &mut face.loops {
+            let Loop::Edges { edges } = l else { continue };
+            for u in edges {
+                let Some(&[lo, hi]) = intervals.get(u.edge as usize) else {
+                    continue;
+                };
+                let (Curve2::Spline { knots, .. } | Curve2::RationalSpline { knots, .. }) =
+                    &mut u.pcurve;
+                let (Some(&first), Some(&last)) = (knots.first(), knots.last()) else {
+                    continue;
+                };
+                if first >= last || lo >= hi {
+                    continue;
+                }
+                let near = |a: f64, b: f64| (a - b).abs() <= ROUNDING;
+                if !(near(first, lo) && near(last, hi)) {
+                    continue;
+                }
+                for knot in knots.iter_mut() {
+                    if *knot == first {
+                        *knot = lo;
+                    } else if *knot == last {
+                        *knot = hi;
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// The first of the import's record checks `record` fails, in a sentence, or `None` where it
