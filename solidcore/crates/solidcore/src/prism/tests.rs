@@ -3088,7 +3088,10 @@ fn close(a: f64, b: f64) -> bool {
 /// roundings (1e-14): the extremes found are values the profile takes, not its enclosure's.
 fn is_range((lo, hi): (f64, f64), want: (f64, f64)) -> bool {
     let past = |w: f64| 1e-14 * (1.0 + w.abs());
-    close(lo, want.0) && close(hi, want.1) && lo >= want.0 - past(want.0) && hi <= want.1 + past(want.1)
+    close(lo, want.0)
+        && close(hi, want.1)
+        && lo >= want.0 - past(want.0)
+        && hi <= want.1 + past(want.1)
 }
 
 #[test]
@@ -3135,20 +3138,32 @@ fn a_slanted_planes_rise_over_a_profile_is_exact_at_lines_and_arcs() {
     assert!(is_range(r, (0.5, 2.5)), "{r:?}");
     // The right half of the unit circle (from -90° by 180°) spans x in [0, 1]: its leftmost
     // point on the full circle, x = -1, is not on the arc.
-    let r = rise(half_slope(), arc_and_chord(p(0.0, 0.0), 1.0, -FRAC_PI_2, PI));
+    let r = rise(
+        half_slope(),
+        arc_and_chord(p(0.0, 0.0), 1.0, -FRAC_PI_2, PI),
+    );
     assert!(is_range(r, (1.0, 1.5)), "{r:?}");
     // The same arc running back (from 90° by -180°), and with a negative radius (the left half,
     // its points at the opposite angles).
-    let r = rise(half_slope(), arc_and_chord(p(0.0, 0.0), 1.0, FRAC_PI_2, -PI));
+    let r = rise(
+        half_slope(),
+        arc_and_chord(p(0.0, 0.0), 1.0, FRAC_PI_2, -PI),
+    );
     assert!(is_range(r, (1.0, 1.5)), "{r:?}");
-    let r = rise(half_slope(), arc_and_chord(p(0.0, 0.0), -1.0, -FRAC_PI_2, PI));
+    let r = rise(
+        half_slope(),
+        arc_and_chord(p(0.0, 0.0), -1.0, -FRAC_PI_2, PI),
+    );
     assert!(is_range(r, (0.5, 1.0)), "{r:?}");
     // A plane sloping along y, z = 1 + y / 2, over a circle of radius 2: [0, 2].
     let r = rise(sloped(0.0, 0.5), outer(circle(p(0.0, 0.0), 2.0)));
     assert!(is_range(r, (0.0, 2.0)), "{r:?}");
     // Sloping along both, z = 1 + (x + y) / 2, over a circle of radius √2 about (1, -1): x + y
     // there is ±2, at 45° and 225° off the axes, so [0, 2].
-    let r = rise(sloped(0.5, 0.5), outer(circle(p(1.0, -1.0), 2.0_f64.sqrt())));
+    let r = rise(
+        sloped(0.5, 0.5),
+        outer(circle(p(1.0, -1.0), 2.0_f64.sqrt())),
+    );
     assert!(is_range(r, (0.0, 2.0)), "{r:?}");
 }
 
@@ -3156,7 +3171,11 @@ fn a_slanted_planes_rise_over_a_profile_is_exact_at_lines_and_arcs() {
 fn a_free_form_pieces_extremes_are_values_it_takes() {
     // The ellipse of semi-axes 3 and 1 as four exact conics, under z = 1 + (x + y) / 2: x + y
     // reaches ±√10 at (±9, ±1) / √10, inside two of the quarter conics, not at their ends.
-    let r = plane_rise(&xy(), &sloped(0.5, 0.5), &[outer(ellipse(p(0.0, 0.0), 3.0, 1.0))]);
+    let r = plane_rise(
+        &xy(),
+        &sloped(0.5, 0.5),
+        &[outer(ellipse(p(0.0, 0.0), 3.0, 1.0))],
+    );
     let half = 10.0_f64.sqrt() / 2.0;
     let r = r.unwrap();
     assert!(is_range(r, (1.0 - half, 1.0 + half)), "{r:?}");

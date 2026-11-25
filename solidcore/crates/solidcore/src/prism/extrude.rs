@@ -223,8 +223,8 @@ pub fn plane_gap(
 fn affine_extremes(level: Level, regions: &[Region2], op: &'static str) -> Result<(f64, f64)> {
     let malformed = || SolidError::invalid_input(op, "a malformed profile segment");
     // the angle of the sketch direction along which the level rises fastest
-    let rise = (level.slope.x != 0.0 || level.slope.y != 0.0)
-        .then(|| level.slope.y.atan2(level.slope.x));
+    let rise =
+        (level.slope.x != 0.0 || level.slope.y != 0.0).then(|| level.slope.y.atan2(level.slope.x));
     let mut range: Option<(f64, f64)> = None;
     let mut take = |v: f64| -> Result<()> {
         if !v.is_finite() {
