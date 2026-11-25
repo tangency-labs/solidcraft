@@ -99,7 +99,7 @@ fn escape_that_blurs_a_text_editor_keeps_keyboard_ownership() {
     let ctx = context();
     install_keyboard_focus(&ctx);
     let mut text = String::from("12 mm");
-    let id = egui::Id::new("escape owner");
+    let id = egui::Id::unique("escape owner");
     raw_frame(&ctx, egui::RawInput::default(), |ui| {
         ui.add(egui::TextEdit::singleline(&mut text).id(id)).request_focus();
     });
@@ -109,6 +109,7 @@ fn escape_that_blurs_a_text_editor_keeps_keyboard_ownership() {
     assert!(ctx.text_edit_focused());
     raw_frame(&ctx, egui::RawInput { events: key(egui::Key::Escape, false), ..Default::default() }, |ui| {
         assert!(!ctx.egui_wants_keyboard_input());
+        assert_eq!(text_edit_escape_owner(&ctx), Some(id));
         assert!(text_edit_owned_escape(&ctx));
         ui.add(egui::TextEdit::singleline(&mut text).id(id));
     });

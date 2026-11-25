@@ -33,9 +33,14 @@ fn text_escape_id(viewport: egui::ViewportId) -> egui::Id {
 /// Escape belonged to a text editor before egui cleared its focus. Keep the
 /// ownership for every layout pass of the same frame, but not the next press.
 pub fn text_edit_owned_escape(ctx: &egui::Context) -> bool {
+    text_edit_escape_owner(ctx).is_some()
+}
+
+/// The particular editor that owned Escape before egui removed its focus.
+pub fn text_edit_escape_owner(ctx: &egui::Context) -> Option<egui::Id> {
     let frame = ctx.cumulative_frame_nr();
     let id = text_escape_id(ctx.viewport_id());
-    ctx.data(|d| d.get_temp::<u64>(id)) == Some(frame)
+    ctx.data(|d| d.get_temp::<(u64, egui::Id)>(id)).filter(|(f, _)| *f == frame).map(|(_, owner)| owner)
 }
 
 fn focused_text_id() -> egui::Id {
@@ -77,7 +82,7 @@ impl egui::Plugin for TabSelects {
             && egui::text_edit::TextEditState::load(ctx, id).is_some()
         {
             let frame = ctx.cumulative_frame_nr_for(input.viewport_id);
-            ctx.data_mut(|d| d.insert_temp(text_escape_id(input.viewport_id), frame));
+            ctx.data_mut(|d| d.insert_temp(text_escape_id(input.viewport_id), (frame, id)));
         }
         self.tab_pressed |= input.events.iter().any(|event| {
             matches!(event, egui::Event::Key { key: egui::Key::Tab, pressed: true, modifiers, .. }

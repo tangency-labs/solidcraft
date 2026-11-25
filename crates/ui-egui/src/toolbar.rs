@@ -3006,6 +3006,14 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
         app.escape_owner = Some(crate::EscapeOwner::Overlay);
         return;
     }
+    // Select Other is above the underlying editor and has first refusal.
+    if crate::select_other::is_open(app) && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        crate::select_other::close(app);
+        app.esc_handled = true;
+        app.escape_owner = Some(crate::EscapeOwner::Overlay);
+        app.last_escape = None;
+        return;
+    }
     if popup_owner
         || inline_editor
         || chat_owner
