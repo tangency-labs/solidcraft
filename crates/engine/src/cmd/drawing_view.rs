@@ -20,7 +20,8 @@
 //! drawing's design on a sheet, or a view projected from another, lined up with it a gap past its
 //! boundary unless placed. Each is one undo step, refused whole by the record's rules, and lists
 //! itself when it lies outside the sheet's drawing space. On a diagonal of its parent,
-//! `drawing.view.projected` makes a pictorial view: isometric, placed apart (#13044).
+//! `drawing.view.projected` makes a pictorial view, placed apart (#13044): isometric, or dimetric or
+//! at three scales of its own as its `axonometry` says, which `drawing.view.edit` changes.
 //! `drawing.view.projection_for` (#13044) answers which view a point that far from the parent's
 //! centre would make, under the drawing's projection, by the record's one rule, for a preview.
 //! `drawing.view.auxiliary` (#13044) makes an auxiliary view: its parent folded toward the side that
@@ -82,13 +83,13 @@ use crate::drawing_view::{
 };
 use crate::params::bad;
 use crate::schema::drawing_view::{
-    AccuracyResult, AlongParam, AngleFromParam, AuxiliaryParams, BaseParams, BoxResult, ChoicesResult, ConfigurationParam, ConfigurationResult,
-    CopyParams, CreateResult, DPI_RANGE, DetailBoundaryParam, DetailParams, DrawnJointResult, DrawnRowResult, EditParams, EditResult, ExplodedParam,
-    ExtentsResult, FlatParams, FromResult, InspectParams, InspectResult, LabelResult, LabelSet, LineResult, LinesStatusResult, MeasureParam,
-    MeasurementResult, MoveParams, OutsideResult, PathSegResult, PictureResult, PieceResult, PlaceParam, PoseParam, PoseResult, ProjectedParams,
-    ProjectionForParams, ProjectionForResult, ScaleResult, SceneResult, SectionParams, SettingResult, SettingsResult, SnapshotParams, SnapshotResult,
-    SourceResult, StandardParams, StandardResult, StudyPoseParam, StudyStepResult, ThreadPieceResult, ThreadResult, ToSheetResult, ViewLineParam,
-    ViewMoveParams, ViewMoveResult, ViewResult, ViewSet,
+    AccuracyResult, AlongParam, AngleFromParam, AuxiliaryParams, AxonometryParam, BaseParams, BoxResult, ChoicesResult, ConfigurationParam,
+    ConfigurationResult, CopyParams, CreateResult, DPI_RANGE, DetailBoundaryParam, DetailParams, DrawnJointResult, DrawnRowResult, EditParams,
+    EditResult, ExplodedParam, ExtentsResult, FlatParams, FromResult, InspectParams, InspectResult, LabelResult, LabelSet, LineResult,
+    LinesStatusResult, MeasureParam, MeasurementResult, MoveParams, OutsideResult, PathSegResult, PictureResult, PieceResult, PlaceParam, PoseParam,
+    PoseResult, ProjectedParams, ProjectionForParams, ProjectionForResult, ScaleResult, SceneResult, SectionParams, SettingResult, SettingsResult,
+    SnapshotParams, SnapshotResult, SourceResult, StandardParams, StandardResult, StudyPoseParam, StudyStepResult, ThreadPieceResult, ThreadResult,
+    ToSheetResult, ViewLineParam, ViewMoveParams, ViewMoveResult, ViewResult, ViewSet,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
@@ -132,6 +133,8 @@ const MAX_STANDARD_GAP_MM: f64 = 1000.0;
 /// How far a new projected view's boundary is from its parent's, in paper millimetres, until a
 /// drawing style gives it.
 const DEFAULT_GAP_MM: f64 = 20.0;
+/// Why an axonometry is refused on a view that isn't pictorial.
+const ONLY_PICTORIAL: &str = "only a pictorial view has an axonometry";
 
 pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snapshot", crate::checked!("drawing.view.snapshot", snapshot))
     .icon("export")
@@ -163,7 +166,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
         .contract(&INSPECT_CONTRACT)
         .output(output_schema_for::<InspectResult>)
         .params(concat!(
-            "view: a saved view's id → {view, sheet, kind: base|projected|flat, source, parent?, side?, direction, place: {at: [x, y]} or {aligned: n}, settings: {scale, visual_style, reference_style, reference_hides_model, tangent_edges, occurrences (null: every body), exploded (\"assembled\" or {view: id}), pose (\"designed\", {joints: [...]} as saved, in radians and mm, or {study: {id, step}}; with drawn?, skipped? and study? for a position of its own), configuration (\"active\" or {row: id}, with drawn: {id, name} or null, and errors?), hide: {value, from: this|parent|default, parent?, set}}, reference_shown_percent, boundary_mm: {min, max} on the sheet (a 20 x 20 mm placeholder round the view's centre when there's nothing to measure), extents: {min, max, error_mm, status: approximate|exact (a flat pattern view's)|placeholder, provenance (a placeholder's reason: past_walk_limit, no_bodies, not_placed, nothing_chosen, no_exploded_view, not_posed, no_configuration, not_configured, no_flat or cut_away; a flat pattern view's: flat_pattern)} in model mm on the view's plane, linked? (a projected view's display settings: true, false or \"partly\"), dimensions: [its dimensions' ids, in id order], balloons: [its balloons' ids, in id order], centre_marks: [its manual marks' ids], centre_lines: [its manual lines' ids], choices: {visual_style, scale}}. Read-only; ",
+            "view: a saved view's id → {view, sheet, kind: base|projected|flat, source, parent?, side?, axonometry? (a pictorial view's), direction, place: {at: [x, y]} or {aligned: n}, settings: {scale, visual_style, reference_style, reference_hides_model, tangent_edges, occurrences (null: every body), exploded (\"assembled\" or {view: id}), pose (\"designed\", {joints: [...]} as saved, in radians and mm, or {study: {id, step}}; with drawn?, skipped? and study? for a position of its own), configuration (\"active\" or {row: id}, with drawn: {id, name} or null, and errors?), hide: {value, from: this|parent|default, parent?, set}}, reference_shown_percent, boundary_mm: {min, max} on the sheet (a 20 x 20 mm placeholder round the view's centre when there's nothing to measure), extents: {min, max, error_mm, status: approximate|exact (a flat pattern view's)|placeholder, provenance (a placeholder's reason: past_walk_limit, no_bodies, not_placed, nothing_chosen, no_exploded_view, not_posed, no_configuration, not_configured, no_flat or cut_away; a flat pattern view's: flat_pattern)} in model mm on the view's plane, linked? (a projected view's display settings: true, false or \"partly\"), dimensions: [its dimensions' ids, in id order], balloons: [its balloons' ids, in id order], centre_marks: [its manual marks' ids], centre_lines: [its manual lines' ids], choices: {visual_style, scale}}. Read-only; ",
             "a view of another configuration evaluates a copy of the design; ",
             "the design is unchanged.",
         )),
@@ -175,7 +178,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
         .output(output_schema_for::<EditResult>)
         .params(concat!(
             "view: a saved view's id; ",
-            "set: {scale?, visual_style?, reference_style?, reference_hides_model?, tangent_edges?, line_group?: an ISO 128 line group by its wide line (0.25, 0.35, 0.5, 0.7, 1, 1.4 or 2), source?: {occurrences: [[ids…]]}, hide?: [[ids…]] as drawing.view.snapshot's, exploded?, pose?, configuration?: as drawing.view.base's: each a value, or null to follow the parent (a base view keeps a scale; a base view's line group follows its sheet's, then its drawing's); reference_shown_percent?; view?: a base view's direction; place?: {at: [x, y]} or {aligned: n}; linked?: a projected view's display settings all following its parent (true) or all its own, as they are now (false)} → {view, changed: [fields], followers: [the views projected from it whose settings changed with it], outside?: [it and the views lined up with it, when it moved or changed size and their boundary leaves the sheet's drawing space or lies over its title block, none moved back in]}. One undo step; ",
+            "set: {scale?, visual_style?, reference_style?, reference_hides_model?, tangent_edges?, line_group?: an ISO 128 line group by its wide line (0.25, 0.35, 0.5, 0.7, 1, 1.4 or 2), source?: {occurrences: [[ids…]]}, hide?: [[ids…]] as drawing.view.snapshot's, exploded?, pose?, configuration?: as drawing.view.base's: each a value, or null to follow the parent (a base view keeps a scale; a base view's line group follows its sheet's, then its drawing's); reference_shown_percent?; view?: a base view's direction; place?: {at: [x, y]} or {aligned: n}; linked?: a projected view's display settings all following its parent (true) or all its own, as they are now (false); axonometry?: a pictorial view's, as drawing.view.projected takes it} → {view, changed: [fields], followers: [the views projected from it whose settings changed with it], outside?: [it and the views lined up with it, when it moved or changed size and their boundary leaves the sheet's drawing space or lies over its title block, none moved back in]}. One undo step; ",
             "no model is evaluated, but to check a new source or hide, a view of another configuration evaluates a copy of the design; ",
             "the design is unchanged.",
         )),
@@ -239,8 +242,9 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
         .output(output_schema_for::<CreateResult>)
         .params(concat!(
             "parent: a saved view's id; ",
-            "side: left, right, above or below, where it sits (the drawing's projection says which side of the model it shows), or above_right, above_left, below_right or below_left for an isometric (pictorial) view on that diagonal, which shows what its two neighbours show and is never lined up; ",
-            "place?: {at: [x, y]} or {aligned: n} (a side's default: lined up with its parent, its boundary 20 mm past the parent's; a diagonal's: at the point that puts its boundary 20 mm past the parent's on both axes; a diagonal takes {at} only) → {view, sheet: its parent's, scale: its parent's, boundary_mm, outside?}. Its scale and display settings follow its parent; ",
+            "side: left, right, above or below, where it sits (the drawing's projection says which side of the model it shows), or above_right, above_left, below_right or below_left for a pictorial view on that diagonal, which shows what its two neighbours show and is never lined up; ",
+            "place?: {at: [x, y]} or {aligned: n} (a side's default: lined up with its parent, its boundary 20 mm past the parent's; a diagonal's: at the point that puts its boundary 20 mm past the parent's on both axes; a diagonal takes {at} only); ",
+            "axonometry?: a pictorial view's (ISO 5456-3): \"isometric\" (default), \"dimetric\" (its depth at half: for a parent of main importance) or {scales: [x, y, depth]}, its parent's paper x, paper y and depth in that proportion (a trimetric view; each squared at most the other two squared together), refused with a side → {view, sheet: its parent's, scale: its parent's, boundary_mm, outside?}. Its scale and display settings follow its parent; ",
             "drawing.view.edit sets its own. No view is made from a pictorial or flat pattern view yet. One undo step; ",
             "a view of another configuration evaluates a copy of the design; ",
             "the design is unchanged.",
@@ -254,7 +258,8 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
         .output(output_schema_for::<ProjectionForResult>)
         .params(concat!(
             "parent: a saved view's id; ",
-            "offset_mm: [dx, dy], paper mm from the parent's centre, each at most 10000 either way → {kind: orthographic|pictorial|none, side? (as drawing.view.projected takes it), lined_up, direction? (as drawing.view.inspect gives it), scale? (the parent's), projection: first|third, why? (for none: on the parent's centre, or why no view is made from that parent)}: which view drawing.view.projected would make there, the nearest of eight directions (sides within 22.5° of an axis, diagonals between), under the drawing's projection. Read-only; ",
+            "offset_mm: [dx, dy], paper mm from the parent's centre, each at most 10000 either way; ",
+            "axonometry?: a diagonal's pictorial view's, as drawing.view.projected takes it (isometric by default; a side's view has none) → {kind: orthographic|pictorial|none, side? (as drawing.view.projected takes it), lined_up, direction? (as drawing.view.inspect gives it), scale? (the parent's), projection: first|third, why? (for none: on the parent's centre, or why no view is made from that parent)}: which view drawing.view.projected would make there, the nearest of eight directions (sides within 22.5° of an axis, diagonals between), under the drawing's projection. Read-only; ",
             "no model is evaluated.",
         )),
     CommandSpec::new(AUXILIARY, "Auxiliary View", crate::checked!("drawing.view.auxiliary", auxiliary)).begins_edit()
@@ -682,6 +687,10 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             ViewKind::Auxiliary { toward, .. } => Some(*toward),
             _ => None,
         },
+        axonometry: match &view.kind {
+            ViewKind::Pictorial { axonometry, .. } => Some(AxonometryParam(*axonometry)),
+            _ => None,
+        },
         direction: direction(&resolved.basis),
         place: PlaceParam(view.place),
         settings: SettingsResult {
@@ -891,6 +900,10 @@ fn change(d: &mut Drawing, id: u64, set: &ViewSet, found: &Found) -> Result<Vec<
         let ViewKind::Base { view: looking, .. } = &mut view.kind else { return Err(bad(EDIT, own_direction)) };
         *looking = direction.0;
     }
+    if let Some(given) = set.axonometry {
+        let ViewKind::Pictorial { axonometry, .. } = &mut view.kind else { return Err(bad(EDIT, ONLY_PICTORIAL)) };
+        *axonometry = given.0;
+    }
     if let Some(place) = set.place {
         view.place = place.0;
     }
@@ -929,6 +942,11 @@ fn type_over(label: &mut ViewLabel, parts: &LabelSet) {
 /// The names of the fields that differ between `a` and `b`, two states of one view.
 fn changed_fields(a: &View, b: &View) -> Vec<String> {
     let (x, y) = (&a.settings, &b.settings);
+    let axonometry = |view: &View| match view.kind {
+        ViewKind::Pictorial { axonometry, .. } => Some(axonometry),
+        _ => None,
+    };
+    let new_axonometry = axonometry(a) != axonometry(b);
     let fields = [
         ("scale", x.scale != y.scale),
         ("visual_style", x.visual_style != y.visual_style),
@@ -942,7 +960,8 @@ fn changed_fields(a: &View, b: &View) -> Vec<String> {
         ("pose", x.pose != y.pose),
         ("configuration", x.configuration != y.configuration),
         ("reference_shown_percent", a.reference_shown_percent != b.reference_shown_percent),
-        ("view", a.kind != b.kind),
+        ("view", a.kind != b.kind && !new_axonometry),
+        ("axonometry", new_axonometry),
         ("place", a.place != b.place),
         ("label", a.label != b.label),
     ];
@@ -1282,8 +1301,8 @@ fn copy_to_sheet(s: &mut Session, p: &Value) -> Result<Value> {
                 ViewKind::Section { parent, line } => {
                     view.kind = ViewKind::Section { parent: copy_of(*parent).unwrap_or(*parent), line: line.clone() }
                 }
-                ViewKind::Pictorial { parent, diagonal } => {
-                    view.kind = ViewKind::Pictorial { parent: copy_of(*parent).unwrap_or(*parent), diagonal: *diagonal }
+                ViewKind::Pictorial { parent, diagonal, axonometry } => {
+                    view.kind = ViewKind::Pictorial { parent: copy_of(*parent).unwrap_or(*parent), diagonal: *diagonal, axonometry: *axonometry }
                 }
                 ViewKind::Auxiliary { parent, toward } => {
                     view.kind = ViewKind::Auxiliary { parent: copy_of(*parent).unwrap_or(*parent), toward: *toward }
@@ -1437,9 +1456,13 @@ fn projected(s: &mut Session, p: &Value) -> Result<Value> {
     let beside = request.side.0;
     let id = record.allocate_id(&mut s.ids).map_err(|e| bad(PROJECTED, e.to_string()))?;
     let parent_centre = record.view_centre(parent).map_err(|e| bad(PROJECTED, e.to_string()))?;
-    let (kind, staged_place) = match beside {
-        Beside::Side(side) => (ViewKind::Projected { parent, side }, ViewPlace::Aligned(side.along(parent_centre))),
-        Beside::Diagonal(diagonal) => (ViewKind::Pictorial { parent, diagonal }, ViewPlace::At([parent_centre.x, parent_centre.y])),
+    let (kind, staged_place) = match (beside, request.axonometry) {
+        (Beside::Side(side), None) => (ViewKind::Projected { parent, side }, ViewPlace::Aligned(side.along(parent_centre))),
+        (Beside::Side(_), Some(_)) => return Err(bad(PROJECTED, ONLY_PICTORIAL)),
+        (Beside::Diagonal(diagonal), axonometry) => {
+            let axonometry = axonometry.unwrap_or_default().0;
+            (ViewKind::Pictorial { parent, diagonal, axonometry }, ViewPlace::At([parent_centre.x, parent_centre.y]))
+        }
     };
     let place = request.place.map_or(staged_place, |place| place.0);
     let mut view = View { id, sheet, kind, place, settings: ViewOverrides::default(), reference_shown_percent: 0.0, label: None };
@@ -1590,7 +1613,8 @@ fn projection_for(s: &mut Session, p: &Value) -> Result<Value> {
         (None, Ok(())) => none("on the parent's centre".into()),
         (Some(beside), Ok(())) => {
             let resolved = d.resolve_view(parent).map_err(|e| bad(PROJECTION_FOR, e.to_string()))?;
-            let basis = beside.basis(&resolved.basis, d.projection).map_err(|e| bad(PROJECTION_FOR, e.to_string()))?;
+            let axonometry = request.axonometry.unwrap_or_default().0;
+            let basis = beside.basis(&resolved.basis, d.projection, axonometry).map_err(|e| bad(PROJECTION_FOR, e.to_string()))?;
             let scale = resolved.scale.value;
             let lined_up = matches!(beside, Beside::Side(_));
             ProjectionForResult {

@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use solidcore_record::Seg2;
 use solidcraft_doc::drawing::cutting_line::{ArrowSide, SectionKind};
+use solidcraft_doc::drawing::fold::Axonometry;
 use solidcraft_doc::drawing::view::{Beside, Diagonal, QuarterTurn, ViewPlace};
 use solidcraft_doc::drawing_view::{MAX_JOINT_VALUES, MAX_POSE_JOINTS, TangentEdges, ViewDirection, ViewSettings};
 use solidcraft_geom::drawing_sheet::{Orientation, PaperSize, SheetSize};
@@ -601,6 +602,10 @@ pub struct ViewSet {
     #[serde(deserialize_with = "super::present")]
     #[schemars(with = "LabelSet")]
     pub label: Option<LabelSet>,
+    /// A pictorial view's axonometry.
+    #[serde(deserialize_with = "super::present")]
+    #[schemars(with = "AxonometryParam")]
+    pub axonometry: Option<AxonometryParam>,
 }
 
 /// The parts of a view's label `drawing.view.edit` changes, each only when given (#13044).
@@ -791,6 +796,9 @@ pub struct InspectResult {
     /// The side of its parent an auxiliary view sits on: a unit `[dx, dy]` on the parent's paper.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub toward: Option<[f64; 2]>,
+    /// A pictorial view's axonometry.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub axonometry: Option<AxonometryParam>,
     /// Which way it looks, as resolved through its parents.
     pub direction: ViewResult,
     pub place: PlaceParam,
@@ -1030,6 +1038,10 @@ pub struct ProjectedParams {
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "PlaceParam")]
     pub place: Option<PlaceParam>,
+    /// A pictorial view's axonometry (isometric when not given); refused with a side.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "AxonometryParam")]
+    pub axonometry: Option<AxonometryParam>,
 }
 
 /// What `drawing.view.auxiliary` takes: its parent, the edge or the face it looks square to (one of
@@ -1122,15 +1134,36 @@ impl JsonSchema for SideParam {
         let sides = ProjectedSide::ALL.map(Beside::Side).into_iter();
         let names: Vec<Value> = sides.chain(Diagonal::ALL.map(Beside::Diagonal)).filter_map(|s| serde_json::to_value(s).ok()).collect();
         json_schema!({
-            "description": "Where it sits by its parent: left, right, above or below for a projected view (the drawing's projection says which side of the model it shows), or above_right, above_left, below_right or below_left for an isometric (pictorial) view on that diagonal.",
+            "description": "Where it sits by its parent: left, right, above or below for a projected view (the drawing's projection says which side of the model it shows), or above_right, above_left, below_right or below_left for a pictorial view on that diagonal (isometric unless an axonometry is given).",
             "type": "string",
             "enum": names
         })
     }
 }
 
-/// What `drawing.view.projection_for` takes: the parent, and a point by its offset from the
-/// parent's centre.
+/// Which axonometry a pictorial view is (ISO 5456-3 §5).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Deserialize, Serialize)]
+#[serde(transparent)]
+pub struct AxonometryParam(pub Axonometry);
+
+impl JsonSchema for AxonometryParam {
+    fn schema_name() -> Cow<'static, str> {
+        "Axonometry".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        let scales = json!({"type": "array", "items": {"type": "number", "exclusiveMinimum": 0}, "minItems": 3, "maxItems": 3});
+        json_schema!({
+            "description": "A pictorial view's axonometry: isometric (the default: its parent's paper x, paper y and depth at one scale), dimetric (ISO 5456-3's: the depth at half, for a view of main importance), or {scales: [x, y, depth]}, any three scales in proportion (a trimetric view's; each squared at most the other two squared together).",
+            "oneOf": [
+                {"type": "string", "enum": ["isometric", "dimetric"]},
+                {"type": "object", "properties": {"scales": scales}, "required": ["scales"], "additionalProperties": false}
+            ]
+        })
+    }
+}
+
+/// What `drawing.view.projection_for` takes: the parent, a point by its offset from the parent's
+/// centre, and the axonometry of a pictorial view there.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(deny_unknown_fields)]
@@ -1139,12 +1172,17 @@ pub struct ProjectionForParams {
     /// The point, in paper millimetres from the parent's centre: `[dx, dy]`, each at most 10000
     /// either way.
     pub offset_mm: [f64; 2],
+    /// The axonometry of the pictorial view a diagonal gives (isometric when not given); a side's
+    /// view has none.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "AxonometryParam")]
+    pub axonometry: Option<AxonometryParam>,
 }
 
 /// What `drawing.view.projection_for` returns: the view `drawing.view.projected` would make there.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ProjectionForResult {
-    /// `orthographic` (a projected view, lined up), `pictorial` (an isometric view, placed apart) or
+    /// `orthographic` (a projected view, lined up), `pictorial` (a pictorial view, placed apart) or
     /// `none`.
     pub kind: &'static str,
     /// Where it would sit, as `drawing.view.projected`'s `side` takes it.

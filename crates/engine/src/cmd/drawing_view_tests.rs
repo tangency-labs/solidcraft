@@ -4,6 +4,7 @@ use serde_json::json;
 use solidcore_record::Vec3;
 use solidcraft_doc::MAX_PLACEMENT_DEPTH;
 use solidcraft_doc::drawing::DEFAULT_DPI;
+use solidcraft_doc::drawing::fold::Axonometry;
 use solidcraft_doc::drawing::view::{Diagonal, QuarterTurn};
 use solidcraft_geom::cell::Projection;
 use solidcraft_geom::drawing_view::ProjectedSide;
@@ -4010,7 +4011,7 @@ fn a_pictorial_view_sits_a_gap_past_its_parents_corner() {
     assert_box(&iso, [255.0, 173.5], [255.0 + wide, 173.5 + high]);
     assert_eq!(iso["scale"]["text"], "1:2");
     let view = saved(&s, iso_id);
-    assert_eq!(view.kind, ViewKind::Pictorial { parent: front, diagonal: Diagonal::AboveRight });
+    assert_eq!(view.kind, ViewKind::Pictorial { parent: front, diagonal: Diagonal::AboveRight, axonometry: Axonometry::Isometric });
     let ViewPlace::At([x, y]) = view.place else { panic!("placed at a point: {:?}", view.place) };
     assert!((Vec2::new(x, y) - Vec2::new(255.0 + wide / 2.0, 173.5 + high / 2.0)).len() < EPS, "{x} {y}");
     let inspected = inspect_view(&mut s, iso_id);
@@ -4045,6 +4046,84 @@ fn an_isometric_view_of_a_100_60_20_block_is_its_isometric_outline() {
     let (iso, _) = create(&mut s, PROJECTED, json!({"parent": ids::encode(front), "side": "above_right"}));
     let (size, _) = boundary(&iso);
     assert!((size.x - 160.0 / 2f64.sqrt()).abs() < EPS && (size.y - 200.0 / 6f64.sqrt()).abs() < EPS, "{size:?}");
+}
+
+/// A dimetric view of a 100 x 60 x 20 block at 1:1 is its outline at ISO 5456-3's dimetric scales
+/// (X and Z at sqrt(8/9), the front view's depth Y at sqrt(2/9)): (100 sqrt 7 + 60) / (2 sqrt 2) =
+/// 114.75 wide and (100 + 60 sqrt 7) / (6 sqrt 2) + 40 sqrt 2 / 3 = 49.35 high. Inspect names its
+/// axonometry. Edited to isometric, one undo step naming what changed, it is the isometric outline;
+/// edited to scales 1 : 1 : 1/2, the dimetric one again.
+#[test]
+fn a_dimetric_view_of_a_100_60_20_block_is_its_dimetric_outline() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 20, "body_name": "Block"}));
+    run(&mut s, "drawing.create", json!({}));
+    let (_, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "scale": "1:1", "position_mm": [100.0, 100.0]}));
+    let (view, id) = create(&mut s, PROJECTED, json!({"parent": ids::encode(front), "side": "above_right", "axonometry": "dimetric"}));
+    let dimetric =
+        Vec2::new((100.0 * 7f64.sqrt() + 60.0) / (2.0 * 2f64.sqrt()), (100.0 + 60.0 * 7f64.sqrt()) / (6.0 * 2f64.sqrt()) + 40.0 * 2f64.sqrt() / 3.0);
+    let near = |size: Vec2, want: Vec2| (size - want).len() < EPS;
+    assert!(near(boundary(&view).0, dimetric), "{view}");
+    assert_eq!(saved(&s, id).kind, ViewKind::Pictorial { parent: front, diagonal: Diagonal::AboveRight, axonometry: Axonometry::Dimetric });
+    assert_eq!(inspect_view(&mut s, id)["axonometry"], json!("dimetric"));
+
+    let steps = s.undo.len();
+    let reply = edit_view(&mut s, id, json!({"axonometry": "isometric"}));
+    assert!(reply["changed"].as_array().unwrap().contains(&json!("axonometry")), "{reply}");
+    assert_eq!(s.undo.len(), steps + 1);
+    let inspected = inspect_view(&mut s, id);
+    assert!(near(boundary(&inspected).0, Vec2::new(160.0 / 2f64.sqrt(), 200.0 / 6f64.sqrt())), "{inspected}");
+    assert_eq!(inspected["axonometry"], json!("isometric"));
+
+    edit_view(&mut s, id, json!({"axonometry": {"scales": [1.0, 1.0, 0.5]}}));
+    let inspected = inspect_view(&mut s, id);
+    assert!(near(boundary(&inspected).0, dimetric), "{inspected}");
+    assert_eq!(inspected["axonometry"], json!({"scales": [1.0, 1.0, 0.5]}));
+    assert_eq!(inspect_view(&mut s, front).get("axonometry"), None, "only a pictorial view has one");
+}
+
+/// An axonometry is a pictorial view's alone, and one no view shows is refused whole: given with a
+/// side, set on a projected view, not one of the named kinds, not three scales, or scales more than
+/// the others allow (with the size that fits). The drawing is unchanged by each refused edit.
+#[test]
+fn hostile_axonometries_are_refused() {
+    let mut s = block_drawing();
+    let (_, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "scale": "1:2"}));
+    let parent = json!(ids::encode(front));
+    let message = create_refused(&mut s, PROJECTED, json!({"parent": parent, "side": "right", "axonometry": "dimetric"}));
+    assert!(message.contains("only a pictorial view has an axonometry"), "{message}");
+    for bad in [json!("trimetric"), json!(7), json!({"scales": [1.0, 1.0]}), json!({"scales": [0.0, 1.0, 1.0]}), json!({"scales": ["1", 1.0, 1.0]})] {
+        create_refused(&mut s, PROJECTED, json!({"parent": parent, "side": "above_right", "axonometry": bad}));
+    }
+    let message = create_refused(&mut s, PROJECTED, json!({"parent": parent, "side": "above_right", "axonometry": {"scales": [1.0, 1.0, 1.5]}}));
+    assert!(message.contains("at most 1.414"), "{message}");
+
+    let (_, right) = create(&mut s, PROJECTED, json!({"parent": parent, "side": "right"}));
+    let (_, iso) = create(&mut s, PROJECTED, json!({"parent": parent, "side": "above_right"}));
+    let record = s.drawing("test").unwrap().clone();
+    let message = edit_refused(&mut s, right, json!({"axonometry": "dimetric"}));
+    assert!(message.contains("only a pictorial view has an axonometry"), "{message}");
+    let message = edit_refused(&mut s, iso, json!({"axonometry": {"scales": [1.0, 1.0, 1.5]}}));
+    assert!(message.contains("at most 1.414"), "{message}");
+    assert_eq!(s.drawing("test").unwrap().clone(), record, "refused whole");
+}
+
+/// `drawing.view.projection_for` previews the axonometry asked for on a diagonal: the direction
+/// `drawing.view.projected` saves for that view. A side's view has none, so it is the same with it.
+#[test]
+fn the_view_beside_a_point_takes_its_axonometry() {
+    let mut s = block_drawing();
+    let (_, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "scale": "1:2"}));
+    let ask = |s: &mut Session, offset: [f64; 2], axonometry: Value| {
+        run(s, PROJECTION_FOR, json!({"parent": ids::encode(front), "offset_mm": offset, "axonometry": axonometry}))
+    };
+    for axonometry in [json!("dimetric"), json!({"scales": [1.0, 0.9, 0.6]})] {
+        let preview = ask(&mut s, [80.0, 80.0], axonometry.clone());
+        let (_, made) = create(&mut s, PROJECTED, json!({"parent": ids::encode(front), "side": "above_right", "axonometry": axonometry}));
+        assert_eq!(preview["direction"], inspect_view(&mut s, made)["direction"], "{axonometry}");
+        assert_ne!(preview["direction"], ask(&mut s, [80.0, 80.0], json!("isometric"))["direction"]);
+        assert_eq!(ask(&mut s, [80.0, 0.0], axonometry)["direction"]["named"], "right");
+    }
 }
 
 /// `drawing.view.projection_for` names the view a point gives, under the drawing's projection: in

@@ -49,7 +49,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<EditParams>(), &["set", "view"]);
     assert_keys(input_schema_for::<MoveParams>(), &["break_alignment", "position_mm", "sheet", "view"]);
     assert_keys(input_schema_for::<CopyParams>(), &["position_mm", "sheet", "view", "with_linked"]);
-    assert_keys(input_schema_for::<ProjectedParams>(), &["parent", "place", "side"]);
+    assert_keys(input_schema_for::<ProjectedParams>(), &["axonometry", "parent", "place", "side"]);
 }
 
 /// `drawing.view.edit` changes what a saved view sets itself, field for field, and its direction,
@@ -74,7 +74,7 @@ fn the_edit_contract_lists_a_saved_views_settings() {
     let named = |key: &String| if key == "occurrences" { "source".to_string() } else { key.clone() };
     let mut theirs: Vec<String> = own.as_object().map(|o| o.keys().map(named).collect()).unwrap_or_default();
     // And the view's label (#13044), which isn't a setting a child follows.
-    theirs.extend(["label", "linked", "place", "reference_shown_percent", "view"].map(String::from));
+    theirs.extend(["axonometry", "label", "linked", "place", "reference_shown_percent", "view"].map(String::from));
     theirs.sort();
     let schema = input_schema_for::<ViewSet>();
     let mut ours: Vec<String> = schema.as_value()["properties"].as_object().map(|o| o.keys().cloned().collect()).unwrap_or_default();
