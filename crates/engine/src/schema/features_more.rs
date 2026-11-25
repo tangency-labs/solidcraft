@@ -196,6 +196,19 @@ fn fill_tools<'de, D: Deserializer<'de>>(d: D) -> Result<Option<NameList>, D::Er
     names_in(d, 1..=MAX_TOOLS, TOOLS_MESSAGE)
 }
 
+/// Boundary Fill's `planes`: up to 64 plane names (the handler checks that each is one).
+fn fill_planes<'de, D: Deserializer<'de>>(d: D) -> Result<Option<NameList>, D::Error> {
+    names_in(d, 0..=MAX_TOOLS, "`planes` must list at most 64 plane names")
+}
+
+fn fill_planes_schema(_: &mut SchemaGenerator) -> Schema {
+    // Unlike the tools, no planes at all is allowed: the handler reads `[]` as none.
+    json_schema!({
+        "description": "Planes that also bound the cells, by name: an origin plane (XY, XZ, YZ) or a construction plane. A plane cuts space like an infinite plane, so it can close an open end of a tool body; a cell lies on the side of each plane its point is on. Up to 64 with the tools.",
+        "anyOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}, "minItems": 0, "maxItems": MAX_TOOLS}]
+    })
+}
+
 fn fill_tools_schema(_: &mut SchemaGenerator) -> Schema {
     names_schema("The tool bodies whose surfaces bound the cells, by name: 1 to 64.", MAX_TOOLS)
 }
@@ -251,6 +264,9 @@ pub struct BoundaryFillParams {
     #[serde(default, deserialize_with = "fill_tools")]
     #[schemars(schema_with = "fill_tools_schema")]
     pub tools: Option<NameList>,
+    #[serde(default, deserialize_with = "fill_planes")]
+    #[schemars(schema_with = "fill_planes_schema")]
+    pub planes: Option<NameList>,
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "FillCells")]
     pub cells: Option<FillCells>,

@@ -2928,6 +2928,32 @@ pub(crate) fn face_region(b: &Body, q: &Query, plane: &Plane, out: Vec3, f: usiz
     face_chart(b, q, &Shape::Plane { plane: *plane, out }, f, sag, tol).ok().map(|(r, _)| r)
 }
 
+/// Face `f` of `b`, a cylinder, as a region in its own chart: x along its axis, y the angle
+/// round it (unwrapped on one turn). `None` for a face that is not a cylinder or whose loops
+/// cannot be read. For the Midsurface pairing of round walls.
+pub(crate) fn cylinder_chart(b: &Body, q: &Query, f: usize, tol: f64) -> Option<Region2> {
+    let shape = Shape::of(b, q, f, false, tol).ok()?;
+    if !matches!(shape, Shape::Cylinder { .. }) {
+        return None;
+    }
+    let sag = (b.size() * 1e-4).max(1e-4);
+    face_chart(b, q, &shape, f, sag, tol).ok().map(|(r, _)| r)
+}
+
+/// Face `f` of `b`, a cylinder, as a region in the chart of cylinder face `host` (the same axis,
+/// the same angle origin and sense, `f`'s own radius): where two coaxial faces lie round the axis
+/// compared on one chart. `None` when either is not a cylinder or a loop cannot be read.
+pub(crate) fn cylinder_chart_in(b: &Body, q: &Query, f: usize, host: usize, tol: f64) -> Option<Region2> {
+    let (Shape::Cylinder { origin, axis, e1, e2, inward, .. }, Shape::Cylinder { radius, .. }) =
+        (Shape::of(b, q, host, false, tol).ok()?, Shape::of(b, q, f, false, tol).ok()?)
+    else {
+        return None;
+    };
+    let shape = Shape::Cylinder { origin, axis, e1, e2, radius, inward };
+    let sag = (b.size() * 1e-4).max(1e-4);
+    face_chart(b, q, &shape, f, sag, tol).ok().map(|(r, _)| r)
+}
+
 /// A point of face `f`: halfway along the first edge of its outer loop.
 fn face_point(q: &Query, f: usize) -> Option<Vec3> {
     let face = q.record().faces.get(f)?;
@@ -3269,6 +3295,9 @@ pub struct SurfaceSheet {
     /// The recesses cut into its flat panels (see `sheet_surface_cuts`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recesses: Vec<crate::Recess>,
+    /// The conical countersinks cut into its flat panels (see `sheet_surface_cuts`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub countersinks: Vec<crate::Countersink>,
     /// The recesses in the flat, as pockets measured from its face on the sheet's surface.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pockets: Vec<crate::sheet::SheetPocket>,
@@ -3675,6 +3704,7 @@ impl SurfaceSheet {
             notes: c.notes.clone(),
             // The engravings Convert keeps; Recognize reads a body's own once it is built.
             recesses: c.recesses.clone(),
+            countersinks: Vec::new(),
             pockets: Vec::new(),
             loose: Vec::new(),
             labels: Vec::new(),
@@ -3892,6 +3922,7 @@ impl SurfaceSheet {
             slits: Vec::new(),
             notes: Vec::new(),
             recesses: Vec::new(),
+            countersinks: Vec::new(),
             pockets: Vec::new(),
             loose: Vec::new(),
             labels: Vec::new(),
@@ -4203,6 +4234,7 @@ impl SurfaceSheet {
         let mut work = FlatWork::new();
         let pieces = crate::sheet_surface::pieces(&dev, &mut work)?;
         let regions = crate::sheet_surface::join_pieces(&pieces, &mut work)?;
+        self.check_countersinks(&dev, &pieces)?;
         self.laid_out(&dev, &pieces, regions)?;
         // The loose pieces lie in the flat where their panels do.
         let loose: Vec<Region2> =
@@ -4217,7 +4249,8 @@ impl SurfaceSheet {
             let frames = folded.places.clone();
             (Some(folded), frames)
         };
-        let namer = crate::sheet::FaceNamer::new(&self.sheet, &dev, &pieces, &self.sketch_curves, &self.recipes, &self.beads);
+        let solid_pieces = if self.countersinks.is_empty() { pieces } else { self.solid_pieces_for_countersinks(&dev, &pieces)? };
+        let namer = crate::sheet::FaceNamer::new(&self.sheet, &dev, &solid_pieces, &self.sketch_curves, &self.recipes, &self.beads);
         // What the builder made each face for, in the order it makes them: each face's name from
         // the builder is its place in that order, read back below.
         let made = std::cell::RefCell::new(Vec::new());
@@ -4228,12 +4261,12 @@ impl SurfaceSheet {
         };
         let (mut body, keys) = match &folded {
             Some(folded) => {
-                let forms = crate::sheet_surface_bead::forms(self, &pieces, folded)?;
-                crate::sheet_surface_fold::solid(&dev, folded, self.thickness, &pieces, &forms, &mut work, &keep)?
+                let forms = crate::sheet_surface_bead::forms(self, &solid_pieces, folded)?;
+                crate::sheet_surface_fold::solid(&dev, folded, self.thickness, &solid_pieces, &forms, &mut work, &keep)?
             }
             // Laid flat in the sheet's flat: the same faces, so the flat's are the folded
             // sheet's (#7990).
-            None => crate::sheet_surface_fold::solid_flat(&dev, self.flat, self.thickness, &pieces, &mut work, &keep)?,
+            None => crate::sheet_surface_fold::solid_flat(&dev, self.flat, self.thickness, &solid_pieces, &mut work, &keep)?,
         };
         let made = made.into_inner();
         let at = |k: &Option<String>| k.as_deref().and_then(|k| k.parse::<usize>().ok()).and_then(|k| made.get(k).copied());
@@ -4262,10 +4295,214 @@ impl SurfaceSheet {
             names = crate::sheet::carried(&names, &body);
         }
         let (body, names) = self.recessed_named(body, names, &frames)?;
+        let (body, names) = self.countersunk_named(body, names, &frames)?;
         let (body, names) = self.bored(body, names, &frames)?;
         self.parts = crate::sheet::ranked(names.iter().map(|n| n.as_ref().and_then(|n| n.0.clone())).collect());
         self.frames = names.into_iter().map(|n| n.and_then(|n| n.1)).collect();
         Ok(body)
+    }
+
+    /// Depth slack (mm) within which a countersink is treated as reaching the far face cleanly,
+    /// shared by flat-hole omission and the 3D cone cut so the exit circle and flat bore agree.
+    const FULL_COUNTERSINK_TOL: f64 = 1e-6;
+
+    /// Refuses any countersink whose outer cone circle reaches into a bend zone or panel trim
+    /// (for example after adding a flange or widening a bend radius).
+    fn check_countersinks(&self, dev: &Development, pieces: &[(Piece, Region2)]) -> Result<()> {
+        for cs in &self.countersinks {
+            let Some(place) = dev.placements.get(cs.panel).copied().flatten() else { continue };
+            let circle = Loop2::circle(place.point(cs.center), cs.outer_radius);
+            for (piece, region) in pieces {
+                if matches!(piece, Piece::Zone(_) | Piece::Tab(..)) && !crate::sheet_surface::loop_clear_of(&circle, region) {
+                    return Err(DocError::Invalid("a countersink reaches into a bend zone: not supported yet".into()));
+                }
+            }
+            for tr in dev.trims.iter().filter(|tr| tr.panel == cs.panel) {
+                if !crate::sheet_surface::loop_clear_of(&circle, &tr.region) {
+                    return Err(DocError::Invalid("a countersink reaches into a bend zone: not supported yet".into()));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// `pieces` adjusted for building the 3D solid before [`Self::countersunk_named`] cuts the
+    /// cones: omits standalone exit circles of full-thickness countersinks, and fills back any
+    /// opposing-cone breakthrough opening (less non-full circular bores) so the two cones cut
+    /// through solid metal cleanly without a zero-height vertical wall along their intersection.
+    /// The flat pattern keeps the exact through-opening from `pieces`.
+    fn solid_pieces_for_countersinks(&self, dev: &Development, pieces: &[(Piece, Region2)]) -> Result<Vec<(Piece, Region2)>> {
+        let t = self.thickness;
+        let tol = 1e-7;
+        let mut by_panel: BTreeMap<usize, Vec<&crate::Countersink>> = BTreeMap::new();
+        for cs in &self.countersinks {
+            by_panel.entry(cs.panel).or_default().push(cs);
+        }
+        let mut edits: BTreeMap<usize, (Vec<(Vec2, f64)>, Vec<Region2>)> = BTreeMap::new();
+        for (panel, list) in by_panel {
+            let Some(place) = dev.placements.get(panel).copied().flatten() else { continue };
+            let full: Vec<(Vec2, f64)> =
+                list.iter().filter(|c| c.depth >= t - Self::FULL_COUNTERSINK_TOL).map(|c| (place.point(c.center), c.inner_radius())).collect();
+            let has_near = list.iter().any(|c| !c.far);
+            let has_far = list.iter().any(|c| c.far);
+            let mut patch: Vec<Region2> = Vec::new();
+            if has_near && has_far {
+                let owned: Vec<crate::Countersink> = list.iter().map(|c| (*c).clone()).collect();
+                let breakthrough = crate::sheet_surface_cuts::opposing_breakthrough(&owned, t, tol).map_err(DocError::Invalid)?;
+                if !breakthrough.is_empty() {
+                    let non_full_bores: Vec<Region2> = list
+                        .iter()
+                        .filter(|c| c.depth < t - Self::FULL_COUNTERSINK_TOL && c.inner_radius() > 1e-6)
+                        .map(|c| Region2 { outer: Loop2::circle(c.center, c.inner_radius()), holes: Vec::new() })
+                        .collect();
+                    let mut patch_local = breakthrough;
+                    for bore in &non_full_bores {
+                        if patch_local.is_empty() {
+                            break;
+                        }
+                        patch_local =
+                            solidcraft_kernel::planar_regions_boolean(&patch_local, std::slice::from_ref(bore), solidcraft_kernel::BoolOp::Cut, tol)?;
+                    }
+                    patch.extend(patch_local.iter().map(|r| place.region(r)));
+                    // If a full-thickness countersink merged with the breakthrough opening, its
+                    // exit hole is no longer a standalone circle: include its disc in the patch.
+                    for c in list.iter().filter(|c| c.depth >= t - Self::FULL_COUNTERSINK_TOL && c.inner_radius() > 1e-6) {
+                        patch.push(Region2 { outer: Loop2::circle(place.point(c.center), c.inner_radius()), holes: Vec::new() });
+                    }
+                }
+            }
+            if !full.is_empty() || !patch.is_empty() {
+                edits.insert(panel, (full, patch));
+            }
+        }
+        if edits.is_empty() {
+            return Ok(pieces.to_vec());
+        }
+        let is_matching_circle = |lp: &Loop2, want_center: Vec2, want_radius: f64| -> bool {
+            let Some(Seg2::Arc { sweep: first_sweep, .. }) = lp.segs.first() else { return false };
+            let mut total = 0.0;
+            for seg in &lp.segs {
+                let Seg2::Arc { center, radius, sweep, .. } = *seg else { return false };
+                if center.dist(want_center) > 1e-3 || (radius - want_radius).abs() > 1e-3 || sweep.signum() != first_sweep.signum() {
+                    return false;
+                }
+                total += sweep;
+            }
+            (total.abs() - std::f64::consts::TAU).abs() < 1e-6
+        };
+        let mut out = Vec::with_capacity(pieces.len());
+        for (piece, region) in pieces {
+            let Piece::Panel(p) = *piece else {
+                out.push((*piece, region.clone()));
+                continue;
+            };
+            let Some((full, patch)) = edits.get(&p) else {
+                out.push((*piece, region.clone()));
+                continue;
+            };
+            let holes = if full.is_empty() {
+                region.holes.clone()
+            } else {
+                region.holes.iter().filter(|h| !full.iter().any(|(c, r)| is_matching_circle(h, *c, *r))).cloned().collect()
+            };
+            let cur = Region2 { outer: region.outer.clone(), holes };
+            if patch.is_empty() {
+                out.push((*piece, cur));
+                continue;
+            }
+            let outer_only = Region2 { outer: cur.outer.clone(), holes: Vec::new() };
+            let mut cur_vec = vec![cur];
+            for pr in patch {
+                let clipped = solidcraft_kernel::planar_regions_boolean(
+                    std::slice::from_ref(pr),
+                    std::slice::from_ref(&outer_only),
+                    solidcraft_kernel::BoolOp::Intersect,
+                    tol,
+                )?;
+                if !clipped.is_empty() {
+                    cur_vec = solidcraft_kernel::planar_regions_boolean(&cur_vec, &clipped, solidcraft_kernel::BoolOp::Union, tol)?;
+                }
+            }
+            out.extend(cur_vec.into_iter().map(|r| (*piece, r)));
+        }
+        Ok(out)
+    }
+
+    /// Cut each conical countersink in its panel's frame, carrying the body's face names through
+    /// each cut (see [`Self::recessed_named`]).
+    fn countersunk_named<T: Clone>(&self, mut body: Body, mut names: Vec<Option<T>>, frames: &[Option<Rigid3>]) -> Result<(Body, Vec<Option<T>>)> {
+        let t = self.sheet.thickness;
+        for cs in &self.countersinks {
+            let frame = frames.get(cs.panel).copied().flatten().ok_or_else(|| DocError::Invalid("a countersunk panel has no place".into()))?;
+            let tan_h = cs.half_angle.tan();
+            if !(tan_h > 0.0 && tan_h.is_finite() && cs.outer_radius > 0.0 && cs.depth > 0.0) {
+                continue;
+            }
+            let full = cs.depth >= t - Self::FULL_COUNTERSINK_TOL;
+            let depth = if full { t } else { cs.depth.min(t) };
+            let r_in = (cs.outer_radius - depth * tan_h).max(0.0);
+            // Past the opening face by a hair, as `recessed` does, so no face of the tool lies on
+            // the sheet's; above the face the tool stays at `outer_radius` (a cylinder, #5041) so
+            // it cuts nothing beside the rim.
+            let margin = t * 1e-3 + 2.0 * body.record().tolerance;
+            // When the cone meets a through-hole or exits the far face, run it a little past its
+            // inner rim into air so the cone crosses the bore or exits the sheet cleanly rather
+            // than ending on an existing edge. Stop at `depth` when a flat floor sits there.
+            let on_floor = !full
+                && self.recesses.iter().any(|r| {
+                    r.panel == cs.panel
+                        && r.far == cs.far
+                        && (r.depth - depth).abs() <= 1e-4
+                        && crate::sheet_surface_cuts::region_holds(&r.region, cs.center)
+                });
+            let extra = if full {
+                if r_in > 1e-6 { margin.min(0.5 * r_in / tan_h) } else { 0.0 }
+            } else if on_floor {
+                0.0
+            } else {
+                let next_floor = self
+                    .recesses
+                    .iter()
+                    .filter(|r| {
+                        r.panel == cs.panel
+                            && r.far == cs.far
+                            && r.depth > depth + 1e-4
+                            && crate::sheet_surface_cuts::region_holds(&r.region, cs.center)
+                    })
+                    .map(|r| r.depth)
+                    .fold(t, f64::min);
+                let max_past = (next_floor - depth) * 0.5;
+                if r_in > 1e-6 && max_past > 0.0 { ((r_in * 0.1) / tan_h).min(max_past) } else { 0.0 }
+            };
+            let len = depth + extra;
+            let r_end = (cs.outer_radius - len * tan_h).max(0.0);
+            // Revolve seam turned 0.613 rad off `frame.x` so it never coincides with the vertical
+            // edges where `sheet_surface::halved` splits circular hole walls (at 0 and π).
+            let (s, c) = 0.613_f64.sin_cos();
+            let radial = frame.x * c + frame.y * s;
+            let up = if cs.far { frame.z } else { -frame.z };
+            let origin = frame.point(Vec3::new(cs.center.x, cs.center.y, if cs.far { t } else { 0.0 }));
+            let rp = Plane::new(origin, radial, up).ok_or_else(|| DocError::Invalid("a countersunk panel has no plane".into()))?;
+            let pts = if r_end > 1e-9 {
+                vec![
+                    Vec2::new(cs.outer_radius, 0.0),
+                    Vec2::new(r_end, -len),
+                    Vec2::new(0.0, -len),
+                    Vec2::new(0.0, margin),
+                    Vec2::new(cs.outer_radius, margin),
+                ]
+            } else {
+                vec![Vec2::new(cs.outer_radius, 0.0), Vec2::new(0.0, -len), Vec2::new(0.0, margin), Vec2::new(cs.outer_radius, margin)]
+            };
+            let region = Region2 { outer: Loop2::polygon(&pts), holes: Vec::new() };
+            let tool = solidcraft_kernel::revolve(&rp, &[region], Vec2::ZERO, Vec2::Y, std::f64::consts::TAU)?
+                .pop()
+                .ok_or_else(|| DocError::Invalid("a countersink tool could not be built".into()))?;
+            body = solidcraft_kernel::boolean(&body, &tool, solidcraft_kernel::BoolOp::Cut)?
+                .ok_or_else(|| DocError::Invalid("a countersink takes the whole sheet".into()))?;
+            names = crate::sheet::carried(&names, &body);
+        }
+        Ok((body, names))
     }
 
     /// [`Self::recessed`], carrying `names`, its faces' names, through each cut.

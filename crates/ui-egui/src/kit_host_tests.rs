@@ -703,7 +703,7 @@ mod panel {
         ) -> (bool, bool) {
             content.tick().unwrap();
             host.capture_metrics(&content.runtime, &content.models).unwrap();
-            host.capture_reservations(&content.runtime, &content.catalogue).unwrap();
+            host.capture_reservations(&content.runtime, &crate::panel_runtime::CatalogueLayoutStoreRef(&content.catalogue)).unwrap();
             host.prepare(&content.runtime, LogicalRect { origin: Point { x: 0.0, y: 0.0 }, size: Size { width: 1400.0, height: 1000.0 } }).unwrap();
             *time += 1.0 / 60.0;
             let mut observed = (false, false);
@@ -786,7 +786,7 @@ mod panel {
                         &mut content.runtime,
                         &mut content.native,
                         &mut ContentServices { models: &content.models, commands: &mut content.commands, local: &mut content.local },
-                        &mut content.catalogue,
+                        &mut crate::panel_runtime::CatalogueLayoutStore(&mut content.catalogue),
                     )
                     .unwrap();
                 },

@@ -221,6 +221,28 @@ fn orbit(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             let response = setting::free_orbit_upright(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("nav.free_orbit_upright.help"));
             crate::scenario::publish_target("prefs:free_orbit_upright", response.rect);
         });
+        let label = app.tr("nav.free_orbit_key.label");
+        let width = ui_kit::ContentWidth::label(ui, label) + t.space_16 + t.space_4;
+        ui_kit::settings_form(ui, width, |ui| {
+            ui_kit::settings_row_help(ui, label, app.tr("nav.free_orbit_key.help"), |ui| {
+                let current = FreeOrbitKey::of(app);
+                let name = |key: FreeOrbitKey| match key {
+                    FreeOrbitKey::Off => solidcraft_ui_text::tr("nav.buttons.no_key"),
+                    FreeOrbitKey::Alt => "Alt/Option",
+                    FreeOrbitKey::Ctrl => "Ctrl/Cmd",
+                };
+                ui_kit::settings_control_width(ui, t.space_24 * 4.0, |ui| {
+                    let response = ui_kit::dropdown_menu(ui, "pref_free_orbit_key", name(current), |ui| {
+                        for &(key, id) in FreeOrbitKey::ALL {
+                            if ui_kit::list_picker(ui, id, name(key), current == key).clicked() {
+                                app.preferences.free_orbit_key = id.into();
+                            }
+                        }
+                    });
+                    crate::scenario::publish_target("prefs:free_orbit_key", response.rect);
+                });
+            });
+        });
     });
 }
 

@@ -22,5 +22,8 @@
   },
   "zh": {
     "ui.sketch_use_fixed_plane_explained": "“Use fixed plane”会在此面的当前平面上创建草图，不会跟随该面之后的更改。"
+  },
+  "fr": {
+    "ui.sketch_use_fixed_plane_explained": "L’option Utiliser un plan fixe crée l’esquisse sur le plan actuel de cette face. Elle ne suivra pas les modifications ultérieures de la face."
   }
 }
