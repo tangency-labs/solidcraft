@@ -1833,7 +1833,12 @@ fn footprint_copper_graphics_and_wildcard_pads_reach_the_inner_layers_or_are_rep
         .filter(|mesh| mesh.name.starts_with("Copper In1.Cu"))
         .flat_map(|mesh| mesh.positions.as_chunks::<3>().0.iter().map(|p| f64::from(p[0])))
         .collect();
-    assert!(xs.iter().any(|x| (*x - 8.0).abs() < 0.05), "the footprint's rectangle is on In1: {xs:?}");
+    // The rectangle spans X = 8 to 12 (its stroke reaches 0.1 mm past that); the pad's ring spans 14.2 to 15.8.
+    assert!(
+        xs.iter().any(|x| (*x - 8.0).abs() < 0.15),
+        "the footprint's rectangle is on In1: {:?}",
+        xs.iter().map(|x| (x * 10.0).round() / 10.0).collect::<Vec<_>>()
+    );
     // A board with only wildcard pads on its inner layers still says the overlay leaves them out,
     // and a board thinner than the foil says it has no room.
     let mut load = |_: &str| Err("not used".to_string());
