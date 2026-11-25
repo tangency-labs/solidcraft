@@ -26,7 +26,7 @@ pub(crate) enum RecordCell {
     Moved(std::sync::Arc<LazyMove>),
 }
 
-/// How a record moves by a rigid motion ([`solidcraft_geom::brep::placement::moved`]).
+/// How a record moves by a rigid motion ([`crate::placement::moved`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Movable {
     /// It does not: it is moved by mapping it, or in SMLib.
@@ -40,7 +40,7 @@ pub(crate) enum Movable {
 
 impl Movable {
     /// Whether the record moves by `motion`.
-    fn by(self, motion: &solidcraft_geom::brep::placement::Rigid) -> bool {
+    fn by(self, motion: &crate::placement::Rigid) -> bool {
         match self {
             Movable::No => false,
             Movable::Exactly => motion.is_exact(),
@@ -61,13 +61,13 @@ pub(crate) struct Placing {
 #[derive(Debug)]
 pub(crate) struct LazyMove {
     source: std::sync::Arc<Brep>,
-    motion: solidcraft_geom::brep::placement::Rigid,
+    motion: crate::placement::Rigid,
     matrix: [[f64; 4]; 4],
     made: std::sync::OnceLock<std::sync::Arc<Brep>>,
 }
 
 impl LazyMove {
-    pub(crate) fn new(source: std::sync::Arc<Brep>, motion: solidcraft_geom::brep::placement::Rigid, matrix: [[f64; 4]; 4]) -> LazyMove {
+    pub(crate) fn new(source: std::sync::Arc<Brep>, motion: crate::placement::Rigid, matrix: [[f64; 4]; 4]) -> LazyMove {
         LazyMove { source, motion, matrix, made: std::sync::OnceLock::new() }
     }
 
@@ -75,8 +75,7 @@ impl LazyMove {
         self.made.get_or_init(|| {
             // The record was checked to move exactly before it was placed this way; should that
             // fail after all, it is mapped, and as a last resort kept where it is (logged).
-            let moved = solidcraft_geom::brep::placement::moved(&self.source, &self.motion)
-                .or_else(|| solidcraft_geom::brep::placement::mapped(&self.source, &self.matrix));
+            let moved = crate::placement::moved(&self.source, &self.motion).or_else(|| crate::placement::mapped(&self.source, &self.matrix));
             match moved {
                 Some(r) => std::sync::Arc::new(r),
                 None => {
@@ -363,7 +362,7 @@ pub fn placed_mesh(m: &Mesh, t: &[[f64; 4]; 4]) -> Option<Mesh> {
             t[0][2] * v.x + t[1][2] * v.y + t[2][2] * v.z + w * t[3][2],
         )
     };
-    solidcraft_geom::brep::placement::Rigid::of_matrix(t)?;
+    crate::placement::Rigid::of_matrix(t)?;
     Some(Mesh {
         positions: m.positions.iter().map(|p| r(*p, 1.0)).collect(),
         normals: m.normals.iter().map(|n| r(*n, 0.0)).collect(),
@@ -703,7 +702,7 @@ impl SurfaceKind {
 
 /// A record prepared for hidden lines with [`OUTLINE_TRIM_SAMPLES`], or why it could not be.
 #[derive(Default)]
-pub(crate) struct OutlinePrep(std::sync::OnceLock<Option<solidcraft_geom::hlr::Prepared>>);
+pub(crate) struct OutlinePrep(std::sync::OnceLock<Option<crate::hlr::Prepared>>);
 
 impl std::fmt::Debug for OutlinePrep {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -723,20 +722,19 @@ impl Body {
         matches!(&self.record, RecordCell::Moved(m) if m.made.get().is_some())
     }
 
-    /// The record prepared for hidden lines ([`solidcraft_geom::hlr::prepare`] with
+    /// The record prepared for hidden lines ([`crate::hlr::prepare`] with
     /// [`OUTLINE_TRIM_SAMPLES`] on one thread), as a whole-body projection traces its outline:
     /// made the first time it is asked for and shared by clones, which share the record. None
     /// for a mesh body and when the record cannot be prepared.
-    pub fn outline_prepared(&self) -> Option<&solidcraft_geom::hlr::Prepared> {
+    pub fn outline_prepared(&self) -> Option<&crate::hlr::Prepared> {
         self.outline
             .0
             .get_or_init(|| {
                 if self.is_mesh() {
                     return None;
                 }
-                let opts =
-                    solidcraft_geom::hlr::Options { trim_samples: OUTLINE_TRIM_SAMPLES, threads: 1, ..solidcraft_geom::hlr::Options::default() };
-                solidcraft_geom::hlr::prepare(self.record(), &opts).ok()
+                let opts = crate::hlr::Options { trim_samples: OUTLINE_TRIM_SAMPLES, threads: 1, ..crate::hlr::Options::default() };
+                crate::hlr::prepare(self.record(), &opts).ok()
             })
             .as_ref()
     }
@@ -1431,16 +1429,14 @@ impl Body {
     /// already is moved by both motions at once, without moving its record in between. The body
     /// keeps what a rigid move keeps (face order, sources, colour, paint, the display it shares
     /// with its part's other copies); its history is the identity.
-    pub(crate) fn moved_lazily(&self, motion: solidcraft_geom::brep::placement::Rigid, matrix: [[f64; 4]; 4]) -> Option<Body> {
+    pub(crate) fn moved_lazily(&self, motion: crate::placement::Rigid, matrix: [[f64; 4]; 4]) -> Option<Body> {
         if self.mesh.is_some() {
             return None;
         }
         let movable = *self.placing.movable.get_or_init(|| {
             let identity = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
             let source = self.record.lazy().map_or_else(|| self.record.arc().clone(), |m| m.source().clone());
-            let moves = solidcraft_geom::brep::placement::Rigid::of_matrix(&identity)
-                .and_then(|id| solidcraft_geom::brep::placement::moved(&source, &id))
-                .is_some();
+            let moves = crate::placement::Rigid::of_matrix(&identity).and_then(|id| crate::placement::moved(&source, &id)).is_some();
             let blended = source.faces.iter().any(|f| matches!(f.surface, solidcore_record::brep::Surface::Blend { .. }));
             match (moves, blended) {
                 (false, _) => Movable::No,
@@ -1462,7 +1458,7 @@ impl Body {
             Some(inner) => (inner.source().clone(), solidcore_ops::affine::then(&inner.matrix, &matrix).ok()?),
             None => (self.record.arc().clone(), matrix),
         };
-        let motion = solidcraft_geom::brep::placement::Rigid::of_matrix(&matrix).filter(|m| movable.by(m))?;
+        let motion = crate::placement::Rigid::of_matrix(&matrix).filter(|m| movable.by(m))?;
         Some(Body {
             record: RecordCell::Moved(std::sync::Arc::new(LazyMove::new(source, motion, matrix))),
             placing: self.placing.clone(),
@@ -1730,7 +1726,7 @@ impl Body {
         // A placed copy is planned as its original, moved (as `Body::mesh` shows the original's
         // mesh): the part is planned once for every copy.
         if let Some((shared, m)) = self.display_of.as_deref()
-            && solidcraft_geom::brep::placement::Rigid::of_matrix(m).is_some()
+            && crate::placement::Rigid::of_matrix(m).is_some()
         {
             return Ok(remembered(&shared.plans, t, || shared.original.mesh_plan_untimed(t))?.transformed(m));
         }

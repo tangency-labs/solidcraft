@@ -422,10 +422,3 @@ fn an_accuracy_scales_with_its_curve() {
         "a sampled zero stays sampled"
     );
 }
-
-/// A drawing's hidden lines (solidcore's) take as many items as a section: one aggregate limit.
-#[test]
-fn hidden_lines_share_the_section_item_limit() {
-    assert_eq!(crate::hlr::MAX_ITEMS, MAX_ITEMS);
-    assert_eq!(crate::hlr::Options::default().max_tracks, MAX_ITEMS);
-}
