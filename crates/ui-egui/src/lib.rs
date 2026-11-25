@@ -601,6 +601,8 @@ pub struct Services {
     pub open_bytes: Option<Box<dyn Fn(&str, &str, &[u8]) -> Result<(), String>>>,
     /// Open a file in the program the system opens its kind with (a PDF in its viewer, to print).
     pub open_path: Option<Box<dyn Fn(&str) -> Result<(), String>>>,
+    /// A browser persists prepared design bytes and acknowledges them after the write ends.
+    pub persist_design: Option<save_job::PersistDesign>,
     /// Open a dialog for one file of a kind (its name, its extensions): on macOS a dialog allows
     /// only the types it names, so the agent chat's files need a dialog of their own. `None`: the
     /// Open dialog.
@@ -754,6 +756,8 @@ pub struct SolveApp {
     pub(crate) import_report: Option<import_report::Shown>,
     /// A Save or Save As being written on a worker (see [`save_job`]).
     saving: Option<save_job::Saving>,
+    host_saves: Vec<save_job::HostSaving>,
+    host_save_left_dirty: std::collections::HashSet<u64>,
     /// A signature check running on a worker (see [`verify_job`]).
     verifying: Option<verify_job::Verifying>,
     /// A drawing view being drawn on a worker (see [`drawing_jobs`]).
@@ -1175,6 +1179,8 @@ impl SolveApp {
             plugin_updates: Default::default(),
             import_report: None,
             saving: None,
+            host_saves: Vec::new(),
+            host_save_left_dirty: Default::default(),
             verifying: None,
             drawing_job: None,
             viewport: viewport::ViewportState::default(),
@@ -1863,6 +1869,14 @@ impl SolveApp {
             self.status = None;
         }
         let done = self.command_completed(id, r);
+        if done.is_ok()
+            && id == "view.navigate"
+            && params.get("action").and_then(Value::as_str) == Some("turn_around")
+            && params.get("direction").is_none()
+            && params.get("motion").is_none()
+        {
+            self.cam_anim = self.cam_anim.map(Self::screen_up_turn);
+        }
         issue_report::ticket::step_params(self, id, params);
         if self.session.revision != revision {
             timeline::stop_playback(self);
@@ -2146,6 +2160,14 @@ impl SolveApp {
             }
             if id == "view.origin_axes_across_view" {
                 self.preferences.origin_axes_across_view = v.get("enabled").and_then(Value::as_bool).unwrap_or(false);
+            }
+            if id == "view.isolate_others" {
+                if let Some(show) = v.get("show").and_then(|s| serde_json::from_value(s.clone()).ok()) {
+                    self.preferences.isolate_others = show;
+                }
+                if let Some(pick) = v.get("pick").and_then(Value::as_bool) {
+                    self.preferences.isolate_others_pick = pick;
+                }
             }
             if id == "view.scale_bar" {
                 self.preferences.scale_bar = v.get("enabled").and_then(Value::as_bool).unwrap_or(false);
@@ -4178,7 +4200,11 @@ impl SolveApp {
             };
             self.fit_waits = 0;
             if animate {
+                let screen_up_turn = self.cam_anim.as_ref().is_some_and(CameraAnim::is_screen_up_turn);
                 self.animate_to(to);
+                if screen_up_turn {
+                    self.cam_anim = self.cam_anim.map(Self::screen_up_turn);
+                }
             } else {
                 let previous = self.cam;
                 self.cam = to;
@@ -4191,6 +4217,20 @@ impl SolveApp {
             }
             ctx.request_repaint();
         }
+    }
+
+    /// Select the screen-up turn through the kernel adapter; the shared viewport owns timing.
+    fn screen_up_turn(animation: CameraAnim) -> CameraAnim {
+        if !animation.from.is_valid() || !animation.to.is_valid() || animation.from.up != animation.to.up {
+            return animation.around_screen_up(None);
+        }
+        let (_, up, back) = animation.from.basis();
+        let (_, to_up, to_back) = animation.to.basis();
+        if !matches!(solidcraft_kernel::services::measure::points_meet(up.into(), to_up.into(), 1e-9), Ok(true)) {
+            return animation.around_screen_up(None);
+        }
+        let angle = solidcraft_kernel::services::affine::signed_unit_angle(up.into(), back.into(), to_back.into()).ok();
+        animation.around_screen_up(angle)
     }
 
     /// Move the camera to `to` over half a second (ease in-out, orientation slerped).
@@ -5049,6 +5089,10 @@ impl SolveApp {
             ctx.request_repaint();
             return;
         };
+        if control::host_save(self, &req) {
+            ctx.request_repaint();
+            return;
+        }
         let reply = req.reply.clone();
         match control::handle(self, ctx, &req) {
             control::Outcome::Done(v) => {

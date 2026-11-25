@@ -32,12 +32,14 @@ browser.collapse_all              the browser tree: order, groups and folding
 browser.expand_all                the browser tree: order, groups and folding
 browser.find                      the browser tree: search by name; crates/engine/src/browser_find_tests.rs
 browser.group                     the browser tree: order, groups and folding
+browser.isolate                   visibility only: crates/engine/src/cmd/browser.rs tests
 browser.move                      the browser tree: order, groups and folding
 browser.order                     the browser tree: order, groups and folding
 browser.rename_group              the browser tree: order, groups and folding
 browser.toggle_planes             the browser: crates/engine/src/cmd/browser.rs tests
 browser.toggle_reference          the browser: crates/engine/src/cmd/browser.rs tests
 browser.ungroup                   the browser tree: order, groups and folding
+browser.unisolate                 visibility only: crates/engine/src/cmd/browser.rs tests
 canvas.calibrate                  reference images, and sketches traced from them (sketch only)
 canvas.decal                      reference images, and sketches traced from them (sketch only)
 canvas.delete                     reference images, and sketches traced from them (sketch only)
@@ -572,6 +574,7 @@ view.grid                         the view: camera, layout, display
 view.ground_shadow                the view: camera, layout, display
 view.history_layout               the view: camera, layout, display
 view.home                         the view: camera, layout, display
+view.isolate_others               display-only preference: crates/engine/src/cmd/view_navigation.rs and crates/ui-egui/src/viewport tests
 view.isometric                    the view: camera, layout, display
 view.layout                       the view: camera, layout, display
 view.left                         the view: camera, layout, display
