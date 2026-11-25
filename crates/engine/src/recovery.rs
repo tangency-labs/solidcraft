@@ -282,6 +282,9 @@ struct Snapshot {
     visibility: crate::Visibility,
     dimension_values: crate::DimensionValues,
     path: Option<String>,
+    /// Whether the design's saves keep the bodies of linked designs ([`Session::linked_bodies`]).
+    /// The copy holds them either way; it carries the choice, so a recovered design keeps it.
+    linked_bodies: bool,
 }
 
 impl Snapshot {
@@ -291,7 +294,11 @@ impl Snapshot {
     fn write(&self) -> Result<Vec<String>> {
         let io = |e: std::io::Error| EngineError::Other(format!("autosave: {e}"));
         let (doc, left_out) = drawing::openable(&self.doc);
-        let bytes = solidcraft_io::write_design_container(&crate::as_saved(&doc, &self.visibility, &self.dimension_values))?;
+        let mut design = crate::as_saved(&doc, &self.visibility, &self.dimension_values);
+        if !self.linked_bodies {
+            design.to_mut().linked_bodies_left_out = true;
+        }
+        let bytes = solidcraft_io::write_design_container(&design)?;
         solidcraft_io::write_atomic(&file(&self.dir, &self.id, solidcraft_io::DESIGN_EXT), &bytes, false).map_err(io)?;
         let entry = Entry {
             id: self.id.clone(),
@@ -374,7 +381,15 @@ impl Autosaver {
                 }
                 // No thread to write on: write here, as before.
                 Err(_) => {
-                    let snapshot = Snapshot { dir: self.dir.clone(), id: self.id.clone(), doc, visibility, dimension_values, path: s.path.clone() };
+                    let snapshot = Snapshot {
+                        dir: self.dir.clone(),
+                        id: self.id.clone(),
+                        doc,
+                        visibility,
+                        dimension_values,
+                        path: s.path.clone(),
+                        linked_bodies: s.linked_bodies,
+                    };
                     let written = snapshot.write();
                     self.written(s, snapshot.doc, snapshot.visibility, written)?;
                     Ok(true)
@@ -415,6 +430,7 @@ impl Autosaver {
             visibility: s.visibility.clone(),
             dimension_values: s.dimension_values.clone(),
             path: s.path.clone(),
+            linked_bodies: s.linked_bodies,
         })
     }
 
