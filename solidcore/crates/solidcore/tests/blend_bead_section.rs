@@ -1779,10 +1779,61 @@ fn a_sagitta_past_its_bound_is_refused_with_the_sagitta_that_fits() {
     assert!(smb(&k, &part) == before, "the tubes changed");
 }
 
+/// Between two planes the bead takes every sagitta the planar bead takes, and no other: at
+/// 90, 60 and 120 degrees with 4 mm legs, concave and convex, a bead too deep or too high is
+/// refused with the planar bead's own fit (`beads_apart`: the exact bead's frame, the float
+/// below its closed-form bound), to the bit; at that fit it builds, and at the next float
+/// up, the bound itself, it is refused. The part does not change.
+#[test]
+fn a_bead_between_planes_takes_the_planar_bead_s_sagittas() {
+    use solidcore::error::FitMeasure;
+    for alpha in [FRAC_PI_2, FRAC_PI_3, 2.0 * FRAC_PI_3] {
+        let mut k = kernel();
+        let (mut b, at) = corner(&mut k, alpha);
+        let edge = pick(&k, &b, at);
+        let before = smb(&k, &b);
+        let size = ChamferSize::Distances([4.0; 2]);
+        for sign in [-1.0, 1.0] {
+            let planar = beads_apart(&mut k, &mut b, &[edge], &[size], sign * 100.0, &[])
+                .unwrap_err()
+                .fit()
+                .unwrap();
+            assert_eq!(planar.measure, FitMeasure::Sagitta);
+            let mut bead =
+                |h: f64| weld_bead_body(&mut k, &mut b, &[edge], &[size], h, &[], &[], SQUARE);
+            let err = bead(sign * 100.0).err().unwrap();
+            let fit = err.fit().unwrap();
+            println!(
+                "{} degrees, side {sign}: the planar bead's fit {}, the weld's {}",
+                alpha.to_degrees(),
+                planar.size,
+                fit.size
+            );
+            assert_eq!(fit.measure, FitMeasure::Sagitta, "{err}");
+            assert!(
+                fit.size.to_bits() == planar.size.to_bits(),
+                "{} against the planar bead's {}",
+                fit.size,
+                planar.size
+            );
+            let built = bead(sign * planar.size);
+            assert!(
+                built.is_ok(),
+                "at the planar bead's fit {}: {:?}",
+                planar.size,
+                built.err()
+            );
+            let bound = f64::from_bits(planar.size.to_bits() + 1);
+            assert!(bead(sign * bound).is_err(), "built at the bound {bound}");
+        }
+        assert!(smb(&k, &b) == before, "the corner changed");
+    }
+}
+
 /// A refusal's size is searched over the whole weld, not the failed piece's alone: round the
 /// T-joint the concave bound changes along the joint, and a stitch of three short spans that
-/// is too deep names a depth no larger than the least any of its spans names alone (to a
-/// twentieth: a span's own size is that of its own stations), and a tenth shallower than it
+/// is too deep names the least depth any of its spans names alone (each span's size is
+/// enclosed over that span alone, for the fit as for the build), and at exactly that depth
 /// the stitch builds. Both ways round the joint, so that in one the first span is not the
 /// tightest.
 #[test]
@@ -1808,8 +1859,11 @@ fn a_stitch_too_deep_names_the_least_depth_of_its_spans() {
         let together = depth(&stitch).expect("the stitch is refused with a depth");
         println!("spans alone {alone:?}, together {together}");
         assert!(least.is_finite(), "no span alone is refused with a depth");
-        assert!(together <= least * 1.05, "{together} against {alone:?}");
-        assert!(bead(&stitch, -0.9 * together).is_ok(), "{together}");
+        assert!(
+            together.to_bits() == least.to_bits(),
+            "{together} against {alone:?}"
+        );
+        assert!(bead(&stitch, -together).is_ok(), "{together}");
     }
 }
 
@@ -1984,6 +2038,9 @@ fn the_bound_enclosed_over_a_joint_is_below_the_bound_at_every_parameter() {
                 "{what}, sagitta {h}: enclosed {enclosed:?}, least of 2001 parameters {least}, {took:?}"
             );
             if let Ok((lower, _)) = enclosed {
+                // the lower end is below the bound at every parameter; the reference is
+                // `bound_at` in floats at 2001 of them, a few last places off the bound
+                // there either way, so the comparison leaves it 1e-12 of itself
                 assert!(
                     lower <= least * (1.0 + 1e-12),
                     "{what} {h}: {lower} above {least}"
