@@ -1878,7 +1878,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
         // Not upstream: proto vertices that a point's uncertainty region does not tell
         // apart are one (docs/booleans.md, "One point or two")
-        mgr.combine_proto_vertices_not_proved_apart(k)?;
+        mgr.combine_proto_vertices_with_incidence(k, &*brep)?;
 
         // 1. for every ProtoEdge pair - split ProtoEdges at ProtoEdge/ProtoEdge XSects
         // (the list is re-read after each split: splitting appends proto edges)
@@ -2530,6 +2530,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     Err(
                         e @ (SolidError::Unported { .. }
                         | SolidError::Cancelled { .. }
+                        | SolidError::OutOfFuel { .. }
                         | SolidError::InvalidInput { .. }
                         | SolidError::PortInvariant { .. }),
                     ) => return Err(e),
@@ -2830,6 +2831,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                             Err(
                                 err @ (SolidError::Unported { .. }
                                 | SolidError::Cancelled { .. }
+                                | SolidError::OutOfFuel { .. }
                                 | SolidError::InvalidInput { .. }
                                 | SolidError::PortInvariant { .. }),
                             ) => return Err(err),

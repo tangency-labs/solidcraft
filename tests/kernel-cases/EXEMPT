@@ -26,6 +26,7 @@ assembly.constraint.create        assembly placement: tested in joints_relations
 assembly.constraint.edit          assembly placement: tested in joints_relations_tests.rs
 body.collision                    URDF collision shape: no geometry built (crates/engine/src/cmd/urdf_tests.rs)
 body.print_faces                  reports which bodies have a print face; crates/engine/src/cmd/print_face.rs tests
+body.remove_history               timeline bookkeeping: the body's B-rep kept as a base feature (crates/engine/src/cmd/edit_tests.rs)
 body.rename                       a body name
 browser.collapse_all              the browser tree: order, groups and folding
 browser.expand_all                the browser tree: order, groups and folding
@@ -95,6 +96,14 @@ drawing.balloon.edit              a drawing: its tests in crates/engine/src/cmd/
 drawing.balloon.inspect           a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.balloon.repair            a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.break.preview             read-only drawing preview: crates/engine/src/cmd/drawing_break_tests.rs and crates/ui-egui/src/broken_view_preview_tests.rs
+drawing.center_line.add          paper annotation: tested in crates/engine/src/cmd/drawing_centre_mark_tests.rs
+drawing.center_line.edit         paper annotation: tested in crates/engine/src/cmd/drawing_centre_mark_tests.rs
+drawing.center_line.inspect      paper annotation: tested in crates/engine/src/cmd/drawing_centre_mark_tests.rs
+drawing.center_line.remove       paper annotation: tested in crates/engine/src/cmd/drawing_centre_mark_tests.rs
+drawing.center_mark.add          paper annotation: tested in crates/engine/src/cmd/drawing_centre_mark_tests.rs
+drawing.center_mark.edit         paper annotation: tested in crates/engine/src/cmd/drawing_centre_mark_tests.rs
+drawing.center_mark.inspect      paper annotation: tested in crates/engine/src/cmd/drawing_centre_mark_tests.rs
+drawing.center_mark.remove       paper annotation: tested in crates/engine/src/cmd/drawing_centre_mark_tests.rs
 drawing.check                     a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.close                     a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.create                    a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
@@ -386,6 +395,7 @@ settings.profile.import           settings profiles: preferences saved, applied 
 settings.profile.list             settings profiles: preferences saved, applied and shared
 settings.profile.rename           settings profiles: preferences saved, applied and shared
 settings.profile.save             settings profiles: preferences saved, applied and shared
+sheet.bead                        formed beads pressed into a panel: crates/engine/src/cmd/sheet_surface_bead_tests.rs and solidcore/crates/solidcore/src/develop/bead_tests.rs
 sheet.convert                     every face a panel: crates/engine/src/cmd/sheet_surface_convert_tests.rs and sheet_convert_tests.rs (thin solids are sheet.recognize, which the convert-named cases here run)
 sheet.measure_body                measures a body's thickness and modelled bend radii, makes nothing: crates/engine/src/cmd/sheet_recognize_tests.rs
 sheet.rule_library                the standard library's listing, makes nothing: crates/engine/src/cmd/sheet_tests.rs and crates/doc/src/sheet_library_tests.rs
@@ -483,6 +493,7 @@ sketch.spline.insert_point        2D sketch only (the sketch solver and engine t
 sketch.spline.remove_point        2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.spline.reset_handles       2D sketch only (crates/engine/src/cmd/sketch_create.rs: blend_tests::reset_tangent_handles_gives_back_the_spline_through_its_fit_points); no kernel operation
 sketch.spline.reverse             2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.spline3d.control_point     a 3D sketch curve: its tests in crates/engine/src/cmd/sketch_3d_frame_tests.rs
 sketch.toggle_diameter            2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.toggle_driven              2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.transform                  2D sketch only (the sketch solver and engine tests); no kernel operation
@@ -581,6 +592,7 @@ view.render_stage                 the view: camera, layout, display
 view.ribbon_tabs_only             the view: camera, layout, display
 view.right                        the view: camera, layout, display
 view.save                         the view: camera, layout, display
+view.scale_bar                    display-only preference: crates/engine/src/cmd/view_navigation.rs and crates/ui-egui/src/scale_bar.rs
 view.set_compass                  per-view UI visibility, no geometry
 view.shots_strip                  the view: camera, layout, display
 view.spin                         the view: camera, layout, display
