@@ -185,8 +185,13 @@ fn vec_status<T>(r: Result<T>) -> Result<T> {
 // ---- unported callees -------------------------------------------------------------------
 
 /// Not upstream (tangency-labs/solidcore#3399): the share of its fit tolerance a trim that
-/// would raise its edge's tolerance is fitted again at ([`get_or_create_uv_trim_curve`]).
+/// would raise its edge's tolerance is fitted again at ([`refit_raising_trim`]).
 const REFIT_SHARE: f64 = 1e-3;
+
+/// Not upstream (tangency-labs/solidcore#3399): the share of the first trim's distance a refit
+/// trim must lie within to replace it ([`refit_raising_trim`]): a trim whose fit error adds
+/// less than 1% to its distance keeps its first fit.
+const REFIT_GAIN: f64 = 0.99;
 
 /// What `SmSurface::DropCurve` produced.
 #[derive(Debug)]
@@ -1827,15 +1832,17 @@ pub fn get_or_create_uv_trim_curve(
 }
 
 /// Not upstream (tangency-labs/solidcore#3399): `created`, the new trim of `eu`, or the same
-/// trim fitted again at [`REFIT_SHARE`] of the fit tolerance where that one lies closer to the
-/// edge, when `created` lies far enough from the edge to raise its tolerance
-/// (`SetUVTrimCurve` raises a tolerance below twice the distance). The drop's fit error (up to
-/// the fit tolerance, the edge's own) is part of that distance, and the edge is raised to
-/// cover the trim, not the curve it was fitted from: a line dropped onto a cylinder at 4e-5
-/// gave a trim 2.7e-5 from the line where the line is 2.5e-5 from the cylinder, and raised the
-/// edge and its two vertices to 5.4e-5 instead of 5.0e-5. A validate-only pass raises nothing
-/// (`Kernel::with_held_trim_raise`, `bValidateOnly`), so it fits once; a refit that fails
-/// leaves `created`.
+/// trim fitted again at [`REFIT_SHARE`] of the fit tolerance where that one lies within
+/// [`REFIT_GAIN`] of `created`'s distance from the edge, when `created` lies far enough from
+/// the edge to raise its tolerance (`SetUVTrimCurve` raises a tolerance below twice the
+/// distance). The drop's fit error (up to the fit tolerance, the edge's own) is part of that
+/// distance, and the edge is raised to cover the trim, not the curve it was fitted from: a
+/// line dropped onto a cylinder at 4e-5 gave a trim 2.7e-5 from the line where the line is
+/// 2.5e-5 from the cylinder, and raised the edge and its two vertices to 5.4e-5 instead of
+/// 5.0e-5. A validate-only pass raises nothing (`Kernel::with_held_trim_raise`,
+/// `bValidateOnly`), so it fits once. A refit not kept (it fails, or it is not that much
+/// closer) leaves `created`, and the edge and its vertices at the tolerances they had: a drop
+/// at a larger tolerance raises them.
 ///
 /// # Errors
 ///
@@ -1857,6 +1864,12 @@ fn refit_raising_trim(
         return Ok(created);
     }
     let fit = zone_tol3d(k, REFIT_SHARE * fit_tolerance(k, b, e)?);
+    let (v0, v1) = crate::topology::edge::start_end_vertices(b, e)?;
+    let mut held = Vec::new();
+    for v in [v0, v1].into_iter().flatten() {
+        held.push((v, b.vertex(v)?.tolerance));
+    }
+    let edge_tol = b.edge(e)?.tolerance;
     let tight = ignored(create_uv_trim_curve_fitted(
         k,
         b,
@@ -1865,10 +1878,16 @@ fn refit_raising_trim(
         None,
         Some(fit),
     ))?;
-    Ok(match tight {
-        Some(t) if t.max_dist_to_surf < created.max_dist_to_surf => t,
-        _ => created,
-    })
+    if let Some(t) = tight {
+        if t.max_dist_to_surf <= REFIT_GAIN * created.max_dist_to_surf {
+            return Ok(t);
+        }
+    }
+    crate::topology::edge::set_tolerance(b, e, edge_tol, false, false)?;
+    for (v, t) in held {
+        crate::topology::vertex::set_tolerance(b, v, t, false, false)?;
+    }
+    Ok(created)
 }
 
 /// Not upstream (#18162, #18009): the distance `SetUVTrimCurve` raises an edge's tolerance to
