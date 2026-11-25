@@ -3760,6 +3760,16 @@ fn batch_does_not_resend_after_a_transport_error() {
     assert!(body.as_str().is_some_and(|t| t.contains("may have run") && t.contains("timed out")), "{body}");
 }
 
+/// A batch the user declined ran nothing: it is not reported as one that may have run.
+#[test]
+fn batch_declined_by_the_user_says_it_did_not_run() {
+    let (b, body, is_error) =
+        recorded_batch(Err("not run: the user declined this call".into()), json!({"commands": [{"command": "a.one"}, {"command": "a.two"}]}));
+    assert_eq!(methods(&b), ["engine.batch"]);
+    assert!(is_error);
+    assert_eq!(body.as_str(), Some("not run: the user declined this call"), "{body}");
+}
+
 /// A batch longer than one control line goes step by step instead of being refused unrun.
 #[test]
 fn batch_too_large_for_one_control_line_goes_per_step() {

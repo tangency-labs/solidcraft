@@ -3649,15 +3649,7 @@ impl Surface {
         tol: f64,
         farthest: bool,
     ) -> Result<SingularityInversion> {
-        let body =
-            || self.invert_near_singularity_body(k, test_pt, uv_domain, uv_guess, tol, farthest);
-        // (test-only seam of the WR-57 substitution replay, feature `wr57-replay`)
-        #[cfg(feature = "wr57-replay")]
-        let body = || {
-            let input = super::replay::invert_input(test_pt, uv_domain, uv_guess, tol);
-            super::replay::wrap(k, self, super::replay::Seam::Invert, &input, farthest, body)
-        };
-        body()
+        self.invert_near_singularity_body(k, test_pt, uv_domain, uv_guess, tol, farthest)
     }
 
     /// [`Surface::invert_point_near_singularity_for`]'s work.

@@ -191,6 +191,7 @@ pub use eval::PlacedBodies;
 pub use eval::PreparedMeshImport;
 pub use eval::RevolveExtent;
 pub use eval::SavedModel;
+pub use eval::SketchCopy;
 pub use eval::SolvedSketch;
 pub use eval::ThreadInfo;
 pub use eval::blend_target;
