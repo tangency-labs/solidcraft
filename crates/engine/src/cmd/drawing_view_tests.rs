@@ -2603,6 +2603,33 @@ fn an_exploded_view_takes_what_measures_its_parts_where_it_draws_them() {
     assert!(near_value(&run(&mut s, "drawing.dimension.inspect", json!({"dimension": on_above})), 70.0));
 }
 
+/// A balloon and a note are taken off a drawing by their own commands (#22193): each reply names
+/// what went, the other stays, a second delete is refused, and one undo puts it back.
+#[test]
+fn a_balloon_and_a_note_are_deleted_by_their_own_commands() {
+    let (mut s, view, [_, second], _) = exploded_pair();
+    let edge = json!({"point": [35, 0, 0], "path": [second]});
+    let balloon = run(&mut s, "drawing.balloon.add", json!({"view": ids::encode(view), "edge": edge, "at": [60, 40]}))["balloon"].clone();
+    let note = json!({"anchor": {"view": ids::encode(view)}, "at": [60, -40], "content": "Deburr"});
+    let note = run(&mut s, "drawing.note.add", note)["note"].clone();
+
+    let gone = run(&mut s, "drawing.balloon.delete", json!({"balloon": balloon}));
+    assert_eq!(gone, json!({"balloon": balloon}));
+    assert!(s.execute("drawing.balloon.inspect", &json!({"balloon": balloon})).is_err(), "the balloon is gone");
+    assert!(s.execute("drawing.balloon.delete", &json!({"balloon": balloon})).is_err(), "a second delete is refused");
+    assert_eq!(run(&mut s, "drawing.note.inspect", json!({"note": note}))["status"], "ok", "the note stays");
+
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(run(&mut s, "drawing.balloon.inspect", json!({"balloon": balloon}))["status"], "ok", "one undo brings it back");
+
+    let gone = run(&mut s, "drawing.note.delete", json!({"note": note}));
+    assert_eq!(gone, json!({"note": note}));
+    assert!(s.execute("drawing.note.inspect", &json!({"note": note})).is_err(), "the note is gone");
+    assert!(s.execute("drawing.note.delete", &json!({"note": note})).is_err(), "a second delete is refused");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(run(&mut s, "drawing.note.inspect", json!({"note": note}))["status"], "ok", "one undo brings it back");
+}
+
 /// A projected view's centre annotation blocks its parent from exploding until the follower
 /// explicitly chooses the assembled design for itself.
 #[test]
