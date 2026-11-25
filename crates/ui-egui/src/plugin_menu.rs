@@ -154,6 +154,33 @@ pub(crate) struct Field {
     controls: Option<Map<String, Value>>,
     hook: Option<solidcraft_engine::plugin::dialog::FieldPatch>,
     hook_baseline: Option<Input>,
+    pub(crate) layout: Layout,
+}
+
+/// How a field sits in the dialog, from the layout annotations of `craft_plugin::layout`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct Layout {
+    /// A heading drawn above the field; empty for a divider line.
+    pub(crate) section: Option<String>,
+    /// The heading folds the fields under it, down to the next heading.
+    pub(crate) collapsible: bool,
+    /// The choice field whose current value is this field's unit.
+    pub(crate) unit_from: Option<String>,
+    /// An `https` page the field's help link opens.
+    pub(crate) help: Option<String>,
+}
+impl Layout {
+    fn read(property: &Value, collapsible: bool) -> Self {
+        use craft_plugin::layout::{HELP, SECTION, UNIT_FROM, help_url};
+        let text = |key: &str| property.get(key).and_then(Value::as_str).map(str::trim).map(str::to_owned);
+        let section = text(SECTION);
+        Self {
+            collapsible: collapsible && section.as_ref().is_some_and(|s| !s.is_empty()),
+            section,
+            unit_from: text(UNIT_FROM).filter(|s| !s.is_empty()),
+            help: text(HELP).filter(|url| help_url(url)),
+        }
+    }
 }
 
 /// What a field holds, with its schema limits.
@@ -260,7 +287,15 @@ pub(crate) fn form(schema: &Value) -> Option<Vec<(Field, Input)>> {
     if required.iter().any(|key| !properties.contains_key(*key)) {
         return None;
     }
-    let mut fields = properties.iter().map(|(key, property)| field(key, property, required.contains(&key.as_str()))).collect::<Option<Vec<_>>>()?;
+    let collapsible = schema.get(craft_plugin::layout::SECTIONS).is_some();
+    let mut fields = properties
+        .iter()
+        .map(|(key, property)| {
+            let (mut field, input) = field(key, property, required.contains(&key.as_str()))?;
+            field.layout = Layout::read(property, collapsible);
+            Some((field, input))
+        })
+        .collect::<Option<Vec<_>>>()?;
     // The default remains required-first; open_entry applies declared order only on opt-in.
     let rank = |key: &str| required.iter().position(|r| *r == key).unwrap_or(usize::MAX);
     fields.sort_by(|(a, _), (b, _)| rank(&a.key).cmp(&rank(&b.key)).then_with(|| a.key.cmp(&b.key)));
@@ -305,6 +340,9 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
         "x-solidcraft-enabled-when",
         "x-solidcraft-defaults",
         "x-solidcraft-grant",
+        craft_plugin::layout::SECTION,
+        craft_plugin::layout::UNIT_FROM,
+        craft_plugin::layout::HELP,
     ];
     if p.keys().any(|k| !ANNOTATIONS.contains(&k.as_str()) && !allowed.contains(&k.as_str())) {
         return None;
@@ -423,6 +461,7 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
             controls: None,
             hook: None,
             hook_baseline: None,
+            layout: Layout::default(),
         },
         input,
     ))
@@ -447,6 +486,8 @@ fn selection_field(key: &str, p: &Map<String, Value>, required: bool) -> Option<
         SELECTION_KEY,
         "x-solidcraft-visible-when",
         "x-solidcraft-enabled-when",
+        craft_plugin::layout::SECTION,
+        craft_plugin::layout::HELP,
     ];
     if p.keys().any(|k| !KEYWORDS.contains(&k.as_str())) {
         return None;
@@ -502,6 +543,7 @@ fn selection_field(key: &str, p: &Map<String, Value>, required: bool) -> Option<
             controls: None,
             hook: None,
             hook_baseline: None,
+            layout: Layout::default(),
         },
         Input::Selection(Vec::new()),
     ))
@@ -2669,6 +2711,32 @@ fn apply_browsed_folder(app: &mut SolveApp, id: u64, key: &str, path: String) {
 }
 
 /// Draws the dialog. Returns the key of a directory field whose Browse button was pressed.
+/// Give each field with `x-solidcraft-unit-from` the current value of the choice it names as
+/// its unit suffix. A choice with nothing chosen leaves the field's own unit.
+fn follow_units(fields: &mut [(Field, Input)]) {
+    let chosen: Vec<(String, String)> = fields
+        .iter()
+        .filter_map(|(field, input)| match (&field.kind, input) {
+            (Kind::Choice { values, .. }, Input::Choice(Some(i))) => Some((field.key.clone(), values.get(*i)?.clone())),
+            _ => None,
+        })
+        .collect();
+    for (field, _) in fields.iter_mut() {
+        let Some(source) = field.layout.unit_from.as_deref() else { continue };
+        let Some((_, value)) = chosen.iter().find(|(key, _)| key == source) else { continue };
+        if let Kind::Number { unit, .. } | Kind::Integer { unit, .. } = &mut field.kind {
+            *unit = Some(value.clone());
+        }
+    }
+}
+
+/// A field's help link, under its row: opens the plugin's `https` page in the browser.
+fn help_link(app: &SolveApp, ui: &mut egui::Ui, key: &str, url: &str) {
+    let t = solidcraft_theme::Tokens::get();
+    let link = ui_kit::row(ui, "", |ui| ui.hyperlink_to(egui::RichText::new(app.tr("ui.plugin_dialog_help")).size(t.font_small), url));
+    crate::scenario::publish_target(&format!("plugin_dialog:help:{key}"), link.rect);
+}
+
 fn body(
     app: &SolveApp,
     ui: &mut egui::Ui,
@@ -2706,11 +2774,27 @@ fn body(
             ui_kit::text(ui, app.tr("ui.plugin_dialog_no_inputs"), ui_kit::Text::Note("plugin_no_inputs"));
         }
         Some(fields) => {
+            follow_units(fields);
             ui.add_enabled_ui(editable, |ui| {
                 let mut picks = 0;
+                // Whether the fields under the last collapsible heading are folded away.
+                let mut folded = false;
                 for (field, input) in fields.iter_mut() {
                     let pick_index = picks;
-                    if !field.visible {
+                    if field.visible
+                        && let Some(title) = field.layout.section.as_deref()
+                    {
+                        folded = false;
+                        if title.is_empty() {
+                            ui_kit::divider(ui, &format!("plugin_dialog:{}", field.key));
+                        } else if field.layout.collapsible {
+                            folded = ui_kit::section(ui, ("plugin_dialog_section", id, title), title, true, |_| ()).is_none();
+                        } else {
+                            ui_kit::section_heading(ui, title);
+                        }
+                    }
+                    // A folded field with a problem is still drawn, so its error is never hidden.
+                    if !field.visible || (folded && !field_errors.contains_key(&field.key)) {
                         if matches!(input, Input::Selection(_)) {
                             picks += 1;
                         }
@@ -2750,6 +2834,9 @@ fn body(
                     }
                     if field.grant_read {
                         ui_kit::text(ui, app.tr("ui.plugin_dialog_folder_read_once"), ui_kit::Text::Note("plugin_folder_read_once"));
+                    }
+                    if let Some(url) = field.layout.help.as_deref() {
+                        help_link(app, ui, &field.key, url);
                     }
                 }
             });

@@ -697,6 +697,75 @@ fn shared_field_definitions_are_drawn_like_inline_fields() {
 }
 
 #[test]
+fn layout_annotations_draw_headings_fold_sections_follow_units_and_link_help() {
+    // Alphabetical keys: without a recorded declaration order the dialog sorts optional fields by name.
+    let schema = json!({"type":"object","x-solidcraft-sections":"collapsible","properties":{
+        "a_units":{"type":"string","title":"Units","enum":["mm","in"],"default":"in","x-solidcraft-section":"Carcass"},
+        "b_width":{"type":"number","title":"Width","default":20,"unit":"mm","x-solidcraft-unit-from":"a_units",
+            "x-solidcraft-help":"https://example.com/width"},
+        "c_drawers":{"type":"integer","title":"Drawers","default":2,"x-solidcraft-section":"Drawers"},
+        "d_labels":{"type":"boolean","title":"Labels","x-solidcraft-section":""}
+    }});
+    let fields = form(&schema).expect("layout annotations keep the dialog drawable");
+    let layouts: Vec<&Layout> = fields.iter().map(|(f, _)| &f.layout).collect();
+    assert_eq!((layouts[0].section.as_deref(), layouts[0].collapsible), (Some("Carcass"), true));
+    assert_eq!(layouts[1].unit_from.as_deref(), Some("a_units"));
+    assert_eq!(layouts[1].help.as_deref(), Some("https://example.com/width"));
+    assert_eq!((layouts[3].section.as_deref(), layouts[3].collapsible), (Some(""), false), "an empty heading is a divider");
+    let plain =
+        form(&json!({"type":"object","properties":{"w":{"type":"number","x-solidcraft-section":"Size","x-solidcraft-help":"http://example.com"}}}));
+    let plain = plain.unwrap();
+    assert!(!plain[0].0.layout.collapsible, "headings fold only when the schema asks");
+    assert_eq!(plain[0].0.layout.help, None, "only https links are drawn");
+
+    let mut h = crate::scenario::Harness::new();
+    let mut command = entry("cabinet", "edit", json!([]));
+    command.input_schema = schema;
+    h.app.plugin_menu.listed = vec![listed("woodwork", vec![command])];
+    h.app.plugin_menu.loaded = true;
+    h.app.home.open = false;
+    open_entry(&mut h.app, 0, 0);
+    h.app.plugin_menu.dialogs.last_mut().unwrap().preview = false;
+    h.frames(4);
+    let unit = |h: &crate::scenario::Harness| {
+        let fields = h.app.plugin_menu.dialog().unwrap().fields.clone().unwrap();
+        match &fields.iter().find(|(f, _)| f.key == "b_width").unwrap().0.kind {
+            Kind::Number { unit, .. } => unit.clone(),
+            other => panic!("{other:?}"),
+        }
+    };
+    assert_eq!(unit(&h), Some("in".into()), "the suffix follows the units choice");
+    if let Some((_, input)) = h.app.plugin_menu.dialogs.last_mut().unwrap().fields.as_mut().unwrap().iter_mut().find(|(f, _)| f.key == "a_units") {
+        *input = Input::Choice(Some(0));
+    }
+    h.frames(2);
+    assert_eq!(unit(&h), Some("mm".into()));
+    assert!(crate::scenario::rect_of("dialog:section:Carcass").is_some() && crate::scenario::rect_of("dialog:section:Drawers").is_some());
+    assert!(crate::scenario::rect_of("dialog:divider:plugin_dialog:d_labels").is_some());
+    assert!(crate::scenario::handle_at("plugin_dialog:field:c_drawers").is_some());
+
+    // Folding Drawers hides its field and keeps the next heading's fields; Carcass is untouched.
+    h.step(&json!({"click":{"handle":"dialog:section:Drawers"}})).unwrap();
+    h.frames(3);
+    assert!(crate::scenario::handle_at("plugin_dialog:field:c_drawers").is_none(), "a folded section hides its fields");
+    assert!(crate::scenario::handle_at("plugin_dialog:field:b_width").is_some());
+    assert!(crate::scenario::handle_at("plugin_dialog:field:d_labels").is_some(), "a divider ends the folded section");
+    assert_eq!(params(h.app.plugin_menu.dialog().unwrap().fields.as_ref().unwrap()).unwrap()["c_drawers"], 2, "folded fields are still sent");
+
+    let at = crate::scenario::handle_at("plugin_dialog:help:b_width").expect("help link");
+    let (x, y) = (f64::from(at.x), f64::from(at.y));
+    assert_eq!(h.call("ui.move", json!({"x":x,"y":y}))["ok"], true);
+    let (request, _reply) = crate::control::ControlRequest::new("ui.click", json!({"x":x,"y":y}));
+    assert!(matches!(crate::control::handle(&mut h.app, &h.ctx, &request), crate::control::Outcome::Done(value) if value["ok"] == true));
+    let mut commands = Vec::new();
+    for _ in 0..12 {
+        h.frame();
+        commands.extend(h.output.commands.clone());
+    }
+    assert!(commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(open) if open.url == "https://example.com/width")));
+}
+
+#[test]
 fn described_field_labels_and_values_show_the_same_tooltip() {
     for mut property in [
         json!({"type":"number","default":2}),

@@ -81,6 +81,7 @@ pub mod conditions;
 pub mod dialog;
 pub mod images;
 mod input;
+pub mod layout;
 mod schema_order;
 mod schema_refs;
 pub mod swatches;
@@ -918,6 +919,7 @@ impl RuntimeManifest {
             {
                 return Err(invalid(format!("{field}.x-solidcraft-field-order"), "must be \"declared\" when present"));
             }
+            layout::validate(&entry.input_schema, &field)?;
             validate_list_inputs(&entry.input_schema, &field)?;
             directory_read_fields(&entry.input_schema)?;
             conditions::validate_conditions(&entry.input_schema)?;
