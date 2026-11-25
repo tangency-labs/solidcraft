@@ -157,6 +157,15 @@ pub enum Error {
         /// The kernel's statement of why.
         why: String,
     },
+    /// A draft the kernel refused whose drafted face would cut through a face it does not meet
+    /// (the kernel's `drafted_through`): a hole's wall within the draft of the side.
+    DraftCutsThrough {
+        /// A point of the face cut through, between the drafted face's plane and its drafted
+        /// plane.
+        at: [f64; 3],
+        /// How far that point lies past the drafted plane.
+        depth: f64,
+    },
     /// A planar profile the kernel refuses, and why (`solidcore::prism::profile::check_regions`).
     Profile(solidcore::prism::profile::ProfileRefusal),
     /// A frame-stock path or its section the kernel refuses, including the curve index
@@ -530,6 +539,7 @@ impl Error {
             Error::CurveDoesNotCut => "CurveDoesNotCut",
             Error::NotExact => "NotExact",
             Error::BlendsNotFollowed { .. } => "BlendsNotFollowed",
+            Error::DraftCutsThrough { .. } => "DraftCutsThrough",
             Error::Profile(..) => "Profile",
             Error::FrameMember(..) => "FrameMember",
             Error::Degenerate => "Degenerate",
@@ -1063,6 +1073,13 @@ impl std::fmt::Display for Error {
             Error::BlendsNotFollowed { exact: false, why } => write!(
                 f,
                 "the blends on the moved faces cannot be taken off and put back: {why}"
+            ),
+            Error::DraftCutsThrough {
+                at: [x, y, z],
+                depth,
+            } => write!(
+                f,
+                "a drafted face would cut through the face at ({x:.3}, {y:.3}, {z:.3}), which reaches {depth:.3} past it and meets no edge of it"
             ),
             Error::Profile(r) => write!(
                 f,
