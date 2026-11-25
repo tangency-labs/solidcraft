@@ -85,6 +85,7 @@ pub fn pick_command(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
                 .ok_or("view.pick: `point_px` must be a number from 0 to 1024".to_string())? as f32,
         ),
     };
+    let clouds_on = solidcraft_engine::point_cloud_pick::clouds_requested(p)?;
     let cloud_radius = match p.get("cloud_radius") {
         None | Some(Value::Null) => solidcraft_engine::point_cloud_pick::DEFAULT_CLOUD_RADIUS_MM,
         Some(v) => {
@@ -183,8 +184,13 @@ pub fn pick_command(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
             ),
             _ => (None, None),
         };
-        let cloud_max = if all || wireframe { None } else { face_t.map(|t| t + slack) };
-        let cloud_hits = cloud_candidates(app, &proj, input, cloud_max, point_px, cloud_radius, &section, all);
+        // Whatever is nearest in front hides the cloud: the first kept face or the section's cap.
+        let cover_t = match (kept.first().map(|c| c.t), cap.as_ref().map(|c| c.t)) {
+            (Some(f), Some(c)) => Some(f.min(c)),
+            (f, c) => f.or(c),
+        };
+        let cloud_max = if all || wireframe { None } else { cover_t.map(|t| t + slack) };
+        let cloud_hits = if clouds_on { cloud_candidates(app, &proj, input, cloud_max, point_px, cloud_radius, &section, all) } else { Vec::new() };
         hits.push(match (all, cap, kept) {
             (true, cap, kept) => {
                 let mut rows: Vec<(f64, Value)> = Vec::new();
@@ -243,12 +249,13 @@ fn face_candidates(
 ) -> Vec<Cand> {
     let mut out = Vec::new();
     for (i, b) in st.bodies.iter().enumerate() {
-        if !app.body_visible(&b.name) || replaced.contains(&b.name) {
+        if !crate::viewport::body_shown(app, &b.name) || replaced.contains(&b.name) {
             continue;
         }
         let ghosted = crate::viewport::body_faded(app, b, active_bodies);
-        // Ghost Frame Members lets clicks through a member's faces, as the mouse picker does.
-        if (ghosted && !include_ghosted) || crate::viewport::frame_ghosted(app, b) {
+        // Ghost Frame Members lets clicks through a member's faces, as the mouse picker does, and so
+        // does an Isolate's wireframe: only its edges are drawn.
+        if (ghosted && !include_ghosted) || crate::viewport::frame_ghosted(app, b) || crate::viewport::wire_ghost(app, b) {
             continue;
         }
         if let Some((_, bb)) = bounds.get(i) {
@@ -417,14 +424,15 @@ pub(crate) fn body_cut_at(
 ) -> Option<String> {
     let walk_eps = 1e-6 * (1.0 + crate::viewport::scene_radius(app));
     for (i, b) in st.bodies.iter().enumerate() {
-        if !app.body_visible(&b.name) || replaced.contains(&b.name) {
+        if !crate::viewport::body_shown(app, &b.name) || replaced.contains(&b.name) {
             continue;
         }
         if !include_ghosted && crate::viewport::body_faded(app, b, active_bodies) {
             continue;
         }
-        // Ghost Frame Members lets picks through a member, its cut too, as `face_candidates` does.
-        if crate::viewport::frame_ghosted(app, b) {
+        // Ghost Frame Members lets picks through a member, its cut too, as `face_candidates` does;
+        // an Isolate's wireframe has no faces to cut.
+        if crate::viewport::frame_ghosted(app, b) || crate::viewport::wire_ghost(app, b) {
             continue;
         }
         // A sheet or an open shell has no inside to cut: a ray crossing it once is not within
@@ -492,7 +500,7 @@ fn near_edges(
     let mut best_e: Option<EdgeHit> = None;
     let mut best_v: Option<VertexHit> = None;
     for (i, b) in st.bodies.iter().enumerate() {
-        if !app.body_visible(&b.name) || replaced.contains(&b.name) {
+        if !crate::viewport::body_shown(app, &b.name) || replaced.contains(&b.name) {
             continue;
         }
         if !include_ghosted && crate::viewport::body_faded(app, b, active_bodies) {
@@ -524,7 +532,7 @@ fn near_edges(
                     if let Some(sp) = proj.to_screen(v) {
                         let dd = sp.distance(pos);
                         if dd <= edge_px + 1.0 && visible(v, body_slack) && best_v.as_ref().is_none_or(|x| dd < x.dist_px) {
-                            best_v = Some(VertexHit { dist_px: dd, point: v });
+                            best_v = Some(VertexHit { body: b.name.clone(), dist_px: dd, point: v });
                         }
                     }
                 }
@@ -540,7 +548,7 @@ fn near_edges(
                 && best_e.as_ref().is_none_or(|x| dd < x.dist_px)
             {
                 let k = seg_param(pos, a, c);
-                best_e = Some(EdgeHit { index: ei, dist_px: dd, point: p0 + (p1 - p0) * f64::from(k) });
+                best_e = Some(EdgeHit { body: b.name.clone(), index: ei, dist_px: dd, point: p0 + (p1 - p0) * f64::from(k) });
             }
         }
     }
@@ -548,12 +556,15 @@ fn near_edges(
 }
 
 struct EdgeHit {
+    /// The body the edge belongs to: a hit reports it only on that body.
+    body: String,
     index: usize,
     dist_px: f32,
     point: Vec3,
 }
 
 struct VertexHit {
+    body: String,
     dist_px: f32,
     point: Vec3,
 }
@@ -606,6 +617,9 @@ fn hit_json(
     edge: Option<&EdgeHit>,
     vertex: Option<&VertexHit>,
 ) -> Value {
+    // An edge or vertex is reported only on the body it belongs to.
+    let edge = edge.filter(|e| e.body == c.body);
+    let vertex = vertex.filter(|v| v.body == c.body);
     let mut j = json!({
         "pixel": input.raw,
         "body": c.body,
@@ -689,7 +703,7 @@ fn cloud_candidates(
         return Vec::new();
     }
     let mut out = Vec::new();
-    let mut best_depth = max_depth;
+    // Every cloud is searched to the same depth: the nearest across clouds is chosen after.
     for raw_cloud in solidcraft_engine::view::shown_point_clouds(&app.session) {
         if raw_cloud.is_empty() {
             continue;
@@ -701,28 +715,18 @@ fn cloud_candidates(
             Some(pos) => {
                 let px = point_px.unwrap_or_else(|| ((cloud.point_size as f32) * 0.5 + 2.0).max(6.0));
                 let (a, b) = crate::pick_index::reach(proj, pos, px);
-                solidcraft_engine::point_cloud_pick::pick_cloud_screen(&cloud, index.as_deref(), input.o, input.d, a, b, best_depth, section, |w| {
+                solidcraft_engine::point_cloud_pick::pick_cloud_screen(&cloud, index.as_deref(), input.o, input.d, a, b, max_depth, section, |w| {
                     proj.to_screen(w).map(|sp| sp.distance(pos)).filter(|d| *d <= px)
                 })
                 .map(|(h, dpx)| (h, Some(dpx)))
             }
-            None => solidcraft_engine::point_cloud_pick::pick_cloud_ray(
-                &cloud,
-                index.as_deref(),
-                input.o,
-                input.d,
-                cloud_radius,
-                0.0,
-                best_depth,
-                section,
-            )
-            .map(|h| (h, None)),
-        };
-        if let Some((h, dpx)) = hit {
-            if !all {
-                best_depth = Some(best_depth.map_or(h.depth, |cur| cur.min(h.depth)));
+            None => {
+                solidcraft_engine::point_cloud_pick::pick_cloud_ray(&cloud, index.as_deref(), input.o, input.d, cloud_radius, 0.0, max_depth, section)
+                    .map(|h| (h, None))
             }
-            out.push((h, dpx));
+        };
+        if let Some(h) = hit {
+            out.push(h);
         }
     }
     out.sort_by(|a, b| a.0.depth.total_cmp(&b.0.depth));

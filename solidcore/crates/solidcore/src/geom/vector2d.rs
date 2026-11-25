@@ -54,6 +54,7 @@
 
 use core::ops::{Add, AddAssign, Div, Mul, MulAssign, Neg, Sub, SubAssign};
 
+use crate::error::geom::GeomFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::tol;
 use crate::geom::vector3d::{acos as sm_acos, asin as sm_asin, sqrt as sm_sqrt};
@@ -229,7 +230,7 @@ impl Vec2 {
         match index {
             0 => Ok(self.x),
             1 => Ok(self.y),
-            _ => Err(Self::bad_index()),
+            _ => Err(Self::bad_index(index)),
         }
     }
 
@@ -238,14 +239,14 @@ impl Vec2 {
         match index {
             0 => Ok(&mut self.x),
             1 => Ok(&mut self.y),
-            _ => Err(Self::bad_index()),
+            _ => Err(Self::bad_index(index)),
         }
     }
 
-    fn bad_index() -> SolidError {
-        SolidError::geom_failed(
+    fn bad_index(index: usize) -> SolidError {
+        SolidError::geom(
             "geom::vector2d::Vec2::component",
-            "the component index is out of range",
+            GeomFailure::IndexOutOfRange { index, len: 2 },
         )
     }
 

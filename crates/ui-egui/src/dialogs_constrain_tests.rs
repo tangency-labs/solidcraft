@@ -18,6 +18,7 @@ const COLORS: crate::preview::Colors = crate::preview::Colors {
     ghost: true,
     tint_new: true,
     cut_tint: true,
+    replaced_ghost: true,
     glass_new: false,
 };
 

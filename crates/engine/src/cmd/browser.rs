@@ -21,9 +21,9 @@ use crate::schema::browser::{
     BodyRenameParams, BodyRenamed, BrowserFoldParams, BrowserFoldResult, BrowserGroupMade, BrowserGroupParams, BrowserGroupRenamed,
     BrowserMoveParams, BrowserMoved, BrowserOrderParams, BrowserOrdered, BrowserRenameGroupParams, BrowserUngroupParams, BrowserUngrouped,
     BrowserVisibilityParams, BrowserVisibilityResult, DocumentUnitsParams, DocumentUnitsResult, FindParams, FindResult, FlipAxis, Isolated,
-    PlaneFrame, RedefineAttachment, RedefineSketchParams, RedefineSketchResult, RenamedBody, RepairDone, RepairFace, RepairHole, RepairParams,
-    RepairResult, RepairSewn, ViewApplyParams, ViewDeleteParams, ViewDeleted, ViewListParams, ViewListResult, ViewRenameParams, ViewRenamed,
-    ViewSaveParams, ViewSaved, VisibilityState,
+    PlaneFrame, PlaneSizeParams, PlaneSized, RedefineAttachment, RedefineSketchParams, RedefineSketchResult, RenamedBody, RepairDone, RepairFace,
+    RepairHole, RepairParams, RepairResult, RepairSewn, ViewApplyParams, ViewDeleteParams, ViewDeleted, ViewListParams, ViewListResult,
+    ViewRenameParams, ViewRenamed, ViewSaveParams, ViewSaved, VisibilityState,
 };
 use crate::schema::view_navigation::CameraReply;
 use crate::schema::{TypedContract, output_schema_for};
@@ -40,6 +40,7 @@ const MOVE_CONTRACT: TypedContract<BrowserMoveParams> = TypedContract::new();
 const ORDER_CONTRACT: TypedContract<BrowserOrderParams> = TypedContract::new();
 const VISIBILITY_CONTRACT: TypedContract<BrowserVisibilityParams> = TypedContract::new();
 const TOGGLE_CONTRACT: TypedContract<crate::schema::browser::BrowserToggleParams> = TypedContract::new();
+const ISOLATE_CONTRACT: TypedContract<crate::schema::browser::BrowserIsolateParams> = TypedContract::new();
 const FOLD_CONTRACT: TypedContract<BrowserFoldParams> = TypedContract::new();
 const REDEFINE_SKETCH_CONTRACT: TypedContract<RedefineSketchParams> = TypedContract::new();
 const VIEW_SAVE_CONTRACT: TypedContract<ViewSaveParams> = TypedContract::new();
@@ -47,6 +48,7 @@ const VIEW_RENAME_CONTRACT: TypedContract<ViewRenameParams> = TypedContract::new
 const VIEW_DELETE_CONTRACT: TypedContract<ViewDeleteParams> = TypedContract::new();
 const VIEW_LIST_CONTRACT: TypedContract<ViewListParams> = TypedContract::new();
 const VIEW_APPLY_CONTRACT: TypedContract<ViewApplyParams> = TypedContract::new();
+const PLANE_SIZE_CONTRACT: TypedContract<PlaneSizeParams> = TypedContract::new();
 
 /// A reply as JSON: the commands here build their replies from the types their output schemas
 /// describe, so the two can't drift apart.
@@ -62,6 +64,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("body: its name, or bodies: several body names (each in turn gets the first of name, name (2), name (3)… that no other body has), name: the new name (features that use the bodies follow)"),
     // The import and failed operations offer it for a part the modelling kernel refuses.
     CommandSpec::new("body.repair", "Repair Part", crate::checked!("body.repair", repair_body))
+        .begins_edit()
         .icon("body")
         .contract(&REPAIR_CONTRACT)
         .output(output_schema_for::<RepairResult>)
@@ -103,6 +106,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&VIEW_SAVE_CONTRACT)
         .output(output_schema_for::<ViewSaved>)
         .params("name?; camera: {target: [x,y,z], yaw, pitch, distance, fov?, roll?, up?: z|y} (replaces a view of the same name)"),
+    CommandSpec::new("view.plane_size", "Resize Plane", crate::checked!("view.plane_size", plane_size))
+        .icon("scale")
+        .contract(&PLANE_SIZE_CONTRACT)
+        .output(output_schema_for::<PlaneSized>)
+        .params(
+            "plane: construction plane name; extent: [x0, y0, x1, y1] (mm, in the plane's own x and y about its origin) | null (back to a size that follows the zoom). Display only",
+        ),
     CommandSpec::new("view.rename", "Rename Named View", crate::checked!("view.rename", view_rename))
         .icon("rename")
         .contract(&VIEW_RENAME_CONTRACT)
@@ -142,8 +152,25 @@ pub static COMMANDS: &[CommandSpec] = &[
          or features?: [feature id or name] (the bodies they made; path?: [occurrence ids] for only that placement's); \
          or folder?: bodies|sketches|construction|origin|joints|all (all of it; showing also shows its browser folders and groups, and `all` takes in the occurrence hides too); \
          or tree_folders?: [browser folder or group key: c0/bodies, o:4/sketches, o:4/origin, c0/g7, c0/joints, c0/canvases, c0/point_clouds] (the folder or group itself: its items keep their own state; component origin items use o:4/origin/XY etc. in items); \
-         or paths?: [[occurrence ids]] (exact placements and descendants), isolate?: bool (with paths or items of bodies, and visible:true: everything else is hidden, other placements as placements). Saved with the design and undone like any other change (the camera is not)",
+         or paths?: [[occurrence ids]] (exact placements and descendants), isolate?: bool (with paths or items of bodies, and visible:true: everything else is hidden, other placements as placements); \
+         or unisolate?: bool (with visible:true and no target: put back what the isolates since the last unisolate hid, or show everything). Saved with the design and undone like any other change (the camera is not)",
     ),
+    CommandSpec::new("browser.isolate", "Isolate", crate::checked!("browser.isolate", isolate_selection))
+        .icon("body")
+        .key("Ctrl+I")
+        .contract(&ISOLATE_CONTRACT)
+        .output(output_schema_for::<BrowserVisibilityResult>)
+        .params(
+        "clear?: bool. Without it, hides everything except the selection: the selected components' placements, or else the selected \
+         bodies and the bodies of the selected faces, edges and vertices, as browser.visibility with isolate:true; nothing selected is \
+         an error. clear:true ends the Isolate in effect instead, as browser.unisolate (the viewport status pill's close)",
+    ),
+    CommandSpec::new("browser.unisolate", "Exit Isolation", crate::checked!("browser.unisolate", unisolate_all))
+        .icon("unisolate")
+        .key("Ctrl+Shift+I")
+        .contract(&TOGGLE_CONTRACT)
+        .output(output_schema_for::<BrowserVisibilityResult>)
+        .params("(no parameters) as browser.visibility with visible:true and unisolate:true: puts back what the isolates hid; with nothing isolated it is an error and shows nothing"),
     CommandSpec::new("browser.toggle_planes", "Show/Hide Planes", crate::checked!("browser.toggle_planes", toggle_planes))
         .icon("eye")
         .contract(&TOGGLE_CONTRACT)
@@ -633,6 +660,8 @@ fn isolate_bodies(s: &mut Session, p: &Value, visible: bool) -> Result<Value> {
     // A hidden Bodies folder or group a picked body is in would keep it hidden: those show
     // again. Their other bodies are hidden one by one above, as the root's are.
     let shown_folders = folders_holding(s, &keep);
+    // Kept only now, once nothing above can fail, for Unisolate.
+    remember_before_isolate(s);
     s.visibility.hidden_folders.retain(|k| !shown_folders.contains(k));
     s.visibility.hidden_occurrences = hidden;
     s.visibility.hidden_bodies = hidden_bodies;
@@ -674,9 +703,86 @@ fn folders_holding(s: &Session, world: &[String]) -> std::collections::BTreeSet<
     keys
 }
 
+/// Unisolate: puts back what the Isolates since the last Unisolate hid, and leaves alone what was
+/// changed since (locks, sketches, dimensions). With no Isolate in effect, shows everything.
+/// Keeps what an Isolate is about to change, with the bodies on screen now, unless an earlier
+/// Isolate is still in effect (#8120).
+fn remember_before_isolate(s: &mut Session) {
+    if s.visibility.before_isolate.is_some() {
+        return;
+    }
+    let shown =
+        s.world_state().map(|world| world.bodies.iter().filter(|b| s.body_visible(&b.name)).map(|b| b.name.clone()).collect()).unwrap_or_default();
+    s.visibility.remember_before_isolate();
+    if let Some(before) = s.visibility.before_isolate.as_mut() {
+        before.shown_bodies = shown;
+    }
+}
+
+/// `browser.isolate`: Isolate on the selection, for its key (#3504): placements when components
+/// are selected, else the bodies the selection names.
+fn isolate_selection(s: &mut Session, p: &Value) -> Result<Value> {
+    if bool_(p, "clear").unwrap_or(false) {
+        return unisolate_all(s, &json!({}));
+    }
+    // Select All's whole-body scope counts as its bodies.
+    let selection = s.selected_items()?;
+    let paths: Vec<Vec<u64>> =
+        selection.iter().filter_map(|item| if let crate::Sel::Occurrence { path } = item { Some(path.clone()) } else { None }).collect();
+    if !paths.is_empty() {
+        return visibility(s, &json!({"visible": true, "paths": paths, "isolate": true}));
+    }
+    let mut bodies: Vec<String> = Vec::new();
+    for name in selection.iter().filter_map(crate::Sel::body_name) {
+        if !bodies.iter().any(|b| b == name) {
+            bodies.push(name.to_owned());
+        }
+    }
+    if bodies.is_empty() {
+        return Err(bad("browser.isolate", "select a body or component to isolate"));
+    }
+    visibility(s, &json!({"visible": true, "items": bodies, "isolate": true}))
+}
+
+/// `browser.unisolate`: Unisolate, for its key (#3504). With no Isolate in effect it refuses and
+/// changes nothing; it never falls back to showing everything, as `unisolate: true` does.
+fn unisolate_all(s: &mut Session, _p: &Value) -> Result<Value> {
+    if s.visibility.before_isolate.is_none() {
+        return Err(bad("browser.unisolate", "nothing is isolated"));
+    }
+    visibility(s, &json!({"visible": true, "unisolate": true}))
+}
+
+fn unisolate(s: &mut Session, p: &Value, visible: bool) -> Result<Value> {
+    let cmd = "browser.visibility";
+    if !visible {
+        return Err(bad(cmd, "unisolate requires visible:true"));
+    }
+    if ["items", "folder", "features", "joints", "paths", "tree_folders", "isolate"].iter().any(|k| p.get(*k).is_some()) {
+        return Err(bad(cmd, "unisolate takes no targets"));
+    }
+    let Some(before) = s.visibility.before_isolate.take() else {
+        return visibility(s, &json!({ "folder": "all", "visible": true }));
+    };
+    s.visibility.hidden_bodies = before.hidden_bodies;
+    s.visibility.hidden_occurrences = before.hidden_occurrences;
+    // Isolate only ever shows folders: hide those again, and keep a folder hidden while isolating.
+    for key in before.hidden_folders {
+        if !s.visibility.hidden_folders.contains(&key) {
+            s.visibility.hidden_folders.push(key);
+        }
+    }
+    s.refresh_display();
+    let visibility = VisibilityState::from(&s.visibility);
+    reply(cmd, BrowserVisibilityResult { visible: true, changed: None, isolated: None, visibility, param_warnings: Vec::new() })
+}
+
 fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "browser.visibility";
     let visible = bool_(p, "visible").ok_or_else(|| bad(cmd, "`visible` must be true or false"))?;
+    if bool_(p, "unisolate").unwrap_or(false) {
+        return unisolate(s, p, visible);
+    }
     if let Some(value) = p.get("tree_folders") {
         if ["items", "folder", "joints", "paths"].iter().any(|k| p.get(*k).is_some()) {
             return Err(bad(cmd, "give `tree_folders`, `items`, `folder`, `joints` or `paths`, not several"));
@@ -771,6 +877,7 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
             let mut root_bodies: Vec<String> =
                 s.model.state().bodies.iter().filter(|b| s.doc.model_body_component(b) == 0).map(|b| b.name.clone()).collect();
             root_bodies.extend(ancestor_bodies);
+            remember_before_isolate(s);
             s.visibility.hidden_occurrences = hidden;
             s.visibility.hidden_bodies = root_bodies;
             s.refresh_display();
@@ -850,8 +957,9 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
     // Showing all of a kind also shows the browser folders and groups that hold it.
     if visible && let Some(f) = str_(p, "folder") {
         if f == "all" {
-            // Everything includes the folders and groups themselves.
+            // Everything includes the folders and groups themselves, and nothing is isolated.
             s.visibility.hidden_folders.clear();
+            s.visibility.before_isolate = None;
         } else {
             let groups: Vec<String> = s.doc.browser_groups.iter().filter(|g| g.folder == f).map(|g| format!("/g{}", g.id)).collect();
             let own = format!("/{f}");
@@ -1334,6 +1442,41 @@ fn view_save(s: &mut Session, p: &Value) -> Result<Value> {
     reply(cmd, ViewSaved { view: name, param_warnings: Vec::new() })
 }
 
+/// Most a plane's drawn rectangle reaches from its origin, mm.
+const MAX_PLANE_EXTENT: f64 = 1e7;
+
+/// The size a construction plane is drawn at: a rectangle of its own (dragged by its edges and
+/// corners in the view), or (`extent: null`) a square that follows the zoom.
+fn plane_size(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "view.plane_size";
+    let name = str_(p, "plane").ok_or_else(|| bad(cmd, "`plane` must name a construction plane"))?;
+    let id = crate::view::construction_planes(s)
+        .into_iter()
+        .find(|(_, n, _)| n == name)
+        .map(|(id, _, _)| id)
+        .ok_or_else(|| bad(cmd, format!("no construction plane `{name}`")))?;
+    let extent = match p.get("extent") {
+        None => return Err(bad(cmd, "`extent` must be [x0, y0, x1, y1] or null")),
+        Some(Value::Null) => None,
+        Some(v) => {
+            let e: [f64; 4] = serde_json::from_value(v.clone()).map_err(|_| bad(cmd, "`extent` must be [x0, y0, x1, y1] or null"))?;
+            if !e.iter().all(|x| x.is_finite() && x.abs() <= MAX_PLANE_EXTENT) || e[2] - e[0] < 1e-3 || e[3] - e[1] < 1e-3 {
+                return Err(bad(cmd, "`extent` must be finite, within 10 km of the plane's origin, with x1 > x0 and y1 > y0"));
+            }
+            Some(e)
+        }
+    };
+    if s.doc.plane_extents.get(&id).copied() == extent {
+        return Err(bad(cmd, "the plane already has that size"));
+    }
+    let d = s.doc_mut();
+    match extent {
+        Some(e) => d.plane_extents.insert(id, e),
+        None => d.plane_extents.remove(&id),
+    };
+    reply(cmd, PlaneSized { plane: name.to_string(), extent, param_warnings: Vec::new() })
+}
+
 fn view_apply(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "view.apply";
     let cam = match (str_(p, "view"), p.get("camera")) {
@@ -1548,6 +1691,7 @@ fn repair_body(s: &mut Session, p: &Value) -> Result<Value> {
 /// The longest body name `body.rename` gives.
 const MAX_BODY_NAME: usize = 128;
 
+/// Rename a body and update the later references that identify it, including exact gusset faces.
 fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "body.rename";
     fn new_name<'a>(cmd: &str, p: &'a Value) -> Result<&'a str> {
@@ -1767,9 +1911,38 @@ fn rename_one(s: &mut Session, cmd: &str, given: &str, name: &str) -> Result<Bod
                 }
             }
         }
+        if let FeatureKind::FramePlate { plane, .. } = &mut f.kind
+            && let Some(anchor) = super::sketch::face::anchor_mut(plane)
+            && anchor.target.body == old
+        {
+            let ids = std::collections::BTreeMap::from([(anchor.target.origin_feature, anchor.target.origin_feature)]);
+            let bodies = std::collections::BTreeMap::from([(old.clone(), name.to_string())]);
+            anchor.remap_target(&ids, &bodies)?;
+        }
         if let FeatureKind::FrameEndCap { ends, .. } = &mut f.kind {
             for end in ends {
                 if let Some(anchor) = super::sketch::face::anchor_mut(&mut end.plane)
+                    && anchor.target.body == old
+                {
+                    let ids = std::collections::BTreeMap::from([(anchor.target.origin_feature, anchor.target.origin_feature)]);
+                    anchor.remap_target(&ids, &std::collections::BTreeMap::from([(old.clone(), name.to_string())]))?;
+                }
+            }
+        }
+        if let FeatureKind::FrameTrim { to, .. } = &mut f.kind {
+            for target in to {
+                if let solidcraft_doc::frame::TrimTarget::Plane { plane } = target
+                    && let Some(anchor) = super::sketch::face::anchor_mut(plane)
+                    && anchor.target.body == old
+                {
+                    let ids = std::collections::BTreeMap::from([(anchor.target.origin_feature, anchor.target.origin_feature)]);
+                    anchor.remap_target(&ids, &std::collections::BTreeMap::from([(old.clone(), name.to_string())]))?;
+                }
+            }
+        }
+        if let FeatureKind::FrameGusset { supports, .. } = &mut f.kind {
+            for support in supports {
+                if let Some(anchor) = super::sketch::face::anchor_mut(&mut support.plane)
                     && anchor.target.body == old
                 {
                     let ids = std::collections::BTreeMap::from([(anchor.target.origin_feature, anchor.target.origin_feature)]);
@@ -1850,7 +2023,7 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
             _ => None,
         })
         .cloned();
-    let mut plane = super::sketch::plane_ref_numbers(&trial, p, cmd)?;
+    let mut plane = super::sketch::plane_ref_numbers_with(&trial, p, cmd, super::sketch::face::IndexMode::MayBeStale)?;
     if super::sketch::face::is_face(p) {
         super::sketch::face::capture_positions(&mut trial, &plane)?;
     }
@@ -2063,6 +2236,36 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// In a window, a feature's result shows before SMLib's check of it ends
+    /// ([`Session::set_background_checks`]). The join on the block (refused by the check, as in
+    /// the test above) can show at once; a command that reads the model next reads it checked: the
+    /// join failed with the check's error, and no check left running, also for the evaluation the
+    /// refusal needed before it.
+    #[test]
+    fn a_command_that_reads_the_model_reads_it_checked_in_a_window() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-bg-checks-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("block.step");
+        std::fs::write(&path, include_str!("../../../../tests/step-regressions/block_edge_off_its_face.step")).unwrap();
+        let mut s = Session::default();
+        let r = run(&mut s, "file.insert_step", json!({"path": path.to_string_lossy()}));
+        let id = r["feature"].as_u64().unwrap_or_else(|| panic!("{r}"));
+        s.model.result(id).and_then(|f| f.import_report.clone()).expect("the import's check").settled().expect("the check ends");
+        s.set_background_checks(true);
+        let joined =
+            s.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5, "corner": [18, 28, 8], "operation": "join", "targets": ["Bloco"]}));
+        let measured = s.execute("inspect.measure", &json!({}));
+        assert!(measured.is_ok(), "{measured:?}");
+        assert!(!s.model.checking_features(), "the command read the model with no check left running");
+        // Refused at once (the check ended in time) or once settled: the same error either way.
+        let error = match joined {
+            Err(e) => e.to_string(),
+            Ok(_) => s.model.results.last().and_then(|r| r.error.clone()).expect("the join fails once its check is settled"),
+        };
+        assert!(error.contains("SMLib's check refuses the result"), "{error}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn repair_part_patches_a_missing_face_as_one_undoable_feature() {
         let mut s = Session::default();
@@ -2163,6 +2366,93 @@ mod tests {
             Ok(v) => v,
             Err(e) => panic!("selection.delete: {e}"),
         }
+    }
+
+    /// #3504: Ctrl+I isolates the selection (a face names its body) and Ctrl+Shift+I puts back what
+    /// it hid; with nothing selected Isolate refuses rather than hiding everything.
+    #[test]
+    fn the_isolate_keys_act_on_the_selection() {
+        let mut s = Session::default();
+        two_boxes(&mut s);
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [20, 0, 0], "body_name": "C"}));
+        let spec = |id: &str| crate::find_command(id).unwrap_or_else(|| panic!("{id}"));
+        assert_eq!((spec("browser.isolate").shortcut, spec("browser.unisolate").shortcut), (Some("Ctrl+I"), Some("Ctrl+Shift+I")));
+        s.clear_selection();
+        assert!(s.execute("browser.isolate", &json!({})).is_err(), "nothing selected");
+        // Select All's whole-body scope isolates its bodies: nothing to hide, nothing refused.
+        s.selection_all_bodies = true;
+        run(&mut s, "browser.isolate", json!({}));
+        assert!(s.visibility.hidden_bodies.is_empty() && s.visibility.before_isolate.is_some());
+        run(&mut s, "browser.unisolate", json!({}));
+        s.clear_selection();
+        assert!(s.visibility.hidden_bodies.is_empty() && s.visibility.before_isolate.is_none());
+        s.selection = vec![crate::Sel::Face { body: "B".into(), index: 0, point: Default::default() }];
+        run(&mut s, "browser.isolate", json!({}));
+        assert_eq!(s.visibility.hidden_bodies, ["A", "C"]);
+        // The bodies on screen when it began, for drawing what it hid see-through or as edges.
+        let shown: Vec<&str> = s.visibility.before_isolate.as_ref().unwrap().shown_bodies.iter().map(String::as_str).collect();
+        assert_eq!(shown, ["A", "B", "C"]);
+        // #8120: the Isolate is a viewport status, ended by its own command, as Zebra is.
+        let status = s.status_items().into_iter().find(|item| item.id == crate::status_items::StatusId::Isolate).expect("an Isolate status");
+        assert_eq!(status.setting, crate::status_items::StatusSetting::Isolate { hidden: 2 });
+        assert_eq!((status.clear.command.as_str(), status.clear.params.clear), ("browser.isolate", true));
+        run(&mut s, &status.clear.command, json!({"clear": true}));
+        assert!(s.status_items().iter().all(|item| item.id != crate::status_items::StatusId::Isolate), "ended");
+        run(&mut s, "browser.isolate", json!({}));
+        run(&mut s, "browser.unisolate", json!({}));
+        assert!(s.visibility.hidden_bodies.is_empty() && s.visibility.before_isolate.is_none());
+        // With nothing isolated, Ctrl+Shift+I leaves what the user hid alone.
+        run(&mut s, "browser.visibility", json!({"items": ["C"], "visible": false}));
+        assert!(s.execute("browser.unisolate", &json!({})).is_err(), "nothing is isolated");
+        assert_eq!(s.visibility.hidden_bodies, ["C"], "and nothing is shown");
+    }
+
+    /// #8120: a body hidden before the Isolate and renamed during it stays hidden after Unisolate,
+    /// and a folder hidden during it stays hidden.
+    #[test]
+    fn unisolate_follows_renames_and_keeps_later_folder_hides() {
+        let mut s = Session::default();
+        two_boxes(&mut s);
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [20, 0, 0], "body_name": "C"}));
+        run(&mut s, "browser.visibility", json!({"items": ["C"], "visible": false}));
+        run(&mut s, "browser.visibility", json!({"items": ["A"], "visible": true, "isolate": true}));
+        run(&mut s, "body.rename", json!({"body": "C", "name": "D"}));
+        assert!(!s.visibility.before_isolate.as_ref().unwrap().shown_bodies.contains("C"), "C was hidden before the Isolate");
+        run(&mut s, "body.rename", json!({"body": "B", "name": "E"}));
+        assert!(s.visibility.before_isolate.as_ref().unwrap().shown_bodies.contains("E"), "a rename follows into what was on screen");
+        run(&mut s, "browser.visibility", json!({"tree_folders": ["c0/sketches"], "visible": false}));
+        run(&mut s, "browser.unisolate", json!({}));
+        assert_eq!(s.visibility.hidden_bodies, ["D"], "the renamed body stays hidden");
+        assert!(s.visibility.hidden_folders.iter().any(|k| k == "c0/sketches"), "the folder hidden while isolating stays hidden");
+    }
+
+    /// #8120: Unisolate puts back what the Isolates hid, as it was before the first one, is one
+    /// undo step, and is never saved with the design.
+    #[test]
+    fn unisolate_restores_what_isolate_hid() {
+        let mut s = Session::default();
+        two_boxes(&mut s);
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [20, 0, 0], "body_name": "C"}));
+        let hidden = |s: &Session| s.visibility.hidden_bodies.clone();
+        run(&mut s, "browser.visibility", json!({"items": ["C"], "visible": false}));
+        run(&mut s, "browser.visibility", json!({"items": ["A"], "visible": true, "isolate": true}));
+        run(&mut s, "browser.visibility", json!({"items": ["B"], "visible": true, "isolate": true}));
+        assert_eq!(hidden(&s).len(), 2, "only B is shown");
+        assert!(!serde_json::to_string(&s.visibility).unwrap().contains("isolate"), "the snapshot is not saved");
+        let undo = s.undo.len();
+        run(&mut s, "browser.visibility", json!({"visible": true, "unisolate": true}));
+        assert_eq!(hidden(&s), ["C"], "back to before the first Isolate, C still hidden by hand");
+        assert!(s.visibility.before_isolate.is_none());
+        assert_eq!(s.undo.len(), undo + 1);
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(hidden(&s).len(), 2, "undo brings the isolation back");
+        assert!(s.visibility.before_isolate.is_some(), "and Unisolate with it");
+        run(&mut s, "edit.redo", json!({}));
+        // With no Isolate in effect, Unisolate shows everything.
+        run(&mut s, "browser.visibility", json!({"visible": true, "unisolate": true}));
+        assert!(hidden(&s).is_empty());
+        assert!(s.execute("browser.visibility", &json!({"visible": false, "unisolate": true})).is_err());
+        assert!(s.execute("browser.visibility", &json!({"visible": true, "unisolate": true, "items": ["A"]})).is_err());
     }
 
     #[test]
@@ -2291,7 +2581,7 @@ mod tests {
         run(&mut computed, "body.rename", json!({"body": "Peg", "name": "Stud"}));
         // The user hides the body while the rename is being evaluated.
         run(&mut s, "browser.visibility", json!({"items": ["Peg"], "visible": false}));
-        s.accept_computed(computed);
+        s.accept_computed(computed).unwrap();
         assert!(!s.body_visible("Stud"));
         assert_eq!(s.visibility.hidden_bodies, ["Stud"]);
         run(&mut s, "edit.undo", json!({}));
@@ -2321,7 +2611,7 @@ mod tests {
                 if computed {
                     let mut scratch = s.scratch();
                     run(&mut scratch, "body.rename", json!({"body": "B", "name": "A"}));
-                    s.accept_computed(scratch);
+                    s.accept_computed(scratch).unwrap();
                 } else {
                     run(&mut s, "body.rename", json!({"body": "B", "name": "A"}));
                 }

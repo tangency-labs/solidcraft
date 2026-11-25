@@ -36,6 +36,124 @@ fn cylinder_base_expressions_follow_parameters() {
     assert!(near(lo, [25.0, 5.0, -2.0]), "{lo:?}");
 }
 
+/// A cylinder's axis takes unitless expressions, as its base does (#18822): it turns when the
+/// parameter changes, follows a rename, and survives a save and reopen. Plain numbers are still
+/// stored as normalized numbers, and an axis that is zero for the values now is refused.
+#[test]
+fn cylinder_axis_expressions_follow_parameters() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "t", "expression": "45 deg"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 1, "height": 10, "axis": ["0", "-sin(t)", "-cos(t)"], "body_name": "Slant"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 1, "height": 10, "axis": [0, -1, -1], "base": [20, 0, 0], "body_name": "Fixed"}));
+    let shifted = |(lo, hi): ([f64; 3], [f64; 3])| ([lo[0] - 20.0, lo[1], lo[2]], [hi[0] - 20.0, hi[1], hi[2]]);
+    let (slant, fixed) = (bbox(&s, "Slant"), shifted(bbox(&s, "Fixed")));
+    assert!(near(slant.0, fixed.0) && near(slant.1, fixed.1), "{slant:?} {fixed:?}");
+    assert!(slant.0[1] < -7.0 && slant.0[2] < -7.0, "{slant:?}");
+    // Turned to lie along -Y when the parameter changes.
+    run(&mut s, "parameters.change", json!({"name": "t", "expression": "90 deg"}));
+    let (lo, hi) = bbox(&s, "Slant");
+    assert!(near(lo, [-1.0, -10.0, -1.0]) && near(hi, [1.0, 0.0, 1.0]), "{lo:?} {hi:?}");
+    // A rename follows into the axis, and the parameter can't be deleted while it uses it.
+    assert!(s.execute("parameters.delete", &json!({"name": "t"})).is_err());
+    run(&mut s, "parameters.rename", json!({"name": "t", "new_name": "tilt"}));
+    run(&mut s, "parameters.change", json!({"name": "tilt", "expression": "0 deg"}));
+    let (lo, hi) = bbox(&s, "Slant");
+    assert!(near(lo, [-1.0, -1.0, -10.0]) && near(hi, [1.0, 1.0, 0.0]), "{lo:?} {hi:?}");
+    // Saved as expressions; plain numbers stay numbers, normalized as before.
+    let text = s.doc.to_json();
+    let v: Value = serde_json::from_str(&text).unwrap();
+    let feats = v["features"].as_array().unwrap();
+    assert_eq!(feats[0]["axis"], json!([0.0, "-sin(tilt)", "-cos(tilt)"]), "{v}");
+    let h = std::f64::consts::FRAC_1_SQRT_2;
+    let fixed = feats[1]["axis"].as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect::<Vec<_>>();
+    assert!(fixed.len() == 3 && fixed[0] == 0.0 && (fixed[1] + h).abs() < 1e-12 && (fixed[2] + h).abs() < 1e-12, "{v}");
+    let mut s2 = Session::new(solidcraft_doc::Document::from_json(&text).unwrap());
+    let (lo, _) = bbox(&s2, "Slant");
+    assert!(near(lo, [-1.0, -1.0, -10.0]), "{lo:?}");
+    run(&mut s2, "parameters.change", json!({"name": "tilt", "expression": "90 deg"}));
+    let (lo, _) = bbox(&s2, "Slant");
+    assert!(near(lo, [-1.0, -10.0, -1.0]), "{lo:?}");
+    // An axis that is zero for the values now is refused, not built along some other line.
+    let before = s.doc.features.len();
+    assert!(s.execute("solid.cylinder", &json!({"radius": 1, "height": 2, "axis": ["sin(tilt)", 0, 0]})).is_err());
+    assert_eq!(s.doc.features.len(), before);
+}
+
+/// Inside a component turned a quarter turn about Z, an axis of expressions is turned into the
+/// component's frame (#18822), as `[x, y, z]` or `{x, y, z}`, landing where the same direction
+/// given as numbers lands. X, Y or Z by name stays the component's own axis, as before, for the
+/// cylinder, the cone and the coil alike.
+#[test]
+fn cylinder_axis_forms_turn_with_a_turned_component() {
+    let world_box_of = |cmd: &str, params: Value| {
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name": "t", "expression": "45 deg"}));
+        let c = run(&mut s, "component.create", json!({"name": "Arm", "grounded": false}));
+        let (cid, occ) = (c["component"].as_u64().unwrap(), c["occurrence"].as_u64().unwrap());
+        run(&mut s, "component.activate", json!({"component": 0}));
+        run(&mut s, "occurrence.move", json!({"occurrence": occ, "axis": [0, 0, 1], "angle": "90 deg", "origin": [0, 0, 0]}));
+        run(&mut s, "component.activate", json!({"component": cid}));
+        run(&mut s, cmd, params);
+        let b = s.world_state().unwrap().body("C").unwrap().mesh().bounds();
+        ([b.min.x, b.min.y, b.min.z], [b.max.x, b.max.y, b.max.z])
+    };
+    let world_box = |axis: Value| world_box_of("solid.cylinder", json!({"radius": 1, "height": 10, "axis": axis, "body_name": "C"}));
+    let same = |a: ([f64; 3], [f64; 3]), b: ([f64; 3], [f64; 3])| near(a.0, b.0) && near(a.1, b.1);
+    let slant = world_box(json!([0, -1, -1]));
+    assert!(slant.0[1] < -6.0 && slant.0[2] < -6.0, "{slant:?}");
+    for axis in [json!(["0", "-sin(t)", "-cos(t)"]), json!({"x": "0", "y": "-sin(t)", "z": "-cos(t)"}), json!([0, "-sin(t) * sqrt(2)", -1])] {
+        assert!(same(world_box(axis.clone()), slant), "{axis}: {:?} vs {slant:?}", world_box(axis.clone()));
+    }
+    // The component's X is the world's Y after the quarter turn; its Y is the world's -X.
+    let own_x = world_box(json!([0, 1, 0]));
+    assert!(own_x.1[1] > 9.0 && own_x.1[0] < 1.5, "{own_x:?}");
+    for axis in [json!("X"), json!(" x ")] {
+        assert!(same(world_box(axis.clone()), own_x), "{axis}: {:?} vs {own_x:?}", world_box(axis.clone()));
+    }
+    let cone = |axis: Value| world_box_of("solid.cone", json!({"radius": 2, "top_radius": 1, "height": 10, "axis": axis, "body_name": "C"}));
+    assert!(same(cone(json!("X")), cone(json!([0, 1, 0]))), "{:?} vs {:?}", cone(json!("X")), cone(json!([0, 1, 0])));
+    assert!(same(cone(json!(" y ")), cone(json!([-1, 0, 0]))), "{:?}", cone(json!(" y ")));
+    let coil = |axis: Value| {
+        world_box_of("solid.coil", json!({"diameter": 10, "revolutions": 2, "pitch": 5, "section_size": 1, "axis": axis, "body_name": "C"}))
+    };
+    let (named, numbers) = (coil(json!("X")), coil(json!([0, 1, 0])));
+    assert!(named.1[1] > 9.0 && numbers.1[1] > 9.0, "{named:?} vs {numbers:?}");
+}
+
+/// An axis that uses no parameter is saved normalized, as numbers, whatever form it was given
+/// in; a short axis keeps its direction; the parameters it uses are named as its Axis.
+#[test]
+fn cylinder_axis_constants_short_axes_and_users() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 1, "height": 2, "axis": [0, "0", "2"], "body_name": "A"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 1, "height": 2, "axis": [0, 0, 1e-11], "base": [10, 0, 0], "body_name": "B"}));
+    let v: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    assert_eq!(v["features"][0]["axis"], json!([0.0, 0.0, 1.0]), "{v}");
+    assert_eq!(v["features"][1]["axis"], json!([0.0, 0.0, 1.0]), "{v}");
+    // A long axis is a direction too, given as numbers or by expressions.
+    run(&mut s, "solid.cylinder", json!({"radius": 1, "height": 2, "axis": [1e300, 1e300, 0], "base": [0, 10, 0], "body_name": "L"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 1, "height": 2, "axis": ["1e12", 0, 0], "base": [0, 20, 0], "body_name": "M"}));
+    let v: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    let h = std::f64::consts::FRAC_1_SQRT_2;
+    let long: Vec<f64> = v["features"][2]["axis"].as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect();
+    assert!((long[0] - h).abs() < 1e-12 && (long[1] - h).abs() < 1e-12 && long[2] == 0.0, "{v}");
+    assert_eq!(v["features"][3]["axis"], json!([1.0, 0.0, 0.0]), "{v}");
+    run(&mut s, "parameters.add", json!({"name": "t", "expression": "45 deg"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 1, "height": 10, "axis": ["0", "0", "sin(t)"], "base": [20, 0, 0], "body_name": "C"}));
+    for tiny in ["1e-9 deg", "1e-300 deg"] {
+        run(&mut s, "parameters.change", json!({"name": "t", "expression": tiny}));
+        let (lo, hi) = bbox(&s, "C");
+        assert!(near(lo, [19.0, -1.0, 0.0]) && near(hi, [21.0, 1.0, 10.0]), "{tiny}: {lo:?} {hi:?}");
+    }
+    // A parameter added as a plain number is a length: refused as it is, with the way out.
+    run(&mut s, "parameters.add", json!({"name": "n", "expression": "2"}));
+    let length = s.execute("solid.cylinder", &json!({"radius": 1, "height": 2, "axis": ["n", 0, 0]})).unwrap_err().to_string();
+    assert!(length.contains("n / 1 mm"), "{length}");
+    run(&mut s, "solid.cylinder", json!({"radius": 1, "height": 2, "axis": ["n / 1 mm", 0, 0], "base": [30, 0, 0], "body_name": "D"}));
+    let refused = s.execute("parameters.delete", &json!({"name": "t"})).unwrap_err().to_string();
+    assert!(refused.contains("Axis") && !refused.contains("Position"), "{refused}");
+}
+
 #[test]
 fn primitive_points_take_expressions() {
     let mut s = Session::default();

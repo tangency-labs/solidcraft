@@ -79,7 +79,7 @@
 use crate::error::heal::HealFailure;
 use crate::error::{ignored, EntityRef, Result, SolidError};
 use crate::geom::global_solver::SolverOperation;
-use crate::geom::tol::{calc_face_zone_tol_3d, xsect_tol_3d_from_zones, zone_tol3d};
+use crate::geom::tol::{brep_size_zone_tol_3d, xsect_tol_3d_from_zones, zone_tol3d};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::intersect::curve_class::p1::{
     get_connected_touches, get_winding_count, CrvDirOnFaceType, CurveClassification, TouchData,
@@ -1424,6 +1424,12 @@ pub struct FaceProps<O: LoopObject> {
     pub raw_touch_list_v: Vec<TouchData<O>>,
     /// `m_sDoneTouchListV`.
     pub done_touch_list_v: Vec<TouchData<O>>,
+    /// Not upstream: whether anything reads the seams' touch lists after
+    /// [`crate::topology::face::p4::has_seam_problem_mut`] fills them (`true`, as
+    /// upstream always fills them). `false` only on the properties `HasSeamProblem` makes
+    /// for itself and drops, whose lists only its doubly periodic cases read: the seam
+    /// classifications then skip `GetLoopCrossings` on a surface periodic in one direction.
+    pub(crate) touch_lists_read: bool,
     /// `m_bBadCrossedPole`: one interior pole crossing is cached (after splitting,
     /// Stage 2 finds the next crossing).
     pub bad_crossed_pole: Tri,
@@ -1524,6 +1530,7 @@ impl<O: LoopObject> FaceProps<O> {
             crv_class_v: None,
             raw_touch_list_v: Vec::new(),
             done_touch_list_v: Vec::new(),
+            touch_lists_read: true,
             bad_crossed_pole: Tri::False,
             crossed_pole_edge: None,
             crossed_pole_parameter: 0.0,
@@ -1862,7 +1869,9 @@ impl<O: LoopObject> FaceProps<O> {
         }
 
         // CalcZone is the desired tolerance for an object with the current gaps
-        let calc_zone_tol_3d = calc_face_zone_tol_3d(k, Some(&k.context));
+        // (upstream asks the B-rep's context, there this model's: the zone tolerance
+        // of this B-rep's own model size estimate)
+        let calc_zone_tol_3d = brep_size_zone_tol_3d(k, b);
 
         // ZoneTol3d for current Gap3d sizes
         self.bad_small_zone_tol_3d = Tri::from(self.zone_tol_3d <= calc_zone_tol_3d - EFF_ZERO);
@@ -1954,10 +1963,7 @@ impl<O: LoopObject> FaceProps<O> {
 
         // no work - called before SmHealData::Fix_TolSizes() has run on this Brep
         if exe_heal_op < HealerOpType::FixTolsizes {
-            return Err(SolidError::heal_failed(
-                OP_STAGE2,
-                "the tolerance sizes are not fixed yet",
-            ));
+            return Err(SolidError::heal(OP_STAGE2, HealFailure::HealStepNotRun));
         }
 
         // extra work - get props that need to be built before these props
@@ -2318,10 +2324,7 @@ impl<O: LoopObject> FaceProps<O> {
 
         // no work - called before SmHealData::Fix_SplitEdgesAtSeam() has run
         if exe_heal_op < HealerOpType::FixSplitedgeAtseam {
-            return Err(SolidError::heal_failed(
-                OP_STAGE3,
-                "the edges are not split at the seams yet",
-            ));
+            return Err(SolidError::heal(OP_STAGE3, HealFailure::HealStepNotRun));
         }
 
         // extra work - get props that need to be built before these props
@@ -3024,11 +3027,16 @@ mod tests {
         let f = FaceId::from_index(0);
         let mut p: FaceProps<H> = FaceProps::new();
         // before Fix_TolSizes: SM_ERR, nothing is touched
+        let named = |e: &SolidError| {
+            e.upstream_status() == Some(1001)
+                && e.heal_failure() == Some(&HealFailure::HealStepNotRun)
+                && e.kind() == crate::error::ErrorKind::InvalidInput
+        };
         let e = p.set_props_stage2(&k, &b, f, 0, HealerOpType::None);
-        assert!(matches!(e, Err(e) if e.upstream_status() == Some(1001)));
+        assert!(matches!(e, Err(ref e) if named(e)), "{e:?}");
         assert_eq!(p.prop_stage, PropStage::Stage0);
         let e = p.set_props_stage3(&k, &b, f, 0, HealerOpType::FixTolsizes);
-        assert!(matches!(e, Err(e) if e.upstream_status() == Some(1001)));
+        assert!(matches!(e, Err(ref e) if named(e)), "{e:?}");
     }
 
     #[test]

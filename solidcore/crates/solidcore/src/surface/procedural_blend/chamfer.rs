@@ -28,8 +28,12 @@
 //! at the chain's widest wedge, bounded from above by enclosures of the faces' normals along
 //! each edge (`blend::chamfer_side::widest_wedge_bound`), not by samples. The sizes drift. A rim whose wedge runs from 63.4 to
 //! 116.6 degrees, asked 1 and 2, is measured at 86.4 and has setbacks from 0.01 to 1.95 and
-//! from 1.73 to 2.61. Setbacks that hold at every station are another definition. Edges
-//! between planes of different wedges have no one pair: each keeps its own.
+//! from 1.73 to 2.61. Setbacks that hold at every station are another definition, a record
+//! kind not built yet (`record::ChamferKindRecord::Setbacks`, its station in
+//! `blend::fillet_section::setback_station`). Edges between planes of different wedges have
+//! no one pair. A chain of equal setbacks uses the local wedge on the intervening curved
+//! supports: if the signed unit normals at the feet have dot product q, the common offset is
+//! d sqrt((1 + q) / (1 - q)).
 //!
 //! Not upstream (solidcore's, #2486). Deviations: none. No recursion.
 
@@ -63,6 +67,8 @@ pub struct ChamferDefinition {
     /// The angle between the supports at the edge, inside the wedge the chamfer cuts
     /// across, `0 < wedge < pi`.
     pub wedge: f64,
+    /// The two offsets follow the local wedge to preserve an equal setback on the supports.
+    stationwise: bool,
 }
 
 fn positive(x: f64) -> bool {
@@ -78,13 +84,25 @@ impl ChamferDefinition {
     /// `InvalidInput` for a size that is not finite and positive, a wedge outside
     /// `(0, pi)`, or an angle outside `(0, pi - wedge)`.
     pub fn new(size: ChamferSize, wedge: f64) -> Result<Self> {
+        let definition = Self {
+            size,
+            wedge,
+            stationwise: false,
+        };
+        definition.validate()?;
+        Ok(definition)
+    }
+
+    /// Check the public size and wedge against the kind of chamfer being stored.
+    pub(super) fn validate(&self) -> Result<()> {
+        let wedge = self.wedge;
         if !(wedge.is_finite() && wedge > 0.0 && wedge < PI) {
             return Err(SolidError::invalid_input(
                 OP,
                 "a chamfer's wedge angle is between 0 and pi",
             ));
         }
-        let sizes_ok = match size {
+        let sizes_ok = match self.size {
             ChamferSize::Distances([a, b]) => positive(a) && positive(b),
             ChamferSize::DistanceAngle { distance, angle } => {
                 positive(distance) && positive(angle) && angle + wedge < PI
@@ -97,7 +115,30 @@ impl ChamferDefinition {
                 "a chamfer's sizes are finite and positive, its angle less than pi less the wedge's",
             ));
         }
-        Ok(Self { size, wedge })
+        if self.stationwise && !matches!(self.size, ChamferSize::Distances([a, b]) if a == b) {
+            return Err(SolidError::invalid_input(
+                OP,
+                "a local wedge needs equal positive setbacks",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Hold the same setback in the tangent planes at every pair of support feet.
+    /// The stored wedge describes the reference section for reporting the sizes.
+    pub(crate) fn at_every_station(mut self) -> Result<Self> {
+        self.stationwise = true;
+        self.validate()?;
+        Ok(self)
+    }
+
+    /// The setback that fixes the rolling radius at each station, if specified.
+    #[must_use]
+    pub(crate) fn constant_setback(self) -> Option<f64> {
+        match self.size {
+            ChamferSize::Distances([d, _]) if self.stationwise => Some(d),
+            _ => None,
+        }
     }
 
     /// The sizes of the chamfer of `offsets` at `wedge`: its two setbacks.
@@ -177,6 +218,7 @@ impl ChamferDefinition {
         Self {
             size,
             wedge: self.wedge,
+            stationwise: self.stationwise,
         }
     }
 }

@@ -169,7 +169,7 @@ impl DxfTextSource {
     }
 
     pub(super) fn transformed(&self, translation: Vec2, scale: f64) -> Result<Self> {
-        let first_anchor_mm = self.first_anchor_mm.map(|p| solidcore_ops::import_geometry::transform_anchor(p, scale, translation));
+        let first_anchor_mm = self.first_anchor_mm.map(|p| solidcraft_kernel::services::dxf::export::transform_anchor(p, scale, translation));
         let raw_group1 = self
             .raw_group1
             .as_deref()
@@ -462,6 +462,11 @@ impl<G> DxfFile<G> {
             return Err(invalid("DXF source layer has no resolved declared style"));
         }
         self.layers.get(id.index).ok_or_else(|| invalid("unknown DXF layer handle"))
+    }
+
+    /// Where a declared layer sits in [`Self::layers`].
+    pub(super) fn layer_index(&self, id: LayerId) -> Result<usize> {
+        self.layer(id).map(|_| id.index)
     }
 
     /// The frozen legacy fixtures keep exact names and first declaration wins.
