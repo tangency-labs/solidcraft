@@ -7876,15 +7876,23 @@ fn blend_edges_on(mb: &ModelBody, f: &Feature, edges: &[crate::Position], idx: &
         let hit = trusted_edge_name(f, i, p)
             .and_then(|n| crate::name_lookup::locate_projected_edge(mb, n, p).ok())
             .ok_or_else(|| DocError::reselect(stored.as_str()))?;
-        if let Some(note) = hit.note(stored) {
-            notes.push(note);
-        }
         // The body changed since the pick: the pick may now sit at an end of the edge.
-        let moved = f.edge_refs.get(i).is_some_and(|r| {
+        let moved = f.edge_refs.get(i).map(|r| {
             let now = mb.mesh().bounds();
             let tight = (mb.body.size() * 2e-3).max(1e-3);
             now.min.dist(r.min) > tight || now.max.dist(r.max) > tight
         });
+        // On the body the pick was made on, a pick off the named edge and on one named alike but for
+        // its faces' tie numbers is that edge: the numbers moved, not the edge (#22230).
+        let hit = match (hit.on_point, moved) {
+            (false, Some(false)) => crate::name_lookup::retied_edge(mb, &mb.mesh(), stored, hit.edge, p)
+                .map_or(hit, |edge| crate::name_lookup::EdgeHit { edge, point: p, verified: false, on_point: true }),
+            _ => hit,
+        };
+        let moved = moved.unwrap_or(false);
+        if let Some(note) = hit.note(stored) {
+            notes.push(note);
+        }
         out.push(if moved { off_the_ends(mb, hit.edge, hit.point) } else { hit.point });
     }
     if out.is_empty() {

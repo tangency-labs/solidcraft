@@ -174,6 +174,47 @@ pub fn locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, Str
     }
 }
 
+/// Edge name `name` without the numbers that tell its faces apart from tied pieces of the same
+/// name (`F2:side:l1|F2:top#1` is `F2:side:l1|F2:top`): `None` when none of its faces has one, or
+/// it does not read as an edge name.
+fn without_face_ties(name: &str) -> Option<crate::persistent_name::EdgeName> {
+    use crate::persistent_name::{EdgeName, Suffix};
+    let mut e = EdgeName::parse(name).ok()?;
+    let mut tied = false;
+    for f in &mut e.faces {
+        match f.suffixes.last_mut() {
+            Some(Suffix::Numbered(_)) => {
+                f.suffixes.pop();
+                tied = true;
+            }
+            Some(Suffix::Piece(q)) if q.tie.is_some() => {
+                q.tie = None;
+                tied = true;
+            }
+            _ => {}
+        }
+    }
+    tied.then_some(e)
+}
+
+/// The edge a blend's stored edge name `name` meant when it found edge `found` of body `b` (whose
+/// mesh is `m`) and the blend's own pick `near` does not lie on it: the edge `near` lies on
+/// (exactly, clear of its ends, see [`edge_through`]), when its name differs from `name` only in
+/// the numbers of its faces. Pieces that nothing else tells apart are numbered along where they
+/// lie, and builds have numbered them differently: both caps of an extrude with a start offset are
+/// `top`, and since #21762 the one a design saved by 0.47.0 called `top#1` is `top#2` (#22230).
+/// The point was picked on the edge the name was given to, so it says which one that is, but only
+/// on the body it was picked on: a pick is not updated when an edit moves the body, and then it
+/// can lie on the other cap's edge. The caller checks that the body has not moved.
+pub(crate) fn retied_edge(b: &ModelBody, m: &Mesh, name: &str, found: usize, near: Vec3) -> Option<usize> {
+    if b.body.is_mesh() || !near.is_finite() || edge_near(b, m, found, near) {
+        return None;
+    }
+    let wanted = without_face_ties(name)?;
+    let j = edge_through(b, m, near).filter(|j| *j != found)?;
+    (without_face_ties(edge_names(b).get(j)?)? == wanted).then_some(j)
+}
+
 /// Find a saved edge in its body when it may be named with numbered pieces: a Sketch Project edge, or
 /// the edge of a fillet or chamfer (#16535). Older designs can name the edge between
 /// numbered pieces of faces that now evaluate whole (`F4:side:l6#2|F4:side:l7#2`, now
