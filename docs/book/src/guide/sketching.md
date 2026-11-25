@@ -235,8 +235,11 @@ becomes a dimension of that side, and the other sides stay equal to it.
 `sketch.edit_text` take a `font`, the family or full name of an installed font ("DejaVu Sans") or the path
 of a `.ttf` / `.otf` file, and the **Edit Text** dialog has a **Font** field for it. An unknown font is an
 error, and the font is kept with the text in the design, so the text stays editable in it. `SOLIDCRAFT_FONT_DIRS`
-adds folders to the ones searched for installed fonts. A text's `height`, its `angle` and each coordinate of
-its `at` can be expressions of the design's parameters, given as strings (`"height": "plate_height / 10"`,
+adds folders to the ones searched for installed fonts. On Windows, SolidCraft also reads installed
+font files from the current user's and machine's `Software\Microsoft\Windows NT\CurrentVersion\Fonts`
+registry keys, including absolute file paths outside the standard Windows and per-user Fonts
+folders. Restart SolidCraft after installing fonts to refresh the cached list. A text's `height`, its
+`angle` and each coordinate of its `at` can be expressions of the design's parameters, given as strings (`"height": "plate_height / 10"`,
 `"at": ["plate_width / 2", 5]`): the text keeps the expression and follows the parameters when they change, and
 saves it with the design. A number takes the place of an expression, and so does moving the text or dragging its
 handles (what moves becomes a number; turning a text leaves its height as it was). A string that names no
@@ -295,6 +298,91 @@ another plane, where it fails for the same projections, and so it does when the 
 plane was lost as well: it then names the projections it lost. Shown in the browser or at the
 timeline marker, the sketch draws its last geometry too; its profiles and edges can't be picked
 or used by a new feature until it builds again.
+
+Picking a face projects every loop of its boundary, holes included; picking an edge projects
+that edge only. Projected curves and points are drawn in the projected colour (lost ones in
+the lost colour), and dashed when switched to construction with **Normal/Construction**: then
+they bound no profile but stay linked and keep following their source.
+
+**Constraining to the model.** Projected geometry is fixed where its source puts it, so
+constrain and dimension the sketch's own geometry to it. The constraint tools and Dimension
+take a model edge or vertex directly. Turn on **Projection display and picking** in
+the Project tool's options panel to also pick another sketch's curve directly: the click projects it into
+the sketch first (the status line says so) and uses the projection. This option also gives
+projected points their projection or lost colors, groups Break Link with the projection's
+actions, and lists projections under their sketch in the browser and history.
+It is off by default and lasts for the current app session only. It is not a Preferences setting.
+With it off, the previous menu, picking and row layout remain. Opening a saved design does not enable it.
+A consistent constraint only between projections is kept and reported as redundant, as on
+other fixed geometry. Commands can request `if_redundant: "refuse"` to refuse it instead.
+A conflicting constraint is always refused. A dimension on projected geometry alone can
+only be driven, and Fix says projected geometry is fixed already. When a source changes shape
+(a fillet or chamfer added before the sketch), the projection is made again and its curves and
+points keep their ids wherever the new geometry continues the old (a shortened edge on the same
+line, a hole of the same size), so the constraints and dimensions on them stay; those on
+geometry that is gone, such as a corner cut away, are removed and the sketch's warning names
+them.
+
+**Projecting from another part.** Geometry picked on another component is read from the exact
+placement it was picked on: an edge of the second copy of a part (`A:2`) follows `A:2` when
+it is moved or turned, and moving `A:1` changes nothing. The projection is worked out in the
+placement of the sketch's own component it was made in (the active one when the sketch's
+component is active), so moving the sketch's component moves it the other way, moving both
+together leaves it as it is, and a sketch made in a second copy of its component (`B:2`)
+keeps that view when the design is saved and opened again. Scripts give the placement as an
+occurrence path: `sketch.project {refs: [{edge: [x,y,z], body: "Plate", path: [occurrence
+ids]}]}` (the browser's instance names, such as `Plate (A:2)`, work too). With `strict_occurrence_references: true`, a sketch cannot project another copy of its own
+component or a part inside that copy. A sketch of a part placed more than once then needs
+an explicit `path`. The input defaults to false on `sketch.project`, `sketch.intersect` and
+`sketch.include_3d`: ambiguous sketches and other placements of the receiving component
+keep main's ordinary links. Own-sketch and later-timeline references remain refused.
+**Projection display and picking** sends the strict input and the displayed copy's path;
+command callers can choose it explicitly. Whatever the sketch is constrained to and the features
+built on it are rebuilt with it.
+
+A curve or point of another component's sketch is the exception when that component is placed
+once: the projection keeps the place it had relative to the sketch's component when it was
+made, so joint motion carries the two parts together. A sketch of a component placed more than
+once is read from the placement its `path` names, as body geometry is.
+
+Body geometry from a part placed only once keeps following uncaptured moves while its
+projection is refreshed, as before. Projections from repeated placements follow captured
+positions: a move kept pending (`occurrence.move` with `capture: false`) is not followed until
+it is captured. With **Projection display and picking** enabled, each projection is listed
+under its sketch in the browser and history, with the placement it reads and its state (lost,
+frozen, pending). Its eye hides it without changing the sketch (it still bounds profiles), and
+its menu offers:
+
+- **Update References** (`sketch.update_references {sketch?, capture?, files?}`) reads every
+  projection where its source is now, solves and stores the sketch and rebuilds what follows,
+  reporting each projection changed, unchanged, frozen or lost and any feature that failed.
+  `capture: true` first captures the pending moves of the placements it reads; `files: true`
+  first runs **Update Links** for each linked design, and reports a design whose file cannot
+  be read as unavailable while its bodies stay usable.
+- **Freeze Link** (`sketch.freeze_link`) keeps the projection as it is until **Resume Link**
+  (`sketch.resume_link`).
+- **Remove Projection** (`sketch.remove_link`) deletes the projection's curves and points and
+  the constraints on them; **Break Link** keeps them as ordinary geometry instead. Deleting
+  some of a projected face's curves breaks the remaining link by default. With
+  `preserve_projection_link: true`, Delete keeps identifiable remaining edges linked.
+  Both `sketch.delete` and `selection.delete` take this input, including dry runs.
+  **Projection display and picking** sends true; it is off by default. The projection remembers the
+  source edges they came from by name, so exactly those stay deleted when it is updated, the
+  part moves or the face is resized. Where the deleted curves can't be told apart that way (part
+  of a source edge, one of edges told apart only by number such as half a hole, or a projection
+  not made of a face's edges: a silhouette, a section, a mesh body's face), the curves left are
+  broken off where they are, as Break Link does, and keep their construction setting; the
+  command's `broken_links` says which and why. If a deleted member's source edge no longer exists,
+  the projection is reported lost and keeps its last geometry until it is repaired or removed.
+
+A projection whose source is gone keeps the last geometry it was stored with (Update
+References stores it) and says it is lost; it is never moved onto another copy of the part
+or a nearby edge. **Repair Link…** in a lost projection's menu (while its sketch is edited)
+starts a pick: the edge, face or vertex clicked next becomes its source
+(`sketch.repair_link {link, ref}`), keeping its curve ids and the constraints on them when the
+new geometry has the same shape. `sketch.references` lists every projection with its source,
+placements and status; `stale` means the model already shows the projection where its source
+is now and only the stored sketch is behind (editing the sketch or Update References stores it).
 
 A sketch on a construction plane built from the model (through a sketch line, through three
 points, midway between two faces…) projects, intersects, includes and holds text like a sketch

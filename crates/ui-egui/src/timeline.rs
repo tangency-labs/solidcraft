@@ -271,7 +271,10 @@ impl TimelineKind {
     pub(crate) fn of(kind: &FeatureKind) -> Self {
         match kind {
             FeatureKind::Sketch { .. } => Self::Sketch,
-            FeatureKind::Extrude { sketch, .. } | FeatureKind::Revolve { sketch, .. } | FeatureKind::Sweep { sketch, .. } => Self::Profile(*sketch),
+            FeatureKind::Extrude { sketch, .. }
+            | FeatureKind::Revolve { sketch, .. }
+            | FeatureKind::Sweep { sketch, .. }
+            | FeatureKind::Coil { sketch: Some(sketch), .. } => Self::Profile(*sketch),
             // Sheet metal drawn from a sketch: the base flange's outline and the contour flange's chain.
             FeatureKind::SheetBase { sketch, .. } | FeatureKind::SheetContour { sketch, .. } => Self::Profile(*sketch),
             _ => Self::Other,
@@ -346,6 +349,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::Loft { .. } => "loft",
         FeatureKind::Sweep { .. } => "sweep",
         FeatureKind::Shell { .. } => "shell",
+        FeatureKind::Dome { .. } => "dome",
         FeatureKind::Draft { .. } => "draft",
         FeatureKind::Split { .. } => "split",
         FeatureKind::Move { .. } => "move",

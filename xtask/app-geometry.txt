@@ -28,7 +28,6 @@ crates/doc/src/construct.rs:facing cross,dot,normalized
 crates/doc/src/construct.rs:lies_on_mesh closest_on_triangle
 crates/doc/src/construct.rs:line_line dot
 crates/doc/src/construct.rs:line_plane dot
-crates/doc/src/construct.rs:model_axis normalized
 crates/doc/src/construct.rs:plane dot
 crates/doc/src/construct.rs:plane_plane cross,dot,normalized
 crates/doc/src/construct.rs:resolve_axis normalized
@@ -109,10 +108,8 @@ crates/doc/src/eval.rs:feature_json triangles
 crates/doc/src/eval.rs:feature_tools_with_constructor atan2,cross,dot,normalized
 crates/doc/src/eval.rs:flat_to_end dot
 crates/doc/src/eval.rs:from_slope_height dot
-crates/doc/src/eval.rs:height_at raycast
-crates/doc/src/eval.rs:hole_depth_to dot,raycast
+crates/doc/src/eval.rs:hole_depth_to dot
 crates/doc/src/eval.rs:hole_dir_into_face dot,normalized
-crates/doc/src/eval.rs:hole_reaches raycast
 crates/doc/src/eval.rs:hole_run_on cross,dot
 crates/doc/src/eval.rs:hole_spots normalized
 crates/doc/src/eval.rs:hole_spots_raw normalized
@@ -136,6 +133,7 @@ crates/doc/src/eval.rs:path_station normalized
 crates/doc/src/eval.rs:pattern_transforms atan2,cross,dot,normalized
 crates/doc/src/eval.rs:pick_lies_on_a_round_axis dot,normalized
 crates/doc/src/eval.rs:planes_cross_over atan2,normalized
+crates/doc/src/eval.rs:ray_face raycast
 crates/doc/src/eval.rs:replay normalized
 crates/doc/src/eval.rs:resolve_edges cross
 crates/doc/src/eval.rs:revolve_axis dot
@@ -701,7 +699,6 @@ crates/geom/src/brep/eval.rs:Intersection::solve cross,dot,normalized
 crates/geom/src/brep/eval.rs:SurfaceEval::new normalized
 crates/geom/src/brep/eval.rs:SurfaceEval::project_with atan2,hypot
 crates/geom/src/brep/eval.rs:angle atan2
-crates/geom/src/brep/eval.rs:face_flux cross,dot
 crates/geom/src/brep/eval.rs:solve3 cross,dot
 crates/geom/src/brep/form.rs:axes cross,normalized
 crates/geom/src/brep/form.rs:on_frame atan2,cross,dot,normalized
@@ -711,7 +708,6 @@ crates/geom/src/brep/form.rs:surface_on dot
 crates/geom/src/brep/form.rs:tube_on_grid atan2,dot
 crates/geom/src/brep/form.rs:turned cross
 crates/geom/src/brep/normal_section.rs:normal_section cross,dot
-crates/geom/src/brep/placement.rs:Affine::conic atan2
 crates/geom/src/bvh.rs:MeshIndex::raycast raycast,triangles
 crates/geom/src/bvh.rs:MeshIndex::triangles_only triangles
 crates/geom/src/chain.rs:Ring::area_vector cross
@@ -787,11 +783,6 @@ crates/geom/src/mesh_distance.rs:TriangleSet::new triangles
 crates/geom/src/mesh_distance.rs:closest_on_segments dot
 crates/geom/src/mesh_distance.rs:segment_through cross,dot
 crates/geom/src/mesh_distance.rs:triangle_distance closest_on_triangle
-crates/geom/src/network.rs:EndCondition::natural dot
-crates/geom/src/network.rs:EndCondition::scale dot
-crates/geom/src/network.rs:end_frame dot,normalized
-crates/geom/src/network.rs:network_surface dot
-crates/geom/src/network.rs:refine dot
 crates/geom/src/paper/annotate.rs:Terminator::place normalized
 crates/geom/src/paper/clip.rs:Clip::cuts dot
 crates/geom/src/plane.rs:Plane::from_normal cross,dot,normalized
@@ -870,12 +861,12 @@ crates/io/src/lib.rs:export_stl_face_solids triangles
 crates/io/src/lib.rs:export_with_parts_noted triangles
 crates/io/src/lib.rs:mass_properties triangles
 crates/io/src/lib.rs:mesh_import_feature_in_prepared triangles
-crates/io/src/lib.rs:mesh_object triangles
 crates/io/src/lib.rs:mesh_text triangles
 crates/io/src/lib.rs:normal_at dot,normalized
 crates/io/src/lib.rs:push_facet cross,normalized
 crates/io/src/lib.rs:stl_ascii triangles
 crates/io/src/lib.rs:stl_binary cross,normalized,triangles
+crates/io/src/lib.rs:weld_for_3mf triangles
 crates/io/src/native_cad/design.rs:Builder::extrude dot
 crates/io/src/native_cad/design.rs:Builder::revolve cross,dot
 crates/io/src/native_cad/design.rs:Builder::sketch cross
@@ -995,6 +986,7 @@ crates/kernel/src/emboss/chain.rs:Chain::flat_piece cross,dot,normalized (emboss
 crates/kernel/src/emboss/chain.rs:Chain::outline dot (emboss wrap: tangent flat beside the wall, moves to solidcore with the rest of the wrap)
 crates/kernel/src/emboss/flat.rs:line_ends dot,normalized (emboss wrap: tangent flat beside the wall, moves to solidcore with the rest of the wrap)
 crates/kernel/src/emboss/flat.rs:tangent_flats dot,normalized (emboss wrap: tangent flat beside the wall, moves to solidcore with the rest of the wrap)
+crates/kernel/src/face_flux.rs:face_flux cross,dot
 crates/kernel/src/fair.rs:Net::fair solve
 crates/kernel/src/fill.rs:Beside::across cross,normalized
 crates/kernel/src/fill.rs:Projection::pcurve dot
@@ -1052,6 +1044,11 @@ crates/kernel/src/meshbody.rs:mesh_ray cross,dot,normalized,raycast,triangles
 crates/kernel/src/meshbody.rs:unify_winding triangles
 crates/kernel/src/meshbody.rs:weld_mesh normalized,triangles
 crates/kernel/src/native/preview.rs:native_preview_mesh triangles
+crates/kernel/src/network.rs:EndCondition::natural dot
+crates/kernel/src/network.rs:EndCondition::scale dot
+crates/kernel/src/network.rs:end_frame dot,normalized
+crates/kernel/src/network.rs:network_surface dot
+crates/kernel/src/network.rs:refine dot
 crates/kernel/src/offset.rs:Surf::same dot
 crates/kernel/src/offset.rs:axes cross,normalized
 crates/kernel/src/offset.rs:surf_of cross,dot,normalized
@@ -1061,6 +1058,7 @@ crates/kernel/src/offset_backend.rs:face_points triangles
 crates/kernel/src/offset_backend.rs:faces_under closest_on_triangle,triangles
 crates/kernel/src/offset_backend.rs:with_offsets closest_on_triangle,triangles
 crates/kernel/src/ops.rs:transform normalized
+crates/kernel/src/placement.rs:Affine::conic atan2
 crates/kernel/src/planar_sources.rs:PlaneIndex::near dot
 crates/kernel/src/planar_sources.rs:PlaneIndex::new dot
 crates/kernel/src/planar_sources.rs:actual_planes cross
@@ -1369,8 +1367,8 @@ crates/ui-egui/src/move_preview.rs:ghost triangles
 crates/ui-egui/src/navigation.rs:device atan2,dot
 crates/ui-egui/src/navigation.rs:kept_view_middle distance
 crates/ui-egui/src/navigation.rs:navigator_home_centre distance
-crates/ui-egui/src/navigation.rs:orbit hypot
-crates/ui-egui/src/navigation.rs:orbit_drag dot
+crates/ui-egui/src/navigation.rs:orbit_drag_styled dot
+crates/ui-egui/src/navigation.rs:orbit_styled hypot
 crates/ui-egui/src/navigation.rs:snap_directions normalized
 crates/ui-egui/src/navigation.rs:snapped_axis_camera dot
 crates/ui-egui/src/navigation.rs:snapped_quarter_roll dot
@@ -1396,7 +1394,6 @@ crates/ui-egui/src/place_gizmo/hole.rs:places normalized
 crates/ui-egui/src/place_gizmo/look.rs:angle_label normalized
 crates/ui-egui/src/place_gizmo/look.rs:grown dot,normalized
 crates/ui-egui/src/place_gizmo/primitive.rs:box_frame dot
-crates/ui-egui/src/place_gizmo/primitive.rs:frame normalized
 crates/ui-egui/src/place_gizmo/primitive.rs:planes triangles
 crates/ui-egui/src/place_gizmo/primitive.rs:square_to dot
 crates/ui-egui/src/point_clouds.rs:Key::of triangles
@@ -1475,7 +1472,6 @@ crates/ui-egui/src/tools.rs:edge_center_outline dot,normalized
 # UI picking only: the distance from the pointer to the line's middle; it picks a point in the view, it builds no geometry.
 crates/ui-egui/src/tools.rs:midpoint_of distance
 crates/ui-egui/src/tools.rs:polygon_outline normalized
-crates/ui-egui/src/tools.rs:preview_circumcentre cross
 crates/ui-egui/src/tools.rs:preview_curve cross,dot,normalized
 crates/ui-egui/src/tools.rs:run_shape cross,dot,normalized
 crates/ui-egui/src/tools.rs:sketch_axis_of dot

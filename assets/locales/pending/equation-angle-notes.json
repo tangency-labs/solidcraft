@@ -1,0 +1,34 @@
+{
+  "en": {
+    "ui.equation_angles_degrees": "In sin(), cos() and tan(), a number without a unit is in degrees. Write rad for radians. A result without a unit is in the design's length unit.",
+    "ui.equation_angles_legacy": "This older curve still reads numbers without a unit in sin(), cos() and tan() as radians. Write deg for degrees. A result without a unit is in the design's length unit."
+  },
+  "ar": {
+    "ui.equation_angles_degrees": "في sin() وcos() وtan()، يُقرأ العدد بلا وحدة بالدرجات. اكتب rad للراديان. وتكون النتيجة بلا وحدة بوحدة الطول في التصميم.",
+    "ui.equation_angles_legacy": "لا يزال هذا المنحنى القديم يقرأ الأعداد بلا وحدة في sin() وcos() وtan() بالراديان. اكتب deg للدرجات. وتكون النتيجة بلا وحدة بوحدة الطول في التصميم."
+  },
+  "de": {
+    "ui.equation_angles_degrees": "In sin(), cos() und tan() werden Zahlen ohne Einheit als Grad gelesen. Für Bogenmaß rad schreiben. Ein Ergebnis ohne Einheit ist in der Längeneinheit der Konstruktion.",
+    "ui.equation_angles_legacy": "Diese ältere Kurve liest Zahlen ohne Einheit in sin(), cos() und tan() weiterhin im Bogenmaß. Für Grad deg schreiben. Ein Ergebnis ohne Einheit ist in der Längeneinheit der Konstruktion."
+  },
+  "he": {
+    "ui.equation_angles_degrees": "ב־sin(), cos() ו־tan(), מספר ללא יחידה נקרא במעלות. לרדיאנים יש לכתוב rad. תוצאה ללא יחידה היא ביחידת האורך של התכן.",
+    "ui.equation_angles_legacy": "עקומה ישנה זו עדיין קוראת מספרים ללא יחידה ב־sin(), cos() ו־tan() ברדיאנים. למעלות יש לכתוב deg. תוצאה ללא יחידה היא ביחידת האורך של התכן."
+  },
+  "ja": {
+    "ui.equation_angles_degrees": "sin()、cos()、tan() の単位なしの数値は度として扱います。ラジアンを指定するには rad を付けます。単位のない結果はデザインの長さの単位になります。",
+    "ui.equation_angles_legacy": "この旧バージョンの曲線では、sin()、cos()、tan() の単位なしの数値を引き続きラジアンとして扱います。度を指定するには deg を付けます。単位のない結果はデザインの長さの単位になります。"
+  },
+  "ko": {
+    "ui.equation_angles_degrees": "sin(), cos(), tan()에서 단위가 없는 수는 도로 해석됩니다. 라디안을 쓰려면 rad를 붙입니다. 단위가 없는 결과는 디자인의 길이 단위를 따릅니다.",
+    "ui.equation_angles_legacy": "이전 버전에서 만든 이 곡선은 sin(), cos(), tan()에서 단위가 없는 수를 여전히 라디안으로 해석합니다. 도를 쓰려면 deg를 붙입니다. 단위가 없는 결과는 디자인의 길이 단위를 따릅니다."
+  },
+  "vi": {
+    "ui.equation_angles_degrees": "Trong sin(), cos() và tan(), số không có đơn vị được hiểu là độ. Viết rad để dùng radian. Kết quả không có đơn vị dùng đơn vị chiều dài của thiết kế.",
+    "ui.equation_angles_legacy": "Đường cong cũ này vẫn hiểu số không có đơn vị trong sin(), cos() và tan() là radian. Viết deg để dùng độ. Kết quả không có đơn vị dùng đơn vị chiều dài của thiết kế."
+  },
+  "zh": {
+    "ui.equation_angles_degrees": "sin()、cos() 和 tan() 中不带单位的数按度计算。要用弧度，请写 rad。不带单位的结果采用设计的长度单位。",
+    "ui.equation_angles_legacy": "这条旧曲线的 sin()、cos() 和 tan() 仍将不带单位的数按弧度计算。要用度，请写 deg。不带单位的结果采用设计的长度单位。"
+  }
+}
