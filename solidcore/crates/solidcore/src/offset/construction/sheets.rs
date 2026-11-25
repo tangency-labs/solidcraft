@@ -352,8 +352,10 @@ fn bounded_patch(patch: &Patch) -> (Bounded3, Option<Bounded>) {
 /// multiply-add, rounded once on its own value, so the move costs `gamma(1)` of the moved
 /// net (and `f64::MIN_POSITIVE` for underflow), and the forms' rounding follows the
 /// patch's size, not its distance from the origin (`docs/definitions-and-certificates.md`
-/// §7, invariant 5). A coefficient that overflows leaves an infinite bound, which
-/// certifies nothing.
+/// §7, invariant 5). The net is taken as the Bezier decomposition and the restriction to
+/// the face's box computed it: their own rounding, at the scale of the coordinates, is not
+/// counted (`docs/offset-and-shell.md` §4.2). A coefficient that overflows leaves an
+/// infinite bound, which certifies nothing.
 ///
 /// # Errors
 ///
