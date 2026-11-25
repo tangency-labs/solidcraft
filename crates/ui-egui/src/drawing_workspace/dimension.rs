@@ -17,8 +17,9 @@ use solidcraft_engine::sketch::{LinearAxis, in_sector, linear_axis};
 use solidcraft_engine::{
     doc::{drawing::dimension::EdgePick, ids},
     drawing_scene,
-    geom::{Seg2Geom, Vec2Geom, hlr::Source},
+    geom::{Seg2Geom, Vec2Geom},
 };
+use solidcraft_kernel::hlr::Source;
 use solidcraft_theme::Tokens;
 
 use super::close_panel;
@@ -396,4 +397,57 @@ pub(crate) fn hovered_shape(app: &SolveApp) -> Option<Shape> {
 #[cfg(test)]
 pub(crate) fn picked_shapes(app: &SolveApp) -> Vec<Shape> {
     app.drawing_workspace.dimension.as_ref().map(|d| d.picks.iter().map(|p| p.shape).collect()).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A box with a 6 mm hole through it inside component Block, and a front view of it.
+    fn block_in_a_component() -> (SolveApp, Value, u64) {
+        let mut s = solidcraft_engine::Session::default();
+        let block = s.execute("component.create", &json!({"name": "Block"})).unwrap()["occurrence"].as_u64().unwrap();
+        s.execute("solid.box", &json!({"length": 20, "width": 30, "height": 10, "body_name": "Block", "operation": "new"})).unwrap();
+        s.execute("solid.hole", &json!({"position": [10, 15, 10], "direction": [0, 0, -1], "diameter": 6})).unwrap();
+        s.execute("component.activate", &json!({"component": 0})).unwrap();
+        s.execute("drawing.create", &json!({})).unwrap();
+        let view = s.execute("drawing.view.base", &json!({"sheet": "Sheet 1", "scale": "1:1", "position_mm": [200, 150]})).unwrap()["view"].clone();
+        (SolveApp::new(s, crate::Services::default()), view, block)
+    }
+
+    /// The index of Block's edge whose points all pass `on`.
+    fn edge_of(app: &SolveApp, on: impl Fn(Vec3) -> bool) -> usize {
+        let state = app.session.model.state();
+        let mesh = state.body("Block").unwrap().mesh();
+        mesh.edges.iter().position(|line| line.iter().all(|p| on(*p))).unwrap()
+    }
+
+    fn add(app: &mut SolveApp, view: &Value, kind: Value) -> Result<Value, String> {
+        app.session.execute("drawing.dimension.add", &json!({"view": view, "kind": kind})).map_err(|e| e.to_string())
+    }
+
+    /// An edge picked on a part inside a component is dimensioned.
+    #[test]
+    fn an_edge_of_a_part_in_a_component_can_be_dimensioned() {
+        let (mut app, view, block) = block_in_a_component();
+        let index = edge_of(&app, |p| p.y.abs() < 1e-9 && p.z.abs() < 1e-9);
+        let picked = Picked { body: "Block".into(), of: Of::Edge(index), path: vec![block], shape: Shape::Other, stroke: Vec::new() };
+        add(&mut app, &view, json!({"length": {"edge": picked.edge()}})).unwrap();
+    }
+
+    /// Two parallel edges, and a hole's rim with an edge, picked on a part inside a component are
+    /// dimensioned across: the picks' ends and centres carry the path too.
+    #[test]
+    fn two_picks_on_a_part_in_a_component_can_be_dimensioned_across() {
+        let (mut app, view, block) = block_in_a_component();
+        let bottom = edge_of(&app, |p| p.y.abs() < 1e-9 && p.z.abs() < 1e-9);
+        let top = edge_of(&app, |p| p.y.abs() < 1e-9 && (p.z - 10.0).abs() < 1e-9);
+        let rim = edge_of(&app, |p| (p.z - 10.0).abs() < 1e-9 && ((p.x - 10.0).hypot(p.y - 15.0) - 3.0).abs() < 1e-6);
+        let pick = |index, shape| Picked { body: "Block".into(), of: Of::Edge(index), path: vec![block], shape, stroke: Vec::new() };
+        let line = |z: f64| Shape::Straight([Vec2::new(0.0, z), Vec2::new(20.0, z)]);
+        for picks in [[pick(bottom, line(0.0)), pick(top, line(10.0))], [pick(rim, Shape::Round(Vec2::new(10.0, 10.0))), pick(bottom, line(0.0))]] {
+            let kind = kind_for(&app, &picks, Vec2::new(30.0, 5.0)).unwrap();
+            add(&mut app, &view, kind.clone()).unwrap_or_else(|e| panic!("{kind}: {e}"));
+        }
+    }
 }

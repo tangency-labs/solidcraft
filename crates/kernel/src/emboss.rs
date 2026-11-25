@@ -12,6 +12,13 @@
 //! check that the raised or sunk material meets nothing else of the body: first an annular
 //! sector over the profiles' angles and heights standing on the wall, then, where that meets the
 //! body, each profile's own raised or sunk solid (#12029). Touching along the wall is not meeting.
+//! A partial outside wall's wrap carries on across either of its lines onto a rectangular plane
+//! face tangent to it there, as one developable strip ([`chain`], #5358): the plane's part is
+//! laid flat, exactly.
+mod chain;
+mod flat;
+mod strip;
+
 use crate::assemble::{AFace, AUse, Assembly};
 use crate::body::Body;
 use crate::history::Change;
@@ -512,6 +519,14 @@ fn emboss_impl(body: &Body, anchor: Option<Vec3>, plane: &Plane, regions: &[Regi
                 face_axial_bounds(&rec, fi, o, axis)?.ok_or_else(|| fail("cylindrical face bounds"))?
             }
         };
+        // A partial outside wall carries the wrap on onto the planes tangent to it (#5358).
+        let flats = if whole.is_none() && outside {
+            flat::tangent_flats(&rec, &surfaces, fi, &flat::Axes { o, axis, radial, tangent, r }, (alo, ahi), (lo, hi), tol)
+        } else {
+            Vec::new()
+        };
+        let strip_lo = flats.iter().filter(|f| f.side < 0.0).map(|f| f.x - f.width).fold(alo * r, f64::min);
+        let strip_hi = flats.iter().filter(|f| f.side > 0.0).map(|f| f.x + f.width).fold(ahi * r, f64::max);
         // An infinite cylinder can be tangent while its finite wall is far from
         // the selected footprint. Conservative analytic/control-polygon bounds
         // exclude that body before unsupported-profile or depth diagnostics.
@@ -571,7 +586,7 @@ fn emboss_impl(body: &Body, anchor: Option<Vec3>, plane: &Plane, regions: &[Regi
                         return Err(fail("a profile edge of no length"));
                     }
                     // The whole curve, not only its ends, stays clear of the seam and endcaps.
-                    let (xlo, xhi) = (alo * r + tol, ahi * r - tol);
+                    let (xlo, xhi) = (strip_lo + tol, strip_hi - tol);
                     if !clear_within(s, Vec2::new(xlo, lo + tol), Vec2::new(xhi, hi - tol), tol, &mut 256) {
                         return Err(fail("profile crosses a cylinder seam or endcap boundary"));
                     }
@@ -590,14 +605,33 @@ fn emboss_impl(body: &Body, anchor: Option<Vec3>, plane: &Plane, regions: &[Regi
         if qualify {
             let segment = mapped.first().and_then(|region| region.outer.segs.first()).ok_or_else(|| fail("empty profile"))?;
             let p = segment.point_at(0.5);
+            // On the wall face itself, between its angles and heights: a profile reaching a
+            // tangent plane can have this point past the seam, where a replay would not find the
+            // wall (#5358). A point inside is kept.
+            let inside = |v: f64, a: f64, b: f64| if v > a && v < b { v } else { v.clamp(a + 0.25 * (b - a), b - 0.25 * (b - a)) };
+            let p = Vec2::new(inside(p.x, alo * r, ahi * r), inside(p.y, lo, hi));
             let at = o + axis * p.y + (radial * (p.x / r).cos() + tangent * (p.x / r).sin()) * r;
             return Ok(EmbossOutcome::Anchor(fi, at));
         }
         // On a partial wall: whether the sector over every profile meets the rest of the body (a
         // first check, after which each profile's own solid is checked once it is built).
         let raised = depth > 0.0;
+        // The planes the profiles reach past the wall's seams: a segment crossing the seam line,
+        // or with an end on it or past it (one in contact is then refused as touching the seam).
+        let touch = tol * 100.0;
+        let reached: Vec<flat::Flat> = flats
+            .into_iter()
+            .filter(|f| {
+                let past = |x: f64| (x - f.x) * f.side > -touch;
+                mapped
+                    .iter()
+                    .flat_map(|m| m.loops())
+                    .flat_map(|l| &l.segs)
+                    .any(|s| past(s.start().x) || past(s.end().x) || !crossings(s, f.x).is_empty())
+            })
+            .collect();
         let mut broad = false;
-        if whole.is_none() {
+        if whole.is_none() && reached.is_empty() {
             broad = meets(body, &wall_sector(o, axis, radial, tangent, r, rr, &mapped)?, raised)?;
         }
         let mut asm = Assembly::from_record(&rec)?;
@@ -616,6 +650,8 @@ fn emboss_impl(body: &Body, anchor: Option<Vec3>, plane: &Plane, regions: &[Regi
             .flat_map(|l| &l.segs)
             .map(seg_box)
             .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), (l, h)| (a.min(l.x), b.max(h.x)));
+        // Past the seams the footprint lies on the planes: the wall's own part is centred.
+        let (x_lo, x_hi) = if reached.is_empty() { (x_lo, x_hi) } else { (x_lo.max(alo * r), x_hi.min(ahi * r)) };
         let wall_form = wall_form.map(|w| w.centred(0.5 * (x_lo + x_hi), r));
         let cap_form = OnForm {
             delta: 0.0,
@@ -640,6 +676,21 @@ fn emboss_impl(body: &Body, anchor: Option<Vec3>, plane: &Plane, regions: &[Regi
             cap_form,
             spans: std::cell::Cell::new(MAX_TOTAL_SPANS),
         };
+        if !reached.is_empty() {
+            let rebuilt = chain::Chain::new(&wall, reached, rr, depth).build(&mut asm, &selected, fi, &numbered, body, touch)?;
+            let mut history: Vec<_> =
+                (0..rec.faces.len()).filter(|i| !rebuilt.removed.contains(i)).map(|i| crate::record::from_face(0, i, Change::Kept)).collect();
+            for (f, h) in rebuilt.faces {
+                asm.face(f);
+                history.push(h);
+            }
+            let finished = asm.finish()?;
+            let result = crate::assemble::body_with_history(finished, &asm, body, history)?;
+            if !result.validity().is_empty() {
+                return Err(fail("rebuilt cylinder is not a closed manifold"));
+            }
+            return Ok(EmbossOutcome::Body(result));
+        }
         if mapped.iter().flat_map(|m| m.loops()).flat_map(|l| &l.segs).any(|seg| !wall.exact(seg)) {
             wall.check_wall_form(&selected, mapped.iter().flat_map(|m| m.loops()).flat_map(|l| &l.segs).find(|seg| !wall.exact(seg)))?;
         }
@@ -1202,23 +1253,7 @@ impl Wrap {
                 return Err(fail("loop topology"));
             };
             let (eb, et, wall) = if self.exact(seg) {
-                let eb = self.edge(asm, ba, bb, p, q, self.r)?;
-                let et = self.edge(asm, ta, tb, p, q, rr)?;
-                // The wall's plane, its natural normal along the loop's turning: out of the
-                // material whether the cap is raised or sunk.
-                let mid = (p + q) * 0.5;
-                let ring = [self.at(p, self.r), self.at(mid, self.r), self.at(q, self.r), self.at(q, rr), self.at(mid, rr), self.at(p, rr)];
-                let normal = newell(&ring).ok_or_else(|| fail("a wall of no area"))?;
-                let u = (ring[2] - ring[0]).normalized().ok_or_else(|| fail("a wall of no width"))?;
-                let u = (u - normal * u.dot(normal)).normalized().ok_or_else(|| fail("a wall of no width"))?;
-                let surface = Surface::Plane { origin: arr(ring[0]), u_axis: arr(u), v_axis: arr(normal.cross(u)) };
-                let lp = vec![
-                    eb.clone(),
-                    AUse { edge: rb, forward: true, given: None },
-                    AUse { edge: et.edge, forward: !et.forward, given: None },
-                    AUse { edge: ra, forward: false, given: None },
-                ];
-                (eb, et, AFace { surface, nurbs: None, natural_out: true, loops: vec![lp], shell, domain: None })
+                self.exact_piece(asm, p, q, rr, [ba, bb, ta, tb, ra, rb], shell)?
             } else {
                 self.fitted(asm, seg, q, rr, [ba, bb, ta, tb, ra, rb], shell)?
             };
@@ -1227,6 +1262,29 @@ impl Wrap {
             te.push(et);
         }
         Ok((be, te, walls))
+    }
+
+    /// The wrap of a segment from `p` to `q` along the axis or round the wall (wall coordinates)
+    /// with its exact edges and its planar side wall; `v` as in [`Wrap::fitted`].
+    fn exact_piece(&self, asm: &mut Assembly, p: Vec2, q: Vec2, rr: f64, v: [u32; 6], shell: usize) -> Result<(AUse, AUse, AFace)> {
+        let [ba, bb, ta, tb, ra, rb] = v;
+        let eb = self.edge(asm, ba, bb, p, q, self.r)?;
+        let et = self.edge(asm, ta, tb, p, q, rr)?;
+        // The wall's plane, its natural normal along the loop's turning: out of the
+        // material whether the cap is raised or sunk.
+        let mid = (p + q) * 0.5;
+        let ring = [self.at(p, self.r), self.at(mid, self.r), self.at(q, self.r), self.at(q, rr), self.at(mid, rr), self.at(p, rr)];
+        let normal = newell(&ring).ok_or_else(|| fail("a wall of no area"))?;
+        let u = (ring[2] - ring[0]).normalized().ok_or_else(|| fail("a wall of no width"))?;
+        let u = (u - normal * u.dot(normal)).normalized().ok_or_else(|| fail("a wall of no width"))?;
+        let surface = Surface::Plane { origin: arr(ring[0]), u_axis: arr(u), v_axis: arr(normal.cross(u)) };
+        let lp = vec![
+            eb.clone(),
+            AUse { edge: rb, forward: true, given: None },
+            AUse { edge: et.edge, forward: !et.forward, given: None },
+            AUse { edge: ra, forward: false, given: None },
+        ];
+        Ok((eb, et, AFace { surface, nurbs: None, natural_out: true, loops: vec![lp], shell, domain: None }))
     }
 
     /// Take `n` spans from the emboss's budget, or refuse it as too detailed.
@@ -1832,6 +1890,162 @@ mod tests {
     fn volume(b: &Body) -> f64 {
         crate::measure(b).unwrap().volume
     }
+    /// A slab with one end round: a half cylinder of radius 10 about z, from y = 10 round by
+    /// x = -10 to y = -10, carried on by the planes y = ±10 out to x = `length`, 20 tall.
+    pub(super) fn round_ended(length: f64) -> crate::body::Body {
+        let half = std::f64::consts::FRAC_PI_2;
+        let outline = Loop2 {
+            segs: vec![
+                Seg2::Line { a: Vec2::new(0., -10.), b: Vec2::new(length, -10.) },
+                Seg2::Line { a: Vec2::new(length, -10.), b: Vec2::new(length, 10.) },
+                Seg2::Line { a: Vec2::new(length, 10.), b: Vec2::new(0., 10.) },
+                Seg2::Arc { center: Vec2::ZERO, radius: 10., start: half, sweep: std::f64::consts::PI },
+            ],
+        };
+        crate::extrude(&Plane::XY, &[Region2 { outer: outline, holes: vec![] }], 0., 20.).unwrap().remove(0)
+    }
+
+    /// A sketch tangent to [`round_ended`]'s wall at x = -10, its x running towards -y.
+    fn on_round_end() -> Plane {
+        Plane::new(Vec3::new(-10., 0., 10.), -Vec3::Y, Vec3::Z).unwrap()
+    }
+    #[test]
+    fn a_wrap_carries_on_onto_a_tangent_plane() {
+        let body = round_ended(15.);
+        let before = volume(&body);
+        let (r, quarter) = (10., 5. * std::f64::consts::PI);
+        // A rectangle from 12 to 20 along the wall, across the seam at 5π, 6 tall: its part on the
+        // wall is a slice of a ring, its part on the plane a box.
+        let rect =
+            Region2 { outer: Loop2::polygon(&[Vec2::new(12., -3.), Vec2::new(20., -3.), Vec2::new(20., 3.), Vec2::new(12., 3.)]), holes: vec![] };
+        for (depth, mirror) in [(0.5, 1.), (-0.5, 1.), (0.5, -1.), (-0.5, -1.)] {
+            let region = Region2 {
+                outer: Loop2 { segs: rect.outer.segs.iter().map(|s| s.map_controls(|p| Vec2::new(p.x * mirror, p.y))).collect() },
+                holes: vec![],
+            };
+            let rr: f64 = r + depth;
+            let result = emboss_cylinder(&body, &on_round_end(), std::slice::from_ref(&region), depth).unwrap();
+            assert_eq!(result.shell_count(), 1);
+            assert!(result.validity().is_empty());
+            let (on_wall, on_plane) = ((quarter - 12.) * 6., (20. - quarter) * 6.);
+            let want = depth.signum() * on_wall * (rr * rr - r * r).abs() / (2. * r) + depth * on_plane;
+            let change = volume(&result) - before;
+            assert!((change - want).abs() < 1e-6, "depth {depth} mirror {mirror}: {change} vs {want}");
+        }
+        // A profile whose first edge lies wholly on the plane: the inferred pick is still on the
+        // wall face, and replaying it builds the emboss.
+        let wedge = Region2 { outer: Loop2::polygon(&[Vec2::new(14., 0.), Vec2::new(22., -3.), Vec2::new(22., 3.)]), holes: vec![] };
+        let (_, at) = infer_cylinder_emboss(&body, &on_round_end(), std::slice::from_ref(&wedge), 0.5).unwrap().unwrap();
+        assert!(at.x < 1e-9, "the pick {at:?} is on the round end");
+        let replayed = emboss_cylinder_at(&body, at, &on_round_end(), std::slice::from_ref(&wedge), 0.5);
+        assert!(replayed.is_ok(), "{:?}", replayed.map(|_| ()));
+    }
+
+    #[test]
+    fn curves_and_holes_wrap_across_the_seam_onto_the_plane() {
+        let body = round_ended(15.);
+        let before = volume(&body);
+        let r = 10.;
+        let c = 5. * std::f64::consts::PI;
+        // Each shape symmetric about a point on the seam (x = 5π, height 0 in the sketch): half of
+        // it on the wall, half on the plane.
+        let k = 0.552_284_749_830_793_4 * 2.;
+        let at = |x: f64, y: f64| Vec2::new(c + x, y);
+        // The blob turned 45°, so no corner of it lies on the seam.
+        let turned = |x: f64, y: f64| {
+            let h = std::f64::consts::FRAC_1_SQRT_2;
+            at(h * (x - y), h * (x + y))
+        };
+        let blob = Loop2 {
+            segs: vec![
+                Seg2::Cubic { p0: turned(2., 0.), p1: turned(2., k), p2: turned(k, 2.), p3: turned(0., 2.) },
+                Seg2::Cubic { p0: turned(0., 2.), p1: turned(-k, 2.), p2: turned(-2., k), p3: turned(-2., 0.) },
+                Seg2::Cubic { p0: turned(-2., 0.), p1: turned(-2., -k), p2: turned(-k, -2.), p3: turned(0., -2.) },
+                Seg2::Cubic { p0: turned(0., -2.), p1: turned(k, -2.), p2: turned(2., -k), p3: turned(2., 0.) },
+            ],
+        };
+        let shapes = [
+            Region2 { outer: Loop2::circle(Vec2::new(c, 0.), 2.), holes: vec![] },
+            Region2 { outer: Loop2::circle(Vec2::new(c, 0.), 3.), holes: vec![Loop2::circle(Vec2::new(c, 0.), 1.5).reversed()] },
+            Region2 { outer: Loop2::polygon(&[at(-3., -1.), at(1., -3.), at(3., 1.), at(-1., 3.)]), holes: vec![] },
+            Region2 { outer: blob, holes: vec![] },
+        ];
+        for (i, region) in shapes.iter().enumerate() {
+            for (depth, mirror) in [(0.5, 1.), (-0.5, -1.)] {
+                let region = Region2 {
+                    outer: Loop2 { segs: region.outer.segs.iter().map(|s| s.map_controls(|p| Vec2::new(p.x * mirror, p.y))).collect() },
+                    holes: region
+                        .holes
+                        .iter()
+                        .map(|h| Loop2 { segs: h.segs.iter().map(|s| s.map_controls(|p| Vec2::new(p.x * mirror, p.y))).collect() })
+                        .collect(),
+                };
+                let region = Region2 { outer: region.outer.ccw(), holes: region.holes.iter().map(|h| h.ccw().reversed()).collect() };
+                let rr: f64 = r + depth;
+                let result = emboss_cylinder(&body, &on_round_end(), std::slice::from_ref(&region), depth);
+                let result = result.unwrap_or_else(|e| panic!("shape {i} depth {depth}: {e}"));
+                assert_eq!(result.shell_count(), 1);
+                assert!(result.validity().is_empty(), "shape {i}");
+                let half = region.area() / 2.;
+                let want = depth.signum() * half * (rr * rr - r * r).abs() / (2. * r) + depth * half;
+                let change = volume(&result) - before;
+                assert!((change - want).abs() < 1e-5 * region.area(), "shape {i} depth {depth}: {change} vs {want}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_wrap_onto_a_plane_stops_at_its_end_and_takes_a_chamfered_edge() {
+        let seam = 5. * std::f64::consts::PI;
+        let rect = |x0: f64, x1: f64| Region2 {
+            outer: Loop2::polygon(&[Vec2::new(x0, -3.), Vec2::new(x1, -3.), Vec2::new(x1, 3.), Vec2::new(x0, 3.)]),
+            holes: vec![],
+        };
+        // Past the plane's far end, 5 on from the seam.
+        let short = round_ended(5.);
+        let e = emboss_cylinder(&short, &on_round_end(), &[rect(12., seam + 6.)], 0.5).map(|_| ()).unwrap_err();
+        assert!(e.to_string().contains("seam or endcap"), "{e}");
+        // A corner on the seam itself.
+        let e = emboss_cylinder(&short, &on_round_end(), &[rect(12., seam)], 0.5).map(|_| ()).unwrap_err();
+        assert!(e.to_string().contains("touches the seam"), "{e}");
+        // The bottom edges chamfered: the planes' lower edges are straight splines, and the wrap
+        // still carries on across the seam.
+        let body = round_ended(15.);
+        let chamfered = crate::chamfer(&body, &[Vec3::new(-10., 0., 0.), Vec3::new(7.5, 10., 0.), Vec3::new(7.5, -10., 0.)], 1.).unwrap();
+        let before = volume(&chamfered);
+        let result = emboss_cylinder(&chamfered, &on_round_end(), &[rect(12., 20.)], 0.5).unwrap();
+        let rr: f64 = 10.5;
+        let want = (seam - 12.) * 6. * (rr * rr - 100.) / 20. + (20. - seam) * 6. * 0.5;
+        let change = volume(&result) - before;
+        assert!((change - want).abs() < 1e-6, "{change} vs {want}");
+        // A long plane: the footprint's middle lies turns round from the wall, and the wall's
+        // slanted edge, fitted on the wall's form, still lands on the wall.
+        // The wall a 120° sketch arc (its form two arcs of 60°, not on the quarter grid), with
+        // planes 60 long tangent to it either side.
+        let third = std::f64::consts::FRAC_PI_3;
+        let at = |t: f64| Vec2::new(10. * t.cos(), 10. * t.sin());
+        let (a0, a1) = (at(2. * third), at(4. * third));
+        let (b0, b1) = (a0 + Vec2::new(0.866_025_403_784_438_6, 0.5) * 60., a1 + Vec2::new(0.866_025_403_784_438_6, -0.5) * 60.);
+        let outline = Loop2 {
+            segs: vec![
+                Seg2::Arc { center: Vec2::ZERO, radius: 10., start: 2. * third, sweep: 2. * third },
+                Seg2::Line { a: a1, b: b1 },
+                Seg2::Line { a: b1, b: b0 },
+                Seg2::Line { a: b0, b: a0 },
+            ],
+        };
+        let long = crate::extrude(&Plane::XY, &[Region2 { outer: outline, holes: vec![] }], 0., 20.).unwrap().remove(0);
+        let before = volume(&long);
+        let seam = 10. * third;
+        let slanted =
+            Region2 { outer: Loop2::polygon(&[Vec2::new(8., -3.), Vec2::new(66., -3.), Vec2::new(68., 3.), Vec2::new(10., 3.)]), holes: vec![] };
+        let result = emboss_cylinder(&long, &on_round_end(), std::slice::from_ref(&slanted), 0.5).unwrap();
+        assert!(result.validity().is_empty());
+        let on_wall = 6. * (seam - 9.);
+        let want = on_wall * (rr * rr - 100.) / 20. + (348. - on_wall) * 0.5;
+        let change = volume(&result) - before;
+        assert!((change - want).abs() < 1e-5 * 348., "{change} vs {want}");
+    }
     #[test]
     fn inference_uses_finite_wall_footprint_and_an_interior_profile_anchor() {
         let near = crate::cylinder(Vec3::ZERO, Vec3::Z, 10., 20.).unwrap();
@@ -2382,8 +2596,12 @@ mod tests {
         assert!(e.to_string().contains("breaks through"), "{e}");
         let wide =
             Region2 { outer: Loop2::polygon(&[Vec2::new(-5., 5.), Vec2::new(5., 5.), Vec2::new(5., 10.), Vec2::new(-5., 10.)]), holes: vec![] };
-        let e = emboss_cylinder(&rounded, &on_corner, &[wide], 1.).unwrap_err();
-        assert!(e.to_string().contains("seam or endcap"), "{e}");
+        // Wider than the rounded corner: the wrap carries on onto the box's faces either side
+        // (#5358), the corner's quarter turn a slice of a ring and the rest flat.
+        let across = emboss_cylinder(&rounded, &on_corner, &[wide], 1.).map(|b| volume(&b) - volume(&rounded));
+        let quarter = 2.5 * std::f64::consts::PI;
+        let want = quarter * 5. * (36. - 25.) / 10. + (10. - quarter) * 5.;
+        assert!(across.as_ref().is_ok_and(|c| (c - want).abs() < 1e-6), "{across:?} vs {want}");
         let tall =
             Region2 { outer: Loop2::polygon(&[Vec2::new(-2., 15.), Vec2::new(2., 15.), Vec2::new(2., 21.), Vec2::new(-2., 21.)]), holes: vec![] };
         assert!(emboss_cylinder(&flanged, &plane(), &[tall], 1.).is_err());

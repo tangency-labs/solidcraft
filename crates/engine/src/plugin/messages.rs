@@ -48,6 +48,10 @@ pub const MESSAGES: &[(&str, &str)] = &[
     ("plugin_error.trap", "it stopped on an error inside the plugin ({reason}). Report this to its author."),
     ("plugin_error.unsupported", "{plugin} does not support this: {reason}"),
     ("plugin_error.unsupported_file", "{plugin} does not support {file}: {reason}"),
+    (
+        "plugin_error.user_storage_conflict",
+        "its user settings changed or are being written by another run. Retry the plugin run to load the latest settings.",
+    ),
 ];
 
 /// A plugin's failure: which plugin, the file it was opening (an importer), and what went wrong.
@@ -135,6 +139,7 @@ impl PluginFailure {
                 _ => self.error.to_string(),
             },
             HostError::Trap { reason } => say("plugin_error.trap", &[("reason", reason)]),
+            HostError::UserStorageConflict { .. } => say("plugin_error.user_storage_conflict", &[]),
             // What the plugin or the host said about the input, without the field's name.
             HostError::InvalidInput { reason, .. } | HostError::Unsupported { reason } => reason.clone(),
             error => error.to_string(),

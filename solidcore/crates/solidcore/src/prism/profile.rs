@@ -18,6 +18,8 @@
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing tests, kept as written
 
+pub mod line_family;
+
 use std::f64::consts::{FRAC_PI_2, TAU};
 
 use crate::curve::curve::Curve;
@@ -562,7 +564,7 @@ impl Seg2 {
 /// `B(k + 3, k + 1)`; the tail is bounded by a geometric series. Elsewhere in closed form: with
 /// `w = cos φ` (an ellipse), `w (φ - w s) / s^3`, `s = sin φ`; with `w = cosh ψ` (a hyperbola),
 /// `w (w s - ψ) / s^3`, `s = sinh ψ`.
-fn conic_factor(w: f64) -> Option<(f64, f64)> {
+pub(super) fn conic_factor(w: f64) -> Option<(f64, f64)> {
     if !(w.is_finite() && w > 1e-9 && w < 1e9) {
         return None;
     }

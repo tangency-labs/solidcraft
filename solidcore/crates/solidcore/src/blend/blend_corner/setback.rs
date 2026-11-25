@@ -2090,6 +2090,8 @@ fn grow_curved<S: SetbackSolvers>(
     corner: &mut FilletCorner,
     solvers: &mut S,
     asked: Option<SetBackFill>,
+    curved: bool,
+    hi_scale: f64,
 ) -> Result<core::result::Result<Ends, SetbackRefusal>> {
     if growth.trial(pseudo, corner, solvers, 2.0)?.is_none() {
         let why = if let Some(a) = asked {
@@ -2098,14 +2100,15 @@ fn grow_curved<S: SetbackSolvers>(
                 fmt_g(a.setback)
             )
         } else {
-            "Fillet Error: no setbacks up to twice the rule's within the corner's edges keep its fill no more concave than its faces".to_owned()
+            "Fillet Error: no setbacks within the corner's edges keep its fill no more concave than its faces".to_owned()
         };
         return Ok(Err(SetbackRefusal::no_room(why, Some(0.0))));
     }
     // The planar search's (`certified_scale`, #2382, the fork's 20b1c01): the smallest
     // certifying scale on the grid of thousandths whose neighbour below fails, by bisection
     // from 1 (the fill at the setbacks themselves, refused) and 2.
-    let hi = bisect_thousandths(1000, 2000, |i| {
+    let top = (hi_scale * 1000.0) as i32;
+    let hi = bisect_thousandths(1000, top, |i| {
         let at = growth.trial(pseudo, corner, solvers, f64::from(i) / 1000.0)?;
         Ok::<bool, SolidError>(at.is_some())
     })?;
@@ -2117,14 +2120,18 @@ fn grow_curved<S: SetbackSolvers>(
     // (#2343 (d)): the growth finds no smaller one certified, and a spring curve off its face
     // at these is taken to stay off it at every larger one (as the growth takes
     // certification, checked on the cases, not proved)
-    let springs = springs_on_faces(
-        growth.k,
-        growth.target,
-        pseudo,
-        corner,
-        growth.planes,
-        growth.tol,
-    )?;
+    let springs = if curved {
+        springs_on_faces(
+            growth.k,
+            growth.target,
+            pseudo,
+            corner,
+            growth.planes,
+            growth.tol,
+        )?
+    } else {
+        Springs::Clear
+    };
     if matches!(springs, Springs::Leave | Springs::Holds) {
         let what = if springs == Springs::Leave {
             "a spring curve is not shown to stay on its face"
@@ -2867,21 +2874,54 @@ pub fn build_setback_fill<S: SetbackSolvers>(
         }
     }
     let mut stats = FillStats::default();
+    // a corner left open derives its face curves from the fill without building it, and
+    // does not demand its convexity certificate
     let first = fill_hole_counted(
         k,
         &planes.planes,
         &rounds_of(&surfaces, &sides),
         order,
         tol,
+        !open,
         &mut stats,
     );
+    // whether the fill that builds is certified convex
+    let mut certified = false;
     let fill = match first {
-        Ok(fill) => fill,
-        Err(refusal) if !curved || !stats.uncertified => {
+        Ok(fill) => {
+            certified = true;
+            fill
+        }
+        // an uncertified fill grows its setbacks to the least that certifies, with the
+        // real rounds: beside a curved face (its ruling (a) certificate) and for the G2
+        // planar corner (its convexity certificate, #13775); the G1 planar corner's
+        // setbacks were grown before the fill (certified_scale)
+        Err(refusal) if !stats.uncertified || (!curved && order == 1) => {
             return Ok(Err(SetbackRefusal::not_built(refusal.reason.unwrap_or(
                 "Fillet Error: the setback corner's hole cannot be filled",
             ))))
         }
+        // the G2 planar corner's certificate is a degree preference at the setbacks the
+        // rule gave: where no degree certifies, the fill without the certificate builds
+        // as it always did (the owner's requirement: a corner the kernel built before
+        // stays built; the growth that would change the setbacks is a separate
+        // question, #13775)
+        Err(_) if !curved && order == 2 => match fill_hole_counted(
+            k,
+            &planes.planes,
+            &rounds_of(&surfaces, &sides),
+            order,
+            tol,
+            false,
+            &mut stats,
+        ) {
+            Ok(fill) => fill,
+            Err(_) => {
+                return Ok(Err(SetbackRefusal::not_built(
+                    "Fillet Error: the setback corner's hole cannot be filled",
+                )))
+            }
+        },
         Err(_) => {
             let asked = set_back_fill_of(fills, vtx);
             let sb = corner
@@ -2894,11 +2934,21 @@ pub fn build_setback_fill<S: SetbackSolvers>(
             let base = sb.setbacks.clone();
             let mut most = Vec::with_capacity(n);
             for ((&b, &r), e) in base.iter().zip(&sb.room).zip(&planes.edges) {
+                // the G2 fill's least certifying setback can be far past the G1's twice
+                // convention (the box corner's is about five radii, #13775): its growth
+                // is bounded by each edge's room, asked for or not
                 most.push(if asked.is_some() {
                     BIG_DOUBLE
                 } else {
                     smax(b, r - 0.25 * e.radius)
                 });
+            }
+            // the largest scale the rooms allow (the growth's search bound)
+            let mut room_scale = f64::INFINITY;
+            for (&b, &m) in base.iter().zip(&most) {
+                if b > 0.0 {
+                    room_scale = room_scale.min(m / b);
+                }
             }
             let growth = Growth {
                 k,
@@ -2908,7 +2958,8 @@ pub fn build_setback_fill<S: SetbackSolvers>(
                 base,
                 most,
             };
-            match grow_curved(&growth, pseudo, corner, solvers, asked)? {
+            let hi_scale = if curved { 2.0 } else { room_scale };
+            match grow_curved(&growth, pseudo, corner, solvers, asked, curved, hi_scale)? {
                 // the fill where the grown setbacks put the blends' ends, made as a corner
                 // asked for those setbacks would make it
                 Ok((grown_surfaces, grown_sides)) => {
@@ -2920,9 +2971,13 @@ pub fn build_setback_fill<S: SetbackSolvers>(
                         &rounds_of(&surfaces, &sides),
                         order,
                         tol,
+                        !open,
                         &mut stats,
                     ) {
-                        Ok(fill) => fill,
+                        Ok(fill) => {
+                            certified = true;
+                            fill
+                        }
                         Err(refusal) => {
                             return Ok(Err(SetbackRefusal::not_built(refusal.reason.unwrap_or(
                                 "Fillet Error: the setback corner's hole cannot be filled",
@@ -3061,6 +3116,7 @@ pub fn build_setback_fill<S: SetbackSolvers>(
             convex,
             worst,
             &fill,
+            certified,
         )?),
         _ => None,
     };
@@ -3235,9 +3291,10 @@ fn keep_definition(
     convex: bool,
     worst: f64,
     fill: &Fill,
+    certified: bool,
 ) -> Result<Arc<SetbackFill>> {
-    let definition = SetbackFill::create(k, faces, rounds, order, tol, convex, worst)?;
-    if !definition.is_fill(&definition.refill(k)?, &fill.patches) {
+    let definition = SetbackFill::create(k, faces, rounds, order, tol, convex, worst, certified)?;
+    if !definition.is_fill(&definition.refill(k, certified)?, &fill.patches) {
         return Err(defect(
             OP_FILL,
             "the fill's definition, run again, rebuilds the fill's own patches",

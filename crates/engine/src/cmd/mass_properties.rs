@@ -175,7 +175,7 @@ impl Session {
     /// Mass, centre of mass and inertia of every occurrence and rigid group of the design, as
     /// `assembly.mass_properties` returns them (kg, mm, kg·mm²), pending moves included.
     pub fn mass_properties(&self) -> Result<AssemblyMassResult> {
-        let mut doc = (*self.doc).clone();
+        let mut doc = self.doc.active_assembly().into_owned();
         for occurrence in &mut doc.occurrences {
             if let Some(transform) = self.pending_moves.get(&occurrence.id) {
                 occurrence.transform = *transform;
@@ -240,7 +240,7 @@ pub fn assembly(doc: &Document, state: &ModelState) -> Result<AssemblyMassResult
     let measured: Vec<usize> = (0..state.bodies.len()).filter(|i| owners.get(*i).is_some_and(|c| placed.contains(c))).collect();
     let shapes = solidcraft_kernel::map_on_threads(&measured, 16, |&i| -> Result<Shape> {
         let body = state.bodies.get(i).ok_or_else(|| EngineError::Other("body index out of range".into()))?;
-        let closed = crate::cmd::inspect::encloses_volume(&body.body);
+        let closed = body.is_closed();
         if !closed {
             return Ok(Shape { closed, volume: 0.0, centroid: Vec3::ZERO, gyration: None });
         }

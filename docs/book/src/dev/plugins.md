@@ -1,7 +1,8 @@
 # Writing a plugin
 
 This guide goes from an empty folder to two working plugins: a command that adds a plate to the
-open design, and an importer that opens a file of another format as a new design. It covers the
+open design, and an importer that opens a file of another format as a new design. A third
+example adds a docked panel to a command plugin. It covers the
 manifest, the WIT interface, building the component, permissions, limits, checking, testing and
 installing.
 
@@ -270,7 +271,7 @@ installed for you, and your files are not touched. A case is:
 |---|---|
 | `entry` | The entry to run. |
 | `params` | A command's parameters, or an importer's options. Default `{}`. |
-| `design` | A command runs on this design, in the `tests` folder. Default: an empty design. |
+| `design` | A command runs on this design, in the `tests` folder. Default: an empty design. A design saved there as `.json` is not read as a case. |
 | `file` | An importer opens this file, in the `tests` folder. |
 | `grants` | What the user approved: `command_groups`, `folders` (`[{"name", "read", "write", "from"}]`, each a fresh folder, or a copy of `from` in `tests`), `input_folder` and `memory_mib`. Default: everything the manifest asks for, as Install approves it. |
 | `expect.error` | The run fails with this kind of error: `permission_denied`, `command_failed`, `limit_exceeded` (or, more exactly, `exhausted` when a budget ran out and `over_ceiling` when the app refused it before it ran), `invalid_input`, `unsupported`, `trap`, `cancelled`, or `any`. Default: it succeeds. |
@@ -318,9 +319,13 @@ it at install:
 - `command_groups`: commands that reach past the open design are grouped: `file` (save, export,
   import, libraries), `doc` (open, create or switch designs), `app` (settings, the window) and
   `plugin` (other plugins). A listed command of a group needs the group here, and the user's grant.
+  A `file` or `doc` command may name a file in a granted folder as `grant:<name>/<path>`, where
+  `<name>` is one of the `files` names below; any command but a known input reader (such as
+  `file.insert_step`) needs that folder with both `read` and `write`.
 - `files`: named folders the plugin reads (`read`) or writes (`write`) through the `files`
-  interface, by name and a relative path. The user picks each folder at install; the plugin never
-  sees where it is. Writes appear only when the run succeeds.
+  interface, by name and a relative path. The user picks each folder at install; the `files`
+  interface never shows the plugin where it is, but a `file` or `doc` command's reply or error
+  can name the full path. Writes appear only when the run succeeds.
 - `clock`: the `clock` interface tells the time; without it, it says 0.
 - `input_folder` (importers only): read the other files in the folder of the file being opened,
   such as an assembly's parts.
@@ -471,6 +476,207 @@ An importer that converts a large file can ask for more guest compute time (`dea
 600,000 under the default host policy, or more with a raised `max_deadline_ms`), stack
 (`stack_kib`) and memory; see [Importers](../../../plugins.md#importers), which also covers reading
 an assembly's other files and checking the result with `evaluate`.
+
+## A plugin with a panel
+
+A command plugin can also show a docked panel: a table, a list, a form, buttons and text that
+SolidCraft draws with its own controls and theme. The plugin sends data, never pixels or UI code.
+A click in the panel runs one of the plugin's entries as an ordinary command, so an agent can do
+over MCP everything a person does in the panel.
+
+This one, Job List, keeps a list of machining jobs in the open design and shows them in a **Jobs**
+panel. **Add** in the Model tab's Plugins group asks for a job's name and tool diameter; the
+panel's **Refresh** and **Clear** buttons read the list again or empty it.
+
+The manifest, `job-list/plugin.json`:
+
+```json
+{
+  "id": "job-list",
+  "name": "Job List",
+  "version": "0.1.0",
+  "description": "Keeps a list of machining jobs in the design and shows it in a docked panel.",
+  "capabilities": ["commands@0.2", "ui@0.1", "storage@0.1"],
+  "runtime": {
+    "module": "job-list.wasm",
+    "data_format": 1,
+    "commands": ["storage.get", "storage.set"],
+    "entries": [
+      {
+        "name": "add",
+        "effect": "edit",
+        "input_schema": {"type": "object", "properties": {
+          "name": {"type": "string", "title": "Job", "default": "Pocket"},
+          "tool": {"type": "number", "title": "Tool diameter", "default": 6, "minimum": 0.1, "unit": "mm"}
+        }}
+      },
+      {"name": "clear", "effect": "edit", "input_schema": {"type": "object", "properties": {}}},
+      {"name": "refresh", "effect": "read", "input_schema": {"type": "object", "properties": {}}}
+    ],
+    "ui": {
+      "ui_version": 1,
+      "panels": [{
+        "id": "jobs", "title": "Jobs", "zones": ["right", "bottom"],
+        "layout": {"root": 0, "nodes": [
+          {"widget": {"group": [1, 2]}},
+          {"widget": {"toolbar": [
+            {"label": "Refresh", "icon": null, "entry": "refresh"},
+            {"label": "Clear", "icon": null, "entry": "clear"}
+          ]}},
+          {"widget": {"table": {
+            "bind": "/jobs", "row_id": "id",
+            "columns": [
+              {"key": "name", "label": "Job", "unit": null},
+              {"key": "tool", "label": "Tool", "unit": "length"}
+            ],
+            "select": "single", "on_select": null, "on_edit": null
+          }}}
+        ]}
+      }],
+      "workspaces": []
+    },
+    "limits": {"fuel": 1000000000, "memory_mib": 32, "deadline_ms": 5000}
+  }
+}
+```
+
+What is new beside a command plugin:
+
+- `"ui@0.1"` in `capabilities`, and `runtime.ui`: the panels, each with an `id`, a `title`, the
+  `zones` it may dock in and a `layout`. A layout is a flat list of widgets (`nodes`) with children
+  named by index, so `{"group": [1, 2]}` holds the toolbar and the table. Every `entry` a widget
+  names is one of `runtime.entries`.
+- `"storage@0.1"` and `data_format`: the jobs live in the design, written with the `storage.set`
+  command and read with `storage.get`, so each change is one undo step and a saved design keeps
+  them. See [Plugin data in a design](../../../plugins.md#plugin-data-in-a-design).
+
+The crate is made as in Steps 2 and 3. The component implements the `panel-plugin` world: it
+exports `entry`, as a command does, and `ui-provider`, whose `describe` returns the same panels as
+`runtime.ui` (every run checks that the two agree). `job-list-src/src/lib.rs`:
+
+```rust
+wit_bindgen::generate!({ path: "wit", world: "panel-plugin" });
+
+use craft::plugin::commands;
+use craft::plugin::types::{Datum, FieldFailure, PluginError, Value as Cell};
+use craft::plugin::ui::{self, ButtonSpec, Column, Declarations, DockZone, Layout, Node, PanelSpec, SelectionMode, TableSpec, UiEvent, Widget};
+use serde_json::{Value, json};
+
+struct Plugin;
+
+impl exports::craft::plugin::entry::Guest for Plugin {
+    fn execute(entry: String, params: String) -> Result<String, PluginError> {
+        let params: Value = serde_json::from_str(&params).map_err(|e| invalid("params", e))?;
+        let mut jobs = read_jobs()?;
+        match entry.as_str() {
+            "add" => {
+                let name = params["name"].as_str().unwrap_or("Pocket");
+                let tool = params["tool"].as_f64().unwrap_or(6.0);
+                jobs.push(json!({"id": format!("job{}", jobs.len() + 1), "name": name, "tool": tool}));
+                // The jobs live in the design: one undo step, saved with it.
+                commands::run("storage.set", &json!({"document": {"jobs": jobs}}).to_string())?;
+                ui::show_panel("jobs", true)?;
+            }
+            "clear" => {
+                jobs.clear();
+                commands::run("storage.set", &json!({"document": {"jobs": jobs}}).to_string())?;
+            }
+            "refresh" => {}
+            _ => return Err(invalid("entry", format!("no entry `{entry}`"))),
+        }
+        show(&jobs)?;
+        Ok(json!({"jobs": jobs.len()}).to_string())
+    }
+}
+
+/// The jobs kept in the open design, oldest first.
+fn read_jobs() -> Result<Vec<Value>, PluginError> {
+    let reply: Value = serde_json::from_str(&commands::run("storage.get", "{}")?).map_err(|e| invalid("storage", e))?;
+    Ok(reply["document"]["jobs"].as_array().cloned().unwrap_or_default())
+}
+
+/// Replace the panel's rows: one cell per path, "/jobs/<row>/<column>".
+fn show(jobs: &[Value]) -> Result<(), PluginError> {
+    let mut cells = Vec::new();
+    for (row, job) in jobs.iter().enumerate() {
+        let cell = |key: &str, value: Cell| Datum { path: format!("/jobs/{row}/{key}"), value };
+        cells.push(cell("id", Cell::Text(job["id"].as_str().unwrap_or_default().into())));
+        cells.push(cell("name", Cell::Text(job["name"].as_str().unwrap_or_default().into())));
+        cells.push(cell("tool", Cell::Number(job["tool"].as_f64().unwrap_or_default())));
+    }
+    ui::clear_data("jobs")?;
+    ui::set_data("jobs", &cells)
+}
+
+impl exports::craft::plugin::ui_provider::Guest for Plugin {
+    /// The same panel as `runtime.ui` in plugin.json.
+    fn describe() -> Declarations {
+        let button = |label: &str, entry: &str| ButtonSpec { label: label.into(), icon: None, entry: entry.into() };
+        let column = |key: &str, label: &str, unit: Option<&str>| Column { key: key.into(), label: label.into(), unit: unit.map(Into::into) };
+        let table = TableSpec {
+            bind: "/jobs".into(),
+            row_id: "id".into(),
+            columns: vec![column("name", "Job", None), column("tool", "Tool", Some("length"))],
+            select: SelectionMode::Single,
+            on_select: None,
+            on_edit: None,
+        };
+        let nodes = vec![
+            Node { widget: Widget::Group(vec![1, 2]) },
+            Node { widget: Widget::Toolbar(vec![button("Refresh", "refresh"), button("Clear", "clear")]) },
+            Node { widget: Widget::Table(table) },
+        ];
+        let panel =
+            PanelSpec { id: "jobs".into(), title: "Jobs".into(), zones: vec![DockZone::Right, DockZone::Bottom], layout: Layout { root: 0, nodes } };
+        Declarations { ui_version: 1, panels: vec![panel], workspaces: vec![] }
+    }
+
+    fn on_event(_event: UiEvent) -> Result<(), PluginError> {
+        Ok(())
+    }
+
+    fn on_enter(_workspace: String) -> Result<(), PluginError> {
+        Ok(())
+    }
+
+    fn on_exit(_workspace: String) -> Result<(), PluginError> {
+        Ok(())
+    }
+}
+
+fn invalid(field: &str, reason: impl ToString) -> PluginError {
+    PluginError::InvalidInput(FieldFailure { field: field.into(), reason: reason.to_string() })
+}
+
+export!(Plugin);
+```
+
+The plugin fills the panel with `ui::set-data`: one typed value per cell, at a path such as
+`/jobs/0/name`, with lengths in mm. `clear-data` empties it, and `show-panel` opens it. Panel data
+is not kept: it is cleared when the design closes, which is why the panel has a **Refresh** button
+that shows the jobs again from the design.
+
+A button press runs its entry at once, with the press as its `params`:
+`{"panel": "jobs", "event": "press", "path": "refresh", "row": null, "value": null}`, where `path`
+is the button's entry. A button does not open the entry's dialog, so an entry that needs values
+from the user, such as `add`, is opened from the Plugins menu or the Plugins group.
+
+Build, check and install it as in Steps 5 to 8; its test, `job-list/tests/add-job.json`, adds one
+job:
+
+```json
+{
+  "entry": "add",
+  "params": {"name": "Face", "tool": 50},
+  "expect": {
+    "reply": {"result": {"jobs": 1}}
+  }
+}
+```
+
+The panel docks on the right the first time a job is added, with its title, the plugin's name and
+a plugin badge. The other widgets, the events each one sends and the limits (eight panels per
+plugin, 512 widgets per layout) are in [Docked panels](../../../plugins.md#docked-panels).
 
 ## When something goes wrong
 
