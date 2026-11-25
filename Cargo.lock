@@ -1390,6 +1390,7 @@ name = "craft-plugin"
 version = "0.48.0"
 dependencies = [
  "image",
+ "naga",
  "schemars",
  "serde",
  "serde_json",
@@ -6215,8 +6216,8 @@ dependencies = [
 name = "solidcraft-develop"
 version = "0.48.0"
 dependencies = [
- "solidcore-ops",
  "solidcore-record",
+ "solidcraft-kernel",
  "thiserror 2.0.21",
 ]
 
@@ -6232,9 +6233,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "solidcore-ops",
  "solidcore-record",
- "solidcore-tess",
  "solidcraft-color",
  "solidcraft-derive",
  "solidcraft-develop",
@@ -6270,13 +6269,13 @@ dependencies = [
  "image",
  "log",
  "png",
+ "quick-xml",
  "resvg",
  "schemars",
  "serde",
  "serde_json",
  "serde_path_to_error",
  "sha2 0.10.9",
- "solidcore-ops",
  "solidcore-record",
  "solidcraft-color",
  "solidcraft-control",
@@ -6306,6 +6305,7 @@ dependencies = [
 name = "solidcraft-format"
 version = "0.48.0"
 dependencies = [
+ "crc32fast",
  "serde_json",
  "sha2 0.10.9",
  "zip",
@@ -6336,7 +6336,6 @@ dependencies = [
  "serde",
  "serde_json",
  "solidcore-record",
- "solidcore-tess",
  "solidcraft-color",
  "solidcraft-engine",
  "solidcraft-geom",
@@ -6379,10 +6378,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "solidcore-cadir",
- "solidcore-ops",
  "solidcore-record",
- "solidcore-step",
- "solidcore-tess",
  "solidcraft-color",
  "solidcraft-doc",
  "solidcraft-format",
@@ -6414,12 +6410,23 @@ dependencies = [
  "solidcore-step",
  "solidcore-tess",
  "solidcraft-geom",
+ "solidcraft-kernel-api",
  "solidcraft-profile",
  "solidcraft-smlib",
  "spade",
  "sysinfo",
  "thiserror 2.0.21",
  "web-time",
+]
+
+[[package]]
+name = "solidcraft-kernel-api"
+version = "0.48.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "solidcore-record",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -6506,7 +6513,6 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "solidcore-record",
- "solidcore-tess",
  "solidcraft-color",
  "solidcraft-geom",
  "solidcraft-viewport",
@@ -6523,9 +6529,9 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "solidcore-ops",
  "solidcore-record",
  "solidcraft-geom",
+ "solidcraft-kernel",
  "thiserror 2.0.21",
  "ttf-parser",
  "unicode-bidi",
@@ -6586,14 +6592,13 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "solidcore-ops",
  "solidcore-record",
- "solidcore-tess",
  "solidcraft-color",
  "solidcraft-control",
  "solidcraft-control-egui",
  "solidcraft-engine",
  "solidcraft-gpu",
+ "solidcraft-kernel",
  "solidcraft-look",
  "solidcraft-space-mouse",
  "solidcraft-theme",

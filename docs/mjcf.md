@@ -10,6 +10,7 @@ more than URDF, so the model keeps what a URDF has to drop:
 - A ball joint is one MuJoCo `ball` joint, not three turns about z, y and z.
 - A joint without a limit has no `range`. URDF needs ±1000 m for an unlimited slide.
 - A joint that closes a loop is kept as an equality constraint. URDF is a tree and leaves it out.
+- Motion links (gears, rack and pinion, screws) are equality constraints between two joints.
 
 - **Commands:** `file.export_mjcf {"path": "robot.xml"}`, or `file.export {"path": "robot.xml",
   "format": "mjcf"}`
@@ -25,23 +26,26 @@ MJCF always exports the whole assembly, so `bodies` is refused. Load the file wi
 
 ## Files
 
-Next to `robot.xml` the export writes one binary STL per component, in metres, named as the URDF
-export names them: `robot-<component>.stl`, the root component's bodies in `robot-base.stl`, and
-`robot-<component>-collision.stl` when a component mixes closed solids with open surfaces. Every
-path is checked before anything is written. The meshes are written first and the `.xml` last.
+Next to `robot.xml` the export writes the binary STL meshes the URDF export writes, in metres and
+with the same names ([Files](urdf.md#files)). Every path is checked before anything is written. The
+meshes are written first and the `.xml` last.
 
 ## Bodies
 
 - **The world** holds the root component's bodies and every grounded occurrence, which hangs on
   it without a joint.
 - **One body per placement of a component,** nested in the body it hangs on, named as the URDF
-  link is (`Gripper`, or `Finger_1` for a component placed several times).
-- **Mass and inertia** are the URDF link's: each body's mesh and material density, the mass in kg,
-  the centre of mass and the inertia about it (`fullinertia`, kg m²) in the body frame.
-- **Geoms:** the component's mesh. When it mixes closed solids with open surfaces, the mesh is
-  drawn but does not collide (`contype="0" conaffinity="0"`), and the closed solids' mesh collides
-  (`group="3"`). Open surfaces add no mass.
+  link is (`Gripper`, or `Finger_1` for a component placed several times). A part called `world`,
+  MuJoCo's name for the world, becomes `world_2`.
+- **Mass and inertia** are the URDF link's ([Links](urdf.md#links)), a component's mass override
+  included: the mass in kg, the centre of mass and the inertia about it (`fullinertia`, kg m²) in
+  the body frame.
+- **Geoms:** the component's mesh, which collides as it is drawn unless the component has
+  [collision shapes](urdf.md#collision-shapes) of its own. Then the mesh is only drawn
+  (`contype="0" conaffinity="0"`), and each shape is a geom that collides (`group="3"`): a `box`,
+  `cylinder` or `sphere`, or the mesh of the bodies that collide as theirs.
 - **Colour:** the first body's colour, as the geom's `rgba`.
+- **Frames** ([Frames](urdf.md#frames)) are `site`s of their part's body.
 
 ## Where the model starts
 
@@ -69,7 +73,23 @@ A ball joint's value is a quaternion. It is the identity where the design is now
 
 The axes are the joint frame's, as in the URDF ([Joints](urdf.md#joints)): when the tree reaches a
 joint from its B side, its steps run backwards with their axes reversed, so the values still
-match. Motion links (gears, rack and pinion, screws) are not written: each joint's value is free.
+match.
+
+- **Limits of one value** (a joint held at 20°, say) are a `joint` constraint that holds the joint
+  there: MuJoCo leaves a joint whose `range` is one value free.
+- **Dynamics** ([Joint dynamics](urdf.md#joint-dynamics)): the damping and friction saved for a
+  joint's value are its `damping` and `frictionloss`. A ball joint has one of each: those of its
+  last value, with a warning if the others differ. Effort and velocity limits are not written.
+
+## Motion links
+
+A gear pair, rack and pinion, screw or plain link is a `joint` constraint between the driven joint
+and the first joint that drives it, as the URDF export's `<mimic>` names them: `polycoef="a0 a1 0 0
+0"` with `a1` the ratio in metres and radians. MuJoCo couples how far each joint is from its `ref`,
+so `a0` is 0 where the design holds the link. MuJoCo sets how stiff the constraint is without `a1`,
+so where the ratio is below 1 (a rack's 0.005 m per radian) the driving joint is `joint1` and `a1`
+its inverse: the other way round a rack follows a sixth of the way. A cam is left free, and so is a
+link to or from a ball joint, each with a warning.
 
 ## Loops
 
@@ -85,9 +105,8 @@ close a loop becomes an `<equality>` constraint between the bodies of its two si
 
 ## Not covered
 
-- Motion links as `<equality>` couplings between joint values.
-- Actuators, sensors, joint damping and friction.
-- Simplified collision shapes: the collision mesh is the visual mesh.
+- A menu entry.
+- Actuators, sensors, and effort and velocity limits.
 - Decals and other pictures on the model.
 - Joint motion inside the copies of a component placed several times.
 - MJCF import.

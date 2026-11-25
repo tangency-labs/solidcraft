@@ -339,11 +339,11 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              The format comes from the extension unless given; for OpenUSD the path's extension picks text, binary or package, and a \
              format naming another encoding is refused. URDF (.urdf) exports the whole assembly for robot simulators: a link per \
              component placement with mass and inertia, joints from the assembly's joints, and STL meshes in metres written \
-             next to it (docs/urdf.md); RViz needs mesh_prefix such as package://robot/meshes/. SDF (.sdf) writes a Gazebo \
+             next to it, or where mesh_prefix points with place_meshes (docs/urdf.md); RViz needs mesh_prefix such as package://robot/meshes/. SDF (.sdf) writes a Gazebo \
              model folder at the path (a .sdf ending dropped): model.config, model.sdf, an STL per body and each decal's image \
              on a textured quad, the image also its visual's albedo map (docs/sdf.md). MJCF (format mjcf, any path such as robot.xml) exports the whole \
              assembly as a MuJoCo model at its current joint values: a body per component placement with mass and inertia, a \
-             joint per joint value (ball joints as one), loops closed by equality constraints, and STL meshes written next to it \
+             joint per joint value (ball joints as one), loops and motion links as equality constraints, and STL meshes written next to it \
              (docs/mjcf.md).",
             object(
                 json!({
@@ -352,14 +352,16 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                     "bodies": {"type": "array", "items": {"type": "string"}, "description": "Body names (default: all; not with urdf or mjcf)"},
                     "writer": {"type": "string", "enum": ["solidcraft", "cadmpeg"], "description": "STEP and IGES only: SolidCraft's own writer (default), or cadmpeg's, which writes STEP AP242 with the components and colours but no solid names, and IGES 5.3 with each body where the design shows it; refused for other formats"},
                     "mesh_prefix": string("urdf: put before each mesh file name (default: none, so relative to the .urdf)"),
-                    "effort": {"type": "number", "description": "urdf: joint effort limit, N or N m (default 1000)"},
-                    "velocity": {"type": "number", "description": "urdf: joint velocity limit, m/s or rad/s (default 10)"},
+                    "place_meshes": {"type": "boolean", "description": "urdf: write the meshes where mesh_prefix points, making its folder (default false: next to the .urdf)"},
+                    "effort": {"type": "number", "description": "urdf: effort limit for joints with none saved, N or N m (default 1000)"},
+                    "velocity": {"type": "number", "description": "urdf: velocity limit for joints with none saved, m/s or rad/s (default 10)"},
                     "hierarchy": {"type": "boolean", "description": "glb: false writes every body flat under the root in world coordinates, as SolidCraft 0.40 did (default true: a named node per occurrence)"},
                     "images": {"type": "boolean", "description": "urdf and usd: also write each picture shown on the model as a textured visual; usd writes it only in a .usdz package (default false)"},
                     "physics": {"type": "boolean", "description": "usd: also write the joints, grounded parts and each component's mass as OpenUSD physics, for a simulator (default false)"},
                     "render_setup": string("usd: the saved render setup whose image textures a .usdz package holds (default: none)"),
                     "purpose": {"type": "string", "enum": ["interchange", "distribution"], "description": "usd: what the file is for: interchange (exact shapes beside meshes, for CAD) or distribution (meshes only with the pictures shown on the model, for viewers and game engines); exact_brep and images override it (default interchange)"},
                     "exact_brep": {"type": "boolean", "description": "usd: write each body's exact shape beside its mesh (default: true for interchange, false for distribution)"},
+                    "mimic": {"type": "boolean", "description": "urdf: write <mimic> for motion links (default false)"},
                     "name": string("sdf: the model's name (default: the folder's name)"),
                     "static": {"type": "boolean", "description": "sdf: scenery Gazebo never moves (default true); false gives it the bodies' mass"},
                     "model_uris": {"type": "boolean", "description": "sdf: name files as model://<folder>/<file> (default false: relative to model.sdf)"},
@@ -1109,9 +1111,11 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
                     "bodies",
                     "writer",
                     "mesh_prefix",
+                    "place_meshes",
                     "effort",
                     "velocity",
                     "hierarchy",
+                    "mimic",
                     "images",
                     "physics",
                     "render_setup",
@@ -1399,9 +1403,11 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
                     "bodies",
                     "writer",
                     "mesh_prefix",
+                    "place_meshes",
                     "effort",
                     "velocity",
                     "hierarchy",
+                    "mimic",
                     "images",
                     "physics",
                     "render_setup",
