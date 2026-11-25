@@ -1847,6 +1847,69 @@ fn refuse_end_past_side_edge(
     })
 }
 
+/// Not the fork's (#21463): whether the concave End's rail end `fv`, on the side edge use
+/// `side_eu`, is one the solve found on the side edge's line continued past its far end W
+/// (`run_side_edge_on_along_its_line`, WR-610) where the cap edge's place on the rail's face
+/// S, from W on along that line to the rail's end, is proved to leave S
+/// ([`cap_segment_proved_to_leave_side`]: a boundary edge of S, of a hole or notch in it,
+/// crosses it). That rail end misses the side edge as one not found on it does
+/// (`NoIntRailEu`, the search bounded to the edge): the round overflows the side edge, and
+/// the cap edge, off S, could not close the end patch. A turned-back end
+/// (`RailXExtendedEdgeuse`, whose cap edge the corner's topology proved to stay on S) and a
+/// tangent end (on the seam run on past the vertex) are not misses, nor a rail end on the
+/// side edge within the corner's tolerance, nor one whose cap edge is not proved to leave
+/// S (it may run on along S, as on a side face that continues past W).
+///
+/// # Errors
+/// `SM_ERR_NULL_POINTER` without side edge, far vertex, faces or curve; those of the drop
+/// and the certificate.
+fn rail_end_run_on_leaves_side(
+    k: &Kernel,
+    target: &Brep,
+    pseudo: &FilletBrep,
+    corner: &FilletCorner,
+    fv: VertexId,
+    side_eu: EdgeuseId,
+    fil_eu: EdgeuseId,
+) -> Result<bool> {
+    let record = pseudo.fillet_vertex(fv)?;
+    if !record.is_processed()
+        || record.fillet_vertex_type() == FilletVertexType::RailXExtendedEdgeuse
+        || record.is_tangent_end()
+    {
+        return Ok(false);
+    }
+    let point = pseudo.vertex_point(fv)?;
+    let side_edge = edge_of(target, side_eu)?;
+    let on_side = curve_of(target, side_edge)?.drop_point(
+        k,
+        &edge::interval(target, side_edge)?,
+        point,
+        None,
+        BIG_DOUBLE,
+        None,
+        SolverOperation::Minimize,
+    )?;
+    if on_side.success && on_side.distance <= corner.approx_tol_3d {
+        return Ok(false);
+    }
+    let far = if edge::start_vertex(target, side_edge)? == corner.vertex {
+        edge::end_vertex(target, side_edge)?
+    } else {
+        edge::start_vertex(target, side_edge)?
+    }
+    .ok_or_else(|| edge_without_vertex(side_edge))?;
+    // S: the side edge's face that the rail runs on, a face of the blended edge
+    let side_faces = [face_of(target, side_eu)?, radial_face(target, side_eu)?];
+    let fil_faces = [face_of(target, fil_eu)?, radial_face(target, fil_eu)?];
+    let Some(&s_face) = side_faces.iter().find(|f| fil_faces.contains(f)) else {
+        return Ok(false);
+    };
+    crate::blend::fillet_corner::topology::nx1_end::cap_segment_proved_to_leave_side(
+        k, target, s_face, far, point,
+    )
+}
+
 /// The fork's `SmBlendCorner::FitOfEndPastSideEdges` (41a39ec): before the corner is
 /// built, at an End on its end face of a constant round (`const_radius`: the solver's
 /// type is `SM_FS_CONST_RADIUS` or `SM_FS_CONST_RADIUS_ASSISTED`), the least radius at
@@ -2698,9 +2761,19 @@ pub fn calc_end_edge_geom(
                 continue;
             };
             let record = pseudo.fillet_vertex(fv)?;
-            if record.status() != FilStatus::NoIntRailEu
-                || record.point_class() != PointClassType::Edgeuse
-            {
+            if record.point_class() != PointClassType::Edgeuse {
+                continue;
+            }
+            // not found on the side edge, or found on its line past it where the cap edge
+            // would leave the rail's face (#21463): a miss either way
+            let missed = record.status() == FilStatus::NoIntRailEu
+                || match record.point_class_object() {
+                    Some(EntityRef::Edgeuse(side_eu)) => {
+                        rail_end_run_on_leaves_side(k, target, pseudo, corner, fv, side_eu, fil_eu)?
+                    }
+                    _ => false,
+                };
+            if !missed {
                 continue;
             }
             let Some(EntityRef::Edgeuse(side_eu)) = record.point_class_object() else {

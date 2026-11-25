@@ -1537,10 +1537,13 @@ fn a_corner_round_whose_rail_ends_past_w_off_the_side_is_refused_as_on_main() {
 /// (y -75.68) and the rail's end R = (-36, -80, 5) of the corner round r4 = 15. R stays inside
 /// the side, but the slot's edges on the side cross the cap edge's place from W to R, so the
 /// turned-back end is not taken and main's outcome stands: without the corpus's fixes
-/// refused, naming 10.68 (the closed form less the fit margin); with them it fails as on main
-/// (status 1001, not asserted beyond failing). MEASURED: with only the certificate removed,
-/// the turned-back end is taken and the round without the corpus's fixes fails with status
-/// 1001 instead.
+/// refused, naming 10.68 (the closed form less the fit margin); with them it fails (not
+/// asserted beyond failing). The rail's end, found on the top edge's line past W, is a miss
+/// of that edge, as the search bounded to the edge finds none there: the slot's edges cross
+/// the cap edge's place from W to R (`cap_segment_proved_to_leave_side`, #21463), so the
+/// round is refused as one overflowing its side edge, not failed with status 1001 when its
+/// end patch cannot close. MEASURED: with only the certificate removed, the turned-back end
+/// is taken and the round without the corpus's fixes fails with status 1001 instead.
 #[test]
 fn a_corner_round_whose_cap_edge_crosses_a_slot_in_the_side_is_refused_as_on_main() {
     let r4 = 15.0;
