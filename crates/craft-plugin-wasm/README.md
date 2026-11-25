@@ -54,6 +54,13 @@ folder is refused, not followed. There is no ambient filesystem access. Wall tim
 clock permission.
 Requests for `net` and reserved socket, HTTP and fetch imports are refused.
 
+The additive `user-storage` interface requires `user-storage@0.1` in a command plugin's
+manifest. It delegates JSON get/set/remove/list calls to the host for the calling plugin
+alone. A `read` entry cannot set or remove settings, even when the capability is present.
+Keys and JSON inputs (at most 1 MiB before parsing) are checked before delegation; the host applies the
+shared map budgets (128 keys and 64 KiB), persistence and commit/rollback policy. Existing
+0.1 and 0.2 components continue linking without importing the new interface.
+
 Fuel, epoch interruption and store limits bound guest execution. Defaults are
 10,000,000 fuel, 64 MiB memory and 5000 ms. One linear memory is allowed; memory64 is
 disabled. Components are capped at 16 MiB and JSON parameters/results at 1 MiB each.

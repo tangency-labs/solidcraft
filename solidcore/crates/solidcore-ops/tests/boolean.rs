@@ -4263,3 +4263,116 @@ fn a_hole_crossing_equal_holes_a_hair_off_their_axes_cuts_a_drilled_cube() {
         PointClass::Inside
     );
 }
+
+/// #21801's insert: a prism over the quadrilateral (2.85, 7), (26.868841, 7), (9.247749, 28),
+/// (2.85, 28) in x-z from y = 2.85 to 249.15, less a loft through three sections at x = -5,
+/// 95, 195 whose quadratic runs from (y, z) = (2.85, 28) to (249.15, 7) with its middle
+/// control point at y = ym, ym - 50, ym and z = 7. The loft meets z = 7 tangentially at
+/// y = 249.15, so the insert ends in a knife along the bin's floor there.
+fn fitted_loft_insert(ym: f64) -> Body {
+    let (f, top) = (7.0, 28.0);
+    let q = [[2.85, f], [26.868841, f], [9.247749, top], [2.85, top]];
+    let section: Vec<Curve> = (0..4)
+        .map(|i| {
+            let (a, b) = (q[i], q[(i + 1) % 4]);
+            Curve::Line {
+                start: [a[0], 2.85, a[1]],
+                end: [b[0], 2.85, b[1]],
+            }
+        })
+        .collect();
+    let prism = extrude(
+        &section,
+        [0.0, 1.0, 0.0],
+        246.3,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    let above = |x: f64, ym: f64| {
+        vec![
+            Curve::Nurbs {
+                degree: 2,
+                points: vec![[x, 2.85, top, 1.0], [x, ym, f, 1.0], [x, 249.15, f, 1.0]],
+                knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            },
+            Curve::Line {
+                start: [x, 249.15, f],
+                end: [x, 249.15, top],
+            },
+            Curve::Line {
+                start: [x, 249.15, top],
+                end: [x, 2.85, top],
+            },
+        ]
+    };
+    let cut = solidcore_ops::sweep::loft(
+        &[above(-5.0, ym), above(95.0, ym - 50.0), above(195.0, ym)],
+        2,
+        true,
+    )
+    .unwrap();
+    boolean(prism, cut, BooleanOp::Subtract).unwrap().unwrap()
+}
+
+/// #21801: with `simple_coincidence_crossing_is_point` off, the union of #18064's bin with
+/// the fitted-loft insert failed with `NotSolid`: imprinting the vertex where the loft's
+/// section curve leaves the bin's floor arc at (4, 248) split the arc, and the vertex
+/// definition that split added to the same proto vertex was never imprinted, so the insert's
+/// bottom face was not split along the arc. With that imprinted, it failed with
+/// `RelateConflict`: the insert's bottom-face arc edge and its top-face section edge along the
+/// same arc had no certified coincidence bound (an ellipse against a B-spline).
+///
+/// The union now gets through the imprint and the relations. It still refuses in
+/// `manifold_boolean`'s leak check (#21822: the bin's wall is classified against only one of
+/// the insert's two coincident edges); once #21822 is fixed this test requires the joined
+/// solid. The volume of that solid lies in a certified enclosure: the bin and the insert
+/// share no volume except in the two pocket corners the insert covers, outside the rounds
+/// about (4, 4) and (4, 248), each of area 1.15^2 (1 - pi / 4), between z = 7 and the
+/// insert's top, at most z = 28; their sum is at most `share`.
+#[test]
+fn a_fitted_loft_insert_with_a_knife_on_the_floor_gets_through_imprint_and_relate() {
+    let no_crossing = solidcore::kernel::UpstreamFixes::NAMES
+        .iter()
+        .copied()
+        .filter(|n| *n != "simple_coincidence_crossing_is_point");
+    session::set_thread_fixes(no_crossing).unwrap();
+    let bin = pocketed_bin();
+    let insert = fitted_loft_insert(200.0);
+    let (vb, vi) = (volume(&bin), volume(&insert));
+    let share = 2.0 * 1.15 * 1.15 * (1.0 - PI / 4.0) * 21.0;
+    let _ = (session::take_failure_code(), session::take_failure_detail());
+    let joined = boolean(bin, insert, BooleanOp::Union);
+    let (code, detail) = (session::take_failure_code(), session::take_failure_detail());
+    match joined {
+        Ok(Some(r)) => {
+            let report = r.check(CheckLevel::All).unwrap();
+            assert!(report.is_valid(), "{}", report.text);
+            assert!(r.is_manifold_solid().unwrap());
+            let got = volume(&r);
+            // each of the three volumes is computed to `1e-8` relative accuracy (`volume`)
+            let slack = 1e-8 * (vb + vi + got);
+            assert!(
+                got >= vb + vi - share - slack && got <= vb + vi + slack,
+                "volume {got} outside [{}, {}]",
+                vb + vi - share,
+                vb + vi
+            );
+        }
+        Ok(None) => panic!("the union of two solids is empty"),
+        Err(e) => {
+            let code = code.unwrap_or_else(|| panic!("{e:?} without a failure code"));
+            assert_eq!(
+                code.operation, "boolean::merge::p4::manifold_boolean",
+                "{e:?} ({code}): refused before the leak check (#21822)"
+            );
+            // the leak check's own cause (`BooleanFailure::SolidLeaks`), not another refusal there
+            let detail = detail.unwrap_or_default();
+            assert!(
+                detail.contains("the solid it bounded merged into the outside"),
+                "{e:?}: {detail}"
+            );
+        }
+    }
+}

@@ -350,6 +350,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::Sweep { .. } => "sweep",
         FeatureKind::Shell { .. } => "shell",
         FeatureKind::Lighten(_) => "pocket",
+        FeatureKind::Dome { .. } => "dome",
         FeatureKind::Draft { .. } => "draft",
         FeatureKind::Split { .. } => "split",
         FeatureKind::Move { .. } => "move",

@@ -3751,13 +3751,17 @@ impl Session {
     }
 
     fn compute_commands_under(
-        self,
+        mut self,
         commands: &[(String, Value)],
         marker: Option<Option<usize>>,
         original: Option<Session>,
     ) -> Result<ComputedCommands> {
         let editor_original = original.as_ref().map(|session| session.doc.clone());
         let mut computed = self.scratch();
+        computed.plugin_state.defer_user_settings();
+        // UI consent travels to the worker invocation, never to the source identity that is
+        // compared with the live session when accepting its result.
+        self.plugin_state.user.dialog_folders = None;
         let mut steps = Vec::new();
         if let Some(marker) = marker {
             let before = computed.doc.clone();
@@ -3826,6 +3830,9 @@ impl Session {
                 }
             }
             return Err(EngineError::Other("the design changed while the feature was computing".into()));
+        }
+        if !self.plugin_state.user.defer_user_settings {
+            prepared.computed.plugin_state.publish_user_settings()?;
         }
         if let Some(original) = &prepared.editor_original {
             self.restore_editor_history(&prepared.source.doc, original);
@@ -3994,6 +4001,7 @@ impl Session {
         let owner = self.checked_sketch_owner(computed.active_sketch, computed.sketching_view)?;
         self.checked_sheet_sketch_owner(&self.view_context, computed.active_sheet_sketch.as_deref(), &computed.doc)?;
         computed.sketching_view = owner;
+        self.plugin_state.user.pending_user_settings = std::mem::take(&mut computed.plugin_state.user.pending_user_settings);
         // Audited direct-mutation jobs may not have passed through execute. Their
         // accepted document is still a new committed state with a fresh token.
         let newer = match (design_revision_generation(&computed.design_revision), design_revision_generation(&self.design_revision)) {
@@ -4172,6 +4180,7 @@ impl Session {
     }
 
     fn preview_in_place(mut self, commands: &[(String, Value)], step: Option<&std::sync::atomic::AtomicUsize>) -> Result<(Self, Vec<Value>)> {
+        self.plugin_state.defer_user_settings();
         if commands.is_empty() {
             return Err(EngineError::Other("nothing to preview".into()));
         }
@@ -4537,6 +4546,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         visibility,
         drawings,
         next_component_color_index,
+        plane_extents,
         plugin_data,
         linked_bodies_left_out,
     } = a;
@@ -4580,6 +4590,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         && *visibility == b.visibility
         && *drawings == b.drawings
         && *next_component_color_index == b.next_component_color_index
+        && *plane_extents == b.plane_extents
 }
 
 /// Store `pins` (sketch, link, vertex name, edge name) on the links they name: a name the link

@@ -1910,7 +1910,7 @@ pub(crate) fn same_path(a: &str, b: &str) -> bool {
 
 /// Open `session` in a new tab after the active one, leaving the shown design as it is (a file
 /// opened while the person is busy in another design). Its view is framed when it is shown.
-pub(crate) fn open_tab_behind(app: &mut SolveApp, session: Session) -> Result<(), String> {
+pub(crate) fn open_tab_behind(app: &mut SolveApp, mut session: Session) -> Result<(), String> {
     if app.docs.slots.is_empty() {
         app.docs.slots.push(None);
         app.docs.active = 0;
@@ -1918,6 +1918,7 @@ pub(crate) fn open_tab_behind(app: &mut SolveApp, session: Session) -> Result<()
     if app.docs.slots.len() >= MAX_OPEN {
         return Err(format!("at most {MAX_OPEN} designs can be open"));
     }
+    session.plugin_state.publish_user_settings().map_err(|e| e.to_string())?;
     let mut slot = DocSlot::new(session);
     slot.fit = true;
     app.docs.slots.insert(app.docs.active + 1, Some(slot));
@@ -1925,7 +1926,7 @@ pub(crate) fn open_tab_behind(app: &mut SolveApp, session: Session) -> Result<()
 }
 
 /// Open `session` in a new tab after the active one and switch to it (`fit`: frame its model).
-pub fn open_tab(app: &mut SolveApp, session: Session) -> Result<(), String> {
+pub fn open_tab(app: &mut SolveApp, mut session: Session) -> Result<(), String> {
     if app.docs.group.is_some() {
         return Err(app.tr("document.finish_save_prompt").to_owned());
     }
@@ -1936,6 +1937,7 @@ pub fn open_tab(app: &mut SolveApp, session: Session) -> Result<(), String> {
     if app.docs.slots.len() >= MAX_OPEN {
         return Err(format!("at most {MAX_OPEN} designs can be open"));
     }
+    session.plugin_state.publish_user_settings().map_err(|e| e.to_string())?;
     let at = app.docs.active + 1;
     app.docs.slots.insert(at, Some(DocSlot::new(session)));
     crate::agent_chat::follow_new_tab(app, |app| switch(app, at));
@@ -1952,8 +1954,12 @@ pub fn active_is_blank(app: &SolveApp) -> bool {
 
 /// Show `session` (a design built or read elsewhere): in place of a blank active design,
 /// otherwise in a new tab. Whether it is shown (no tab left for it: the status says so).
-pub fn adopt(app: &mut SolveApp, session: Session) -> bool {
+pub fn adopt(app: &mut SolveApp, mut session: Session) -> bool {
     if active_is_blank(app) {
+        if let Err(error) = session.plugin_state.publish_user_settings() {
+            app.set_status(error.to_string(), true);
+            return false;
+        }
         let rev = app.session.revision;
         crate::browser::discard_reveals(app);
         crate::semantic_content::leave_document(app);
@@ -3666,6 +3672,11 @@ pub fn answer_prompt(app: &mut SolveApp, answer: Answer) {
     }
     quit_step(app);
     batch_step(app);
+}
+
+/// Whether a tab is waiting for its save before closing.
+pub(crate) fn saving_to_close(app: &SolveApp) -> bool {
+    app.docs.saving
 }
 
 /// Resume Close/Quit only after Save As has answered and the write succeeded.
