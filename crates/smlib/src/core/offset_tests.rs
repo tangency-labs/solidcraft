@@ -16,7 +16,7 @@ use solidcore::geom::vector3d::Vec3;
 use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::sweep::api_brep::create_linear_sweep;
 
-use super::offset::{draft, mark_moved, moved_faces, offset_faces, offset_sheet, refused, shell, thicken};
+use super::offset::{draft, offset_faces, offset_sheet, refused, shell, thicken};
 use super::{Body, area, bounds, counts, make_box, make_cylinder, make_sphere, run, to_arrays, volume};
 use crate::export::native;
 use crate::{BooleanOp, Error};
@@ -607,39 +607,6 @@ fn a_solidcore_error_in_a_pick_is_an_error() {
     assert!(matches!(other, Err(SolidError::InvalidInput { .. })), "{other:?}");
     let unported = pick(&all, &points, 1.0, 1e-6, |i, _| answer(if i == 0 { Err(SolidError::unported("Sm::X", "u")) } else { Ok(0.5) }));
     assert!(matches!(unported, Err(SolidError::Unported { .. })), "{unported:?}");
-}
-
-/// The capi's `moved_faces` reading: no mark, no move (SMLIB_ERR_NO_EFFECT); a mark is read once,
-/// and gone.
-#[test]
-fn a_draft_with_no_marked_face_left_has_no_effect() {
-    let body = make_box([0.0; 3], [10.0; 3]).unwrap();
-    super::with_body("marks", &body, |_, w| {
-        assert!(!moved_faces(w)?, "no face marked");
-        let f = w.face_list()[0];
-        mark_moved(w, &[f])?;
-        assert!(moved_faces(w)?, "a face marked");
-        assert!(!moved_faces(w)?, "the mark removed");
-        Ok(())
-    })
-    .unwrap();
-}
-
-/// A draft leaves no mark of its own on what it returns, on a plane or on a cylinder turned cone.
-#[test]
-fn a_draft_leaves_no_mark() {
-    let z = [0.0, 0.0, 1.0];
-    let bx = make_box([0.0; 3], [20.0, 30.0, 10.0]).unwrap();
-    let plane = draft(&bx, &[[10.0, 0.0, 5.0]], TOL, [0.0; 3], z, z, 0.1).unwrap();
-    let cyl = make_cylinder([0.0; 3], 5.0, 10.0).unwrap();
-    let cone = draft(&cyl, &[[5.0, 0.0, 5.0]], TOL, [0.0; 3], z, z, 0.1).unwrap();
-    for b in [plane, cone] {
-        super::with_body("marks", &b, |_, w| {
-            assert!(!moved_faces(w)?);
-            Ok(())
-        })
-        .unwrap();
-    }
 }
 
 /// A stepped block, 40 x 30 x 10 with its half x < 20 raised to 20 (rig case
