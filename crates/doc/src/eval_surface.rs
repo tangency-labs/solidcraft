@@ -152,7 +152,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             }
             Ok(())
         }
-        FeatureKind::SurfaceExtend { body, edges, distance, mode, up_to, neighbours } => {
+        FeatureKind::SurfaceExtend { body, edges, distance, mode, up_to, neighbours, stays_surface } => {
             let i = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
             let mode = match mode {
@@ -179,7 +179,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 }
             };
             if let Some(slot) = st.bodies.get_mut(i) {
-                *slot = ModelBody::new(mb.name, out, mb.feature);
+                *slot = ModelBody { sheet: mb.sheet || *stays_surface, ..ModelBody::new(mb.name, out, mb.feature) };
             }
             Ok(())
         }
@@ -281,7 +281,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             // A match rebuilds the face in place: the body keeps its name, and whatever meets it
             // downstream still finds it.
             if let Some(slot) = st.bodies.get_mut(i) {
-                *slot = ModelBody::new(mb.name, made, mb.feature);
+                *slot = ModelBody { sheet: mb.sheet, ..ModelBody::new(mb.name, made, mb.feature) };
             }
             Ok(())
         }
@@ -319,7 +319,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 report.movement
             ));
             if let Some(slot) = st.bodies.get_mut(i) {
-                *slot = ModelBody::new(mb.name, faired, mb.feature);
+                *slot = ModelBody { sheet: mb.sheet, ..ModelBody::new(mb.name, faired, mb.feature) };
             }
             Ok(())
         }
@@ -372,7 +372,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             push_sheet(st, f, crate::lineage::ChainRoles { sketch: &ss, chains: &chains }.tool(body));
             Ok(())
         }
-        FeatureKind::SurfaceRevolve { sketch, profiles, curves, axis, angle, angle2, symmetric, faced } => {
+        FeatureKind::SurfaceRevolve { sketch, profiles, curves, axis, angle, angle2, symmetric, faced, stays_surface } => {
             let ss = constructor_profile_in_frame(
                 doc,
                 st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?,
@@ -411,6 +411,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 kernel::revolve_sheet_legacy_sides(&ss.plane, &chains, o, d, start, sweep)?
             };
             push_sheet(st, f, crate::lineage::ChainRoles { sketch: &ss, chains: &chains }.tool(body));
+            stays_a_surface(st, *stays_surface);
             Ok(())
         }
         FeatureKind::Unstitch { body, faces } => {
@@ -458,6 +459,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             rails,
             rail_fit,
             spline_as_samples,
+            stays_surface,
         } => {
             let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?;
             // The path is a chain of a body's edges (#2216) or the curves of a sketch.
@@ -512,9 +514,10 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             };
             let traced = crate::lineage::ChainRoles { sketch: ss, chains: &chains }.tool(body);
             push_sheet(st, f, traced);
+            stays_a_surface(st, *stays_surface);
             Ok(())
         }
-        FeatureKind::SurfaceLoft { sections, continuity, crown, rails, rail_fit, faced } => {
+        FeatureKind::SurfaceLoft { sections, continuity, crown, rails, rail_fit, faced, stays_surface } => {
             // A loft with edge chains or 3D sketch curves for sections, or one that has to leave its
             // ends a particular way, is built through `loft_blend` from the frames of every
             // section; the plain one (planar sketch chains only, both ends G0) is the loft of old.
@@ -527,7 +530,9 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                         "not supported yet: guide rails on a loft with edge sections or end continuity".into()
                     }));
                 }
-                return loft_blend(st, f, sections, *continuity, *crown, doc);
+                loft_blend(st, f, sections, *continuity, *crown, doc)?;
+                stays_a_surface(st, *stays_surface);
+                return Ok(());
             }
             let mut secs = Vec::with_capacity(sections.len());
             let mut sketches = Vec::with_capacity(sections.len());
@@ -568,9 +573,10 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             let loops: Vec<solidcore_record::Loop2> = secs.iter().map(|(_, c)| solidcore_record::Loop2 { segs: c.clone() }).collect();
             let traced = crate::lineage::SectionRoles { sections: sketches.iter().zip(&loops).map(|(s, lp)| (s, vec![lp])).collect() }.tool(body);
             push_sheet(st, f, traced);
+            stays_a_surface(st, *stays_surface);
             Ok(())
         }
-        FeatureKind::SurfaceOffset { faces, body, distance, chain, tolerance } => {
+        FeatureKind::SurfaceOffset { faces, body, distance, chain, tolerance, stays_surface } => {
             let d = val(vals, distance, Kind::Length)?;
             let tol = match tolerance {
                 Some(t) => val(vals, t, Kind::Length)?,
@@ -590,9 +596,10 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             let made = Traced::step(kernel::offset_surface(&mb.body, &picked, d, tol)?, &[&mb.traced()]);
             let name = new_name(st, f, 0);
             st.bodies.push(ModelBody::traced_new(name, made, f.id));
+            stays_a_surface(st, *stays_surface);
             Ok(())
         }
-        FeatureKind::SurfaceRuled { body, edges, distance, mode, angle, direction, flip, corners, face, far } => {
+        FeatureKind::SurfaceRuled { body, edges, distance, mode, angle, direction, flip, corners, face, far, stays_surface } => {
             let d = val(vals, distance, Kind::Length)?;
             let mode = match mode {
                 RuledMode::Normal => kernel::RuledMode::Normal,
@@ -615,6 +622,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             let made = Traced::step(kernel::ruled_surface_with(&mb.body, &crate::plain(edges), &r, &handles)?, &[&mb.traced()]);
             let name = new_name(st, f, 0);
             st.bodies.push(ModelBody::traced_new(name, made, f.id));
+            stays_a_surface(st, *stays_surface);
             Ok(())
         }
         FeatureKind::SurfaceUntrim { face, holes, outer, in_place } => {
@@ -736,6 +744,15 @@ fn sheet_to_object(
 }
 
 /// A surface builder's body, added to the model with what its faces came from.
+/// The body a surface feature just made is a surface body even where its shells close, when the
+/// feature says so (`stays_surface`, #21969); without it (designs saved before), a result that
+/// closes is a solid, as it always was.
+fn stays_a_surface(st: &mut ModelState, stays_surface: bool) {
+    if stays_surface && let Some(made) = st.bodies.last_mut() {
+        made.sheet = true;
+    }
+}
+
 fn push_sheet(st: &mut ModelState, f: &Feature, traced: crate::lineage::Traced) {
     let name = new_name(st, f, 0);
     st.bodies.push(ModelBody::traced_new(name, traced, f.id));

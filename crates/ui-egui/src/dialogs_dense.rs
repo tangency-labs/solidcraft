@@ -1120,6 +1120,15 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Draft { angle } => {
             enter |= expr_row(ui, "Angle", angle);
         }
+        Kind::Dome { spherical, reverse, .. } => {
+            form_row(ui, "Shape", |ui| {
+                let mut i = usize::from(*spherical);
+                let labels = [solidcraft_ui_text::tr("ui.dome_elliptical"), solidcraft_ui_text::tr("ui.dome_spherical")];
+                ui_kit::segmented(ui, &mut i, &labels, Default::default());
+                *spherical = i == 1;
+            });
+            ui_kit::options(ui, "feature_options", &mut [(solidcraft_ui_text::tr("ui.dome_reverse"), reverse)]);
+        }
         Kind::Mirror => {
             // Feature replay retains the source operation; Join is for body copies.
             if !d.inputs.first().is_some_and(|i| i.accept == selection::FEATURES) {

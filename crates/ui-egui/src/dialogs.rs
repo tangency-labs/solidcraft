@@ -14,7 +14,7 @@ use solidcraft_engine::Sel;
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::doc::{
-    AxisRef, Direction, FeatureKind, FilletStyle, HoleKind, Operation, PatternDistance, PatternKind, PlaneRef, ProfileSel, ThinSide,
+    AxisRef, Direction, DomeShape, FeatureKind, FilletStyle, HoleKind, Operation, PatternDistance, PatternKind, PlaneRef, ProfileSel, ThinSide,
 };
 use solidcraft_engine::geom::Aabb3;
 
@@ -138,6 +138,13 @@ crate::dialog_descriptor::dialog_descriptors! {
             FeatureKind::Shell { thickness, .. }) {
             thickness: String = "2 mm".into() => shown_expr(thickness, ValueKind::Length),
         } => json!({"thickness": thickness});
+        // One planar face, raised into a dome of `height` along its outward normal (#19532).
+        Dome("solid.dome", "DOME", [("Face", FACES, false)],
+            FeatureKind::Dome { height, shape, reverse, .. }) {
+            height: String = "5 mm".into() => shown_expr(height, ValueKind::Length),
+            spherical: bool = false => *shape == DomeShape::Spherical,
+            reverse: bool = false => *reverse,
+        } => json!({"height": height, "shape": if *spherical { "spherical" } else { "elliptical" }, "reverse": reverse});
         Draft("solid.draft", "DRAFT", [("Faces", FACES, true), ("Neutral plane", PLANES | PLANAR_FACES, false)],
             FeatureKind::Draft { angle, .. }) {
             angle: String = "5 deg".into() => shown_expr(angle, ValueKind::Angle),
@@ -1602,6 +1609,7 @@ impl Dialog {
                 | Kind::Revolve { .. }
                 | Kind::Fillet { .. }
                 | Kind::Shell { .. }
+                | Kind::Dome { .. }
                 | Kind::Draft { .. }
                 | Kind::Mirror
                 | Kind::Split { .. }
@@ -1654,6 +1662,7 @@ impl Dialog {
                 (label, ValueKind::Length, radius)
             }
             Kind::Shell { thickness } => ("Thickness", ValueKind::Length, thickness),
+            Kind::Dome { height, .. } => ("Height", ValueKind::Length, height),
             Kind::Draft { angle } => ("Angle", ValueKind::Angle, angle),
             Kind::Hole { diameter, opts, .. } => {
                 // A thread or a bolt size sets the diameter: nothing to type on the canvas.
@@ -5166,6 +5175,7 @@ fn rememberable(kind: &Kind) -> bool {
             | Kind::Primitive { .. }
             | Kind::Combine { .. }
             | Kind::Shell { .. }
+            | Kind::Dome { .. }
             | Kind::Draft { .. }
             | Kind::OffsetPlane { .. }
             | Kind::AnglePlane { .. }
@@ -6758,6 +6768,12 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 p
             };
             ("solid.shell", p)
+        }
+        Kind::Dome { .. } => {
+            need(0, "the face")?;
+            let [Sel::Face { body, .. }] = sels(d, 0) else { return Err("pick one planar face".into()) };
+            let Some(point) = face_points(0).into_iter().next() else { return Err("pick one planar face".into()) };
+            ("solid.dome", json!({"body": body, "face": point}))
         }
         Kind::Draft { .. } => {
             need(0, "faces")?;
@@ -8919,6 +8935,20 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                         })
                         .collect();
                 }
+            }
+            d
+        }
+        FeatureKind::Dome { face, .. } => {
+            let mut d = start("solid.dome")?;
+            d.kind = Kind::simple_restore(&f.kind)?;
+            if let Some(inp) = d.inputs.get_mut(0) {
+                inp.items = f
+                    .face_names
+                    .first()
+                    .and_then(|name| named_refill(s, f.kind.face_body(), name, face.0, false))
+                    .or_else(|| face_sel(s, face.0))
+                    .into_iter()
+                    .collect();
             }
             d
         }
