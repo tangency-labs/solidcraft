@@ -56,6 +56,7 @@ pub(crate) struct Counts {
     pub thread_cuts: usize,
     pub grouped_thread_fallbacks: usize,
     pub hole_tools: usize,
+    pub run_on_probes: usize,
     pub tight_boxes: usize,
     pub blends: usize,
     pub fit_searches: usize,
@@ -95,6 +96,7 @@ thread_local! {
             thread_cuts: 0,
             grouped_thread_fallbacks: 0,
             hole_tools: 0,
+            run_on_probes: 0,
             tight_boxes: 0,
             blends: 0,
             fit_searches: 0,
@@ -3736,6 +3738,8 @@ fn a_hole_copy_under_material_builds_its_own_tools() {
     assert_eq!(volumes.len(), 2, "{volumes:?}");
     assert!((volumes[0] - 400.0).abs() < 1e-6, "{volumes:?}");
     assert!((volumes[1] - (20_000.0 - 90.0 * hole)).abs() < 1e-6 * hole, "{volumes:?}");
+    // Each block piece already lies in the full-width run-on of the first tool.
+    assert_eq!(work.run_on_probes, 0, "{work:?}");
     // The three copies under the block build theirs, and so does a copy in the clear after one.
     assert!(work.hole_tools > 4 && work.hole_tools < 90, "{work:?}");
 }
@@ -4061,6 +4065,29 @@ fn a_hole_whose_run_on_column_cannot_be_built_keeps_its_run_on() {
     let (top, near) = super::hole_run_on(&state, &Plane::XY, 3.0, 1.0);
     assert!((top - 0.25).abs() < 1e-6, "top {top}");
     assert!(near.is_empty());
+}
+
+/// A cover can shorten the run-on below a nearer piece. The hole still checks whether its
+/// shortened tool reaches the piece before subtracting it.
+#[test]
+fn a_shortened_run_on_checks_its_first_piece() {
+    let mut state = ModelState::default();
+    for (name, low, high) in [("Plate", -5.0, 0.0), ("Near", 0.15, 0.18), ("Cover", 0.25, 0.5)] {
+        let body = kernel::box_solid(Vec3::new(-50.0, -50.0, low), Vec3::new(50.0, 50.0, high)).unwrap();
+        state.bodies.push(ModelBody::new(name.into(), body, 0));
+    }
+    let vals = Default::default();
+    let depth = Some("2".into());
+    let reach = super::hole_reach(&vals, &state, &Vec3::ZERO, -Vec3::Z, "3", &depth, &HoleKind::Simple, false, &[]).unwrap();
+    assert!((reach.top - 0.125).abs() < 1e-6);
+    assert_eq!(reach.above.len(), 1);
+    let work = counted(|| {
+        let tools = super::hole_tools_reaching(&vals, &state, &Vec3::ZERO, -Vec3::Z, "3", &depth, &HoleKind::Simple, &reach).unwrap();
+        let volume = kernel::measure(&tools[0].0.body).unwrap().volume;
+        let expected = std::f64::consts::PI * 1.5_f64.powi(2) * (2.0 + reach.top);
+        assert!((volume - expected).abs() < 1e-6, "{volume}");
+    });
+    assert_eq!(work.run_on_probes, 1);
 }
 
 /// `n` boxes of 2 x 2 x 2 in a row, `pitch` from one to the next, joined into the first by one

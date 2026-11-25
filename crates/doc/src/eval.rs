@@ -9075,6 +9075,7 @@ struct HoleReach {
     size: f64,
     top: f64,
     above: Vec<(Body, f64)>,
+    full_run_on: bool,
     exits: bool,
     bore_end: f64,
 }
@@ -9135,8 +9136,8 @@ fn hole_reach(
     // The entry face may slant across the axis: it then rises above the entry point within the
     // tools' reach, and the tools must start clear of all of it, or a wedge of it is left over the
     // low side (#20045).
-    let top = top + entry_face_rise(st, position, &plane, wide);
-    let (top, above) = hole_run_on(st, &plane, wide, top);
+    let column_top = top + entry_face_rise(st, position, &plane, wide);
+    let (top, above) = hole_run_on(st, &plane, wide, column_top);
     let bottom = match depth {
         Some(d) => -val(vals, d, Kind::Length)?,
         None => -(size * 2.0 + 1.0),
@@ -9165,7 +9166,7 @@ fn hole_reach(
         },
         None => bottom,
     };
-    Ok(HoleReach { size, top, above, exits, bore_end })
+    Ok(HoleReach { size, top, above, full_run_on: top == column_top, exits, bore_end })
 }
 
 /// How far a planar face the hole enters by at `position` rises above `plane` (the hole's frame
@@ -9204,7 +9205,7 @@ fn hole_tools_reaching(
 ) -> Result<Vec<(Traced, Option<more::PrimitivePrism>)>> {
     #[cfg(test)]
     cost_tests::count(|c| c.hole_tools += 1);
-    let HoleReach { size, top, ref above, exits, bore_end } = *reach;
+    let HoleReach { size, top, ref above, full_run_on, exits, bore_end } = *reach;
     let r = val(vals, diameter, Kind::Length)? / 2.0;
     let plane = Plane::from_normal(*position, -dir).ok_or_else(|| DocError::Invalid("hole axis".into()))?;
     let bottom = match depth {
@@ -9317,11 +9318,18 @@ fn hole_tools_reaching(
     // whole cylinder stays its reach (it takes a drill that meets one panel and nothing else of
     // the sheet).
     let mut kept = Vec::with_capacity(tools.len());
-    for (mut tool, mut prism) in tools {
-        for (piece, low) in above {
+    for (tool_index, (mut tool, mut prism)) in tools.into_iter().enumerate() {
+        for (piece_index, (piece, low)) in above.iter().enumerate() {
             // Best effort: where the kernel cannot answer, the tool stays as it was before.
-            if !matches!(kernel::boolean(&tool.body, piece, BoolOp::Intersect), Ok(Some(_))) {
-                continue;
+            // The first (widest) tool contains the entire column above the face when nothing
+            // shortened its run-on. Each piece is already an intersection with that column.
+            // After a cut, some of a later piece might already have been removed.
+            if !(tool_index == 0 && piece_index == 0 && full_run_on) {
+                #[cfg(test)]
+                cost_tests::count(|c| c.run_on_probes += 1);
+                if !matches!(kernel::boolean(&tool.body, piece, BoolOp::Intersect), Ok(Some(_))) {
+                    continue;
+                }
             }
             let Ok(Some(cut)) = kernel::boolean(&tool.body, piece, BoolOp::Cut) else { continue };
             tool = Traced::step(cut, &[&tool, &Traced::unnamed(piece.clone())]);
