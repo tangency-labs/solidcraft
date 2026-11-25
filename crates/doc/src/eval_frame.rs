@@ -23,9 +23,14 @@ use crate::{DocError, Document, Feature, FeatureId, FeatureKind, ProfileSel, Res
 
 #[path = "frame_earlier.rs"]
 mod earlier;
-
 #[path = "frame_paths.rs"]
 mod paths;
+#[path = "eval_frame_trim.rs"]
+mod trimming;
+
+pub(super) fn trim(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState, warning: &mut Option<String>) -> Result<()> {
+    trimming::trim(doc, vals, f, st, warning)
+}
 
 /// Most profiles a profile sketch may have for its material to be worked out.
 const MAX_PROFILE_PIECES: usize = 256;
@@ -68,6 +73,7 @@ fn evaluate_members(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature,
         let bases = group_bases(&f.kind, &default, ids.len());
         let pinned = ids.iter().cloned().zip(group_member_names(st, &ids, &bases, names)).collect::<BTreeMap<_, _>>();
         let (start, counter) = (st.bodies.len(), st.body_counter);
+        let records = st.frame_members.len();
         let result = (|| {
             let mut offset = 0;
             for mut group in groups {
@@ -83,6 +89,7 @@ fn evaluate_members(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature,
         if result.is_err() {
             st.bodies.truncate(start);
             st.body_counter = counter;
+            st.frame_members.truncate(records);
         }
         return result;
     }
@@ -284,6 +291,11 @@ fn built(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut M
         let all: Vec<Traced> = made.into_iter().enumerate().flat_map(|(m, t)| t.into_iter().chain(later_of(m).into_iter().map(|p| p.1))).collect();
         for (k, t) in all.into_iter().enumerate() {
             let name = new_name(st, f, copy_offset + k);
+            if trimming::can_rebuild(&f.kind)
+                && let Some((line, ..)) = segments.get(k)
+            {
+                st.frame_members.push(trimming::record(f.id, line, &name, [None, None], &t.body));
+            }
             st.bodies.push(ModelBody::traced_new(name, t, f.id));
         }
         return Ok(());
@@ -295,6 +307,11 @@ fn built(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut M
     // A piece with no body leaves its name unused.
     for (m, (name, t)) in named.iter().zip(made).enumerate() {
         if let Some(t) = t {
+            if trimming::can_rebuild(&f.kind)
+                && let Some(line) = ids.get(m)
+            {
+                st.frame_members.push(trimming::record(f.id, line, name, [None, None], &t.body));
+            }
             st.bodies.push(ModelBody::traced_new(name.clone(), t, f.id));
         }
         // A later piece of a tube split where another overlaps it, `L>X` (X: the other's line or pair id, a piece's
@@ -1874,15 +1891,10 @@ fn section(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &Mod
     let at = match locate {
         Some([x, y]) => {
             // A design file is hostile input: the command checks the point, a file may not.
-            if !(x.is_finite() && y.is_finite() && x.abs() <= frame::MAX_PROFILE_SIZE && y.abs() <= frame::MAX_PROFILE_SIZE) {
+            if !(frame::within_profile_size(*x) && frame::within_profile_size(*y)) {
                 return Err(DocError::Invalid(format!("frame member `locate` must be two finite lengths within {} mm", frame::MAX_PROFILE_SIZE)));
             }
-            // `locate` is the profile point that sits on the line, measured from the profile's
-            // own origin (`Profile::origin`). The built-in region is centred on its bounding
-            // box, so that origin moves when the section's size changes, and the located point
-            // moves with it: the member stays attached at the same point of its section.
-            let p = origin + Vec2::new(*x, *y);
-            if *mirror { Vec2::new(-p.x, p.y) } else { p }
+            located_point(origin, *mirror, [*x, *y])
         }
         None => frame::anchor_point(&regions, *anchor),
     };
@@ -1997,6 +2009,17 @@ pub fn member_segments(doc: &Document, st: &ModelState, f: &Feature) -> Result<V
     Ok(segments(doc, &doc.evaluation_values(), f, st)?.0.into_iter().map(|(id, a, b)| (id, place(a), place(b))).collect())
 }
 
+/// The section point a member's `locate` puts on its line, in the section's coordinates as drawn
+/// (mirrored when the member is). `locate` is measured from the profile's own origin
+/// (`Profile::origin`), before the mirror. The built-in region is centred on its bounding box, so
+/// that origin moves when the section's size changes, and the located point moves with it: the
+/// member stays attached at the same point of its section. [`SectionView::locate_of`] is the
+/// inverse.
+pub fn located_point(origin: Vec2, mirror: bool, locate: [f64; 2]) -> Vec2 {
+    let p = origin + Vec2::new(locate[0], locate[1]);
+    if mirror { Vec2::new(-p.x, p.y) } else { p }
+}
+
 /// A member's section as a dialog shows it before the member is made: the section of the member
 /// on the feature's first line, in world coordinates, laid out by the same code that makes the
 /// body, so what the dialog shows is where the member goes.
@@ -2030,10 +2053,15 @@ impl SectionView {
     }
 
     /// The `locate` that puts section point `p` on the line: measured from the profile's own
-    /// origin, before the mirror, as the member reads it.
+    /// origin, before the mirror, as the member reads it ([`located_point`] is the inverse).
     pub fn locate_of(&self, p: Vec2) -> [f64; 2] {
         let q = if self.mirror { Vec2::new(-p.x, p.y) } else { p };
         [q.x - self.origin.x, q.y - self.origin.y]
+    }
+
+    /// The section point that `locate` puts on the line: the inverse of [`Self::locate_of`].
+    pub fn locate_point(&self, locate: [f64; 2]) -> Vec2 {
+        located_point(self.origin, self.mirror, locate)
     }
 
     /// Every anchor's section point, in [`frame::Anchor::ALL`] order.
@@ -2081,6 +2109,17 @@ pub(crate) fn member_section(
     st: &ModelState,
     line: &str,
 ) -> Result<(Plane, f64, Region2, [bool; 2])> {
+    let original = untrimmed_member_section(doc, vals, f, st, line)?;
+    trimming::section(doc, vals, f, st, line, original)
+}
+
+fn untrimmed_member_section(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    st: &ModelState,
+    line: &str,
+) -> Result<(Plane, f64, Region2, [bool; 2])> {
     if paths::uses(st, &f.kind)? {
         return paths::member_section(doc, vals, f, st, line);
     }
@@ -2092,7 +2131,7 @@ pub(crate) fn member_section(
             FeatureKind::FrameMember { lines, .. } if lines.is_empty() || lines.iter().any(|id| id == line))
             })
             .ok_or_else(|| DocError::Unknown(format!("line `{line}` of the member feature")))?;
-        return member_section(doc, vals, &group, st, line);
+        return untrimmed_member_section(doc, vals, &group, st, line);
     }
     let FeatureKind::FrameMember { corner, corners, gap, .. } = &f.kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));

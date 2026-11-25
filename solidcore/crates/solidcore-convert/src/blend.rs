@@ -89,6 +89,7 @@ fn definition(d: &r::BlendDefinitionRecord) -> kb::BlendDefinitionRecord {
                 kb::RadiusRecord::Constant { offsets: *offsets }
             }
             r::RadiusRecord::Law(law) => kb::RadiusRecord::Law(curve(law)),
+            r::RadiusRecord::EqualSetback => kb::RadiusRecord::EqualSetback,
         },
         order: d.order,
         thumbweight: d.thumbweight,
@@ -113,6 +114,7 @@ fn record_definition(d: kb::BlendDefinitionRecord) -> r::BlendDefinitionRecord {
         radius: match d.radius {
             kb::RadiusRecord::Constant { offsets } => r::RadiusRecord::Constant { offsets },
             kb::RadiusRecord::Law(law) => r::RadiusRecord::Law(record_curve(law)),
+            kb::RadiusRecord::EqualSetback => r::RadiusRecord::EqualSetback,
         },
         order: d.order,
         thumbweight: d.thumbweight,

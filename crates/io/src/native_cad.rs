@@ -87,7 +87,7 @@ fn step_producer(bytes: &[u8]) -> Producer {
     for _ in 0..STEP_HEADER_ENDS {
         let Some(end) = next_end_section(&text, from) else { break };
         let header = format!("{};\nEND-ISO-10303-21;\n", text.get(..end).unwrap_or_default());
-        if let Ok(ex) = solidcore_record::step::p21::parse(&header) {
+        if let Ok(ex) = solidcraft_kernel::services::step::p21::parse(&header) {
             return Producer { system: ex.originating_system, preprocessor: ex.preprocessor, description: ex.description };
         }
         from = end;
@@ -194,7 +194,7 @@ pub(crate) fn cadir_records(ir: &cadmpeg_ir::document::CadIr, product: &str, sys
 }
 
 /// `ir`'s bodies as an import kept as records, written by `system`: each body region assembled
-/// into a record by `solidcore_cadir`, its pcurves without a closed form made as a STEP import's
+/// into a record by `solidcraft_kernel::services::cadir`, its pcurves without a closed form made as a STEP import's
 /// are ([`solidcraft_kernel::import_trims`]). Nothing passes through STEP text. CADIR's bodies
 /// come with their own names, visibility and rigid placements, which the records keep. Where the
 /// file has a product structure (occurrences), the tree is that structure and each body is placed
@@ -213,7 +213,7 @@ fn traced_records(
 ) -> (solidcraft_kernel::ImportRecords, Vec<validation::Origin>) {
     use solidcraft_kernel::{ImportRecords, RecordBody, StepNode};
     let _span = solidcraft_profile::span("import", "cadir.records");
-    let read = solidcore_cadir::read_bodies(ir, Some(solidcraft_kernel::import_trims()));
+    let read = solidcraft_kernel::services::cadir::read_bodies(ir, Some(solidcraft_kernel::import_trims()));
     let by_id: std::collections::HashMap<&str, &cadmpeg_ir::topology::Body> = ir.model.bodies.iter().map(|b| (b.id.as_str(), b)).collect();
     let label = |id: &str| by_id.get(id).and_then(|b| b.name.clone()).filter(|n| !n.trim().is_empty()).unwrap_or_else(|| id.to_string());
     let mut warnings = Vec::new();

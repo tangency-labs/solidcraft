@@ -36,6 +36,9 @@ pub(crate) enum Operand {
     /// pattern or mirror of that feature: its faces named by their roles in that feature
     /// (`F<feature>:<role>@F<pattern>.<instance>`).
     CopiedTool { roles: Vec<Vec<String>>, feature: u64, instance: usize },
+    /// A body another feature (`feature`) builds, built again by this one in its place (a frame
+    /// member with its ends trimmed): its faces keep that feature's names (`F<feature>:<role>`).
+    Rebuilt { roles: Vec<Vec<String>>, feature: u64 },
     /// A body the feature made on the way to its result (a cut body before it falls into lumps),
     /// named as a whole first so pieces of one face in different results are told apart.
     Stage(Box<Stage>),
@@ -117,6 +120,7 @@ impl Lineage {
                 Operand::Made(roles) => Arc::new(Operand::CopiedTool { roles: roles.clone(), feature, instance }),
                 // A sheet's faces are named by what made them in the sheet: no copy has them.
                 Operand::Grown { faces, .. } => Arc::new(Operand::Made(vec![Vec::new(); faces.len()])),
+                Operand::Rebuilt { roles, feature: built } => Arc::new(Operand::CopiedTool { roles: roles.clone(), feature: *built, instance }),
                 _ => op.clone(),
             })
             .collect();
@@ -212,6 +216,20 @@ impl Traced {
         }
     }
 
+    /// Label this instance of a tool. A cached or moved tool can have the same geometry but
+    /// belong to a different sketch point.
+    pub fn with_part_prefix(mut self, prefix: Option<&str>) -> Traced {
+        if let (Some(prefix), Some(lineage)) = (prefix, self.lineage.as_mut()) {
+            for operand in &mut lineage.operands {
+                if let Operand::Made(roles) = operand.as_ref() {
+                    let roles = roles.iter().map(|names| names.iter().map(|role| format!("{prefix}:{role}")).collect()).collect();
+                    *operand = Arc::new(Operand::Made(roles));
+                }
+            }
+        }
+        self
+    }
+
     /// `copy`, this tool moved: instance `instance` of a pattern or mirror of feature `feature`,
     /// which built it.
     pub fn copied(&self, copy: Body, feature: u64, instance: usize) -> Traced {
@@ -229,6 +247,22 @@ impl Traced {
         let lineages: Option<Vec<&Lineage>> = inputs.iter().map(|t| t.lineage.as_ref()).collect();
         let lineage = lineages.and_then(|l| Lineage::step(&result, &l));
         Traced { body: result, lineage, recipe: None }
+    }
+
+    /// This tool replaces faces built by `feature`, preserving that feature's roles even
+    /// when a later trim supplies the replacement cap.
+    pub fn rebuilt(mut self, feature: u64) -> Traced {
+        if let Some(lineage) = &mut self.lineage {
+            lineage.operands = lineage
+                .operands
+                .iter()
+                .map(|op| match op.as_ref() {
+                    Operand::Made(roles) => Arc::new(Operand::Rebuilt { roles: roles.clone(), feature }),
+                    _ => op.clone(),
+                })
+                .collect();
+        }
+        self
     }
 
     /// `result`, made by one kernel operation from this body alone. Where that operation's
@@ -545,17 +579,18 @@ pub(crate) fn cone_roles(body: &Body) -> Option<Vec<Vec<String>>> {
 /// by the part it makes: `<part>:top` (its end cap), `<part>:base` (its start cap) and
 /// `<part>:side:<k>` (swept from segment `k` of its profile), as its construction records them.
 pub(crate) fn part_tool(body: Body, part: &str) -> Traced {
-    let roles = body.history().filter(|h| h.operands == 0).map(|h| {
-        h.faces
-            .iter()
-            .map(|f| match f.origins.as_slice() {
-                [FaceOrigin::Cap { end }] => vec![format!("{part}:{}", if *end { "top" } else { "base" })],
-                [FaceOrigin::Profile { segment }] => vec![format!("{part}:side:{segment}")],
-                _ => Vec::new(),
-            })
-            .collect()
-    });
+    let roles =
+        body.history().filter(|h| h.operands == 0).map(|h| h.faces.iter().map(|f| part_role(&f.origins, part).into_iter().collect()).collect());
     Traced::made(body, roles)
+}
+
+/// The role of one face of a tool built from a profile (see [`part_tool`]).
+pub(crate) fn part_role(origins: &[FaceOrigin], part: &str) -> Option<String> {
+    match origins {
+        [FaceOrigin::Cap { end }] => Some(format!("{part}:{}", if *end { "top" } else { "base" })),
+        [FaceOrigin::Profile { segment }] => Some(format!("{part}:side:{segment}")),
+        _ => None,
+    }
 }
 
 /// Faces named by their place in a body built as a whole (an imported part's faces in the
@@ -614,6 +649,13 @@ pub(crate) fn link_role(fid: u64, name: &str, depth: usize) -> String {
         role.push_str(&format!("#{k}"));
     }
     role
+}
+
+/// [`numbered_tool`] for a body feature `feature` built, built again by another feature: its
+/// faces keep the names `feature` gave them.
+pub(crate) fn numbered_rebuilt(body: Body, feature: u64) -> Traced {
+    let roles = (0..body.face_count()).map(|k| vec![format!("face:{k}")]).collect();
+    Traced { lineage: Some(Lineage::of(&body, Operand::Rebuilt { roles, feature })), body, recipe: None }
 }
 
 /// The role of an extrude's cap at `height` along the sketch normal: on the sketch plane, above
@@ -752,7 +794,7 @@ pub(crate) fn sheet_lineage(before: Option<SheetBefore<'_>>, sheet: &crate::Surf
                 Some((_, PanelMade::Converted { face, .. })) => vec![*face],
                 _ => Vec::new(),
             },
-            (SheetPart::Hole { .. }, _) => Vec::new(),
+            (SheetPart::Hole { .. } | SheetPart::Drill { .. }, _) => Vec::new(),
             _ => had.get(x).cloned().unwrap_or_default(),
         };
         if !source.is_empty() {
@@ -828,8 +870,9 @@ pub(crate) fn sheet_lineage(before: Option<SheetBefore<'_>>, sheet: &crate::Surf
 /// and its side is the face of the body its panel away from the corner was, the one the corner's
 /// two bends do not share. Each corner's walls are so named apart from every other corner's, and
 /// numbered among themselves (see `FaceNamer::part`). Where a side is not known, the walls are
-/// `relief` alone. A hole's wall is `side:<curve>` of the cut that made it. None for a panel
-/// nothing says what made.
+/// `relief` alone. A hole's wall is `side:<curve>` of the cut that made it, and a bead's face
+/// `<face>:<curve>` of the bead feature, after its centreline (`crown.top:<curve>`, see
+/// `sheet_surface_bead::face_role`). None for a panel nothing says what made.
 fn sheet_role(
     part: &crate::sheet_surface_convert::SheetPart,
     place: Option<usize>,
@@ -957,6 +1000,12 @@ fn sheet_role(
         }
         SheetPart::Hole { feature, curve } => {
             Some(GrownFace { role: format!("side:{curve}"), feature: Some(*feature), on: Vec::new(), across: Vec::new(), ordinal: place })
+        }
+        SheetPart::Drill { feature, role } => {
+            Some(GrownFace { role: role.clone(), feature: Some(*feature), on: Vec::new(), across: Vec::new(), ordinal: place })
+        }
+        SheetPart::Bead { feature, curve, face } => {
+            Some(GrownFace { role: format!("{face}:{curve}"), feature: Some(*feature), on: Vec::new(), across: Vec::new(), ordinal: place })
         }
     }
 }

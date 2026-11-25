@@ -955,7 +955,7 @@ fn start(app: &mut SolveApp) {
                 let began = std::time::Instant::now();
                 let picture = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| partial_picture(&partial.world, &stop))).ok().flatten();
                 if solidcraft_engine::geom::env::var_os("PROFILE_OPEN").is_some() {
-                    eprintln!(
+                    solidcraft_engine::note!(
                         "SolidCraft partial picture: features={} bodies={} drawn={} ms={:.1}",
                         partial.features,
                         partial.world.bodies.len(),
@@ -996,7 +996,7 @@ fn start(app: &mut SolveApp) {
                     if let Some(picture) = picture.filter(|_| !progress.is_cancelled()) {
                         let _ = preview_tx.send(picture);
                         if solidcraft_engine::geom::env::var_os("PROFILE_OPEN").is_some() {
-                            eprintln!("SolidCraft saved preview: ready_ms={:.3}", preview_began.elapsed().as_secs_f64() * 1000.0);
+                            solidcraft_engine::note!("SolidCraft saved preview: ready_ms={:.3}", preview_began.elapsed().as_secs_f64() * 1000.0);
                         }
                     }
                 }
@@ -1479,7 +1479,7 @@ fn compute(
     phase.store(2, Ordering::Relaxed);
     let view_ms = view_began.elapsed().as_secs_f64() * 1000.0;
     if profile {
-        eprintln!(
+        solidcraft_engine::note!(
             "SolidCraft open phases: geometry_ms={geometry_ms:.3} placement_ms={placement_ms:.3} tessellation_ms={tessellation_ms:.3} display_warmup_ms={view_ms:.3} total_ms={:.3}",
             began.elapsed().as_secs_f64() * 1000.0
         );
@@ -2496,6 +2496,82 @@ M30
         begin_request(&mut h.app, request).unwrap();
         assert_eq!(h.app.docs.count(), tabs, "the open design is reused, not opened again");
         assert!(h.app.verifying.is_some(), "the automatic check runs separately");
+    }
+
+    #[test]
+    fn a_read_only_open_of_a_chosen_design_lands_read_only() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-read-only-open-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("plate.sc").to_string_lossy().into_owned();
+        let mut part = Session::default();
+        part.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        part.execute("file.save", &json!({"path": path, "cache": false})).unwrap();
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        app.open_chosen_file_read_only(&path);
+        let asked = app.file_load.running.as_ref().map(|r| &r.request).or(app.file_load.queued.front());
+        assert_eq!(asked.and_then(|r| r.options.get("read_only")), Some(&json!(true)));
+        let ctx = crate::fonts::test_context();
+        for _ in 0..5000 {
+            if app.file_load.running.is_none() && app.file_load.queued.is_empty() {
+                break;
+            }
+            tick(&mut app, &ctx);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert_eq!(app.session.path.as_deref(), Some(path.as_str()));
+        assert!(app.session.read_only);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A design under a name no format claims (the `.bak` a save keeps) is still read as a design,
+    /// so `--read-only` must not open it for writing.
+    #[test]
+    fn a_read_only_open_of_a_design_under_another_name_lands_read_only() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-read-only-bak-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let saved = dir.join("plate.sc").to_string_lossy().into_owned();
+        let mut part = Session::default();
+        part.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        part.execute("file.save", &json!({"path": saved, "cache": false})).unwrap();
+        let path = dir.join("plate.sc.bak").to_string_lossy().into_owned();
+        std::fs::copy(&saved, &path).unwrap();
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        app.open_chosen_file_read_only(&path);
+        let asked = app.file_load.running.as_ref().map(|r| &r.request).or(app.file_load.queued.front());
+        assert_eq!(asked.and_then(|r| r.options.get("read_only")), Some(&json!(true)));
+        let ctx = crate::fonts::test_context();
+        for _ in 0..5000 {
+            if app.file_load.running.is_none() && app.file_load.queued.is_empty() {
+                break;
+            }
+            tick(&mut app, &ctx);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert_eq!(app.session.path.as_deref(), Some(path.as_str()));
+        assert_eq!(app.session.doc.features.len(), 1, "read as the design");
+        assert!(app.session.read_only);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_read_only_open_does_not_ask_about_a_design_open_elsewhere() {
+        use solidcraft_engine::io::design_lock::{self, Lock};
+        let dir = std::env::temp_dir().join(format!("solidcraft-read-only-lock-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("plate.sc");
+        std::fs::write(&file, b"x").unwrap();
+        let path = file.to_string_lossy().into_owned();
+        // Another computer holds the design, with a fresh lock (a lock left on this computer by a
+        // process that has ended no longer counts, #20522).
+        let now = design_lock::now_secs();
+        design_lock::write(&file, &Lock { host: "WORKSHOP-PC".into(), pid: std::process::id().wrapping_add(1), ..Lock::mine(now) }).unwrap();
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        crate::open_elsewhere::start(&mut app);
+        assert!(crate::open_elsewhere::check_open(&mut app, Request::new(&path, Kind::Open)).is_none(), "a plain open asks");
+        let mut read_only = Request::new(&path, Kind::Open);
+        read_only.options.insert("read_only".into(), json!(true));
+        assert!(crate::open_elsewhere::check_open(&mut app, read_only).is_some(), "a read-only open does not ask");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
