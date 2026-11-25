@@ -66,6 +66,85 @@ fn swatches_validate_package_paths_sizes_types_and_images_without_refusing_the_m
     assert!(check_input(&entries[0].input_schema, &json!({"finish":"0"})).is_ok());
 }
 
+/// Synthetic pixels only: a part picture may be larger than a swatch, but not without limit.
+#[test]
+fn option_images_allow_larger_files_and_refuse_oversized_or_escaping_ones() {
+    let mut value = manifest();
+    let options: Vec<_> = ["parts/elbow.png", "../outside.png", "/abs.png", "huge.png", "wide.png", "heavy.png"]
+        .iter()
+        .enumerate()
+        .map(|(i, path)| json!({"const":i.to_string(),"x-solidcraft-image":path}))
+        .collect();
+    value["runtime"]["entries"] = json!([{"name":"make","input_schema":{"type":"object","properties":{"part":{"type":"string","oneOf":options}}}}]);
+    let parsed = parse(&value).expect("bad artwork never refuses a plugin");
+    let entries = &parsed.runtime.unwrap().entries;
+    let encoded = |width, height| {
+        let pixels = image::RgbImage::from_pixel(width, height, image::Rgb([20, 90, 160]));
+        let mut out = std::io::Cursor::new(Vec::new());
+        pixels.write_to(&mut out, image::ImageFormat::Png).unwrap();
+        out.into_inner()
+    };
+    let big = encoded(1024, 1024);
+    let wide = encoded(1025, 4);
+    let mut heavy = encoded(8, 8);
+    heavy.resize(512 * 1024 + 1, 0);
+    let report = swatches::check(entries, |path| {
+        Ok(match path {
+            "parts/elbow.png" => big.clone(),
+            "wide.png" => wide.clone(),
+            "heavy.png" => heavy.clone(),
+            _ => b"bad image".to_vec(),
+        })
+    });
+    assert_eq!(report.pictures.len(), 1, "{:?}", report.warnings);
+    assert!(report.images.is_empty(), "a picture is not a swatch");
+    assert_eq!(report.pictures["parts/elbow.png"].size, [512, 512], "kept at most 512 pixels on a side");
+    assert_eq!(report.warnings.len(), 5, "{:?}", report.warnings);
+    assert!(swatches::decode("big.png", &big).is_err(), "the same file is too big for a swatch");
+    assert!(swatches::decode_image("big.png", &big).is_ok());
+    assert!(swatches::decode_image("wide.png", &wide).is_err());
+}
+
+/// Synthetic pixels only: one file named as a swatch and as a picture is judged by each limit.
+#[test]
+fn a_file_named_as_swatch_and_picture_keeps_a_result_for_each_annotation() {
+    let mut value = manifest();
+    value["runtime"]["entries"] = json!([{"name":"make","input_schema":{"type":"object","properties":{"part":{"type":"string","oneOf":[
+        {"const":"a","x-solidcraft-swatch":"big.png","x-solidcraft-image":"big.png"}
+    ]}}}}]);
+    let parsed = parse(&value).expect("manifest");
+    let entries = &parsed.runtime.unwrap().entries;
+    let pixels = image::RgbImage::from_pixel(1024, 1024, image::Rgb([20, 90, 160]));
+    let mut out = std::io::Cursor::new(Vec::new());
+    pixels.write_to(&mut out, image::ImageFormat::Png).unwrap();
+    let big = out.into_inner();
+    let report = swatches::check(entries, |_| Ok(big.clone()));
+    assert!(report.images.is_empty(), "too large for a swatch");
+    assert_eq!(report.pictures["big.png"].size, [512, 512], "valid under the picture limits");
+    assert_eq!(report.warnings.len(), 1, "{:?}", report.warnings);
+    assert!(report.warnings[0].starts_with(swatches::KEY));
+}
+
+#[test]
+fn artwork_files_stay_inside_the_package_up_to_the_picture_size() {
+    let root = std::env::temp_dir().join(format!("solidcraft-image-paths-{}", std::process::id()));
+    std::fs::create_dir_all(root.join("package")).unwrap();
+    let dir = root.join("package");
+    std::fs::write(root.join("outside.png"), b"outside").unwrap();
+    std::fs::write(dir.join("ok.png"), vec![0; 100 * 1024]).unwrap();
+    std::fs::write(dir.join("large.png"), vec![0; 512 * 1024 + 1]).unwrap();
+    assert!(swatches::read_artwork(&dir, "ok.png").is_ok());
+    assert!(swatches::read_file(&dir, "ok.png").is_err(), "over the swatch size");
+    assert!(swatches::read_artwork(&dir, "large.png").is_err());
+    assert!(swatches::read_artwork(&dir, "../outside.png").is_err());
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(root.join("outside.png"), dir.join("linked.png")).unwrap();
+        assert!(swatches::read_artwork(&dir, "linked.png").is_err());
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn swatch_files_stay_inside_the_resolved_package() {
     let root = std::env::temp_dir().join(format!("solidcraft-swatch-paths-{}", std::process::id()));
@@ -230,6 +309,74 @@ fn declared_inputs_effects_and_slots_are_readable() {
     assert_eq!(entry.input_schema["properties"]["selection"]["type"], "array");
     value["runtime"]["entries"][0]["input_schema"]["properties"]["selection"]["type"] = json!("string");
     assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field.ends_with("selection")));
+}
+
+#[test]
+fn ribbon_groups_parse_in_declared_order_and_are_opt_in() {
+    let runtime = parse(&manifest()).unwrap().runtime.unwrap();
+    assert!(runtime.ribbon_groups.is_empty());
+    assert!(serde_json::to_value(runtime).unwrap().get("ribbon_groups").is_none(), "old manifests keep their serialized shape");
+    let mut value = manifest();
+    value["runtime"]["entries"] = json!(["make", "inspect", "other"]);
+    value["runtime"]["ribbon_groups"] = json!([
+        {"label":"Gears","icon":"icons/gears.svg","entries":["inspect","make"]},
+        {"label":"Other","entries":["other"]}
+    ]);
+    let runtime = parse(&value).unwrap().runtime.unwrap();
+    assert_eq!(runtime.ribbon_groups[0].label, "Gears");
+    assert_eq!(runtime.ribbon_groups[0].icon.as_deref(), Some("icons/gears.svg"));
+    assert_eq!(runtime.ribbon_groups[0].entries, ["inspect", "make"]);
+    assert_eq!(runtime.ribbon_groups[1].icon, None);
+    let serialized = serde_json::to_value(&runtime).unwrap();
+    assert_eq!(serialized["ribbon_groups"], value["runtime"]["ribbon_groups"]);
+    value["runtime"] = serialized;
+    assert_eq!(parse(&value).unwrap().runtime.unwrap().ribbon_groups, runtime.ribbon_groups);
+}
+
+#[test]
+fn ribbon_groups_refuse_unknown_entries_empty_groups_and_duplicates() {
+    for (groups, field, message) in [
+        (json!([{"label":"Gears","entries":["missing"]}]), "0.entries", "unknown entry `missing`"),
+        (json!([{"label":"Gears","entries":[]}]), "0.entries", "1..32 distinct entry names"),
+        (json!([{"label":"Gears","entries":["make","make"]}]), "0.entries", "entry `make` is listed twice"),
+        (json!([{"label":"Gears","entries":["make"]},{"label":"More","entries":["make"]}]), "1.entries", "entry `make` is listed twice"),
+        (json!([{"label":"Gears","entries":["make"]},{"label":" Gears ","entries":["inspect"]}]), "1.label", "ribbon group `Gears` is listed twice"),
+    ] {
+        let mut value = manifest();
+        value["runtime"]["entries"] = json!(["make", "inspect"]);
+        value["runtime"]["ribbon_groups"] = groups;
+        let error = parse(&value).unwrap_err();
+        assert!(
+            matches!(&error, HostError::InvalidManifest { field: f, reason } if f == &format!("runtime.ribbon_groups.{field}") && reason.contains(message)),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn ribbon_groups_refuse_hostile_labels_icons_and_malformed_fields() {
+    for group in [
+        json!({"label":"","entries":["make"]}),
+        json!({"label":"   ","entries":["make"]}),
+        json!({"label":"Gears\n","entries":["make"]}),
+        json!({"label":"x".repeat(81),"entries":["make"]}),
+        json!({"label":"Gears","icon":"../gears.svg","entries":["make"]}),
+        json!({"label":"Gears","icon":"/gears.svg","entries":["make"]}),
+        json!({"label":"Gears","icon":"https://example.org/gears.svg","entries":["make"]}),
+        json!({"label":"Gears","icon":"gears.png","entries":["make"]}),
+        json!({"label":"Gears","icon":"","entries":["make"]}),
+        json!({"label":"Gears","icon":42,"entries":["make"]}),
+        json!({"label":"Gears","entries":"make"}),
+        json!({"label":"Gears","entries":["make"],"unknown":true}),
+        json!({"label":"Gears"}),
+    ] {
+        let mut value = manifest();
+        value["runtime"]["ribbon_groups"] = json!([group]);
+        assert!(matches!(parse(&value), Err(HostError::InvalidManifest { .. })), "{value}");
+    }
+    let mut value = manifest();
+    value["runtime"]["ribbon_groups"] = json!(vec![json!({"label":"Gears","entries":["make"]}); 33]);
+    assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field == "runtime.ribbon_groups"));
 }
 
 #[test]

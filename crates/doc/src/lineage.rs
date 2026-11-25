@@ -87,12 +87,17 @@ pub(crate) struct Lineage {
     /// the piece each is on (see `sheet_lineage`). It numbers the faces of one name nothing around
     /// them tells apart, as [`GrownFace::ordinal`] does: a rank, never a measure (#21300).
     pub(crate) ordinals: Vec<Option<usize>>,
+    /// The pieces the feature split faces into, by face of the body this is the lineage of: each
+    /// piece's role in the feature (`in`, `out`, `+`, …, see [`Traced::with_pieces`]), `None` for
+    /// a face it did not split. Only the feature's own step has them: a later step's lineage reads
+    /// the names they gave.
+    pub(crate) pieces: Option<Arc<Vec<Option<String>>>>,
 }
 
 impl Lineage {
     /// `body` as it is: every face and edge its own, named as `operand` names them.
     pub(crate) fn of(body: &Body, operand: Operand) -> Lineage {
-        Lineage { history: History::identity(body), operands: vec![Arc::new(operand)], ordinals: Vec::new() }
+        Lineage { history: History::identity(body), operands: vec![Arc::new(operand)], ordinals: Vec::new(), pieces: None }
     }
 
     /// The lineage of `result`, made by one kernel operation from operands whose lineages are
@@ -112,7 +117,7 @@ impl Lineage {
             }
         }
         let operands: Vec<Arc<Operand>> = inputs.iter().flat_map(|l| l.operands.iter().cloned()).collect();
-        (history.operands == operands.len()).then_some(Lineage { history, operands, ordinals: Vec::new() })
+        (history.operands == operands.len()).then_some(Lineage { history, operands, ordinals: Vec::new(), pieces: None })
     }
 
     /// This lineage for a moved copy of what feature `feature` built (instance `instance` of a
@@ -129,7 +134,7 @@ impl Lineage {
                 _ => op.clone(),
             })
             .collect();
-        Lineage { history: self.history.clone(), operands, ordinals: self.ordinals.clone() }
+        Lineage { history: self.history.clone(), operands, ordinals: self.ordinals.clone(), pieces: None }
     }
 
     /// Whether each face of the body this is the lineage of came, in whole or in part, from a
@@ -172,7 +177,7 @@ impl Lineage {
             .iter()
             .map(|piece| {
                 let history = piece.history()?.clone();
-                (history.operands == 1).then(|| Lineage { history, operands: vec![stage.clone()], ordinals: Vec::new() })
+                (history.operands == 1).then(|| Lineage { history, operands: vec![stage.clone()], ordinals: Vec::new(), pieces: None })
             })
             .collect()
     }
@@ -188,7 +193,7 @@ impl Lineage {
                 let history = piece.history()?.clone();
                 let body = crate::ModelBody::new(String::new(), whole.clone(), 0);
                 let stage = Arc::new(Operand::Stage(Box::new(Stage { body, lineage: lineage.clone(), names: OnceLock::new() })));
-                (history.operands == 1).then(|| Lineage { history, operands: vec![stage], ordinals: Vec::new() })
+                (history.operands == 1).then(|| Lineage { history, operands: vec![stage], ordinals: Vec::new(), pieces: None })
             })
             .collect()
     }
@@ -254,6 +259,18 @@ impl Traced {
         Traced { body: result, lineage, recipe: None }
     }
 
+    /// This body with the pieces its feature split faces into named by their roles there (one per
+    /// face, `None` for a face it did not split): `F<feature>:<role>` tells each piece apart.
+    pub fn with_pieces(mut self, pieces: Vec<Option<String>>) -> Traced {
+        if let Some(lineage) = &mut self.lineage
+            && pieces.len() == self.body.face_count()
+            && pieces.iter().any(Option::is_some)
+        {
+            lineage.pieces = Some(Arc::new(pieces));
+        }
+        self
+    }
+
     /// This tool replaces faces built by `feature`, preserving that feature's roles even
     /// when a later trim supplies the replacement cap.
     pub fn rebuilt(mut self, feature: u64) -> Traced {
@@ -286,7 +303,7 @@ impl Traced {
             }
             let body = crate::ModelBody::new(String::new(), self.body.clone(), 0);
             let stage = Arc::new(Operand::Stage(Box::new(Stage { body, lineage: l.clone(), names: OnceLock::new() })));
-            Some(Lineage { history, operands: vec![stage], ordinals: Vec::new() })
+            Some(Lineage { history, operands: vec![stage], ordinals: Vec::new(), pieces: None })
         });
         Traced { body: result, lineage, recipe: None }
     }
@@ -765,6 +782,7 @@ pub(crate) fn sheet_lineage(before: Option<SheetBefore<'_>>, sheet: &crate::Surf
                         history: History { operands: 1, faces, edges: Vec::new() },
                         operands: vec![Arc::new(Operand::Body(b.name.to_string()))],
                         ordinals: Vec::new(),
+                        pieces: None,
                     }
                 }
             };
@@ -839,7 +857,7 @@ pub(crate) fn sheet_lineage(before: Option<SheetBefore<'_>>, sheet: &crate::Surf
     let ordinals: Vec<Option<usize>> =
         parts.iter().map(|x| x.as_ref().filter(|x| matches!(x.part, SheetPart::Cap { .. })).and_then(|x| x.place)).collect();
     let Some(first) = first else {
-        return Some(Lineage { history, operands: vec![Arc::new(Operand::Grown { body: None, faces: grown })], ordinals });
+        return Some(Lineage { history, operands: vec![Arc::new(Operand::Grown { body: None, faces: grown })], ordinals, pieces: None });
     };
     // A face grown from faces of the body as the feature found it is named after their names;
     // where the feature made that body so far, after the faces of the model before them.
@@ -864,7 +882,7 @@ pub(crate) fn sheet_lineage(before: Option<SheetBefore<'_>>, sheet: &crate::Surf
     history.substitute(0, &first.history).ok()?;
     let mut operands = first.operands.clone();
     operands.push(Arc::new(Operand::Grown { body: body_name, faces: grown }));
-    (history.operands == operands.len()).then_some(Lineage { history, operands, ordinals })
+    (history.operands == operands.len()).then_some(Lineage { history, operands, ordinals, pieces: None })
 }
 
 /// The role of a face a sheet's build made for `part` (see `SheetPart`), the `place`th of the faces

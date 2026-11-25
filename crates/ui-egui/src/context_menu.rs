@@ -1075,6 +1075,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(act("ui.saveMesh", "Save As Mesh", "export").with(json!({ "bodies": [body] })));
         v.push(Item::sep());
         v.push(act("ui.tangentChain", "Select Tangent Chain", "chain"));
+        v.push(cmd(app, "select.edge_loop", "Select Edge Loop"));
         v.push(cmd(app, "inspect.measure", "Measure"));
     } else if has(|s| matches!(s, Sel::Body { .. })) {
         v.extend(body_items(app, &sel_bodies(app), false));
@@ -2726,6 +2727,12 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 if calibrate {
                     app.set_status(solidcraft_ui_text::tr("browser.calibrate_click_a"), false);
                 }
+            }
+        }
+        "ui.traceCanvasRegion" => {
+            if let Some(c) = id_of(&p, "canvas") {
+                app.tree.canvas_panel = Some(crate::browser::CanvasPanel::trace(app, c));
+                app.set_status(solidcraft_ui_text::tr("browser.trace_click"), false);
             }
         }
         "ui.straightenCanvas" => {

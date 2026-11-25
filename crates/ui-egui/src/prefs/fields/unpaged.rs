@@ -49,11 +49,17 @@ macro_rules! unpaged_preferences {
             /// edits wait in the dialog until Apply or OK sets them together, in one rebuild and one undo
             /// step. Its checkbox is in the dialog itself.
             parameters_apply_live: bool = true;
+            /// Model Parameters are listed under the component each feature belongs to (#20648); off keeps
+            /// the flat list in listing order. Its check box is in the Parameters window, next to the list.
+            params_group_by_component: bool = false;
             /// Personal Sheet Metal Rules, offered by the rule manager of every design in this profile
             /// (#9346). No page reset discards this user-authored library.
             personal_sheet_rules: crate::personal_sheet_rules::Library = crate::personal_sheet_rules::Library::default();
             /// Approved install permissions survive page resets and Cancel, like installed files.
             plugin_grants: std::collections::BTreeMap<String, solidcraft_engine::plugin::Grants> = std::collections::BTreeMap::new();
+            /// Importer options, by plugin id and entry name: each entry's own "Remember these options"
+            /// choice and its last-run values. Bookkeeping, never design data.
+            plugin_importer_options: std::collections::BTreeMap<String, std::collections::BTreeMap<String, crate::plugin_menu::ImporterMemory>> = std::collections::BTreeMap::new();
             /// Resource identities and history belong to the user, never the design.
             render_library_favorites: std::collections::BTreeSet<(String, String)> = Default::default();
             render_library_recent: std::collections::VecDeque<(String, String)> = Default::default();
