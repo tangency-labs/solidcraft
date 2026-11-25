@@ -305,15 +305,23 @@ pub(crate) const SEAM_ANGLE: f64 = 0.6131;
 pub fn cylinder(base: Vec3, axis: Vec3, radius: f64, height: f64) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "cylinder");
     let plane = Plane::from_normal(base, axis).ok_or_else(|| KernelError::Invalid("cylinder axis".into()))?;
+    if !frame_ok(&plane) {
+        return Err(KernelError::Invalid("extrude frame is not finite and orthonormal".into()));
+    }
     let radius = finite(radius, "radius")?;
     if radius <= 1e-6 {
         return Err(KernelError::Invalid("radius must be positive".into()));
     }
+    let height = finite(height, "height")?;
+    let (lo, hi) = if height >= 0.0 { (0.0, height) } else { (height, 0.0) };
+    if hi - lo < 1e-6 {
+        return Err(KernelError::Invalid("extrude distance is zero".into()));
+    }
     // The seams at an odd angle: on the frame's axes they would lie exactly where faces placed
     // on a grid cut the cylinder (along a seam edge, which booleans don't survive).
     let r = Region2 { outer: Loop2::circle_from(Vec2::ZERO, radius, SEAM_ANGLE), holes: vec![] };
-    let mut v = extrude(&plane, &[r], 0.0, finite(height, "height")?)?;
-    v.pop().ok_or_else(|| KernelError::Failed("cylinder".into()))
+    region_ok(&r)?;
+    crate::smlib_sweeps::cylinder(&plane, radius, lo, hi, &r)
 }
 
 /// Sphere: SMLib's own (smlib_make_sphere), each face swept from the arc (segment 0) of the half
@@ -1563,4 +1571,22 @@ pub fn sweep_with(plane: &Plane, region: &Region2, path: &[PathSeg], ctl: &crate
 pub fn sweep(plane: &Plane, region: &Region2, path: &[PathSeg]) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "sweep");
     smlib_sweep(plane, region, path, &crate::SweepControl::default())
+}
+
+/// Where the line along `sketch`'s normal through `point` meets `plane`, as a level along that
+/// normal ([`solidcore_ops::prism::level_on_plane`]).
+pub fn level_on_plane(sketch: &Plane, point: Vec3, plane: &Plane) -> Result<f64> {
+    solidcore_ops::prism::level_on_plane(sketch, point, plane).map_err(|e| KernelError::Invalid(e.to_string()))
+}
+
+/// The least and the most level of `plane` above `sketch` over the profiles' outer loops
+/// ([`solidcore_ops::prism::plane_rise`]).
+pub fn plane_rise(sketch: &Plane, plane: &Plane, regions: &[Region2]) -> Result<(f64, f64)> {
+    solidcore_ops::prism::plane_rise(sketch, plane, regions).map_err(|e| KernelError::Invalid(e.to_string()))
+}
+
+/// The least and the most of `to`'s level above `sketch` less `from`'s over the profiles' outer
+/// loops ([`solidcore_ops::prism::plane_gap`]).
+pub fn plane_gap(sketch: &Plane, from: &Plane, to: &Plane, regions: &[Region2]) -> Result<(f64, f64)> {
+    solidcore_ops::prism::plane_gap(sketch, from, to, regions).map_err(|e| KernelError::Invalid(e.to_string()))
 }

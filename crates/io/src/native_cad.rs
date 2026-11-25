@@ -187,6 +187,19 @@ pub fn native_cad_design(bytes: &[u8], file: &str) -> Result<NativeDesign, Strin
     Ok(design)
 }
 
+/// A FreeCAD file's sketches alone, as [`native_cad_design`] makes them, for a file whose history
+/// is not rebuilt: its solids come in as an Import feature and these sketches beside them. A
+/// sketch that cannot be read is left out with a warning; an error when none can be.
+pub fn native_cad_sketches(bytes: &[u8], file: &str) -> Result<NativeDesign, String> {
+    let name = std::path::Path::new(file).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| file.to_string());
+    solidcraft_kernel::guard("cadmpeg sketches", || convert::sketches(&name, bytes).map_err(solidcraft_kernel::KernelError::Invalid)).map_err(|e| {
+        match e {
+            solidcraft_kernel::KernelError::Invalid(m) => m,
+            e => e.to_string(),
+        }
+    })
+}
+
 /// [`traced_records`]'s records alone.
 #[cfg(test)]
 pub(crate) fn cadir_records(ir: &cadmpeg_ir::document::CadIr, product: &str, system: &str, colours: bool) -> solidcraft_kernel::ImportRecords {
@@ -781,6 +794,21 @@ mod convert {
 
     /// The design history of a FreeCAD file (`name`), rebuilt.
     pub(super) fn design(name: &str, bytes: &[u8]) -> Result<super::NativeDesign, String> {
+        let (ir, arenas) = read_design(name, bytes)?;
+        let index = std::cell::OnceCell::new();
+        let work = WorkBudget::new(EDGE_WORK);
+        let edge_point = |id: &str| edge_point(&ir, index.get_or_init(|| ModelIndex::build(&ir)), &work, id);
+        super::design::rebuild(&arenas, &edge_point)
+    }
+
+    /// The sketches of a FreeCAD file (`name`) alone.
+    pub(super) fn sketches(name: &str, bytes: &[u8]) -> Result<super::NativeDesign, String> {
+        let (_, arenas) = read_design(name, bytes)?;
+        super::design::sketches(&arenas)
+    }
+
+    /// A FreeCAD file (`name`) decoded at full depth, with its design arenas and placements.
+    fn read_design(name: &str, bytes: &[u8]) -> Result<(CadIr, super::design::Arenas), String> {
         let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
         let (format, decoded) = decode_at(name, &ext, bytes, &ACCEPTED, DecodeDepth::Full)?;
         if format != "fcstd" {
@@ -822,10 +850,7 @@ mod convert {
                 arenas.pattern_axes.insert(owner, (at, along));
             }
         }
-        let index = std::cell::OnceCell::new();
-        let work = WorkBudget::new(EDGE_WORK);
-        let edge_point = |id: &str| edge_point(&ir, index.get_or_init(|| ModelIndex::build(&ir)), &work, id);
-        super::design::rebuild(&arenas, &edge_point)
+        Ok((ir, arenas))
     }
 
     /// Mark hidden what FreeCAD shows only through its body: the shapes of the features inside a

@@ -79,9 +79,9 @@ pub(crate) struct Draft {
 }
 
 pub(crate) use imp::{
-    body_from_record, curve, curve_tolerance, extrude, extrude_drafted_with_holes, face_section, loft, loft_curves, loft_many_rails, loft_to_point,
-    loft_to_point_with_rails, path_curve, project_onto_face, rail_curves, railed_skin, revolve, screw, screw_radial, skin_sections, sphere, sweep,
-    sweep_controlled,
+    body_from_record, curve, curve_tolerance, cylinder, extrude, extrude_drafted_with_holes, face_section, loft, loft_curves, loft_many_rails,
+    loft_to_point, loft_to_point_with_rails, path_curve, project_onto_face, rail_curves, railed_skin, revolve, screw, screw_radial, skin_sections,
+    sphere, sweep, sweep_controlled,
 };
 
 /// `parts` joined in order in a balanced tree: each part with its neighbour, then each pair with
@@ -447,6 +447,74 @@ mod imp {
                 _ => Err(failed(what, "a curve SMLib made is not a B-spline")),
             })
             .collect()
+    }
+
+    /// Cylinder built via `Brep::extrude` of the single circle arc on `plane` spanning `[lo, hi]`
+    /// along `plane.normal()` with its seam at [`crate::build::SEAM_ANGLE`]. Produces the exact
+    /// same B-rep as general `extrude` (with `solidcore`'s ray-free `stitch_solid` for a single
+    /// right cylinder) while skipping `number_regions`, `broken_at_seams`, and `roles()` curve
+    /// sampling. Carries the exact same cap/wall history and construction sources.
+    pub(crate) fn cylinder(plane: &Plane, radius: f64, lo: f64, hi: f64, region: &Region2) -> Result<Body> {
+        let distance = hi - lo;
+        let base = plane.offset(lo);
+        let top = plane.offset(hi);
+        let n = plane.normal();
+        let circle = Curve::Arc {
+            center: p(base.origin),
+            axis: p(n),
+            reference: p(plane.x),
+            radius,
+            start: crate::build::SEAM_ANGLE,
+            end: crate::build::SEAM_ANGLE + std::f64::consts::TAU,
+        };
+        let brep = Brep::extrude(&[circle], p(n), distance, 0.0, DraftCorner::default(), true).map_err(|e| failed("extrude", e))?;
+        let body = body_of(brep, "extrude")?;
+        let r = body.record();
+        let size = body.size().max(1e-9);
+        let tol = (size * 1e-5 + 1e-9).min(0.25 * distance);
+        let seg = region.outer.segs.first().copied().ok_or_else(|| KernelError::Failed("cylinder profile segment".into()))?;
+        let low_plane = Plane { origin: base.origin, x: plane.x, y: -plane.y };
+        let cap_points = |surface: &solidcore_record::brep::Surface| -> Option<[Vec3; 3]> {
+            match surface {
+                solidcore_record::brep::Surface::Plane { origin, u_axis, v_axis } => {
+                    let fo = crate::body::v3(*origin);
+                    Some([fo, fo + crate::body::v3(*u_axis), fo + crate::body::v3(*v_axis)])
+                }
+                solidcore_record::brep::Surface::PlaneThrough { origin, u_point, v_point } => {
+                    Some([crate::body::v3(*origin), crate::body::v3(*u_point), crate::body::v3(*v_point)])
+                }
+                _ => None,
+            }
+        };
+        let mut prov = Vec::with_capacity(r.faces.len());
+        let mut sources = Vec::with_capacity(r.faces.len());
+        let (mut starts, mut ends, mut walls) = (0usize, 0usize, 0usize);
+        for face in &r.faces {
+            if matches!(face.surface, solidcore_record::brep::Surface::Cylinder { .. }) {
+                walls += 1;
+                prov.push(record::profile(&[0usize]));
+                sources.push(Some(crate::FaceSource::ExtrudeSide { segment: seg, plane: None, coalesced: false }));
+            } else if let Some(pts) = cap_points(&face.surface) {
+                if pts.iter().all(|pt| base.height(*pt).abs() <= tol) {
+                    starts += 1;
+                    prov.push(record::cap(false));
+                    sources.push(Some(crate::FaceSource::ExtrudeCap { high: false, region: region.clone(), plane: low_plane }));
+                } else if pts.iter().all(|pt| top.height(*pt).abs() <= tol) {
+                    ends += 1;
+                    prov.push(record::cap(true));
+                    sources.push(Some(crate::FaceSource::ExtrudeCap { high: true, region: region.clone(), plane: top }));
+                } else {
+                    return Err(failed("cylinder", "unexpected planar face on cylinder"));
+                }
+            } else {
+                return Err(failed("cylinder", "unexpected surface on cylinder"));
+            }
+        }
+        if (starts, ends, walls) != (1, 1, 1) {
+            return Err(failed("cylinder", format!("unexpected cylinder face roles: start={starts}, end={ends}, wall={walls}")));
+        }
+        let body = body.with_face_sources(Some(std::sync::Arc::new(sources)));
+        Ok(record::attach(body, &[], Some(prov), &[]))
     }
 
     /// SMLib's sphere about `center`, each face swept from the arc (segment 0) of the half disc
