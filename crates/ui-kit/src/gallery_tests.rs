@@ -396,7 +396,7 @@ pub const ELEMENTS: &[Element] = &[
             "1.2.0",
             "Adds a parametric gear feature.",
             &mut sample.checked,
-            &PluginCardLabels { show_in_folder: "Show in folder", enabled: "Enabled" },
+            &PluginCardLabels { show_in_folder: "Show in folder", enabled: "Enabled", update: None },
         );
     }),
     element!("text_button", |ui, _| {

@@ -665,6 +665,29 @@ pub struct Manifest {
     /// View backgrounds and tints (`shaders@0.2`); a plugin may ship shaders and no runtime.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shaders: Vec<shader::Shader>,
+    /// Where newer versions are published. SolidCraft before 0.49 refuses the field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updates: Option<Updates>,
+}
+
+/// The plugin's GitHub repository, `owner/repo`: its latest release is the update.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Updates {
+    pub github: String,
+}
+
+/// A GitHub `owner/repo`: an owner of 1..39 letters, digits and hyphens, and a repository of
+/// 1..100 letters, digits, `-`, `_` and `.`, other than `.` and `..`.
+pub fn valid_github_repo(text: &str) -> bool {
+    let Some((owner, repo)) = text.split_once('/') else { return false };
+    (1..=39).contains(&owner.len())
+        && owner.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-')
+        && !owner.starts_with('-')
+        && (1..=100).contains(&repo.len())
+        && repo.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_' | b'.'))
+        && repo != "."
+        && repo != ".."
 }
 
 /// A read-only entry called after a coalesced design or linked-file invalidation. Listeners refresh
@@ -1047,6 +1070,11 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
         return Err(invalid("description", "requires at most 240 printable characters"));
     }
     check_capabilities(&manifest.capabilities, app)?;
+    if let Some(updates) = &manifest.updates
+        && !valid_github_repo(&updates.github)
+    {
+        return Err(invalid("updates.github", "must be a GitHub repository, owner/repo"));
+    }
     if let Some(runtime) = &manifest.runtime {
         if runtime.entries.iter().any(|entry| entry.dialog_hook) && !manifest.capabilities.iter().any(|c| c.starts_with("dialog@")) {
             return Err(invalid("capabilities", "a dialog hook needs the dialog capability: dialog@0.1"));
