@@ -394,7 +394,9 @@ impl FootBlend {
     /// side (its outer face use not on the void: material on both sides), a joint that does
     /// not lie on both faces (off a surface, or neither side of it on the face), a face that
     /// does not hold its side's step all along, and faces that do not meet in an inside
-    /// corner all along (an outside or a tangent stretch); those of the evaluations.
+    /// corner all along (an outside or a tangent stretch); [`SolidError::UnsureRegion`] for a
+    /// face use on a region the kernel is unsure of (not read as void or material); those of
+    /// the evaluations.
     pub fn of_faces(
         k: &Kernel,
         body1: &Brep,
@@ -1387,7 +1389,11 @@ fn strip_margin(z: f64) -> f64 {
 /// [`FootBlend::strip_off_face`] looks at for one face before it refuses the strip as not
 /// proved (`WeldGap::StripNotProved`, not as off the face): far past what a face's edges
 /// take, halved from their spans (a few per edge far from the joint or square to it at an
-/// end, some hundreds along a curved edge on the root).
+/// end, some hundreds along a curved edge on the root). An edge of a curved face lying on a
+/// curved root costs more as the leg shrinks (its pieces must fit inside the margin, a share
+/// of the leg): on a rod of radius 15 the proof finishes at a leg of 0.01 and refuses as not
+/// proved at 1e-3 (brett19's measurement on #22031), sooner on a larger radius; the bead
+/// body itself refuses those legs on the build path today.
 const STRIP_PAIRS: usize = 1 << 18;
 
 /// The least `|v|` over an enclosure `v` (each component's least magnitude), rounded down.
@@ -1672,52 +1678,58 @@ impl FootBlend {
                 }
                 Ok(StripPair::Split)
             };
-            let mut work: Vec<([f64; 2], [f64; 2])> = Vec::new();
-            for ep in pieces_of(&knots, range.min(), range.max()) {
-                for &jp in &joint_pieces {
-                    work.push((ep, jp));
+            for span in pieces_of(&knots, range.min(), range.max()) {
+                // this edge span's pairs with the joint's spans, only within what is left of the
+                // budget: an edge and a joint of many spans would otherwise take their product in
+                // memory before the budget is read
+                if joint_pieces.len() > STRIP_PAIRS.saturating_sub(pairs) {
+                    let [a, b] = span;
+                    return Ok(Strip::Unproved(curve.evaluate_point(k, 0.5 * (a + b))?));
                 }
-            }
-            while let Some((ep, jp)) = work.pop() {
-                pairs += 1;
-                let [ua, ub] = ep;
-                let [ta, tb] = jp;
-                let here = || curve.evaluate_point(k, 0.5 * (ua + ub));
-                if pairs > STRIP_PAIRS {
-                    return Ok(Strip::Unproved(here()?));
-                }
-                match pair(ep, jp)? {
-                    StripPair::Clear => {}
-                    StripPair::Off => return Ok(Strip::Off(here()?)),
-                    StripPair::Split => {
-                        // the longer piece halved; pieces down to rounding are not proved
-                        // each piece's size by the polygon through its ends and middle (a
-                        // closed piece's chord is nothing)
-                        let size = |c: &Curve, a: f64, b: f64| -> Result<f64> {
-                            let (p, m, q) = (
-                                c.evaluate_point(k, a)?,
-                                c.evaluate_point(k, 0.5 * (a + b))?,
-                                c.evaluate_point(k, b)?,
-                            );
-                            Ok(p.distance(m) + m.distance(q))
-                        };
-                        let edge_length = size(curve, ua, ub)?;
-                        let joint_length = size(&self.curve, ta, tb)?;
-                        let tiny = |a: f64, b: f64| b - a <= 1e-12 * (1.0 + a.abs().max(b.abs()));
-                        if edge_length >= joint_length {
-                            if tiny(ua, ub) {
-                                return Ok(Strip::Unproved(here()?));
+                let mut work: Vec<([f64; 2], [f64; 2])> =
+                    joint_pieces.iter().map(|&jp| (span, jp)).collect();
+                while let Some((ep, jp)) = work.pop() {
+                    pairs += 1;
+                    let [ua, ub] = ep;
+                    let [ta, tb] = jp;
+                    let here = || curve.evaluate_point(k, 0.5 * (ua + ub));
+                    if pairs > STRIP_PAIRS {
+                        return Ok(Strip::Unproved(here()?));
+                    }
+                    match pair(ep, jp)? {
+                        StripPair::Clear => {}
+                        StripPair::Off => return Ok(Strip::Off(here()?)),
+                        StripPair::Split => {
+                            // the longer piece halved; pieces down to rounding are not proved
+                            // each piece's size by the polygon through its ends and middle (a
+                            // closed piece's chord is nothing)
+                            let size = |c: &Curve, a: f64, b: f64| -> Result<f64> {
+                                let (p, m, q) = (
+                                    c.evaluate_point(k, a)?,
+                                    c.evaluate_point(k, 0.5 * (a + b))?,
+                                    c.evaluate_point(k, b)?,
+                                );
+                                Ok(p.distance(m) + m.distance(q))
+                            };
+                            let edge_length = size(curve, ua, ub)?;
+                            let joint_length = size(&self.curve, ta, tb)?;
+                            let tiny =
+                                |a: f64, b: f64| b - a <= 1e-12 * (1.0 + a.abs().max(b.abs()));
+                            if edge_length >= joint_length {
+                                if tiny(ua, ub) {
+                                    return Ok(Strip::Unproved(here()?));
+                                }
+                                let m = 0.5 * (ua + ub);
+                                work.push(([ua, m], jp));
+                                work.push(([m, ub], jp));
+                            } else {
+                                if tiny(ta, tb) {
+                                    return Ok(Strip::Unproved(here()?));
+                                }
+                                let m = 0.5 * (ta + tb);
+                                work.push((ep, [ta, m]));
+                                work.push((ep, [m, tb]));
                             }
-                            let m = 0.5 * (ua + ub);
-                            work.push(([ua, m], jp));
-                            work.push(([m, ub], jp));
-                        } else {
-                            if tiny(ta, tb) {
-                                return Ok(Strip::Unproved(here()?));
-                            }
-                            let m = 0.5 * (ta + tb);
-                            work.push((ep, [ta, m]));
-                            work.push((ep, [m, tb]));
                         }
                     }
                 }
@@ -1874,11 +1886,14 @@ pub const WELD_FIT_TOLERANCE: f64 = 0.01;
 /// classifies as on it either side.
 const SIDE_STEP: f64 = WELD_FIT_TOLERANCE;
 
-/// Whether the face use `fu` of `body` bounds a void: the infinite region, or a region whose
-/// void flag is set (a cavity; `SmRegion::IsVoid`, `UNSURE` counted as set).
+/// Whether the face use `fu` of `body` bounds a void: the infinite region, or a region the
+/// kernel classifies as void (a cavity). A region it is unsure of is refused, not guessed
+/// (`crate::mass::integrator::properties::region_material`): read as void, a face whose upward
+/// use is on it would take the material side as its outer side.
 ///
 /// # Errors
 ///
+/// [`SolidError::UnsureRegion`] for a region the kernel is unsure of;
 /// [`SolidError::NotFound`] for a dangling id.
 fn on_a_void(body: &Brep, fu: crate::topology::FaceuseId) -> Result<bool> {
     let Some(shell) = body.faceuse(fu)?.shell else {
@@ -1889,7 +1904,9 @@ fn on_a_void(body: &Brep, fu: crate::topology::FaceuseId) -> Result<bool> {
         return Ok(true);
     }
     match region {
-        Some(r) => Ok(body.region(r)?.is_void() != 0),
+        Some(r) => Ok(!crate::mass::integrator::properties::region_material(
+            body, r,
+        )?),
         None => Ok(false),
     }
 }
