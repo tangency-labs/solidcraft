@@ -1821,6 +1821,26 @@ fn coil_flip_winds_the_coil_down_its_axis() {
     assert!(axis.is_some_and(|a| a.z < -0.99), "the coil winds down: {axis:?}");
 }
 
+/// Flip reverses an axis of expressions as expressions (#21932): a number negated, an
+/// expression `e` sent as `-(e)`, so the flipped coil still follows its parameter.
+#[test]
+fn coil_flip_keeps_an_axis_of_expressions() {
+    use solidcraft_engine::doc::FeatureKind;
+    let mut h = fixture();
+    h.app.run("parameters.add", json!({"name": "t", "expression": "45 deg"})).unwrap();
+    let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
+    d.extra.insert("flip".into(), json!(true));
+    d.extra.insert("axis".into(), json!([0.0, "-sin(t)", "-cos(t)"]));
+    let (id, p) = apply_commands(&h.app, &d).unwrap().remove(0);
+    assert_eq!(p["axis"], json!([-0.0, "-(-sin(t))", "-(-cos(t))"]), "{p}");
+    h.app.run(&id, p.clone()).unwrap_or_else(|e| panic!("{e}: {p}"));
+    let axis = h.app.session.doc.features.iter().rev().find_map(|f| match &f.kind {
+        FeatureKind::Coil { axis, .. } => Some(axis.clone()),
+        _ => None,
+    });
+    assert!(axis.as_ref().is_some_and(|a| solidcraft_engine::doc::literal_dir(a).is_none()), "still expressions: {axis:?}");
+}
+
 /// A square-ended coil edited onto a sketch profile is accepted: the profile's plane is the
 /// section, so the end cut it kept from the coil is not sent (#20737).
 #[test]

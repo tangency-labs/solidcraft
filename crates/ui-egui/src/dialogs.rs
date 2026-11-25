@@ -7492,9 +7492,22 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             }
             // Flip winds the coil the other way along its axis, downward from a sketch profile
             // (#17870): the reversed axis keeps the coil's hand, where a negative pitch mirrors it.
+            // An axis of expressions (#21932) is reversed as expressions, so it still follows them.
             if *cmd == "solid.coil" && coil_flipped(&d.extra) {
-                let axis = p.get("axis").or_else(|| d.extra.get("axis")).and_then(solidcraft_engine::params::vec3).unwrap_or(Vec3::Z);
-                p.insert("axis".into(), pt3(-axis));
+                let saved = p.get("axis").or_else(|| d.extra.get("axis"));
+                let flipped = match (saved.and_then(solidcraft_engine::params::vec3), saved.and_then(Value::as_array)) {
+                    (None, Some(c)) if c.len() == 3 && c.iter().any(Value::is_string) => Value::Array(
+                        c.iter()
+                            .map(|x| match x {
+                                Value::String(e) => json!(format!("-({e})")),
+                                Value::Number(n) => n.as_f64().map_or_else(|| x.clone(), |n| json!(-n)),
+                                _ => x.clone(),
+                            })
+                            .collect(),
+                    ),
+                    (axis, _) => pt3(-axis.unwrap_or(Vec3::Z)),
+                };
+                p.insert("axis".into(), flipped);
             }
             p.insert("operation".into(), json!(OPS.get(*operation).copied().unwrap_or("new")));
             (cmd, Value::Object(p))
