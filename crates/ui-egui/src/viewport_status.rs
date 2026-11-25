@@ -5,10 +5,11 @@ use crate::{
 };
 use solidcraft_engine::status_items::{StatusId, StatusItem as Effect, StatusSetting};
 
-/// An Isolate is in effect and the navigation bar has no Isolate slot to show it, so a status
-/// pill does (#8120).
+/// An Isolate is in effect and no navigation bar shows an Isolate slot for it (the bar has none,
+/// or the bar is hidden), so a status pill does (#8120).
 pub(crate) fn isolate_pill(app: &SolveApp) -> bool {
-    app.session.visibility.before_isolate.is_some() && !app.preferences.navigation_bar.slots.iter().any(|id| id == "isolate")
+    let on_bar = app.ui.show_navigation_bar && app.preferences.navigation_bar.slots.iter().any(|id| id == "isolate");
+    app.session.visibility.before_isolate.is_some() && !on_bar
 }
 
 fn allowed(app: &SolveApp) -> Vec<StatusId> {
