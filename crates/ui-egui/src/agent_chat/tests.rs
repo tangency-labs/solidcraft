@@ -1273,6 +1273,204 @@ fn an_agents_opened_design_keeps_its_conversation_and_undo_ownership() {
     }
 }
 
+/// Opting into `agent_shared_session` (#16282) preserves one Assistant conversation and backend
+/// across tab creation, tab switching, and tab closing, and informs the agent on its next turn
+/// when the active design changed.
+#[test]
+fn shared_session_keeps_conversation_and_backend_across_tab_switches() {
+    let (mut app, script, ctx) = app_with_script();
+    app.preferences.agent_shared_session = true;
+    app.session.doc_mut().name = "MasterAssembly".into();
+    send(&mut app, &ctx, "inspect master".into());
+    assert!(app.agent_chat.state() == State::Busy);
+    script.report(Event::Text { thought: false, text: "Master inspected.".into() });
+    ended(&script, "");
+    poll(&mut app, &ctx);
+    assert_eq!(app.agent_chat.state(), State::Ready);
+
+    let mut sub = solidcraft_engine::Session::default();
+    sub.doc_mut().name = "SubAssembly".into();
+    sub.path = Some("sub_assembly.sc".into());
+    crate::documents::open_tab(&mut app, sub).unwrap();
+    assert!(app.agent_chat.backend.is_some());
+    assert!(app.agent_chat.items.iter().any(|i| matches!(i, Item::User { text, .. } if text == "inspect master")));
+    assert!(app.agent_chat.items.iter().any(|i| matches!(i, Item::Agent { text, .. } if text == "Master inspected.")));
+
+    crate::documents::switch(&mut app, 0);
+    assert!(app.agent_chat.backend.is_some());
+    crate::documents::switch(&mut app, 1);
+    assert!(app.agent_chat.backend.is_some());
+
+    send(&mut app, &ctx, "inspect sub".into());
+    let prompt = script.calls().pop().unwrap_or_default();
+    assert!(prompt.contains("The active design tab changed from \"MasterAssembly\" to \"SubAssembly\""), "{prompt}");
+    assert!(prompt.contains("(sub_assembly.sc)"), "{prompt}");
+    script.report(Event::Text { thought: false, text: "Sub inspected.".into() });
+    ended(&script, "");
+    poll(&mut app, &ctx);
+
+    crate::documents::close(&mut app, 0, true);
+    assert!(app.agent_chat.backend.is_some());
+    assert!(!script.calls().iter().any(|call| matches!(call.as_str(), "cancel" | "new_session")));
+}
+
+/// With `agent_shared_session` enabled (#16282), `doc.open` on a design already open in another
+/// tab switches cleanly to that tab in the same conversation while each tab keeps its own undo.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn shared_session_allows_doc_open_to_switch_to_already_open_tab() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-shared-chat-open-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let next_path = dir.join("next.solidcraft");
+    let first_path = dir.join("first.solidcraft");
+    let mut next = solidcraft_engine::Session::default();
+    next.execute("solid.box", &boxed(100.0)["params"]).unwrap();
+    next.execute("file.save_as", &json!({"path": next_path})).unwrap();
+
+    let (mut app, script, ctx) = app_with_script();
+    let (tx, rx) = channel();
+    app.agent_chat.tools_rx = Some(rx);
+    app.preferences.ai_permissions = agents::Mode::All;
+    app.preferences.agent_shared_session = true;
+    app.run("solid.box", boxed(0.0)["params"].clone()).unwrap();
+    app.run("file.save_as", json!({"path": first_path})).unwrap();
+
+    send(&mut app, &ctx, "work across both tabs".into());
+    assert_eq!(chat_tool(&mut app, &tx, &ctx, "engine.execute", boxed(20.0))["ok"], true);
+    let r = chat_tool(&mut app, &tx, &ctx, "engine.execute", json!({"command": "doc.open", "params": {"path": next_path}, "allow_paths": [&dir]}));
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(app.docs.count(), 2);
+    assert_eq!(app.docs.active, 1);
+    assert_eq!(chat_tool(&mut app, &tx, &ctx, "engine.execute", boxed(130.0))["ok"], true);
+
+    // Switching back to the already-open first tab via `doc.open` succeeds in shared-session mode.
+    let r = chat_tool(&mut app, &tx, &ctx, "engine.execute", json!({"command": "doc.open", "params": {"path": first_path}, "allow_paths": [&dir]}));
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(app.docs.active, 0);
+    assert!(app.agent_chat.backend.is_some());
+    assert_eq!(chat_tool(&mut app, &tx, &ctx, "engine.execute", boxed(40.0))["ok"], true);
+    ended(&script, "");
+    poll(&mut app, &ctx);
+    assert!(!script.calls().iter().any(|call| matches!(call.as_str(), "cancel" | "new_session")));
+
+    assert_eq!(app.session.doc.features.len(), 3);
+    crate::documents::switch(&mut app, 1);
+    assert_eq!(app.session.doc.features.len(), 2);
+    app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(app.session.doc.features.len(), 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Toggling Preferences -> Assistant -> Keep one chat across design tabs (`agent_shared_session`)
+/// flips the preference and stops any parked background tab conversations.
+#[test]
+fn shared_session_preference_checkbox_toggles_and_disconnects_background_chats() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.ai_features = true;
+    h.app.agent_chat.detection = Some(Default::default());
+    let bg_script = Script::default();
+    h.app.agent_chat.backend = Some(Box::new(bg_script.clone()));
+    h.app.agent_chat.state = Some(State::Ready);
+
+    crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
+    assert!(!h.app.preferences.agent_shared_session);
+    assert!(h.app.agent_chat.backend.is_none());
+
+    h.call("ui.resize", json!({"width": 1280, "height": 800}));
+    h.call("ui.prefs", json!({"open": "AI"}));
+    h.frames(3);
+    crate::prefs::reveal_preference(&mut h, "prefs:agent_shared_session");
+    h.step(&json!({"click": {"handle": "prefs:agent_shared_session"}})).unwrap();
+    h.frames(2);
+    assert!(h.app.preferences.agent_shared_session);
+    assert!(bg_script.calls().iter().any(|c| c == "cancel"), "parked tab backend must disconnect when enabling shared chat");
+
+    h.app.preferences.agent_shared_session = false;
+    crate::documents::switch(&mut h.app, 0);
+    assert!(h.app.agent_chat.backend.is_none());
+    assert_eq!(h.app.agent_chat.state(), State::Off);
+}
+
+/// Switching tabs while `agent_shared_session` is enabled must never transfer a parked tab's
+/// transcript or draft into another tab's slot once sharing is turned off again.
+#[test]
+fn shared_session_keeps_parked_conversations_with_their_owning_tabs() {
+    let (mut app, script_a, ctx) = app_with_script();
+    app.session.doc_mut().name = "TabA".into();
+    send(&mut app, &ctx, "message in A".into());
+    script_a.report(Event::Text { thought: false, text: "reply in A".into() });
+    ended(&script_a, "");
+    poll(&mut app, &ctx);
+    app.agent_chat.input = "draft in A".into();
+
+    // Open Tab B while sharing is off, giving Tab B its own conversation and draft.
+    let mut sess_b = solidcraft_engine::Session::default();
+    sess_b.doc_mut().name = "TabB".into();
+    crate::documents::open_tab(&mut app, sess_b).unwrap();
+    let script_b = Script::default();
+    app.agent_chat.backend = Some(Box::new(script_b.clone()));
+    app.agent_chat.state = Some(State::Ready);
+    send(&mut app, &ctx, "message in B".into());
+    script_b.report(Event::Text { thought: false, text: "reply in B".into() });
+    ended(&script_b, "");
+    poll(&mut app, &ctx);
+    app.agent_chat.input = "draft in B".into();
+
+    // Return to Tab A, enable sharing, run A -> B -> A, then turn sharing off.
+    crate::documents::switch(&mut app, 0);
+    app.preferences.agent_shared_session = true;
+    crate::documents::disconnect_background_chats(&mut app, false);
+    crate::documents::switch(&mut app, 1);
+    crate::documents::switch(&mut app, 0);
+    app.preferences.agent_shared_session = false;
+
+    // Tab A still owns its transcript and draft.
+    assert!(app.agent_chat.items.iter().any(|i| matches!(i, Item::User { text, .. } if text == "message in A")));
+    assert!(!app.agent_chat.items.iter().any(|i| matches!(i, Item::User { text, .. } if text == "message in B")));
+    assert_eq!(app.agent_chat.input, "draft in A");
+
+    // Switching back to Tab B restores Tab B's own transcript and draft, never Tab A's.
+    crate::documents::switch(&mut app, 1);
+    assert!(app.agent_chat.items.iter().any(|i| matches!(i, Item::User { text, .. } if text == "message in B")));
+    assert!(!app.agent_chat.items.iter().any(|i| matches!(i, Item::User { text, .. } if text == "message in A")));
+    assert_eq!(app.agent_chat.input, "draft in B");
+}
+
+/// With `agent_shared_session` enabled, a prompt queued while the agent is still Starting or
+/// waiting for sign-in must be held when switching tabs so a late Ready event cannot run it on
+/// the newly active design.
+#[test]
+fn shared_session_holds_queued_startup_prompt_on_tab_switch() {
+    for state in [State::Starting, State::NeedsAuth] {
+        let (mut app, script, ctx) = app_with_script();
+        app.preferences.agent_shared_session = true;
+        app.session.doc_mut().name = "TabA".into();
+        let mut sess_b = solidcraft_engine::Session::default();
+        sess_b.doc_mut().name = "TabB".into();
+        crate::documents::open_tab(&mut app, sess_b).unwrap();
+        crate::documents::switch(&mut app, 0);
+
+        app.agent_chat.state = Some(state);
+        send(&mut app, &ctx, "change tab A".into());
+        assert!(app.agent_chat.queued.is_some(), "prompt must queue in {state:?}");
+
+        crate::documents::switch(&mut app, 1);
+        assert!(app.agent_chat.queued.is_none(), "tab switch must hold queued prompt in {state:?}");
+        assert_eq!(app.agent_chat.pending.len(), 1, "queued prompt moves to pending in {state:?}");
+        assert!(app.agent_chat.stopped, "pending queue must stay paused after tab switch in {state:?}");
+
+        script.report(Event::Ready { agent: "fake".into(), images: false });
+        poll(&mut app, &ctx);
+        assert!(
+            !script.calls().iter().any(|c| c.starts_with("prompt:")),
+            "late Ready on Tab B must not auto-send Tab A's prompt in {state:?}: {:?}",
+            script.calls()
+        );
+    }
+}
+
 #[test]
 fn an_agents_failed_new_design_batch_restores_its_undo_boundary() {
     let (mut app, script, ctx) = app_with_script();

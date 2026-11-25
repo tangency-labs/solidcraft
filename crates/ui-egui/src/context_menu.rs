@@ -2729,6 +2729,12 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 }
             }
         }
+        "ui.traceCanvasRegion" => {
+            if let Some(c) = id_of(&p, "canvas") {
+                app.tree.canvas_panel = Some(crate::browser::CanvasPanel::trace(app, c));
+                app.set_status(solidcraft_ui_text::tr("browser.trace_click"), false);
+            }
+        }
         "ui.straightenCanvas" => {
             if let Some(c) = id_of(&p, "canvas") {
                 app.tree.canvas_panel = Some(crate::browser::CanvasPanel::straighten(app, c));

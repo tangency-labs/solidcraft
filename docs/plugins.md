@@ -277,7 +277,7 @@ new versions on its card. Older versions refuse a manifest with this field.
 ## Removing
 
 Each installed plugin card in **Preferences > Plugins** has an enable switch and **Remove** action.
-Remove asks for confirmation, then deletes the package folder and its stored grants. Cancelling
+Remove asks for confirmation, then deletes the package folder, its stored grants and remembered importer options. Cancelling
 Preferences does not restore a removed package. Removing a plugin preserves its data in saved designs.
 Approved grants and removal survive closing or resetting Preferences. Grants are host preferences,
 never design data; preferences retain at most 256 plugin ids, four command groups and 32 folders per id.
@@ -1364,6 +1364,28 @@ Only an importer may say `open`.
    "limits": {"fuel": 100000000000, "memory_mib": 1024, "deadline_ms": 300000, "stack_kib": 16384},
    "permissions": {"input_folder": true}}}
 ```
+
+An importer's options dialog has a **Remember these options** checkbox next to **Restore defaults**.
+It is off by default and belongs to that one entry (a plugin id and entry name). When you start an
+import with it on, the entry keeps the values you used, in the app's user preferences
+(`plugin_importer_options`), outside every design. With it off the entry keeps nothing.
+The next dialog keeps remembered fields that still satisfy the current input schema; missing or
+invalid fields start from the schema defaults. Changing a field or cancelling the dialog or file
+picker does not change the stored values. **Restore defaults** resets the values and leaves the
+checkbox as it is; the stored values change only when the next import starts.
+
+With the checkbox off, the entry's dialog starts from schema defaults, and **File > Open** and
+drag-and-drop start the import directly, as before; an entry with `file_first` still shows its
+dialog for the chosen file, from schema defaults. With it on, File > Open and drag-and-drop show
+that entry's dialog, filled in with the remembered values, for the file just chosen. The dialog's
+**Open file** button opens that file without asking for it again. If the form cannot render the
+importer's schema, the file still opens directly with schema defaults. Native readers retain
+priority for formats SolidCraft already supports.
+Removing a plugin forgets all of its entries' remembered values, including when Preferences is cancelled.
+
+Scripts, CLI and MCP opens never read or update this memory and never open an options dialog.
+They receive only their explicit `options`, with schema defaults filling omitted fields; explicit
+values always take precedence. Automated imports therefore do not depend on earlier interactive runs.
 
 - **Opening.** `doc.open` opens a file SolidCraft does not read itself with the installed, enabled
   importer that claims its extension. `file.import` always uses an importer, and `format`
