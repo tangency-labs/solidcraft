@@ -350,9 +350,10 @@ fn bounded_patch(patch: &Patch) -> (Bounded3, Option<Bounded>) {
 /// regularity forms are the same polynomials in any frame (`A_u` and `A_v` do not change,
 /// nor the second forms `P_uu w - P w_uu`, ...). Each coefficient is one fused
 /// multiply-add, rounded once on its own value, so the move costs `gamma(1)` of the moved
-/// net, and the forms' rounding follows the patch's size, not its distance from the
-/// origin (`docs/definitions-and-certificates.md` §7, invariant 5). A coefficient that
-/// overflows leaves an infinite bound, which certifies nothing.
+/// net (and `f64::MIN_POSITIVE` for underflow), and the forms' rounding follows the
+/// patch's size, not its distance from the origin (`docs/definitions-and-certificates.md`
+/// §7, invariant 5). A coefficient that overflows leaves an infinite bound, which
+/// certifies nothing.
 ///
 /// # Errors
 ///
@@ -382,7 +383,7 @@ fn own_frame(patch: &Patch) -> Result<(Bounded3, Option<Bounded>)> {
     }
     let moved = |c: &Bernstein2, k: usize| -> Result<Bounded> {
         let mid = match (lo.get(k), hi.get(k)) {
-            (Some(&l), Some(&h)) => 0.5 * (l + h),
+            (Some(&l), Some(&h)) => 0.5 * l + 0.5 * h,
             _ => 0.0,
         };
         let coefficients = c
@@ -395,7 +396,7 @@ fn own_frame(patch: &Patch) -> Result<(Bounded3, Option<Bounded>)> {
         let f = Bernstein2::new(du, dv, coefficients)?;
         let size = f.max_abs_coefficient();
         let err = if size.is_finite() {
-            gamma(1) * size
+            gamma(1) * size + f64::MIN_POSITIVE
         } else {
             f64::INFINITY
         };
@@ -1075,7 +1076,7 @@ impl RegularityForms {
             x_min * q1_max
         };
         let q0_min = self.q0.f.min_coefficient() - self.q0.err;
-        q0_min - worst > gamma(8) * (q0_min.abs() + worst.abs())
+        q0_min - worst > gamma(8) * (q0_min.abs() + worst.abs()) + f64::MIN_POSITIVE
     }
 
     /// `Q` at the middle of the patch.

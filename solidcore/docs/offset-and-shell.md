@@ -192,7 +192,8 @@ the patch's size, not its distance from the origin. The bound starts from each p
 Bezier decomposition computed it; the decomposition's own rounding is not counted. A patch is
 certified when the coefficients' ranges, widened by that bound, keep it above 0, and a form that
 is not finite certifies nothing. Each patch's bound is subdivided into quarters on an explicit
-stack, at most `MAX_REGULARITY_PATCHES` (20,000); a patch whose middle value is negative is a fold, and a
+stack, at most `MAX_REGULARITY_PATCHES` (20,000); a patch whose middle value is negative is a fold
+once the face's own partials prove it in interval arithmetic (otherwise it is subdivided), and a
 budget run out is refused too, since a face not proved regular is not built. A pole (a normal that
 vanishes) never certifies, so it is refused the same way.
 
