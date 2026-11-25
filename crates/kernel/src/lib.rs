@@ -357,6 +357,7 @@ pub use matchsurf::match_surface;
 pub use matchsurf::seam_continuity;
 pub use measure::BodyMeasure;
 pub use measure::MassMeasure;
+pub use measure::levels_along;
 pub use measure::measure;
 pub use measure::measure_mass;
 pub use mesh_convert::convert_prismatic_mesh;
@@ -670,10 +671,10 @@ thread_local! {
     static GUARDED: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
 
-/// Is this thread inside [`guard`]? (A panic now will be caught and turned into an error; the
-/// engine's crash reports mark it recovered.)
+/// Is this thread inside [`guard`], an SMLib call or the mesher's own guard? (A panic now will be
+/// caught and turned into an error; the engine's crash reports mark it recovered.)
 pub fn guarded() -> bool {
-    GUARDED.with(std::cell::Cell::get) > 0 || solidcraft_smlib::in_call()
+    GUARDED.with(std::cell::Cell::get) > 0 || solidcraft_smlib::in_call() || solidcore_tess::guarded()
 }
 
 /// A panic inside a solidcore call, caught there and reported as the kernel's internal error

@@ -1096,7 +1096,7 @@
   "ai.prefs.control_listening": "127.0.0.1:{port} dinleniyor",
   "ai.prefs.control_not_listening": "Dinlenmiyor",
   "ai.prefs.control_port": "Port",
-  "ai.prefs.control_port_note": "Yapay zeka ajanlarının bu bilgisayarda (127.0.0.1) bağlandığı port. Varsayılan değer 27878'dir: kullanımdaysa bir sonraki boş port alınır. Diğer tüm portlar olduğu gibi kullanılır. MCP istemcinizi aynı porta yönlendirin, örneğin: solidcraft-cli mcp --connect 127.0.0.1:7878.",
+  "ai.prefs.control_port_note": "Yapay zeka ajanlarının bu bilgisayarda (127.0.0.1) bağlandığı port. Varsayılan değer 27878'dir: kullanımdaysa bir sonraki boş port alınır. Diğer tüm portlar olduğu gibi kullanılır. MCP istemcinizi aynı porta yönlendirin, örneğin: solidcraft-cli mcp --connect 127.0.0.1:27878.",
   "ai.prefs.control_port_taken": "{port} portu başka bir program (veya başka bir SolidCraft penceresi) tarafından kullanılıyor. Başka bir port seçin.",
   "ai.prefs.follow_camera": "Kamerayı eskizlere çevir",
   "ai.prefs.follow_camera_off": "Otomatik kamera takibi kapalı.",

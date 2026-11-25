@@ -538,6 +538,7 @@ pub fn tessellate_boundaries(
                 Err(
                     err @ (SolidError::Unported { .. }
                     | SolidError::Cancelled { .. }
+                    | SolidError::OutOfFuel { .. }
                     | SolidError::PreparationRequired { .. }),
                 ) => return Err(err),
                 Ok(_) | Err(_) => None,
