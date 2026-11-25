@@ -4,14 +4,14 @@
 //! chosen target frame.
 //!
 //! All fitting, residual, projection, orthonormal frame, and rigid matrix math lives in
-//! `solidcore::geom::scan_frame` and is invoked through `solidcore_ops::scan_align`.
+//! `solidcore::geom::scan_frame` and is invoked through `solidcraft_kernel::services::scan_align`.
 
 use serde_json::Value;
-use solidcore_ops::scan_align::{DEFAULT_TOL, DirectionInput, Frame3D, PlaneInput, compose_column_major, solve_alignment};
 use solidcore_record::Vec3;
 use solidcraft_doc::joints::AxisRef;
 use solidcraft_doc::{IDENTITY, Mat, mat_inverse, mat_mul};
 use solidcraft_geom::PlaneGeom;
+use solidcraft_kernel::services::scan_align::{DEFAULT_TOL, DirectionInput, Frame3D, PlaneInput, compose_column_major, solve_alignment};
 
 use super::CommandSpec;
 use crate::params::{bad, vec3};
@@ -186,9 +186,16 @@ fn resolve_target_frame(s: &Session, v: Option<&Value>, tol: f64, cmd: &str) -> 
         let (vals, _) = s.doc.param_values();
         let world = s.world_state()?;
         let pl = s.placed_document().resolve_plane_in(&vals, &pl_ref, 0, 0, Some(&*world)).map_err(|e| bad(cmd, e.to_string()))?;
-        let (frame, _) =
-            solidcore_ops::scan_align::build_frame(to_arr(pl.origin), to_arr(pl.normal()), to_arr(pl.x), to_arr(pl.origin), false, false, tol)
-                .map_err(|e| bad(cmd, format!("invalid target frame: {e}")))?;
+        let (frame, _) = solidcraft_kernel::services::scan_align::build_frame(
+            to_arr(pl.origin),
+            to_arr(pl.normal()),
+            to_arr(pl.x),
+            to_arr(pl.origin),
+            false,
+            false,
+            tol,
+        )
+        .map_err(|e| bad(cmd, format!("invalid target frame: {e}")))?;
         return Ok(frame);
     }
     if let Some(obj) = v.as_object() {
@@ -203,7 +210,7 @@ fn resolve_target_frame(s: &Session, v: Option<&Value>, tol: f64, cmd: &str) -> 
             .and_then(vec3)
             .filter(|q| q.x.is_finite() && q.y.is_finite() && q.z.is_finite())
             .ok_or_else(|| bad(cmd, "`target.z_axis` must be finite [x, y, z]"))?;
-        let (frame, _) = solidcore_ops::scan_align::build_frame(origin, to_arr(z_axis), to_arr(x_axis), origin, false, false, tol)
+        let (frame, _) = solidcraft_kernel::services::scan_align::build_frame(origin, to_arr(z_axis), to_arr(x_axis), origin, false, false, tol)
             .map_err(|e| bad(cmd, format!("invalid target frame: {e}")))?;
         return Ok(frame);
     }
