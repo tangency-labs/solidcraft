@@ -2,12 +2,20 @@
 //! them.
 //!
 //! A spline of degree `p` with `n` control points has `n + p + 1` knots, none smaller than the one
-//! before it, and runs over the parameters from knot `p` to knot `n`. This module evaluates such a
-//! curve; [`crate::teeth::Piece::Spline`] is a piece of an outline given this way.
+//! before it, and runs over the parameters from knot `p` to knot `n`.
+//! [`crate::teeth::Piece::Spline`] is a piece of an outline given this way. This module checks such
+//! a spline and evaluates it as the kernel's NURBS curve ([`crate::nurbs::crv_basic::Curve`]). What
+//! is the tooth module's own is the enclosure of a spline's derivatives and of the rounding of its
+//! points that the chords of an outline are proved with ([`span_bend`], [`stretch_bend`],
+//! [`span_rounding`]).
 
 use crate::blend::fillet_section::interval::Ivl;
 use crate::error::teeth::{TeethFailure, Why};
 use crate::geom::certified::gamma;
+use crate::nurbs::crv_basic::Curve as NurbCurve;
+use crate::nurbs::knots::{KnotVector, Side};
+use crate::nurbs::math::{CPoint, NOW};
+use crate::nurbs::nurbs_crv::crv_derivs_into;
 use crate::teeth::bound::{self, Bend};
 use crate::teeth::outline::Point;
 use crate::teeth::MAX_CURVE_POINTS;
@@ -33,9 +41,21 @@ pub(crate) fn range_typed(
     knots: &[f64],
     control: &[Point],
 ) -> Result<(f64, f64), TeethFailure> {
+    range_up_to(degree, knots, control, MAX_DEGREE)
+}
+
+/// [`range_typed`] with degrees up to `most` accepted: the kernel's curves go past
+/// [`MAX_DEGREE`] ([`crate::nurbs::knots::MAX_DEGREE`]), and a section's Bezier pieces take any
+/// spline the kernel can hold.
+pub(crate) fn range_up_to(
+    degree: usize,
+    knots: &[f64],
+    control: &[Point],
+    most: usize,
+) -> Result<(f64, f64), TeethFailure> {
     visited(knots.len().saturating_add(control.len()));
     let n = control.len();
-    if !(1..=MAX_DEGREE).contains(&degree)
+    if !(1..=most).contains(&degree)
         || n <= degree
         || n > MAX_CURVE_POINTS
         || knots.len() != n + degree + 1
@@ -67,8 +87,9 @@ pub(crate) fn range_typed(
     Ok((from, to))
 }
 
-/// The point of a spline at the parameter `t`, which is taken into the spline's range (de Boor's
-/// steps).
+/// The point of a spline at the parameter `t`, which is taken into the spline's range: the
+/// kernel's evaluation of the curve (The NURBS Book's A2.3 at order 0), and an end control point
+/// itself at an end of the range where the knots are clamped.
 pub fn point(degree: usize, knots: &[f64], control: &[Point], t: f64) -> crate::Result<Point> {
     point_typed(degree, knots, control, t)
         .map_err(|e| SolidError::teeth("teeth::bspline::point", e))
@@ -81,127 +102,104 @@ pub(crate) fn point_typed(
     control: &[Point],
     t: f64,
 ) -> Result<Point, TeethFailure> {
-    let (from, to) = range_typed(degree, knots, control)?;
-    if t.is_nan() {
-        return Err(NOT_A_SPLINE);
-    }
-    let t = t.max(from).min(to);
-    // The span of `t`: the last knot at or before it, among those that start a span of the range.
-    let last_span = control.len() - 1;
-    let mut span = degree;
-    while span < last_span && knots.get(span + 1).is_some_and(|&next| next <= t) {
-        span += 1;
-    }
-    visited(span - degree + 1);
-    de_boor(degree, knots, control, span, t)
+    Checked::new(degree, knots, control)?.point(t)
 }
 
-/// The point at `t` (already in the range) of a spline that [`range`] accepted, on the span `span`
-/// (de Boor's steps).
-fn de_boor(
+/// The kernel's curve of a spline: its control points in the plane `z = 0` of the kernel's space,
+/// without weights, its degree and knots as they are. Nothing is checked here: the callers pass a
+/// spline [`range`] accepted.
+pub(crate) fn kernel_curve(
     degree: usize,
     knots: &[f64],
     control: &[Point],
-    span: usize,
-    t: f64,
-) -> Result<Point, TeethFailure> {
-    visited((degree + 1) * (degree + 2) / 2);
-    let first = span.checked_sub(degree).ok_or(NOT_A_SPLINE)?;
-    let mut d: Vec<Point> = control.get(first..=span).ok_or(NOT_A_SPLINE)?.to_vec();
-    for round in 1..=degree {
-        for j in (round..=degree).rev() {
-            let i = j + first;
-            let (lo, hi) = (
-                *knots.get(i).ok_or(NOT_A_SPLINE)?,
-                *knots.get(i + 1 + degree - round).ok_or(NOT_A_SPLINE)?,
-            );
-            let share = if hi > lo { (t - lo) / (hi - lo) } else { 0.0 };
-            let (a, b) = (
-                *d.get(j - 1).ok_or(NOT_A_SPLINE)?,
-                *d.get(j).ok_or(NOT_A_SPLINE)?,
-            );
-            let mixed = [
-                (1.0 - share) * a[0] + share * b[0],
-                (1.0 - share) * a[1] + share * b[1],
-            ];
-            *d.get_mut(j).ok_or(NOT_A_SPLINE)? = mixed;
-        }
-    }
-    d.get(degree).copied().ok_or(NOT_A_SPLINE)
+) -> Result<NurbCurve, TeethFailure> {
+    let pw = control
+        .iter()
+        .map(|&[x, y]| CPoint::new(x, y, 0.0, NOW))
+        .collect();
+    NurbCurve::new(pw, degree, knots.to_vec()).map_err(|_| NOT_A_SPLINE)
 }
 
-/// A spline that [`range`] has accepted, to be evaluated at many parameters without checking it
-/// again: [`Checked::point`] gives exactly what [`point`] gives, and finds the span of a parameter
-/// by halving instead of walking the knots from the start.
-pub(super) struct Checked<'a> {
+/// A spline that [`range`] has accepted, as the kernel's curve, to be evaluated at many parameters
+/// without checking it again: [`Checked::point`] is what [`point`] gives.
+pub(super) struct Checked {
+    /// The kernel's curve.
+    curve: NurbCurve,
+    /// The degree.
     degree: usize,
-    knots: &'a [f64],
-    control: &'a [Point],
+    /// The first parameter of the range.
     from: f64,
+    /// The last parameter of the range.
     to: f64,
+    /// The first control point, where the knots hold the start of the range exactly `degree + 1`
+    /// times: the spline starts there.
+    start: Option<Point>,
+    /// The last control point, where the knots hold the end of the range exactly `degree + 1`
+    /// times: the spline ends there.
+    end: Option<Point>,
 }
 
-impl<'a> Checked<'a> {
+impl Checked {
     /// The spline, if `degree`, `knots` and `control` describe one (see [`range`]).
     pub(super) fn new(
         degree: usize,
-        knots: &'a [f64],
-        control: &'a [Point],
-    ) -> Result<Checked<'a>, TeethFailure> {
+        knots: &[f64],
+        control: &[Point],
+    ) -> Result<Checked, TeethFailure> {
         let (from, to) = range_typed(degree, knots, control)?;
+        let clamped_start =
+            knots.first() == Some(&from) && knots.get(degree + 1).is_some_and(|&k| k > from);
+        let clamped_end = knots.last() == Some(&to)
+            && control
+                .len()
+                .checked_sub(1)
+                .and_then(|i| knots.get(i))
+                .is_some_and(|&k| k < to);
         Ok(Checked {
+            curve: kernel_curve(degree, knots, control)?,
             degree,
-            knots,
-            control,
             from,
             to,
+            start: control.first().copied().filter(|_| clamped_start),
+            end: control.last().copied().filter(|_| clamped_end),
         })
     }
 
-    /// The point at the parameter `t`, which is taken into the spline's range, as [`point`] gives
-    /// it.
+    /// The point at the parameter `t`, which is taken into the spline's range: the kernel's
+    /// evaluation (the basis functions of the span [`span_of`] finds for `t` and their sum with
+    /// the control points: The NURBS Book's A2.3 at order 0, the general basis whatever the
+    /// knots), and at an end of the range where the knots are clamped the end control point
+    /// itself, which the spline passes through.
     pub(super) fn point(&self, t: f64) -> Result<Point, TeethFailure> {
         if t.is_nan() {
             return Err(NOT_A_SPLINE);
         }
         let t = t.max(self.from).min(self.to);
-        // The span of `t`: the last knot at or before it among those that start a span of the
-        // range, as `point` finds it. The knots are in order, so halving finds the same one.
-        let last_span = self.control.len().saturating_sub(1);
-        let (mut low, mut high) = (self.degree, last_span);
-        let mut halvings = 1;
-        while low < high {
-            halvings += 1;
-            // The upper of the two middles, so that `low` moves up with every step.
-            let between = high - low;
-            let middle = low + between / 2 + between % 2;
-            if self.knots.get(middle).is_some_and(|&k| k <= t) {
-                low = middle;
-            } else {
-                high = middle - 1;
-            }
+        visited(self.degree + 1);
+        let clamped = if t == self.from {
+            self.start
+        } else if t == self.to {
+            self.end
+        } else {
+            None
+        };
+        if let Some(p) = clamped {
+            return Ok(p);
         }
-        visited(halvings);
-        de_boor(self.degree, self.knots, self.control, low, t)
+        let mut point = [crate::Vec3::ZERO];
+        crv_derivs_into(&self.curve, t, Side::Left, &mut point).map_err(|_| NOT_A_SPLINE)?;
+        let [p] = point;
+        Ok([p.x, p.y])
     }
 }
 
-/// The span [`Checked::point`] evaluates a parameter `t` on, for a spline that [`range`] accepted
-/// with `count` control points: the last index from `degree` to `count - 1` whose knot is at or
-/// before `t` (`degree` if none is), found by the same halving. `t` is taken as it is: the caller
-/// passes a parameter of the spline's range.
-pub(super) fn span_of(degree: usize, knots: &[f64], count: usize, t: f64) -> usize {
-    let (mut low, mut high) = (degree, count.saturating_sub(1));
-    while low < high {
-        let between = high - low;
-        let middle = low + between / 2 + between % 2;
-        if knots.get(middle).is_some_and(|&k| k <= t) {
-            low = middle;
-        } else {
-            high = middle - 1;
-        }
-    }
-    low
+/// The span the kernel evaluates a parameter `t` of a spline on ([`Checked::point`]): the kernel's
+/// own search ([`KnotVector::find_span`], the span that starts at or before `t`, the end spans
+/// taken for a parameter at or past an end). `degree` where the knots are too few for the degree.
+pub(super) fn span_of(degree: usize, knots: &[f64], t: f64) -> usize {
+    KnotVector::from_slice(knots)
+        .and_then(|k| k.find_span(degree, t, Side::Left))
+        .unwrap_or(degree)
 }
 
 /// Counts the knots and control points looked at, for the tests that bound the work of sampling a
@@ -332,13 +330,14 @@ pub(crate) fn span_bend(degree: usize, knots: &[f64], control: &[Point], span: u
 
 /// The counted rounding of a point `Checked::point` computes in the knot span `span` of a spline
 /// of degree `p`: `2 gamma(12 p + 4)` times the largest coordinate of the span's active control
-/// points `P[s-p] ..= P[s]`, rounded up in `Ivl`. It is the kernel's count for de Boor's convex
-/// combinations (docs/definitions-and-certificates.md 4.4, `eval::collapse`), whose steps are
-/// sums, products and quotients, all rounded correctly under IEEE 754; the factor 2 covers both
-/// coordinates of the distance. It covers points evaluated in span `span` only; `Piece::chain`
-/// raises it for a break stretch whose end point is evaluated in a later span. Infinite for an
-/// index outside the spline, a degree outside 1 to [`MAX_DEGREE`], or a coordinate that is not
-/// finite.
+/// points `P[s-p] ..= P[s]`, rounded up in `Ivl`. It is the kernel's count for its evaluation of a
+/// curve's point (`crate::nurbs::crv_deviation::interpolation_bound`: the basis functions of The
+/// NURBS Book's A2.3 at order 0 and their sum with the control points, sums, products and
+/// quotients alone, all rounded correctly under IEEE 754); the factor 2 covers both coordinates
+/// of the distance. A clamped end is the control point itself, with no rounding. It covers points
+/// evaluated in span `span` only; `Piece::chain` raises it for a break stretch whose end point is
+/// evaluated in a later span. Infinite for an index outside the spline, a degree outside 1 to
+/// [`MAX_DEGREE`], or a coordinate that is not finite.
 pub(crate) fn span_rounding(degree: usize, control: &[Point], span: usize) -> f64 {
     if !(1..=MAX_DEGREE).contains(&degree) {
         return f64::INFINITY;

@@ -197,19 +197,65 @@ fn the_period_left_out_is_one_arc_on_the_circle_and_every_other_piece_is_kept() 
             let replaced = replaced_period(shaft, Material::Inside, circle, 0.0)
                 .unwrap_or_else(|e| panic!("{name} {circle:?}: {e}"));
             let pieces = replaced.outline.tooth();
-            // One period gone, one arc in its place.
+            let pitch = shaft.pitch_angle();
+            // The sweep of an arc about the axis on the circle with the circle's role.
+            let on_circle = |p: &Piece| match p {
+                Piece::Arc {
+                    centre,
+                    radius: r,
+                    sweep,
+                    role: found,
+                    ..
+                } if centre == &[0.0, 0.0] && (r - radius).abs() < 1e-9 && *found == role => {
+                    Some(*sweep)
+                }
+                _ => None,
+            };
+            let own: Vec<f64> = shaft.tooth().iter().filter_map(on_circle).collect();
+            let now: Vec<f64> = pieces.iter().filter_map(on_circle).collect();
+            // One period gone, one arc in its place, and that arc one piece with the outline's
+            // own arcs on the circle that it runs on into: the one before, the one after, or both.
+            let whole = shaft.tooth().len() * (shaft.teeth() as usize - 1) + 1;
+            let joined = whole - pieces.len();
+            assert!(joined <= 2, "{name} {circle:?}: {joined} pieces joined");
+            // A period runs from a joint on the circle, which is an end of the outline's own arc
+            // there where it has one: the new arc then has that arc beside it, and joins it.
+            assert_eq!(joined == 0, own.is_empty(), "{name} {circle:?}");
             assert_eq!(
-                pieces.len(),
-                shaft.tooth().len() * (shaft.teeth() as usize - 1) + 1,
+                now.len(),
+                own.len() * (shaft.teeth() as usize - 1) + 1 - joined,
                 "{name} {circle:?}"
             );
-            let arcs: Vec<&Piece> =
-                pieces.iter().filter(|p| matches!(p, Piece::Arc { sweep, .. } if (sweep - shaft.pitch_angle()).abs() < 1e-12)).collect();
-            assert_eq!(arcs.len(), 1, "{name} {circle:?}");
+            // Going round, the arcs on the circle cover what the outline's own covered on every
+            // other period, and a pitch more: nothing is added or lost by the joining.
+            let covered: f64 = now.iter().sum();
+            let before: f64 = own.iter().sum::<f64>() * f64::from(shaft.teeth() - 1);
             assert!(
-                matches!(arcs[0], Piece::Arc { centre, radius: r, role: found, .. }
-                if centre == &[0.0, 0.0] && (r - radius).abs() < 1e-9 && *found == role)
+                (covered - before - pitch).abs() < 1e-9,
+                "{name} {circle:?}: {covered} against {before} and a pitch"
             );
+            // The arc of the period is the one arc at least a pitch long, and no arc on the
+            // circle is left beside it: the stretch is one piece from side to side.
+            let long: Vec<usize> = pieces
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| on_circle(p).is_some_and(|s| s > pitch - 1e-12))
+                .map(|(i, _)| i)
+                .collect();
+            assert_eq!(long.len(), 1, "{name} {circle:?}");
+            let (at, n) = (long[0], pieces.len());
+            let sweep = on_circle(&pieces[at]).unwrap();
+            assert_eq!(
+                joined == 0,
+                (sweep - pitch).abs() < 1e-12,
+                "{name} {circle:?}"
+            );
+            for side in [(at + n - 1) % n, (at + 1) % n] {
+                assert!(
+                    on_circle(&pieces[side]).is_none(),
+                    "{name} {circle:?}: an arc on the circle left beside the period's arc"
+                );
+            }
             assert!(
                 (replaced.arc.radius - radius).abs() < 1e-9
                     && (replaced.arc.end - replaced.arc.start - shaft.pitch_angle()).abs() < 1e-12

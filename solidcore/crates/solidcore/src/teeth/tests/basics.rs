@@ -544,8 +544,9 @@ fn a_long_spline_is_cut_into_chords_without_checking_it_at_every_point() -> crat
     bspline::VISITED.with(|v| v.set(0));
     let outline = Outline::new(4, vec![piece], 1e-3)?;
     let visited = bspline::VISITED.with(std::cell::Cell::get);
-    // Each span is evaluated 41 times, each time looking at about 15 knots and control points,
-    // and the whole spline (4,004 of them) is checked a few times: at most 1,500 for each span.
+    // Each span is evaluated 41 times, each time by the kernel from the degree's two control
+    // points, and the whole spline (4,004 knots and control points) is checked a few times: at
+    // most 1,500 for each span.
     // Checking the whole spline again at every evaluation looks at more than 300 million.
     assert!(visited <= 3_000_000, "{visited}");
     assert_eq!(outline.points().len(), 4 * 8 * spans);

@@ -1038,6 +1038,33 @@ fn spaces_cut_with_a_cutter_end_in_its_curve() {
     assert_close("teeth the whole length", volume(&mut s, "Shaft"), cut_shaft_volume(14.0, 30.0, shaft_area(&numbers(6, 28.0, 6.0)), 30.0));
 }
 
+#[test]
+fn a_space_too_wide_for_the_cutter_ends_square_and_the_feature_says_so() {
+    // Two teeth 1.5 mm wide leave two spaces of more than 170 degrees each: more than one cutter's curve reaches
+    // round. Nothing is refused: those spaces end square, exactly as a spline cut without a cutter ends, and the
+    // feature says so in a warning.
+    let mut s = Session::default();
+    shaft(&mut s, 14.0, 60.0);
+    let wide = with(straight(), json!({"teeth": 2, "tooth_width": 1.5, "shaft_face": [14, 0, 55]}));
+    let r = run(&mut s, CMD, with(wide.clone(), json!({"cutter_diameter": 40})));
+    let f = feature_of(&r);
+    let got = volume(&mut s, "Shaft");
+    let told = notes(&s);
+    assert!(told.iter().any(|w| w.contains("2 of the 2 tooth spaces end square")), "{told:?}");
+    let fs = faces(&mut s, "Shaft");
+    assert_lasting_names(&fs);
+    assert!(!fs.iter().any(|x| stem(&x.name).contains(":end:")), "no space ends in the cutter's curve: {fs:?}");
+    for k in 0..2 {
+        assert!(has(&fs, &format!("F{f}:space{k}:root")), "space {k}: {fs:?}");
+    }
+    // The same spline without a cutter: the same solid.
+    let mut plain = Session::default();
+    shaft(&mut plain, 14.0, 60.0);
+    run(&mut plain, CMD, wide);
+    assert!(notes(&plain).is_empty(), "{:?}", notes(&plain));
+    assert_close("two wide spaces end square", got, volume(&mut plain, "Shaft"));
+}
+
 /// The spline of a neck, cut from the neck's free end for its whole length, with a cutter: `shaft_face` near the
 /// top of the 20 mm neck of [`stepped`], which stands on a 30 mm step from z = 40.
 fn neck_to_the_step(cutter_diameter: f64) -> Value {

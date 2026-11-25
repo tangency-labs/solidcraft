@@ -185,23 +185,489 @@ pub struct SplineMade {
     pub flank_tolerance: Option<f64>,
 }
 
-/// Why the numbers make nothing: the number the refusal is about, and the words, which name it
-/// in backticks first.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SplineRefusal {
-    /// The number to change, where the refusal names one.
-    pub key: Option<String>,
-    /// The refusal in plain words.
-    pub words: String,
+/// A number of a shaft spline that a refusal is about (the kernel's `SplineQuantity`). Its name
+/// in the data is the number's name in [`SplineNumbers`], in lowercase words joined by `_`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SplineQuantity {
+    /// The count of teeth.
+    Teeth,
+    /// How far the teeth run along the axis.
+    Length,
+    /// The module of involute teeth.
+    Module,
+    /// The pressure angle of involute teeth.
+    PressureAngle,
+    /// The height of the shaft's teeth above the pitch circle.
+    Addendum,
+    /// The depth of the shaft's spaces below the pitch circle.
+    Dedendum,
+    /// The radius of the cutting tool's tip, the root fillet.
+    RootFillet,
+    /// The profile shift.
+    ProfileShift,
+    /// What is taken off each tooth's thickness.
+    Thinning,
+    /// The height of the hub's teeth inside the pitch circle.
+    HubAddendum,
+    /// The gap between the shaft's tips and the hub's roots.
+    TipClearance,
+    /// The least gap between the hub's tips and the start of the shaft's root fillet.
+    FormClearance,
+    /// The diameter over the shaft's tips.
+    MajorDiameter,
+    /// The diameter at the bottoms of the shaft's spaces.
+    MinorDiameter,
+    /// The width of a straight-sided tooth.
+    ToothWidth,
+    /// The angle between the two flanks of a serration.
+    FlankAngle,
+    /// The round where a flank meets the minor circle.
+    RootRound,
+    /// The size of a chamfered or rounded tip corner.
+    TipSize,
+    /// The gap at the major circle.
+    MajorClearance,
+    /// The gap at the minor circle.
+    MinorClearance,
+    /// The round on the tips of the hub's teeth.
+    HubTipRound,
+    /// The play between the flanks.
+    SideClearance,
+    /// The round at the roots of the hub's teeth.
+    HubRootRound,
+    /// The outside diameter of a new hub.
+    HubDiameter,
+    /// The master spline: which tooth is made different.
+    MasterSpline,
+    /// Where the middle of the master spline sits.
+    MasterAngle,
+    /// The diameter of the cutter that ends the tooth spaces of a shaft.
+    CutterDiameter,
+    /// The chamfer on the ends of a shaft's teeth.
+    EndChamfer,
+    /// The chamfer where the teeth run out of a hub's bore.
+    EntryChamfer,
+    /// How far the end chamfer runs across the end.
+    EndChamferDistance2,
+    /// The angle of the end chamfer to the round face.
+    EndChamferAngle,
+    /// How far the entry chamfer runs across the end.
+    EntryChamferDistance2,
+    /// The angle of the entry chamfer to the bore.
+    EntryChamferAngle,
 }
 
-impl std::fmt::Display for SplineRefusal {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.words)
+/// What a number the planner requires is measured in (the kernel's `RequiredUnit`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RequiredUnit {
+    /// Millimetres.
+    Mm,
+    /// Millimetres, both sides together on the pitch circle (an involute side clearance).
+    MmBothSidesOnPitch,
+    /// Millimetres on each side, square to the flanks (a straight-sided side clearance).
+    MmEachSideSquareToFlanks,
+    /// Millimetres, a tip chamfer's length down the flank.
+    MmDownTheFlank,
+    /// Millimetres, a tip round's radius.
+    MmRoundRadius,
+}
+
+/// Why numbers that are each acceptable make no teeth (the kernel's tooth `Why`): one variant per
+/// reason.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToothWhy {
+    /// The knots and control points given are not a B-spline.
+    NotASpline,
+    /// The outline to fit was made coarser than a fortieth of the fit's tolerance.
+    SourceTooCoarse,
+    /// The tolerance is below what numbers of the outline's size can resolve.
+    ToleranceTooFineForSize,
+    /// No spline the fit makes comes within the tolerance.
+    SplineNotWithin,
+    /// The fitted spline's numbers would not be finite.
+    FittedNotFinite,
+    /// A curve of the outline to fit has no length.
+    CurveHasNoLength,
+    /// The fit's equations have no single solution.
+    FitNotSolvable,
+    /// The fit's system is not square or its sides do not agree.
+    SystemNotSquare,
+    /// Keeping the tolerance would need more control points than allowed.
+    TooManyControlPoints,
+    /// A curve of the outline has too few or too many points to fit.
+    CurvePointCount,
+    /// A run of pieces cannot be held as one piece within the tolerance.
+    RunNotOnePiece,
+    /// The pieces of a run do not join.
+    RunNotJoined,
+    /// A run has no pieces.
+    RunEmpty,
+    /// A run would not be finite.
+    RunNotFinite,
+    /// A run is too long to be held in points.
+    RunTooLong,
+    /// The root fillet of an external tooth does not meet its flank.
+    FilletMissesFlank,
+    /// The tooth would be thinner than nothing or as wide as the pitch.
+    ToothThickness,
+    /// The root does not lie below the pitch circle by more than the tool's tip radius.
+    RootAboveTipRound,
+    /// The root circle would be inside the axis.
+    RootInsideAxis,
+    /// The tool's tip radius is so large that its two rounds overlap.
+    TipRoundsOverlap,
+    /// The undercut would cut the tooth through at its root.
+    CutThrough,
+    /// The root fillets of neighbouring teeth would cross.
+    FilletsCross,
+    /// The tip circle is at or below the start of the flank.
+    NoFlankLeft,
+    /// The teeth would come to a point below the tip circle.
+    PointedBelowTip,
+    /// A hub's spaces would be as wide as the pitch.
+    SpacesAsWideAsPitch,
+    /// A hub's tips would be below the base circle.
+    TipsBelowBase,
+    /// A hub's roots do not lie outside its tips by more than the fillet radius.
+    RootsInsideRound,
+    /// A hub's spaces would meet at the tips.
+    SpacesMeetAtTips,
+    /// A hub's root rounds are so large that they overlap.
+    RootRoundsOverlap,
+    /// The hub's teeth would reach into the shaft's root fillet.
+    HubReachesFillet,
+    /// The hub's root rounds would reach the shaft's tip corners.
+    HubRoundsReachTips,
+    /// An angle is not a number.
+    AngleNotANumber,
+    /// No corner of the teeth lies on the smallest circle.
+    NoCornerOnSmallest,
+    /// No corner of the teeth lies on the largest circle.
+    NoCornerOnLargest,
+    /// The angle of a master spline is outside -360 to 360 degrees.
+    MasterAngleRange,
+    /// The two outlines are not a shaft and its hub on one axis.
+    NotAShaftAndHub,
+    /// The hub's start is not a number.
+    HubStartNotANumber,
+    /// A body's outline is not finite.
+    BodyNotFinite,
+    /// A body's outline crosses itself.
+    BodyCrossesItself,
+    /// A part is not at a finite place.
+    PartNotFinite,
+    /// Two outlines are too fine or too intricate to be measured against each other in one go.
+    MeasureTooIntricate,
+    /// The tolerance is so fine that a curve would need too many points.
+    CurveTooFine,
+    /// The outline is too intricate to check that it does not cross itself.
+    CrossingCheckTooIntricate,
+    /// The outline would not be finite.
+    OutlineNotFinite,
+    /// The pieces of the tooth would not join into a closed outline.
+    PiecesDoNotJoin,
+    /// The tolerance is so fine that the outline would need too many points.
+    OutlineTooFine,
+    /// The tolerance is so coarse that the outline would have fewer than three points.
+    TooCoarse,
+    /// The outline does not run counter-clockwise around an area.
+    NotCounterClockwise,
+    /// The outline would cross itself.
+    CrossesItself,
+    /// No top of a tooth lies near the angle asked for.
+    NoTopNearAngle,
+    /// The tops of two teeth meet, with no space between them.
+    TopsMeet,
+    /// The angle of the tooth is not a number.
+    ToothAngleNotANumber,
+    /// The outlines are too fine, or the reach too small, to be turned through so many steps.
+    TooMuchTurning,
+    /// The first part's axis is not at a finite place.
+    FirstAxisNotFinite,
+    /// The second part would not be at a finite place.
+    SecondNotFinite,
+    /// Nothing stops the one part turning on the other.
+    TurnsFreely,
+    /// A straight flank does not cross both circles.
+    FlankMissesCircles,
+    /// The chamfer is too large for the tooth.
+    ChamferTooLarge,
+    /// The round at the major circle is too large for the tooth.
+    MajorRoundTooLarge,
+    /// The round at the minor circle is too large for the tooth.
+    MinorRoundTooLarge,
+    /// The corners of a shaft's tooth would meet.
+    TipCornersMeet,
+    /// Neighbouring teeth of a shaft would meet at the root.
+    TeethMeetAtRoot,
+    /// The hub's root rounds would meet.
+    HubRootRoundsMeet,
+    /// The hub's teeth would be too narrow.
+    HubTeethTooNarrow,
+    /// The corners leave no straight flank between them.
+    NoStraightFlank,
+    /// The hub's root rounds would come closer to the shaft's tips than the smallest clearance.
+    HubRootRoundsTooClose,
+    /// The hub's tips would come closer to the shaft's root rounds than the smallest clearance.
+    HubTipsTooClose,
+    /// The minor diameter is not smaller than the major diameter.
+    MinorNotSmaller,
+    /// The minor clearance would take the hub's teeth out beyond the shaft's tips.
+    MinorClearanceTooLarge,
+    /// The flanks are parallel.
+    FlanksParallel,
+    /// The flanks are so nearly parallel that where they meet cannot be said.
+    FlanksNearlyParallel,
+}
+
+/// Why a tooth outline cannot be made into a profile of lines, arcs and Bezier pieces.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", content = "why", rename_all = "snake_case")]
+pub enum ProfileWhy {
+    /// A curve of the outline is held as points only, not fitted as a spline.
+    NotFitted,
+    /// A spline of the outline cannot be cut into Bezier pieces: the tooth module's reason.
+    Spline(ToothWhy),
+}
+
+/// A refusal of the shaft-spline planner as data (the kernel's `PlanRefusal`): the number it is
+/// about and the numbers of the refusal. An application maps the quantity to its own parameter
+/// and words the refusal for its users.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum PlanRefusal {
+    /// A tooth module's number out of range, with the spline's number it comes from where the
+    /// planner knows it.
+    Number {
+        /// The spline's number to change, where the planner knows it.
+        quantity: Option<SplineQuantity>,
+        /// The tooth module's name for the number.
+        what: String,
+        /// What was given.
+        value: f64,
+        /// It must be above this.
+        above: f64,
+        /// It must be at most this.
+        up_to: f64,
+    },
+    /// A tooth module's reason, with the spline's number to change where the planner knows it.
+    Reason {
+        /// The spline's number to change, where the planner knows it.
+        quantity: Option<SplineQuantity>,
+        /// The tooth module's reason.
+        why: ToothWhy,
+    },
+    /// A bound a tooth module could not prove, with the spline's number to change where the
+    /// planner knows it.
+    Unproved {
+        /// The spline's number to change, where the planner knows it.
+        quantity: Option<SplineQuantity>,
+        /// What could not be proved, as the kernel names it.
+        what: String,
+        /// The bound that had to be met.
+        asked: f64,
+        /// The best bound proved when the work ran out.
+        reached: f64,
+    },
+    /// A tooth cannot be left out of these teeth: no corner of the teeth lies on the smallest
+    /// circle.
+    MasterToothOut,
+    /// A wide tooth cannot be made on these teeth: no corner of the teeth lies on the largest
+    /// circle.
+    MasterWideTooth,
+    /// A number given is not a number.
+    NotANumber {
+        /// The number.
+        quantity: SplineQuantity,
+    },
+    /// A number this kind of teeth needs was not given.
+    Required {
+        /// The number.
+        quantity: SplineQuantity,
+        /// What it is measured in.
+        unit: RequiredUnit,
+    },
+    /// The splined length is outside what is taken.
+    LengthRange {
+        /// The shortest length taken, in mm.
+        least: f64,
+        /// The longest length taken, in mm.
+        most: f64,
+        /// What was given.
+        value: f64,
+    },
+    /// The hub's outside diameter was given, but no hub is made.
+    HubDiameterWithoutHub,
+    /// The hub's outside diameter was not given, but the hub is made.
+    HubDiameterRequired,
+    /// The master spline's angle was given, but there is no master spline.
+    MasterAngleWithoutMaster,
+    /// The master spline's angle is outside -360 to 360 degrees.
+    MasterAngleRange {
+        /// What was given, in degrees.
+        value: f64,
+    },
+    /// A chamfer is outside what is taken.
+    ChamferRange {
+        /// The chamfer.
+        quantity: SplineQuantity,
+        /// The largest chamfer taken, in mm.
+        most: f64,
+        /// What was given.
+        value: f64,
+    },
+    /// The cutter's diameter is not a number the planner takes.
+    CutterNotANumber {
+        /// The largest diameter taken, in mm.
+        most: f64,
+    },
+    /// The cutter's radius does not reach past the depth of the teeth.
+    CutterTooSmall {
+        /// The diameter the cutter must be larger than, in mm.
+        at_least: f64,
+    },
+    /// The hub's outside diameter is larger than what is taken.
+    HubDiameterTooLarge {
+        /// The largest diameter taken, in mm.
+        most: f64,
+        /// What was given.
+        value: f64,
+    },
+    /// The hub's outside diameter leaves no rim around its teeth.
+    NoRim {
+        /// The diameter the hub's must be larger than, in mm.
+        at_least: f64,
+    },
+    /// A second distance or an angle of a chamfer was given, but not the chamfer itself.
+    ChamferShapeWithout {
+        /// The number given: a chamfer's second distance or angle.
+        quantity: SplineQuantity,
+        /// The chamfer it shapes.
+        chamfer: SplineQuantity,
+    },
+    /// Both a second distance and an angle were given for one chamfer.
+    ChamferBothShapes {
+        /// The chamfer's second distance.
+        distance2: SplineQuantity,
+        /// The chamfer's angle.
+        angle: SplineQuantity,
+        /// The chamfer.
+        chamfer: SplineQuantity,
+    },
+    /// A chamfer's second distance is not more than 0, or more than what is taken.
+    ChamferDistanceRange {
+        /// The second distance.
+        quantity: SplineQuantity,
+        /// The largest distance taken, in mm.
+        most: f64,
+        /// What was given.
+        value: f64,
+    },
+    /// A chamfer's angle is not between 0 and 90 degrees.
+    ChamferAngleRange {
+        /// The angle.
+        quantity: SplineQuantity,
+        /// What was given, in degrees.
+        value: f64,
+    },
+    /// The outline cannot be made into a profile of lines, arcs and Bezier pieces.
+    NotAProfile {
+        /// Why.
+        why: ProfileWhy,
+    },
+}
+
+impl PlanRefusal {
+    /// The number of the spline to change, where the refusal names one.
+    #[must_use]
+    pub fn quantity(&self) -> Option<SplineQuantity> {
+        match self {
+            Self::Number { quantity, .. }
+            | Self::Reason { quantity, .. }
+            | Self::Unproved { quantity, .. } => *quantity,
+            Self::MasterToothOut | Self::MasterWideTooth => Some(SplineQuantity::MasterSpline),
+            Self::NotANumber { quantity }
+            | Self::Required { quantity, .. }
+            | Self::ChamferRange { quantity, .. }
+            | Self::ChamferShapeWithout { quantity, .. }
+            | Self::ChamferDistanceRange { quantity, .. }
+            | Self::ChamferAngleRange { quantity, .. } => Some(*quantity),
+            Self::ChamferBothShapes { distance2, .. } => Some(*distance2),
+            Self::LengthRange { .. } => Some(SplineQuantity::Length),
+            Self::HubDiameterWithoutHub
+            | Self::HubDiameterRequired
+            | Self::HubDiameterTooLarge { .. }
+            | Self::NoRim { .. } => Some(SplineQuantity::HubDiameter),
+            Self::MasterAngleWithoutMaster | Self::MasterAngleRange { .. } => {
+                Some(SplineQuantity::MasterAngle)
+            }
+            Self::CutterNotANumber { .. } | Self::CutterTooSmall { .. } => {
+                Some(SplineQuantity::CutterDiameter)
+            }
+            Self::NotAProfile { .. } => None,
+        }
     }
 }
 
-impl std::error::Error for SplineRefusal {}
+/// Why a shaft spline's numbers, outlines or sections make nothing, as data (the kernel's
+/// `TeethFailure`, or another refusal of the kernel's).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SplineRefusal {
+    /// A number of the tooth modules is not finite or lies outside what is accepted: above
+    /// `above` and at most `up_to`.
+    OutOfRange {
+        /// The tooth modules' name for the number.
+        what: String,
+        /// What was given.
+        value: f64,
+        /// It must be above this.
+        above: f64,
+        /// It must be at most this.
+        up_to: f64,
+    },
+    /// Each number is acceptable, but together they do not make teeth.
+    Invalid {
+        /// Why.
+        why: ToothWhy,
+    },
+    /// The planner's refusal, or one of a tooth profile: the number to change and why.
+    Refused {
+        /// The refusal.
+        refusal: PlanRefusal,
+    },
+    /// A bound could not be proved within the work allowed.
+    NotProved {
+        /// What could not be proved, as the kernel names it.
+        what: String,
+        /// The bound that had to be met.
+        asked: f64,
+        /// The best bound proved when the work ran out.
+        reached: f64,
+    },
+    /// A refusal of the kernel that is not a tooth module's: the routine that refused.
+    Kernel {
+        /// The kernel routine that refused, by its path.
+        operation: String,
+    },
+}
+
+impl SplineRefusal {
+    /// The number of the spline to change, where the refusal names one.
+    #[must_use]
+    pub fn quantity(&self) -> Option<SplineQuantity> {
+        match self {
+            Self::Refused { refusal } => refusal.quantity(),
+            Self::OutOfRange { .. }
+            | Self::Invalid { .. }
+            | Self::NotProved { .. }
+            | Self::Kernel { .. } => None,
+        }
+    }
+}
 
 /// What a piece of a tooth's outline is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -351,6 +817,24 @@ pub struct SplinePlan {
     /// The chamfer at the entry of a hub's bore as made; none where `entry_chamfer` is left out
     /// or 0.
     pub entry_chamfer: Option<ChamferSize>,
+    /// An angle about the axis, in radians, that lies in a tooth space of the shaft: where a tool
+    /// turned once about the axis has its seam, so that the seam is cut away with the space.
+    pub shaft_seam: f64,
+    /// An angle about the axis, in radians, that lies in a tooth space of the hub (over a tooth of
+    /// the shaft), for the seam of a tool turned once about the axis.
+    pub hub_seam: f64,
+    /// Each tooth of the shaft with a space of its own after it, in order: every tooth but the one
+    /// a master spline left out or made wide.
+    pub spaced_teeth: Vec<SpacedTooth>,
+}
+
+/// A tooth of the shaft with a space of its own after it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SpacedTooth {
+    /// Its number, counted counter-clockwise from tooth 0.
+    pub tooth: u32,
+    /// The angle of its middle, in radians counter-clockwise from the x axis.
+    pub angle: f64,
 }
 
 /// A chamfer as the numbers make it: how far it runs along the round face, and how far across
@@ -502,6 +986,36 @@ pub struct ChamferSection {
     pub slope: usize,
 }
 
+/// Why a chamfer at the end of a round face has no tool's section.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChamferRefusal {
+    /// A number of the chamfer, or the margin, is not finite.
+    NotFinite,
+    /// The chamfer runs no distance across the end or along the face, or the face has no radius.
+    NoSize,
+    /// At a step, the body past the end stands as high as the face: there is no corner to take
+    /// off.
+    NoCorner,
+    /// The section would reach the axis or past it: the chamfer runs too far across the end.
+    ReachesAxis,
+}
+
+/// The whole cross-section of one tooth space out to a circle about the axis, counter-clockwise:
+/// what a space that ends square takes out of the shaft.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SpaceRegion {
+    /// The floor's spans in the floor's order, then three: the line out from the corner of the
+    /// tooth before the space, the arc of the circle, the line in to the corner of the tooth
+    /// after it.
+    pub segs: Vec<Seg2>,
+    /// How many of `segs` each piece of the space's floor became, in the floor's order (0 for a
+    /// piece too short to draw).
+    pub spans: Vec<usize>,
+    /// Where two spans of one curve meet.
+    pub joints: Vec<Vec2>,
+}
+
 /// One tooth space of a shaft as a region closed above by a circle about the axis: what a cutter
 /// takes out between two teeth.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -516,4 +1030,7 @@ pub struct SpaceSection {
     pub end: [f64; 2],
     /// Whether the region stays clear of the regions of the neighbouring spaces.
     pub apart: bool,
+    /// The outline's tolerance: how far the Bezier pieces a spline of `floor` becomes may be from
+    /// it.
+    pub tolerance: f64,
 }

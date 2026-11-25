@@ -608,6 +608,150 @@ impl Torus {
         self.rebuild_polar_converter(k)
     }
 
+    /// Not upstream: the torus of stored numbers (a placement and two radii) on its NURBS form,
+    /// as the surface that holds the form, for a reader of stored faces: `Some` where the
+    /// kernel proves the form on that torus
+    /// ([`crate::surface::implicit::AnalyticSupport::build`]: the form lies on it, and it
+    /// evaluates as the form at the form's own parameters), so the torus keeps the numbers it
+    /// was made with; `None` where it does not (numbers worked back out of a form they do not
+    /// prove on).
+    ///
+    /// # Errors
+    ///
+    /// Only an unported path or a cancellation ([`SolidError::is_unported_or_cancelled`]):
+    /// every other refusal of the proof is `None`.
+    pub fn stored_on_form(
+        k: &Kernel,
+        placement: Axis2Placement,
+        major: f64,
+        minor: f64,
+        form: &BSplineSurface,
+    ) -> Result<Option<crate::surface::surface::Surface>> {
+        let own = crate::surface::implicit::AnalyticSupport::Torus {
+            placement,
+            major_radius: major,
+            minor_radius: minor,
+        };
+        match own.build(k, form.copy()) {
+            Ok(torus) => Ok(Some(torus)),
+            Err(e) if e.is_unported_or_cancelled() => Err(e),
+            Err(_) => Ok(None),
+        }
+    }
+
+    /// Not upstream: the torus of a support's own numbers on the parametrisation of `form`, for
+    /// a form the recogniser finds no torus in. A short arc of the tube fixes neither its
+    /// circle nor its plane closely enough for the recogniser's tests of the meridians (their
+    /// circles through three points, their planes through one line): a tube of radius 13.7
+    /// that shows 0.3 degrees is found in some places and not in others, one that shows 0.1
+    /// degrees hardly anywhere. The support says where the axis and the tube are, so only the
+    /// conventions are read off the form, from its control net and its first meridian:
+    ///
+    /// - the sweep runs along the direction across which the net's end columns lie in a plane
+    ///   through the support's axis (a meridian does; a row along the sweep turns about the
+    ///   axis);
+    /// - the sweep's interval is the form's own end meridians' about that axis
+    ///   ([`sweep_frame`]);
+    /// - the tube is inside out where the first meridian, from its start to 0.45 of its range,
+    ///   turns about the tube's centre against the support's frame (the recogniser's test, on
+    ///   the support's centre in place of a fitted one).
+    ///
+    /// The result is a candidate only: [`Self::on_support`] carries the support's numbers on
+    /// it, and the caller proves the form on it (`AnalyticSupport::build`). `None` where the
+    /// form is not rational of degree 2 both ways, or gives no such reading.
+    ///
+    /// # Errors
+    ///
+    /// Those of the form's control net, its iso curve and that one's evaluation, and of
+    /// [`Self::new`].
+    pub(crate) fn conventions_of(
+        k: &Kernel,
+        placement: Axis2Placement,
+        major: f64,
+        minor: f64,
+        form: &BSplineSurface,
+    ) -> Result<Option<Self>> {
+        if form.degree(SurfParamType::U) != 2
+            || form.degree(SurfParamType::V) != 2
+            || !form.is_rational()
+        {
+            return Ok(None);
+        }
+        let (origin, z) = (placement.origin(), placement.z_axis());
+        let radial = |p: &Point3| {
+            let s = *p - origin;
+            s - s.dot(z) * z
+        };
+        // a column's direction from the axis (its point farthest from it) and how far the
+        // column stands out of the plane through the axis along that direction
+        let reading = |column: &[Point3]| -> Option<(f64, Vec3)> {
+            let side = column
+                .iter()
+                .map(radial)
+                .max_by(|a, b| a.length().total_cmp(&b.length()))?
+                .unitize()
+                .ok()?;
+            let across = z.cross(side);
+            let out = column
+                .iter()
+                .map(|p| radial(p).dot(across).abs())
+                .fold(0.0_f64, f64::max);
+            Some((out, side))
+        };
+        let mut read = Vec::new();
+        for swap in [false, true] {
+            let [first, last] = meridians(form, swap)?;
+            if let (Some((a, from)), Some((b, to))) = (reading(&first), reading(&last)) {
+                read.push((a.max(b), swap, [from, to], [first, last]));
+            }
+        }
+        let Some((_, swap_uv, sides, ends)) = read.into_iter().min_by(|a, b| a.0.total_cmp(&b.0))
+        else {
+            return Ok(None);
+        };
+        let [side, _] = sides;
+        let Some((_, _, sweep)) = sweep_frame(origin, z, sides, ends) else {
+            return Ok(None);
+        };
+        let domain = form.natural_uv_domain();
+        let generator = form
+            .create_iso_parametric_curve(
+                k,
+                if swap_uv {
+                    SurfParamType::V
+                } else {
+                    SurfParamType::U
+                },
+                if swap_uv {
+                    domain.v_min()
+                } else {
+                    domain.u_min()
+                },
+                IsoCurveOptions::default(),
+            )?
+            .curve;
+        let interval = generator.natural_interval();
+        let centre = origin + side * major;
+        let from = generator.evaluate_point(interval.min())? - centre;
+        let on = generator.evaluate_point(interval.evaluate(0.45))? - centre;
+        let inside_out = z.dot(from.cross(on).cross(side)) < 0.0;
+        Self::new(
+            k,
+            origin,
+            placement.x_axis(),
+            placement.y_axis(),
+            Extent2d::from_bounds(sweep.min(), 0.0, sweep.max(), 360.0),
+            major,
+            minor,
+            TorusOptions {
+                swap_uv,
+                inside_out,
+                circle_nurb: None,
+            },
+        )
+        .map(Some)
+    }
+
     /// `RebuildPolarConverter` with the torus's iso circles.
     pub(crate) fn rebuild_polar_converter(&mut self, k: &Kernel) -> Result<()> {
         let shape = self.shape();

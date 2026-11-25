@@ -32,6 +32,7 @@ pub mod plane;
 // is and its fields are the names in its formula.
 #[allow(missing_docs)]
 pub mod profile;
+pub mod round_face;
 pub mod shaft_spline;
 pub mod step;
 pub mod vec;

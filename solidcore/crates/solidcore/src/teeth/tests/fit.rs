@@ -9,13 +9,15 @@
 use std::f64::consts::{PI, TAU};
 
 use super::basics::old_sampled;
-use super::common::{assert_gap, check_outline, dist, sound, Dice, HOSTILE, HOSTILE_COUNTS};
+use super::common::{assert_gap, check_outline, dist, lift, sound, Dice, HOSTILE, HOSTILE_COUNTS};
 use crate::error::teeth::{TeethFailure, Why, FIT_DISTANCE};
+use crate::prism::profile::MAX_BEZIER_CTRL;
 use crate::teeth::bspline::{self, MAX_DEGREE};
 use crate::teeth::fit::{
     self as lib, bezier_pieces, cubic_beziers, fit, fit_typed, fitted, one_piece_typed,
-    solve_symmetric, Datum, Fitted, Spline, CORRECTIONS, DEFAULT_DEGREE, MAX_CONTROL_POINTS,
-    ONE_PIECE_LEAST_DEGREE, SOURCE_SHARE, WORKING_POINTS,
+    profile_pieces, profile_pieces_typed, solve_normal, Datum, Fitted, Spline, CORRECTIONS,
+    DEFAULT_DEGREE, MAX_CONTROL_POINTS, MAX_PROFILE_PIECES, ONE_PIECE_LEAST_DEGREE, SOURCE_SHARE,
+    WORKING_POINTS,
 };
 use crate::teeth::involute::{hub_for, spline_pair, External, Fit};
 use crate::teeth::outline::{distance, on_circle, rotated, space_section};
@@ -644,27 +646,57 @@ fn the_least_squares_solver_solves_and_refuses_what_cannot_be_solved() -> crate:
     let right: Vec<f64> = (0..4)
         .map(|i| (0..4).map(|j| matrix[i * 4 + j] * answer[j]).sum())
         .collect();
-    let x = solve_symmetric(4, &matrix, &right)?;
+    let x = lift(solve_normal(4, &matrix, &right))?;
     assert!(
         x.iter().zip(answer).all(|(a, b)| (a - b).abs() < 1e-13),
         "{x:?}"
     );
     // A full one.
     let full = [2.0, 1.0, 1.0, 1.0, 3.0, 1.0, 1.0, 1.0, 4.0];
-    let x = solve_symmetric(3, &full, &[4.0, 5.0, 6.0])?;
+    let x = lift(solve_normal(3, &full, &[4.0, 5.0, 6.0]))?;
     for i in 0..3 {
         let back: f64 = (0..3).map(|j| full[i * 3 + j] * x[j]).sum();
         assert!((back - [4.0, 5.0, 6.0][i]).abs() < 1e-13);
     }
+    // The same equations scaled far down and far up: the kernel's least pivot is taken relative
+    // to the largest number on the diagonal, so their size does not decide.
+    for scale in [1e-12, 1e12] {
+        let scaled: Vec<f64> = matrix.iter().map(|v| v * scale).collect();
+        let right: Vec<f64> = right.iter().map(|v| v * scale).collect();
+        let x = lift(solve_normal(4, &scaled, &right))?;
+        assert!(
+            x.iter().zip(answer).all(|(a, b)| (a - b).abs() < 1e-12),
+            "{scale}: {x:?}"
+        );
+    }
     // What cannot be solved: a matrix that does not fix the unknowns, one that is not positive,
     // sizes that do not agree, numbers that are not finite.
-    assert!(solve_symmetric(2, &[1.0, 1.0, 1.0, 1.0], &[1.0, 1.0]).is_err());
-    assert!(solve_symmetric(2, &[-1.0, 0.0, 0.0, 1.0], &[1.0, 1.0]).is_err());
-    assert!(solve_symmetric(3, &[1.0, 0.0, 0.0, 1.0], &[1.0, 1.0]).is_err());
-    assert!(solve_symmetric(2, &[1.0, 0.0, 0.0, 1.0], &[1.0]).is_err());
-    assert!(solve_symmetric(2, &[1.0, f64::NAN, 0.0, 1.0], &[1.0, 1.0]).is_err());
-    assert!(solve_symmetric(usize::MAX, &[], &[]).is_err());
-    assert_eq!(solve_symmetric(0, &[], &[])?, Vec::<f64>::new());
+    let not_solvable = Err(TeethFailure::Invalid(Why::FitNotSolvable));
+    let not_square = Err(TeethFailure::Invalid(Why::SystemNotSquare));
+    assert_eq!(
+        solve_normal(2, &[1.0, 1.0, 1.0, 1.0], &[1.0, 1.0]),
+        not_solvable
+    );
+    assert_eq!(
+        solve_normal(2, &[-1.0, 0.0, 0.0, 1.0], &[1.0, 1.0]),
+        not_solvable
+    );
+    assert_eq!(
+        solve_normal(2, &[1.0, 0.0, 0.0, -1.0], &[1.0, 1.0]),
+        not_solvable
+    );
+    assert_eq!(
+        solve_normal(3, &[1.0, 0.0, 0.0, 1.0], &[1.0, 1.0]),
+        not_square
+    );
+    assert_eq!(solve_normal(2, &[1.0, 0.0, 0.0, 1.0], &[1.0]), not_square);
+    assert_eq!(
+        solve_normal(2, &[1.0, f64::NAN, 0.0, 1.0], &[1.0, 1.0]),
+        not_solvable
+    );
+    assert_eq!(solve_normal(2, &[0.0; 4], &[1.0, 1.0]), not_solvable);
+    assert_eq!(solve_normal(usize::MAX, &[], &[]), not_square);
+    assert_eq!(solve_normal(0, &[], &[]), Ok(Vec::new()));
     Ok(())
 }
 
@@ -1045,8 +1077,13 @@ fn hostile_numbers_never_panic() -> crate::Result<()> {
         let size = dice.roll() % 5;
         let matrix: Vec<f64> = (0..size * size).map(|_| dice.pick(&HOSTILE)).collect();
         let right: Vec<f64> = (0..size).map(|_| dice.pick(&HOSTILE)).collect();
-        if let Ok(x) = solve_symmetric(size, &matrix, &right) {
+        if let Ok(x) = solve_normal(size, &matrix, &right) {
             assert!(x.iter().all(|v| v.is_finite()));
+        }
+        let tolerance = dice.pick(&HOSTILE);
+        if let Ok(pieces) = profile_pieces(degree, &knots, &control, tolerance) {
+            assert!(pieces.iter().flatten().flatten().all(|v| v.is_finite()));
+            assert!(pieces.iter().all(|p| p.len() <= MAX_BEZIER_CTRL));
         }
     }
     Ok(())
@@ -2427,13 +2464,14 @@ impl Rack {
     }
 }
 
-/// The fit's certificate is trusted only for a spline its proof applies to: parameters from
-/// exactly 0 to exactly 1 (the pairing takes the first point at 0 and the last at 1 as the whole
-/// spline), and no knot inside repeated as many times as the degree (a corner, where the first
-/// derivative jumps and the chord bound does not hold). Every spline the fit makes is such a
-/// spline; another is refused, not measured.
+/// The fit's certificate is the kernel's certified bound of the spline against its source laid on
+/// the spline's parameters, which takes any spline on the parameters 0 to 1 with clamped knots,
+/// corners included (a knot inside repeated as many times as the degree): its bound holds the
+/// distance between the spline and the polyline both ways, measured here by brute force. A spline
+/// on other parameters is refused, not measured: the pairing takes the first point at 0 and the
+/// last at 1 as the whole spline.
 #[test]
-fn the_certificate_refuses_a_spline_its_proof_does_not_cover() {
+fn the_certificate_bounds_every_spline_on_its_parameters_and_refuses_the_others() {
     let spline = |degree: usize, knots: &[f64]| {
         let control: Vec<Point> = (0..knots.len().saturating_sub(degree + 1))
             .map(|i| [i as f64, 0.25 * (i % 2) as f64])
@@ -2445,26 +2483,62 @@ fn the_certificate_refuses_a_spline_its_proof_does_not_cover() {
         (3, &[0.0, 0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0]),
         (2, &[0.0, 0.0, 0.0, 0.25, 0.75, 1.0, 1.0, 1.0]),
         (1, &[0.0, 0.0, 1.0, 1.0]),
-    ];
-    let not_covered: &[(usize, &[f64])] = &[
         (3, &[0.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0]),
-        (3, &[0.0, 0.0, 0.0, 0.0, 2.0, 2.0, 2.0, 2.0]),
-        (3, &[1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0]),
         (2, &[0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0]),
         (1, &[0.0, 0.0, 0.5, 1.0, 1.0]),
     ];
+    let not_covered: &[(usize, &[f64])] = &[
+        (3, &[0.0, 0.0, 0.0, 0.0, 2.0, 2.0, 2.0, 2.0]),
+        (3, &[1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0]),
+    ];
     let points: Vec<Point> = (0..=8).map(|i| [0.5 * f64::from(i), 0.0]).collect();
     let starts: Vec<f64> = (0..=8).map(|i| f64::from(i) / 8.0).collect();
+    let to_polyline = |p: Point| {
+        points
+            .windows(2)
+            .map(|w| off_chord(p, w[0], w[1]))
+            .fold(f64::INFINITY, f64::min)
+    };
     for &(degree, knots) in covered {
+        let s = spline(degree, knots);
+        let (bound, by_span) = lift(lib::certificate(&s, &points, &starts, 1e-3)).unwrap();
+        assert!(bound.is_finite(), "{degree} {knots:?}");
+        assert_eq!(by_span.len(), s.control.len());
+        let along = spline_points(degree, knots, &s.control, 4_000);
+        let from_spline = along
+            .iter()
+            .map(|&p| to_polyline(p))
+            .fold(0.0_f64, f64::max);
+        let from_points = points
+            .windows(2)
+            .flat_map(|w| {
+                (0..=100).map(move |j| {
+                    let t = f64::from(j) / 100.0;
+                    [
+                        w[0][0] + t * (w[1][0] - w[0][0]),
+                        w[0][1] + t * (w[1][1] - w[0][1]),
+                    ]
+                })
+            })
+            .map(|q| {
+                along
+                    .iter()
+                    .map(|&p| dist(p, q))
+                    .fold(f64::INFINITY, f64::min)
+            })
+            .fold(0.0_f64, f64::max);
+        // The dense points of the spline stand a little apart: their own spacing is the slack.
+        let spacing = along
+            .windows(2)
+            .map(|w| dist(w[0], w[1]))
+            .fold(0.0_f64, f64::max);
         assert!(
-            lib::certifiable(&spline(degree, knots)),
-            "{degree} {knots:?}"
+            bound >= from_spline.max(from_points) - spacing,
+            "{degree} {knots:?}: {bound} below {from_spline} or {from_points}"
         );
     }
     for &(degree, knots) in not_covered {
-        let cornered = spline(degree, knots);
-        assert!(!lib::certifiable(&cornered), "{degree} {knots:?}");
-        let refused = lib::certificate(&cornered, &points, &starts, 1e-3);
+        let refused = lib::certificate(&spline(degree, knots), &points, &starts, 1e-3);
         assert!(
             matches!(
                 refused,
@@ -2473,5 +2547,171 @@ fn the_certificate_refuses_a_spline_its_proof_does_not_cover() {
             ),
             "{degree} {knots:?}: {refused:?}"
         );
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+// Bezier pieces of a profile: a degree above a profile's lowered within the tolerance
+// -------------------------------------------------------------------------------------------------
+
+/// A spline of `degree` with `count` control points on a wave about the x axis, on clamped knots
+/// spread evenly over 0 to 1.
+fn wave(degree: usize, count: usize) -> (Vec<f64>, Vec<Point>) {
+    let spans = count - degree;
+    let knots: Vec<f64> = (0..=(count + degree))
+        .map(|j| j.saturating_sub(degree).min(spans) as f64 / spans as f64)
+        .collect();
+    let control: Vec<Point> = (0..count)
+        .map(|i| {
+            let x = i as f64 / (count - 1) as f64;
+            [10.0 * x, (3.0 * PI * x).sin()]
+        })
+        .collect();
+    (knots, control)
+}
+
+/// The largest distance, both ways, between dense points of a spline of any degree the kernel
+/// holds (its own evaluation) and dense points of its profile pieces, by brute force, and the
+/// slack of that measure: the largest step between two dense points of either.
+fn pieces_off_spline(
+    degree: usize,
+    knots: &[f64],
+    control: &[Point],
+    pieces: &[Vec<Point>],
+) -> (f64, f64) {
+    let curve = bspline::kernel_curve(degree, knots, control).unwrap();
+    let along: Vec<Point> = (0..=3_000)
+        .map(|i| {
+            let t = f64::from(i) / 3_000.0;
+            let d = curve.derivs(t, crate::nurbs::knots::Side::Left, 0).unwrap();
+            [d[0].x, d[0].y]
+        })
+        .collect();
+    let on_pieces: Vec<Vec<Point>> = pieces
+        .iter()
+        .map(|piece| {
+            (0..=60)
+                .map(|i| bezier_at(piece, f64::from(i) / 60.0))
+                .collect()
+        })
+        .collect();
+    let step = |run: &[Point]| {
+        run.windows(2)
+            .map(|w| dist(w[0], w[1]))
+            .fold(0.0_f64, f64::max)
+    };
+    let mut slack = step(&along);
+    for run in &on_pieces {
+        slack = slack.max(step(run));
+    }
+    let flat: Vec<Point> = on_pieces.into_iter().flatten().collect();
+    let one_way = |from: &[Point], onto: &[Point]| {
+        from.iter()
+            .map(|&p| {
+                onto.iter()
+                    .map(|&q| dist(p, q))
+                    .fold(f64::INFINITY, f64::min)
+            })
+            .fold(0.0_f64, f64::max)
+    };
+    (one_way(&along, &flat).max(one_way(&flat, &along)), slack)
+}
+
+/// A spline whose degree a profile holds comes out as its Bezier pieces, exactly as
+/// `bezier_pieces` gives them, whatever the tolerance; one of a higher degree is never refused:
+/// its pieces are lowered to the highest degree a profile holds, split where one lowered piece
+/// would be farther than the tolerance, follow each other end to end, and stay within the
+/// tolerance of the spline.
+#[test]
+fn profile_pieces_lower_a_high_degree_within_the_tolerance() -> crate::Result<()> {
+    let most = MAX_BEZIER_CTRL - 1;
+    for degree in [2, 3, most] {
+        let (knots, control) = wave(degree, degree + 4);
+        assert_eq!(
+            profile_pieces(degree, &knots, &control, 1e-3)?,
+            bezier_pieces(degree, &knots, &control)?
+        );
+    }
+    for degree in [most + 1, most + 3, crate::nurbs::knots::MAX_DEGREE] {
+        for tolerance in [1e-2, 1e-4, 1e-6] {
+            let (knots, control) = wave(degree, degree + 3);
+            let pieces = profile_pieces(degree, &knots, &control, tolerance)?;
+            assert!(!pieces.is_empty());
+            assert!(
+                pieces.iter().all(|p| p.len() == MAX_BEZIER_CTRL),
+                "degree {degree}"
+            );
+            for w in pieces.windows(2) {
+                assert_eq!(w[0].last(), w[1].first(), "degree {degree}, {tolerance}");
+            }
+            assert_eq!(pieces.first().and_then(|p| p.first()), control.first());
+            assert_eq!(pieces.last().and_then(|p| p.last()), control.last());
+            // The pieces are compared with the spline as curves, both ways, by dense points of
+            // the two, which stand apart by up to the measure's slack.
+            let (off, slack) = pieces_off_spline(degree, &knots, &control, &pieces);
+            assert!(
+                off <= tolerance + slack,
+                "degree {degree}, {tolerance}: {off} (slack {slack})"
+            );
+        }
+    }
+    Ok(())
+}
+
+/// What profile pieces refuse, in typed words: a tolerance that is not a positive length, what is
+/// not a spline (a degree past the kernel's highest), a tolerance below what the size of the
+/// spline can be held to, and a tolerance no number of pieces reaches within the work allowed.
+/// Nothing loops: each ends after at most `MAX_PROFILE_PIECES` pieces.
+#[test]
+fn profile_pieces_refuse_what_they_cannot_hold_in_typed_words() {
+    let degree = MAX_BEZIER_CTRL;
+    let (knots, control) = wave(degree, degree + 3);
+    for tolerance in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 1e9] {
+        assert!(
+            matches!(
+                profile_pieces_typed(degree, &knots, &control, tolerance),
+                Err(TeethFailure::OutOfRange { .. })
+            ),
+            "{tolerance}"
+        );
+    }
+    let too_high = crate::nurbs::knots::MAX_DEGREE + 1;
+    let (high_knots, high_control) = wave(too_high, too_high + 2);
+    assert_eq!(
+        profile_pieces_typed(too_high, &high_knots, &high_control, 1e-3),
+        Err(TeethFailure::Invalid(Why::NotASpline))
+    );
+    assert_eq!(
+        profile_pieces_typed(degree, &knots, &control, 1e-300),
+        Err(TeethFailure::Invalid(Why::ToleranceTooFineForSize))
+    );
+    // Just above what the size allows, near the kernel's own rounding of the bound: the pieces
+    // reach it or the work runs out and says so, after at most `MAX_PROFILE_PIECES` pieces.
+    let refused = profile_pieces_typed(degree, &knots, &control, 2e-11);
+    assert!(
+        matches!(
+            refused,
+            Ok(_)
+                | Err(TeethFailure::NotProved {
+                    what: FIT_DISTANCE,
+                    ..
+                })
+        ),
+        "{refused:?}"
+    );
+    // Hostile splines and tolerances: a typed refusal or pieces of finite numbers, never more
+    // control points than a profile holds.
+    let mut dice = Dice(0x9F1);
+    for _ in 0..300 {
+        let degree = dice.pick(&HOSTILE_COUNTS) as usize;
+        let knots: Vec<f64> = (0..dice.roll() % 30).map(|_| dice.pick(&HOSTILE)).collect();
+        let control: Vec<Point> = (0..dice.roll() % 20)
+            .map(|_| [dice.pick(&HOSTILE), dice.pick(&HOSTILE)])
+            .collect();
+        if let Ok(pieces) = profile_pieces_typed(degree, &knots, &control, dice.pick(&HOSTILE)) {
+            assert!(pieces.iter().flatten().flatten().all(|v| v.is_finite()));
+            assert!(pieces.iter().all(|p| p.len() <= MAX_BEZIER_CTRL));
+            assert!(pieces.len() <= MAX_PROFILE_PIECES);
+        }
     }
 }

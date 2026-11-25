@@ -2,7 +2,7 @@
 //! numbers go to the kernel, the plan and its outlines come back, and an outline's pieces go
 //! both ways.
 
-use solidcore::error::teeth::TeethFailure;
+use solidcore::error::teeth as kt;
 use solidcore::teeth as k;
 use solidcore::teeth::master_spline::Span;
 use solidcore::teeth::outline::SpaceSection as KernelSection;
@@ -11,10 +11,11 @@ use solidcore::teeth::section as ksection;
 use solidcore::teeth::shaft_spline as ks;
 use solidcore::SolidError;
 use solidcore_record::shaft_spline::{
-    AxisGap, ChamferSection, ChamferSize, ChordGap, CutterSection, EndChamfer, LoopPiece,
-    MasterArc, MasterPlaced, OutlineLoop, OutlinePiece, RoundFace, SeatFrame, SeatRefusal,
-    SpaceSection, SplineCorner, SplineForm, SplineMade, SplineMake, SplineMaster, SplineNumbers,
-    SplinePlan, SplineRefusal, ToothOutline, ToothRole,
+    AxisGap, ChamferRefusal, ChamferSection, ChamferSize, ChordGap, CutterSection, EndChamfer,
+    LoopPiece, MasterArc, MasterPlaced, OutlineLoop, OutlinePiece, PlanRefusal, ProfileWhy,
+    RequiredUnit, RoundFace, SeatFrame, SeatRefusal, SpaceRegion, SpaceSection, SpacedTooth,
+    SplineCorner, SplineForm, SplineMade, SplineMake, SplineMaster, SplineNumbers, SplinePlan,
+    SplineQuantity, SplineRefusal, ToothOutline, ToothRole, ToothWhy,
 };
 
 use crate::{record_plane, record_seg2, record_vec2, record_vec3, vec3};
@@ -129,24 +130,286 @@ pub fn record_made(m: &ks::SplineMade) -> SplineMade {
     }
 }
 
-/// A refusal of the kernel's planner as the record's: the number to change and the words, which are
-/// the tooth failure's own Display (never `SolidError`'s, which names the operation first).
+/// A refusal of the kernel's tooth functions as the record's: the tooth failure as data, or for
+/// another error of the kernel's, the routine that refused.
 #[must_use]
 pub fn record_refusal(e: &SolidError) -> SplineRefusal {
-    SplineRefusal {
-        key: e
-            .teeth_failure()
-            .and_then(TeethFailure::key)
-            .map(str::to_string),
-        words: refusal_words(e),
+    e.teeth_failure().map_or_else(
+        || SplineRefusal::Kernel {
+            operation: e.operation().to_string(),
+        },
+        record_failure,
+    )
+}
+
+/// A kernel tooth failure as the record's.
+#[must_use]
+pub fn record_failure(f: &kt::TeethFailure) -> SplineRefusal {
+    match *f {
+        kt::TeethFailure::OutOfRange {
+            what,
+            value,
+            above,
+            up_to,
+        } => SplineRefusal::OutOfRange {
+            what: what.to_string(),
+            value,
+            above,
+            up_to,
+        },
+        kt::TeethFailure::Invalid(why) => SplineRefusal::Invalid {
+            why: record_why(why),
+        },
+        kt::TeethFailure::Refused(ref refusal) => SplineRefusal::Refused {
+            refusal: record_plan_refusal(refusal),
+        },
+        kt::TeethFailure::NotProved {
+            what,
+            asked,
+            reached,
+        } => SplineRefusal::NotProved {
+            what: what.to_string(),
+            asked,
+            reached,
+        },
     }
 }
 
-/// The words of a kernel tooth refusal: the tooth failure's Display; another error's Display.
+/// A kernel refusal of the shaft-spline planner as the record's.
 #[must_use]
-pub fn refusal_words(e: &SolidError) -> String {
-    e.teeth_failure()
-        .map_or_else(|| e.to_string(), ToString::to_string)
+pub fn record_plan_refusal(r: &kt::PlanRefusal) -> PlanRefusal {
+    let q = record_quantity;
+    match *r {
+        kt::PlanRefusal::Number {
+            quantity,
+            what,
+            value,
+            above,
+            up_to,
+        } => PlanRefusal::Number {
+            quantity: quantity.map(q),
+            what: what.to_string(),
+            value,
+            above,
+            up_to,
+        },
+        kt::PlanRefusal::Reason { quantity, why } => PlanRefusal::Reason {
+            quantity: quantity.map(q),
+            why: record_why(why),
+        },
+        kt::PlanRefusal::Unproved {
+            quantity,
+            what,
+            asked,
+            reached,
+        } => PlanRefusal::Unproved {
+            quantity: quantity.map(q),
+            what: what.to_string(),
+            asked,
+            reached,
+        },
+        kt::PlanRefusal::MasterToothOut => PlanRefusal::MasterToothOut,
+        kt::PlanRefusal::MasterWideTooth => PlanRefusal::MasterWideTooth,
+        kt::PlanRefusal::NotANumber { quantity } => PlanRefusal::NotANumber {
+            quantity: q(quantity),
+        },
+        kt::PlanRefusal::Required { quantity, unit } => PlanRefusal::Required {
+            quantity: q(quantity),
+            unit: record_unit(unit),
+        },
+        kt::PlanRefusal::LengthRange { least, most, value } => {
+            PlanRefusal::LengthRange { least, most, value }
+        }
+        kt::PlanRefusal::HubDiameterWithoutHub => PlanRefusal::HubDiameterWithoutHub,
+        kt::PlanRefusal::HubDiameterRequired => PlanRefusal::HubDiameterRequired,
+        kt::PlanRefusal::MasterAngleWithoutMaster => PlanRefusal::MasterAngleWithoutMaster,
+        kt::PlanRefusal::MasterAngleRange { value } => PlanRefusal::MasterAngleRange { value },
+        kt::PlanRefusal::ChamferRange {
+            quantity,
+            most,
+            value,
+        } => PlanRefusal::ChamferRange {
+            quantity: q(quantity),
+            most,
+            value,
+        },
+        kt::PlanRefusal::CutterNotANumber { most } => PlanRefusal::CutterNotANumber { most },
+        kt::PlanRefusal::CutterTooSmall { at_least } => PlanRefusal::CutterTooSmall { at_least },
+        kt::PlanRefusal::HubDiameterTooLarge { most, value } => {
+            PlanRefusal::HubDiameterTooLarge { most, value }
+        }
+        kt::PlanRefusal::NoRim { at_least } => PlanRefusal::NoRim { at_least },
+        kt::PlanRefusal::ChamferShapeWithout { quantity, chamfer } => {
+            PlanRefusal::ChamferShapeWithout {
+                quantity: q(quantity),
+                chamfer: q(chamfer),
+            }
+        }
+        kt::PlanRefusal::ChamferBothShapes {
+            distance2,
+            angle,
+            chamfer,
+        } => PlanRefusal::ChamferBothShapes {
+            distance2: q(distance2),
+            angle: q(angle),
+            chamfer: q(chamfer),
+        },
+        kt::PlanRefusal::ChamferDistanceRange {
+            quantity,
+            most,
+            value,
+        } => PlanRefusal::ChamferDistanceRange {
+            quantity: q(quantity),
+            most,
+            value,
+        },
+        kt::PlanRefusal::ChamferAngleRange { quantity, value } => PlanRefusal::ChamferAngleRange {
+            quantity: q(quantity),
+            value,
+        },
+        kt::PlanRefusal::NotAProfile(why) => PlanRefusal::NotAProfile {
+            why: record_profile_why(why),
+        },
+    }
+}
+
+/// Why a kernel tooth outline is no profile, as the record's.
+#[must_use]
+pub fn record_profile_why(w: kt::ProfileWhy) -> ProfileWhy {
+    match w {
+        kt::ProfileWhy::NotFitted => ProfileWhy::NotFitted,
+        kt::ProfileWhy::Spline(why) => ProfileWhy::Spline(record_why(why)),
+    }
+}
+
+/// A kernel unit of a required number as the record's.
+#[must_use]
+pub fn record_unit(u: kt::RequiredUnit) -> RequiredUnit {
+    match u {
+        kt::RequiredUnit::Mm => RequiredUnit::Mm,
+        kt::RequiredUnit::MmBothSidesOnPitch => RequiredUnit::MmBothSidesOnPitch,
+        kt::RequiredUnit::MmEachSideSquareToFlanks => RequiredUnit::MmEachSideSquareToFlanks,
+        kt::RequiredUnit::MmDownTheFlank => RequiredUnit::MmDownTheFlank,
+        kt::RequiredUnit::MmRoundRadius => RequiredUnit::MmRoundRadius,
+    }
+}
+
+/// A kernel number of a shaft spline, as a refusal names it, as the record's.
+#[must_use]
+pub fn record_quantity(q: kt::SplineQuantity) -> SplineQuantity {
+    match q {
+        kt::SplineQuantity::Teeth => SplineQuantity::Teeth,
+        kt::SplineQuantity::Length => SplineQuantity::Length,
+        kt::SplineQuantity::Module => SplineQuantity::Module,
+        kt::SplineQuantity::PressureAngle => SplineQuantity::PressureAngle,
+        kt::SplineQuantity::Addendum => SplineQuantity::Addendum,
+        kt::SplineQuantity::Dedendum => SplineQuantity::Dedendum,
+        kt::SplineQuantity::RootFillet => SplineQuantity::RootFillet,
+        kt::SplineQuantity::ProfileShift => SplineQuantity::ProfileShift,
+        kt::SplineQuantity::Thinning => SplineQuantity::Thinning,
+        kt::SplineQuantity::HubAddendum => SplineQuantity::HubAddendum,
+        kt::SplineQuantity::TipClearance => SplineQuantity::TipClearance,
+        kt::SplineQuantity::FormClearance => SplineQuantity::FormClearance,
+        kt::SplineQuantity::MajorDiameter => SplineQuantity::MajorDiameter,
+        kt::SplineQuantity::MinorDiameter => SplineQuantity::MinorDiameter,
+        kt::SplineQuantity::ToothWidth => SplineQuantity::ToothWidth,
+        kt::SplineQuantity::FlankAngle => SplineQuantity::FlankAngle,
+        kt::SplineQuantity::RootRound => SplineQuantity::RootRound,
+        kt::SplineQuantity::TipSize => SplineQuantity::TipSize,
+        kt::SplineQuantity::MajorClearance => SplineQuantity::MajorClearance,
+        kt::SplineQuantity::MinorClearance => SplineQuantity::MinorClearance,
+        kt::SplineQuantity::HubTipRound => SplineQuantity::HubTipRound,
+        kt::SplineQuantity::SideClearance => SplineQuantity::SideClearance,
+        kt::SplineQuantity::HubRootRound => SplineQuantity::HubRootRound,
+        kt::SplineQuantity::HubDiameter => SplineQuantity::HubDiameter,
+        kt::SplineQuantity::MasterSpline => SplineQuantity::MasterSpline,
+        kt::SplineQuantity::MasterAngle => SplineQuantity::MasterAngle,
+        kt::SplineQuantity::CutterDiameter => SplineQuantity::CutterDiameter,
+        kt::SplineQuantity::EndChamfer => SplineQuantity::EndChamfer,
+        kt::SplineQuantity::EntryChamfer => SplineQuantity::EntryChamfer,
+        kt::SplineQuantity::EndChamferDistance2 => SplineQuantity::EndChamferDistance2,
+        kt::SplineQuantity::EndChamferAngle => SplineQuantity::EndChamferAngle,
+        kt::SplineQuantity::EntryChamferDistance2 => SplineQuantity::EntryChamferDistance2,
+        kt::SplineQuantity::EntryChamferAngle => SplineQuantity::EntryChamferAngle,
+    }
+}
+
+/// A kernel reason why numbers make no teeth as the record's.
+#[must_use]
+pub fn record_why(w: kt::Why) -> ToothWhy {
+    match w {
+        kt::Why::NotASpline => ToothWhy::NotASpline,
+        kt::Why::SourceTooCoarse => ToothWhy::SourceTooCoarse,
+        kt::Why::ToleranceTooFineForSize => ToothWhy::ToleranceTooFineForSize,
+        kt::Why::SplineNotWithin => ToothWhy::SplineNotWithin,
+        kt::Why::FittedNotFinite => ToothWhy::FittedNotFinite,
+        kt::Why::CurveHasNoLength => ToothWhy::CurveHasNoLength,
+        kt::Why::FitNotSolvable => ToothWhy::FitNotSolvable,
+        kt::Why::SystemNotSquare => ToothWhy::SystemNotSquare,
+        kt::Why::TooManyControlPoints => ToothWhy::TooManyControlPoints,
+        kt::Why::CurvePointCount => ToothWhy::CurvePointCount,
+        kt::Why::RunNotOnePiece => ToothWhy::RunNotOnePiece,
+        kt::Why::RunNotJoined => ToothWhy::RunNotJoined,
+        kt::Why::RunEmpty => ToothWhy::RunEmpty,
+        kt::Why::RunNotFinite => ToothWhy::RunNotFinite,
+        kt::Why::RunTooLong => ToothWhy::RunTooLong,
+        kt::Why::FilletMissesFlank => ToothWhy::FilletMissesFlank,
+        kt::Why::ToothThickness => ToothWhy::ToothThickness,
+        kt::Why::RootAboveTipRound => ToothWhy::RootAboveTipRound,
+        kt::Why::RootInsideAxis => ToothWhy::RootInsideAxis,
+        kt::Why::TipRoundsOverlap => ToothWhy::TipRoundsOverlap,
+        kt::Why::CutThrough => ToothWhy::CutThrough,
+        kt::Why::FilletsCross => ToothWhy::FilletsCross,
+        kt::Why::NoFlankLeft => ToothWhy::NoFlankLeft,
+        kt::Why::PointedBelowTip => ToothWhy::PointedBelowTip,
+        kt::Why::SpacesAsWideAsPitch => ToothWhy::SpacesAsWideAsPitch,
+        kt::Why::TipsBelowBase => ToothWhy::TipsBelowBase,
+        kt::Why::RootsInsideRound => ToothWhy::RootsInsideRound,
+        kt::Why::SpacesMeetAtTips => ToothWhy::SpacesMeetAtTips,
+        kt::Why::RootRoundsOverlap => ToothWhy::RootRoundsOverlap,
+        kt::Why::HubReachesFillet => ToothWhy::HubReachesFillet,
+        kt::Why::HubRoundsReachTips => ToothWhy::HubRoundsReachTips,
+        kt::Why::AngleNotANumber => ToothWhy::AngleNotANumber,
+        kt::Why::NoCornerOnSmallest => ToothWhy::NoCornerOnSmallest,
+        kt::Why::NoCornerOnLargest => ToothWhy::NoCornerOnLargest,
+        kt::Why::MasterAngleRange => ToothWhy::MasterAngleRange,
+        kt::Why::NotAShaftAndHub => ToothWhy::NotAShaftAndHub,
+        kt::Why::HubStartNotANumber => ToothWhy::HubStartNotANumber,
+        kt::Why::BodyNotFinite => ToothWhy::BodyNotFinite,
+        kt::Why::BodyCrossesItself => ToothWhy::BodyCrossesItself,
+        kt::Why::PartNotFinite => ToothWhy::PartNotFinite,
+        kt::Why::MeasureTooIntricate => ToothWhy::MeasureTooIntricate,
+        kt::Why::CurveTooFine => ToothWhy::CurveTooFine,
+        kt::Why::CrossingCheckTooIntricate => ToothWhy::CrossingCheckTooIntricate,
+        kt::Why::OutlineNotFinite => ToothWhy::OutlineNotFinite,
+        kt::Why::PiecesDoNotJoin => ToothWhy::PiecesDoNotJoin,
+        kt::Why::OutlineTooFine => ToothWhy::OutlineTooFine,
+        kt::Why::TooCoarse => ToothWhy::TooCoarse,
+        kt::Why::NotCounterClockwise => ToothWhy::NotCounterClockwise,
+        kt::Why::CrossesItself => ToothWhy::CrossesItself,
+        kt::Why::NoTopNearAngle => ToothWhy::NoTopNearAngle,
+        kt::Why::TopsMeet => ToothWhy::TopsMeet,
+        kt::Why::ToothAngleNotANumber => ToothWhy::ToothAngleNotANumber,
+        kt::Why::TooMuchTurning => ToothWhy::TooMuchTurning,
+        kt::Why::FirstAxisNotFinite => ToothWhy::FirstAxisNotFinite,
+        kt::Why::SecondNotFinite => ToothWhy::SecondNotFinite,
+        kt::Why::TurnsFreely => ToothWhy::TurnsFreely,
+        kt::Why::FlankMissesCircles => ToothWhy::FlankMissesCircles,
+        kt::Why::ChamferTooLarge => ToothWhy::ChamferTooLarge,
+        kt::Why::MajorRoundTooLarge => ToothWhy::MajorRoundTooLarge,
+        kt::Why::MinorRoundTooLarge => ToothWhy::MinorRoundTooLarge,
+        kt::Why::TipCornersMeet => ToothWhy::TipCornersMeet,
+        kt::Why::TeethMeetAtRoot => ToothWhy::TeethMeetAtRoot,
+        kt::Why::HubRootRoundsMeet => ToothWhy::HubRootRoundsMeet,
+        kt::Why::HubTeethTooNarrow => ToothWhy::HubTeethTooNarrow,
+        kt::Why::NoStraightFlank => ToothWhy::NoStraightFlank,
+        kt::Why::HubRootRoundsTooClose => ToothWhy::HubRootRoundsTooClose,
+        kt::Why::HubTipsTooClose => ToothWhy::HubTipsTooClose,
+        kt::Why::MinorNotSmaller => ToothWhy::MinorNotSmaller,
+        kt::Why::MinorClearanceTooLarge => ToothWhy::MinorClearanceTooLarge,
+        kt::Why::FlanksParallel => ToothWhy::FlanksParallel,
+        kt::Why::FlanksNearlyParallel => ToothWhy::FlanksNearlyParallel,
+    }
 }
 
 /// A record role of an outline's piece as the kernel's.
@@ -305,6 +568,18 @@ pub fn record_plan(p: &ks::SplinePlan) -> SplinePlan {
         tooth_at: p.tooth_at,
         end_chamfer: p.end_chamfer.as_ref().map(record_chamfer_size),
         entry_chamfer: p.entry_chamfer.as_ref().map(record_chamfer_size),
+        shaft_seam: p.shaft_seam,
+        hub_seam: p.hub_seam,
+        spaced_teeth: p.spaced_teeth.iter().map(record_spaced_tooth).collect(),
+    }
+}
+
+/// A kernel tooth with a space after it as the record's.
+#[must_use]
+pub fn record_spaced_tooth(t: &ks::SpacedTooth) -> SpacedTooth {
+    SpacedTooth {
+        tooth: t.tooth,
+        angle: t.angle,
     }
 }
 
@@ -427,13 +702,36 @@ pub fn record_chamfer_section(s: &ksection::ChamferSection) -> ChamferSection {
     }
 }
 
-/// A kernel section of a tooth space as the record's.
+/// A kernel refusal of a chamfer's section as the record's.
 #[must_use]
-pub fn record_section(s: &KernelSection) -> SpaceSection {
+pub fn record_chamfer_refusal(r: ksection::ChamferRefusal) -> ChamferRefusal {
+    match r {
+        ksection::ChamferRefusal::NotFinite => ChamferRefusal::NotFinite,
+        ksection::ChamferRefusal::NoSize => ChamferRefusal::NoSize,
+        ksection::ChamferRefusal::NoCorner => ChamferRefusal::NoCorner,
+        ksection::ChamferRefusal::ReachesAxis => ChamferRefusal::ReachesAxis,
+    }
+}
+
+/// A kernel cross-section of a tooth space as the record's.
+#[must_use]
+pub fn record_space_region(r: &ksection::SpaceRegion) -> SpaceRegion {
+    SpaceRegion {
+        segs: r.segs.iter().map(record_seg2).collect(),
+        spans: r.spans.clone(),
+        joints: r.joints.iter().copied().map(record_vec2).collect(),
+    }
+}
+
+/// A kernel section of a tooth space as the record's, with the tolerance of the outline it was
+/// made from (`tolerance`), which its floor's splines are held to.
+#[must_use]
+pub fn record_section(s: &KernelSection, tolerance: f64) -> SpaceSection {
     SpaceSection {
         floor: s.floor.iter().map(record_piece).collect(),
         start: s.corners.0,
         end: s.corners.1,
         apart: s.apart,
+        tolerance,
     }
 }

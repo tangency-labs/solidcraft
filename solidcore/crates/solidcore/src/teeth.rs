@@ -29,8 +29,11 @@
 //!   whole spline.
 //! - [`fit`]: the point curves of an outline turned into single B-splines within a stated tolerance
 //!   of the true curve, with as few control points as the fit finds, joining smoothly where the
-//!   curve does and keeping its corners; the cubic ones also as Bezier segments. What a CAD kernel
-//!   holds as one edge.
+//!   curve does and keeping its corners; the cubic ones also as Bezier segments, and any spline as
+//!   the Bezier pieces of a profile, a degree a profile does not hold lowered within a stated
+//!   tolerance. What a CAD kernel holds as one edge. The splines are the kernel's NURBS curves:
+//!   evaluated, solved for, cut into pieces and bounded by the kernel's own routines
+//!   ([`crate::nurbs`]).
 //! - [`shaft_spline`]: a spline on a shaft and in its hub planned from one set of numbers, with
 //!   every refusal naming the number to change.
 //! - [`seat`]: where a spline sits on a round face of a part (the frame at its free end, angle 0
@@ -109,6 +112,7 @@ pub mod master_spline;
 pub mod mesh;
 pub mod outline;
 pub mod pair;
+pub mod round_face;
 pub mod seat;
 pub mod section;
 pub mod shaft_spline;

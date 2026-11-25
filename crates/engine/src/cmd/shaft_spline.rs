@@ -407,7 +407,7 @@ fn add_spline(s: &mut Session, p: &Value) -> Result<Value> {
     let mut known = true;
     if let Some(at) = shaft {
         match solidcraft_doc::shaft_radius_at(&s.model.state(), at) {
-            Some(radius) => solidcraft_doc::shaft_spline::fit_to_shaft_within(&mut asked.numbers, radius),
+            Some(radius) => asked.numbers = solidcraft_doc::shaft_spline::fit_to_shaft_within(&asked.numbers, radius),
             None => known = !fitting,
         }
     }
@@ -581,7 +581,7 @@ pub fn shaft_spline_preview(p: &Value) -> std::result::Result<SplinePreview, Spl
         circles.push((SplineCircle::HubOutside, od / 2.0));
     }
     // The outlines as the kernel's points: the hub's turned to lie on the shaft.
-    let points = |outline: &ToothOutline, turn: f64| outline_points(outline, turn).map_err(|words| SplineRefusal { key: None, words });
+    let points = |outline: &ToothOutline, turn: f64| outline_points(outline, turn);
     let outlines = vec![
         SplineOutline { part: SplinePart::Shaft, made: asked.numbers.with_shaft, points: points(&planned.shaft, 0.0)? },
         SplineOutline { part: SplinePart::Hub, made: asked.numbers.with_hub, points: points(&planned.hub, planned.hub_start)? },

@@ -10,8 +10,10 @@
 use std::collections::BTreeSet;
 use std::f64::consts::PI;
 
-use super::common::{operation, refusal, Dice, HOSTILE, HOSTILE_COUNTS};
-use crate::error::teeth::{PlanRefusal, TeethFailure, Why, CHORD, FILLET_SEPARATION, FIT_DISTANCE};
+use super::common::{failure, operation, Dice, HOSTILE, HOSTILE_COUNTS};
+use crate::error::teeth::{
+    PlanRefusal, SplineQuantity, TeethFailure, Why, CHORD, FILLET_SEPARATION, FIT_DISTANCE,
+};
 use crate::error::ErrorKind;
 use crate::teeth::involute::{External, Fit, Internal};
 use crate::teeth::master_spline::{self, Circle, Form as MasterForm};
@@ -34,7 +36,7 @@ const PUBLIC: &[&str] = &[
     "bspline::breaks",
     "fit::fitted",
     "fit::fit",
-    "fit::solve_symmetric",
+    "fit::profile_pieces",
     "fit::bezier_pieces",
     "fit::one_piece",
     "fit::cubic_beziers",
@@ -84,8 +86,19 @@ const PUBLIC: &[&str] = &[
     "pair::Pair::gap_at",
     "pair::Pair::through",
     "pair::Pair::through_a_cycle",
+    "round_face::End::shut",
+    "round_face::End::run_out",
+    "round_face::End::run_past",
+    "round_face::End::carried",
+    "round_face::into_seat",
+    "round_face::extent",
+    "round_face::far_end",
+    "round_face::past_end",
+    "round_face::stands_over",
+    "round_face::beside_clear",
+    "round_face::whole_band",
+    "round_face::grow_block",
     "seat::normal",
-    "seat::frame_through",
     "seat::angle_zero",
     "seat::off_cylinder",
     "seat::nearer_start",
@@ -96,11 +109,16 @@ const PUBLIC: &[&str] = &[
     "seat::axis_gap",
     "seat::chord_gap",
     "seat::centre_angle",
-    "seat::angles_apart",
-    "seat::reach_along",
+    "seat::copy_turn",
+    "seat::turn_tells_sense",
+    "seat::lies_turned_back",
+    "seat::quarter_turn_in",
+    "seat::lies_inward",
     "seat::points_apart",
+    "section::tooth_at",
     "section::outline_loop",
     "section::cutter_section",
+    "section::space_region",
     "section::chamfer_section",
     "section::chamfer_plane",
     "shaft_spline::module_for_major_radius",
@@ -729,20 +747,6 @@ fn sweep_fit(s: &mut Sweep) {
     }
     let mut dice = Dice(0xF17);
     for round in 0..2000 {
-        let size = dice.roll() % 6;
-        let matrix: Vec<f64> = (0..size * size + round % 3)
-            .map(|_| dice.pick(&HOSTILE))
-            .collect();
-        let right: Vec<f64> = (0..size + round % 2).map(|_| dice.pick(&HOSTILE)).collect();
-        let _ = s.checked("fit::solve_symmetric", || {
-            fit::solve_symmetric(size, &matrix, &right)
-        });
-        let identity: Vec<f64> = (0..size * size)
-            .map(|i| if i % (size + 1) == 0 { 2.0 } else { 0.1 })
-            .collect();
-        let _ = s.checked("fit::solve_symmetric", || {
-            fit::solve_symmetric(size, &identity, &right)
-        });
         let degree = dice.roll() % 12;
         let count = dice.roll() % 14;
         let control: Vec<Point> = (0..count)
@@ -756,6 +760,9 @@ fn sweep_fit(s: &mut Sweep) {
         }
         let _ = s.checked("fit::bezier_pieces", || {
             fit::bezier_pieces(degree, &knots, &control)
+        });
+        let _ = s.checked("fit::profile_pieces", || {
+            fit::profile_pieces(degree, &knots, &control, dice.pick(&HOSTILE))
         });
         let _ = s.checked("fit::cubic_beziers", || {
             fit::cubic_beziers(&knots, &control)
@@ -986,6 +993,177 @@ fn a_serration_with_all_but_parallel_flanks_has_no_sharp_tip_to_give() {
     );
 }
 
+/// Hostile seats, extents, probe answers and band readings through the readings of a body on and
+/// past a round face. A probe may be asked for at most [`round_face::MOST_PROBES`] times in one
+/// reading.
+fn sweep_round_face(s: &mut Sweep) {
+    use crate::eval::Frame;
+    use crate::teeth::round_face::{self, BandEdge, BandFace, End, Extent, Met, Round};
+    use crate::teeth::seat::SeatFrame;
+    use crate::Vec3;
+
+    let v = |k: usize| Vec3::new(arg(k), arg(k + 1), arg(k + 2));
+    let plain_frame = Frame {
+        origin: [0.0, 0.0, 0.0],
+        x_axis: [1.0, 0.0, 0.0],
+        y_axis: [0.0, 1.0, 0.0],
+    };
+    let plain = SeatFrame {
+        plane: plain_frame.clone(),
+        inward: 1.0,
+        room: 30.0,
+        at: Vec3::new(10.0, 0.0, 15.0),
+    };
+    for k in 0..HOSTILE.len() {
+        let hostile_frame = Frame {
+            origin: v(k).to_array(),
+            x_axis: v(k + 3).to_array(),
+            y_axis: v(k + 5).to_array(),
+        };
+        let hostile = SeatFrame {
+            plane: hostile_frame.clone(),
+            inward: arg(k + 1),
+            room: arg(k + 2),
+            at: v(k + 4),
+        };
+        let extents = [
+            Extent {
+                low: -2.0,
+                high: 30.0,
+                across: 12.0,
+            },
+            Extent {
+                low: arg(k),
+                high: arg(k + 1),
+                across: arg(k + 2),
+            },
+        ];
+        let answers = [
+            Met::Nothing,
+            Met::Unread,
+            Met::Piece {
+                min: [-11.0, -11.0, -1.0],
+                max: [11.0, 11.0, 0.0],
+            },
+            Met::Piece {
+                min: v(k).to_array(),
+                max: v(k + 1).to_array(),
+            },
+        ];
+        for seat in [&plain, &hostile] {
+            let _ = s.call("round_face::into_seat", || round_face::into_seat(seat));
+            let _ = s.call("round_face::extent", || {
+                round_face::extent(seat, v(k).to_array(), v(k + 2).to_array())
+            });
+            let _ = s.call("round_face::far_end", || round_face::far_end(seat));
+            for body in extents {
+                for answer in answers {
+                    let mut asked = 0_usize;
+                    let mut probe = |_: &round_face::Probe| {
+                        asked += 1;
+                        answer
+                    };
+                    for (radius, reach) in [(10.0, 9.0), (arg(k + 3), arg(k + 4))] {
+                        let end = s.call("round_face::past_end", || {
+                            round_face::past_end(
+                                seat,
+                                radius,
+                                k % 2 == 0,
+                                reach,
+                                Some(body),
+                                &mut probe,
+                            )
+                        });
+                        let _ = s.call("round_face::End::run_out", || end.run_out());
+                        let _ = s.call("round_face::End::run_past", || end.run_past(arg(k)));
+                        let _ = s.call("round_face::End::carried", || {
+                            end.carried(arg(k + 1), arg(k + 2))
+                        });
+                    }
+                    let _ = s.call("round_face::stands_over", || {
+                        round_face::stands_over(
+                            seat,
+                            arg(k),
+                            body,
+                            arg(k + 1),
+                            arg(k + 2),
+                            arg(k + 3),
+                            &mut probe,
+                        )
+                    });
+                    let _ = s.call("round_face::stands_over", || {
+                        round_face::stands_over(seat, 10.0, body, 10.0, 0.0, 5.0, &mut probe)
+                    });
+                    let _ = s.call("round_face::beside_clear", || {
+                        round_face::beside_clear(seat, arg(k), arg(k + 1), &mut probe)
+                    });
+                    let _ = s.call("round_face::beside_clear", || {
+                        round_face::beside_clear(seat, 10.0, 12.0, &mut probe)
+                    });
+                    assert!(
+                        asked <= 6 * round_face::MOST_PROBES,
+                        "{asked} probes in six readings"
+                    );
+                }
+                let _ = s.call("round_face::grow_block", || {
+                    round_face::grow_block(seat, arg(k), body, arg(k + 1), arg(k + 2), arg(k + 3))
+                });
+                let _ = s.call("round_face::grow_block", || {
+                    round_face::grow_block(seat, 10.0, body, 1.0, 0.5, 0.5)
+                });
+            }
+            let round = |frame: &Frame, radius: f64| {
+                Some(Round {
+                    frame: frame.clone(),
+                    radius,
+                })
+            };
+            let faces = [
+                BandFace {
+                    cylinder: round(&plain_frame, 10.0),
+                    edges: vec![
+                        BandEdge {
+                            index: 0,
+                            circle: round(&plain_frame, 10.0),
+                            ..BandEdge::default()
+                        },
+                        BandEdge {
+                            index: 1,
+                            line: true,
+                            ends: Some([v(k), v(k + 1)]),
+                            ..BandEdge::default()
+                        },
+                    ],
+                },
+                BandFace {
+                    cylinder: round(&hostile_frame, arg(k)),
+                    edges: vec![
+                        BandEdge {
+                            index: 2,
+                            circle: round(&hostile_frame, arg(k + 1)),
+                            ..BandEdge::default()
+                        },
+                        BandEdge {
+                            index: 3,
+                            ends: Some([v(k + 2), v(k + 3)]),
+                            points: vec![v(k), v(k + 1), v(k + 2)],
+                            ..BandEdge::default()
+                        },
+                    ],
+                },
+                BandFace::default(),
+            ];
+            let _ = s.call("round_face::whole_band", || {
+                round_face::whole_band(seat, arg(k), &faces)
+            });
+            let _ = s.call("round_face::whole_band", || {
+                round_face::whole_band(seat, 10.0, &faces)
+            });
+        }
+        let _ = s.call("round_face::End::shut", || End::shut(arg(k)));
+    }
+}
+
 #[test]
 fn the_list_names_every_public_function_of_the_sources() {
     let found = public_functions_in_the_sources();
@@ -1014,6 +1192,7 @@ fn hostile_numbers_through_every_public_function_never_panic_or_hang() {
     sweep_master_spline(&mut s, &mut dice);
     sweep_shaft_spline(&mut s, &mut dice);
     sweep_seat_and_section(&mut s);
+    sweep_round_face(&mut s);
     let not_called: Vec<&str> = PUBLIC
         .iter()
         .copied()
@@ -1099,13 +1278,16 @@ fn sweep_seat_and_section(s: &mut Sweep) {
             let _ = s.call("seat::centre_angle", || {
                 seat::centre_angle(plane, v(k), v(k + 2))
             });
+            let _ = s.call("seat::lies_turned_back", || {
+                seat::lies_turned_back(plane, v(k), v(k + 2), arg(k), arg(k + 1))
+            });
+            let _ = s.call("seat::lies_inward", || {
+                seat::lies_inward(plane, arg(k), v(k), v(k + 2))
+            });
             let _ = s.call("section::chamfer_plane", || {
                 section::chamfer_plane(plane, arg(k), arg(k + 1))
             });
         }
-        let _ = s.call("seat::frame_through", || {
-            seat::frame_through(v(k), v(k + 1), v(k + 2))
-        });
         let _ = s.call("seat::angle_zero", || seat::angle_zero(v(k)));
         for face in [&plain_face, &hostile_face] {
             let _ = s.call("seat::off_cylinder", || seat::off_cylinder(face, v(k)));
@@ -1124,11 +1306,14 @@ fn sweep_seat_and_section(s: &mut Sweep) {
         let _ = s.call("seat::chord_gap", || {
             seat::chord_gap(v(k), v(k + 1), v(k + 2))
         });
-        let _ = s.call("seat::angles_apart", || {
-            seat::angles_apart(arg(k), arg(k + 1))
+        let _ = s.call("seat::copy_turn", || {
+            seat::copy_turn(arg(k), arg(k + 1), k % 2 == 0)
         });
-        let _ = s.call("seat::reach_along", || {
-            seat::reach_along(v(k), v(k + 1), v(k + 2), v(k + 3))
+        let _ = s.call("seat::turn_tells_sense", || {
+            seat::turn_tells_sense(arg(k), arg(k + 1))
+        });
+        let _ = s.call("seat::quarter_turn_in", || {
+            seat::quarter_turn_in(arg(k), k % 2 == 0)
         });
         let _ = s.call("seat::points_apart", || {
             seat::points_apart([arg(k), arg(k + 1)], [arg(k + 2), 1.0])
@@ -1136,11 +1321,14 @@ fn sweep_seat_and_section(s: &mut Sweep) {
         // The loop of an outline: a hostile pitch, largest radius and turn on a real tooth, then
         // hostile counts of teeth.
         let _ = s.checked("section::outline_loop", || {
-            section::outline_loop(6, arg(k), &tooth, arg(k + 1), arg(k + 2))
+            section::outline_loop(6, arg(k), &tooth, arg(k + 1), arg(k + 2), arg(k + 3))
         });
         let teeth = HOSTILE_COUNTS[k % HOSTILE_COUNTS.len()];
+        let _ = s.call("section::tooth_at", || {
+            section::tooth_at(teeth, arg(k), arg(k + 1))
+        });
         let _ = s.checked("section::outline_loop", || {
-            section::outline_loop(teeth.min(2001), 0.1, &tooth, 10.0, arg(k))
+            section::outline_loop(teeth.min(2001), 0.1, &tooth, 10.0, arg(k), 1e-3)
         });
         let _ = s.checked("section::cutter_section", || {
             section::cutter_section(
@@ -1150,7 +1338,7 @@ fn sweep_seat_and_section(s: &mut Sweep) {
                 arg(k + 2),
                 arg(k + 3),
                 arg(k + 4),
-                v(k),
+                arg(k + 5),
             )
         });
         let _ = s.checked("section::cutter_section", || {
@@ -1161,8 +1349,20 @@ fn sweep_seat_and_section(s: &mut Sweep) {
                 9.0,
                 arg(k),
                 arg(k + 1),
-                Vec3::ZERO,
+                1e-3,
             )
+        });
+        let _ = s.checked("section::space_region", || {
+            section::space_region(
+                &tooth,
+                [arg(k), 1.0],
+                [1.0, arg(k + 1)],
+                arg(k + 2),
+                arg(k + 3),
+            )
+        });
+        let _ = s.checked("section::space_region", || {
+            section::space_region(&tooth, [10.0, 1.0], [10.0, -1.0], arg(k), 1e-3)
         });
         for outside in [true, false] {
             let chamfer = EndChamfer {
@@ -1437,10 +1637,16 @@ fn sweep_shaft_spline(s: &mut Sweep, dice: &mut Dice) {
                 _ => {}
             }
             // The numbers a spline cut on a shaft takes from the shaft, the shaft's radius hostile.
-            let mut fitted = n.clone();
-            s.call("shaft_spline::fit_to_shaft_within", || {
-                shaft_spline::fit_to_shaft_within(&mut fitted, arg(k));
+            let fitted = s.call("shaft_spline::fit_to_shaft_within", || {
+                shaft_spline::fit_to_shaft_within(&n, arg(k))
             });
+            // Only the size changes.
+            let kept = SplineNumbers {
+                module: n.module,
+                major_diameter: n.major_diameter,
+                ..fitted
+            };
+            assert_eq!(format!("{kept:?}"), format!("{n:?}"));
             // What decides whether involute teeth are fitted is the shaft's own outline: once
             // enough plans have been made, the numbers whose shaft is accepted are left out.
             let shaft_is_made =
@@ -1743,10 +1949,14 @@ fn old_plain(x: f64) -> String {
     }
 }
 
-/// The planner's key of a refusal, as it was: the first word in backticks, when it is lowercase or
+/// The planner's key of a refusal, as it was: the first word in backticks, when it is lowercase, digits or
 /// `_`.
 fn old_key(words: &str) -> Option<String> {
-    let is_key = |k: &&str| !k.is_empty() && k.chars().all(|c| c.is_ascii_lowercase() || c == '_');
+    let is_key = |k: &&str| {
+        !k.is_empty()
+            && k.chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+    };
     words.split('`').nth(1).filter(is_key).map(str::to_string)
 }
 
@@ -1898,24 +2108,54 @@ const SETS: &[(Tables, OldTables)] = &[
         &[OLD_STRAIGHT_FIT, OLD_SERRATION_SHAFT],
     ),
     (
-        &[(&[("teeth", "teeth")], &[])],
+        &[(&[("teeth", SplineQuantity::Teeth)], &[])],
         &[(&[("teeth", "teeth")], &[])],
     ),
 ];
 
-/// The planner's refusals as data give the keys and the words it gave when it built them from
-/// words: every reason and every refused number through every table set it asks, and the master
-/// spline's refusals, against a copy of the planner as it was; then each refusal of the planner's
-/// own checks against its words written out. The new refusals (a bound not proved) have no old
-/// counterpart and are asserted as they are meant.
+/// A quantity's name as the enum spells it, in lowercase words joined by `_`: the key the
+/// planner named it by before its refusals named their numbers in words.
+fn snake(q: SplineQuantity) -> String {
+    let mut out = String::new();
+    for c in format!("{q:?}").chars() {
+        if c.is_ascii_uppercase() {
+            if !out.is_empty() {
+                out.push('_');
+            }
+            out.push(c.to_ascii_lowercase());
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// The words a refusal of a tooth module's failure gives now, from the words it gave before: the
+/// number named by its key in backticks is named in words, and the master spline's forms no
+/// longer name the other form by its key.
+fn renamed(old: &str, quantity: Option<SplineQuantity>) -> String {
+    match (old_key(old), quantity) {
+        (Some(key), Some(q)) => old
+            .replacen(&format!("`{key}`"), q.words(), 1)
+            .replace(" (wide_tooth)", "")
+            .replace(" (tooth_out)", ""),
+        _ => old.to_string(),
+    }
+}
+
+/// The planner's refusals as data name the numbers the words it gave before named, and name
+/// them in words: every reason and every refused number through every table set it asks, and the
+/// master spline's refusals, against a copy of the planner as it was; then each refusal of the
+/// planner's own checks against its words before and now, written out. The refusals of a bound
+/// not proved have no old counterpart and are asserted as they are meant.
 #[test]
-fn the_planner_gives_todays_keys_and_words() {
+fn the_planner_names_the_numbers_it_named_before() {
     let mut compared = 0_usize;
     let mut mismatches: Vec<String> = Vec::new();
     let mut compare = |case: &dyn Fn() -> String, new: TeethFailure, old: &str| {
         compared += 1;
-        let found = (new.key().map(str::to_string), new.to_string());
-        let wanted = (old_key(old), old.to_string());
+        let found = (new.quantity().map(snake), new.to_string());
+        let wanted = (old_key(old), renamed(old, new.quantity()));
         if found != wanted {
             mismatches.push(format!("{}: {found:?}, before {wanted:?}", case()));
         }
@@ -2018,11 +2258,11 @@ fn the_planner_gives_todays_keys_and_words() {
             assert!(
                 matches!(
                     unproved,
-                    TeethFailure::Refused(PlanRefusal::Unproved { key: None, .. })
+                    TeethFailure::Refused(PlanRefusal::Unproved { quantity: None, .. })
                 ),
                 "set {set}: {unproved:?}"
             );
-            assert_eq!(unproved.key(), None, "set {set}");
+            assert_eq!(unproved.quantity(), None, "set {set}");
             assert_eq!(unproved.kind(), ErrorKind::Unsupported, "set {set}");
         }
     }
@@ -2040,28 +2280,28 @@ fn the_planner_gives_todays_keys_and_words() {
             matches!(
                 unproved,
                 TeethFailure::Refused(PlanRefusal::Unproved {
-                    key: Some("root_fillet"),
+                    quantity: Some(SplineQuantity::RootFillet),
                     what: FILLET_SEPARATION,
                     ..
                 })
             ),
             "{unproved:?}"
         );
-        assert_eq!(unproved.key(), Some("root_fillet"));
+        assert_eq!(unproved.quantity(), Some(SplineQuantity::RootFillet));
         assert_eq!(unproved.kind(), ErrorKind::Unsupported);
         assert!(
-            unproved.to_string().starts_with("`root_fillet`: "),
+            unproved.to_string().starts_with("the root fillet: "),
             "{unproved}"
         );
     }
 
-    // The planner's own checks, each against its words written out.
+    // The planner's own checks, each against its words before and now.
     let [straight_base, _, involute_base] = plan_bases();
     let made = shaft_spline::plan(&straight_base).expect("the straight-sided base");
     let (root, top) = made.pair.first.outline.radii();
     let margin = shaft_spline::tool_margin(top - root);
     let least = (top + margin) - root + margin;
-    let cases: Vec<(SplineNumbers, &str, String)> = vec![
+    let cases: Vec<(SplineNumbers, &str, String, String)> = vec![
         (
             SplineNumbers {
                 length: f64::NAN,
@@ -2069,6 +2309,7 @@ fn the_planner_gives_todays_keys_and_words() {
             },
             "length",
             "`length` must be a number".to_string(),
+            "the splined length must be a number".to_string(),
         ),
         (
             SplineNumbers {
@@ -2077,6 +2318,7 @@ fn the_planner_gives_todays_keys_and_words() {
             },
             "module",
             "`module` must be a number".to_string(),
+            "the module must be a number".to_string(),
         ),
         (
             SplineNumbers {
@@ -2085,6 +2327,7 @@ fn the_planner_gives_todays_keys_and_words() {
             },
             "module",
             "`module` is required (mm)".to_string(),
+            "the module is required (mm)".to_string(),
         ),
         (
             SplineNumbers {
@@ -2093,6 +2336,7 @@ fn the_planner_gives_todays_keys_and_words() {
             },
             "length",
             "`length` must be from 0.001 to 100000 mm, not 0".to_string(),
+            "the splined length must be from 0.001 to 100000 mm, not 0".to_string(),
         ),
         (
             SplineNumbers {
@@ -2102,6 +2346,8 @@ fn the_planner_gives_todays_keys_and_words() {
             "hub_diameter",
             "`hub_diameter` is the hub's outside diameter: give it only when `make` is hub or both"
                 .to_string(),
+            "the hub's outside diameter is for a hub that is made: give it only when a hub is made"
+                .to_string(),
         ),
         (
             SplineNumbers {
@@ -2110,6 +2356,7 @@ fn the_planner_gives_todays_keys_and_words() {
             },
             "hub_diameter",
             "`hub_diameter` is required to make the hub (mm, its outside diameter)".to_string(),
+            "the hub's outside diameter is required to make the hub (mm)".to_string(),
         ),
         (
             SplineNumbers {
@@ -2120,6 +2367,9 @@ fn the_planner_gives_todays_keys_and_words() {
             "`master_angle` is where the master spline sits: give it only with `master_spline` \
              tooth_out or wide_tooth"
                 .to_string(),
+            "the master spline's angle is where the master spline sits: give it only with a master \
+             spline"
+                .to_string(),
         ),
         (
             SplineNumbers {
@@ -2129,6 +2379,7 @@ fn the_planner_gives_todays_keys_and_words() {
             },
             "master_angle",
             "`master_angle` must be from -360 to 360 (degrees), not 400".to_string(),
+            "the master spline's angle must be from -360 to 360 (degrees), not 400".to_string(),
         ),
         (
             SplineNumbers {
@@ -2137,6 +2388,7 @@ fn the_planner_gives_todays_keys_and_words() {
             },
             "end_chamfer",
             "`end_chamfer` must be from 0 to 100000 mm, not -1".to_string(),
+            "the end chamfer must be from 0 to 100000 mm, not -1".to_string(),
         ),
         (
             SplineNumbers {
@@ -2145,6 +2397,7 @@ fn the_planner_gives_todays_keys_and_words() {
             },
             "entry_chamfer",
             "`entry_chamfer` must be from 0 to 100000 mm, not 200000".to_string(),
+            "the entry chamfer must be from 0 to 100000 mm, not 200000".to_string(),
         ),
         (
             SplineNumbers {
@@ -2155,6 +2408,9 @@ fn the_planner_gives_todays_keys_and_words() {
             "`end_chamfer_distance2` shapes the chamfer `end_chamfer` sets: give it only with \
              `end_chamfer`"
                 .to_string(),
+            "the end chamfer's second distance shapes the end chamfer: give it only with the end \
+             chamfer"
+                .to_string(),
         ),
         (
             SplineNumbers {
@@ -2164,6 +2420,9 @@ fn the_planner_gives_todays_keys_and_words() {
             "entry_chamfer_angle",
             "`entry_chamfer_angle` shapes the chamfer `entry_chamfer` sets: give it only with \
              `entry_chamfer`"
+                .to_string(),
+            "the entry chamfer's angle shapes the entry chamfer: give it only with the entry \
+             chamfer"
                 .to_string(),
         ),
         (
@@ -2177,6 +2436,9 @@ fn the_planner_gives_todays_keys_and_words() {
             "`end_chamfer_distance2` and `end_chamfer_angle` both set how far the chamfer \
              `end_chamfer` reaches across the end: give one of them, not both"
                 .to_string(),
+            "the end chamfer's second distance and the end chamfer's angle both set how far the \
+             end chamfer reaches across the end: give one of them, not both"
+                .to_string(),
         ),
         (
             SplineNumbers {
@@ -2186,6 +2448,8 @@ fn the_planner_gives_todays_keys_and_words() {
             },
             "entry_chamfer_distance2",
             "`entry_chamfer_distance2` must be more than 0 and at most 100000 mm, not 0"
+                .to_string(),
+            "the entry chamfer's second distance must be more than 0 and at most 100000 mm, not 0"
                 .to_string(),
         ),
         (
@@ -2197,6 +2461,9 @@ fn the_planner_gives_todays_keys_and_words() {
             "end_chamfer_distance2",
             "`end_chamfer_distance2` must be a number of more than 0 and at most 100000 mm"
                 .to_string(),
+            "the end chamfer's second distance must be a number of more than 0 and at most \
+             100000 mm"
+                .to_string(),
         ),
         (
             SplineNumbers {
@@ -2206,6 +2473,8 @@ fn the_planner_gives_todays_keys_and_words() {
             },
             "end_chamfer_angle",
             "`end_chamfer_angle` must be more than 0 and less than 90 (degrees), not 90"
+                .to_string(),
+            "the end chamfer's angle must be more than 0 and less than 90 (degrees), not 90"
                 .to_string(),
         ),
         (
@@ -2217,6 +2486,8 @@ fn the_planner_gives_todays_keys_and_words() {
             "entry_chamfer_angle",
             "`entry_chamfer_angle` must be a number of more than 0 and less than 90 (degrees)"
                 .to_string(),
+            "the entry chamfer's angle must be a number of more than 0 and less than 90 (degrees)"
+                .to_string(),
         ),
         (
             SplineNumbers {
@@ -2225,6 +2496,7 @@ fn the_planner_gives_todays_keys_and_words() {
             },
             "cutter_diameter",
             "`cutter_diameter` must be a number of at most 100000 mm".to_string(),
+            "the cutter's diameter must be a number of at most 100000 mm".to_string(),
         ),
         (
             SplineNumbers {
@@ -2237,6 +2509,11 @@ fn the_planner_gives_todays_keys_and_words() {
                  the depth of the teeth",
                 old_plain(2.0 * least)
             ),
+            format!(
+                "the cutter's diameter must be more than {} mm: the cutter's radius must reach \
+                 past the depth of the teeth",
+                old_plain(2.0 * least)
+            ),
         ),
         (
             SplineNumbers {
@@ -2245,6 +2522,7 @@ fn the_planner_gives_todays_keys_and_words() {
             },
             "hub_diameter",
             "`hub_diameter` must be at most 100000 mm, not 200000".to_string(),
+            "the hub's outside diameter must be at most 100000 mm, not 200000".to_string(),
         ),
         (
             SplineNumbers {
@@ -2254,6 +2532,9 @@ fn the_planner_gives_todays_keys_and_words() {
             "hub_diameter",
             "`hub_diameter` leaves no rim around the hub's teeth: it must be more than 31.4 mm"
                 .to_string(),
+            "the hub's outside diameter leaves no rim around the hub's teeth: it must be more than \
+             31.4 mm"
+                .to_string(),
         ),
         (
             SplineNumbers {
@@ -2262,11 +2543,19 @@ fn the_planner_gives_todays_keys_and_words() {
             },
             "tooth_width",
             "`tooth_width` cannot be negative, not -1".to_string(),
+            "the tooth width cannot be negative, not -1".to_string(),
         ),
     ];
-    for (n, key, words) in cases {
+    for (n, key, before, words) in cases {
         let planned = shaft_spline::plan(&n);
-        assert_eq!(refusal(&planned), Some((Some(key), words.clone())), "{n:?}");
+        let found = failure(&planned);
+        assert_eq!(
+            found.map(|f| (f.quantity().map(snake), f.to_string())),
+            Some((Some(key.to_string()), words.clone())),
+            "{n:?}"
+        );
+        // The number is the one the words before named.
+        assert_eq!(old_key(&before).as_deref(), Some(key), "{before}");
         assert_eq!(
             operation(&planned),
             Some("teeth::shaft_spline::plan"),
@@ -2348,12 +2637,62 @@ fn the_plan_makes_each_chamfer_as_its_numbers_say() {
             },
         ] {
             if let Err(e) = shaft_spline::plan(&n) {
-                let key = e.teeth_failure().and_then(TeethFailure::key);
+                let quantity = e.teeth_failure().and_then(TeethFailure::quantity);
                 assert!(
-                    matches!(key, Some("end_chamfer_distance2" | "entry_chamfer_angle")),
+                    matches!(
+                        quantity,
+                        Some(
+                            SplineQuantity::EndChamferDistance2 | SplineQuantity::EntryChamferAngle
+                        )
+                    ),
                     "{h}: {e}"
                 );
             }
+        }
+    }
+}
+
+/// The plan holds every angle a caller turns its tools by: a seam in a space of the shaft and one
+/// in a space of the hub, and each tooth with a space of its own after it, in order, the master
+/// spline's tooth left out. Every count of teeth the planner takes gives finite angles.
+#[test]
+fn the_plan_gives_its_seams_and_spaced_teeth() {
+    let [base, serrated, _] = plan_bases();
+    for n in [base.clone(), serrated] {
+        let made = shaft_spline::plan(&n).expect("the base");
+        let pitch = std::f64::consts::TAU / f64::from(n.teeth);
+        assert_eq!(made.spaced_teeth.len(), n.teeth as usize);
+        for (k, tooth) in made.spaced_teeth.iter().enumerate() {
+            assert_eq!(tooth.tooth as usize, k);
+            assert_eq!(
+                tooth.angle.to_bits(),
+                (pitch * f64::from(tooth.tooth)).to_bits()
+            );
+        }
+        assert_eq!(made.shaft_seam.to_bits(), (pitch * 0.5).to_bits());
+        assert_eq!(made.hub_seam.to_bits(), 0.0_f64.to_bits());
+    }
+    for master in [SplineMaster::ToothOut, SplineMaster::WideTooth] {
+        for angle in [0.0, 30.0, -359.0, 360.0] {
+            let made = shaft_spline::plan(&SplineNumbers {
+                master,
+                master_angle: Some(angle),
+                ..base.clone()
+            })
+            .expect("a master spline");
+            let placed = &made.master.as_ref().expect("placed").placement;
+            assert_eq!(made.spaced_teeth.len(), base.teeth as usize - 1);
+            assert!(made.spaced_teeth.iter().all(|t| t.tooth != placed.tooth));
+            assert!(made
+                .spaced_teeth
+                .windows(2)
+                .all(|pair| pair[0].tooth < pair[1].tooth));
+            let first = made.spaced_teeth.first().expect("a spaced tooth");
+            // The hub's seam lies over the first tooth that stands, the shaft's half a pitch on.
+            assert_eq!(made.hub_seam.to_bits(), first.angle.to_bits());
+            let half = made.tooth_pitch * 0.5;
+            assert!((made.shaft_seam - first.angle - half).abs() < 1e-12);
+            assert!(made.shaft_seam.is_finite() && placed.turn.is_finite());
         }
     }
 }

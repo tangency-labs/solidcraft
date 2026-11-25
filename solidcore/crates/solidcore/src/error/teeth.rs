@@ -5,8 +5,14 @@
 //! numbers. A number that is not finite or lies outside what is accepted is refused as
 //! [`TeethFailure::OutOfRange`]; numbers that are each acceptable but together make no teeth are
 //! refused as [`TeethFailure::Invalid`] with a typed reason ([`Why`]); the shaft-spline planner
-//! refuses as [`TeethFailure::Refused`] naming the number to change ([`PlanRefusal`]); and a bound
-//! that could not be proved within the work allowed is refused as [`TeethFailure::NotProved`].
+//! refuses as [`TeethFailure::Refused`] naming the number to change as a [`SplineQuantity`]
+//! ([`PlanRefusal`]); and a bound that could not be proved within the work allowed is refused as
+//! [`TeethFailure::NotProved`]. A refusal names a number of the spline by what it is, never by a
+//! key of an application: an application maps a [`SplineQuantity`] to its own parameter and
+//! words the refusal for its users. The `Display` here is plain English for logs and tests.
+//!
+//! The enums here are exhaustive: a record that mirrors them field for field
+//! (`solidcore-record`'s shaft spline) is checked against every variant when it is converted.
 //! Each records, for difftest only, the status the C++ would report (crate-private
 //! `comparison_status`, read through [`crate::SolidError::sm_status`]).
 //!
@@ -34,7 +40,6 @@ pub const FIT_DISTANCE: &str = "the distance of a fitted spline from its source"
 
 /// Why a set of numbers gives no teeth.
 #[derive(Clone, Copy, Debug, PartialEq)]
-#[non_exhaustive]
 pub enum TeethFailure {
     /// A number is not finite or lies outside what is accepted: above `above` and at most
     /// `up_to`.
@@ -50,8 +55,8 @@ pub enum TeethFailure {
     },
     /// Each number is acceptable, but together they do not make teeth: why, as a typed reason.
     Invalid(Why),
-    /// The shaft-spline planner's refusal: the number to change and why
-    /// (`crate::teeth::shaft_spline`).
+    /// The shaft-spline planner's refusal, or one of a tooth profile: the number to change and
+    /// why (`crate::teeth::shaft_spline`, `crate::teeth::section`).
     Refused(PlanRefusal),
     /// A bound could not be proved within the work allowed.
     NotProved {
@@ -67,7 +72,6 @@ pub enum TeethFailure {
 
 /// The reasons why numbers that are each acceptable make no teeth: one variant per sentence.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-#[non_exhaustive]
 pub enum Why {
     /// The knots and control points given are not a B-spline.
     NotASpline,
@@ -457,16 +461,203 @@ impl core::fmt::Display for Why {
     }
 }
 
-/// A refusal of the shaft-spline planner, as data: the number it is about and why. Its Display is
-/// the planner's words, letter for letter as they were.
+/// A number of a shaft spline that a refusal is about: one variant for each number of
+/// [`crate::teeth::shaft_spline::SplineNumbers`] the planner names. An application maps each to
+/// its own parameter; [`SplineQuantity::words`] names it in plain English.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SplineQuantity {
+    /// The count of teeth.
+    Teeth,
+    /// How far the teeth run along the axis.
+    Length,
+    /// The module of involute teeth.
+    Module,
+    /// The pressure angle of involute teeth.
+    PressureAngle,
+    /// The height of the shaft's teeth above the pitch circle.
+    Addendum,
+    /// The depth of the shaft's spaces below the pitch circle.
+    Dedendum,
+    /// The radius of the cutting tool's tip, the root fillet.
+    RootFillet,
+    /// The profile shift.
+    ProfileShift,
+    /// What is taken off each tooth's thickness.
+    Thinning,
+    /// The height of the hub's teeth inside the pitch circle.
+    HubAddendum,
+    /// The gap between the shaft's tips and the hub's roots.
+    TipClearance,
+    /// The least gap between the hub's tips and the start of the shaft's root fillet.
+    FormClearance,
+    /// The diameter over the shaft's tips.
+    MajorDiameter,
+    /// The diameter at the bottoms of the shaft's spaces.
+    MinorDiameter,
+    /// The width of a straight-sided tooth.
+    ToothWidth,
+    /// The angle between the two flanks of a serration.
+    FlankAngle,
+    /// The round where a flank meets the minor circle.
+    RootRound,
+    /// The size of a chamfered or rounded tip corner.
+    TipSize,
+    /// The gap at the major circle.
+    MajorClearance,
+    /// The gap at the minor circle.
+    MinorClearance,
+    /// The round on the tips of the hub's teeth.
+    HubTipRound,
+    /// The play between the flanks.
+    SideClearance,
+    /// The round at the roots of the hub's teeth.
+    HubRootRound,
+    /// The outside diameter of a new hub.
+    HubDiameter,
+    /// The master spline: which tooth is made different.
+    MasterSpline,
+    /// Where the middle of the master spline sits.
+    MasterAngle,
+    /// The diameter of the cutter that ends the tooth spaces of a shaft.
+    CutterDiameter,
+    /// The chamfer on the ends of a shaft's teeth.
+    EndChamfer,
+    /// The chamfer where the teeth run out of a hub's bore.
+    EntryChamfer,
+    /// How far the end chamfer runs across the end.
+    EndChamferDistance2,
+    /// The angle of the end chamfer to the round face.
+    EndChamferAngle,
+    /// How far the entry chamfer runs across the end.
+    EntryChamferDistance2,
+    /// The angle of the entry chamfer to the bore.
+    EntryChamferAngle,
+}
+
+impl SplineQuantity {
+    /// Every quantity, once, in the order of the enum (for tests and tables).
+    pub const ALL: &'static [SplineQuantity] = &[
+        SplineQuantity::Teeth,
+        SplineQuantity::Length,
+        SplineQuantity::Module,
+        SplineQuantity::PressureAngle,
+        SplineQuantity::Addendum,
+        SplineQuantity::Dedendum,
+        SplineQuantity::RootFillet,
+        SplineQuantity::ProfileShift,
+        SplineQuantity::Thinning,
+        SplineQuantity::HubAddendum,
+        SplineQuantity::TipClearance,
+        SplineQuantity::FormClearance,
+        SplineQuantity::MajorDiameter,
+        SplineQuantity::MinorDiameter,
+        SplineQuantity::ToothWidth,
+        SplineQuantity::FlankAngle,
+        SplineQuantity::RootRound,
+        SplineQuantity::TipSize,
+        SplineQuantity::MajorClearance,
+        SplineQuantity::MinorClearance,
+        SplineQuantity::HubTipRound,
+        SplineQuantity::SideClearance,
+        SplineQuantity::HubRootRound,
+        SplineQuantity::HubDiameter,
+        SplineQuantity::MasterSpline,
+        SplineQuantity::MasterAngle,
+        SplineQuantity::CutterDiameter,
+        SplineQuantity::EndChamfer,
+        SplineQuantity::EntryChamfer,
+        SplineQuantity::EndChamferDistance2,
+        SplineQuantity::EndChamferAngle,
+        SplineQuantity::EntryChamferDistance2,
+        SplineQuantity::EntryChamferAngle,
+    ];
+
+    /// The quantity in plain words, with its article.
+    #[must_use]
+    pub const fn words(self) -> &'static str {
+        match self {
+            Self::Teeth => "the count of teeth",
+            Self::Length => "the splined length",
+            Self::Module => "the module",
+            Self::PressureAngle => "the pressure angle",
+            Self::Addendum => "the addendum",
+            Self::Dedendum => "the dedendum",
+            Self::RootFillet => "the root fillet",
+            Self::ProfileShift => "the profile shift",
+            Self::Thinning => "the thinning",
+            Self::HubAddendum => "the hub's addendum",
+            Self::TipClearance => "the tip clearance",
+            Self::FormClearance => "the form clearance",
+            Self::MajorDiameter => "the major diameter",
+            Self::MinorDiameter => "the minor diameter",
+            Self::ToothWidth => "the tooth width",
+            Self::FlankAngle => "the flank angle",
+            Self::RootRound => "the root round",
+            Self::TipSize => "the size of the tip corners",
+            Self::MajorClearance => "the major clearance",
+            Self::MinorClearance => "the minor clearance",
+            Self::HubTipRound => "the round on the hub's tips",
+            Self::SideClearance => "the side clearance",
+            Self::HubRootRound => "the round at the hub's roots",
+            Self::HubDiameter => "the hub's outside diameter",
+            Self::MasterSpline => "the master spline",
+            Self::MasterAngle => "the master spline's angle",
+            Self::CutterDiameter => "the cutter's diameter",
+            Self::EndChamfer => "the end chamfer",
+            Self::EntryChamfer => "the entry chamfer",
+            Self::EndChamferDistance2 => "the end chamfer's second distance",
+            Self::EndChamferAngle => "the end chamfer's angle",
+            Self::EntryChamferDistance2 => "the entry chamfer's second distance",
+            Self::EntryChamferAngle => "the entry chamfer's angle",
+        }
+    }
+}
+
+impl core::fmt::Display for SplineQuantity {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(self.words())
+    }
+}
+
+/// What a number the planner requires is measured in, for [`PlanRefusal::Required`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum RequiredUnit {
+    /// Millimetres.
+    Mm,
+    /// Millimetres, both sides together on the pitch circle (an involute side clearance).
+    MmBothSidesOnPitch,
+    /// Millimetres on each side, square to the flanks (a straight-sided side clearance).
+    MmEachSideSquareToFlanks,
+    /// Millimetres, a tip chamfer's length down the flank.
+    MmDownTheFlank,
+    /// Millimetres, a tip round's radius.
+    MmRoundRadius,
+}
+
+impl RequiredUnit {
+    /// The unit in plain words.
+    #[must_use]
+    pub const fn words(self) -> &'static str {
+        match self {
+            Self::Mm => "mm",
+            Self::MmBothSidesOnPitch => "mm, both sides together on the pitch circle",
+            Self::MmEachSideSquareToFlanks => "mm on each side, square to the flanks",
+            Self::MmDownTheFlank => "mm, the chamfer's length down the flank",
+            Self::MmRoundRadius => "mm, the round's radius",
+        }
+    }
+}
+
+/// A refusal of the shaft-spline planner, as data: the number it is about (a
+/// [`SplineQuantity`]) and why. Its Display names the number in plain words.
 #[derive(Clone, Copy, Debug, PartialEq)]
-#[non_exhaustive]
 pub enum PlanRefusal {
-    /// A tooth module's number out of range ([`TeethFailure::OutOfRange`]), named by the
-    /// planner's key where a table knows it.
+    /// A tooth module's number out of range ([`TeethFailure::OutOfRange`]), with the spline's
+    /// number it comes from where the planner's tables know it.
     Number {
-        /// The number to change, where the planner's tables know the tooth module's name.
-        key: Option<&'static str>,
+        /// The spline's number to change, where the planner's tables know the tooth module's
+        /// name.
+        quantity: Option<SplineQuantity>,
         /// The tooth module's name for the number.
         what: &'static str,
         /// What was given.
@@ -476,19 +667,19 @@ pub enum PlanRefusal {
         /// It must be at most this.
         up_to: f64,
     },
-    /// A tooth module's reason ([`TeethFailure::Invalid`]), with the number to change where the
-    /// planner's tables know the reason.
+    /// A tooth module's reason ([`TeethFailure::Invalid`]), with the spline's number to change
+    /// where the planner's tables know the reason.
     Reason {
-        /// The number to change, where the planner's tables know the reason.
-        key: Option<&'static str>,
+        /// The spline's number to change, where the planner's tables know the reason.
+        quantity: Option<SplineQuantity>,
         /// The tooth module's reason.
         why: Why,
     },
-    /// A bound a tooth module could not prove ([`TeethFailure::NotProved`]), with the number to
-    /// change where the planner's tables know what was not proved.
+    /// A bound a tooth module could not prove ([`TeethFailure::NotProved`]), with the spline's
+    /// number to change where the planner's tables know what was not proved.
     Unproved {
-        /// The number to change, where the planner's tables know it.
-        key: Option<&'static str>,
+        /// The spline's number to change, where the planner's tables know it.
+        quantity: Option<SplineQuantity>,
         /// What could not be proved: [`FILLET_SEPARATION`], [`CHORD`] or [`FIT_DISTANCE`].
         what: &'static str,
         /// The bound that had to be met.
@@ -503,14 +694,14 @@ pub enum PlanRefusal {
     /// A number given is not a number.
     NotANumber {
         /// The number.
-        key: &'static str,
+        quantity: SplineQuantity,
     },
     /// A number this kind of teeth needs was not given.
     Required {
         /// The number.
-        key: &'static str,
-        /// What it is measured in, in words (for example "mm").
-        unit: &'static str,
+        quantity: SplineQuantity,
+        /// What it is measured in.
+        unit: RequiredUnit,
     },
     /// The splined length is outside what is taken.
     LengthRange {
@@ -534,9 +725,8 @@ pub enum PlanRefusal {
     },
     /// A chamfer is outside what is taken.
     ChamferRange {
-        /// The chamfer's key, `end_chamfer` or `entry_chamfer`, without the backticks the words
-        /// put around it.
-        key: &'static str,
+        /// The chamfer: [`SplineQuantity::EndChamfer`] or [`SplineQuantity::EntryChamfer`].
+        quantity: SplineQuantity,
         /// The largest chamfer taken, in mm.
         most: f64,
         /// What was given.
@@ -566,24 +756,24 @@ pub enum PlanRefusal {
     },
     /// A second distance or an angle of a chamfer was given, but not the chamfer itself.
     ChamferShapeWithout {
-        /// The number given, `end_chamfer_distance2` for example.
-        key: &'static str,
-        /// The chamfer it shapes, `end_chamfer` or `entry_chamfer`.
-        chamfer: &'static str,
+        /// The number given: a chamfer's second distance or angle.
+        quantity: SplineQuantity,
+        /// The chamfer it shapes.
+        chamfer: SplineQuantity,
     },
     /// Both a second distance and an angle were given for one chamfer.
     ChamferBothShapes {
-        /// The chamfer's second distance, `end_chamfer_distance2` or `entry_chamfer_distance2`.
-        distance2: &'static str,
-        /// The chamfer's angle, `end_chamfer_angle` or `entry_chamfer_angle`.
-        angle: &'static str,
-        /// The chamfer, `end_chamfer` or `entry_chamfer`.
-        chamfer: &'static str,
+        /// The chamfer's second distance.
+        distance2: SplineQuantity,
+        /// The chamfer's angle.
+        angle: SplineQuantity,
+        /// The chamfer.
+        chamfer: SplineQuantity,
     },
     /// A chamfer's second distance is not more than 0, or more than what is taken.
     ChamferDistanceRange {
-        /// The second distance's key.
-        key: &'static str,
+        /// The second distance.
+        quantity: SplineQuantity,
         /// The largest distance taken, in mm.
         most: f64,
         /// What was given.
@@ -591,23 +781,18 @@ pub enum PlanRefusal {
     },
     /// A chamfer's angle is not between 0 and 90 degrees.
     ChamferAngleRange {
-        /// The angle's key.
-        key: &'static str,
+        /// The angle.
+        quantity: SplineQuantity,
         /// What was given, in degrees.
         value: f64,
     },
-    /// A tooth space is too wide for its end to follow the cutter's curve.
-    CutterSpaceTooWide,
     /// The outline cannot be made into a profile of lines, arcs and Bezier pieces.
     NotAProfile(ProfileWhy),
 }
 
 /// Why a tooth outline cannot be made into a profile of lines, arcs and Bezier pieces.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum ProfileWhy {
-    /// A Bezier piece of a spline has more control points than a profile segment holds.
-    DegreeTooHigh,
     /// A curve of the outline is held as points only, not fitted as a spline.
     NotFitted,
     /// A spline of the outline cannot be cut into Bezier pieces: the tooth module's reason.
@@ -617,7 +802,6 @@ pub enum ProfileWhy {
 impl core::fmt::Display for ProfileWhy {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Self::DegreeTooHigh => f.write_str("a curve of too high a degree"),
             Self::NotFitted => f.write_str("a curve of the outline was not fitted"),
             Self::Spline(why) => f.write_str(why.words()),
         }
@@ -625,30 +809,32 @@ impl core::fmt::Display for ProfileWhy {
 }
 
 impl PlanRefusal {
-    /// The number to change (the dialog's field key), where the refusal names one.
+    /// The number of the spline to change, where the refusal names one.
     #[must_use]
-    pub const fn key(&self) -> Option<&'static str> {
+    pub const fn quantity(&self) -> Option<SplineQuantity> {
         match self {
-            Self::Number { key, .. } | Self::Reason { key, .. } | Self::Unproved { key, .. } => {
-                *key
-            }
-            Self::MasterToothOut | Self::MasterWideTooth => Some("master_spline"),
-            Self::NotANumber { key }
-            | Self::Required { key, .. }
-            | Self::ChamferRange { key, .. }
-            | Self::ChamferShapeWithout { key, .. }
-            | Self::ChamferDistanceRange { key, .. }
-            | Self::ChamferAngleRange { key, .. } => Some(*key),
+            Self::Number { quantity, .. }
+            | Self::Reason { quantity, .. }
+            | Self::Unproved { quantity, .. } => *quantity,
+            Self::MasterToothOut | Self::MasterWideTooth => Some(SplineQuantity::MasterSpline),
+            Self::NotANumber { quantity }
+            | Self::Required { quantity, .. }
+            | Self::ChamferRange { quantity, .. }
+            | Self::ChamferShapeWithout { quantity, .. }
+            | Self::ChamferDistanceRange { quantity, .. }
+            | Self::ChamferAngleRange { quantity, .. } => Some(*quantity),
             Self::ChamferBothShapes { distance2, .. } => Some(*distance2),
-            Self::LengthRange { .. } => Some("length"),
+            Self::LengthRange { .. } => Some(SplineQuantity::Length),
             Self::HubDiameterWithoutHub
             | Self::HubDiameterRequired
             | Self::HubDiameterTooLarge { .. }
-            | Self::NoRim { .. } => Some("hub_diameter"),
-            Self::MasterAngleWithoutMaster | Self::MasterAngleRange { .. } => Some("master_angle"),
-            Self::CutterNotANumber { .. }
-            | Self::CutterTooSmall { .. }
-            | Self::CutterSpaceTooWide => Some("cutter_diameter"),
+            | Self::NoRim { .. } => Some(SplineQuantity::HubDiameter),
+            Self::MasterAngleWithoutMaster | Self::MasterAngleRange { .. } => {
+                Some(SplineQuantity::MasterAngle)
+            }
+            Self::CutterNotANumber { .. } | Self::CutterTooSmall { .. } => {
+                Some(SplineQuantity::CutterDiameter)
+            }
             Self::NotAProfile(_) => None,
         }
     }
@@ -658,13 +844,16 @@ impl core::fmt::Display for PlanRefusal {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match *self {
             Self::Number {
-                key,
+                quantity,
                 what,
                 value,
                 above,
                 up_to,
             } => {
-                let name = key.map_or_else(|| format!("the {what}"), |key| format!("`{key}`"));
+                let name = quantity.map_or_else(
+                    || format!("the {what}"),
+                    |quantity| quantity.words().to_string(),
+                );
                 // A lower limit a hair above nothing is "more than 0" in plain words.
                 let above = if above > 0.0 && above < 1e-4 {
                     0.0
@@ -693,12 +882,12 @@ impl core::fmt::Display for PlanRefusal {
                     )
                 }
             }
-            Self::Reason { key, why } => match key {
-                Some(key) => write!(f, "`{key}`: {}", why.planner_words()),
+            Self::Reason { quantity, why } => match quantity {
+                Some(quantity) => write!(f, "{quantity}: {}", why.planner_words()),
                 None => f.write_str(why.words()),
             },
             Self::Unproved {
-                key,
+                quantity,
                 what,
                 asked,
                 reached,
@@ -708,81 +897,87 @@ impl core::fmt::Display for PlanRefusal {
                     asked,
                     reached,
                 };
-                match key {
-                    Some(key) => write!(f, "`{key}`: {inner}"),
+                match quantity {
+                    Some(quantity) => write!(f, "{quantity}: {inner}"),
                     None => write!(f, "{inner}"),
                 }
             }
             Self::MasterToothOut => write!(
                 f,
-                "`master_spline`: a tooth cannot be left out of these teeth: {}; make a wide \
-                 tooth instead (wide_tooth), or make the shaft's root rounds and the hub's tip \
-                 rounds smaller",
+                "the master spline: a tooth cannot be left out of these teeth: {}; make a wide \
+                 tooth instead, or make the shaft's root rounds and the hub's tip rounds smaller",
                 Why::NoCornerOnSmallest.words()
             ),
             Self::MasterWideTooth => write!(
                 f,
-                "`master_spline`: a wide tooth cannot be made on these teeth: {}; leave a tooth \
-                 out instead (tooth_out), or use plain or chamfered tip corners and smaller root \
-                 rounds in the hub",
+                "the master spline: a wide tooth cannot be made on these teeth: {}; leave a tooth \
+                 out instead, or use plain or chamfered tip corners and smaller root rounds in \
+                 the hub",
                 Why::NoCornerOnLargest.words()
             ),
-            Self::NotANumber { key } => write!(f, "`{key}` must be a number"),
-            Self::Required { key, unit } => write!(f, "`{key}` is required ({unit})"),
+            Self::NotANumber { quantity } => write!(f, "{quantity} must be a number"),
+            Self::Required { quantity, unit } => {
+                write!(f, "{quantity} is required ({})", unit.words())
+            }
             Self::LengthRange { least, most, value } => write!(
                 f,
-                "`length` must be from {} to {} mm, not {}",
+                "the splined length must be from {} to {} mm, not {}",
                 plain(least),
                 plain(most),
                 plain(value)
             ),
             Self::HubDiameterWithoutHub => f.write_str(
-                "`hub_diameter` is the hub's outside diameter: give it only when `make` is hub or \
-                 both",
+                "the hub's outside diameter is for a hub that is made: give it only when a hub is \
+                 made",
             ),
             Self::HubDiameterRequired => {
-                f.write_str("`hub_diameter` is required to make the hub (mm, its outside diameter)")
+                f.write_str("the hub's outside diameter is required to make the hub (mm)")
             }
             Self::MasterAngleWithoutMaster => f.write_str(
-                "`master_angle` is where the master spline sits: give it only with \
-                 `master_spline` tooth_out or wide_tooth",
+                "the master spline's angle is where the master spline sits: give it only with a \
+                 master spline",
             ),
             Self::MasterAngleRange { value } => write!(
                 f,
-                "`master_angle` must be from -360 to 360 (degrees), not {}",
+                "the master spline's angle must be from -360 to 360 (degrees), not {}",
                 plain(value)
             ),
-            Self::ChamferRange { key, most, value } => write!(
+            Self::ChamferRange {
+                quantity,
+                most,
+                value,
+            } => write!(
                 f,
-                "`{key}` must be from 0 to {} mm, not {}",
+                "{quantity} must be from 0 to {} mm, not {}",
                 plain(most),
                 plain(value)
             ),
             Self::CutterNotANumber { most } => write!(
                 f,
-                "`cutter_diameter` must be a number of at most {} mm",
+                "the cutter's diameter must be a number of at most {} mm",
                 plain(most)
             ),
             Self::CutterTooSmall { at_least } => write!(
                 f,
-                "`cutter_diameter` must be more than {} mm: the cutter's radius must reach past \
-                 the depth of the teeth",
+                "the cutter's diameter must be more than {} mm: the cutter's radius must reach \
+                 past the depth of the teeth",
                 plain(at_least)
             ),
             Self::HubDiameterTooLarge { most, value } => write!(
                 f,
-                "`hub_diameter` must be at most {} mm, not {}",
+                "the hub's outside diameter must be at most {} mm, not {}",
                 plain(most),
                 plain(value)
             ),
             Self::NoRim { at_least } => write!(
                 f,
-                "`hub_diameter` leaves no rim around the hub's teeth: it must be more than {} mm",
+                "the hub's outside diameter leaves no rim around the hub's teeth: it must be more \
+                 than {} mm",
                 plain(at_least)
             ),
-            Self::ChamferShapeWithout { key, chamfer } => write!(
+            Self::ChamferShapeWithout { quantity, chamfer } => write!(
                 f,
-                "`{key}` shapes the chamfer `{chamfer}` sets: give it only with `{chamfer}`"
+                "{quantity} shapes {chamfer}: give it only with {chamfer}"
             ),
             Self::ChamferBothShapes {
                 distance2,
@@ -790,43 +985,43 @@ impl core::fmt::Display for PlanRefusal {
                 chamfer,
             } => write!(
                 f,
-                "`{distance2}` and `{angle}` both set how far the chamfer `{chamfer}` reaches \
-                 across the end: give one of them, not both"
+                "{distance2} and {angle} both set how far {chamfer} reaches across the end: give \
+                 one of them, not both"
             ),
-            Self::ChamferDistanceRange { key, most, value } => {
+            Self::ChamferDistanceRange {
+                quantity,
+                most,
+                value,
+            } => {
                 if value.is_finite() {
                     write!(
                         f,
-                        "`{key}` must be more than 0 and at most {} mm, not {}",
+                        "{quantity} must be more than 0 and at most {} mm, not {}",
                         plain(most),
                         plain(value)
                     )
                 } else {
                     write!(
                         f,
-                        "`{key}` must be a number of more than 0 and at most {} mm",
+                        "{quantity} must be a number of more than 0 and at most {} mm",
                         plain(most)
                     )
                 }
             }
-            Self::ChamferAngleRange { key, value } => {
+            Self::ChamferAngleRange { quantity, value } => {
                 if value.is_finite() {
                     write!(
                         f,
-                        "`{key}` must be more than 0 and less than 90 (degrees), not {}",
+                        "{quantity} must be more than 0 and less than 90 (degrees), not {}",
                         plain(value)
                     )
                 } else {
                     write!(
                         f,
-                        "`{key}` must be a number of more than 0 and less than 90 (degrees)"
+                        "{quantity} must be a number of more than 0 and less than 90 (degrees)"
                     )
                 }
             }
-            Self::CutterSpaceTooWide => f.write_str(
-                "a tooth space is too wide to end in the cutter's curve: leave out \
-                 `cutter_diameter` (the spaces then end square) or use more teeth",
-            ),
             Self::NotAProfile(why) => write!(
                 f,
                 "the spline's outline cannot be made into a profile: {why}"
@@ -847,7 +1042,7 @@ impl TeethFailure {
     }
 
     /// Its stable [`ErrorKind`]: [`ErrorKind::Unsupported`] for [`TeethFailure::NotProved`] and
-    /// for a [`PlanRefusal::Unproved`] (a bound the planner keyed; an undecided certificate, as
+    /// for a [`PlanRefusal::Unproved`] (a bound the planner named; an undecided certificate, as
     /// #17907 classes one); [`ErrorKind::InvalidInput`] for [`TeethFailure::OutOfRange`],
     /// [`TeethFailure::Invalid`] and every other [`TeethFailure::Refused`].
     #[must_use]
@@ -862,12 +1057,12 @@ impl TeethFailure {
         }
     }
 
-    /// The number to change, for a [`TeethFailure::Refused`] ([`PlanRefusal::key`]); `None`
-    /// otherwise.
+    /// The number of the spline to change, for a [`TeethFailure::Refused`]
+    /// ([`PlanRefusal::quantity`]); `None` otherwise.
     #[must_use]
-    pub const fn key(&self) -> Option<&'static str> {
+    pub const fn quantity(&self) -> Option<SplineQuantity> {
         match self {
-            Self::Refused(r) => r.key(),
+            Self::Refused(r) => r.quantity(),
             Self::OutOfRange { .. } | Self::Invalid(_) | Self::NotProved { .. } => None,
         }
     }
@@ -952,8 +1147,9 @@ mod tests {
     use crate::SolidError;
     use std::collections::{BTreeSet, HashSet};
 
-    /// Today's parse of a refusal's key: the first word in backticks, when it is lowercase
-    /// letters, digits and `_` (as the app's command reads the parameter out of the words).
+    /// How a refusal named its number before the numbers were typed: the first word in backticks,
+    /// when it is lowercase letters, digits and `_` (as the app's command read the parameter out
+    /// of the words).
     fn old_key(words: &str) -> Option<&str> {
         let is_key = |k: &&str| {
             !k.is_empty()
@@ -963,99 +1159,129 @@ mod tests {
         words.split('`').nth(1).filter(is_key)
     }
 
-    /// Every form of the planner's refusals, with numbers chosen for each, and the words each
-    /// gave before the refusals were typed.
-    fn forms() -> Vec<(PlanRefusal, &'static str)> {
+    /// A quantity's name as the enum spells it, in lowercase words joined by `_`: the key the
+    /// refusals named it by before they were typed.
+    fn snake(q: SplineQuantity) -> String {
+        let mut out = String::new();
+        for c in format!("{q:?}").chars() {
+            if c.is_ascii_uppercase() {
+                if !out.is_empty() {
+                    out.push('_');
+                }
+                out.push(c.to_ascii_lowercase());
+            } else {
+                out.push(c);
+            }
+        }
+        out
+    }
+
+    /// Every form of the planner's refusals, with numbers chosen for each: the words each gave
+    /// before the refusals named their numbers in words, and the words each gives now.
+    fn forms() -> Vec<(PlanRefusal, &'static str, &'static str)> {
         vec![
             (
                 PlanRefusal::Number {
-                    key: Some("teeth"),
+                    quantity: Some(SplineQuantity::Teeth),
                     what: "teeth",
                     value: 1.0,
                     above: 2.0,
                     up_to: 2000.0,
                 },
                 "`teeth` must be more than 2, not 1",
+                "the count of teeth must be more than 2, not 1",
             ),
             (
                 PlanRefusal::Number {
-                    key: None,
+                    quantity: None,
                     what: "reach",
                     value: f64::NAN,
                     above: 0.0,
                     up_to: 1e5,
                 },
                 "the reach must be a number",
+                "the reach must be a number",
             ),
             (
                 PlanRefusal::Number {
-                    key: Some("module"),
+                    quantity: Some(SplineQuantity::Module),
                     what: "module",
                     value: 2000.0,
                     above: 0.0,
                     up_to: 1000.0,
                 },
                 "`module` must be at most 1000, not 2000",
+                "the module must be at most 1000, not 2000",
             ),
             (
                 PlanRefusal::Number {
-                    key: Some("module"),
+                    quantity: Some(SplineQuantity::Module),
                     what: "module",
                     value: 1000.0,
                     above: 0.0,
                     up_to: 1000.0,
                 },
                 "`module` must be less than 1000",
+                "the module must be less than 1000",
             ),
             (
                 PlanRefusal::Number {
-                    key: None,
+                    quantity: None,
                     what: "tip clearance",
                     value: -0.5,
                     above: 1e-9,
                     up_to: 10.0,
                 },
                 "the tip clearance cannot be negative, not -0.5",
+                "the tip clearance cannot be negative, not -0.5",
             ),
             (
                 PlanRefusal::Reason {
-                    key: Some("profile_shift"),
+                    quantity: Some(SplineQuantity::ProfileShift),
                     why: Why::CutThrough,
                 },
                 "`profile_shift`: the undercut would cut the tooth through at its root: its two \
                  root fillets would meet",
+                "the profile shift: the undercut would cut the tooth through at its root: its two \
+                 root fillets would meet",
             ),
             (
                 PlanRefusal::Reason {
-                    key: Some("root_fillet"),
+                    quantity: Some(SplineQuantity::RootFillet),
                     why: Why::TipRoundsOverlap,
                 },
                 "`root_fillet`: the root fillet is too large: its two rounds would overlap",
+                "the root fillet: the root fillet is too large: its two rounds would overlap",
             ),
             (
                 PlanRefusal::Reason {
-                    key: None,
+                    quantity: None,
                     why: Why::TipRoundsOverlap,
                 },
+                "the tool's tip radius is too large: its two rounds would overlap",
                 "the tool's tip radius is too large: its two rounds would overlap",
             ),
             (
                 PlanRefusal::Unproved {
-                    key: Some("root_fillet"),
+                    quantity: Some(SplineQuantity::RootFillet),
                     what: FILLET_SEPARATION,
                     asked: 0.0,
                     reached: -1e-9,
                 },
                 "`root_fillet`: the separation of the root fillets cannot be proved within the \
                  work allowed: asked 0e0, reached -1e-9",
+                "the root fillet: the separation of the root fillets cannot be proved within the \
+                 work allowed: asked 0e0, reached -1e-9",
             ),
             (
                 PlanRefusal::Unproved {
-                    key: None,
+                    quantity: None,
                     what: CHORD,
                     asked: 1e-6,
                     reached: 3e-6,
                 },
+                "the chord error of a curve cannot be proved within the work allowed: asked \
+                 1e-6, reached 3e-6",
                 "the chord error of a curve cannot be proved within the work allowed: asked \
                  1e-6, reached 3e-6",
             ),
@@ -1065,6 +1291,10 @@ mod tests {
                  teeth lies on the smallest circle: no tooth or space can be closed there; make \
                  a wide tooth instead (wide_tooth), or make the shaft's root rounds and the \
                  hub's tip rounds smaller",
+                "the master spline: a tooth cannot be left out of these teeth: no corner of the \
+                 teeth lies on the smallest circle: no tooth or space can be closed there; make \
+                 a wide tooth instead, or make the shaft's root rounds and the hub's tip rounds \
+                 smaller",
             ),
             (
                 PlanRefusal::MasterWideTooth,
@@ -1072,17 +1302,25 @@ mod tests {
                  teeth lies on the largest circle: the tops of the teeth and the bottoms of the \
                  spaces need a flat part to join; leave a tooth out instead (tooth_out), or use \
                  plain or chamfered tip corners and smaller root rounds in the hub",
+                "the master spline: a wide tooth cannot be made on these teeth: no corner of the \
+                 teeth lies on the largest circle: the tops of the teeth and the bottoms of the \
+                 spaces need a flat part to join; leave a tooth out instead, or use plain or \
+                 chamfered tip corners and smaller root rounds in the hub",
             ),
             (
-                PlanRefusal::NotANumber { key: "length" },
+                PlanRefusal::NotANumber {
+                    quantity: SplineQuantity::Length,
+                },
                 "`length` must be a number",
+                "the splined length must be a number",
             ),
             (
                 PlanRefusal::Required {
-                    key: "module",
-                    unit: "mm",
+                    quantity: SplineQuantity::Module,
+                    unit: RequiredUnit::Mm,
                 },
                 "`module` is required (mm)",
+                "the module is required (mm)",
             ),
             (
                 PlanRefusal::LengthRange {
@@ -1091,41 +1329,52 @@ mod tests {
                     value: 0.0,
                 },
                 "`length` must be from 0.001 to 100000 mm, not 0",
+                "the splined length must be from 0.001 to 100000 mm, not 0",
             ),
             (
                 PlanRefusal::HubDiameterWithoutHub,
                 "`hub_diameter` is the hub's outside diameter: give it only when `make` is hub \
                  or both",
+                "the hub's outside diameter is for a hub that is made: give it only when a hub \
+                 is made",
             ),
             (
                 PlanRefusal::HubDiameterRequired,
                 "`hub_diameter` is required to make the hub (mm, its outside diameter)",
+                "the hub's outside diameter is required to make the hub (mm)",
             ),
             (
                 PlanRefusal::MasterAngleWithoutMaster,
                 "`master_angle` is where the master spline sits: give it only with \
                  `master_spline` tooth_out or wide_tooth",
+                "the master spline's angle is where the master spline sits: give it only with a \
+                 master spline",
             ),
             (
                 PlanRefusal::MasterAngleRange { value: 400.0 },
                 "`master_angle` must be from -360 to 360 (degrees), not 400",
+                "the master spline's angle must be from -360 to 360 (degrees), not 400",
             ),
             (
                 PlanRefusal::ChamferRange {
-                    key: "end_chamfer",
+                    quantity: SplineQuantity::EndChamfer,
                     most: 1e5,
                     value: -1.0,
                 },
                 "`end_chamfer` must be from 0 to 100000 mm, not -1",
+                "the end chamfer must be from 0 to 100000 mm, not -1",
             ),
             (
                 PlanRefusal::CutterNotANumber { most: 1e5 },
                 "`cutter_diameter` must be a number of at most 100000 mm",
+                "the cutter's diameter must be a number of at most 100000 mm",
             ),
             (
                 PlanRefusal::CutterTooSmall { at_least: 5.2 },
                 "`cutter_diameter` must be more than 5.2 mm: the cutter's radius must reach past \
                  the depth of the teeth",
+                "the cutter's diameter must be more than 5.2 mm: the cutter's radius must reach \
+                 past the depth of the teeth",
             ),
             (
                 PlanRefusal::HubDiameterTooLarge {
@@ -1133,89 +1382,128 @@ mod tests {
                     value: 2e5,
                 },
                 "`hub_diameter` must be at most 100000 mm, not 200000",
+                "the hub's outside diameter must be at most 100000 mm, not 200000",
             ),
             (
                 PlanRefusal::NoRim { at_least: 31.25 },
                 "`hub_diameter` leaves no rim around the hub's teeth: it must be more than 31.25 \
                  mm",
+                "the hub's outside diameter leaves no rim around the hub's teeth: it must be more \
+                 than 31.25 mm",
             ),
             (
                 PlanRefusal::ChamferShapeWithout {
-                    key: "end_chamfer_angle",
-                    chamfer: "end_chamfer",
+                    quantity: SplineQuantity::EndChamferAngle,
+                    chamfer: SplineQuantity::EndChamfer,
                 },
                 "`end_chamfer_angle` shapes the chamfer `end_chamfer` sets: give it only with \
                  `end_chamfer`",
+                "the end chamfer's angle shapes the end chamfer: give it only with the end \
+                 chamfer",
             ),
             (
                 PlanRefusal::ChamferBothShapes {
-                    distance2: "entry_chamfer_distance2",
-                    angle: "entry_chamfer_angle",
-                    chamfer: "entry_chamfer",
+                    distance2: SplineQuantity::EntryChamferDistance2,
+                    angle: SplineQuantity::EntryChamferAngle,
+                    chamfer: SplineQuantity::EntryChamfer,
                 },
                 "`entry_chamfer_distance2` and `entry_chamfer_angle` both set how far the chamfer \
                  `entry_chamfer` reaches across the end: give one of them, not both",
+                "the entry chamfer's second distance and the entry chamfer's angle both set how \
+                 far the entry chamfer reaches across the end: give one of them, not both",
             ),
             (
                 PlanRefusal::ChamferDistanceRange {
-                    key: "end_chamfer_distance2",
+                    quantity: SplineQuantity::EndChamferDistance2,
                     most: 1e5,
                     value: -0.5,
                 },
                 "`end_chamfer_distance2` must be more than 0 and at most 100000 mm, not -0.5",
+                "the end chamfer's second distance must be more than 0 and at most 100000 mm, not \
+                 -0.5",
             ),
             (
                 PlanRefusal::ChamferAngleRange {
-                    key: "entry_chamfer_angle",
+                    quantity: SplineQuantity::EntryChamferAngle,
                     value: 90.0,
                 },
                 "`entry_chamfer_angle` must be more than 0 and less than 90 (degrees), not 90",
-            ),
-            (
-                PlanRefusal::CutterSpaceTooWide,
-                "a tooth space is too wide to end in the cutter's curve: leave out \
-                 `cutter_diameter` (the spaces then end square) or use more teeth",
+                "the entry chamfer's angle must be more than 0 and less than 90 (degrees), not 90",
             ),
             (
                 PlanRefusal::NotAProfile(ProfileWhy::Spline(Why::NotASpline)),
+                "the spline's outline cannot be made into a profile: the knots and control \
+                 points do not describe a spline",
                 "the spline's outline cannot be made into a profile: the knots and control \
                  points do not describe a spline",
             ),
         ]
     }
 
-    /// A tooth outline that cannot be made into a profile says why in the words the rebuild gave,
-    /// and a chamfer's second distance or angle that is not a number says so.
+    /// Every quantity is named once, in its own words, and its name as the enum spells it is the
+    /// key the refusals named it by before they were typed.
+    #[test]
+    fn every_quantity_has_its_own_words() {
+        assert_eq!(SplineQuantity::ALL.len(), 33);
+        for (i, q) in SplineQuantity::ALL.iter().enumerate() {
+            assert_eq!(*q as usize, i, "{q:?}");
+            assert!(q.words().starts_with("the "), "{q:?}");
+            assert!(
+                !q.words().contains('`') && !q.words().contains('_'),
+                "{q:?}"
+            );
+            assert_eq!(q.to_string(), q.words());
+        }
+        let words: BTreeSet<&str> = SplineQuantity::ALL.iter().map(|q| q.words()).collect();
+        assert_eq!(words.len(), 33, "two quantities share their words");
+        assert_eq!(
+            snake(SplineQuantity::EndChamferDistance2),
+            "end_chamfer_distance2"
+        );
+        assert_eq!(snake(SplineQuantity::MasterSpline), "master_spline");
+        let units = [
+            RequiredUnit::Mm,
+            RequiredUnit::MmBothSidesOnPitch,
+            RequiredUnit::MmEachSideSquareToFlanks,
+            RequiredUnit::MmDownTheFlank,
+            RequiredUnit::MmRoundRadius,
+        ];
+        let unit_words: BTreeSet<&str> = units.iter().map(|u| u.words()).collect();
+        assert_eq!(unit_words.len(), units.len());
+        assert!(unit_words.iter().all(|w| w.starts_with("mm")));
+    }
+
+    /// A tooth outline that cannot be made into a profile says why, and a chamfer's second
+    /// distance or angle that is not a number says so.
     #[test]
     fn the_profile_and_chamfer_words() {
-        let words = |why| PlanRefusal::NotAProfile(why).to_string();
         assert_eq!(
-            words(ProfileWhy::DegreeTooHigh),
-            "the spline's outline cannot be made into a profile: a curve of too high a degree"
-        );
-        assert_eq!(
-            words(ProfileWhy::NotFitted),
+            PlanRefusal::NotAProfile(ProfileWhy::NotFitted).to_string(),
             "the spline's outline cannot be made into a profile: a curve of the outline was not \
              fitted"
         );
         let distance = PlanRefusal::ChamferDistanceRange {
-            key: "entry_chamfer_distance2",
+            quantity: SplineQuantity::EntryChamferDistance2,
             most: 1e5,
             value: f64::NAN,
         };
         assert_eq!(
             distance.to_string(),
-            "`entry_chamfer_distance2` must be a number of more than 0 and at most 100000 mm"
+            "the entry chamfer's second distance must be a number of more than 0 and at most \
+             100000 mm"
         );
         let angle = PlanRefusal::ChamferAngleRange {
-            key: "end_chamfer_angle",
+            quantity: SplineQuantity::EndChamferAngle,
             value: f64::INFINITY,
         };
         assert_eq!(
             angle.to_string(),
-            "`end_chamfer_angle` must be a number of more than 0 and less than 90 (degrees)"
+            "the end chamfer's angle must be a number of more than 0 and less than 90 (degrees)"
         );
-        assert_eq!(PlanRefusal::NotAProfile(ProfileWhy::NotFitted).key(), None);
+        assert_eq!(
+            PlanRefusal::NotAProfile(ProfileWhy::NotFitted).quantity(),
+            None
+        );
     }
 
     #[test]
@@ -1247,8 +1535,10 @@ mod tests {
         }
     }
 
+    /// Each refusal gives its words now, names the number the words before named, and names it
+    /// in words, not by a key: no word in backticks is left.
     #[test]
-    fn the_words_are_todays() {
+    fn the_words_name_the_numbers_the_words_before_named() {
         let out_of_range = TeethFailure::OutOfRange {
             what: "module",
             value: -1.0,
@@ -1274,19 +1564,32 @@ mod tests {
              reached 3e-6"
         );
         let forms = forms();
-        // Every one of the twenty-three forms is written out above.
+        // Every one of the twenty-two forms is written out above.
         let kinds: HashSet<_> = forms
             .iter()
-            .map(|(r, _)| std::mem::discriminant(r))
+            .map(|(r, _, _)| std::mem::discriminant(r))
             .collect();
-        assert_eq!(kinds.len(), 23);
-        for (refusal, words) in &forms {
-            assert_eq!(refusal.to_string(), *words, "{refusal:?}");
+        assert_eq!(kinds.len(), 22);
+        for (refusal, before, now) in &forms {
+            assert_eq!(refusal.to_string(), *now, "{refusal:?}");
             assert_eq!(
                 TeethFailure::Refused(*refusal).to_string(),
-                *words,
+                *now,
                 "{refusal:?}"
             );
+            assert!(!now.contains('`'), "{refusal:?}");
+            // The number named is the one the words before named.
+            assert_eq!(
+                refusal.quantity().map(snake).as_deref(),
+                old_key(before),
+                "{refusal:?}"
+            );
+            // Where the words before named the number first, the words now name it first too.
+            if let Some(q) = refusal.quantity() {
+                if before.starts_with('`') {
+                    assert!(now.starts_with(q.words()), "{q:?}: {now}");
+                }
+            }
         }
         assert_eq!(plain(1e-9), "1e-9");
         assert_eq!(plain(-0.0), "0");
@@ -1294,7 +1597,7 @@ mod tests {
     }
 
     #[test]
-    fn kinds_keys_and_the_error() {
+    fn kinds_quantities_and_the_error() {
         let mut failures = vec![
             TeethFailure::OutOfRange {
                 what: "module",
@@ -1309,7 +1612,7 @@ mod tests {
             },
         ];
         failures.extend(Why::ALL.iter().copied().map(TeethFailure::Invalid));
-        failures.extend(forms().iter().map(|(r, _)| TeethFailure::Refused(*r)));
+        failures.extend(forms().iter().map(|(r, _, _)| TeethFailure::Refused(*r)));
         for f in &failures {
             let unproved = matches!(
                 f,
@@ -1325,17 +1628,15 @@ mod tests {
             assert_eq!(f.comparison_status(), SM_ERR, "{f:?}");
             match f {
                 TeethFailure::Refused(r) => {
-                    // The key is the one today's parse finds in the words.
-                    assert_eq!(r.key(), old_key(&r.to_string()), "{r:?}");
-                    assert_eq!(f.key(), r.key(), "{r:?}");
+                    assert_eq!(f.quantity(), r.quantity(), "{r:?}");
                     assert_eq!(f.why(), None, "{r:?}");
                 }
                 TeethFailure::Invalid(w) => {
                     assert_eq!(f.why(), Some(*w));
-                    assert_eq!(f.key(), None);
+                    assert_eq!(f.quantity(), None);
                 }
                 _ => {
-                    assert_eq!(f.key(), None, "{f:?}");
+                    assert_eq!(f.quantity(), None, "{f:?}");
                     assert_eq!(f.why(), None, "{f:?}");
                 }
             }
@@ -1347,16 +1648,16 @@ mod tests {
             assert_eq!(e.kind(), f.kind(), "{f:?}");
             assert_eq!(e.operation(), "teeth::x");
         }
-        // Both forms of a bound not proved, with a key and without, are unsupported.
-        for key in [Some("root_fillet"), None] {
-            let keyed = TeethFailure::Refused(PlanRefusal::Unproved {
-                key,
+        // Both forms of a bound not proved, with a quantity and without, are unsupported.
+        for quantity in [Some(SplineQuantity::RootFillet), None] {
+            let named = TeethFailure::Refused(PlanRefusal::Unproved {
+                quantity,
                 what: FILLET_SEPARATION,
                 asked: 0.0,
                 reached: -1e-12,
             });
-            assert_eq!(keyed.kind(), ErrorKind::Unsupported, "{key:?}");
-            assert_eq!(keyed.key(), key);
+            assert_eq!(named.kind(), ErrorKind::Unsupported, "{quantity:?}");
+            assert_eq!(named.quantity(), quantity);
         }
         assert_eq!(SolidError::sm_err("teeth::x").teeth_failure(), None);
     }

@@ -41,6 +41,7 @@ pub mod blend;
 pub mod brep;
 pub mod cell_grid;
 pub mod develop;
+pub mod round_face;
 pub mod shaft_spline;
 
 use solidcore::eval as k;

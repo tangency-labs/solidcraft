@@ -2,14 +2,14 @@
 //! numbers worked out by hand, and hostile numbers (not finite, no length) refused or answered
 //! plainly, never a panic.
 
-use std::f64::consts::{FRAC_PI_2, PI, TAU};
+use std::f64::consts::{FRAC_PI_2, PI};
 
 use super::common::HOSTILE;
 use crate::eval::Frame;
 use crate::teeth::seat::{
-    angle_zero, angles_apart, axis_gap, centre_angle, chord_gap, frame_through, into_frame,
-    moved_out, nearer_start, normal, off_cylinder, points_apart, reach_along, seat_frame,
-    start_candidates, RoundFace, SeatRefusal,
+    angle_zero, axis_gap, centre_angle, chord_gap, copy_turn, into_frame, lies_inward,
+    lies_turned_back, moved_out, nearer_start, normal, off_cylinder, points_apart, quarter_turn_in,
+    seat_frame, start_candidates, turn_tells_sense, RoundFace, SeatRefusal,
 };
 use crate::Vec3;
 
@@ -172,9 +172,32 @@ fn a_point_moves_out_from_the_axis_and_into_the_frame() {
     // On the axis it stays.
     let on_axis = Vec3::new(1.0, 2.0, 7.0);
     assert_eq!(moved_out(&plane, on_axis, 3.0), on_axis);
-    let m = into_frame(&plane);
+    let m = into_frame(&plane).expect("the map into the frame");
     assert_eq!(m[0], [1.0, 0.0, 0.0, 0.0]);
     assert_eq!(m[3], [-1.0, -2.0, -30.0, 1.0]);
+    // A turned frame: its own axes go to the world's, its origin to zero.
+    let turned = Frame {
+        origin: [3.0, 0.0, 0.0],
+        x_axis: [0.0, 1.0, 0.0],
+        y_axis: [-1.0, 0.0, 0.0],
+    };
+    let m = into_frame(&turned).expect("the map into the turned frame");
+    let into = crate::Transform { m };
+    assert!(close(
+        into.transform_point(Vec3::new(3.0, 2.0, 0.0)),
+        Vec3::new(2.0, 0.0, 0.0)
+    ));
+    assert!(close(
+        into.transform_point(Vec3::new(3.0, 0.0, 5.0)),
+        Vec3::new(0.0, 0.0, 5.0)
+    ));
+    // A frame whose axes do not span space has no map into it.
+    let flat = Frame {
+        x_axis: [1.0, 0.0, 0.0],
+        y_axis: [1.0, 0.0, 0.0],
+        ..xy()
+    };
+    assert_eq!(into_frame(&flat), None);
     // Hostile numbers: a plain answer, never a panic.
     for &h in &HOSTILE {
         let odd = Frame {
@@ -189,22 +212,7 @@ fn a_point_moves_out_from_the_axis_and_into_the_frame() {
 }
 
 #[test]
-fn a_frame_is_made_orthonormal_or_refused() {
-    let made = frame_through(
-        Vec3::ZERO,
-        Vec3::new(2.0, 0.0, 0.0),
-        Vec3::new(1.0, 3.0, 0.0),
-    )
-    .unwrap();
-    assert_eq!(made.x_axis, [1.0, 0.0, 0.0]);
-    assert_eq!(made.y_axis, [0.0, 1.0, 0.0]);
-    assert!(frame_through(Vec3::ZERO, Vec3::ZERO, Vec3::Y).is_none());
-    assert!(frame_through(Vec3::ZERO, Vec3::X, Vec3::X).is_none());
-    assert!(frame_through(Vec3::new(f64::NAN, 0.0, 0.0), Vec3::X, Vec3::Y).is_none());
-}
-
-#[test]
-fn lines_chords_boxes_and_angles_are_measured() {
+fn lines_chords_boxes_and_points_are_measured() {
     let gap = axis_gap(Vec3::ZERO, Vec3::Z, Vec3::new(3.0, 4.0, 9.0), Vec3::Z);
     assert_eq!((gap.lean, gap.off), (0.0, 5.0));
     let across = axis_gap(Vec3::ZERO, Vec3::Z, Vec3::ZERO, Vec3::X);
@@ -213,18 +221,6 @@ fn lines_chords_boxes_and_angles_are_measured() {
     assert_eq!((chord.length, chord.lean), (5.0, 3.0));
     let angle = centre_angle(&xy(), Vec3::new(-1.0, 1.0, 0.0), Vec3::new(1.0, 3.0, 5.0));
     assert_eq!(angle, FRAC_PI_2);
-    assert!((angles_apart(0.1, TAU - 0.1) - 0.2).abs() < 1e-12);
-    assert!((angles_apart(PI - 0.1, -PI + 0.1) - 0.2).abs() < 1e-12);
-    assert_eq!(angles_apart(1.0, 1.0), 0.0);
-    assert_eq!(
-        reach_along(
-            Vec3::new(0.0, 0.0, 1.0),
-            Vec3::Z,
-            Vec3::new(-1.0, -1.0, -2.0),
-            Vec3::new(1.0, 1.0, 5.0)
-        ),
-        (-3.0, 4.0)
-    );
     assert_eq!(points_apart([1.0, 1.0], [4.0, 5.0]), 5.0);
     for &h in &HOSTILE {
         let _ = axis_gap(
@@ -234,13 +230,75 @@ fn lines_chords_boxes_and_angles_are_measured() {
             Vec3::X,
         );
         let _ = chord_gap(Vec3::new(h, 0.0, 0.0), Vec3::ZERO, Vec3::new(h, h, h));
-        let _ = angles_apart(h, 1.0);
-        let _ = reach_along(
-            Vec3::ZERO,
-            Vec3::X,
+        let _ = points_apart([h, 0.0], [0.0, h]);
+    }
+}
+
+/// A copy of a tool turned about the axis: the angle it is turned by, whether the turn tells its
+/// two senses apart, and which sense the copy's box shows.
+#[test]
+fn a_copy_turned_about_the_axis_shows_which_way_it_went() {
+    assert_eq!(copy_turn(0.5, 1.5, false), 1.0);
+    assert_eq!(copy_turn(0.5, 1.5, true), -1.0);
+    // A quarter turn tells; none, half a turn and a whole turn do not, nor angles that are not
+    // numbers.
+    assert!(turn_tells_sense(0.0, FRAC_PI_2));
+    for to in [0.0, PI, 2.0 * PI, 1e-4, f64::NAN, f64::INFINITY] {
+        assert!(!turn_tells_sense(0.0, to), "{to}");
+    }
+    // A tool about angle 0 turned to the space at a quarter turn: a box about +Y lies where it
+    // should, a box about -Y (the quarter turn the other way) lies turned back.
+    let about = |angle: f64| {
+        let (s, c) = angle.sin_cos();
+        let centre = Vec3::new(10.0 * c, 10.0 * s, 2.0);
+        (
+            centre - Vec3::new(1.0, 1.0, 1.0),
+            centre + Vec3::new(1.0, 1.0, 1.0),
+        )
+    };
+    let (min, max) = about(FRAC_PI_2);
+    assert!(!lies_turned_back(&xy(), min, max, 0.0, FRAC_PI_2));
+    let (min, max) = about(-FRAC_PI_2);
+    assert!(lies_turned_back(&xy(), min, max, 0.0, FRAC_PI_2));
+    // From a space at 1 to one at 2.5: the mirror is at -0.5.
+    let (min, max) = about(-0.5);
+    assert!(lies_turned_back(&xy(), min, max, 1.0, 2.5));
+    let (min, max) = about(2.5);
+    assert!(!lies_turned_back(&xy(), min, max, 1.0, 2.5));
+    for &h in &HOSTILE {
+        let _ = copy_turn(h, 1.0, h > 0.0);
+        let _ = turn_tells_sense(h, 1.0);
+        let _ = lies_turned_back(
+            &xy(),
             Vec3::new(h, 0.0, 0.0),
             Vec3::new(0.0, h, 0.0),
+            h,
+            1.0,
         );
-        let _ = points_apart([h, 0.0], [0.0, h]);
+    }
+}
+
+/// A tool turned a quarter turn off the plane where the full depth ends: into the shaft along the
+/// plane's normal times `inward`, and whether its box lies that way.
+#[test]
+fn a_quarter_turn_goes_into_the_shaft() {
+    assert_eq!(quarter_turn_in(1.0, false), FRAC_PI_2);
+    assert_eq!(quarter_turn_in(-1.0, false), -FRAC_PI_2);
+    assert_eq!(quarter_turn_in(-1.0, true), FRAC_PI_2);
+    let plane = Frame {
+        origin: [0.0, 0.0, 1.0],
+        ..xy()
+    };
+    // Reaching 4 past the plane along +Z and 3 back: inward along +Z, not along -Z.
+    let (min, max) = (Vec3::new(-1.0, -1.0, -2.0), Vec3::new(1.0, 1.0, 5.0));
+    assert!(lies_inward(&plane, 1.0, min, max));
+    assert!(!lies_inward(&plane, -1.0, min, max));
+    // As far each way: inward either way.
+    let even = (Vec3::new(-1.0, -1.0, -1.0), Vec3::new(1.0, 1.0, 3.0));
+    assert!(lies_inward(&plane, 1.0, even.0, even.1));
+    assert!(lies_inward(&plane, -1.0, even.0, even.1));
+    for &h in &HOSTILE {
+        let _ = quarter_turn_in(h, h > 0.0);
+        let _ = lies_inward(&plane, h, Vec3::new(h, 0.0, 0.0), Vec3::new(0.0, h, 0.0));
     }
 }

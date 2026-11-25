@@ -2028,6 +2028,20 @@ fn analytic_of_nurbs(k: &Kernel, nurbs: &BSplineSurface, ty: i64, tol: f64) -> R
     Ok(part.gw_nurb().is_some_and(|got| same_nurbs(want, got, tol)).then_some(found))
 }
 
+/// `TorusOfArrays`: the torus of the arrays' own numbers (its frame and radii) on its NURBS form,
+/// where the kernel proves the form on that torus (`Torus::stored_on_form`: the form lies on it,
+/// and it evaluates as the form at the form's own parameters), holding the form. These are the
+/// numbers the torus was made with. SMLib's test ([`analytic_of_nurbs`]) works them back out of the
+/// form, from circles through three points of each meridian: a tube that shows only a short arc
+/// fixes those circles to its rounding over the square of the arc's angle, so the torus found was
+/// 1e-10 to 1e-9 off the form it was found in (a 1.2 degree arc of a tube of radius 13.7), which
+/// the body's own check then refused, and below about 0.3 degrees no torus was found at all.
+/// `None` where the form is not the parametrisation of that torus (the arrays of an older body,
+/// whose numbers were worked out that way): the test is then asked, as before.
+fn torus_of_arrays(k: &Kernel, nurbs: &BSplineSurface, p: Axis2Placement, major: f64, minor: f64) -> Result<Option<Surface>> {
+    Torus::stored_on_form(k, p, major, minor, nurbs).map_err(sc("Torus::stored_on_form"))
+}
+
 /// `Placement`: X the reference direction, Y the axis cross it (`SetCanonical`).
 fn placement(origin: Point3, z: Vec3, x: Vec3) -> Result<Axis2Placement> {
     let mut p = Axis2Placement::default();
@@ -2308,9 +2322,25 @@ fn flat_to_brep_data(k: &Kernel, f: &In<'_>, s: &Shape) -> Result<BrepData> {
             i_sphere += usize::from(ty == SURFACE_SPHERE_I);
             i_cyl += usize::from(ty == SURFACE_CYLINDER_I);
             i_cone += usize::from(ty == SURFACE_CONE_I);
+            let j_torus = i_torus;
             i_torus += usize::from(ty == SURFACE_TORUS_I);
             let nurbs = bspline_surface_3d(f, &mut nurbs_cursor)?;
-            match analytic_of_nurbs(k, &nurbs, ty, xsect)? {
+            // a torus first as the arrays' own numbers say it is, on this form
+            let own = if ty == SURFACE_TORUS_I {
+                let p = placement(
+                    get3(f.r(FACE_TORUS_ORIGIN), j_torus)?,
+                    get3(f.r(FACE_TORUS_AXIS), j_torus)?,
+                    get3(f.r(FACE_TORUS_REF_DIRECTION), j_torus)?,
+                )?;
+                torus_of_arrays(k, &nurbs, p, get(f.r(FACE_TORUS_MAJOR_RADIUS), j_torus)?, get(f.r(FACE_TORUS_MINOR_RADIUS), j_torus)?)?
+            } else {
+                None
+            };
+            let found = match own {
+                Some(torus) => Some(torus),
+                None => analytic_of_nurbs(k, &nurbs, ty, xsect)?,
+            };
+            match found {
                 Some(analytic) => analytic,
                 // A cone whose ends are closer along its axis than SMLib names a cone (a shoulder
                 // a few ten-thousandths of a millimetre deep) is its NURBS form, exactly: the face

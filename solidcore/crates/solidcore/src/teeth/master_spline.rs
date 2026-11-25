@@ -17,7 +17,10 @@
 //! an arc there fills a space. For a hub's opening the smallest circle is the circle of the tips of
 //! its teeth, so an arc there fills a space, and the largest the circle of the bottoms of its
 //! spaces, so an arc there takes a tooth away. Every other piece is the outline's own piece, kept
-//! exact and turned to its place. Nothing comes closer to the other part than before, so the
+//! exact and turned to its place, but for the outline's own arcs on that circle that the new arc
+//! runs on into: they and the arc are one curve, so they are made one arc (one piece of a
+//! profile, one face of a body: the bottom of the space a tooth is left out of is one face from
+//! flank to flank). Nothing comes closer to the other part than before, so the
 //! clearances of the fit are kept; turned on by a pitch, the hub meets the shaft, so it goes on in
 //! one position only.
 //!
@@ -275,7 +278,9 @@ impl Period {
 /// axis on the circle asked for, as one tooth that goes all the way round. A period runs from a
 /// joint of the outline's pieces that lies on that circle to the same joint a pitch on. Only whole
 /// pieces of the outline are kept or dropped, turned to their places, and the outline keeps its
-/// tolerance.
+/// tolerance. An arc of the outline about the axis on that circle that the new arc runs on into
+/// (before it, after it, or both) is made one arc with it, on the outline's own centre and
+/// radius: the stretch is one curve, so it is one piece.
 ///
 /// The arc takes the role of the outline's own arc about the axis on that circle. Where there is
 /// none, it takes the role that circle has on a part whose material lies as `material` says: on a
@@ -343,8 +348,10 @@ pub(crate) fn replaced_period_typed(
     let leave_out = period.holding(at);
     let arc = period.arc_of(leave_out);
     let mut pieces = Vec::new();
+    let mut placed = 0;
     for k in 0..period.teeth {
         if k == leave_out {
+            placed = pieces.len();
             pieces.push(Piece::Arc {
                 centre: [0.0, 0.0],
                 radius: period.radius,
@@ -358,9 +365,92 @@ pub(crate) fn replaced_period_typed(
         }
     }
     Ok(Replaced {
-        outline: Outline::new_typed(1, pieces, outline.tolerance())?,
+        outline: Outline::new_typed(1, run_on(pieces, placed), outline.tolerance())?,
         arc,
     })
+}
+
+/// How far apart, as a share of the radius, the radii of two arcs about the axis may be for the
+/// arcs to lie on one circle: the rounding of a point's distance from the axis (its two
+/// coordinates, each a product with a sine or a cosine, and their root), sixteen roundings wide.
+const ON_ONE_CIRCLE: f64 = 16.0 * f64::EPSILON;
+
+/// The pieces with the arc at `at` and the arcs it runs on into made one arc. A neighbour of the
+/// arc, going round (the piece before it, the piece after it, or both), that is an arc about the
+/// axis of the same radius ([`ON_ONE_CIRCLE`]), turning the same way, with the same role, lies on
+/// the arc's own circle: the two are one curve, and as two pieces a body would have two faces
+/// where it has one surface. The joined arc takes the place of the arc at `at` and keeps the
+/// neighbour's own centre and radius (the outline's piece, kept exact), from the start of the
+/// arc before through all the sweeps. Where no neighbour is such an arc the pieces are given
+/// back as they are.
+fn run_on(pieces: Vec<Piece>, at: usize) -> Vec<Piece> {
+    let n = pieces.len();
+    let Some(&Piece::Arc {
+        radius,
+        start,
+        sweep,
+        role,
+        ..
+    }) = pieces.get(at)
+    else {
+        return pieces;
+    };
+    if n < 3 {
+        return pieces;
+    }
+    // The start and the sweep of a neighbour on the arc's circle, with its own centre and radius.
+    let on_circle = |i: usize| match pieces.get(i) {
+        Some(&Piece::Arc {
+            centre,
+            radius: r,
+            start: s,
+            sweep: w,
+            role: other,
+        }) if other == role
+            && centre[0] == 0.0
+            && centre[1] == 0.0
+            && (r - radius).abs() <= ON_ONE_CIRCLE * radius
+            && w > 0.0 =>
+        {
+            Some((centre, r, s, w))
+        }
+        _ => None,
+    };
+    // The pieces go round: the one before the first is the last, the one after the last the
+    // first.
+    let last = n.saturating_sub(1);
+    let before = at.checked_sub(1).unwrap_or(last);
+    let after = if at >= last { 0 } else { at.saturating_add(1) };
+    let (b, a) = (on_circle(before), on_circle(after));
+    let (centre, r, from) = match (b, a) {
+        (Some((centre, r, s, _)), _) => (centre, r, s),
+        (None, Some((centre, r, _, _))) => (centre, r, start),
+        (None, None) => return pieces,
+    };
+    let total = b.map_or(0.0, |x| x.3) + sweep + a.map_or(0.0, |x| x.3);
+    if !(total < TAU) {
+        return pieces;
+    }
+    let joined = Piece::Arc {
+        centre,
+        radius: r,
+        start: from,
+        sweep: total,
+        role,
+    };
+    pieces
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, p)| {
+            if i == at {
+                Some(joined.clone())
+            } else if (b.is_some() && i == before) || (a.is_some() && i == after) {
+                None
+            } else {
+                Some(p)
+            }
+        })
+        .collect()
 }
 
 /// Where a master spline goes on a spline of `teeth` teeth so that its middle is at `angle` degrees

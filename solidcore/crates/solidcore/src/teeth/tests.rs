@@ -11,6 +11,7 @@ mod measure;
 mod measure_crossings;
 mod outline_crossings;
 mod pairs;
+mod round_face;
 mod seat;
 mod section;
 mod straight;

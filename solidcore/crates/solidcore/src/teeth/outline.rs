@@ -190,8 +190,8 @@ impl Piece {
                 for stretch in bspline::breaks_typed(*degree, knots, control)?.windows(2) {
                     if let [from, to] = stretch {
                         let near = stretch_bends(*degree, knots, control, *from);
-                        // De Boor's steps are sums, products and quotients alone, so the rounding
-                        // of a point is counted, not measured.
+                        // The kernel's evaluation is sums, products and quotients alone, so the
+                        // rounding of a point is counted, not measured.
                         let rounding = break_rounding(*degree, knots, control, *from, *to);
                         let points = sampled(&at, &|_, _| rounding, &near, *from, *to, tolerance)?;
                         out.extend(points.iter().take(points.len().saturating_sub(1)));
@@ -482,8 +482,8 @@ fn closing_gaps(teeth: u32, tooth: &[Piece]) -> Vec<f64> {
 /// evaluates in a later span at an interior break knot (or further on, past a repeated knot), from
 /// control points the first span's rounding does not cover. In effect `2 gamma(12 p + 4)` times
 /// the largest coordinate of the control points from the first span's first to the end span's
-/// last; constant over the stretch. De Boor's steps are sums, products and quotients alone, which
-/// IEEE 754 rounds correctly, so this is counted and needs no measuring.
+/// last; constant over the stretch. The kernel's evaluation is sums, products and quotients
+/// alone, which IEEE 754 rounds correctly, so this is counted and needs no measuring.
 pub(super) fn break_rounding(
     degree: usize,
     knots: &[f64],
@@ -491,9 +491,7 @@ pub(super) fn break_rounding(
     from: f64,
     to: f64,
 ) -> f64 {
-    let count = control.len();
-    let of =
-        |t: f64| bspline::span_rounding(degree, control, bspline::span_of(degree, knots, count, t));
+    let of = |t: f64| bspline::span_rounding(degree, control, bspline::span_of(degree, knots, t));
     let (first, end) = (of(from), of(to));
     if first.is_nan() || end.is_nan() {
         f64::INFINITY
@@ -512,7 +510,7 @@ pub(super) fn stretch_bends<'a>(
     control: &'a [Point],
     from: f64,
 ) -> impl Fn(f64, f64) -> Bend + 'a {
-    let span = bspline::span_of(degree, knots, control.len(), from);
+    let span = bspline::span_of(degree, knots, from);
     move |lo: f64, hi: f64| bspline::stretch_bend(degree, knots, control, span, lo, hi)
 }
 

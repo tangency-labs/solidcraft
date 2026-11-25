@@ -200,11 +200,6 @@ pub fn operation<T>(r: &crate::Result<T>) -> Option<&'static str> {
     r.as_ref().err().map(SolidError::operation)
 }
 
-/// The planner's key and words of a refused public call: the failure's `key()` and its words.
-pub fn refusal<T>(r: &crate::Result<T>) -> Option<(Option<&'static str>, String)> {
-    failure(r).map(|f| (f.key(), f.to_string()))
-}
-
 /// A crate-private result as a public one, for `?` in tests: operation `"teeth::tests"`.
 pub fn lift<T>(r: Result<T, TeethFailure>) -> crate::Result<T> {
     r.map_err(|e| SolidError::teeth("teeth::tests", e))

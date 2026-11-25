@@ -1,25 +1,37 @@
 //! Where a spline sits on a round face of a part, and the measures a caller that cuts it takes of
 //! the face and of what it cuts: the frame at the face's free end (angle 0 from the world axes),
-//! the face's distances from a point, a point moved out from the axis, the matrix into the frame,
-//! how a line or a chord lies to the axis, the angle of a box's middle and a box's reach along a
-//! direction.
+//! the face's distances from a point, a point moved out from the axis, the map into the frame,
+//! how a line or a chord lies to the axis, the angle of a box's middle, and which way a tool lies
+//! once it is turned (a copy turned about the axis, a quarter turn into the shaft).
 //!
 //! A round face is plain numbers ([`RoundFace`]): a point on its axis, the axis, the radius, and
 //! where the face starts and ends along the axis. The frame is a [`Frame`] whose x is angle 0 and
 //! whose normal (x cross y) is the axis as the world axes orient it.
+//!
+//! The measures are the kernel's own: the frame is [`Transform::orthonormal_frame`], the map into
+//! it [`Transform::inverse`] of the frame's placement, a point's distance from a line
+//! [`line_point_distance`], a box's reach along a direction [`Extent3d::span_along`].
 //!
 //! Not upstream: SolidCraft's shaft spline, a kernel primitive because it computes geometry any
 //! client could use (docs/layers.md §1). No recursion. Inputs are hostile: a direction that has
 //! no length, a face of no size, numbers that are not finite give a refusal or a plain answer,
 //! never a panic.
 
-use std::f64::consts::{PI, TAU};
+use std::f64::consts::FRAC_PI_2;
 
 use crate::eval::Frame;
-use crate::Vec3;
+use crate::geom::extent3d::Extent3d;
+use crate::geom::geom_utility::p1::line_point_distance;
+use crate::math::Vec2;
+use crate::{Transform, Vec3};
 
 /// The least length a direction has to be made a unit vector of.
 const LEAST_LENGTH: f64 = 1e-9;
+
+/// The least sine of the turn from one tool to its copy that tells the turn's two senses apart
+/// by where the copy lies: a turn closer than this to none or to half a turn puts the copy nearly
+/// where either sense would.
+const TELLING_TURN: f64 = 1e-3;
 
 /// A round face of a part as numbers.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -101,15 +113,15 @@ pub fn normal(plane: &Frame) -> Vec3 {
     v(plane.x_axis).cross(v(plane.y_axis))
 }
 
-/// The frame through `origin` with the axes `x` and `y` made a right-handed orthonormal pair: x
-/// along `x`, the normal along `x` cross `y`, y the normal cross x. None where an axis has no
-/// direction or the origin is not finite.
-#[must_use]
-pub fn frame_through(origin: Vec3, x: Vec3, y: Vec3) -> Option<Frame> {
-    let x = normalized(x)?;
-    let n = normalized(x.cross(y))?;
-    let y = normalized(n.cross(x))?;
-    finite(origin).then(|| Frame {
+/// The frame through `origin` with x along `x` and y square to it on the side of `y`: the
+/// kernel's orthonormal frame of the two ([`Transform::orthonormal_frame`]). None where a number
+/// is not finite, or `y` has no length or no direction across `x`.
+fn frame_at(origin: Vec3, x: Vec3, y: Vec3) -> Option<Frame> {
+    if !(finite(origin) && finite(x) && finite(y) && x.cross(y).length() > LEAST_LENGTH) {
+        return None;
+    }
+    let [x, y] = Transform::orthonormal_frame(x, y).ok()?;
+    (finite(x) && finite(y)).then(|| Frame {
         origin: origin.to_array(),
         x_axis: x.to_array(),
         y_axis: y.to_array(),
@@ -173,7 +185,7 @@ pub fn seat_frame(
     let end = face.axis_point + k * end_at;
     let into = if at_start { k } else { k * -1.0 };
     let (x, normal_axis) = angle_zero(k).ok_or(SeatRefusal::NoDirection)?;
-    let plane = frame_through(end, x, normal_axis.cross(x)).ok_or(SeatRefusal::NoPlane)?;
+    let plane = frame_at(end, x, normal_axis.cross(x)).ok_or(SeatRefusal::NoPlane)?;
     let inward = if into.dot(normal(&plane)) > 0.0 {
         1.0
     } else {
@@ -231,32 +243,29 @@ pub fn moved_out(plane: &Frame, at: Vec3, by: f64) -> Vec3 {
     }
 }
 
-/// The matrix that takes world coordinates into the plane's frame (x, y, normal; the origin to
-/// zero), column by column: the images of the world axes, then of the origin.
+/// The map that takes world coordinates into the plane's frame (x, y, normal; the origin to
+/// zero), as the kernel's [`Transform`] matrix (rows the images of the world axes, then the
+/// translation): the inverse of the frame's placement. None where the kernel proves no inverse
+/// (a number not finite, axes that do not span space).
 #[must_use]
-pub fn into_frame(plane: &Frame) -> [[f64; 4]; 4] {
-    let (x, y, n, o) = (
+pub fn into_frame(plane: &Frame) -> Option<[[f64; 4]; 4]> {
+    let placed = Transform::from_axes(
         v(plane.x_axis),
         v(plane.y_axis),
         normal(plane),
         v(plane.origin),
     );
-    [
-        [x.x, y.x, n.x, 0.0],
-        [x.y, y.y, n.y, 0.0],
-        [x.z, y.z, n.z, 0.0],
-        [-o.dot(x), -o.dot(y), -o.dot(n), 1.0],
-    ]
+    placed.inverse().ok().map(|map| map.m)
 }
 
 /// How the line through `point` along `dir` lies to the axis through `axis_point` along `axis`
-/// (unit vectors).
+/// (unit vectors): the lean of the two directions, and the kernel's distance of `point` from the
+/// axis line ([`line_point_distance`]).
 #[must_use]
 pub fn axis_gap(axis_point: Vec3, axis: Vec3, point: Vec3, dir: Vec3) -> AxisGap {
-    let off = point - axis_point;
     AxisGap {
         lean: dir.cross(axis).length(),
-        off: (off - axis * off.dot(axis)).length(),
+        off: line_point_distance(axis_point, axis, point).0,
     }
 }
 
@@ -280,32 +289,67 @@ pub fn centre_angle(plane: &Frame, min: Vec3, max: Vec3) -> f64 {
         .atan2(centre.dot(v(plane.x_axis)))
 }
 
-/// How far the angle `a` is from the angle `b`, the short way round (0 to pi).
+/// The angle a tool made about the middle line at the angle `from` is turned by about the axis to
+/// lie about the middle line at `to` (radians): `to - from`, or its opposite where the turns go
+/// the other way (`back`, as [`lies_turned_back`] tells).
 #[must_use]
-pub fn angles_apart(a: f64, b: f64) -> f64 {
-    ((a - b + PI).rem_euclid(TAU) - PI).abs()
-}
-
-/// The least and the most the box `min`..`max` reaches along `dir` from `origin`, over its eight
-/// corners.
-#[must_use]
-pub fn reach_along(origin: Vec3, dir: Vec3, min: Vec3, max: Vec3) -> (f64, f64) {
-    let (mut low, mut high) = (f64::INFINITY, f64::NEG_INFINITY);
-    for corner in 0..8 {
-        let q = Vec3::new(
-            if corner & 1 == 0 { min.x } else { max.x },
-            if corner & 2 == 0 { min.y } else { max.y },
-            if corner & 4 == 0 { min.z } else { max.z },
-        );
-        let h = (q - origin).dot(dir);
-        low = low.min(h);
-        high = high.max(h);
+pub fn copy_turn(from: f64, to: f64, back: bool) -> f64 {
+    let by = to - from;
+    if back {
+        -by
+    } else {
+        by
     }
-    (low, high)
 }
 
-/// The distance between two points of an outline.
+/// Whether a copy turned from the middle line at `from` to the one at `to` tells the two senses of
+/// turning apart by where it lies: not where the turn is so near none or half a turn that either
+/// sense puts the copy in nearly the same place (or the angles are not numbers).
+#[must_use]
+pub fn turn_tells_sense(from: f64, to: f64) -> bool {
+    (to - from).sin().abs() > TELLING_TURN
+}
+
+/// Whether a copy turned by [`copy_turn`] from `from` to `to` (not back) lies about the mirror of
+/// `to` instead (`from` turned the other way), so that the turns go the other way: the middle of
+/// its box `min`..`max` ([`centre_angle`] about the plane's normal) is nearer, the short way round,
+/// to that mirror than to `to`. Asked only where [`turn_tells_sense`].
+#[must_use]
+pub fn lies_turned_back(plane: &Frame, min: Vec3, max: Vec3, from: f64, to: f64) -> bool {
+    let lies = centre_angle(plane, min, max);
+    let mirror = from - (to - from);
+    // Nearer the short way round is a larger cosine of the angle between.
+    (lies - mirror).cos() > (lies - to).cos()
+}
+
+/// The quarter turn that takes a section on the plane into the shaft (radians): a quarter turn
+/// towards the plane's normal times `inward` (the kernel turns a section towards its plane's
+/// normal), the other way where a tool turned that way lies outside (`back`, as [`lies_inward`]
+/// tells).
+#[must_use]
+pub fn quarter_turn_in(inward: f64, back: bool) -> f64 {
+    let turn = FRAC_PI_2 * inward;
+    if back {
+        -turn
+    } else {
+        turn
+    }
+}
+
+/// Whether the box `min`..`max` of a turned tool lies past the plane into the shaft, along its
+/// normal times `inward`: it reaches at least as far that way as it reaches back out
+/// ([`Extent3d::span_along`] from the plane's origin). A box of numbers that are not numbers is
+/// taken to lie inward, so nothing is turned again for it.
+#[must_use]
+pub fn lies_inward(plane: &Frame, inward: f64, min: Vec3, max: Vec3) -> bool {
+    let into = normal(plane) * inward;
+    let bounds = Extent3d::from_bounds(min.x, min.y, min.z, max.x, max.y, max.z);
+    let [low, high] = bounds.span_along(v(plane.origin), into);
+    !(high < -low)
+}
+
+/// The distance between two points of an outline, the kernel's ([`Vec2::distance`]).
 #[must_use]
 pub fn points_apart(a: [f64; 2], b: [f64; 2]) -> f64 {
-    (a[0] - b[0]).hypot(a[1] - b[1])
+    Vec2::new(a[0], a[1]).distance(Vec2::new(b[0], b[1]))
 }

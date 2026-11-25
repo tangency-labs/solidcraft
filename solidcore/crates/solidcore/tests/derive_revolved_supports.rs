@@ -641,3 +641,103 @@ fn a_twelve_degree_rib_cone_derives_from_the_fillet_support() {
         built.unwrap_or_else(|e| panic!("{name} does not build: {e}"));
     }
 }
+
+/// A quarter of a torus (R `major`, r `minor`) about the tilted frame's axis through `origin`, of
+/// which the tube shows `arc` degrees about `mid` degrees: the tensor product of the two rational
+/// quadratic arcs, its first meridian in the plane of the frame's x.
+fn short_tube_torus(origin: Vec3, major: f64, minor: f64, mid: f64, arc: f64) -> BSplineSurface {
+    let (x, y, z) = tilted();
+    let quarter = std::f64::consts::FRAC_PI_4;
+    let half = (0.5 * arc).to_radians();
+    let rows: Vec<Vec<CPoint>> = (0..3)
+        .map(|i| {
+            let u = f64::from(i) * quarter;
+            let wu = if i == 1 { quarter.cos() } else { 1.0 };
+            let radial = (x * u.cos() + y * u.sin()) * (1.0 / wu);
+            (0..3)
+                .map(|j| {
+                    let v = mid.to_radians() + (f64::from(j) - 1.0) * half;
+                    let wv = if j == 1 { half.cos() } else { 1.0 };
+                    let p = origin
+                        + radial * (major + minor * v.cos() / wv)
+                        + z * (minor * v.sin() / wv);
+                    let w = wu * wv;
+                    CPoint::new(p.x * w, p.y * w, p.z * w, w)
+                })
+                .collect()
+        })
+        .collect();
+    let knots = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+    let nurb = solidcore::nurbs::srf_basic::Surface::new(rows, 2, 2, knots.clone(), knots).unwrap();
+    BSplineSurface::from_nurb(nurb, true)
+}
+
+/// A torus's own numbers build on a form of which the tube shows only a short arc: a tool's
+/// section with a short arc in it, turned about a line, sweeps such a torus (the end of a tooth
+/// space cut with a round cutter). The form does not fix the tube's circle (a 0.1 degree arc of a
+/// circle of radius 13.7 is 0.024 long and 5e-6 high), so the recogniser finds no torus in it and,
+/// for its conventions, `build` had none to carry the support on: the label was dropped, or the
+/// body refused. The support says where the tube is; the form's net says which way it runs
+/// (`Torus::conventions_of`). Built so, the surface is the support, and evaluates as the form.
+#[test]
+fn a_torus_showing_a_short_arc_of_its_tube_builds_on_its_own_numbers() {
+    let k = Kernel {
+        fixes: solidcore::kernel::UpstreamFixes::all(),
+        ..Kernel::default()
+    };
+    let (x, y, _) = tilted();
+    for origin in [
+        Vec3::ZERO,
+        Vec3::new(12.5, -7.25, 40.0),
+        Vec3::new(212.5, 133.0, -87.0),
+    ] {
+        for (major, minor) in [(38.725, 13.725), (10.0, 3.0), (26.0, 1.0)] {
+            for mid in [180.0, 0.0, 90.0, 137.0] {
+                for arc in [5.0, 1.2, 0.3, 0.1, 0.02] {
+                    let at =
+                        format!("R {major} r {minor} at {origin:?}, {arc} degrees about {mid}");
+                    let form = short_tube_torus(origin, major, minor, mid, arc);
+                    let support = AnalyticSupport::Torus {
+                        placement: solidcore::geom::axis2_placement::Axis2Placement::from_stored(
+                            origin, x, y,
+                        ),
+                        major_radius: major,
+                        minor_radius: minor,
+                    };
+                    let built = support
+                        .build(&k, form.copy())
+                        .unwrap_or_else(|e| panic!("{at}: {e}"));
+                    assert_eq!(AnalyticSupport::of(&built), Some(support), "{at}");
+                    let size = origin.length() + major + minor;
+                    let d = form.natural_uv_domain();
+                    for (a, b) in [(0.0, 0.4567), (0.4567, 0.7654), (0.9, 0.1)] {
+                        let uv = Point2::new(
+                            d.min().x + (d.max().x - d.min().x) * a,
+                            d.min().y + (d.max().y - d.min().y) * b,
+                        );
+                        let step = built.convert_uv_from_nurbs_to_step(&k, uv).unwrap();
+                        let off = (built.evaluate_step_point(&k, step).unwrap()
+                            - form.evaluate_point(uv).unwrap())
+                        .length();
+                        assert!(
+                            off <= 64.0 * f64::EPSILON * size,
+                            "{at}: {off:e} off at {uv:?}"
+                        );
+                    }
+                    // a torus a thousandth off the form is still refused
+                    let off_form = AnalyticSupport::Torus {
+                        placement: solidcore::geom::axis2_placement::Axis2Placement::from_stored(
+                            origin, x, y,
+                        ),
+                        major_radius: major + 1e-3,
+                        minor_radius: minor,
+                    };
+                    assert!(
+                        off_form.build(&k, form.copy()).is_err(),
+                        "{at}: a torus off the form"
+                    );
+                }
+            }
+        }
+    }
+}

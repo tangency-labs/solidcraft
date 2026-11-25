@@ -421,3 +421,82 @@ fn a_hole_cut_a_hair_across_a_torus_seam_comes_back() {
     let v = volume(&again, 1e-9).unwrap();
     assert!(rel(v, want) < 1e-9, "joined: {v} vs {want}");
 }
+
+/// The tool that ends a tooth space in a cutter's curve: a section in the plane z = 40 whose floor
+/// is `arc_deg` degrees of the circle of radius 13.725 about the z axis, with two walls up to 16
+/// from that axis and a top, turned a quarter turn about a line in its plane `cutter_radius` above
+/// the floor. The floor sweeps a torus of which the tube shows only those degrees.
+fn run_out_tool(arc_deg: f64, cutter_radius: f64) -> Body {
+    use std::f64::consts::FRAC_PI_2;
+
+    use crate::sweeps::Curve;
+    let (root, out_to, z) = (13.725_f64, 16.0_f64, 40.0);
+    let half = (0.5 * arc_deg).to_radians();
+    let at = |a: f64| [root * a.cos(), root * a.sin(), z];
+    let (after, before) = (at(FRAC_PI_2 + half), at(FRAC_PI_2 - half));
+    let (high_before, high_after) = ([before[0], out_to, z], [after[0], out_to, z]);
+    let line = |start, end| Curve::Line { start, end };
+    let profile = [
+        // from the corner after the space to the one before it: clockwise seen from +z
+        Curve::Arc {
+            center: [0.0, 0.0, z],
+            axis: [0.0, 0.0, -1.0],
+            reference: [(FRAC_PI_2 + half).cos(), (FRAC_PI_2 + half).sin(), 0.0],
+            radius: root,
+            start: 0.0,
+            end: 2.0 * half,
+        },
+        line(before, high_before),
+        line(high_before, high_after),
+        line(high_after, after),
+    ];
+    super::sweep::revolve(&profile, [0.0, root + cutter_radius, z], [1.0, 0.0, 0.0], FRAC_PI_2, true).unwrap()
+}
+
+/// A torus of which the tube shows a short arc comes back from its arrays as the torus it was made:
+/// its frame and radii are the arrays' own, to rounding, and the body passes its own check, alone
+/// and cut out of a shaft. The numbers used to be worked back out of the NURBS form, which a short
+/// arc does not fix: a 1.2 degree arc came back 1e-10 to 1e-9 off and the check refused it in some
+/// places ("Bad Analytic and NURB Evaluate"), and one under about 0.3 degrees was refused outright
+/// ("a NURBS form that is not its analytic surface").
+#[test]
+fn a_torus_showing_a_short_arc_of_its_tube_comes_back_as_it_was_made() {
+    use crate::check::CheckLevel;
+    use crate::flat::{FACE_TORUS_AXIS, FACE_TORUS_MAJOR_RADIUS, FACE_TORUS_MINOR_RADIUS, FACE_TORUS_ORIGIN, FACE_TORUS_REF_DIRECTION};
+    for (arc_deg, cutter_radius) in [(5.0, 25.0), (1.2, 25.0), (1.2, 40.0), (0.3, 25.0), (0.05, 40.0)] {
+        let at = format!("a {arc_deg} degree arc, cutter radius {cutter_radius}");
+        let tool = run_out_tool(arc_deg, cutter_radius);
+        let arrays = to_arrays(&tool).unwrap();
+        let made = &arrays.reals[&FACE_TORUS_MAJOR_RADIUS];
+        assert_eq!(made.len(), 1, "{at}: the floor is one torus");
+        assert!(rel(made[0], 13.725 + cutter_radius) < 1e-12, "{at}: major radius {}", made[0]);
+        let back = from_arrays(&arrays).unwrap();
+        let again = to_arrays(&back).unwrap();
+        for id in [FACE_TORUS_ORIGIN, FACE_TORUS_AXIS, FACE_TORUS_REF_DIRECTION, FACE_TORUS_MAJOR_RADIUS, FACE_TORUS_MINOR_RADIUS] {
+            let (was, is) = (&arrays.reals[&id], &again.reals[&id]);
+            assert_eq!(was.len(), is.len(), "{at}: array {id}");
+            for (a, b) in was.iter().zip(is) {
+                assert!((a - b).abs() <= 8.0 * f64::EPSILON * (1.0 + a.abs()), "{at}: array {id}: {a} came back {b}");
+            }
+        }
+        assert!(super::check(&back, CheckLevel::All).unwrap().is_valid(), "{at}: the tool");
+        let shaft = make_cylinder([0.0; 3], 15.75, 60.0).unwrap();
+        let cut = boolean(&shaft, &back, BooleanOp::Subtract).unwrap().unwrap();
+        let cut = from_arrays(&to_arrays(&cut).unwrap()).unwrap();
+        assert!(super::check(&cut, CheckLevel::All).unwrap().is_valid(), "{at}: the shaft cut with it");
+    }
+}
+
+/// Arrays that name a torus a thousandth off its NURBS form do not put that torus on the form: the
+/// body comes back with the torus its form is (major radius 10), as before.
+#[test]
+fn a_torus_named_off_its_form_is_not_put_on_the_form() {
+    use crate::flat::FACE_TORUS_MAJOR_RADIUS;
+    let mut arrays = to_arrays(&make_torus([1.0, -1.0, 0.5], 10.0, 3.0).unwrap()).unwrap();
+    for r in arrays.reals.get_mut(&FACE_TORUS_MAJOR_RADIUS).unwrap() {
+        *r += 1e-3;
+    }
+    let again = to_arrays(&from_arrays(&arrays).unwrap()).unwrap();
+    let radii = &again.reals[&FACE_TORUS_MAJOR_RADIUS];
+    assert!(!radii.is_empty() && radii.iter().all(|r| (r - 10.0).abs() < 1e-9), "{radii:?}");
+}

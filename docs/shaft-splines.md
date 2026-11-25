@@ -93,7 +93,9 @@ On a picked shaft, **Round the ends** (`cutter_diameter`) makes each tooth space
 cutter of that diameter leaves. That curve starts where the length ends and runs on until it leaves
 the shaft's surface, through a shoulder if one stands there, as a cutter would. Without it the
 spaces end square. `cutter_diameter` is refused without `shaft_face`. Teeth that run the whole length
-of the face run right through, with no rounded end.
+of the face run right through, with no rounded end. A space wider than one cutter's curve reaches
+round (170 degrees or more of the shaft, as between two narrow teeth) ends square, and the feature
+says so in a warning.
 
 ## End chamfer and entry chamfer
 

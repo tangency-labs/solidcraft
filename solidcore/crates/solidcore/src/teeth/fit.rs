@@ -40,10 +40,32 @@
 //! - Arcs, lines and splines are kept as they are. The result is the same on every run.
 //!
 //! [`bezier_pieces`] and [`cubic_beziers`] give a spline as the polynomial pieces between its
-//! knots, each with its own control points, for programs that want Bezier segments.
+//! knots, each with its own control points, for programs that want Bezier segments;
+//! [`profile_pieces`] gives them with at most as many control points as a profile's Bezier
+//! segment holds, a piece of a higher degree lowered within a stated tolerance.
+//!
+//! What is the kernel's and what is the tooth module's own. The spline is the kernel's NURBS curve
+//! ([`crate::nurbs::crv_basic::Curve`]): its points and slopes, its basis functions, the solve of
+//! the least-squares equations ([`RealMatrix::lu_decompose`]), knot insertion, the Bezier pieces
+//! ([`NurbCurve::decompose_bez`]), the lowering of a degree and the split of a piece are the
+//! kernel's routines, and the distance of a spline from its source is the kernel's certified
+//! bound ([`certified_distance`]), taken against the source laid on the spline's parameters. The
+//! tooth module chooses: how many control points a curve needs and where its knots go, where its
+//! corners and smooth joins are, which source points pair with which parameters, and whether the
+//! bound is within the tolerance. The least-squares equations are its own because the end
+//! condition is: the kernel's fitters through the ends fix an end derivative, length and all
+//! ([`crate::nurbs::crv_fit::p2::weighted_lst_sq_knots`], and
+//! [`crate::nurbs::crv_fit::end_directions::interp_end_directions`] takes the data polygon's
+//! length), where a smooth join here fixes only the direction and leaves its length to the fit.
 
 use crate::error::teeth::{TeethFailure, Why, FIT_DISTANCE};
 use crate::geom::certified::{gamma, next_up};
+use crate::nurbs::crv_basic::Curve as NurbCurve;
+use crate::nurbs::crv_deviation::certified_distance;
+use crate::nurbs::knots::{KnotVector, Side as KnotSide, MAX_DEGREE as KERNEL_MAX_DEGREE};
+use crate::nurbs::math::{CPoint, MatrixType, RealMatrix, LU_TOL};
+use crate::nurbs::nurbs_crv::crv_derivs_into;
+use crate::prism::profile::MAX_BEZIER_CTRL;
 use crate::teeth::bound::{self, exact};
 use crate::teeth::bspline::{self, MAX_DEGREE};
 use crate::teeth::outline::{distance, less_gap, rotated, Outline, Piece, Point};
@@ -71,6 +93,11 @@ pub(super) const WORKING_POINTS: usize = 3_000;
 
 /// How many times a fit is done again with the points moved to their feet on the curve found.
 pub(super) const CORRECTIONS: usize = 2;
+
+/// The step of a spline's parameter (which runs from 0 to 1) below which the search for the foot of
+/// a point has arrived: a step this short moves the foot's point by less than the rounding of its
+/// coordinates.
+const FOOT_STEP: f64 = 1e-13;
 
 /// Into how many pieces one source chord may be cut for the proof of a spline's distance.
 const MAX_CHORD_SPLIT: usize = 64;
@@ -533,68 +560,34 @@ pub(super) fn cell(values: &[f64], i: usize) -> f64 {
     values.get(i).copied().unwrap_or(0.0)
 }
 
-/// Sets value `i`, if there is one.
-pub(super) fn put(values: &mut [f64], i: usize, value: f64) {
-    if let Some(v) = values.get_mut(i) {
-        *v = value;
-    }
-}
-
-/// The stretch between knots that holds `u`: the largest `s` from `degree` to `count - 1` with knot
-/// `s` at or before `u`.
+/// The stretch between knots that holds `u`, as the kernel finds it ([`KnotVector::find_span`]:
+/// the span that starts at or before `u`, from `degree` to `count - 1`); `degree` where the
+/// knots are too few for the degree. `count` is the number of control points the knots are for.
 pub(super) fn span_of(degree: usize, knots: &[f64], count: usize, u: f64) -> usize {
-    let (mut low, mut high) = (degree, count.saturating_sub(1).max(degree));
-    while low < high {
-        let middle = (low + high) / 2 + (low + high) % 2;
-        if knot(knots, middle) <= u {
-            low = middle;
-        } else {
-            high = middle - 1;
-        }
-    }
-    low
+    let last = count.saturating_sub(1).max(degree);
+    KnotVector::from_slice(knots)
+        .and_then(|k| k.find_span(degree, u, KnotSide::Left))
+        .map_or(degree, |span| span.min(last))
 }
 
-/// The values at `u` of the `degree + 1` basis functions that are not nothing on stretch `span`.
-pub(super) fn basis(degree: usize, knots: &[f64], span: usize, u: f64) -> [f64; ORDER] {
-    let (mut n, mut left, mut right) = ([0.0; ORDER], [0.0; ORDER], [0.0; ORDER]);
-    put(&mut n, 0, 1.0);
-    for j in 1..=degree.min(MAX_DEGREE) {
-        put(&mut left, j, u - knot(knots, (span + 1).saturating_sub(j)));
-        put(&mut right, j, knot(knots, span + j) - u);
-        let mut saved = 0.0;
-        for r in 0..j {
-            let below = cell(&right, r + 1) + cell(&left, j - r);
-            let share = if below == 0.0 {
-                0.0
-            } else {
-                cell(&n, r) / below
-            };
-            put(&mut n, r, saved + cell(&right, r + 1) * share);
-            saved = cell(&left, j - r) * share;
-        }
-        put(&mut n, j, saved);
+/// The stretch between knots that holds `u` and the values there of the `degree + 1` basis
+/// functions that are not nothing on it: the kernel's ([`KnotVector::basis_eval_into`], The NURBS
+/// Book's A2.2, on the span [`span_of`] finds). `None` where the kernel refuses (knots too few for
+/// the degree, two knots of a span too close to divide by).
+pub(super) fn basis_at(degree: usize, knots: &[f64], u: f64) -> Option<(usize, [f64; ORDER])> {
+    let vector = KnotVector::from_slice(knots).ok()?;
+    let mut values = [0.0; ORDER + 1];
+    let span = vector
+        .basis_eval_into(degree, u, KnotSide::Left, &mut values)
+        .ok()?;
+    let mut out = [0.0; ORDER];
+    for (o, v) in out.iter_mut().zip(values) {
+        *o = v;
     }
-    n
+    Some((span, out))
 }
 
-/// The point of a spline at `u`: the basis functions of `u`'s stretch (Cox-de Boor) weighting the
-/// control points.
-pub(super) fn sum_at(degree: usize, knots: &[f64], control: &[Point], u: f64) -> Point {
-    let span = span_of(degree, knots, control.len(), u);
-    let n = basis(degree, knots, span, u);
-    let mut p = [0.0, 0.0];
-    for (r, weight) in n.iter().take(degree + 1).enumerate() {
-        let c = control
-            .get((span + r).wrapping_sub(degree))
-            .copied()
-            .unwrap_or([f64::NAN, f64::NAN]);
-        p = [p[0] + weight * c[0], p[1] + weight * c[1]];
-    }
-    p
-}
-
-/// A spline over the parameters 0 to 1, with its derivative.
+/// A spline over the parameters 0 to 1, as the kernel's curve, with its derivative.
 pub(super) struct Spline {
     /// Its degree.
     pub(super) degree: usize,
@@ -602,8 +595,8 @@ pub(super) struct Spline {
     pub(super) knots: Vec<f64>,
     /// Its control points.
     pub(super) control: Vec<Point>,
-    /// The control points of its derivative, a spline of one degree less.
-    pub(super) slope_control: Vec<Point>,
+    /// The kernel's curve: the control points in the plane `z = 0`, not weighted.
+    curve: NurbCurve,
 }
 
 const NOT_FINITE: TeethFailure = TeethFailure::Invalid(Why::FittedNotFinite);
@@ -616,42 +609,34 @@ impl Spline {
         control: Vec<Point>,
     ) -> Result<Spline, TeethFailure> {
         bspline::range_typed(degree, &knots, &control)?;
-        let p = degree as f64;
-        let slope_control = control
-            .windows(2)
-            .enumerate()
-            .map(|(i, w)| match w {
-                [a, b] => {
-                    let gap = knot(&knots, i + degree + 1) - knot(&knots, i + 1);
-                    if gap > 0.0 {
-                        [p * (b[0] - a[0]) / gap, p * (b[1] - a[1]) / gap]
-                    } else {
-                        [0.0, 0.0]
-                    }
-                }
-                _ => [0.0, 0.0],
-            })
-            .collect();
+        let curve = bspline::kernel_curve(degree, &knots, &control)?;
         Ok(Spline {
             degree,
             knots,
             control,
-            slope_control,
+            curve,
         })
     }
 
-    /// The point at `u`.
-    pub(super) fn at(&self, u: f64) -> Point {
-        sum_at(self.degree, &self.knots, &self.control, u)
+    /// The point at `u` and the derivative there: the kernel's, into a buffer of its caller's
+    /// ([`crv_derivs_into`]: nothing is allocated for a point); NaN where the kernel refuses.
+    fn point_and_slope(&self, u: f64) -> (Point, Point) {
+        const NOTHING: Point = [f64::NAN, f64::NAN];
+        let mut d = [crate::Vec3::ZERO; 2];
+        match crv_derivs_into(&self.curve, u, KnotSide::Left, &mut d) {
+            Ok(()) => {
+                let [p, s] = d;
+                ([p.x, p.y], [s.x, s.y])
+            }
+            Err(_) => (NOTHING, NOTHING),
+        }
     }
 
-    /// The derivative at `u`.
-    pub(super) fn slope(&self, u: f64) -> Point {
-        let inner = self
-            .knots
-            .get(1..self.knots.len().saturating_sub(1))
-            .unwrap_or(&[]);
-        sum_at(self.degree.saturating_sub(1), inner, &self.slope_control, u)
+    /// The point at `u`: the kernel's ([`NurbCurve::eval`]); NaN where the kernel refuses.
+    pub(super) fn at(&self, u: f64) -> Point {
+        self.curve
+            .eval(u, KnotSide::Left)
+            .map_or([f64::NAN, f64::NAN], |p| [p.x, p.y])
     }
 
     /// The distance from `q` to the spline, looking from the parameter `u`: the closest of the
@@ -659,9 +644,9 @@ impl Spline {
     /// distance), and its parameter.
     pub(super) fn foot(&self, q: Point, u: f64) -> (f64, f64) {
         let mut u = u.clamp(0.0, 1.0);
-        let (mut best, mut best_u) = (distance(self.at(u), q), u);
+        let (mut p, mut d) = self.point_and_slope(u);
+        let (mut best, mut best_u) = (distance(p, q), u);
         for _ in 0..6 {
-            let (p, d) = (self.at(u), self.slope(u));
             let (along, length2) = (
                 (p[0] - q[0]) * d[0] + (p[1] - q[1]) * d[1],
                 d[0] * d[0] + d[1] * d[1],
@@ -670,12 +655,14 @@ impl Spline {
                 break;
             }
             let next = (u - along / length2).clamp(0.0, 1.0);
-            let off = distance(self.at(next), q);
+            // A step this short arrives where it left from: that point is counted already.
+            if (next - u).abs() < FOOT_STEP {
+                break;
+            }
+            (p, d) = self.point_and_slope(next);
+            let off = distance(p, q);
             if off < best {
                 (best, best_u) = (off, next);
-            }
-            if (next - u).abs() < 1e-16 {
-                break;
             }
             u = next;
         }
@@ -840,94 +827,65 @@ fn up(x: f64) -> f64 {
     }
 }
 
-/// Whether the proof of [`certificate`] applies to the spline. Its parameters must run from
-/// exactly 0 to exactly 1: the pairing takes the first point at 0 and the last at 1 as the whole
-/// spline. And no knot inside may be repeated `degree` times: the first derivative would jump
-/// there, and the chord bound `du^2/8 max |S''|` needs it continuous. Every spline the fit makes
-/// is such a spline; this keeps the proof from being trusted for one that is not.
-pub(super) fn certifiable(spline: &Spline) -> bool {
-    let (degree, count) = (spline.degree, spline.control.len());
-    let whole = knot(&spline.knots, degree) == 0.0 && knot(&spline.knots, count) == 1.0;
-    let inside = || {
-        spline
-            .knots
-            .iter()
-            .skip(degree + 1)
-            .take(count.saturating_sub(degree + 1))
-    };
-    let cornered = inside()
-        .zip(inside().skip(degree.saturating_sub(1)))
-        .any(|(a, b)| a == b);
-    whole && degree >= 1 && !cornered
-}
+/// How much looser than the sag bound `h^2/8 max |S''|` the kernel's bound can be on a stretch of a
+/// chord: on a polynomial piece of degree `p` that the chord meets at both ends, the Bezier
+/// coefficients of their difference reach `p / (8 (p - 1)) h^2 max |S''|` at most (from the second
+/// differences of the coefficients), twice the sag bound at degree 2 and less above it. A chord
+/// is cut until this many times its sag bound is within a quarter of the allowance.
+const HULL: f64 = 2.0;
 
 /// The proved distance between `spline` and the polyline `points` (the source's own points), and
-/// the distances per knot span that guide where to add a knot.
+/// for each knot span a distance that guides where a knot is added when the proof falls short.
 ///
-/// The proof. Every point `i` gets a parameter `u_i` on the spline: 0 for the first, 1 for the
+/// The pairing. Every point `i` gets a parameter `u_i` on the spline: 0 for the first, 1 for the
 /// last, the foot of the point (found from `starts`) for the others, then the running largest, so
-/// that the parameters never go back (any parameters that never go back give a sound bound; the
-/// feet only make it tight). For each source chord `i` and `s` from 0 to 1, the spline at
-/// `u_i + s du` and the source chord at `s` are paired. The spline's own chord over `[u_i,
-/// u_{i+1}]` is within `du^2/8 max |S''|` of the spline (Peano's kernel of linear interpolation),
-/// and that chord and the source chord, both straight, are within the larger of the distances
-/// between their ends. Where that bend term is above a quarter of the allowance, the source chord
-/// is cut into `k` (at most `MAX_CHORD_SPLIT`) pieces at points on the chord itself, each with its
-/// own parameter (the foot, kept between the chord's and never going back), and the same holds
-/// for each piece. The pairing is onto both ways, so the Hausdorff distance between the spline
-/// and the polyline is at most the largest piece's bound, and between the spline and the true
-/// curve at most that plus the source's tolerance (proved for every outline the tooth modules
-/// make; for a caller's own polyline, the tolerance the caller stated). Points are added on the
-/// source's chords, not knots: the source is refined, as `filled` refines it.
+/// that the parameters never go back (any parameters that never go back pair the two curves; the
+/// feet only make the bound tight). Where the spline bends on a chord's parameters so that the
+/// chord could not follow it within a quarter of the allowance (`HULL` times the sag bound
+/// `du^2/8 max |S''|`, the bends `bspline::span_bend`'s), the chord is cut into `k` (at most
+/// `MAX_CHORD_SPLIT`) pieces at points on the chord itself, each with its own parameter (its foot,
+/// kept between the chord's and never going back). A run of equal parameters is spread apart over
+/// half the way to the next parameter (`spread`). The source laid on these parameters is the
+/// spline of degree 1 through its points (`polyline`), and the kernel's certified bound of how far
+/// two curves are apart at the same parameter ([`certified_distance`]: their Bezier pieces over
+/// the union of their breaks, raised to one degree, compared control point by control point,
+/// every rounding counted) bounds the distance of every point of either curve from its partner on
+/// the other: the Hausdorff distance between the spline and the polyline. Between the spline and
+/// the true curve it is at most that plus the source's tolerance (proved for every outline the
+/// tooth modules make; for a caller's own polyline, the tolerance the caller stated). A point
+/// added inside a chord, `a + (b - a) j / k`, lies off the chord by its rounding: four operations
+/// per coordinate, within `3 gamma(4) m` (`m` the largest coordinate of the chord's ends), and
+/// `6 gamma(4) m` for both, which is added to the bound.
 ///
-/// The counted operations. The feet only choose parameters and are not counted. The spline's
-/// point `Spline::at` is `sum_at`, Cox-de Boor `basis` and a weighted sum, not de Boor's convex
-/// combinations, so its count is derived here: for `u` in its span (`span_of` puts it there)
-/// `left = u - t` and `right = t - u` are not negative, and each level of `basis` takes left (1),
-/// right (1), `below = right + left` (1), `share = n / below` (1), `right * share` and its sum
-/// with `saved` (2), all on terms that are not negative, so after `p` levels each computed `N_j`
-/// is `N_j (1 + theta)`, `|theta| <= gamma(6p)`; the weights' error moves the sum by at most
-/// `gamma(6p) sum N_j |c_j| <= gamma(6p) max |c|` (the exact `N_j` are not negative and sum to
-/// 1); the sum over the `p + 1` terms (one product and at most `p` additions per term) adds
-/// `gamma(p + 2) sum |computed N_j| |c_j| <= gamma(p + 2) (1 + gamma(6p)) max |c|`. Per
-/// coordinate that is at most `(gamma(6p) + gamma(p + 2) + gamma(p + 2) gamma(6p)) max |c| <=
-/// gamma(7p + 2) max |c|`, taken as `gamma(12p + 4) max |c|`, and twice that for the two
-/// coordinates of a distance: `E_S`. The distance of a point from the spline's point is an upper
-/// bound from `bound::apart`: the two differences, their squares, the sum and the square root as
-/// `Ivl` operations, with nothing taken from the platform's `hypot`. A point inside a chord,
-/// `a + (b - a) j / k`: four operations per coordinate
-/// (the difference, the product by `j`, the quotient by `k`, the sum with `a`), within `gamma(4)
-/// (|a_c| + |b_c - a_c|) <= 3 gamma(4) m` per coordinate, `m` the largest coordinate of the two
-/// ends, and `6 gamma(4) m` for both. Parameter widths are rounded up (`next_up` of the computed
-/// difference). The bounds of `|S''|` are `bspline::span_bend`'s, and every product and sum of
-/// the bound is an `Ivl` operation, rounded outward and taken at its upper end.
+/// The guide. For each chord, the larger of the distances of its ends from their partners plus
+/// `HULL` times its sag bound, kept for the knot span of the chord's middle; a measure, not a
+/// proof. Where the proved bound is above every guide, the span with the largest guide carries it,
+/// so that a spline the proof does not accept always has a span to add a knot to.
 ///
-/// A chord whose bend term stays above the allowance when cut into `MAX_CHORD_SPLIT` pieces is
-/// not refused here: its term is in the bound returned, which is then above the allowance, and
-/// the caller goes on as for any spline not yet within it (another knot where the bound is
-/// largest, or the next degree) and ends in its own refusal if nothing is. A spline that is far
-/// from the curve at one count of knots bends more than the next one will.
+/// A chord whose sag stays above the allowance when cut into `MAX_CHORD_SPLIT` pieces is not
+/// refused here: the bound returned is then above the allowance, and the caller goes on as for any
+/// spline not yet within it (another knot where the guide is largest, or the next degree) and ends
+/// in its own refusal if nothing is.
 ///
-/// Refused (`NotProved` naming [`FIT_DISTANCE`]): a spline the proof does not apply to
-/// ([`certifiable`]), and more than `CERTIFICATE_WORK` pieces.
+/// Refused (`NotProved` naming [`FIT_DISTANCE`]): a spline the kernel's bound does not take (one
+/// not on the parameters 0 to 1 with clamped knots), parameters that floating point cannot spread
+/// apart, and more than `CERTIFICATE_WORK` pieces.
 pub(super) fn certificate(
     spline: &Spline,
     points: &[Point],
     starts: &[f64],
     allowance: f64,
 ) -> Result<(f64, Vec<f64>), TeethFailure> {
+    let not_proved = TeethFailure::NotProved {
+        what: FIT_DISTANCE,
+        asked: allowance,
+        reached: f64::INFINITY,
+    };
     let count = spline.control.len();
     let degree = spline.degree;
     let last = points.len().saturating_sub(1);
     if last == 0 {
         return Err(TeethFailure::Invalid(Why::CurvePointCount));
-    }
-    if !certifiable(spline) {
-        return Err(TeethFailure::NotProved {
-            what: FIT_DISTANCE,
-            asked: allowance,
-            reached: f64::INFINITY,
-        });
     }
     // The parameter of each point on the spline, never going back.
     let mut u: Vec<f64> = Vec::new();
@@ -947,34 +905,30 @@ pub(super) fn certificate(
         }
         u.push(previous);
     }
-    let largest = spline
-        .control
-        .iter()
-        .flatten()
-        .fold(0.0_f64, |m, v| m.max(v.abs()));
-    let e_spline = up((exact(2.0) * exact(gamma(12 * degree + 4)) * exact(largest)).hi);
-    // How far a point on the source chord is from the spline's point at `v`, rounded up, with
-    // `extra` for the rounding of the point itself.
-    let end_distance = |w: Point, v: f64, extra: f64| -> f64 {
-        up((exact(bound::apart(w, spline.at(v))) + exact(e_spline) + exact(extra)).hi)
-    };
     let mut bends = Bends::of(spline);
     let mut by_span: Vec<f64> = spline.control.iter().map(|_| 0.0).collect();
-    let mut bound = 0.0_f64;
+    // The polyline's points and their parameters, and the largest rounding of a point added inside
+    // a chord.
+    let (mut vertices, mut params): (Vec<Point>, Vec<f64>) = (Vec::new(), Vec::new());
+    if let (Some(&first), Some(&at)) = (points.first(), u.first()) {
+        vertices.push(first);
+        params.push(at);
+    }
+    let mut added = 0.0_f64;
     let mut work = 0usize;
-    for (pair, params) in points.windows(2).zip(u.windows(2)) {
-        let ([a, b], [ui, ui1]) = (pair, params) else {
+    for (pair, between) in points.windows(2).zip(u.windows(2)) {
+        let ([a, b], [ui, ui1]) = (pair, between) else {
             continue;
         };
         let (a, b, ui, ui1) = (*a, *b, *ui, *ui1);
         let du = gap(ui, ui1);
         let most = bends.most(ui, ui1);
         // Into how many pieces the chord is cut: one where its bend term is within a quarter of
-        // the allowance, else as many as bring each piece's term near half the allowance.
-        let pieces = if sag(du, most) <= 0.25 * allowance {
+        // the allowance, else as many as bring each piece's term near a quarter of it.
+        let pieces = if HULL * sag(du, most) <= 0.25 * allowance {
             1
         } else {
-            let wanted = (du * (most / (2.0 * allowance)).sqrt()).ceil();
+            let wanted = (du * (HULL * most / (2.0 * allowance)).sqrt()).ceil();
             if wanted.is_finite() && wanted >= 1.0 {
                 wanted.min(MAX_CHORD_SPLIT as f64) as usize
             } else {
@@ -984,45 +938,98 @@ pub(super) fn certificate(
         let m = a[0].abs().max(a[1].abs()).max(b[0].abs()).max(b[1].abs());
         let e_point = up((exact(6.0) * exact(gamma(4)) * exact(m)).hi);
         let k = pieces as f64;
-        let (mut v_before, mut e_before) = (ui, end_distance(a, ui, 0.0));
-        let mut chord_bound = 0.0_f64;
+        let (mut v_before, mut e_before) = (ui, distance(a, spline.at(ui)));
+        let mut guide = 0.0_f64;
         for j in 1..=pieces {
-            let (w, v, extra) = if j == pieces {
-                (b, ui1, 0.0)
+            let (w, v) = if j == pieces {
+                (b, ui1)
             } else {
                 let jf = j as f64;
                 let w = [a[0] + (b[0] - a[0]) * jf / k, a[1] + (b[1] - a[1]) * jf / k];
                 let guess = ui + (ui1 - ui) * jf / k;
-                let v = spline.foot(w, guess).1.max(ui).min(ui1).max(v_before);
-                (w, v, e_point)
+                if !(e_point <= added) {
+                    added = e_point;
+                }
+                (w, spline.foot(w, guess).1.max(ui).min(ui1).max(v_before))
             };
             work += 1;
             if work > CERTIFICATE_WORK {
-                return Err(TeethFailure::NotProved {
-                    what: FIT_DISTANCE,
-                    asked: allowance,
-                    reached: f64::INFINITY,
-                });
+                return Err(not_proved);
             }
-            let e = end_distance(w, v, extra);
-            let term = sag(gap(v_before, v), bends.most(v_before, v));
-            let d = up((exact(e_before.max(e)) + exact(term)).hi);
-            if !(d <= chord_bound) {
-                chord_bound = d;
+            let e = distance(w, spline.at(v));
+            let d = e_before.max(e) + HULL * sag(gap(v_before, v), bends.most(v_before, v));
+            if !(d <= guide) {
+                guide = d;
             }
+            vertices.push(w);
+            params.push(v);
             (v_before, e_before) = (v, e);
-        }
-        if !(chord_bound <= bound) {
-            bound = chord_bound;
         }
         let span = span_of(degree, &spline.knots, count, 0.5 * (ui + ui1));
         if let Some(e) = by_span.get_mut(span) {
-            if !(chord_bound <= *e) {
-                *e = chord_bound;
+            if !(guide <= *e) {
+                *e = guide;
             }
         }
     }
+    let params = spread(&params).ok_or(not_proved)?;
+    let source = polyline(&vertices, &params).ok_or(not_proved)?;
+    let between = certified_distance(&spline.curve, &source).map_err(|_| not_proved)?;
+    let bound = up((exact(between) + exact(added)).hi);
+    if let Some(worst) = by_span.iter_mut().max_by(|x, y| x.total_cmp(y)) {
+        if !(bound <= *worst) {
+            *worst = bound;
+        }
+    }
     Ok((bound, by_span))
+}
+
+/// Parameters that never go back, the first 0 and the last 1, made to go forward: each run of equal
+/// parameters spread evenly over half the way to the next one (the run that ends the parameters,
+/// at 1, over half the way back to the one before it). Parameters that go forward pair the source
+/// with the spline as well as any; the spread only gives each point of the source its own.
+/// `None` where floating point holds no room between two of them.
+fn spread(params: &[f64]) -> Option<Vec<f64>> {
+    let mut out = params.to_vec();
+    let mut i = 0usize;
+    while i < params.len() {
+        let v = *params.get(i)?;
+        let mut j = i;
+        while params.get(j + 1).is_some_and(|&w| w == v) {
+            j += 1;
+        }
+        if j > i {
+            let share = 2.0 * (j - i + 1) as f64;
+            if let Some(&next) = params.get(j + 1) {
+                for k in i..=j {
+                    *out.get_mut(k)? = v + (next - v) * (k - i) as f64 / share;
+                }
+            } else {
+                let before = *params.get(i.checked_sub(1)?)?;
+                for k in i..=j {
+                    *out.get_mut(k)? = v - (v - before) * (j - k) as f64 / share;
+                }
+            }
+        }
+        i = j + 1;
+    }
+    let forward = out.windows(2).all(|w| matches!(w, [a, b] if a < b));
+    (forward && out.first() == Some(&0.0) && out.last() == Some(&1.0)).then_some(out)
+}
+
+/// The polyline through `vertices`, each at its parameter of `params` (going forward), as the
+/// kernel's curve of degree 1 in the plane `z = 0`; `None` where the counts differ or there are
+/// none.
+fn polyline(vertices: &[Point], params: &[f64]) -> Option<NurbCurve> {
+    let (first, last) = (*params.first()?, *params.last()?);
+    if vertices.len() != params.len() {
+        return None;
+    }
+    let knots: Vec<f64> = std::iter::once(first)
+        .chain(params.iter().copied())
+        .chain(std::iter::once(last))
+        .collect();
+    bspline::kernel_curve(1, &knots, vertices).ok()
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -1139,8 +1146,8 @@ pub(super) fn solve(
     let mut right = vec![0.0; unknowns];
     let mut row: Vec<(usize, f64)> = Vec::new();
     for datum in data {
-        let span = span_of(degree, knots, count, datum.u);
-        let n = basis(degree, knots, span, datum.u);
+        // A parameter the kernel finds no basis for makes the system unsolvable (NaN below).
+        let (span, n) = basis_at(degree, knots, datum.u).unwrap_or((degree, [f64::NAN; ORDER]));
         for axis in 0..2 {
             row.clear();
             let mut known = 0.0;
@@ -1172,7 +1179,7 @@ pub(super) fn solve(
             }
         }
     }
-    let solution = solve_symmetric_typed(unknowns, &matrix, &right)?;
+    let solution = solve_normal(unknowns, &matrix, &right)?;
     let value = |i: usize| solution.get(i).copied().unwrap_or(f64::NAN);
     let (mut first_along, mut last_along) = (f64::INFINITY, f64::INFINITY);
     let control: Vec<Point> = slots
@@ -1202,19 +1209,23 @@ pub(super) fn solve(
     Ok((control, first_along, last_along))
 }
 
-/// The solution of `matrix * x = right` for a symmetric matrix that must be positive definite (as
-/// the normal equations of a least-squares fit are), given row by row with `size` rows. Only the
-/// band of the matrix that is not nothing is worked through.
-///
-/// Refused when the matrix is not `size` by `size`, holds numbers that are not finite, or is not
-/// positive definite to within the rounding of its numbers: the points do not fix the unknowns.
-pub fn solve_symmetric(size: usize, matrix: &[f64], right: &[f64]) -> crate::Result<Vec<f64>> {
-    solve_symmetric_typed(size, matrix, right)
-        .map_err(|e| SolidError::teeth("teeth::fit::solve_symmetric", e))
-}
+/// The smallest pivot, as a share of the largest number on the diagonal, that the normal equations
+/// of a fit may have: below it the points do not fix the unknowns to within the rounding of their
+/// numbers.
+const LEAST_PIVOT: f64 = 1e-14;
 
-/// [`solve_symmetric`] with its failure as a [`TeethFailure`], for the tooth module's own callers.
-pub(crate) fn solve_symmetric_typed(
+/// The solution of the normal equations `matrix * x = right` of a least-squares fit (a symmetric
+/// matrix that must be positive definite), given row by row with `size` rows: the kernel's LU
+/// decomposition of their band and its solve ([`RealMatrix::lu_decompose`],
+/// [`RealMatrix::right_for_back`]). The equations are first scaled so that their largest diagonal
+/// number is `LU_TOL / LEAST_PIVOT`, so that the kernel's least pivot (`LU_TOL`) stands for
+/// `LEAST_PIVOT` of the largest; every pivot is then checked to be at least that and positive (the
+/// kernel checks the size of a pivot it divides by, not its sign, and not the last one).
+///
+/// Refused when the matrix is not `size` by `size` (`SystemNotSquare`), holds numbers that are not
+/// finite, or is not positive definite to within the rounding of its numbers (`FitNotSolvable`):
+/// the points do not fix the unknowns.
+pub(super) fn solve_normal(
     size: usize,
     matrix: &[f64],
     right: &[f64],
@@ -1222,7 +1233,7 @@ pub(crate) fn solve_symmetric_typed(
     if size.checked_mul(size) != Some(matrix.len()) || right.len() != size {
         return Err(TeethFailure::Invalid(Why::SystemNotSquare));
     }
-    let solution = solved_symmetric(size, matrix, right);
+    let solution = solved_normal(size, matrix, right);
     if solution.is_none() {
         failed_solve();
     }
@@ -1242,67 +1253,51 @@ fn failed_solve() {}
 
 #[cfg(test)]
 thread_local! {
-    /// How many systems [`solve_symmetric`] found without a solution on this thread.
+    /// How many systems [`solve_normal`] found without a solution on this thread.
     pub(super) static FAILED_SOLVES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
-/// The solution of a square system that [`solve_symmetric`] has sized, or `None` where it holds
+/// The solution of a square system that [`solve_normal`] has sized, or `None` where it holds
 /// numbers that are not finite or is not positive definite to within the rounding of its numbers.
-fn solved_symmetric(size: usize, matrix: &[f64], right: &[f64]) -> Option<Vec<f64>> {
+fn solved_normal(size: usize, matrix: &[f64], right: &[f64]) -> Option<Vec<f64>> {
+    let Some(last) = size.checked_sub(1) else {
+        return Some(Vec::new());
+    };
     if matrix.iter().chain(right).any(|v| !v.is_finite()) {
         return None;
     }
-    let at = |m: &[f64], i: usize, j: usize| m.get(i * size + j).copied().unwrap_or(0.0);
+    let at = |i: usize, j: usize| matrix.get(i * size + j).copied().unwrap_or(0.0);
     // How far from the diagonal the matrix is not nothing.
     let mut band = 0usize;
     for i in 0..size {
         for j in 0..i {
-            if at(matrix, i, j) != 0.0 || at(matrix, j, i) != 0.0 {
+            if at(i, j) != 0.0 || at(j, i) != 0.0 {
                 band = band.max(i - j);
                 break;
             }
         }
     }
-    let largest = (0..size)
-        .map(|i| at(matrix, i, i).abs())
-        .fold(0.0, f64::max);
-    let mut lower = vec![0.0; matrix.len()];
+    let largest = (0..size).map(|i| at(i, i).abs()).fold(0.0, f64::max);
+    let scale = LU_TOL / LEAST_PIVOT / largest;
+    if !(largest > 0.0 && scale.is_finite()) {
+        return None;
+    }
+    // Banded: row `i` holds `A[i][j]` at column `j - i + band`.
+    let mut lu = RealMatrix::new(last, last, MatrixType::Banded, 2 * band + 1).ok()?;
     for i in 0..size {
-        for j in i.saturating_sub(band)..=i {
-            let mut sum = at(matrix, i, j);
-            for k in i.saturating_sub(band).max(j.saturating_sub(band))..j {
-                sum -= at(&lower, i, k) * at(&lower, j, k);
-            }
-            let value = if i == j {
-                if !(sum > 1e-14 * largest) {
-                    return None;
-                }
-                sum.sqrt()
-            } else {
-                sum / at(&lower, j, j)
-            };
-            if let Some(v) = lower.get_mut(i * size + j) {
-                *v = value;
-            }
+        for j in i.saturating_sub(band)..=(i + band).min(last) {
+            lu.set(i, j + band - i, at(i, j) * scale).ok()?;
         }
     }
-    let mut y = vec![0.0; size];
+    lu.lu_decompose().ok()?;
     for i in 0..size {
-        let mut sum = cell(right, i);
-        for k in i.saturating_sub(band)..i {
-            sum -= at(&lower, i, k) * cell(&y, k);
+        if !(lu.get(i, band).ok()? >= LU_TOL) {
+            return None;
         }
-        put(&mut y, i, sum / at(&lower, i, i));
     }
-    let mut x = vec![0.0; size];
-    for i in (0..size).rev() {
-        let mut sum = cell(&y, i);
-        for k in i + 1..(i + band + 1).min(size) {
-            sum -= at(&lower, k, i) * cell(&x, k);
-        }
-        put(&mut x, i, sum / at(&lower, i, i));
-    }
-    if x.iter().any(|v| !v.is_finite()) {
+    let scaled: Vec<f64> = right.iter().map(|&r| r * scale).collect();
+    let x = lu.right_for_back(&scaled).ok()?;
+    if x.len() != size || x.iter().any(|v| !v.is_finite()) {
         return None;
     }
     Some(x)
@@ -1333,17 +1328,15 @@ fn interlaced(degree: usize, knots: &[f64], data: &[Datum]) -> bool {
             if !(d.weight > 0.0 && d.u > used) {
                 continue;
             }
-            let span = span_of(degree, knots, count, d.u);
+            let Some((span, n)) = basis_at(degree, knots, d.u) else {
+                return false;
+            };
             let first = span.saturating_sub(degree);
             if first > j {
                 // Past the support of control point j.
                 return false;
             }
-            if span >= j
-                && basis(degree, knots, span, d.u)
-                    .get(j - first)
-                    .is_some_and(|&n| n > 0.0)
-            {
+            if span >= j && n.get(j - first).is_some_and(|&value| value > 0.0) {
                 used = d.u;
                 break;
             }
@@ -1809,43 +1802,6 @@ pub(super) fn cell_count(values: &[usize], i: usize) -> usize {
 /// The knots and control points do not describe a spline.
 const NOT_A_SPLINE: TeethFailure = TeethFailure::Invalid(Why::NotASpline);
 
-/// A spline with one more knot, `u`, and the same curve (one more control point).
-pub(super) fn with_knot(
-    degree: usize,
-    knots: &[f64],
-    control: &[Point],
-    u: f64,
-) -> Result<(Vec<f64>, Vec<Point>), TeethFailure> {
-    // The last knot at or before `u`, and how often `u` is a knot already.
-    let k = knots.iter().rposition(|&v| v <= u).ok_or(NOT_A_SPLINE)?;
-    let already = knots.iter().filter(|&&v| v == u).count();
-    if k < degree || k < already || k - already >= control.len() {
-        return Err(NOT_A_SPLINE);
-    }
-    let mut out = Vec::new();
-    for i in 0..=control.len() {
-        let q = if i + degree <= k {
-            *control.get(i).ok_or(NOT_A_SPLINE)?
-        } else if i <= k - already {
-            let (low, high) = (knot(knots, i), knot(knots, i + degree));
-            let a = if high > low {
-                (u - low) / (high - low)
-            } else {
-                0.0
-            };
-            let (p0, p1) = (
-                *control.get(i - 1).ok_or(NOT_A_SPLINE)?,
-                *control.get(i).ok_or(NOT_A_SPLINE)?,
-            );
-            [(1.0 - a) * p0[0] + a * p1[0], (1.0 - a) * p0[1] + a * p1[1]]
-        } else {
-            *control.get(i - 1).ok_or(NOT_A_SPLINE)?
-        };
-        out.push(q);
-    }
-    Ok((with_value_at(knots, k + 1, u), out))
-}
-
 /// `values` with `value` put in at the place `at`: before the value that stood there, or at the
 /// end where `at` is past it.
 pub(super) fn with_value_at(values: &[f64], at: usize, value: f64) -> Vec<f64> {
@@ -1872,60 +1828,206 @@ pub fn bezier_pieces(
 }
 
 /// [`bezier_pieces`] with its failure as a [`TeethFailure`], for the tooth module's own callers.
+///
+/// The pieces are the kernel's: the spline clamped to its range (`clamped`) and cut at every knot
+/// inside it ([`NurbCurve::decompose_bez`], the routine behind
+/// `crate::blend::blend_corner::on_face::bezier_pieces`), then joined (`joined`).
 pub(crate) fn bezier_pieces_typed(
     degree: usize,
     knots: &[f64],
     control: &[Point],
 ) -> Result<Vec<Vec<Point>>, TeethFailure> {
-    let breaks = bspline::breaks_typed(degree, knots, control)?;
-    let mut out = Vec::new();
-    for stretch in breaks.windows(2) {
-        let [from, to] = stretch else { continue };
-        // The piece depends on the control points of its stretch and the knots around it only.
-        let span = span_of(degree, knots, control.len(), *from);
-        let mut local_knots = knots
-            .get(span - degree..=span + degree + 1)
-            .ok_or(NOT_A_SPLINE)?
-            .to_vec();
-        let mut local_control = control
-            .get(span - degree..=span)
-            .ok_or(NOT_A_SPLINE)?
-            .to_vec();
-        for end in [*from, *to] {
-            for _ in 0..degree {
-                if local_knots.iter().filter(|&&v| v == end).count() >= degree {
-                    break;
-                }
-                (local_knots, local_control) =
-                    with_knot(degree, &local_knots, &local_control, end)?;
-            }
-        }
-        let at = local_knots
-            .iter()
-            .rposition(|&v| v <= *from)
-            .ok_or(NOT_A_SPLINE)?;
-        let mut segment = local_control
-            .get(at.checked_sub(degree).ok_or(NOT_A_SPLINE)?..=at)
-            .ok_or(NOT_A_SPLINE)?
-            .to_vec();
+    bspline::range_typed(degree, knots, control)?;
+    joined(&kernel_pieces(degree, knots, control)?)
+}
+
+/// The kernel's Bezier pieces of a spline that [`bspline::range_up_to`] accepted, in order: the
+/// spline clamped to its range (`clamped`), then cut at every knot inside it
+/// ([`NurbCurve::decompose_bez`]).
+fn kernel_pieces(
+    degree: usize,
+    knots: &[f64],
+    control: &[Point],
+) -> Result<Vec<NurbCurve>, TeethFailure> {
+    clamped(degree, knots, control)?
+        .decompose_bez()
+        .map_err(|_| NOT_A_SPLINE)
+}
+
+/// The kernel's curve of a spline that [`bspline::range_up_to`] accepted, over its range only, with
+/// each end of the range held `degree + 1` times by its knots: the kernel's own clamp of a curve
+/// to its bounds ([`crate::nurbs::iges::clamp_curve`]), which leaves a curve that is clamped as it
+/// is and takes the knots and control points that only shape a curve outside its range away.
+fn clamped(degree: usize, knots: &[f64], control: &[Point]) -> Result<NurbCurve, TeethFailure> {
+    let (from, to) = (knot(knots, degree), knot(knots, control.len()));
+    let mut curve = bspline::kernel_curve(degree, knots, control)?;
+    crate::nurbs::iges::clamp_curve(&mut curve, [from, to]).map_err(|_| NOT_A_SPLINE)?;
+    Ok(curve)
+}
+
+/// The control points of the kernel's Bezier pieces, in order. Each piece is worked out on its
+/// own, so the point two pieces share can come out a last digit apart (rounding); the later piece
+/// then takes the earlier one's. A spline that really breaks there keeps both. Refused: a
+/// coordinate that is not finite.
+fn joined(pieces: &[NurbCurve]) -> Result<Vec<Vec<Point>>, TeethFailure> {
+    let mut out: Vec<Vec<Point>> = Vec::new();
+    for piece in pieces {
+        let mut segment: Vec<Point> = piece.cpts().iter().map(|p| [p.x, p.y]).collect();
         if segment.iter().flatten().any(|v| !v.is_finite()) {
             return Err(NOT_A_SPLINE);
         }
-        // Each piece is worked out on its own, so the point two pieces share can come out a last
-        // digit apart (rounding); the later piece then takes the earlier one's. A spline that
-        // really breaks there keeps both.
         if let (Some(start), Some(&end)) = (
             segment.first_mut(),
             out.last().and_then(|before: &Vec<Point>| before.last()),
         ) {
-            let close = |a: f64, b: f64| (a - b).abs() <= 1e-12 * (1.0 + a.abs().max(b.abs()));
-            if close(start[0], end[0]) && close(start[1], end[1]) {
+            if within_rounding(*start, end) {
                 *start = end;
             }
         }
         out.push(segment);
     }
     Ok(out)
+}
+
+/// Whether two points are the same but for the last digits of their coordinates.
+fn within_rounding(a: Point, b: Point) -> bool {
+    let close = |x: f64, y: f64| (x - y).abs() <= 1e-12 * (1.0 + x.abs().max(y.abs()));
+    close(a[0], b[0]) && close(a[1], b[1])
+}
+
+/// The most Bezier pieces [`profile_pieces`] looks at for one spline (pieces lowered and pieces
+/// split in two together): a spline that needs more to be lowered within its tolerance is refused.
+pub const MAX_PROFILE_PIECES: usize = 4_096;
+
+/// The spline as Bezier pieces of a profile, in order: as [`bezier_pieces`], each with at most
+/// [`MAX_BEZIER_CTRL`] control points (a profile's Bezier segment). A spline of a higher degree is
+/// not refused: each of its pieces is lowered to the highest degree a profile holds by the
+/// kernel's degree reduction ([`NurbCurve::reduce_degree_once`], The NURBS Book's A5.11, once per
+/// degree), its ends put back on the piece's own ends, and kept when the kernel's certified bound
+/// of its distance from the piece at every parameter ([`certified_distance`]) is within
+/// `tolerance` (millimetres); a piece whose lowered form is farther than that is split in two at
+/// the middle of its parameters (the kernel's [`NurbCurve::split`]) and each half lowered in turn.
+/// The pieces follow each other, each starting at the very point the piece before it ends at.
+///
+/// Refused: a tolerance that is not a positive length; what is not a spline (as
+/// [`crate::teeth::bspline::range`] says, with degrees up to the kernel's highest,
+/// [`crate::nurbs::knots::MAX_DEGREE`]); a tolerance too fine for the size of the spline to be held
+/// in numbers, where a degree must be lowered; and a spline whose pieces are not all within
+/// `tolerance` after [`MAX_PROFILE_PIECES`] pieces (`NotProved` naming [`FIT_DISTANCE`], with the
+/// last bound reached).
+pub fn profile_pieces(
+    degree: usize,
+    knots: &[f64],
+    control: &[Point],
+    tolerance: f64,
+) -> crate::Result<Vec<Vec<Point>>> {
+    profile_pieces_typed(degree, knots, control, tolerance)
+        .map_err(|e| SolidError::teeth("teeth::fit::profile_pieces", e))
+}
+
+/// [`profile_pieces`] with its failure as a [`TeethFailure`], for the tooth module's own callers.
+pub(crate) fn profile_pieces_typed(
+    degree: usize,
+    knots: &[f64],
+    control: &[Point],
+    tolerance: f64,
+) -> Result<Vec<Vec<Point>>, TeethFailure> {
+    let tolerance = in_range("tolerance", tolerance, 0.0, MAX_LENGTH)?;
+    bspline::range_up_to(degree, knots, control, KERNEL_MAX_DEGREE)?;
+    let most = MAX_BEZIER_CTRL.saturating_sub(1);
+    let pieces = kernel_pieces(degree, knots, control)?;
+    if degree <= most {
+        return joined(&pieces);
+    }
+    let size = control
+        .iter()
+        .flatten()
+        .fold(0.0_f64, |s, v| s.max(v.abs()));
+    if !(tolerance >= 1e-12 * (1.0 + size)) {
+        return Err(TeethFailure::Invalid(Why::ToleranceTooFineForSize));
+    }
+    let mut out: Vec<Vec<Point>> = Vec::new();
+    // The pieces still to lower, the next one last.
+    let mut waiting: Vec<NurbCurve> = pieces.into_iter().rev().collect();
+    let mut looked_at = 0usize;
+    let mut reached = f64::INFINITY;
+    while let Some(piece) = waiting.pop() {
+        looked_at += 1;
+        if looked_at > MAX_PROFILE_PIECES {
+            return Err(TeethFailure::NotProved {
+                what: FIT_DISTANCE,
+                asked: tolerance,
+                reached,
+            });
+        }
+        let start = out.last().and_then(|before| before.last()).copied();
+        match lowered(&piece, most, tolerance, start)? {
+            Ok(points) => out.push(points),
+            Err(bound) => {
+                reached = bound;
+                let (Some(&a), Some(&b)) = (piece.knots().first(), piece.knots().last()) else {
+                    return Err(NOT_A_SPLINE);
+                };
+                let middle = a + 0.5 * (b - a);
+                let (before, after) = piece.split(middle).map_err(|_| TeethFailure::NotProved {
+                    what: FIT_DISTANCE,
+                    asked: tolerance,
+                    reached,
+                })?;
+                waiting.push(after);
+                waiting.push(before);
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// One Bezier piece of the kernel lowered to the degree `most`: the kernel's degree reduction once
+/// per degree ([`NurbCurve::reduce_degree_once`], whatever it moves; the bound decides), its end
+/// control points put on the piece's own ends (its start on `start`, the end of the piece before,
+/// where the two are within rounding of each other), and the kernel's certified bound of its
+/// distance from the piece ([`certified_distance`]): its control points when the bound is within
+/// `tolerance`, else the bound (infinite where the kernel gives none).
+fn lowered(
+    piece: &NurbCurve,
+    most: usize,
+    tolerance: f64,
+    start: Option<Point>,
+) -> Result<Result<Vec<Point>, f64>, TeethFailure> {
+    let mut low = piece.clone();
+    while low.degree() > most {
+        match low.reduce_degree_once(f64::MAX) {
+            Ok(reduction) => match reduction.curve {
+                Some(c) => low = c,
+                None => return Ok(Err(f64::INFINITY)),
+            },
+            Err(_) => return Ok(Err(f64::INFINITY)),
+        }
+    }
+    let ends = |c: Option<&CPoint>| c.map(|p| [p.x, p.y]);
+    let (Some(first), Some(end)) = (ends(piece.cpts().first()), ends(piece.cpts().last())) else {
+        return Err(NOT_A_SPLINE);
+    };
+    let first = match start {
+        Some(s) if within_rounding(s, first) => s,
+        _ => first,
+    };
+    let mut points: Vec<Point> = low.cpts().iter().map(|p| [p.x, p.y]).collect();
+    if let Some(p) = points.first_mut() {
+        *p = first;
+    }
+    if let Some(p) = points.last_mut() {
+        *p = end;
+    }
+    if points.iter().flatten().any(|v| !v.is_finite()) {
+        return Ok(Err(f64::INFINITY));
+    }
+    let made = bspline::kernel_curve(low.degree(), low.knots(), &points)?;
+    Ok(match certified_distance(piece, &made) {
+        Ok(bound) if bound <= tolerance => Ok(points),
+        Ok(bound) => Err(bound),
+        Err(_) => Err(f64::INFINITY),
+    })
 }
 
 // -------------------------------------------------------------------------------------------------
