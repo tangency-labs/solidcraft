@@ -110,13 +110,32 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let _language = solidcraft_ui_text::scope(&app.preferences.language);
     let detail = solidcraft_ui_text::tr("linked_files.other_folders_detail");
     let (height, most, least) = list_heights(ctx, prompt.folders.len());
-    // The dialog is as wide as the list was dragged (kept while the app runs): never narrower
-    // than a dialog's usual width, nor wider than the window.
     let card = solidcraft_theme::Tokens::get().form_card_width;
     let usual = card * 1.5;
-    let width_id = egui::Id::unique("sc_link_folders_prompt_width");
     let screen = ctx.content_rect().width();
-    let width = ctx.data(|d| d.get_temp::<f32>(width_id)).unwrap_or(usual).min(screen).max(usual);
+    // What the dialog adds around the list's width, as last laid out (a dialog of the usual width
+    // around a list that fits it, before the first frame).
+    let around_id = egui::Id::unique("sc_link_folders_prompt_around");
+    let around = ctx.data(|d| d.get_temp::<f32>(around_id)).unwrap_or(0.0);
+    // The list's size once its corner was dragged, kept while the app runs; until then each
+    // question starts at the size its folders and the window give. The drag is applied before
+    // anything is laid out, so the dialog widens in the same frame as the list.
+    let size_id = egui::Id::unique("sc_link_folders_prompt_size");
+    let grip_id = egui::Id::unique("sc_link_folders_prompt_grip");
+    let mut dragged = ctx.data(|d| d.get_temp::<egui::Vec2>(size_id));
+    if ctx.is_being_dragged(grip_id) {
+        let delta = ctx.input(|i| i.pointer.delta());
+        let from = dragged.unwrap_or(egui::vec2(usual - around, height));
+        dragged = Some(from + delta);
+    }
+    let width_range = (usual - around).max(0.0)..=(screen - around).max(usual - around).max(0.0);
+    let dragged = dragged.map(|s| egui::vec2(s.x.clamp(*width_range.start(), *width_range.end()), s.y.clamp(least, most)));
+    if let Some(s) = dragged {
+        ctx.data_mut(|d| d.insert_temp(size_id, s));
+    }
+    // The dialog is as wide as the list: never narrower than a dialog's usual width, nor wider
+    // than the window.
+    let width = dragged.map_or(usual, |s| (s.x + around).clamp(usual, screen.max(usual)));
     let mut confirm =
         ui_kit::Confirm::new(egui::Id::unique("sc_link_folders_prompt"), "help", solidcraft_ui_text::tr("linked_files.other_folders_title"))
             .actions(solidcraft_ui_text::tr("linked_files.other_folders_load"), solidcraft_ui_text::tr("linked_files.other_folders_not_now"), None)
@@ -129,28 +148,31 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         // taller, to see more folders at once, or wider, and the dialog widens with it.
         ui_kit::list_frame(ui, "link_folders", |ui| {
             let fits = ui.available_width();
-            // What the dialog adds around the list, so the list's width gives the dialog's.
-            let around = width - fits;
-            let mut dragged = fits;
-            egui::Resize::default()
-                .id_salt("link_folders_size")
-                .resizable([true, true])
-                .with_stroke(false)
-                .default_size([fits, height])
-                .min_size([(usual - around).max(0.0), least])
-                .max_size([(screen - around).max(fits), most])
-                .show(ui, |ui| {
-                    dragged = ui.available_width();
-                    egui::ScrollArea::vertical().id_salt("link_folders").auto_shrink([false, false]).show(ui, |ui| {
-                        for folder in &prompt.folders {
-                            ui_kit::text(ui, folder, ui_kit::Text::MonoNote("link_folder"));
-                        }
-                    });
-                });
-            if (dragged - fits).abs() > 0.5 {
-                ui.ctx().data_mut(|d| d.insert_temp(width_id, (dragged + around).clamp(usual, screen.max(usual))));
-                ui.ctx().request_repaint();
+            ui.ctx().data_mut(|d| d.insert_temp(around_id, width - fits));
+            let list_height = dragged.map_or(height, |s| s.y);
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(fits, list_height), egui::Sense::hover());
+            let mut list = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::top_down(egui::Align::Min)));
+            egui::ScrollArea::vertical().id_salt("link_folders").auto_shrink([false, false]).max_height(list_height).show(&mut list, |ui| {
+                for folder in &prompt.folders {
+                    ui_kit::text(ui, folder, ui_kit::Text::MonoNote("link_folder"));
+                }
+            });
+            // The corner grip, over the list's bottom right.
+            let corner = ui.visuals().resize_corner_size;
+            let grip = egui::Rect::from_min_max(rect.right_bottom() - egui::vec2(corner, corner), rect.right_bottom());
+            let response = ui.interact(grip, grip_id, egui::Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeNwSe);
+            if response.dragged() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeNwSe);
             }
+            let t = solidcraft_theme::Tokens::get();
+            let ink = if response.hovered() || response.dragged() { t.form_ink } else { t.form_dim };
+            let stroke = egui::Stroke::new(1.0, ink);
+            let painter = ui.painter_at(grip);
+            for step in [0.25, 0.5, 0.75] {
+                let w = corner * step;
+                painter.line_segment([grip.right_bottom() - egui::vec2(w, 0.0), grip.right_bottom() - egui::vec2(0.0, w)], stroke);
+            }
+            crate::scenario::publish_target("dialog:resize:link_folders", grip);
         });
     });
     let mut chosen = match action {

@@ -708,7 +708,7 @@
     "joint.error.limit_order": "minimum limitu spoje nesmí překročit maximum",
     "joint.unground_issue": "Problém se spojem po zrušení ukotvení {occurrence}: {joint}: {reason}",
     "kernel.blend.limiting_face": "omezeno plochou obsahující ({x}, {y}, {z})",
-    "linked_files.other_folders_detail": "Tento návrh používá soubory z {folders}. Načíst je?",
+    "linked_files.other_folders_detail": "Tento návrh používá soubory z těchto složek. Načíst je?",
     "linked_files.other_folders_load": "Načíst",
     "linked_files.other_folders_not_now": "Teď ne",
     "linked_files.other_folders_title": "Propojené soubory v jiných složkách",
