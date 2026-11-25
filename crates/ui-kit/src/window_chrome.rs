@@ -49,6 +49,11 @@ use solidcraft_theme::Tokens;
 pub mod caption;
 pub mod native_menu;
 
+/// Associate a native pop-out with the SolidCraft viewport that opened it.
+pub fn popout_viewport(builder: ViewportBuilder, owner: egui::ViewportId) -> ViewportBuilder {
+    builder.with_native_owner(owner)
+}
+
 /// One caption button: as wide as the native Windows ones.
 pub const BUTTON_WIDTH: f32 = 46.0;
 /// The three caption buttons together.
@@ -148,6 +153,9 @@ pub struct TitleBar {
     pub traffic_lights: bool,
     /// No OS decorations (Windows, Linux): the bar has its own caption buttons at the right end.
     pub caption_buttons: bool,
+    /// With `caption_buttons`, leave the buttons out (a tiling window manager handles the window,
+    /// #20385): the bar still moves the window and its contents take the buttons' room.
+    pub hide_caption_buttons: bool,
 }
 
 /// Where a [`TitleBar`] puts things in the bar's rect.
@@ -164,12 +172,17 @@ pub struct TitleBarLayout {
 impl TitleBar {
     pub fn layout(self, bar: Rect) -> TitleBarLayout {
         let left = bar.left() + if self.traffic_lights { TRAFFIC_LIGHTS } else { 0.0 };
-        let right = bar.right() - if self.caption_buttons { WIDTH } else { 0.0 };
+        let right = bar.right() - if self.shows_caption_buttons() { WIDTH } else { 0.0 };
         TitleBarLayout {
             drag: (self.traffic_lights || self.caption_buttons).then_some(bar),
             content: Rect::from_min_max(pos2(left, bar.top()), pos2(right, bar.bottom())),
-            captions: self.caption_buttons.then(|| Rect::from_min_max(pos2(right, bar.top()), bar.right_bottom())),
+            captions: self.shows_caption_buttons().then(|| Rect::from_min_max(pos2(right, bar.top()), bar.right_bottom())),
         }
+    }
+
+    /// Whether the bar draws its own caption buttons.
+    pub fn shows_caption_buttons(self) -> bool {
+        self.caption_buttons && !self.hide_caption_buttons
     }
 
     /// Lays out the bar in `bar`: the drag area first (so the contents' widgets, registered
@@ -181,7 +194,7 @@ impl TitleBar {
             drag_area(ui, r);
         }
         contents(ui, layout.content);
-        if self.caption_buttons { caption_buttons(ui, bar) } else { None }
+        if self.shows_caption_buttons() { caption_buttons(ui, bar) } else { None }
     }
 }
 
@@ -828,19 +841,19 @@ mod tests {
     fn title_bar_from_plain_inputs_insets_for_the_traffic_lights_and_drags_from_empty_space() {
         let bar = Rect::from_min_size(Pos2::ZERO, vec2(1200.0, BAR));
         // macOS: the OS draws the traffic lights over the bar's left end; no caption buttons.
-        let mac = TitleBar { traffic_lights: true, caption_buttons: false };
+        let mac = TitleBar { traffic_lights: true, caption_buttons: false, hide_caption_buttons: false };
         let layout = mac.layout(bar);
         assert_eq!(layout.drag, Some(bar));
         assert_eq!(layout.content, Rect::from_min_max(pos2(TRAFFIC_LIGHTS, 0.0), pos2(1200.0, BAR)));
         assert_eq!(layout.captions, None);
         // Windows and Linux without OS decorations: caption buttons at the right end.
-        let own = TitleBar { traffic_lights: false, caption_buttons: true };
+        let own = TitleBar { traffic_lights: false, caption_buttons: true, hide_caption_buttons: false };
         let layout = own.layout(bar);
         assert_eq!(layout.drag, Some(bar));
         assert_eq!(layout.content, Rect::from_min_max(pos2(0.0, 0.0), pos2(1200.0 - WIDTH, BAR)));
         assert_eq!(layout.captions, Some(Rect::from_min_max(pos2(1200.0 - WIDTH, 0.0), pos2(1200.0, BAR))));
         // The OS's own title bar: the bar is plain content and moves nothing.
-        let os = TitleBar { traffic_lights: false, caption_buttons: false };
+        let os = TitleBar { traffic_lights: false, caption_buttons: false, hide_caption_buttons: false };
         assert_eq!(os.layout(bar), TitleBarLayout { drag: None, content: bar, captions: None });
 
         let mut w = Bar::new(mac, 1200.0);
@@ -854,7 +867,7 @@ mod tests {
         cmds.extend(w.gesture(&[empty]).0);
         assert!(cmds.contains(&ViewportCommand::Maximized(true)), "double-click maximizes: {cmds:?}");
 
-        let mut w = Bar::new(TitleBar { traffic_lights: false, caption_buttons: false }, 1200.0);
+        let mut w = Bar::new(TitleBar { traffic_lights: false, caption_buttons: false, hide_caption_buttons: false }, 1200.0);
         w.frame(vec![]);
         let (cmds, _) = w.gesture(&[empty, empty + vec2(30.0, 8.0)]);
         assert!(cmds.is_empty(), "no drag area under the OS's own title bar: {cmds:?}");
@@ -862,7 +875,7 @@ mod tests {
 
     #[test]
     fn caption_buttons_return_actions_and_leave_close_to_the_app() {
-        let mut w = Bar::new(TitleBar { traffic_lights: false, caption_buttons: true }, 1200.0);
+        let mut w = Bar::new(TitleBar { traffic_lights: false, caption_buttons: true, hide_caption_buttons: false }, 1200.0);
         w.frame(vec![]);
         let at = |c: Caption| w.ctx.read_response(caption_id(c)).map(|r| r.rect.center()).unwrap_or(Pos2::ZERO);
         let (min, max, close) = (at(Caption::Minimize), at(Caption::Maximize), at(Caption::Close));
@@ -922,7 +935,7 @@ mod tests {
         }
     }
 
-    const OWN: TitleBar = TitleBar { traffic_lights: false, caption_buttons: true };
+    const OWN: TitleBar = TitleBar { traffic_lights: false, caption_buttons: true, hide_caption_buttons: false };
 
     #[test]
     fn a_window_that_draws_the_bar_publishes_it_for_the_systems_hit_test() {
@@ -949,7 +962,7 @@ mod tests {
         assert_eq!((bar.min_x, bar.min_y, bar.max_x, bar.max_y), (0, 0, (1200.0 * ppp).ceil() as i32, (BAR * ppp).ceil() as i32));
         assert!(maximize.is_some_and(|m| m.min_x > bar.min_x && m.max_x < bar.max_x), "{maximize:?} in {bar:?}");
         // A pass that draws no bar (the system's own title bar, full screen): no caption.
-        w.bar = TitleBar { traffic_lights: false, caption_buttons: false };
+        w.bar = TitleBar { traffic_lights: false, caption_buttons: false, hide_caption_buttons: false };
         w.frame(vec![]);
         assert_eq!((hit(bare), caption::title_bar(window)), (CaptionHit::Outside, None));
         // And the bar again as soon as it is drawn again.

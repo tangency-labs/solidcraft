@@ -33,7 +33,9 @@
 //! with those knots, and split at them alone; each side keeps the definition, its net
 //! trimmed to the side. The split's loop passes over a face the rebuild of an earlier one removed
 //! (the fork's list would hold a deleted face there). With `Kernel::blend_face_log` on, a
-//! dip's zone is marked as a corner ball's patch (#2489; not the fork's). No recursion.
+//! dip's zone is marked as a corner ball's patch (#2489; not the fork's). Not the fork's
+//! (#22021): a dip's zone is made through its circles' points taken onto the corner ball's
+//! sphere, so that it lies on the sphere its definition names. No recursion.
 
 use super::trim_at_creases::with_target_env_of;
 use super::{FilletSession, SolverObject};
@@ -562,13 +564,35 @@ impl FilletSession<'_> {
             // own: the sphere through both circles, which share their ends (the rails'
             // points at the corner)
             let [first, second] = &curves;
+            // (not the fork's, #22021) each point the zone is made through is taken onto the
+            // corner ball's sphere along its radius: the circles are the pieces' nets' end
+            // sections, which lie within the pieces' accuracy of the ball's circles, not on
+            // them (a piece by its definition evaluates its net), and the zone through them
+            // would lie on another sphere than the definition it keeps. Each point moves by
+            // its distance from the sphere, at most that accuracy (`kept.tol_3d`, else the
+            // section is not the ball's circle and the corner is refused); the zone's edges
+            // take the corner's tolerance, at least that, below.
+            let on_ball = |p: Point3| -> Result<Point3> {
+                let d = p - corner.centre;
+                let length = d.length();
+                // (a NaN fails the comparison as well)
+                if !(length > 0.0 && (length - corner.radius).abs() <= kept.tol_3d) {
+                    return Err(defect(
+                        "a dip's touch circle lies off its corner ball by more than the \
+                         pieces' accuracy: each piece's end section is the ball's circle \
+                         within it",
+                        SM_ERR,
+                    ));
+                }
+                Ok(corner.centre + d * (corner.radius / length))
+            };
             let middle = |c: &Curve| -> Result<Point3> {
                 let ivl = c.natural_interval();
-                c.evaluate_point(k, 0.5 * (ivl.min() + ivl.max()))
+                on_ball(c.evaluate_point(k, 0.5 * (ivl.min() + ivl.max()))?)
             };
             let ivl = first.natural_interval();
-            let two = first.evaluate_point(k, ivl.min())?;
-            let one = first.evaluate_point(k, ivl.max())?;
+            let two = on_ball(first.evaluate_point(k, ivl.min())?)?;
+            let one = on_ball(first.evaluate_point(k, ivl.max())?)?;
             let mut zone = Surface::from(sphere_zone(
                 corner.centre,
                 corner.radius,

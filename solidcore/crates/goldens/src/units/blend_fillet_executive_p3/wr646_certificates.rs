@@ -1,8 +1,7 @@
 //! WR-646 (#18917): a variable round's span is checked against the fillet solved at its
-//! test shares, so the round follows its radius law between traced points. The seven
-//! `law-*` rows it moves keep their status and counts and change only their geometry and
-//! mass values. Each row is checked here, on the finished body, one test per row:
-//! - the fillet succeeds and the vertex, edge and face counts are the golden's, unchanged;
+//! test shares, so the round follows its radius law between traced points. Seven `law-*`
+//! rows are checked here, on the finished body, one test per row:
+//! - the fillet succeeds and the vertex, edge and face counts are the golden's;
 //! - `check_brep` Level 2 reports nothing and the body is one closed manifold solid;
 //! - the volume the mass integrator converges to lies in the body's certified volume
 //!   enclosure ([`enclose_volume`]), and every other mass value lies in its certified
@@ -24,8 +23,7 @@
 //!   `(r - sqrt(2) T)^2 / 2` and `(r + sqrt(2) T)^2 / 2`, within `sqrt(2) r T + T^2` of
 //!   `r^2 / 2`, and the volume lies within `B = sqrt(2) T int_0^20 r + 20 T^2 =
 //!   sqrt(2) T 200 / 3 + 20 T^2` of `8000 - 112`. The body's certified enclosure lies in
-//!   that band. Main's body removed `112.0517` (off by `5.2e-2`, past `B`), so main's
-//!   value is refuted. (Argued, not certified: the edges lie on the box planes to within
+//!   that band. (Argued, not certified: the edges lie on the box planes to within
 //!   their tolerance, and the chord meets the planes at 45 degrees, so the gap moves the
 //!   volume by about `len * tol^2`, far below `B`.)
 //! - each of the six ball-section rows is compared with the true round's volume
@@ -33,13 +31,11 @@
 //!   convention, the law continued a quarter of the edge past each end) takes off the box,
 //!   enclosed in
 //!   rounded interval arithmetic ([`envelope::envelope`]; the derivation is in that
-//!   module). Both distances below are certified: the farthest the body's certified
-//!   enclosure, and the golden's new volume, can be from `box - V*`, and the nearest main's
-//!   volume can be. Each row asserts that the new ones are certifiably closer than main's.
-//!   It also asserts that they are within `T * A_lo` (`A_lo <= ` the envelope's area), a
-//!   lower bound on the volume a skin within `T` of the envelope can move. Main's values lie within that band
-//!   too, so they are not refuted outright, only certifiably farther. (Whether the body's
-//!   skin is within `T` of the envelope is not needed for either assertion. Skin to
+//!   module). The farthest the body's certified enclosure, and the golden's volume, can be
+//!   from `box - V*` is certified, and each row asserts that both are within `T * A_lo`
+//!   (`A_lo <= ` the envelope's area), a lower bound on the volume a skin within `T` of
+//!   the envelope can move. (Whether the body's skin is within `T` of the envelope is not
+//!   needed for the assertion. Skin to
 //!   envelope is certified for four of the rows by an ignored proof run in
 //!   `solidcore/crates/solidcore/tests/wr646_variable_round_follows_law.rs`; the other
 //!   direction is argued there, not certified.)
@@ -59,18 +55,17 @@ use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 #[path = "wr646_envelope.rs"]
 mod envelope;
 
-/// A moved row: name, main's volume (the golden's before), and its status and counts
-/// (the same before and after).
-type Row = (&'static str, f64, [i64; 4]);
+/// A row: name, and its status and counts.
+type Row = (&'static str, [i64; 4]);
 
 const ROWS: &[Row] = &[
-    ("law-box10x20x30-e0-deg2-edge-map-reversed", 5986.9198957359595, [0, 10, 15, 7]),
-    ("law-box10x20x30-e0-deg2-edge-map-sub-range", 5986.9198957359595, [0, 10, 15, 7]),
-    ("law-cube20-e0-deg2-smooth-4-2-4", 7952.165588609178, [0, 10, 15, 7]),
-    ("law-cube20-e0-deg2-smooth-g2", 7952.165588609178, [0, 10, 15, 7]),
-    ("law-cube20-e0-deg2-smooth-xsect-linear", 7887.9482893284285, [0, 10, 15, 7]),
-    ("law-cube20-e0-deg3-asymmetric", 7953.6430498032405, [0, 10, 15, 7]),
-    ("law-cube20-e7-deg3-asymmetric", 7953.643049803992, [0, 10, 15, 7]),
+    ("law-box10x20x30-e0-deg2-edge-map-reversed", [0, 10, 15, 7]),
+    ("law-box10x20x30-e0-deg2-edge-map-sub-range", [0, 10, 15, 7]),
+    ("law-cube20-e0-deg2-smooth-4-2-4", [0, 10, 15, 7]),
+    ("law-cube20-e0-deg2-smooth-g2", [0, 10, 15, 7]),
+    ("law-cube20-e0-deg2-smooth-xsect-linear", [0, 10, 15, 7]),
+    ("law-cube20-e0-deg3-asymmetric", [0, 10, 15, 7]),
+    ("law-cube20-e7-deg3-asymmetric", [0, 10, 15, 7]),
 ];
 
 /// The linear-section row, whose removed volume has a closed form.
@@ -112,7 +107,7 @@ fn every_moved_row_has_its_own_test() {
 fn check(row: &str) {
     let picked: Vec<&Row> = ROWS.iter().filter(|r| r.0 == row).collect();
     assert_eq!(picked.len(), 1, "{row}: one row of that name");
-    for &&(name, old_volume, before) in &picked {
+    for &&(name, before) in &picked {
         let input = inputs(name).real_solid.expect("a real solid");
         assert_eq!(input.checkpoint, Checkpoint::Full, "{name}");
         assert!(input.radius_law.is_some(), "{name}: a radius law");
@@ -134,7 +129,7 @@ fn check(row: &str) {
         assert!(lines.is_empty(), "{name}: Level 2: {lines:?}");
         assert!(is_manifold_solid(&body).unwrap(), "{name}: not one closed manifold solid");
         // the law rounds are bare nets, not definitions: no spread to add
-        let estimates = volume_band(&k, &mut body, &[], old_volume, name);
+        let estimates = volume_band(&k, &mut body, &[], name);
         mass_bands(&k, &mut body, &estimates, name);
         if name == LINEAR {
             let law = input.radius_law.as_ref().unwrap();
@@ -143,7 +138,7 @@ fn check(row: &str) {
             let skin = linear_skin_bound(&k, &body, ends, dims, &law.radii, 4.0 * tol);
             let boxed = dims.iter().product::<f64>();
             let args = (4.0 * tol, skin, len, boxed);
-            linear_holds_its_closed_form(&k, &mut body, args, &law.radii, old_volume);
+            linear_holds_its_closed_form(&k, &mut body, args, &law.radii);
         } else {
             let law = input.radius_law.as_ref().unwrap();
             let degree = law.degree as usize;
@@ -153,7 +148,7 @@ fn check(row: &str) {
             assert_eq!(law.multiplicities, [m, m], "{name}: one Bezier span");
             let boxed = input.dimensions.unwrap().iter().product::<f64>();
             let golden = estimates.golden.properties.volume;
-            let args = (len, 4.0 * tol, boxed, old_volume, golden);
+            let args = (len, 4.0 * tol, boxed, golden);
             balls_hold_their_envelope(&k, &mut body, name, &law.radii, law.edge_map, args);
         }
     }
@@ -162,14 +157,12 @@ fn check(row: &str) {
 /// The linear-section row: its skin is certified within `T` of the chord surface
 /// ([`linear_skin_bound`]), so its volume lies within `B = T sqrt 2 int r + len T^2` of
 /// `box - len int_0^1 r^2 du / 2`, both from the row's inputs (the module header derives
-/// them: `8000 - 112`). Its certified volume enclosure lies in
-/// that band; main's volume did not.
+/// them: `8000 - 112`). Its certified volume enclosure lies in that band.
 fn linear_holds_its_closed_form(
     k: &Kernel,
     body: &mut Brep,
     (t, skin, len, boxed): (f64, f64, f64, f64),
     radii: &[f64],
-    old_volume: f64,
 ) {
     assert!(skin <= t, "{LINEAR}: the skin is {skin:e} off the chord, past T = {t:e}");
     // from the row's quadratic Bezier law r = sum R_i B_i: int_0^1 B_i B_j du =
@@ -193,7 +186,7 @@ fn linear_holds_its_closed_form(
     let e = enclose_volume(k, body, 1e-9 * exact.hi).unwrap();
     eprintln!(
         "{LINEAR}: skin within {skin:e} of the chord (T = {t:e}); volume in [{}, {}], closed \
-         form {}, bound {bound:e}, main {old_volume}",
+         form {}, bound {bound:e}",
         e.lo, e.hi, exact.hi
     );
     assert!(
@@ -201,11 +194,6 @@ fn linear_holds_its_closed_form(
         "{LINEAR}: [{}, {}] not within {bound:e} of {}",
         e.lo,
         e.hi,
-        exact.hi
-    );
-    assert!(
-        (Ivl::from(old_volume) - exact).mig() > bound,
-        "{LINEAR}: main's {old_volume} was already within {bound:e} of {}",
         exact.hi
     );
 }
@@ -225,40 +213,30 @@ fn edge_length(k: &Kernel, body: &Brep, e: EdgeId, dims: [f64; 3]) -> f64 {
 
 /// A ball-section row's certified volume enclosure and the golden's new volume lie within
 /// `T * A_lo` of the box less the balls' envelope volume `V*`, certified by
-/// [`envelope::envelope`] (`A_lo` is at most the envelope's area). Both are also
-/// certifiably closer to it than main's volume was.
+/// [`envelope::envelope`] (`A_lo` is at most the envelope's area).
 fn balls_hold_their_envelope(
     k: &Kernel,
     body: &mut Brep,
     name: &str,
     radii: &[f64],
     edge_map: [f64; 2],
-    (len, t, boxed, old_volume, golden): (f64, f64, f64, f64, f64),
+    (len, t, boxed, golden): (f64, f64, f64, f64),
 ) {
     let env = envelope::envelope(radii, edge_map, len);
     let reference = Ivl::from(boxed) - env.volume;
     let band = (Ivl::from(t) * Ivl::from(env.area_lo)).lo;
     let e = enclose_volume(k, body, 1e-9 * boxed).unwrap();
-    // the farthest a value in [lo, hi] can be from the reference, and the nearest
+    // the farthest a value in [lo, hi] can be from the reference
     let far = |lo: f64, hi: f64| {
         (Ivl::from(hi) - reference)
             .hi
             .max((reference - Ivl::from(lo)).hi)
     };
-    let near = |v: f64| {
-        if v < reference.lo {
-            (reference - Ivl::from(v)).lo
-        } else if v > reference.hi {
-            (Ivl::from(v) - reference).lo
-        } else {
-            0.0
-        }
-    };
-    let (body_far, golden_far, main_near) = (far(e.lo, e.hi), far(golden, golden), near(old_volume));
+    let (body_far, golden_far) = (far(e.lo, e.hi), far(golden, golden));
     eprintln!(
         "{name}: V* in [{}, {}] (width {:e}, {} cells), box - V* in [{}, {}]; body in [{}, {}], \
-         within {body_far:e}; golden {golden} within {golden_far:e}; main {old_volume} at least \
-         {main_near:e} off; band T * A_lo = {t:e} x {} = {band:e}",
+         within {body_far:e}; golden {golden} within {golden_far:e}; band T * A_lo = {t:e} x {} \
+         = {band:e}",
         env.volume.lo,
         env.volume.hi,
         env.volume.hi - env.volume.lo,
@@ -271,10 +249,6 @@ fn balls_hold_their_envelope(
     );
     assert!(body_far <= band, "{name}: the body is {body_far:e} off, past {band:e}");
     assert!(golden_far <= band, "{name}: the golden is {golden_far:e} off, past {band:e}");
-    assert!(
-        body_far < main_near && golden_far < main_near,
-        "{name}: not certifiably closer than main ({body_far:e}, {golden_far:e} against {main_near:e})"
-    );
 }
 
 /// The linear-section row's skin, certified within `T` of the chord surface: every point

@@ -744,11 +744,10 @@ pub(crate) fn decode(
             return Err(DocError::Invalid(format!("damaged design: feature `{}` has an invalid profile frame", feature.name)));
         }
     }
-    // Fill in what older designs (and hand-edited files) may lack; a no-op otherwise.
     crate::format_offsets::validate_typed(&d)?;
     // `next_id` is trusted by nothing: a hand-edited or generated file may omit it or leave it stale,
     // and the next feature, component or occurrence would then reuse an id that is already taken.
-    // It is repaired before `normalise`, which gives an occurrence to each component that has none.
+    // Raised before `normalise`, which adds the occurrences older designs lack under new ids.
     let largest =
         d.features.iter().map(|f| f.id).chain(d.components.iter().map(|c| c.id)).chain(d.occurrences.iter().map(|o| o.id)).max().unwrap_or(0);
     let floor = largest.checked_add(1).ok_or_else(|| DocError::Invalid("damaged design: the id space is exhausted".into()))?;
@@ -756,6 +755,7 @@ pub(crate) fn decode(
     // These lists used to allocate independently. Keep their existing identities, but never
     // let a later deletion make them available again after loading an older design.
     d.next_id = d.next_item_id()?;
+    // Fill in what older designs (and hand-edited files) may lack; a no-op otherwise.
     normalise(&mut d)?;
     d.drawings = crate::drawing::in_design(drawings).map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
     d.format = format_string(FORMAT);
@@ -821,8 +821,10 @@ fn validate_sketch_sizes(value: &Value) -> Result<()> {
                         }
                     }
                 }
-                if curve.get("spline_handle_of").and_then(Value::as_str).is_some_and(|id| id.len() > 512) {
-                    return Err(invalid());
+                for key in ["spline_handle_of", "spline_control_polygon_of"] {
+                    if curve.get(key).and_then(Value::as_str).is_some_and(|id| id.len() > 512) {
+                        return Err(invalid());
+                    }
                 }
             }
         }
@@ -1242,7 +1244,7 @@ fn validate_freeform_chain_offsets(value: &Value) -> Result<()> {
 
 /// Largest coordinate or size a design may hold (mm): a kilometre-scale part is already far
 /// outside what the kernel's tolerances serve.
-pub(crate) const MAX_REAL: f64 = 1e9;
+pub const MAX_REAL: f64 = 1e9;
 
 /// Every number the design itself holds is in range ([`check_numbers`]). `metadata` is left
 /// alone: it is other tools' data, kept as it is and never read as a number (#1015); parsing
@@ -2901,6 +2903,25 @@ mod tests {
         let mut v: Value = serde_json::from_str(&d.to_json()).unwrap();
         f(&mut v);
         v.to_string()
+    }
+
+    #[test]
+    fn occurrences_added_on_open_take_fresh_ids_and_the_design_reopens() {
+        let mut d = Document::new("Legacy");
+        d.add_component(None, 0).unwrap();
+        let b = d.add_component(None, 0).unwrap();
+        // No `next_id`, `b` without its occurrence, and the other occurrence on id 1.
+        let json = edited(&d, |v| {
+            v.as_object_mut().unwrap().remove("next_id");
+            let occurrences = v["occurrences"].as_array_mut().unwrap();
+            occurrences.retain(|o| o["component"] != b);
+            occurrences[0]["id"] = 1.into();
+        });
+        let back = read(&json).unwrap();
+        assert_eq!(back.occurrences.len(), 2);
+        assert!(back.occurrences.iter().any(|o| o.component == b));
+        assert!(all_unique(back.occurrences.iter().map(|o| o.id)), "{:?}", back.occurrences);
+        read(&back.to_json()).unwrap();
     }
 
     #[test]

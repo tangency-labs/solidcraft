@@ -87,7 +87,7 @@ fn step_producer(bytes: &[u8]) -> Producer {
     for _ in 0..STEP_HEADER_ENDS {
         let Some(end) = next_end_section(&text, from) else { break };
         let header = format!("{};\nEND-ISO-10303-21;\n", text.get(..end).unwrap_or_default());
-        if let Ok(ex) = solidcraft_kernel::services::step::p21::parse(&header) {
+        if let Ok(ex) = solidcore_record::step::p21::parse(&header) {
             return Producer { system: ex.originating_system, preprocessor: ex.preprocessor, description: ex.description };
         }
         from = end;
@@ -187,6 +187,19 @@ pub fn native_cad_design(bytes: &[u8], file: &str) -> Result<NativeDesign, Strin
     Ok(design)
 }
 
+/// A FreeCAD file's sketches alone, as [`native_cad_design`] makes them, for a file whose history
+/// is not rebuilt: its solids come in as an Import feature and these sketches beside them. A
+/// sketch that cannot be read is left out with a warning; an error when none can be.
+pub fn native_cad_sketches(bytes: &[u8], file: &str) -> Result<NativeDesign, String> {
+    let name = std::path::Path::new(file).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| file.to_string());
+    solidcraft_kernel::guard("cadmpeg sketches", || convert::sketches(&name, bytes).map_err(solidcraft_kernel::KernelError::Invalid)).map_err(|e| {
+        match e {
+            solidcraft_kernel::KernelError::Invalid(m) => m,
+            e => e.to_string(),
+        }
+    })
+}
+
 /// [`traced_records`]'s records alone.
 #[cfg(test)]
 pub(crate) fn cadir_records(ir: &cadmpeg_ir::document::CadIr, product: &str, system: &str, colours: bool) -> solidcraft_kernel::ImportRecords {
@@ -194,7 +207,7 @@ pub(crate) fn cadir_records(ir: &cadmpeg_ir::document::CadIr, product: &str, sys
 }
 
 /// `ir`'s bodies as an import kept as records, written by `system`: each body region assembled
-/// into a record by `solidcore_cadir`, its pcurves without a closed form made as a STEP import's
+/// into a record by [`solidcraft_kernel::read_cadir`], its pcurves without a closed form made as a STEP import's
 /// are ([`solidcraft_kernel::import_trims`]). Nothing passes through STEP text. CADIR's bodies
 /// come with their own names, visibility and rigid placements, which the records keep. Where the
 /// file has a product structure (occurrences), the tree is that structure and each body is placed
@@ -213,7 +226,7 @@ fn traced_records(
 ) -> (solidcraft_kernel::ImportRecords, Vec<validation::Origin>) {
     use solidcraft_kernel::{ImportRecords, RecordBody, StepNode};
     let _span = solidcraft_profile::span("import", "cadir.records");
-    let read = solidcore_cadir::read_bodies(ir, Some(solidcraft_kernel::import_trims()));
+    let read = solidcraft_kernel::read_cadir(ir);
     let by_id: std::collections::HashMap<&str, &cadmpeg_ir::topology::Body> = ir.model.bodies.iter().map(|b| (b.id.as_str(), b)).collect();
     let label = |id: &str| by_id.get(id).and_then(|b| b.name.clone()).filter(|n| !n.trim().is_empty()).unwrap_or_else(|| id.to_string());
     let mut warnings = Vec::new();
@@ -235,8 +248,8 @@ fn traced_records(
             continue;
         }
         let body = by_id.get(r.body.as_str());
-        let (color, paint) = looks.as_ref().map_or((None, None), |l| l.paint_of(ir, &r.body, &r.solid.face_origin));
-        warnings.extend(r.solid.notes.iter().map(|n| format!("{}: {n}", label(&r.body))));
+        let (color, paint) = looks.as_ref().map_or((None, None), |l| l.paint_of(ir, &r.body, &r.face_origin));
+        warnings.extend(r.notes.iter().map(|n| format!("{}: {n}", label(&r.body))));
         let record = RecordBody {
             name: body.and_then(|b| b.name.as_deref()).map(str::trim).unwrap_or_default().to_string(),
             path: vec![product.to_string()],
@@ -247,9 +260,9 @@ fn traced_records(
             paint,
             hidden: body.is_some_and(|b| b.visible == Some(false)) || layers.bodies.contains(r.body.as_str()),
             placement: r.placement,
-            brep: Some(r.solid.brep),
-            face_origin: r.solid.face_origin,
-            sheet: r.solid.sheet,
+            brep: Some(r.brep),
+            face_origin: r.face_origin,
+            sheet: r.sheet,
             copy_of: None,
             mesh: None,
         };
@@ -781,6 +794,21 @@ mod convert {
 
     /// The design history of a FreeCAD file (`name`), rebuilt.
     pub(super) fn design(name: &str, bytes: &[u8]) -> Result<super::NativeDesign, String> {
+        let (ir, arenas) = read_design(name, bytes)?;
+        let index = std::cell::OnceCell::new();
+        let work = WorkBudget::new(EDGE_WORK);
+        let edge_point = |id: &str| edge_point(&ir, index.get_or_init(|| ModelIndex::build(&ir)), &work, id);
+        super::design::rebuild(&arenas, &edge_point)
+    }
+
+    /// The sketches of a FreeCAD file (`name`) alone.
+    pub(super) fn sketches(name: &str, bytes: &[u8]) -> Result<super::NativeDesign, String> {
+        let (_, arenas) = read_design(name, bytes)?;
+        super::design::sketches(&arenas)
+    }
+
+    /// A FreeCAD file (`name`) decoded at full depth, with its design arenas and placements.
+    fn read_design(name: &str, bytes: &[u8]) -> Result<(CadIr, super::design::Arenas), String> {
         let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
         let (format, decoded) = decode_at(name, &ext, bytes, &ACCEPTED, DecodeDepth::Full)?;
         if format != "fcstd" {
@@ -822,10 +850,7 @@ mod convert {
                 arenas.pattern_axes.insert(owner, (at, along));
             }
         }
-        let index = std::cell::OnceCell::new();
-        let work = WorkBudget::new(EDGE_WORK);
-        let edge_point = |id: &str| edge_point(&ir, index.get_or_init(|| ModelIndex::build(&ir)), &work, id);
-        super::design::rebuild(&arenas, &edge_point)
+        Ok((ir, arenas))
     }
 
     /// Mark hidden what FreeCAD shows only through its body: the shapes of the features inside a

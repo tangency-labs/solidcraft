@@ -294,7 +294,25 @@ fn planned(body: &Body, at: &[Vec3], r: &Ruled, handles: &[Option<Vec<Vec3>>]) -
     // Such an edge is taken as the cubic it is too (exact degree elevation, the same points at the
     // same parameters), the lowest degree whose interior control points set each end's tangent
     // and let the curve pass near the rulings' ends.
-    let bases: Vec<CurveN<4>> = bases.into_iter().zip(&sampled).map(|(c, s)| if s.affine.is_none() { cubic_if_straight(c) } else { c }).collect();
+    //
+    // An edge's curve may also repeat a knot to its degree where it runs on smoothly (a loft's run
+    // does at every section). A far curve on those knots is free to turn a corner there, which its
+    // edge does not, and a strip with a corner inside it is no valid face. So a free strip's edge
+    // is taken on the knots it needs ([`without_smooth_joints`]): the same curve, and a far curve
+    // as smooth as it. Handles given for the edge's own knots (a design saved before) keep them.
+    let bases: Vec<CurveN<4>> = bases
+        .into_iter()
+        .zip(&sampled)
+        .enumerate()
+        .map(|(k, (c, s))| {
+            if s.affine.is_some() {
+                return c;
+            }
+            let c = cubic_if_straight(c);
+            let given = handles.get(k).and_then(Option::as_ref).map(Vec::len);
+            if given.is_some_and(|g| g + 2 == c.ctrl.len()) { c } else { without_smooth_joints(c, eps) }
+        })
+        .collect();
     let rulings = rulings_on(&bases, &sides, &field);
     // Exact strips' far edges are their edges' images; the rest are solved together.
     let exact: Vec<Option<CurveN<4>>> = sampled.iter().zip(&bases).map(|(s, base)| s.affine.as_ref().map(|m| mapped(base, |p| m.apply(p)))).collect();
@@ -402,6 +420,33 @@ fn cubic_if_straight(c: CurveN<4>) -> CurveN<4> {
     };
     let mix = |s: f64| std::array::from_fn::<f64, 4, _>(|i| p0[i] * (1.0 - s) + p1[i] * s);
     CurveN { degree: 3, knots: vec![t0, t0, t0, t0, t1, t1, t1, t1], ctrl: vec![p0, mix(1.0 / 3.0), mix(2.0 / 3.0), p1] }
+}
+
+/// `c` without the joints it does not need: at each knot inside it that it repeats to its degree
+/// (where a curve on its knots may turn a corner, [`solidcore_ops::curve_knots::joints`]), one
+/// copy of the knot removed by the kernel, when its certified bound of the curve's move stays
+/// within `tol` ([`solidcore_ops::curve_knots::remove_knot`]). Where `c` runs on smoothly the
+/// removal is exact but for rounding: what is left is the same curve, and the curves on its
+/// knots are those on `c`'s knots that have one tangent at that knot. One copy is all a corner
+/// needs gone; the rest stay, and with them the far curve's freedom to follow the rulings' ends.
+/// A real corner, a rational curve (whose bound the kernel does not certify yet) and a curve the
+/// kernel refuses are left as they are.
+fn without_smooth_joints(c: CurveN<4>, tol: f64) -> CurveN<4> {
+    let Ok((mut curve, interval)) = spline_curve(&hpoints(&c), c.knots.clone()) else { return c };
+    let Ok(joints) = solidcore_ops::curve_knots::joints(&curve, interval) else { return c };
+    let mut removed = false;
+    for t in joints {
+        if let Ok((next, _)) = solidcore_ops::curve_knots::remove_knot(&curve, t, tol) {
+            curve = next;
+            removed = true;
+        }
+    }
+    match curve {
+        b::Curve::Spline { knots, points } if removed => {
+            CurveN { degree: c.degree, knots, ctrl: points.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect() }
+        }
+        _ => c,
+    }
 }
 
 fn degree(knots: &[f64], n: usize) -> Result<usize> {
@@ -542,7 +587,8 @@ impl Sampled {
 // Rulings that turn along a free-form edge end on an offset curve, which has no exact NURBS form.
 // Such a strip's far edge is a curve this module defines instead, and the strip is exactly the
 // ruled surface between the edge and it: a B-spline on the edge's own degree, knots and weights
-// (a straight edge's taken as its cubic, `cubic_if_straight`; only its control points are free), from the strip's start corner to its end corner (where the
+// (less the joints the edge does not need, [`without_smooth_joints`]; a straight edge's taken as
+// its cubic, `cubic_if_straight`; only its control points are free), from the strip's start corner to its end corner (where the
 // rulings at the edge's ends reach). Its interior control points are given (the doc's handles)
 // or, by default, the least-squares solution of these weighted terms, the construction's
 // parameters:
@@ -1583,6 +1629,87 @@ mod tests {
         assert!(rose > 0.1, "the middle rose {rose}");
         let (_, d) = s.nearest_edge(mid, tol).unwrap().unwrap();
         assert!(d > 0.5 * rose, "the default strip has an edge {d} from the moved middle (it rose {rose})");
+    }
+
+    /// A skin lofted through three sections, one face. Its edge along the run, through the
+    /// sections' last stations, is one curve whose knot at the middle section (parameter 1/2) is
+    /// repeated to the curve's degree (the loft's spans are Béziers), and the curve is smooth
+    /// there. The skin's normal turns along that edge, so a strip off it is ruled to a far curve
+    /// of its own. The strip takes the edge without that joint: the same curve, still through the
+    /// middle section's last station at 1/2, with one copy of that knot fewer. So the far
+    /// curve has no corner there: its two one-sided tangents at 1/2 are parallel and as long as
+    /// each other, as the edge's are, and the strip is one valid face, along the skin's normal and
+    /// continuing the skin alike. Handles listed for the edge's own knots, as a design saved
+    /// before lists them, are still taken, on those knots.
+    ///
+    /// Two skins: quarter circles of radii 120, 142 and 115 at x = 0, 300 and 600, whose edge
+    /// (x, r, 0) lies in the plane z = 0 with the skin's normal in it; and arcs of ellipses
+    /// (half axes 120 × 100, 142 × 130, 115 × 90, to the angle 1.2), whose edge lies in no plane.
+    #[test]
+    fn a_far_curve_is_smooth_where_its_edge_repeats_a_knot() {
+        let at = |x: f64, [ry, rz]: [f64; 2], a: f64| Vec3::new(x, ry * a.sin(), rz * a.cos());
+        // One-sided tangents of a curve at its parameter `t`: just before and just after.
+        let sides = |c: &CurveN<4>, t: f64| -> (Vec3, Vec3) {
+            let [t0, t1] = range(c);
+            let h = 1e-9 * (t1 - t0);
+            let tan = |t: f64| point_tangent(c, (t - t0) / (t1 - t0)).unwrap().1;
+            (tan(t - h), tan(t + h))
+        };
+        let joints = |c: &CurveN<4>| -> Vec<f64> {
+            let [t0, t1] = range(c);
+            let inside = c.knots.iter().copied().filter(|k| *k > t0 && *k < t1);
+            let mut repeated: Vec<f64> = inside.filter(|k| c.knots.iter().filter(|x| *x == k).count() >= c.degree).collect();
+            repeated.dedup();
+            repeated
+        };
+        let skins = [([[120.0; 2], [142.0; 2], [115.0; 2]], std::f64::consts::FRAC_PI_2), ([[120.0, 100.0], [142.0, 130.0], [115.0, 90.0]], 1.2)];
+        for (radii, reach) in skins {
+            let sections: Vec<Vec<crate::Frame>> = radii
+                .iter()
+                .zip([0.0, 300.0, 600.0])
+                .map(|(r, x)| {
+                    (0..9)
+                        .map(|k| crate::Frame { p: at(x, *r, reach * f64::from(k) / 8.0), leave: Vec3::X, bend: Vec3::ZERO, bend_change: Vec3::ZERO })
+                        .collect()
+                })
+                .collect();
+            let skin = crate::loft_blend(&sections, [crate::bridge::Continuity::G0; 2], [0.0; 2], 9).unwrap();
+            assert!(skin.is_surface() && skin.face_count() == 1);
+            let (middle, on_skin) = (at(300.0, radii[1], reach), at(300.0, radii[1], reach / 2.0));
+            let edge = [middle];
+            // The edge as the skin holds it: one joint, at the middle section.
+            let (chain, _) = picked_chain(&skin, &edge).unwrap();
+            let [(e, forward)] = chain.as_slice() else { panic!("one edge: {chain:?}") };
+            let own = base_curve(skin.record(), *e, *forward).unwrap();
+            assert_eq!(joints(&own), [0.5], "to {reach}: the edge's knots {:?}", own.knots);
+            for mode in [RuledMode::Normal, RuledMode::Tangent] {
+                let r = ruled(mode, 20.0, on_skin);
+                let plan = planned(&skin, &edge, &r, &[]).unwrap();
+                let [strip] = plan.strips.as_slice() else { panic!("one strip: {}", plan.strips.len()) };
+                assert_eq!(plan.free, [true], "{mode:?} to {reach}: the rulings turn along the edge");
+                assert!(joints(&strip.base).is_empty(), "{mode:?} to {reach}: the strip's edge keeps a joint: {:?}", strip.base.knots);
+                // One copy of the knot is gone, so one control point: the rest of the far curve's freedom stays.
+                assert_eq!(strip.base.ctrl.len() + 1, own.ctrl.len(), "{mode:?} to {reach}: {:?}", strip.base.knots);
+                assert_eq!(strip.top.knots, strip.base.knots);
+                let there = point(&strip.base, 0.5).unwrap();
+                assert!(there.dist(middle) < 1e-9, "{mode:?} to {reach}: the edge at 1/2 is {there:?}, the section's station {middle:?}");
+                let (before, after) = sides(&strip.base, 0.5);
+                assert!(before.cross(after).len() <= 1e-6 * before.len() * after.len(), "{mode:?} to {reach}: the edge is smooth at 1/2");
+                let (far_before, far_after) = sides(&strip.top, 0.5);
+                let kink = far_before.cross(far_after).len() / (far_before.len() * far_after.len());
+                assert!(kink <= 1e-6 && far_before.dot(far_after) > 0.0, "{mode:?} to {reach}: the far curve turns by {kink} rad at 1/2");
+                let (edge_ratio, far_ratio) = (before.len() / after.len(), far_before.len() / far_after.len());
+                assert!(rel(far_ratio, edge_ratio) <= 1e-6, "{mode:?} to {reach}: the far curve's speeds at 1/2: {far_ratio} vs {edge_ratio}");
+                let s = ruled_surface(&skin, &edge, &r).unwrap();
+                assert!(s.is_surface() && s.face_count() == 1, "{mode:?} to {reach}");
+                // Handles for the edge's own knots: taken as they are, on those knots.
+                let old: Vec<Vec3> = (1..own.ctrl.len() - 1).map(|i| Vec3::new(f64::from(i as u32), 0.0, 0.0)).collect();
+                let kept = planned(&skin, &edge, &r, &[Some(old.clone())]).unwrap();
+                assert_eq!(kept.strips[0].top.knots, own.knots, "{mode:?} to {reach}");
+                let ctrl: Vec<Vec3> = kept.strips[0].top.ctrl.iter().map(|h| Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3])).collect();
+                assert!(ctrl[1..ctrl.len() - 1].iter().zip(&old).all(|(a, b)| a.dist(*b) < 1e-12), "{mode:?} to {reach}: {ctrl:?}");
+            }
+        }
     }
 
     /// Each strip is made in place of the edge it stands on; a corner face in place of the two

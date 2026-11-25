@@ -150,7 +150,7 @@ const NO_KERNEL: [&str; 16] = [
     "start",
 ];
 
-const ANSWERING: [&str; 73] = [
+const ANSWERING: &[&str] = &[
     "set_dump_dir",
     "current_call",
     "crash_test",
@@ -179,11 +179,14 @@ const ANSWERING: [&str; 73] = [
     "shell",
     "offset_faces",
     "thicken",
+    "offset_solid",
     "merge_faces",
+    "merge_faces_keeping_edges",
     "draft",
     "split_faces",
     "split_body",
     "split_body_by_sheet",
+    "trim_sheet",
     "untrim_face",
     "extend_sheet",
     "face_points",
@@ -318,7 +321,9 @@ fn every_entry_point_answers() {
     says("shell", a.shell(&top, 0.1, 1.0));
     says("offset_faces", a.offset_faces(&top, 0.1, 1.0));
     says("thicken", a.thicken(1.0, false));
+    says("offset_solid", a.offset_solid(1.0, true));
     says("merge_faces", a.merge_faces(&top, 0.1));
+    says("merge_faces_keeping_edges", a.merge_faces_keeping_edges(&[0]));
     says("draft", a.draft(&[p(5.0, 10.0, 5.0)], 0.1, [0.0; 3], p(0.0, 0.0, 1.0), p(0.0, 0.0, 1.0), 0.1));
     let tool =
         says("Surface::plane", ssi::Surface::plane(p(0.0, 0.0, 5.0), p(1.0, 0.0, 0.0), p(0.0, 1.0, 0.0), [-50.0, 50.0], [-50.0, 50.0])).unwrap();
@@ -328,6 +333,7 @@ fn every_entry_point_answers() {
     let lines: Vec<Curve> = (0..4).map(|i| Curve::Line { start: square[i], end: square[(i + 1) % 4] }).collect();
     let sheet = says("planar_faces", Brep::planar_faces(&lines)).unwrap();
     says("split_body_by_sheet", a.split_body_by_sheet(&sheet, 0));
+    says("trim_sheet", a.trim_sheet(&sheet, &[p(5.0, 5.0, 5.0)]));
     says("untrim_face", sheet.untrim_face(p(5.0, 5.0, 5.0), 0.1, Holes::All, true, false));
     says("extend_sheet", sheet.extend_sheet(p(5.0, 5.0, 5.0), 0.1, 1.0, Continuation::Natural));
     says("face_points", a.face_points());
@@ -876,7 +882,7 @@ fn every_call_starts_clean_on_any_kernel() {
 #[test]
 fn status_sites_only_shrink() {
     const SITES: &[(&str, usize)] =
-        &[("core/blend.rs", 6), ("core/measure.rs", 1), ("core/offset.rs", 7), ("core/split.rs", 3), ("core/ssi.rs", 1), ("core/sweep.rs", 6)];
+        &[("core/blend.rs", 6), ("core/measure.rs", 1), ("core/offset.rs", 7), ("core/split.rs", 1), ("core/ssi.rs", 1), ("core/sweep.rs", 3)];
     /// The lines of `text` outside its top-level inline test modules (rustfmt closes one with a
     /// `}` alone at the start of a line).
     fn code_lines(text: &str) -> Vec<&str> {

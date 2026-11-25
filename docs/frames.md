@@ -44,6 +44,7 @@ frame member, end cap, mounting plate or gusset is the selected body (or the las
 Curved and continuous stock currently requires **Corner Type: None**, no corner overrides,
 Fit Ends, Coped, Flip or gap. Unsupported combinations are refused before changing the design.
 Curved and continuous members cannot yet be combined with multiple placement groups.
+They also take world Z as up: an **Up Axis** other than Z is refused for them.
 Separate curved members may share a plain None feature with point-pair members. Ordinary straight
 members and point pairs retain Auto, corner, fitting and gap behavior described below.
 - **Section (optional)**: pick the section's region in another sketch (the ring between two
@@ -52,8 +53,47 @@ members and point pairs retain Auto, corner, fitting and gap behavior described 
 - **Corner Type**, **Flip** and **Corner Overrides** cut the members where two of them meet, as
   under Corners below, and **Gap** leaves a weld gap at each welded end (see Multi-trim and the weld
   gap). A new Frame Member and the command both start on None.
-- **Anchor**, **Angle** and **Mirror** place the section on each line, as below. **Name** names
-  the members (default: after the profile).
+- **Anchor**, **Angle**, **Mirror** and **Up Axis** place the section on each line, as below.
+  **Name** names the members (default: after the profile).
+- **Offset A** and **Offset B** move the section from its anchor by a length, along the
+  section's own axes as drawn (A across its width, B across its height; they turn with **Angle**,
+  so they are not the world's X and Y): Anchor **Bottom Middle** with Offset B `50 mm` puts a
+  tube's bottom 50 mm above its line. Both empty: the anchor sits on the line. The offsets are
+  your intention: once typed (or set by an arrow or the marker in the view), changing a
+  dimension of the profile, the **Anchor**, **Mirror** or **Angle** keeps them and moves the
+  member to keep them (Bottom Middle with Offset B `50 mm` on a 40 mm tube, then a height of
+  60 mm: the tube's bottom stays 50 mm from its line; Anchor **Top Middle** then puts its top
+  there). They are saved as the member's `locate` (the point of the section on the line), so
+  **Edit Feature** shows a member made with `locate` as the offsets from its anchor, and a
+  member placed by its anchor alone with both offsets empty (OK then adds no `locate`). Offsets that
+  cannot be applied (the point on the line would be past the largest profile, 10000 mm, or the
+  section cannot be laid out) are refused at **OK**, naming Offset A and Offset B; a value that
+  is not a length yet leaves the section where it was until it is one.
+- **Hot points**: while the dialog is open, the view draws the section at the start of the first
+  chosen line, as the member will be placed (angle and mirror applied), with a dot at each anchor
+  (origin, centre, centroid and the corners and edge middles of its bounding box; anchors that
+  fall on the same point share one dot). The anchor in use is ringed. Click a dot to make it the
+  **Anchor**; Offset A and B are emptied (the anchor wins). Drag the marker at the line's start
+  over the section, or past it to put the member off its line, to put that point on the line
+  (Offset A and B are written from the anchor, rounded to 0.1 mm; hold Alt or Ctrl for no
+  rounding); let go near a dot and it takes that anchor instead.
+- **Arrows and arc**: an arrow labelled **A** out from the middle of the section's +A side and
+  one labelled **B** out from the middle of its +B side drag the section along that axis: they
+  change Offset A or Offset B and keep the other as typed (an expression stays an expression).
+  Each drag adds whole steps (1 mm; 0.1 mm with Alt or Ctrl) to the offset as it was at the press,
+  so a press that does not move a step changes nothing and a typed `20.3 mm` becomes `21.3 mm`
+  one step on. An arrow's label is its letter alone while its offset is 0 or empty, and the
+  letter with the offset once it is not (`A 5.0 mm`, in the design's unit, 0.1 mm shown), live
+  while it drags. An arc past the section's corner farthest from the line turns the section about
+  the point on the line, adding 15° steps (1° with Alt or Ctrl) to the **Angle** at the press
+  (`7 deg` becomes `22 deg`). Dots, arrows and arc are hidden while the section is too small on
+  screen or seen edge-on.
+- While they are drawn, presses on the drawn section, the arrows, the arc and a margin of about
+  24 px around them belong to the hot points: one that misses a handle there does nothing, so a
+  slightly missed arrow never starts a box selection that would empty **Lines**. Elsewhere the
+  view picks and box selects as usual.
+- Only the first line of the group shown gets the section; the anchor is the same on every line
+  of the group. Nothing is drawn until the lines and the profile make a member.
 - **Groups**: one feature can lay several groups of lines in the same profile, each with its own
   lines, **Anchor**, **Angle**, **Mirror** and **Name** (uprights turned one way, rails another).
   **New Group** starts an empty group and shows it; click a group to show and edit it, **Remove
@@ -63,7 +103,8 @@ members and point pairs retain Auto, corner, fitting and gap behavior described 
   selected settings; they are not silently dropped. Use separate Frame Members for joined
   corners or point pairs. A single group uses the normal flat form and retains all corner,
   pair and finishing options. Later flat frames can fit their ends to earlier grouped members,
-  using each group's actual anchor, mirror and rotation.
+  using each group's actual anchor, mirror and rotation. **Offset A**, **Offset B** and the hot
+  points act on the group shown and are kept with it.
 - The preview shows the members as you change the values. **Edit Feature** reopens the dialog with
   the feature's values; the members keep their names through the edit, and a new **Name**
   renames them all. A member made with a whole profile sketch keeps it (the **Section** row shows
@@ -196,7 +237,9 @@ own choice.
 
 **Fits.** A tube that ends against the side of another (a T-junction), or one of three or more tubes
 ending at a point, is cut to fit the tube it meets, only near its end: flat on a box tube, with the
-radii squared, and a fishmouth on a round tube.
+radii squared, and a fishmouth on a round tube. On an open section (an angle, a channel) the end
+reaches across the open side to the face beyond, the far leg or the web, and an inside corner's
+fillet is kept, not squared.
 
 **Tubes in no sketch plane.** Point-to-point tubes (`pairs`) and 3D-sketch lines are laid after every
 group, chained among themselves: where two of them end together they are mitred (or joined as an
@@ -441,6 +484,11 @@ placement axes, expressions and hole-pattern limits.
   about the line, counter-clockwise looking back from the line's end; `mirror` mirrors it across
   its y axis first. A line leaning less than 10⁻⁶ rad from vertical counts as vertical, so
   rounding in a 3D sketch never turns a post a quarter turn.
+- `up`: `X`, `-X`, `Y`, `-Y`, `Z` or `-Z`, the world axis that is up for the profile (default `Z`,
+  saved only when it is not). A part drawn with Y up takes `Y`: its members need no `angle`, and
+  lines along Y are its vertical members, their x along world X (world Y when X is up).
+  Under Auto, a member whose section Auto lines up (one in a sketch plane, or in a chain of
+  members in one plane) takes that plane's normal as up instead (see Auto).
 - Bodies are named after `body_name`, or the standard size (`RSC 203x89`), the profile
   (`Rect Tube 40x40x3`) or the profile sketch, then numbered on past names already taken (`(2)`, `(3)`…). Each member's name is kept
   with its line (the feature's `names`), so deleting or adding a line, or deleting another

@@ -247,7 +247,7 @@ pub fn memory_short(path: &str, size: u64) -> Option<(u64, u64)> {
         return None;
     }
     match solidcraft_kernel::step_check_memory(usize::try_from(size).unwrap_or(usize::MAX)) {
-        Err(solidcraft_kernel::services::step::p21::Error::NeedsMemory { needed, available }) => Some((needed as u64, available as u64)),
+        Err(solidcore_record::step::p21::Error::NeedsMemory { needed, available }) => Some((needed as u64, available as u64)),
         _ => None,
     }
 }
@@ -259,7 +259,7 @@ pub fn memory_warning(path: &str, size: u64) -> Option<String> {
     let (needed, available) = memory_short(path, size)?;
     let message = format!(
         "{}; opening it anyway, but SolidCraft may slow down or run out of memory",
-        solidcraft_kernel::services::step::p21::Error::NeedsMemory { needed: needed as usize, available: available as usize }
+        solidcore_record::step::p21::Error::NeedsMemory { needed: needed as usize, available: available as usize }
     );
     log::warn!("{path}: {message}");
     Some(message)
@@ -423,7 +423,7 @@ mod tests {
     /// measured this way.
     #[test]
     fn a_step_file_that_may_need_more_memory_than_there_is_is_warned_about() {
-        let peak = solidcraft_kernel::services::step::p21::PEAK_PER_BYTE as u64;
+        let peak = solidcore_record::step::p21::PEAK_PER_BYTE as u64;
         // As if the machine could spare 64 MB: a 2 MB file is over it.
         solidcraft_kernel::step_with_memory_to_spare(64 << 20, || {
             assert_eq!(memory_short("small.step", MB), None);
