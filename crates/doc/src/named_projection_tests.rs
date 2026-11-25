@@ -472,9 +472,9 @@ fn numbered_round_face_projection_recovers_the_whole_face() {
     assert!(result.error.is_none(), "{result:?}");
     let projected = &state.sketch(3).expect("the saved projection should rebuild").sketch;
     assert_eq!(projected.links[0].face_name.as_deref(), Some("F2:side:c1#1"));
-    assert_eq!(projected.link_curves("j1").len(), 2);
+    // The round wall seen across its axis: its two rims and its two silhouettes (#21295).
+    assert_eq!(projected.link_curves("j1").len(), 4);
 
-    // The edge-on projection of the round wall can retain its saved geometry with a warning.
     // The numbered reference must evaluate the same way as the whole face's existing name.
     let mut exact_doc = doc.clone();
     exact_doc.sketch_mut(3).unwrap().links[0].face_name = Some("F2:side:c1".into());

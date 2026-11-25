@@ -182,6 +182,27 @@ pub struct OriginAxesAcrossViewResult {
     pub param_warnings: Vec<String>,
 }
 
+/// Show or hide the scale bar in the view's bottom left corner: a bar and the round length it
+/// stands for in the design's units, at the view's centre in perspective (#375). An application
+/// preference only: not saved with the design, not an undo step, and never opens a dialog.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ScaleBarParams {
+    /// True shows the scale bar, false hides it.
+    #[serde(deserialize_with = "enabled_flag")]
+    pub enabled: bool,
+}
+
+/// The accepted scale bar setting, applied by the app.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ScaleBarResult {
+    /// Whether the scale bar is shown now.
+    pub enabled: bool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// Turn the view to the command's standard orientation (front, back, left, right, top, bottom
 /// or isometric), as the axes navigator does, keeping the camera's target, distance, projection and
 /// up axis. Display only: the design isn't changed and nothing is added to undo.
