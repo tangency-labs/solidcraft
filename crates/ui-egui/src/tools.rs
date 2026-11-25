@@ -226,10 +226,9 @@ fn xy(p: &(Vec2, Option<String>)) -> Value {
 /// A clicked point that is held where it snapped: a midpoint, on-curve, crossing or body-vertex
 /// snap goes as itself, so the command keeps the point there. A snap to an existing point goes as
 /// its place, where the command's `connect` joins the two with a Coincident the sketch shows.
-/// So does a snap whose curve is no longer in the sketch: Undo between a rectangle's two clicks
-/// can take away the curve its first corner snapped to, and the command would refuse the snap
-/// click after click (the Line's chain re-checks the same way, #10016). And so does every snap
-/// in a drawing sheet's sketch, where the commands take no snap yet.
+/// So does every snap in a drawing sheet's sketch, where the commands take no snap yet. A snap
+/// whose curve the Undo button took away does not reach this function as a snap: `run_shape`
+/// passes every stored click through `standing` first, which turns it into the place clicked.
 fn held(app: &SolveApp, p: &(Vec2, Option<String>)) -> Value {
     match &p.1 {
         Some(id) if solidcraft_engine::cmd::SNAP_PREFIXES.iter().any(|k| id.starts_with(k)) && snap_stands(app, id, p.0) == Some(true) => json!(id),
@@ -778,7 +777,9 @@ fn run_shape(app: &mut SolveApp, t: &Tool) -> Result<Vec<String>, String> {
             // The second click gives the edge's direction and half-length, the third its width.
             // The middle goes as the circle's centre does: a snap to a line's midpoint, a curve or
             // a crossing as itself, so it is held there; a snap to a point as its place (#7299).
-            let (a, p1) = (p[0].0, edge_end(p[0].0, &p[1]));
+            // The edge's end is read from the click as it was made, as the preview reads it: a
+            // snap whose curve Undo took away still keeps the edge off the axis nudge.
+            let (a, p1) = (p[0].0, edge_end(p[0].0, &t.pts[1]));
             let d = (p1 - a).normalized().ok_or("the edge's end must differ from its middle")?;
             let corner = a + d * (p1 - a).len() + d.perp() * (p[2].0 - a).dot(d.perp());
             let anchor = match &p[0].1 {

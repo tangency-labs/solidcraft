@@ -1548,3 +1548,36 @@ fn a_circle_centre_snapped_to_a_line_undone_and_redone_stays_on_it() {
     let held = held_on(&sk, "base");
     assert!(held.iter().any(|p| p.dist(Vec2::new(20.0, 0.0)) < 0.5), "the centre is held on the line: {held:?}");
 }
+
+/// The Edge-Center Rectangle's second click snapped onto a line, a little off a sketch axis, and
+/// the Undo button then took that line away: the rectangle is drawn with its edge the way it was
+/// clicked and previewed, not nudged onto the axis.
+#[test]
+fn an_edge_center_rectangle_whose_edge_end_lost_its_curve_to_undo_keeps_its_clicked_direction() {
+    let mut h = clicked_then_undone("sketch.rectangle.edge_center", &[[-15, 2, 0], [55, 0, 0]]);
+    let pts = h.app.tool.as_ref().unwrap().pts.clone();
+    assert!(pts[0].1.is_none(), "the middle is a free click: {pts:?}");
+    let clicked = (pts[1].0 - pts[0].0).normalized().unwrap();
+    let off_axis = clicked.y.atan2(clicked.x).to_degrees().abs();
+    assert!((1.0..2.0).contains(&off_axis), "the edge is clicked {off_axis} degrees off the X axis");
+    h.step(&json!({"move":{"world":[40, 15, 0]}})).unwrap();
+    h.step(&json!({"click":{"world":[40, 15, 0]}})).unwrap();
+    assert!(!h.app.status.as_ref().is_some_and(|s| s.2), "{:?}", h.app.status);
+    let sid = h.app.session.active_sketch.unwrap();
+    let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
+    let keep = sk.curve_index("keep").unwrap();
+    let sides: Vec<Vec2> = sk
+        .curves
+        .iter()
+        .enumerate()
+        .filter_map(|(i, c)| match c.kind {
+            CurveKind::Line { a, b } if i != keep => (sk.point(b)? - sk.point(a)?).normalized(),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sides.len(), 4, "{:?}", sk.curves);
+    for side in &sides {
+        let (along, across) = (side.dot(clicked).abs(), side.dot(clicked.perp()).abs());
+        assert!(along.min(across) < 1e-6, "a side runs along {side:?}, the edge was clicked along {clicked:?}");
+    }
+}
