@@ -65,10 +65,21 @@ fn mul_mod(a: u64, b: u64) -> u64 {
     }
 }
 
+/// `x` mod `P`: `2^61 = 1` mod `P`, so the high bits fold onto the low ones.
+#[inline]
+fn reduce(x: u64) -> u64 {
+    let s = (x & P) + (x >> 61);
+    if s >= P {
+        s - P
+    } else {
+        s
+    }
+}
+
 /// The two keys: fixed, so a digest is the same in every run, every thread and every kernel
 /// (a digest is still never kept outside the process). Each is in `1..P`: the first two
 /// 64-bit words of the fractional part of pi, reduced mod `P`.
-const KEYS: [u64; 2] = [0x243f_6a88_85a3_08d3 % P, 0x1319_8a2e_0370_7344 % P];
+const KEYS: [u64; 2] = [0x043f_6a88_85a3_08d4, 0x1319_8a2e_0370_7344];
 
 impl Digest {
     /// An empty digest.
@@ -159,7 +170,7 @@ impl Digest {
             d.coefficient(m);
         }
         // the byte count, below P for any real content
-        d.coefficient(d.len % P);
+        d.coefficient(reduce(d.len));
         let [a, b] = d.acc.map(|x| if x >= P { x - P } else { x });
         (u128::from(a) << 64) | u128::from(b)
     }
@@ -260,6 +271,29 @@ mod tests {
     use crate::primitive::api_primitives::{create_box, create_cylinder, create_sphere};
     use crate::topology::Brep;
     use crate::{Kernel, Point3};
+
+    /// The keys are pi's first two fraction words reduced mod `P`, and the folds reduce.
+    #[test]
+    fn the_keys_and_the_reduction_are_mod_p() {
+        assert_eq!(KEYS, [0x243f_6a88_85a3_08d3 % P, 0x1319_8a2e_0370_7344 % P]);
+        assert!(KEYS.iter().all(|&k| k > 0 && k < P));
+        for x in [
+            0,
+            1,
+            P - 1,
+            P,
+            P + 1,
+            u64::MAX,
+            1 << 61,
+            0x0123_4567_89ab_cdef,
+        ] {
+            assert_eq!(reduce(x), x % P, "{x:#x}");
+        }
+        for (a, b) in [(P - 1, P - 1), (P, 5), (1 << 60, 3), (P - 1, 2)] {
+            let want = (u128::from(a) * u128::from(b) % u128::from(P)) as u64;
+            assert_eq!(reduce(mul_mod(a, b)), want, "{a:#x} * {b:#x}");
+        }
+    }
 
     /// A word is the same bytes wherever it falls in the stream, so the word path and the
     /// byte path give one digest; a different stream, or the same bytes cut shorter, does not.
