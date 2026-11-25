@@ -93,6 +93,13 @@
 //!   radius is measured from the torus origin (WR-501; upstream measures it from the
 //!   first sweep circle's centre, off the equator when the tube does not start there,
 //!   #1470).
+//! - **A support on its form.** Not upstream: `Torus::of_support` puts a stored support's
+//!   own numbers on its NURBS form with the form's conventions read about the support's
+//!   axis (which way the sweep runs, the end meridians' frame, which way round the tube
+//!   runs), and fits nothing. A tube that shows a short arc does not fix the circles
+//!   [`Torus::is_nurb_surface_torus`] fits, so a support could not stand on what
+//!   recognition found there; where recognition finds the torus, the surface is the same
+//!   to the last bit.
 //! - **Generator interval.** Recognition, rebuilding and support installation use
 //!   the finalized generator interval for the surface's analytic V bounds. The
 //!   provisional seam-snapped angles only seed generator reconstruction (#19083).
@@ -167,6 +174,22 @@ struct Shape {
     major_radius: f64,
     minor_radius: f64,
     inside_out: bool,
+}
+
+/// What [`Torus::of_support`] reads off a form about a support's axis
+/// (`Torus::conventions_on`).
+#[derive(Debug, Clone, Copy)]
+struct Conventions {
+    /// The form's v is the sweep direction.
+    swap_uv: bool,
+    /// The tube runs against the frame.
+    inside_out: bool,
+    /// The first meridian's direction square to the axis.
+    x: Vec3,
+    /// The axis crossed with `x`.
+    y: Vec3,
+    /// The sweep's interval from `x`, in degrees.
+    sweep: Extent1d,
 }
 
 /// A torus (`SmTorus`): the surface of revolution of a minor circle of radius
@@ -529,8 +552,204 @@ impl Torus {
         )
     }
 
-    /// Carry a stored support on this recognised parametrisation. Both converters must
-    /// use the support's circle, not the independently fitted circle recognition found.
+    /// Not upstream: the torus of a support's own numbers (its placement and two radii) on its
+    /// NURBS form `form`, parametrised as the form is, with nothing fitted to the form.
+    ///
+    /// The support says where the axis and the tube are. What is left to read off the form is
+    /// its conventions, and the form's control points and its first meridian give them about
+    /// that axis ([`Self::conventions_on`]); [`Self::on_support`] then carries the numbers on
+    /// them. The recogniser ([`Self::is_nurb_surface_torus`]) is not asked: it finds a torus
+    /// only where it can fit one within its tolerance, from circles through three points of
+    /// each iso curve, and a tube that shows a short arc does not fix its circle (the centre
+    /// is good to about the points' rounding over the square of the arc, so the meridians'
+    /// fitted planes no longer meet in one line: a tube of radius 13.7 that shows 0.1 degrees
+    /// is found nowhere). Where it does find the torus, its conventions are the ones read
+    /// here, so the surface made is the same to the last bit.
+    ///
+    /// The result is not proved here: the caller proves that the form lies on it and that it
+    /// evaluates as the form (`AnalyticSupport::build`). `None` where the form gives no
+    /// reading (it is not rational of degree 2 both ways, an end meridian lies on the axis, or
+    /// a call the reading makes fails).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`], cancellation and a spent work budget from the reading; those
+    /// of [`Self::on_support`].
+    pub(crate) fn of_support(
+        k: &Kernel,
+        placement: Axis2Placement,
+        major: f64,
+        minor: f64,
+        form: &BSplineSurface,
+    ) -> Result<Option<Self>> {
+        let read = match Self::conventions_on(k, &placement, major, form) {
+            Ok(Some(read)) => read,
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            Ok(None) | Err(_) => return Ok(None),
+        };
+        // the frame and sweep the form's end meridians have about the support's axis, as a
+        // recognised torus carries them: `on_support` reads only their sides from them
+        let mut base = SurfOfRevolution::empty();
+        base.planar_generator = true;
+        base.position = Axis2Placement::new(placement.origin(), read.x, read.y);
+        base.anal_uv_domain = Extent2d::from_bounds(read.sweep.min(), 0.0, read.sweep.max(), 360.0);
+        base.swap_uv = read.swap_uv;
+        let mut torus = Self {
+            base,
+            major_radius: major,
+            minor_radius: minor,
+            inside_out: read.inside_out,
+        };
+        torus.on_support(k, placement, major, minor, form.copy())?;
+        Ok(Some(torus))
+    }
+
+    /// Not upstream: what [`Self::of_support`] reads off `form` about a support's axis (the
+    /// `placement`'s origin and z) and its tube's centres (at `major` from the axis).
+    ///
+    /// - **Which way the sweep runs.** Of the net's two directions, the meridians run along
+    ///   the one whose columns stay nearer planes through the axis. Every column of a
+    ///   revolved net lies in one (the meridians' own and those of the sweep's middle control
+    ///   points alike), and a row along the sweep turns about the axis by the sweep's angle.
+    ///   Each direction is measured by the column that stands farthest out of the plane
+    ///   through the axis and its own farthest point, and the two are compared, with no
+    ///   tolerance; a form that is not this torus fails the caller's proof whichever is
+    ///   taken. All the columns are read, not the end ones alone: a horn torus's tube can
+    ///   start and end on the axis, and then both end rows are points. Equal, the sweep is
+    ///   along u, as the recogniser takes it.
+    /// - **The sweep's frame and interval**, from the form's end meridians ([`sweep_frame`]),
+    ///   each read on the side of the axis its control point farthest from the axis is on.
+    /// - **Which way round the tube runs.** The first meridian turns about its tube's centre
+    ///   from its start to 0.45 of its range; the tube is inside out where that turn is
+    ///   against the frame. This is the recogniser's test with the support's centre in place
+    ///   of the fitted one. The turn is well fixed on any arc: the two points are a tube's
+    ///   radius from the centre and at least 0.45 of the arc apart.
+    ///
+    /// `None` where the form is not rational of degree 2 both ways, has no net, or an end
+    /// meridian has no control point off the axis.
+    ///
+    /// # Errors
+    ///
+    /// Those of the form's control net, its first meridian's extraction and evaluation.
+    fn conventions_on(
+        k: &Kernel,
+        placement: &Axis2Placement,
+        major: f64,
+        form: &BSplineSurface,
+    ) -> Result<Option<Conventions>> {
+        if form.degree(SurfParamType::U) != 2
+            || form.degree(SurfParamType::V) != 2
+            || !form.is_rational()
+        {
+            return Ok(None);
+        }
+        let (origin, z) = (placement.origin(), placement.z_axis());
+        let radial = |p: &Point3| {
+            let s = *p - origin;
+            s - s.dot(z) * z
+        };
+        let Some(net) = form.gw_nurb() else {
+            return Ok(None);
+        };
+        let (n, m) = (net.n(), net.m());
+        // the net's columns across the sweep, their control points Euclidean, were the sweep
+        // along u (`swap_uv` false: a column for each i) or along v (one for each j)
+        let columns = |swap_uv: bool| -> Result<Vec<Vec<Point3>>> {
+            let (across, along) = if swap_uv { (m, n) } else { (n, m) };
+            (0..=across)
+                .map(|a| {
+                    (0..=along)
+                        .map(|b| -> Result<Point3> {
+                            let (i, j) = if swap_uv { (b, a) } else { (a, b) };
+                            Ok(net.cpt(i, j)?.to_euclid())
+                        })
+                        .collect()
+                })
+                .collect()
+        };
+        // a column's side of the axis: the direction of its point farthest from it (none for
+        // a column on the axis, a horn torus's row where its tube touches the axis)
+        let side = |column: &[Point3]| -> Option<Vec3> {
+            column
+                .iter()
+                .map(radial)
+                .max_by(|a, b| a.length().total_cmp(&b.length()))?
+                .unitize()
+                .ok()
+        };
+        // how far a column stands out of the plane through the axis and its farthest point
+        let out_of_plane = |column: &[Point3]| -> f64 {
+            let Some(side) = side(column) else {
+                return 0.0;
+            };
+            let across = z.cross(side);
+            column
+                .iter()
+                .map(|p| radial(p).dot(across).abs())
+                .fold(0.0_f64, f64::max)
+        };
+        let mut read: Option<(f64, bool, Vec<Vec<Point3>>)> = None;
+        for swap_uv in [false, true] {
+            let all = columns(swap_uv)?;
+            let out = all
+                .iter()
+                .map(|column| out_of_plane(column.as_slice()))
+                .fold(0.0_f64, f64::max);
+            if read.as_ref().is_none_or(|(least, ..)| out < *least) {
+                read = Some((out, swap_uv, all));
+            }
+        }
+        let Some((_, swap_uv, all)) = read else {
+            return Ok(None);
+        };
+        let (Some(first), Some(last)) = (all.first(), all.last()) else {
+            return Ok(None);
+        };
+        let (Some(first_side), Some(last_side)) = (side(first), side(last)) else {
+            return Ok(None);
+        };
+        let Some((x, y, sweep)) = sweep_frame(
+            origin,
+            z,
+            [first_side, last_side],
+            [first.clone(), last.clone()],
+        ) else {
+            return Ok(None);
+        };
+        let domain = form.natural_uv_domain();
+        let generator = form
+            .create_iso_parametric_curve(
+                k,
+                if swap_uv {
+                    SurfParamType::V
+                } else {
+                    SurfParamType::U
+                },
+                if swap_uv {
+                    domain.v_min()
+                } else {
+                    domain.u_min()
+                },
+                IsoCurveOptions::default(),
+            )?
+            .curve;
+        let interval = generator.natural_interval();
+        let centre = origin + x * major;
+        let from = generator.evaluate_point(interval.min())? - centre;
+        let on = generator.evaluate_point(interval.evaluate(0.45))? - centre;
+        let inside_out = z.dot(from.cross(on).cross(x)) < 0.0;
+        Ok(Some(Conventions {
+            swap_uv,
+            inside_out,
+            x,
+            y,
+            sweep,
+        }))
+    }
+
+    /// Carry a stored support on this torus's parametrisation (the one [`Self::of_support`]
+    /// read off the form, or a recognised one). Both converters must use the support's
+    /// circle, not the independently fitted circle recognition found.
     pub(crate) fn on_support(
         &mut self,
         k: &Kernel,
@@ -2500,6 +2719,152 @@ mod tests {
                 check(&found);
                 original.rebuild_step_from_nurb_parameters(&k).unwrap();
                 check(&original);
+            }
+        }
+    }
+
+    /// A support's own numbers on its form are the same torus to the last bit whether the
+    /// form's conventions are read about the support's axis (`of_support`) or taken from the
+    /// torus the recogniser finds in the form, wherever it finds one: quarter, half and whole
+    /// sweeps, the tube on the outside, the inside, across the top and whole, the sweep along
+    /// u and along v, the tube either way round, at the origin and on a frame off it and
+    /// askew. The same holds for a support that is not the form's own (its frame turned a
+    /// tenth of a radian about the axis, a radius a tenth off), which the caller then
+    /// refuses.
+    #[test]
+    fn a_support_on_its_form_reads_the_conventions_the_recogniser_finds() {
+        let k = Kernel::default();
+        let askew = {
+            let z = Vec3::new(1.0, 2.0, 3.0).unitize().unwrap();
+            let x = Vec3::new(3.0, -1.0, 0.0);
+            let x = (x - z * x.dot(z)).unitize().unwrap();
+            Axis2Placement::new(Vec3::new(197.06, 33.35, -56.318), x, z.cross(x))
+        };
+        let mut compared = 0;
+        for frame in [Axis2Placement::IDENTITY, askew] {
+            for dom in [
+                Extent2d::from_bounds(0.0, 0.0, 90.0, 90.0),
+                Extent2d::from_bounds(0.0, -60.0, 30.0, 60.0),
+                Extent2d::from_bounds(0.0, 120.0, 180.0, 240.0),
+                Extent2d::from_bounds(0.0, 30.0, 270.0, 300.0),
+                Extent2d::from_bounds(0.0, 80.0, 60.0, 100.0),
+                Extent2d::from_bounds(0.0, 0.0, 360.0, 360.0),
+            ] {
+                for (swap, inside) in [(false, false), (true, false), (false, true), (true, true)] {
+                    let t = Torus::create_canonical(
+                        &k,
+                        &frame,
+                        10.0,
+                        3.0,
+                        TorusOptions {
+                            swap_uv: swap,
+                            inside_out: inside,
+                            circle_nurb: None,
+                        },
+                        Some(&dom),
+                    )
+                    .unwrap();
+                    let form = plain(&t);
+                    let (x, y) = (frame.x_axis(), frame.y_axis());
+                    let turned = Axis2Placement::new(
+                        frame.origin(),
+                        x * 0.1_f64.cos() + y * 0.1_f64.sin(),
+                        y * 0.1_f64.cos() - x * 0.1_f64.sin(),
+                    );
+                    for (own, placement, major, minor) in [
+                        (true, frame, 10.0, 3.0),
+                        (false, turned, 10.0, 3.0),
+                        (false, frame, 10.1, 3.0),
+                        (false, frame, 10.0, 2.9),
+                    ] {
+                        let at = format!(
+                            "{dom:?} swap {swap} inside out {inside}: R {major} r {minor} on \
+                             {placement:?}"
+                        );
+                        let mut found = Torus::is_nurb_surface_torus(&k, &form, 1.0)
+                            .unwrap()
+                            .unwrap_or_else(|| panic!("{at}: no torus found"));
+                        let by_recognition =
+                            found.on_support(&k, placement, major, minor, form.copy());
+                        let by_reading = Torus::of_support(&k, placement, major, minor, &form);
+                        match (by_recognition, by_reading) {
+                            (Ok(()), Ok(Some(read))) => {
+                                assert_eq!(format!("{read:?}"), format!("{found:?}"), "{at}");
+                                compared += usize::from(own);
+                            }
+                            (Err(a), Err(b)) if !own => {
+                                assert_eq!(a.to_string(), b.to_string(), "{at}");
+                            }
+                            (a, b) => panic!("{at}: recognition {a:?}, reading {b:?}"),
+                        }
+                    }
+                }
+            }
+        }
+        // every support that is its form's own was carried both ways and compared
+        assert_eq!(compared, 2 * 6 * 4);
+    }
+
+    /// A support reads its form's conventions as the form was made, where no torus can be
+    /// fitted to the form too: the sweep along u or along v and the tube either way round,
+    /// on tubes that show 2, 0.02 and 0.002 degrees, and on a horn torus whose tube runs from
+    /// the axis round to the axis again (both its end rows are points, so the end columns
+    /// alone would not say which way the sweep runs), at the origin and on a frame off it
+    /// and askew.
+    #[test]
+    fn a_support_reads_its_forms_conventions_off_the_net() {
+        let k = Kernel::default();
+        let askew = {
+            let z = Vec3::new(1.0, 2.0, 3.0).unitize().unwrap();
+            let x = Vec3::new(3.0, -1.0, 0.0);
+            let x = (x - z * x.dot(z)).unitize().unwrap();
+            Axis2Placement::new(Vec3::new(197.06, 33.35, -56.318), x, z.cross(x))
+        };
+        for frame in [Axis2Placement::IDENTITY, askew] {
+            for (major, minor, dom) in [
+                (10.0, 3.0, Extent2d::from_bounds(0.0, 179.0, 90.0, 181.0)),
+                (10.0, 3.0, Extent2d::from_bounds(0.0, 89.99, 90.0, 90.01)),
+                (
+                    38.725,
+                    13.725,
+                    Extent2d::from_bounds(0.0, 179.99, 90.0, 180.01),
+                ),
+                (
+                    38.725,
+                    13.725,
+                    Extent2d::from_bounds(0.0, -0.001, 30.0, 0.001),
+                ),
+                (5.0, 5.0, Extent2d::from_bounds(0.0, 180.0, 90.0, 540.0)),
+                (5.0, 5.0, Extent2d::from_bounds(0.0, 180.0, 360.0, 540.0)),
+            ] {
+                for (swap, inside) in [(false, false), (true, false), (false, true), (true, true)] {
+                    let at = format!(
+                        "R {major} r {minor} over {dom:?}, swap {swap}, inside out {inside}, on \
+                         {frame:?}"
+                    );
+                    let t = Torus::create_canonical(
+                        &k,
+                        &frame,
+                        major,
+                        minor,
+                        TorusOptions {
+                            swap_uv: swap,
+                            inside_out: inside,
+                            circle_nurb: None,
+                        },
+                        Some(&dom),
+                    )
+                    .unwrap();
+                    let read = Torus::of_support(&k, frame, major, minor, &plain(&t))
+                        .unwrap_or_else(|e| panic!("{at}: {e}"))
+                        .unwrap_or_else(|| panic!("{at}: no reading"));
+                    assert_eq!((read.base.swap_uv, read.inside_out), (swap, inside), "{at}");
+                    assert_eq!(
+                        (read.major_radius, read.minor_radius),
+                        (major, minor),
+                        "{at}"
+                    );
+                }
             }
         }
     }
