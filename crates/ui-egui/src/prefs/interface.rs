@@ -738,6 +738,12 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                         key: "pinned_constraints_in_grid",
                         value: |p| &mut p.pinned_constraints_in_grid,
                     },
+                    Check {
+                        label: "prefs.command_search_centred",
+                        help: "prefs.command_search_centred_note",
+                        key: "command_search_centred",
+                        value: |p| &mut p.command_search_centred,
+                    },
                 ],
             );
         });

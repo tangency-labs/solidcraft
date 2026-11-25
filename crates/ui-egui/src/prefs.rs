@@ -6763,6 +6763,7 @@ mod tests {
             ("keep_work_on_tab_switch", json!(true), PAGE_LAYOUT),
             ("remember_toolbar_tab", json!(false), PAGE_LAYOUT),
             ("ribbon_reveal", json!(true), PAGE_LAYOUT),
+            ("command_search_centred", json!(true), PAGE_LAYOUT),
             ("pinned_constraints_in_grid", json!(false), PAGE_LAYOUT),
             ("tab_double_click_renames", json!(false), PAGE_LAYOUT),
             ("design_views_as_tabs", json!(false), PAGE_LAYOUT),

@@ -1,8 +1,11 @@
-use super::*;
-use crate::prelude::*;
+//! The record evaluator's tests (`solidcraft_geom::brep`), with solidcore's checks as the oracle,
+//! and the record motions' ([`crate::placement`]) and face flux's ([`crate::face_flux`]).
+use crate::placement;
 use solidcore_ops::{label, pcurve, record_check as check};
 use solidcore_record::Vec3;
 use solidcore_record::brep::*;
+use solidcraft_geom::brep::{eval, form};
+use solidcraft_geom::prelude::*;
 use std::f64::consts::{FRAC_PI_2, TAU};
 
 fn segment(a: f64, b: f64) -> Curve2 {
@@ -628,7 +631,7 @@ fn a_point_beside_a_pole_is_one_within_its_reach() {
 /// derivatives and are each the derivative of the order below (central differences).
 #[test]
 fn analytic_partials_are_the_derivatives_of_the_order_below() {
-    use crate::tess::partials::MAX_PARTIAL_ORDER;
+    use solidcraft_geom::tess::partials::MAX_PARTIAL_ORDER;
     let f = Frame { origin: [1., 2., 3.], x_axis: [0.6, 0.8, 0.], y_axis: [0., 0., 1.] };
     let surfaces = [
         Surface::Cylinder { frame: f.clone(), radius: 3. },
@@ -767,7 +770,7 @@ fn the_flux_of_p_over_3_out_of_a_tetrahedron_is_its_volume() {
                     _ => Vec::new(),
                 })
                 .collect();
-            let flux = eval::face_flux(&s, face.domain[1][0], &loops, &|p| (p + c) * (1.0 / 3.0)).unwrap();
+            let flux = crate::face_flux::face_flux(&s, face.domain[1][0], &loops, &|p| (p + c) * (1.0 / 3.0)).unwrap();
             sum += if of.forward { flux } else { -flux };
         }
         assert!((sum - 1.0 / 6.0).abs() < 1e-12 * (1.0 + c.len()), "{c:?}: {sum}");
