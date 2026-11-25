@@ -1,0 +1,1 @@
+resolves edge picks for SMLib by a mesh

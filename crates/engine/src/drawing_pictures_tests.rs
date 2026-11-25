@@ -1,3 +1,4 @@
+use solidcraft_doc::canvas::base64_decode;
 use std::sync::Arc;
 
 use serde_json::{Value, json};
@@ -232,8 +233,8 @@ fn block_group(scene: &Scene) -> &Group {
 }
 
 /// A logo of two pixels by one in the legal owner's cell on A3, (230, 44) to (310, 59): the value box
-/// inside its lines and under its label is (231.35, 45.175) to (308.825, 54.15), 8.975 mm high, so the
-/// logo is 17.95 by 8.975, centred on x = 270.0875. It comes first in the block's group, so the lines
+/// inside its lines and under its label is (231.35, 45.175) to (308.825, 54.325), 9.15 mm high (a cell line above the cell, no longer the
+/// outline), so the logo is 18.3 by 9.15, centred on x = 270.0875. It comes first in the block's group, so the lines
 /// draw over it; the SVG holds its own pixels. Taken away, the block is as it was.
 #[test]
 fn a_logo_sits_in_its_cells_value_box_under_the_lines() {
@@ -247,7 +248,7 @@ fn a_logo_sits_in_its_cells_value_box_under_the_lines() {
     let built = crate::drawing_scene::build(&s, &d, sheet).unwrap();
     let group = block_group(&built.scene);
     let Item::Picture(picture) = group.items[0] else { panic!("{:?}", group.items[0]) };
-    let want = Aabb2 { min: Vec2::new(261.1125, 45.175), max: Vec2::new(279.0625, 54.15) };
+    let want = Aabb2 { min: Vec2::new(260.9375, 45.175), max: Vec2::new(279.2375, 54.325) };
     assert!(picture.rect.min.dist(want.min) < 1e-9 && picture.rect.max.dist(want.max) < 1e-9, "{:?}", picture.rect);
     assert_eq!(group.items[1..], block_group(&plain.scene).items[..], "the lines and the symbol are as they were");
     built.scene.validate().unwrap();
@@ -348,4 +349,31 @@ fn the_scene_holds_a_logo_with_or_without_its_cache() {
     let cached = crate::drawing_scene::extract(&mut s, sheet).unwrap();
     assert_eq!(block_group(&cached.scene), block_group(&built.scene));
     assert!(matches!(block_group(&cached.scene).items[0], Item::Picture(_)));
+}
+
+/// A logo change rebuilds the title block without losing a view's centre line, and the provider and
+/// one-shot scene agree throughout.
+#[test]
+fn a_logo_and_centre_line_survive_each_others_updates() {
+    let folder = Folder::new("logo-and-centre-line");
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let block = serde_json::to_value(solidcraft_geom::title_block::default_block()).unwrap();
+    run(&mut s, "drawing.sheet.set", json!({"sheet": ids::encode(sheet), "title_block": block}));
+    let added = run(&mut s, "drawing.center_line.add", json!({"view": ids::encode(front), "a": [0, 0, 0], "b": [100, 0, 0], "overshoot_mm": 2.0}));
+    let line = ids::decode(added["line"].as_str().unwrap()).unwrap();
+    let d = s.drawing("test").unwrap().clone();
+    let before = crate::drawing_scene::as_shown(&mut s, &d, sheet).unwrap();
+    let line_group = before.scene.groups.iter().find(|group| group.object == line && group.kind == ObjectKind::CentreLine).unwrap().clone();
+    logo(&mut s, &folder, &red_blue(), "legal_owner");
+    let d = s.drawing("test").unwrap().clone();
+    let shown = crate::drawing_scene::as_shown(&mut s, &d, sheet).unwrap();
+    assert_eq!(shown.scene, crate::drawing_scene::build(&s, &d, sheet).unwrap().scene);
+    assert!(matches!(block_group(&shown.scene).items[0], Item::Picture(_)));
+    assert_eq!(shown.scene.groups.iter().find(|group| group.object == line).unwrap(), &line_group);
+    run(&mut s, "drawing.title_block.logo", json!({"cell": "legal_owner", "file": null}));
+    let d = s.drawing("test").unwrap().clone();
+    let cleared = crate::drawing_scene::as_shown(&mut s, &d, sheet).unwrap();
+    assert_eq!(cleared.scene, crate::drawing_scene::build(&s, &d, sheet).unwrap().scene);
+    assert!(!block_group(&cleared.scene).items.iter().any(|item| matches!(item, Item::Picture(_))));
+    assert_eq!(cleared.scene.groups.iter().find(|group| group.object == line).unwrap(), &line_group);
 }

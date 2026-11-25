@@ -11,6 +11,7 @@
 //! | [`edges`]                                    | `SmFace::GetEdges`                           |
 //! | [`vertices`]                                 | `SmFace::GetVertices`                        |
 //! | [`upward_loopuses`]                          | `SmFace::GetUpwardLoopuses`                  |
+//! | [`has_loopuses`]                             | (solidcore) `GetUpwardLoopuses` not empty    |
 //! | [`upward_vertexuses`]                        | `SmFace::GetUpwardVertexuses`                |
 //! | [`upward_edgeuses`]                          | `SmFace::GetUpwardEdgeuses`                  |
 //! | [`is_connected_to`]                          | `SmFace::IsConnectedTo`                      |
@@ -48,7 +49,10 @@
 //!   every handle naming `surface` ([`SurfaceCache::map_handles`]: the line solve
 //!   reads only node classes, boxes and the cache surface), its `sm_IsPointValid`
 //!   runs the trimmed cache's `PointTest` (a face classification,
-//!   [`TrimSrfCache::point_test_in`]), and `SmFace::PointClassify` of the single values gets the trimmed cache
+//!   [`TrimSrfCache::point_test_in`]), its coincidence check's point solve (a line that may
+//!   lie on the surface) runs the fast drop's trim test on the face
+//!   (`live_face_fast_drop_test`; upstream's surface reaches its face through `GetFace`),
+//!   and `SmFace::PointClassify` of the single values gets the trimmed cache
 //!   itself (upstream finds it on the surface). The held variant and
 //!   `sm_FaceClassifyUVLine` classify without it. `SmFace::PointClassify` gets the face's tolerance
 //!   options as `query.face_p2`'s callers pass them; its status is ignored as
@@ -174,6 +178,7 @@ const fn must_propagate(e: &SolidError) -> bool {
         e,
         SolidError::Unported { .. }
             | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }
             | SolidError::NotFound { .. }
@@ -285,6 +290,21 @@ pub fn upward_loopuses(
     tgt_loops: Option<&[LoopId]>,
 ) -> Result<Vec<LoopuseId>> {
     selected_loopuses(b, f, tgt_loops_only, tgt_loops)
+}
+
+/// Whether face `f` has loop uses ([`upward_loopuses`] of all loops is not empty):
+/// whether it has trim boundaries. A trimmed surface cache's point test classifies a
+/// solution only on such a face; a face without loop uses keeps every solution. It
+/// reads the face use's list in place (the point test asks it per solution).
+///
+/// # Errors
+///
+/// Those of [`upward_loopuses`].
+pub fn has_loopuses(b: &Brep, f: FaceId) -> Result<bool> {
+    match b.face(f)?.faceuse {
+        Some(fu) => Ok(!b.faceuse(fu)?.loopuses.is_empty()),
+        None => Ok(false),
+    }
 }
 
 /// `GetUpwardVertexuses`: the vertex uses of each selected loop use
@@ -567,6 +587,9 @@ struct FaceLineCache<'b, O> {
     /// The face surface's cache, once fetched; given back to the surface after the
     /// solve.
     trim: Option<FaceSurfaceCache>,
+    /// Whether the fast drop's trim test runs, once decided
+    /// ([`crate::intersect::point_class::live_face_fast_drop_test`]).
+    fast_drop_on: Option<bool>,
 }
 
 impl<O: SolutionObject> FaceSolveCache<O> for FaceLineCache<'_, O> {
@@ -604,6 +627,30 @@ impl<O: SolutionObject> FaceSolveCache<O> for FaceLineCache<'_, O> {
             None,
         )?;
         Ok(ok)
+    }
+
+    fn fast_drop_test(&mut self, k: &Kernel, uv: Point2, src_tol: f64) -> Result<bool> {
+        // the test runs as the cache the solve holds says (the face's surface has no cache
+        // to look at while the solve holds it)
+        if self.fast_drop_on.is_none() {
+            if let Some(lease) = &self.trim {
+                let base = lease.cache.base();
+                self.fast_drop_on = Some(
+                    !self.b.is_surface_owner_cleared(self.f)
+                        && lease.trimmed
+                        && base.point_test_enabled
+                        && !base.face_was_modified,
+                );
+            }
+        }
+        crate::intersect::point_class::live_face_fast_drop_test(
+            k,
+            self.b,
+            self.f,
+            &mut self.fast_drop_on,
+            uv,
+            src_tol,
+        )
     }
 }
 
@@ -659,6 +706,7 @@ fn global_line_intersect_with<O: SolutionObject>(
             f,
             surface,
             trim: None,
+            fast_drop_on: None,
         };
         let solutions = face_surface.global_line_intersect_built(
             k,
@@ -1733,7 +1781,7 @@ fn mark_in_face<O: ClassObject>(c: &mut CurveClassification<O>, face: O) -> Resu
 
 /// The seam classification of one direction: the seam curve classified against the
 /// face, the touch lists filled, false seam edge end classifications cleared;
-/// `(classification, crossed, missing, near_miss)`.
+/// `(classification, crossed, missing, near_miss, curves, boundary_touches)`.
 #[allow(clippy::too_many_arguments)]
 fn classify_seam<O: LoopObject, M: CurveOnClassifyBrep<O>>(
     k: &Kernel,
@@ -1745,7 +1793,7 @@ fn classify_seam<O: LoopObject, M: CurveOnClassifyBrep<O>>(
     outer_loop_only: bool,
     loops: &[LoopId],
     props: &mut FaceProps<O>,
-) -> Result<(CurveClassification<O>, bool, bool, bool, SeamCurves)> {
+) -> Result<(CurveClassification<O>, bool, bool, bool, SeamCurves, bool)> {
     // Build SeamConst curve
     let seam = objects
         .classify_surface(f)?
@@ -1795,6 +1843,33 @@ fn classify_seam<O: LoopObject, M: CurveOnClassifyBrep<O>>(
     // How many times is the Seam crossed by loop
     get_loop_crossings(k, &objects, &class, loops, props, dir)?;
 
+    let mut boundary = None;
+    let mut checked = Vec::new();
+    let mut excludes = |edge| -> Result<bool> {
+        if let Some((_, excluded)) = checked.iter().find(|(e, _)| *e == edge) {
+            return Ok(*excluded);
+        }
+        // Build the geometric certificate only when an edge witness needs it.
+        // The outer option also remembers an unsupported surface's None result.
+        if boundary.is_none() {
+            boundary = Some(seam_boundary(k, f, dir, &objects)?);
+        }
+        let excluded = match boundary.as_ref().and_then(Option::as_ref) {
+            Some(boundary) => boundary.excludes(k, f, &objects, edge)?,
+            None => false,
+        };
+        checked.push((edge, excluded));
+        Ok(excluded)
+    };
+    let raw_touches = if dir == SurfParamType::U {
+        &props.raw_touch_list_u
+    } else {
+        &props.raw_touch_list_v
+    };
+    // Review can clear endpoint classifications. Read each raw touch's original
+    // edge witness first, using the same verdict as the crossing check below.
+    let touches_boundary = touches_seam_boundary(&objects, &class, raw_touches, &mut excludes)?;
+
     // Find and Fix False SeamEdge EndPoint Classifications (status ignored)
     match review_start_and_stop_on_seam_crv_classifies(k, &objects, &mut class) {
         Err(e) if must_propagate(&e) => return Err(e),
@@ -1802,14 +1877,319 @@ fn classify_seam<O: LoopObject, M: CurveOnClassifyBrep<O>>(
     }
 
     // analyze the classification for problems (Crossing or Missing)
-    let crossed = class.is_crossed_by_edge(&objects)?; // only count seam crossings by an Edge
+    let crossed = class.is_crossed_by_edge_unless(&objects, &mut excludes)?;
     let missing = class.is_crossing_face(Some(objects.face(f))); // segments in Face but not on an Edge
     let near_miss = class.has_near_misses(k, &objects, false)?;
     let curves = SeamCurves {
         curve: seam,
         uv_curve: seam_uv,
     };
-    Ok((class, crossed, missing, near_miss, curves))
+    Ok((class, crossed, missing, near_miss, curves, touches_boundary))
+}
+
+/// The two parameter-domain sides representing one periodic seam.
+struct SeamBoundary {
+    lines: [Curve; 2],
+    fixed: [f64; 2],
+    direction: SurfParamType,
+    span: (f64, f64),
+}
+
+impl SeamBoundary {
+    /// A represented seam is not a crossing of the material boundary. Otherwise,
+    /// every edge-use trim on this face must be proved clear of both seam sides.
+    fn excludes<O: LoopObject, M: CurveOnClassifyBrep<O>>(
+        &self,
+        k: &Kernel,
+        f: FaceId,
+        objects: &M,
+        edge: Option<O>,
+    ) -> Result<bool> {
+        let Some((b, EntityRef::Edge(e))) = edge.and_then(|e| objects.topology_entity(e)) else {
+            return Ok(false);
+        };
+        let represented_seam = edge::face_on_both_sides(b, e, f)?;
+        let interval = b.edge(e)?.interval;
+        let (mut all_seam, mut all_disjoint) = (represented_seam, true);
+        let mut saw_use = false;
+        for &eu in &b.edge(e)?.edgeuses {
+            if eu1::face(b, eu)? != Some(f) {
+                continue;
+            }
+            let (Some(trim), Some(holder)) = eu1::uv_trim_curve(b, eu)? else {
+                return Ok(false);
+            };
+            // A mate shares a trim only when it belongs to this same face.
+            if eu1::face(b, holder)? != Some(f) {
+                return Ok(false);
+            }
+            saw_use = true;
+            let on_seam = self
+                .fixed
+                .iter()
+                .any(|&fixed| trim_on_seam(trim, self.direction, fixed));
+            all_seam &= on_seam;
+            if all_disjoint {
+                all_disjoint = !on_seam && self.separates_trim(k, trim, interval)?;
+            }
+            if !all_seam && !all_disjoint {
+                return Ok(false);
+            }
+        }
+        Ok(saw_use && (all_seam || all_disjoint))
+    }
+
+    fn separates_trim(&self, k: &Kernel, trim: &Curve, interval: Extent1d) -> Result<bool> {
+        let Some(trim) = uv_trim_in_xy(trim)? else {
+            return Ok(false);
+        };
+        let Some(points) = trim.piece_hull_points(&interval) else {
+            return Ok(false);
+        };
+        // Both finite seam segments must cover the entire varying coordinate.
+        // Their endpoint enclosures give an inward bound on that covered span.
+        let within = !points.is_empty()
+            && points.iter().all(|&(p, error)| {
+                let value = varying_coordinate(p, self.direction);
+                value.is_finite()
+                    && error.is_finite()
+                    && error >= 0.0
+                    && crate::geom::certified::next_down(value - error) >= self.span.0
+                    && crate::geom::certified::next_up(value + error) <= self.span.1
+            });
+        if !within {
+            return Ok(false);
+        }
+        for line in &self.lines {
+            if !line.proved_disjoint(k, line.natural_interval(), &trim, interval)? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+}
+
+/// Embed the UV definition as (u,v,0). In particular, a 2D native spline stores
+/// NOZ, not zero, in its homogeneous z coordinate. Changing only that coordinate
+/// preserves its exact x,y map, knots and weights; no projected fit is involved.
+fn uv_trim_in_xy(trim: &Curve) -> Result<Option<Curve>> {
+    if let crate::curve::curve::CurveKind::Line(line) = trim.kind() {
+        let mut line = line.clone_exact_bounded();
+        line.convert_to_2d()?;
+        line.convert_to_3d()?;
+        return Ok(Some(Curve::from(line)));
+    }
+    let Some(base) = trim.b_spline_base().filter(|base| base.gw_nurb().is_some()) else {
+        return Ok(None);
+    };
+    let mut base = base.clone_exact();
+    base.convert_to_3d()?;
+    Ok(Some(Curve::from(base)))
+}
+
+fn varying_coordinate(point: Point3, direction: SurfParamType) -> f64 {
+    if direction == SurfParamType::U {
+        point.y
+    } else {
+        point.x
+    }
+}
+
+/// An inward enclosure of the varying span covered by both seam lines. A trim
+/// inside it cannot miss a finite segment while crossing its infinite seam line.
+fn covered_seam_span(lines: &[Curve; 2], direction: SurfParamType) -> Option<(f64, f64)> {
+    use crate::geom::certified::{next_down, next_up};
+
+    let mut span = (f64::NEG_INFINITY, f64::INFINITY);
+    for line in lines {
+        let ends = line.piece_hull_points(&line.natural_interval())?;
+        let (a, ea) = *ends.first()?;
+        let (b, eb) = *ends.last()?;
+        let lo = next_up(varying_coordinate(a, direction) + ea);
+        let hi = next_down(varying_coordinate(b, direction) - eb);
+        if !(ea.is_finite()
+            && ea >= 0.0
+            && eb.is_finite()
+            && eb >= 0.0
+            && lo.is_finite()
+            && hi.is_finite()
+            && lo < hi)
+        {
+            return None;
+        }
+        span = (span.0.max(lo), span.1.min(hi));
+    }
+    (span.0 < span.1).then_some(span)
+}
+
+/// Whole-curve identity in parameter space. A line has a constant coordinate;
+/// every homogeneous control coefficient of a rational trim satisfies X = c W
+/// (or Y = c W). Expansion arithmetic proves the equality without rounding it.
+fn trim_on_seam(trim: &Curve, direction: SurfParamType, fixed: f64) -> bool {
+    let axis = usize::from(direction != SurfParamType::U);
+    trim_has_constant_coordinate(trim, axis, fixed)
+}
+
+fn trim_has_constant_coordinate(trim: &Curve, axis: usize, fixed: f64) -> bool {
+    use crate::geom::expansion;
+    use crate::nurbs::math::NOW;
+
+    let interval = trim.natural_interval();
+    if !(interval.min().is_finite()
+        && interval.max().is_finite()
+        && interval.length().is_finite()
+        && interval.min() < interval.max())
+    {
+        return false;
+    }
+    let coordinate = |p: Point3| p.component(axis);
+    if let crate::curve::curve::CurveKind::Line(line) = trim.kind() {
+        let canonical = line.canonical_unit();
+        let step = line.step_interval();
+        return step.min().is_finite()
+            && step.max().is_finite()
+            && step.length().is_finite()
+            && canonical.scale.is_finite()
+            && canonical.point.x.is_finite()
+            && canonical.point.y.is_finite()
+            && canonical.vector.x.is_finite()
+            && canonical.vector.y.is_finite()
+            && coordinate(canonical.point) == fixed
+            && coordinate(canonical.vector) == 0.0;
+    }
+    let Some(net) = trim.b_spline_base().and_then(|base| base.gw_nurb()) else {
+        return false;
+    };
+    if net.counts_are_valid().is_err()
+        || net.cpts().len() <= net.degree()
+        || crate::nurbs::nurbs_crv::nonempty_spans(net.knots(), net.degree(), net.n()).is_none()
+    {
+        return false;
+    }
+    net.cpts().iter().all(|p| {
+        let weight = if p.w == NOW { 1.0 } else { p.w };
+        let value = coordinate(Point3::new(p.x, p.y, p.z));
+        weight.is_finite()
+            && weight > 0.0
+            && p.x.is_finite()
+            && p.y.is_finite()
+            && expansion::product(fixed, weight)
+                .is_some_and(|product| expansion::is_zero(&expansion::sub(&[value], &product)))
+    })
+}
+
+/// Exact parameter-domain seam geometry. Unsupported definitions provide no
+/// exclusion certificate; the existing crossing classification is retained.
+fn seam_boundary<O: LoopObject, M: CurveOnClassifyBrep<O>>(
+    k: &Kernel,
+    f: FaceId,
+    direction: SurfParamType,
+    objects: &M,
+) -> Result<Option<SeamBoundary>> {
+    let Some(surface) = objects.classify_surface(f)? else {
+        return Ok(None);
+    };
+    if surface.procedural_definition().is_some() {
+        return Ok(None);
+    }
+    let Some(native) = crate::surface::surface::exact_pieces::exact_nurbs_surface(k, surface)?
+    else {
+        return Ok(None);
+    };
+    if native.is_out_of_bounds_enabled() {
+        return Ok(None);
+    }
+    let Some(net) = native.gw_nurb() else {
+        return Ok(None);
+    };
+    let (p, q) = net.degrees();
+    if !(crate::nurbs::nurbs_crv::is_clamped(net.u_knots(), p)
+        && crate::nurbs::nurbs_crv::is_clamped(net.v_knots(), q))
+    {
+        return Ok(None);
+    }
+    let domain = surface.natural_uv_domain_with_nurb(k)?;
+    let native_domain = native.natural_uv_domain();
+    if domain.min() != native_domain.min() || domain.max() != native_domain.max() {
+        return Ok(None);
+    }
+    let (lo, hi) = (domain.min(), domain.max());
+    let span_lo = lo.x.min(lo.y) - (hi.x - lo.x);
+    let span_hi = hi.x.max(hi.y) + (hi.y - lo.y);
+    if !(span_lo.is_finite() && span_hi.is_finite()) {
+        return Ok(None);
+    }
+    let fixed = if direction == SurfParamType::U {
+        [lo.x, hi.x]
+    } else {
+        [lo.y, hi.y]
+    };
+    let lines = fixed.map(|value| {
+        let (a, b) = if direction == SurfParamType::U {
+            (
+                Point3::new(value, span_lo, 0.0),
+                Point3::new(value, span_hi, 0.0),
+            )
+        } else {
+            (
+                Point3::new(span_lo, value, 0.0),
+                Point3::new(span_hi, value, 0.0),
+            )
+        };
+        Curve::from(crate::curve::line::Line::from_points(a, b, 3))
+    });
+    let Some(span) = covered_seam_span(&lines, direction) else {
+        return Ok(None);
+    };
+    Ok(Some(SeamBoundary {
+        lines,
+        fixed,
+        direction,
+        span,
+    }))
+}
+
+/// Raw coincident touches survive touch-list processing. Apply the same edge
+/// certificate here before requesting relocation of a missing periodic seam.
+fn touches_seam_boundary<O: LoopObject, M: FaceBrep>(
+    objects: &M,
+    class: &CurveClassification<O>,
+    touches: &[crate::intersect::curve_class::p1::TouchData<O>],
+    excludes: &mut impl FnMut(Option<O>) -> Result<bool>,
+) -> Result<bool> {
+    for touch in touches {
+        let Some(o) = touch.connected_to else {
+            continue;
+        };
+        let l = o
+            .as_loop()
+            .ok_or_else(|| null("HasSeamProblem: touch not connected to a loop"))?;
+        let lu = objects
+            .brep()
+            .loop_(l)?
+            .loopuse
+            .ok_or_else(|| null("HasSeamProblem: loop without loop use"))?;
+        if loopuse::is_vertex_loopuse(objects.brep(), lu)? {
+            continue;
+        }
+        let point = usize::try_from(touch.pt_classify_index)
+            .ok()
+            .and_then(|index| {
+                if index == 0 {
+                    class.intervals().first().map(|i| &i.start)
+                } else {
+                    class.intervals().get(index - 1).map(|i| &i.end)
+                }
+            });
+        let excluded = match point.and_then(PointClassification::edge_object) {
+            Some(edge) => excludes(Some(edge))?,
+            None => false,
+        };
+        if !excluded {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// `HasSeamProblem`: whether the seams of the face's periodic surface are badly
@@ -1939,6 +2319,8 @@ pub fn has_seam_problem_mut<O: LoopObject, M: CurveOnClassifyBrep<O>>(
     let surface_zone_tol_3d = surface_zone_tol_3d(k, objects.brep(), f, surface)?;
     let mut crossed_u = false;
     let mut crossed_v = false;
+    let mut boundary_touches_u = false;
+    let mut boundary_touches_v = false;
     let mut missing_u = false;
     let mut missing_v = false;
     let mut near_miss_u = false;
@@ -2016,7 +2398,7 @@ pub fn has_seam_problem_mut<O: LoopObject, M: CurveOnClassifyBrep<O>>(
 
     // periodic in U
     if periodic_u {
-        let (class, crossed, missing, near_miss, curves) = classify_seam(
+        let (class, crossed, missing, near_miss, curves, boundary_touches) = classify_seam(
             k,
             f,
             objects,
@@ -2029,12 +2411,13 @@ pub fn has_seam_problem_mut<O: LoopObject, M: CurveOnClassifyBrep<O>>(
         )?;
         out.class_u = class;
         out.seam_u = Some(curves);
+        boundary_touches_u = boundary_touches;
         (crossed_u, missing_u, near_miss_u) = (crossed, missing, near_miss);
     }
 
     // periodic in V
     if periodic_v {
-        let (class, crossed, missing, near_miss, curves) = classify_seam(
+        let (class, crossed, missing, near_miss, curves, boundary_touches) = classify_seam(
             k,
             f,
             objects,
@@ -2047,6 +2430,7 @@ pub fn has_seam_problem_mut<O: LoopObject, M: CurveOnClassifyBrep<O>>(
         )?;
         out.class_v = class;
         out.seam_v = Some(curves);
+        boundary_touches_v = boundary_touches;
         (crossed_v, missing_v, near_miss_v) = (crossed, missing, near_miss);
     }
 
@@ -2097,34 +2481,8 @@ pub fn has_seam_problem_mut<O: LoopObject, M: CurveOnClassifyBrep<O>>(
         let v_start_in_face = starts_in_face(&out.class_v)?;
         let u_start_in_face = starts_in_face(&out.class_u)?;
 
-        // Point-only touches divide a seam but do not cross a face boundary. Keep them out
-        // of the crossing flags used to request MoveSeam. Use the raw lists so coincident
-        // edge touches remain visible after processing.
-        let mut touches_boundary = [false, false];
-        for (touches_seam, touches) in touches_boundary
-            .iter_mut()
-            .zip([&props.raw_touch_list_u, &props.raw_touch_list_v])
-        {
-            for touch in touches {
-                let Some(o) = touch.connected_to else {
-                    continue;
-                };
-                // (SmLoop*) cast
-                let l = o
-                    .as_loop()
-                    .ok_or_else(|| null("HasSeamProblem: touch not connected to a loop"))?;
-                let lu = objects
-                    .brep()
-                    .loop_(l)?
-                    .loopuse
-                    .ok_or_else(|| null("HasSeamProblem: loop without loop use"))?;
-                if !loopuse::is_vertex_loopuse(objects.brep(), lu)? {
-                    *touches_seam = true;
-                    break;
-                }
-            }
-        }
-
+        // Raw coincident touches remain visible, but their edge witnesses have
+        // already received the same geometric verdict as the crossing candidates.
         // use the shared seam point or crossing list to detect a missing SeamU
         if no_xsect_seam_u
             && (v_start_in_face
@@ -2138,7 +2496,7 @@ pub fn has_seam_problem_mut<O: LoopObject, M: CurveOnClassifyBrep<O>>(
 
             // A boundary crossing can require relocating either seam. Isolated vertex
             // loops only require insertion through their existing vertices.
-            if touches_boundary[1] {
+            if boundary_touches_v {
                 crossed_u = true;
                 crossed_v = true;
             }
@@ -2157,7 +2515,7 @@ pub fn has_seam_problem_mut<O: LoopObject, M: CurveOnClassifyBrep<O>>(
 
             // A boundary crossing can require relocating either seam. Isolated vertex
             // loops only require insertion through their existing vertices.
-            if touches_boundary[0] {
+            if boundary_touches_u {
                 crossed_u = true;
                 crossed_v = true;
             }
@@ -2846,5 +3204,452 @@ mod tests {
         .unwrap();
 
         assert_eq!(result.vertexuse, Some(vertexuse));
+    }
+
+    /// A stored edge may miss the 3D meridian while its boundary on the
+    /// cylinder crosses the periodic seam. The normal gap is representation
+    /// error, not evidence that the face's boundary stays on one side.
+    #[test]
+    fn an_offset_boundary_still_crosses_its_cylinders_seam() {
+        use crate::curve::line::Line;
+        use crate::heal::face_props::HealerOpType;
+        use crate::kernel::UpstreamFixes;
+        use crate::primitive::api_primitives::create_cylinder_surface;
+        use crate::topology::brep::p1::HealLoopHandle;
+        use crate::topology::{
+            Edge, Edgeuse, EdgeuseId, EdgeuseOwner, FaceuseId, Loop, LoopId, LoopuseId, Region,
+            Shell, VertexuseId,
+        };
+
+        let k = Kernel {
+            fixes: UpstreamFixes::all(),
+            ..Kernel::default()
+        };
+        let mut b = Brep::new();
+        let region = b
+            .add_region_record(Region {
+                in_brep: true,
+                ..Region::default()
+            })
+            .unwrap();
+        let shell = b
+            .add_shell_record(Shell {
+                region: Some(region),
+                ..Shell::default()
+            })
+            .unwrap();
+        let face = b.add_face(shell).unwrap();
+        let mut surface = Surface::from(
+            create_cylinder_surface(&k, Point3::new(0.0, 0.0, -1.0), 1.0, 3.0).unwrap(),
+        );
+        surface.set_owner(Some(ObjectRef {
+            type_code: crate::topology::face::p2::TYPE,
+            key: ObjectKey(1),
+        }));
+        let domain = surface.natural_uv_domain_with_nurb(&k).unwrap();
+        let tolerance = b.tolerance();
+        {
+            let f = b.face_mut(face).unwrap();
+            f.surface = Some(surface);
+            f.uv_domain = domain;
+            f.tolerance = tolerance;
+            f.faceuse = Some(FaceuseId::from_index(0));
+            f.loops.push(LoopId::from_index(0));
+        }
+        for (i, orientation) in [OrientType::Same, OrientType::Opposite]
+            .into_iter()
+            .enumerate()
+        {
+            b.add_faceuse_record(Faceuse {
+                shell: Some(shell),
+                face: Some(face),
+                mate: Some(FaceuseId::from_index((1 - i) as u32)),
+                orientation,
+                loopuses: vec![LoopuseId::from_index(i as u32)],
+                ..Faceuse::default()
+            })
+            .unwrap();
+            b.add_loopuse_record(Loopuse {
+                faceuse: Some(FaceuseId::from_index(i as u32)),
+                loop_: Some(LoopId::from_index(0)),
+                mate: Some(LoopuseId::from_index((1 - i) as u32)),
+                start: LoopuseStart::Edgeuse(Some(EdgeuseId::from_index((4 * i) as u32))),
+                orientation: OrientType::Same,
+            })
+            .unwrap();
+        }
+        b.add_loop_record(Loop {
+            face,
+            edges: Vec::new(),
+            loopuse: Some(LoopuseId::from_index(0)),
+        })
+        .unwrap();
+
+        let x = 1.0 + 1.0 / 1_048_576.0;
+        let half_width = 1.0 / 512.0;
+        let points = [
+            Point3::new(x, -half_width, 0.0),
+            Point3::new(x, half_width, 0.0),
+            Point3::new(x, half_width, 1.0),
+            Point3::new(x, -half_width, 1.0),
+        ];
+        let vertices = points.map(|p| b.add_vertex(p).unwrap());
+        let seam = Curve::from(Line::from_points(
+            Point3::new(1.0, 0.0, -1.0),
+            Point3::new(1.0, 0.0, 2.0),
+            3,
+        ));
+        for i in 0..4 {
+            let curve = Curve::from(Line::from_points(points[i], points[(i + 1) % 4], 3));
+            let interval = curve.natural_interval();
+            assert!(seam
+                .proved_disjoint(&k, seam.natural_interval(), &curve, interval)
+                .unwrap());
+            b.add_edge_record(Edge {
+                vertices: [vertices[i], vertices[(i + 1) % 4]],
+                edgeuses: vec![
+                    EdgeuseId::from_index(i as u32),
+                    EdgeuseId::from_index((4 + i) as u32),
+                ],
+                interval,
+                tolerance,
+                curve: Some(curve),
+            })
+            .unwrap();
+        }
+        for side in 0..2 {
+            for i in 0..4 {
+                let at = 4 * side + i;
+                let vertex = vertices[(i + side) % 4];
+                let vu = b
+                    .add_vertexuse_record(Vertexuse {
+                        vertex: Some(vertex),
+                        owner: VertexuseOwner::Edgeuse(Some(EdgeuseId::from_index(at as u32))),
+                        ..Vertexuse::default()
+                    })
+                    .unwrap();
+                assert_eq!(vu, VertexuseId::from_index(at as u32));
+                b.vertex_mut(vertex).unwrap().vertexuses.push(vu);
+                b.add_edgeuse_record(Edgeuse {
+                    edge: Some(EdgeId::from_index(i as u32)),
+                    owner: EdgeuseOwner::Loopuse(Some(LoopuseId::from_index(side as u32))),
+                    ccw: Some(EdgeuseId::from_index(
+                        (4 * side + (i + 1 + 2 * side) % 4) as u32,
+                    )),
+                    cw: Some(EdgeuseId::from_index(
+                        (4 * side + (i + 3 - 2 * side) % 4) as u32,
+                    )),
+                    vertexuse: Some(vu),
+                    orientation: if side == 0 {
+                        OrientType::Same
+                    } else {
+                        OrientType::Opposite
+                    },
+                    ..Edgeuse::default()
+                })
+                .unwrap();
+            }
+        }
+        let mut props: FaceProps<HealLoopHandle> = FaceProps::new();
+        props
+            .set_props_stage2_mut(&k, &mut b, face, 0, HealerOpType::All)
+            .unwrap();
+        let objects = BrepSeamObjects::<HealLoopHandle, _>::new(&k, &b, face).unwrap();
+        assert!(props
+            .crv_class_u
+            .as_ref()
+            .unwrap()
+            .is_crossed_by_edge(&objects)
+            .unwrap());
+        assert!(props.bad_crossed_seam.is_true());
+        assert_eq!(props.bad_crossed_seam_dir, SurfParamType::U);
+    }
+    #[test]
+    fn seam_trim_identity_uses_the_whole_curve() {
+        use crate::curve::line::Line;
+        use crate::nurbs::crv_basic::Curve as NurbCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+
+        let along = Curve::from(Line::from_points(
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(0.0, 1.0, 0.0),
+            2,
+        ));
+        assert!(trim_on_seam(&along, SurfParamType::U, 0.0));
+        assert!(!trim_on_seam(&along, SurfParamType::V, 0.0));
+        let mut invalid =
+            Line::from_points(Point3::new(0.0, 0.0, 0.0), Point3::new(0.0, 1.0, 0.0), 2);
+        invalid.make_nurb().unwrap();
+        invalid.set_analytic_domain(Extent1d::from_min_max(0.0, f64::INFINITY));
+        assert!(invalid.natural_interval().max().is_finite());
+        assert!(!trim_on_seam(&Curve::from(invalid), SurfParamType::U, 0.0));
+        let spline = |x: [f64; 3], weights: [f64; 3]| {
+            Curve::from(BSplineCurve::from_nurb(
+                NurbCurve::new(
+                    x.into_iter()
+                        .zip(weights)
+                        .enumerate()
+                        .map(|(i, (x, w))| CPoint::new(x, i as f64, 0.0, w))
+                        .collect(),
+                    2,
+                    vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+                )
+                .unwrap(),
+                2,
+                false,
+            ))
+        };
+        let rational = spline([0.5, 1.0, 0.5], [1.0, 2.0, 1.0]);
+        assert!(trim_on_seam(&rational, SurfParamType::U, 0.5));
+        // x(t)=(2t-1)^2 touches the seam only at the interior midpoint.
+        let touching = spline([1.0, -1.0, 1.0], [NOW; 3]);
+        assert!(!trim_on_seam(&touching, SurfParamType::U, 0.0));
+        let crossing = spline([-1.0, 0.0, 1.0], [NOW; 3]);
+        assert!(!trim_on_seam(&crossing, SurfParamType::U, 0.0));
+        // The rounded product equals the stored coefficient, but the exact
+        // product of the stored doubles does not. It cannot prove identity.
+        let rounded = spline([0.1 * 0.3; 3], [0.3; 3]);
+        assert!(!trim_on_seam(&rounded, SurfParamType::U, 0.1));
+        let mixed = spline([0.5, 1.0, 0.5], [NOW, 2.0, NOW]);
+        assert!(!trim_on_seam(&mixed, SurfParamType::U, 0.5));
+    }
+
+    #[test]
+    fn seam_segments_must_cover_the_whole_trim() {
+        use crate::curve::line::Line;
+        use crate::nurbs::crv_basic::Curve as NurbCurve;
+        use crate::nurbs::math::{CPoint, NOW, NOZ};
+
+        let k = Kernel::default();
+        let lines = [0.0, 1.0].map(|u| {
+            Curve::from(Line::from_points(
+                Point3::new(u, -1.0, 0.0),
+                Point3::new(u, 2.0, 0.0),
+                3,
+            ))
+        });
+        let span = covered_seam_span(&lines, SurfParamType::U).unwrap();
+        let boundary = SeamBoundary {
+            lines,
+            fixed: [0.0, 1.0],
+            direction: SurfParamType::U,
+            span,
+        };
+        let outside = Curve::from(Line::from_points(
+            Point3::new(-0.5, 10.0, 0.0),
+            Point3::new(0.5, 10.0, 0.0),
+            3,
+        ));
+        // It crosses u=0 beyond the finite segment. Segment disjointness alone
+        // cannot exclude a crossing of the infinite parameter-domain side.
+        assert!(boundary.lines[0]
+            .proved_disjoint(
+                &k,
+                boundary.lines[0].natural_interval(),
+                &outside,
+                outside.natural_interval()
+            )
+            .unwrap());
+        assert!(!boundary
+            .separates_trim(&k, &outside, outside.natural_interval())
+            .unwrap());
+        let clear = Curve::from(Line::from_points(
+            Point3::new(0.25, 0.25, 0.0),
+            Point3::new(0.75, 0.75, 0.0),
+            3,
+        ));
+        assert!(boundary
+            .separates_trim(&k, &clear, clear.natural_interval())
+            .unwrap());
+        let clear_2d = BSplineCurve::from_nurb(
+            NurbCurve::new(
+                vec![
+                    CPoint::new(0.25, 0.25, NOZ, NOW),
+                    CPoint::new(0.75, 0.75, NOZ, NOW),
+                ],
+                1,
+                vec![0.0, 0.0, 1.0, 1.0],
+            )
+            .unwrap(),
+            2,
+            false,
+        );
+        let clear_2d = Curve::from(clear_2d);
+        assert!(boundary
+            .separates_trim(&k, &clear_2d, clear_2d.natural_interval())
+            .unwrap());
+        let raised = Curve::from(Line::from_points(
+            Point3::new(-0.5, 0.5, 1.0),
+            Point3::new(0.5, 0.5, 1.0),
+            3,
+        ));
+        // UV uses x,y only: separation on a stored z cannot excuse u=0.
+        assert!(boundary.lines[0]
+            .proved_disjoint(
+                &k,
+                boundary.lines[0].natural_interval(),
+                &raised,
+                raised.natural_interval()
+            )
+            .unwrap());
+        assert!(!boundary
+            .separates_trim(&k, &raised, raised.natural_interval())
+            .unwrap());
+        // The same UV definition over this edge interval has u in [1/4,1/2].
+        assert!(boundary
+            .separates_trim(&k, &raised, Extent1d::from_min_max(0.75, 1.0))
+            .unwrap());
+    }
+
+    #[test]
+    fn raw_seam_touches_use_their_original_edge_verdicts() {
+        use crate::intersect::curve_class::p1::TouchData;
+        use crate::topology::brep::p1::HealLoopHandle;
+        use crate::topology::{Loop, LoopId, LoopuseId};
+
+        let k = Kernel::default();
+        let mut b = Brep::new();
+        let shell = b.add_shell().unwrap();
+        let f = b.add_face(shell).unwrap();
+        let l = b
+            .add_loop_record(Loop {
+                face: f,
+                loopuse: Some(LoopuseId::from_index(0)),
+                edges: Vec::new(),
+            })
+            .unwrap();
+        assert_eq!(l, LoopId::from_index(0));
+        b.add_loopuse_record(Loopuse {
+            loop_: Some(l),
+            start: LoopuseStart::Edgeuse(None),
+            ..Loopuse::default()
+        })
+        .unwrap();
+        let objects = BrepSeamObjects::<HealLoopHandle, _>::new(&k, &b, f).unwrap();
+        let safe = HealLoopHandle::from_topology(EntityRef::Edge(EdgeId::from_index(0))).unwrap();
+        let crossing =
+            HealLoopHandle::from_topology(EntityRef::Edge(EdgeId::from_index(1))).unwrap();
+        let curve = HealLoopHandle::temporary(0, ClassObjectKind::Curve).unwrap();
+        let mut class = CurveClassification::with_curve_interval(
+            &k,
+            curve,
+            Extent1d::from_min_max(0.0, 1.0),
+            k.tolerances.zone_tol_3d,
+        );
+        class
+            .at_mut(0)
+            .unwrap()
+            .start
+            .set_class_object(PointClassType::Edge, Some(safe));
+        class
+            .at_mut(0)
+            .unwrap()
+            .end
+            .set_class_object(PointClassType::Edge, Some(crossing));
+        let touch = |index| TouchData {
+            connected_to: Some(HealLoopHandle::from_loop(l)),
+            loop_dir: CrvDirOnFaceType::In,
+            loop_index: 0,
+            param: index as f64,
+            pt_classify_index: index,
+            pt_classify: None,
+        };
+        let mut excludes = |edge| Ok(edge == Some(safe));
+        assert!(!touches_seam_boundary(&objects, &class, &[touch(0)], &mut excludes).unwrap());
+        // Both touches connect to the same loop: the safe edge cannot excuse
+        // the other edge, named by the first interval's end classification.
+        assert!(
+            touches_seam_boundary(&objects, &class, &[touch(0), touch(1)], &mut excludes).unwrap()
+        );
+        assert!(
+            touches_seam_boundary(&objects, &class, &[touch(u64::MAX)], &mut excludes).unwrap()
+        );
+        let vertex =
+            HealLoopHandle::from_topology(EntityRef::Vertex(VertexId::from_index(0))).unwrap();
+        class
+            .at_mut(0)
+            .unwrap()
+            .start
+            .set_class_object(PointClassType::Vertex, Some(vertex));
+        assert!(touches_seam_boundary(&objects, &class, &[touch(0)], &mut excludes).unwrap());
+    }
+
+    /// The face surface's handle in the line solve of
+    /// [`a_line_lying_on_a_cylinders_side_is_its_range_not_a_failure`]: its natural (u, v) domain.
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    struct SideHandle(Extent2d);
+
+    impl SolutionObject for SideHandle {
+        fn kind(&self) -> crate::geom::solution_array::ObjectKind {
+            crate::geom::solution_array::ObjectKind::Surface
+        }
+        fn natural_uv_domain(&self) -> Option<Extent2d> {
+            Some(self.0)
+        }
+    }
+
+    /// A line lying on a face's surface (a ruling of a cylinder's side, here through (3, 4) on the
+    /// radius-5 cylinder about +Z, z 0..10, and on its seam through (5, 0)) is the surface's range
+    /// solution, which the face then keeps where it classifies to the face. The surface's
+    /// coincidence check solves for a point on the face's own surface, whose face it reaches
+    /// through the caller holding the face, as upstream's surface reaches its face: the answer is
+    /// no single place (no `SingleValue`) and never a failure of the face binding.
+    #[test]
+    fn a_line_lying_on_a_cylinders_side_is_its_range_not_a_failure() {
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_cylinder(&mut k, Point3::ZERO, 5.0, 10.0)
+                .unwrap();
+        let side = crate::topology::brep::p1::faces(&b, None)
+            .unwrap()
+            .into_iter()
+            .find(|f| {
+                matches!(
+                    crate::topology::face::surface(&b, *f)
+                        .unwrap()
+                        .map(Surface::kind),
+                    Some(crate::surface::surface::SurfaceKind::Cone(_))
+                )
+            })
+            .unwrap();
+        let s = crate::topology::face::surface(&b, side).unwrap().unwrap();
+        let handle = SideHandle(s.natural_uv_domain_with_nurb(&k).unwrap());
+        let domain = crate::topology::face::uv_domain(&b, side).unwrap();
+        let tol = crate::topology::face::tolerance(&b, side).unwrap();
+        for through in [Point3::new(3.0, 4.0, 5.0), Point3::new(5.0, 0.0, 5.0)] {
+            let solutions = global_line_intersect(
+                &k,
+                &mut b,
+                side,
+                handle,
+                &domain,
+                through,
+                Vec3::Z,
+                None,
+                false,
+                tol,
+            );
+            let solutions = match solutions {
+                Ok(s) => s,
+                Err(e) => panic!("through {through:?}: {e:?}"),
+            };
+            // a ruling on the seam is also the face's boundary edge: the face solve may leave
+            // it to the edge solves, so only a ruling inside the face must be the range
+            assert!(
+                through.y == 0.0
+                    || solutions
+                        .as_slice()
+                        .iter()
+                        .any(|s| s.solution_type == SolutionType::RangeOfValues),
+                "through {through:?}: the ruling must come back as a range: {solutions:?}"
+            );
+            assert!(
+                solutions
+                    .as_slice()
+                    .iter()
+                    .all(|s| s.solution_type != SolutionType::SingleValue),
+                "through {through:?}: {solutions:?}"
+            );
+        }
     }
 }

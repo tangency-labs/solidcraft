@@ -60,6 +60,7 @@
 use crate::curve::curve::p2::CurvePropertyType;
 use crate::curve::curve::p7::PropertyAnalysisOptions;
 use crate::curve::curve::Curve;
+use crate::error::intersect::IntersectFailure;
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -196,9 +197,12 @@ fn surface_drop_vector(k: &Kernel, surface: &Surface, uv: Point2, vector: Vec3) 
         .first()
         .copied()
         .ok_or_else(|| {
-            SolidError::intersect_failed(
+            SolidError::intersect(
                 OP_DROP,
-                "dropping the vector onto the surface gave no uv vector",
+                IntersectFailure::Defect {
+                    why: "dropping vectors gives one uv vector per vector given, and one \
+                          was given",
+                },
             )
         })
 }
@@ -396,9 +400,9 @@ impl<'s> SurfaceSilhouette<'s> {
         if norm.length_squared() < EFF_ZERO_SQ {
             norm = evaluate_normal(k, surface, uv)?;
             if norm.length_squared() < EFF_ZERO_SQ {
-                return Err(SolidError::intersect_failed(
+                return Err(SolidError::intersect(
                     OP_CPV,
-                    "the surface has no normal at the point",
+                    IntersectFailure::NoSurfaceNormal,
                 ));
             }
             if pnt.surface[1][0].length_squared() < EFF_ZERO_SQ {
@@ -422,10 +426,7 @@ impl<'s> SurfaceSilhouette<'s> {
         }
 
         if r.length_squared() < EFF_ZERO {
-            return Err(SolidError::intersect_failed(
-                OP_CPV,
-                "the surface point is at the eye point",
-            ));
+            return Err(SolidError::intersect(OP_CPV, IntersectFailure::PointAtEye));
         }
 
         let du = pnt.surface[1][0];
@@ -670,9 +671,9 @@ impl<'s> SurfaceSilhouette<'s> {
                     // (operator/, not the guarded operator/=)
                     pnt.curve_3d[1] = (tan_vec / tan_len).unitize_or_z();
                 } else {
-                    return Err(SolidError::intersect_failed(
+                    return Err(SolidError::intersect(
                         OP_CPV,
-                        "the silhouette's tangent is degenerate",
+                        IntersectFailure::DegenerateTangent,
                     ));
                 }
             }
@@ -724,10 +725,7 @@ impl<'s> SurfaceSilhouette<'s> {
         if normal.length_squared() < EFF_ZERO_SQ {
             normal = evaluate_normal(k, surface, s_uv)?;
             if normal.length_squared() < EFF_ZERO_SQ {
-                return Err(SolidError::intersect_failed(
-                    OP,
-                    "the surface has no normal at the point",
-                ));
+                return Err(SolidError::intersect(OP, IntersectFailure::NoSurfaceNormal));
             }
             if eval[1][0].length_squared() < EFF_ZERO_SQ {
                 eval[1][0] = eval[0][1].cross(normal);
@@ -1161,10 +1159,7 @@ impl<'a> FindSilSingEfo<'a> {
                 r = pnt - self.eye;
             }
             if r.length_squared() < EFF_ZERO {
-                return Err(SolidError::intersect_failed(
-                    OP_EFO,
-                    "the surface point is at the eye point",
-                ));
+                return Err(SolidError::intersect(OP_EFO, IntersectFailure::PointAtEye));
             }
             let mut dot1 = r.dot(g1.principle_curvature_vector1);
             if r.dot(g1.principle_curvature_vector2).abs() < dot1.abs() {
@@ -1178,10 +1173,7 @@ impl<'a> FindSilSingEfo<'a> {
                 r = pnt - self.eye;
             }
             if r.length_squared() < EFF_ZERO {
-                return Err(SolidError::intersect_failed(
-                    OP_EFO,
-                    "the surface point is at the eye point",
-                ));
+                return Err(SolidError::intersect(OP_EFO, IntersectFailure::PointAtEye));
             }
             let mut dot2 = r.dot(g2.principle_curvature_vector1);
             if r.dot(g2.principle_curvature_vector2).abs() < dot2.abs() {

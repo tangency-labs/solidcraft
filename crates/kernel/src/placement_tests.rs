@@ -128,6 +128,35 @@ fn a_long_mirrored_body_measures_as_its_source() {
     }
 }
 
+/// A cylinder mirrored in x = 0 keeps its two end circles as circles of the same radius, centred
+/// on the mirrored axis, not as the rational B-splines of their NURBs (WR-21139); its volume is
+/// the source's, pi * 10^2 * 100, and it reads back valid.
+#[test]
+fn a_mirrored_cylinder_keeps_its_circles() {
+    let mirror = [[-1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [0., 0., 0., 1.]];
+    let body = crate::cylinder(Vec3::new(50., 0., 0.), Vec3::Z, 10.0, 100.0).unwrap();
+    let mirrored = transform_matrix(&body, mirror).unwrap();
+    let mut circles = 0;
+    for e in &mirrored.record().edges {
+        match &e.curve {
+            solidcore_record::brep::Curve::Line { .. } => {}
+            solidcore_record::brep::Curve::Circle { frame, radius } => {
+                circles += 1;
+                assert!((radius - 10.).abs() < 1e-12, "radius {radius}");
+                let [x, y, _] = frame.origin;
+                assert!((x + 50.).abs() < 1e-12 && y.abs() < 1e-12, "centre {:?}", frame.origin);
+            }
+            other => panic!("a curved edge of the mirrored cylinder is not a circle: {other:?}"),
+        }
+    }
+    assert_eq!(circles, 2);
+    let want = std::f64::consts::PI * 100. * 100.;
+    let got = crate::measure(&mirrored).unwrap().volume;
+    assert!((got - want).abs() < 1e-9 * want, "volume {got}, expected {want}");
+    let read_back = Body::from_record(mirrored.record().clone()).unwrap();
+    assert!(matches!(crate::validity(&read_back).smlib, Some(crate::SmlibCheck::Valid)), "{:?}", crate::validity(&read_back).smlib);
+}
+
 /// A scaling or shear of a box maps its record as a rigid motion does: its faces stay planes, on
 /// the same parameters, and the volume is the determinant's (#14422). A reflection, or a body
 /// with a cylinder, still goes through SMLib and keeps the right volume.
@@ -307,7 +336,6 @@ fn a_placed_body_is_moved_only_when_its_geometry_is_read() {
     let twice = transform_matrix(&placed, shift).unwrap();
     assert!(twice.record.pending() && placed.record.pending());
     // Read: exactly the eager move's record.
-    let made = crate::lazy_moves_made();
     let eager = |m: &[[f64; 4]; 4]| {
         solidcraft_geom::brep::placement::moved(source.record(), &solidcraft_geom::brep::placement::Rigid::of_matrix(m).unwrap()).unwrap()
     };
@@ -317,7 +345,7 @@ fn a_placed_body_is_moved_only_when_its_geometry_is_read() {
     for v in &twice.record().vertices {
         assert!(source.record().vertices.iter().any(|s| Vec3::from(v.point).dist(moved(both, s.point)) < 1e-9), "moved by both motions");
     }
-    assert!(crate::lazy_moves_made() >= made + 2, "each moved once it was read");
+    assert!(placed.lazy_move_made() && twice.lazy_move_made(), "each moved once it was read");
     let volume = |b: &Body| b.mesh(&crate::MeshTolerance::chord(1e-3)).unwrap().measure().volume;
     assert!((volume(&twice) - volume(&source)).abs() < 1e-3 * volume(&source));
     // Orthonormal only to the looser bound (an imported assembly's rotations are, written to

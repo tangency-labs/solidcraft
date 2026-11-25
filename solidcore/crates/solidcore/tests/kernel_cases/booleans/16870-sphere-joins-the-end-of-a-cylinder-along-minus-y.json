@@ -1,0 +1,209 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b6": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "distance": 16.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                -1.0,
+                0.0
+              ],
+              "center": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "end": 6.896285307179586,
+              "radius": 2.0,
+              "reference": [
+                1.0,
+                0.0,
+                -0.0
+              ],
+              "start": 0.6131
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "make_sphere",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "center": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "radius": 2.0
+      }
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "union"
+      }
+    }
+  ],
+  "case": "16870-sphere-joins-the-end-of-a-cylinder-along-minus-y",
+  "expected": {
+    "body_count": 1,
+    "faces": 3,
+    "method": "a cylinder r2 h16 with a hemispherical end r2: V = pi*4*16 + (2/3)*pi*8 = 64 pi + 16/3 pi = 217.8170906488923; faces: the cylinder's side, its far cap and the hemisphere = 3",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#16870"
+    ],
+    "volume_mm3": 217.8170906488923,
+    "what": "a cylinder r2 h16 along -Y joined with a sphere r2 centred on its base cap: the cap's rim is a great circle of the sphere through its poles, on the sphere's seam meridian, and the cylinder's seam vertex lies on the sphere's seam edge; the join failed classifying a point off the sphere after the coincidence check took the cylinder wall for the sphere at its pole"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 5,
+      "faces": 3,
+      "vertices": 4
+    }
+  },
+  "records": "16870-sphere-joins-the-end-of-a-cylinder-along-minus-y.bodies.json.gz",
+  "result": [
+    {
+      "body": "C",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 238.7610416728243,
+      "body_count": 1,
+      "edges": 3,
+      "faces": 3,
+      "vertices": 2,
+      "volume_mm3": 217.8170906488923
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#16870"
+  ],
+  "traced_ops": [
+    "extrude",
+    "make_sphere",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a cylinder r2 h16 along -Y joined with a sphere r2 centred on its base cap: the cap's rim is a great circle of the sphere through its poles, on the sphere's seam meridian, and the cylinder's seam vertex lies on the sphere's seam edge; the join failed classifying a point off the sphere after the coincidence check took the cylinder wall for the sphere at its pole",
+  "why_not": []
+}

@@ -10,6 +10,10 @@ use super::{Body, area, counts, make_box, to_arrays, volume};
 use crate::Error;
 use crate::export::native;
 use crate::ssi::Spec;
+use solidcore::curve::curve::Curve;
+use solidcore::geom::vector3d::Vec3;
+use solidcore::primitive::api_curves::create_line_segment;
+use solidcore::sweep::api_brep::create_linear_sweep;
 
 const X: [f64; 3] = [1.0, 0.0, 0.0];
 const Y: [f64; 3] = [0.0, 1.0, 0.0];
@@ -164,37 +168,44 @@ fn hostile_arguments_are_refused() {
     assert_eq!(split_faces(&b, &faces, &[&p]).err(), Some(Error::Argument), "too many faces");
 }
 
-/// A sheet is no solid to split in two (`SMLIB_ERR_NOT_SOLID`).
-#[test]
-fn a_sheet_is_not_split_into_two_bodies() {
-    use solidcore::curve::curve::Curve;
-    use solidcore::geom::vector3d::Vec3;
-    use solidcore::primitive::api_curves::create_line_segment;
-    use solidcore::sweep::api_brep::create_linear_sweep;
-    let sheet = super::run("sheet", |k| {
+/// The one-face sheet [0, 10]^2 on z = 0: the line along x from the origin swept 10 along y.
+fn square_sheet() -> Body {
+    super::run("sheet", |k| {
         let c = Curve::from(create_line_segment(Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 0.0, 0.0))?);
         create_linear_sweep(k, &[Some(&c)], Vec3::new(0.0, 1.0, 0.0), 10.0, false)
     })
     .map(Body::from_kernel)
-    .unwrap();
+    .unwrap()
+}
+
+/// A sheet is no solid to split in two (`SMLIB_ERR_NOT_SOLID`).
+#[test]
+fn a_sheet_is_not_split_into_two_bodies() {
+    let sheet = square_sheet();
     assert!(rel(area(&sheet, 1e-8).unwrap(), 100.0) < 1e-9);
     assert_eq!(split_body(&sheet, &plane_x(5.0)).err(), Some(Error::NotSolid));
+}
+
+/// A tool that runs into a face and ends inside it leaves a crack in it, which cuts nothing off:
+/// no face is split, and the call says the tool stops short, not that it missed. The strip of
+/// the plane x = 5 over y in [-1, 5] enters the square sheet at its edge y = 0 and ends at y = 5;
+/// over y in [-1, 11] the strip crosses the sheet and cuts it in two; at x = 20 it misses it.
+#[test]
+fn a_tool_that_ends_inside_the_face_stops_short() {
+    let sheet = square_sheet();
+    let strip = |at: f64, to: f64| Spec::Plane { origin: [at, 0.0, 0.0], xaxis: Y, yaxis: Z, u: [-1.0, to], v: [-1.0, 1.0] };
+    assert_eq!(split_faces(&sheet, &[0], &[&strip(5.0, 5.0)]).err(), Some(Error::ToolStopsShort));
+    let (cut, made) = split_faces(&sheet, &[0], &[&strip(5.0, 11.0)]).unwrap().expect("the strip crosses the sheet");
+    valid("crossed sheet", &cut);
+    assert_eq!(made, [1]);
+    assert!(split_faces(&sheet, &[0], &[&strip(20.0, 11.0)]).unwrap().is_none(), "a strip that misses the sheet");
 }
 
 /// A sheet is no solid to split by a closed tool either: the whole sphere's split (the body's
 /// intersection and difference with the ball) checks the body first, as the slice does (#14214).
 #[test]
 fn a_sheet_is_not_split_by_a_whole_sphere() {
-    use solidcore::curve::curve::Curve;
-    use solidcore::geom::vector3d::Vec3;
-    use solidcore::primitive::api_curves::create_line_segment;
-    use solidcore::sweep::api_brep::create_linear_sweep;
-    let sheet = super::run("sheet", |k| {
-        let c = Curve::from(create_line_segment(Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 0.0, 0.0))?);
-        create_linear_sweep(k, &[Some(&c)], Vec3::new(0.0, 1.0, 0.0), 10.0, false)
-    })
-    .map(Body::from_kernel)
-    .unwrap();
+    let sheet = square_sheet();
     let ball = Spec::Sphere { center: [5.0, 5.0, 0.0], xaxis: X, yaxis: Y, radius: 3.0, lon_deg: [0.0, 360.0], lat_deg: [-90.0, 90.0] };
     assert_eq!(split_body(&sheet, &ball).err(), Some(Error::NotSolid));
 }

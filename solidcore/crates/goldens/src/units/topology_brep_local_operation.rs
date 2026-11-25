@@ -230,7 +230,7 @@ struct Done {
 /// Reads the case's solid and runs `local_operation` on it ([`Runner`]'s edit).
 fn edited(case: &Case) -> Result<Edited, HarnessError> {
     let i: Inputs = case.parse()?;
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     // the Rust reader's B-rep of the same file, its geometry owners named by the
     // Rust reader (no C++ export or owner reaches the Rust side)
     let mut b = match crate::own_reader::read_file_rebuild(&mut k, &path(&i)?, i.rebuild)? {
@@ -240,6 +240,8 @@ fn edited(case: &Case) -> Result<Edited, HarnessError> {
             return Ok(Edited::Ended(o));
         }
     };
+    // (a probe's input, for the result's soundness: capture off, nothing)
+    crate::soundness::input(Some(&b));
     let mut run = || -> SolidResult<Option<Vec<f64>>> {
         let Some((faces, surfaces)) = planes(&k, &b, &i)? else {
             return Ok(None);
@@ -406,7 +408,7 @@ fn draw_on(rng: &mut Rng, file: &str, faces: u64) -> Inputs {
 /// B-rep). A file the Rust reader does not read counts as buildable: that is no
 /// replacement's doing, and the case keeps its draw.
 fn replacements_buildable(i: &Inputs) -> bool {
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let Ok(file) = path(i) else {
         return true;
     };
@@ -490,6 +492,26 @@ mod soundness_probe {
     #[ignore = "a measurement run on demand (`$SC_SOUNDNESS_CASES`)"]
     fn moved_cases_results_measured() {
         crate::soundness::probe(&Runner);
+    }
+}
+
+#[cfg(test)]
+mod nurb_fillet_raise_tests {
+    use super::*;
+
+    /// #18166: `Solids/nurb_fillet.smb` with faces replaced by planes (fc0006) is edited, not
+    /// refused. A refit trim's bound that did not converge (one bisection piece at its deepest
+    /// across a steep step of the reparametrisation, bounds 0.43 and 8.7e-3 for trims 1.2e-6
+    /// and 1.2e-7 from their edges by dense samples) raised edges past the B-rep check's limit
+    /// (1000 times the B-rep's tolerance, `ValidatePointers` test 59), and the edit was refused
+    /// with status 1001, the input put back.
+    #[test]
+    fn nurb_fillet_fc0006_is_edited_not_refused() {
+        let case = crate::case::regression_case(&Runner, "fc0006");
+        let Edited::Done(d) = edited(&case).unwrap() else {
+            panic!("fc0006 ends before the edit");
+        };
+        assert_eq!(d.record.first(), Some(&0.0), "edit status");
     }
 }
 
