@@ -54,6 +54,13 @@
 //! --lib -- wr450_rows::record --ignored` rewrites `DATA` and `main.jsonl`; then set
 //! [`MAIN_COMMIT`] (the recorder does not write it), `UNITS`, the total and
 //! [`WITHIN_RULE`] by hand from its output.
+//!
+//! The WR-255 retirement (#21272: `sm_FixUVTrimCurves` moves only the trims' end control
+//! points) moves `blend.feature_executive`'s `single_face_fillet1019_6` and `_8` under main's
+//! choices too, in their UV trims alone: `operand_trim_rows`' replay of both keeps every
+//! other value (its blinded digests, which leave out the trims, are unchanged) and certifies
+//! each trim on its edge. Their `main.jsonl` lines are recorded again as step 1's run on
+//! that retirement, so step 1 holds them bit for bit.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
