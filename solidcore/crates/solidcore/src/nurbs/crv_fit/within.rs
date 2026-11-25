@@ -23,7 +23,17 @@
 //! its knots are among the tighter one's. The search stops when every span is within the
 //! tolerance and every reach is positive, or when the next knots would need more control
 //! points than allowed, or a middle has no floating-point room inside its span. It makes one
-//! fit and one certificate for every span it adds.
+//! fit and one certificate for every span it adds. A tolerance below what the certificate's
+//! rounding terms come to for the source ([`certified_distance_floor`]) is one no span's
+//! bound can come within: the search then stops after its first fit.
+//!
+//! A held end's leg is formed along its direction, `P_0 + s T_0`, and stored in floating
+//! point: each coordinate of the second control point rounds once. On a leg many such
+//! roundings long the stored leg is the direction to within nothing that matters; on a leg a
+//! few roundings long (a short leg far from the origin) it is not, and no fit can make it so.
+//! The result therefore says how far each stored leg is from its direction
+//! ([`WithinFit::start_turn`], [`WithinFit::end_turn`]), and [`WithinFit::ends_held`] is the
+//! question a caller asks before it relies on the directions.
 //!
 //! The samples: the source's two end points, and in every span of the fit `2 (p + 1)`
 //! parameters at even steps strictly inside it and its right break. Every span then holds at
@@ -39,14 +49,19 @@
 //!
 //! Deviations: none (no upstream counterpart).
 
+use std::f64::consts::PI;
+
 use crate::error::query::QueryFailure;
 use crate::error::{Result, SolidError};
 use crate::limits;
-use crate::math::Vec3;
+use crate::math::{Vec3, EFF_ZERO_RAD};
 use crate::nurbs::crv_basic::Curve;
-use crate::nurbs::crv_deviation::{certified_distance_by_span, SpanDistance};
+use crate::nurbs::crv_deviation::{
+    certified_distance_by_span, certified_distance_floor, SpanDistance,
+};
 use crate::nurbs::crv_fit::end_directions::approx_end_directions;
 use crate::nurbs::knots::{KnotVector, Side, MAX_DEGREE};
+use crate::nurbs::math::CPoint;
 
 const OP: &str = "nurbs::crv_fit::within::refit_within";
 
@@ -63,6 +78,32 @@ pub struct WithinFit {
     pub start_reach: Option<f64>,
     /// The end's reach, where an end direction was given.
     pub end_reach: Option<f64>,
+    /// The angle, in radians, between the curve's first leg as it is stored (from its first
+    /// control point to its second) and the start's direction, where one was given. The leg
+    /// is formed along the direction and each coordinate of the second control point rounds
+    /// once, so the angle is that rounding's: next to nothing on a leg many roundings long,
+    /// and as much as the direction is lost on a leg a few roundings long (a short leg far
+    /// from the origin). π for a leg of no length.
+    pub start_turn: Option<f64>,
+    /// The same for the curve's last leg (from its last control point but one to its last)
+    /// and the end's direction.
+    pub end_turn: Option<f64>,
+}
+
+impl WithinFit {
+    /// Whether every end that was given a direction leaves along it (or is reached along
+    /// it): its reach positive, and its stored leg within [`EFF_ZERO_RAD`] of the direction.
+    /// Two curves held to one direction at a point they share then meet there within twice
+    /// that angle.
+    #[must_use]
+    pub fn ends_held(&self) -> bool {
+        let held = |reach: Option<f64>, turn: Option<f64>| match (reach, turn) {
+            (None, None) => true,
+            (Some(r), Some(t)) => positive(r) && t < EFF_ZERO_RAD,
+            _ => false,
+        };
+        held(self.start_reach, self.start_turn) && held(self.end_reach, self.end_turn)
+    }
 }
 
 /// `source` refitted as a clamped spline of degree `p` on the same domain, through the
@@ -72,10 +113,13 @@ pub struct WithinFit {
 ///
 /// `source` is a clamped, non-rational 3D B-spline curve on any domain. The result is always
 /// the last fit made, with its certified bound (the largest of its spans') and the count of
-/// fits made. The caller compares `bound` with its tolerance: it is within, and every reach
-/// positive, unless the search stopped because the next knots would need more than `most`
-/// control points (or more samples than the kernel allocates), or a middle had no
-/// floating-point room inside its span.
+/// fits made. The caller compares `bound` with its tolerance and asks
+/// [`WithinFit::ends_held`]. The bound is within and every reach positive unless the search
+/// stopped because the next knots would need more than `most` control points (or more samples
+/// than the kernel allocates), a middle had no floating-point room inside its span, or the
+/// tolerance is below [`certified_distance_floor`] of the source (one fit is made). An end is
+/// not held, with its reach positive, where its leg is too short against the rounding of its
+/// end point's coordinates to lie along its direction.
 ///
 /// # Errors
 ///
@@ -132,9 +176,13 @@ pub fn refit_within(
             "a source whose domain is not finite or has no length",
         ));
     }
+    // The unit directions (each has one: checked above).
+    let unit = |d: Option<Vec3>| d.and_then(Vec3::length_and_unit).map(|(_, t)| t);
+    let (start_unit, end_unit) = (unit(start), unit(end));
     // A direction against the source's own tangent at that end cannot be held: the reach
     // would stay negative however short the end span became, and the search would only stop
-    // at its limit.
+    // at its limit. Unit against unit: a product of the raw lengths can overflow to
+    // infinities of both signs, whose sum is not a number and compares as not against.
     let against = |d: Option<Vec3>, u: f64, side: Side| -> Result<bool> {
         let Some(d) = d else {
             return Ok(false);
@@ -148,20 +196,25 @@ pub fn refit_within(
                 },
             ));
         };
-        Ok(tangent.dot(d) < 0.0)
+        Ok(tangent
+            .length_and_unit()
+            .is_some_and(|(_, t)| t.dot(d) < 0.0))
     };
-    if against(start, lo, Side::Right)? {
+    if against(start_unit, lo, Side::Right)? {
         return Err(SolidError::invalid_input(
             OP,
             "a start direction against the source's own",
         ));
     }
-    if against(end, hi, Side::Left)? {
+    if against(end_unit, hi, Side::Left)? {
         return Err(SolidError::invalid_input(
             OP,
             "an end direction against the source's own",
         ));
     }
+    // What no span's bound against the source can be below: a tolerance under it is one no
+    // refinement reaches, so one fit is made and given back with its bound.
+    let floor = certified_distance_floor(source)?;
     // one span of degree 2 has a single inner control point, which cannot lie on both lines
     let both_on_quadratic = p == 2 && start.is_some() && end.is_some();
     let first_spans: usize = if both_on_quadratic { 2 } else { 1 };
@@ -211,14 +264,29 @@ pub fn refit_within(
         let bound = worst.iter().copied().fold(0.0_f64, f64::max);
         let start_short = fit.start_reach.is_some_and(|r| !positive(r));
         let end_short = fit.end_reach.is_some_and(|r| !positive(r));
+        // The end legs as the fit stores them, against their directions.
+        let cpts = fit.curve.cpts();
+        let before_last = cpts.len().checked_sub(2).and_then(|i| cpts.get(i));
+        let start_turn = start_unit.map(|t| leg_turn(cpts.first(), cpts.get(1), t));
+        let end_turn = end_unit.map(|t| leg_turn(before_last, cpts.last(), t));
         let done = WithinFit {
             curve: fit.curve,
             bound,
             fits,
             start_reach: fit.start_reach,
             end_reach: fit.end_reach,
+            start_turn,
+            end_turn,
         };
+        // Within the tolerance with every reach positive: the search is over. A leg that the
+        // rounding of its end point's coordinates has taken off its direction stays as it is
+        // (`ends_held` tells): more knots would only shorten it.
         if !start_short && !end_short && worst.iter().all(|&w| w <= tolerance) {
+            return Ok(done);
+        }
+        // Under the floor of the source's own rounding no span's bound comes within the
+        // tolerance, whatever is halved.
+        if floor > tolerance {
             return Ok(done);
         }
         // The span to halve: the first when the start's reach is not positive, else the last
@@ -277,6 +345,21 @@ pub fn refit_within(
 /// Whether `x` is finite and positive.
 fn positive(x: f64) -> bool {
     x.is_finite() && x > 0.0
+}
+
+/// The angle, in radians, between the leg from `from` to `to` (two control points as they are
+/// stored) and the unit direction `t`: the arc tangent of the cross product's length over the
+/// dot product, exact near 0 where the arc cosine of a dot product loses half its digits. π for
+/// a leg of no length or with a coordinate that is not finite, and for a missing point: such a
+/// leg is along no direction.
+fn leg_turn(from: Option<&CPoint>, to: Option<&CPoint>, t: Vec3) -> f64 {
+    let (Some(a), Some(b)) = (from, to) else {
+        return PI;
+    };
+    match Vec3::new(b.x - a.x, b.y - a.y, b.z - a.z).length_and_unit() {
+        Some((_, leg)) => leg.cross(t).length().atan2(leg.dot(t)),
+        None => PI,
+    }
 }
 
 /// The middle of `[a, b]`, `None` when it is not strictly inside (no floating-point room).
@@ -366,7 +449,6 @@ mod tests {
     use super::*;
     use crate::nurbs::crv_fit::p1::ParamMethod;
     use crate::nurbs::crv_fit::p2::interp;
-    use crate::nurbs::math::CPoint;
 
     fn v(x: f64, y: f64, z: f64) -> Vec3 {
         Vec3::new(x, y, z)
@@ -524,6 +606,10 @@ mod tests {
                     assert!(fit.end_reach.is_none_or(|r| r > 0.0), "{fit:?}");
                     assert_eq!(fit.start_reach.is_some(), start.is_some());
                     assert_eq!(fit.end_reach.is_some(), end.is_some());
+                    // each stored leg is along its direction, and the fit says so
+                    assert_eq!(fit.start_turn.is_some(), start.is_some());
+                    assert_eq!(fit.end_turn.is_some(), end.is_some());
+                    assert!(fit.ends_held(), "{fit:?}");
                     holds(&source, &fit, 3);
                     counts.push(fit.curve.cpts().len());
                     knots.push(fit.curve.knots().to_vec());
@@ -568,6 +654,9 @@ mod tests {
             4.0 * f64::EPSILON * ((at_join + ea) / ea + (at_join + sb) / sb) + 16.0 * f64::EPSILON;
         let held = sine(la, lb);
         assert!(held <= allowed, "{held} past {allowed}");
+        // each fit says its end is held, so the two meet within twice the angle that means
+        assert!(a.ends_held() && b.ends_held(), "{a:?} {b:?}");
+        assert!(held <= 2.0 * EFF_ZERO_RAD);
 
         let a = refit_within(&first, 3, tolerance, None, None, 4096).unwrap();
         let b = refit_within(&second, 3, tolerance, None, None, 4096).unwrap();
@@ -610,6 +699,137 @@ mod tests {
             refit_within(&source, 2, 1e-3, Some(s), Some(e), 3),
             Err(SolidError::InvalidInput { .. })
         ));
+    }
+
+    /// A direction of any finite length is read as its unit. The source leaves its start along
+    /// (1, -2, 0) and reaches its end along (2, 1, 0). The largest direction there is, against
+    /// either, is refused before the search like any direction against it: with the raw
+    /// vectors the products overflow to infinities of both signs, and their sum compares as
+    /// not against. Along the tangents, directions of that size give the fit of their units,
+    /// to the bit.
+    #[test]
+    fn a_direction_of_any_finite_length_is_read_as_its_unit() {
+        let source = curve(
+            &[
+                v(0.0, 0.0, 0.0),
+                v(1.0, -2.0, 0.0),
+                v(3.0, -3.0, 0.0),
+                v(5.0, -2.0, 0.0),
+            ],
+            3,
+            vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        );
+        let invalid = |r: Result<WithinFit>| matches!(r, Err(SolidError::InvalidInput { .. }));
+        let big = f64::MAX;
+        let against_start = Some(v(big, big, 0.0));
+        let against_end = Some(v(-big, big, 0.0));
+        assert!(invalid(refit_within(
+            &source,
+            3,
+            1e-3,
+            against_start,
+            None,
+            64
+        )));
+        assert!(invalid(refit_within(
+            &source,
+            3,
+            1e-3,
+            None,
+            against_end,
+            64
+        )));
+        let (s, e) = (v(1.0, -2.0, 0.0), v(2.0, 1.0, 0.0));
+        let small = refit_within(&source, 3, 1e-3, Some(s), Some(e), 64).unwrap();
+        let (s, e) = (v(0.5 * big, -big, 0.0), v(big, 0.5 * big, 0.0));
+        let large = refit_within(&source, 3, 1e-3, Some(s), Some(e), 64).unwrap();
+        assert_eq!(small, large);
+        assert!(small.bound <= 1e-3 && small.ends_held(), "{small:?}");
+    }
+
+    /// A tolerance below what the certificate's rounding comes to for the source is one no
+    /// span's bound can come within. The search stops after its first fit, where it would
+    /// halve a span a round up to its limit, and gives that fit back with its bound, which is
+    /// not below the floor.
+    #[test]
+    fn a_tolerance_below_the_floor_of_the_certificate_stops_after_one_fit() {
+        for source in sources() {
+            let floor = certified_distance_floor(&source).unwrap();
+            assert!(floor > 0.0);
+            for tolerance in [f64::MIN_POSITIVE, 1e-300, 0.5 * floor] {
+                let fit = refit_within(&source, 3, tolerance, None, None, 4096).unwrap();
+                assert_eq!(fit.fits, 1, "{tolerance}");
+                assert!(fit.bound >= floor, "{} below {floor}", fit.bound);
+                assert!(fit.bound > tolerance, "{} within {tolerance}", fit.bound);
+                holds(&source, &fit, 3);
+            }
+        }
+    }
+
+    /// A leg a few roundings long is not called along its direction. The source is a cubic of
+    /// one span whose control points lie on the grid of the floats near 2^29 (steps of
+    /// `g = 2^-23`), forty steps across; its first leg is the step (14, 3). The direction
+    /// asked for at the start has the slope `sqrt(2) - 1.2`, which no step of the grid of up
+    /// to 64 either way has: the search over every such step below finds the nearest (the
+    /// multiples of (14, 3)) 7e-5 radians off. The fit follows the source within the
+    /// tolerance with a positive reach; its stored leg is a step of the grid, so it cannot
+    /// lie along the direction. The turn says how far off it is, and `ends_held` says no.
+    /// The same steps at the origin, a unit each, hold the direction.
+    #[test]
+    fn a_leg_a_few_roundings_long_is_not_called_along_its_direction() {
+        use std::f64::consts::TAU;
+        let g = 2.0_f64.powi(-23);
+        let base = 2.0_f64.powi(29);
+        let steps = [(0.0, 0.0), (14.0, 3.0), (28.0, 12.0), (40.0, 40.0)];
+        let knots = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+        let d = v(1.0, 2.0_f64.sqrt() - 1.2, 0.0);
+        let along = d.y.atan2(d.x);
+        // the angle between a step of the grid and the direction
+        let off = |i: f64, j: f64| {
+            let a = (j.atan2(i) - along).abs();
+            a.min(TAU - a)
+        };
+        let mut nearest = f64::INFINITY;
+        for i in -64_i32..=64 {
+            for j in -64_i32..=64 {
+                if (i, j) != (0, 0) {
+                    nearest = nearest.min(off(f64::from(i), f64::from(j)));
+                }
+            }
+        }
+        assert!(nearest > 10.0 * EFF_ZERO_RAD, "{nearest}");
+
+        let far: Vec<Vec3> = steps
+            .iter()
+            .map(|&(x, y)| v(base + x * g, base + y * g, 0.0))
+            .collect();
+        let source = curve(&far, 3, knots.clone());
+        let tolerance = 8.0 * g;
+        let fit = refit_within(&source, 3, tolerance, Some(d), None, 64).unwrap();
+        assert!(fit.bound <= tolerance, "{}", fit.bound);
+        assert!(fit.start_reach.unwrap() > 0.0, "{:?}", fit.start_reach);
+        // the stored leg in steps of the grid: whole numbers, among those searched above
+        let (leg, _) = end_legs(&fit.curve);
+        let (i, j) = (leg.x / g, leg.y / g);
+        assert!(i == i.round() && j == j.round() && leg.z == 0.0, "{leg:?}");
+        assert!(i.abs() <= 64.0 && j.abs() <= 64.0, "{i} {j}");
+        assert!(i != 0.0 || j != 0.0, "{i} {j}");
+        // the turn is the leg's angle from the direction
+        let turn = fit.start_turn.unwrap();
+        assert!(
+            (turn - off(i, j)).abs() < 1e-12,
+            "{turn} against {}",
+            off(i, j)
+        );
+        assert!(turn >= nearest, "{turn} against {nearest}");
+        assert!(!fit.ends_held());
+        assert_eq!(fit.end_turn, None);
+
+        let near: Vec<Vec3> = steps.iter().map(|&(x, y)| v(x, y, 0.0)).collect();
+        let source = curve(&near, 3, knots);
+        let fit = refit_within(&source, 3, 1e-2, Some(d), None, 64).unwrap();
+        assert!(fit.bound <= 1e-2 && fit.ends_held(), "{fit:?}");
+        assert!(fit.start_turn.unwrap() < 1e-12, "{:?}", fit.start_turn);
     }
 
     /// The samples: the first break, then `2 (p + 1)` parameters strictly inside each span and

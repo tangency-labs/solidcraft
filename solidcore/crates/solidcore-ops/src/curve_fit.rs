@@ -277,6 +277,12 @@ pub fn rebuild(curve: &Curve, degree: usize, spans: usize) -> Result<(Curve, f64
 /// span with the largest bound halved until every span is within the tolerance, at most 4096
 /// control points, as many as [`rebuild`] takes).
 ///
+/// The fit is made on the curve's own domain, so the bound is against the curve as it is
+/// given, every span of it; the rebuilt curve is then mapped onto `[0, 1]`. An end that is
+/// given a direction leaves along it to within the kernel's numeric zero for angles
+/// (`EFF_ZERO_RAD`, a ten-thousandth of a degree): two curves rebuilt with one direction at
+/// a point they share meet there within twice that.
+///
 /// # Errors
 /// [`Error::Argument`] for a curve that is not a valid clamped spline (a rational spline and a
 /// closed periodic one are refused, as by [`rebuild`]), a degree of 0 or past the record's most
@@ -284,9 +290,12 @@ pub fn rebuild(curve: &Curve, degree: usize, spans: usize) -> Result<(Curve, f64
 /// coordinate that is not finite, of no length, or against the curve's own tangent at that
 /// end, or a tolerance not finite or not positive; [`Error::PastTolerance`] with the bound
 /// reached when 4096 control points (or the floating-point room of the parameter) do not
-/// reach the tolerance; [`Error::Unsupported`] when they reach it but an end still does not
-/// leave along its direction (a direction square to the curve's own there); the kernel's
-/// status otherwise.
+/// reach the tolerance, or the tolerance is below what the rounding of the curve's own
+/// coordinates allows any bound to be; [`Error::Unsupported`] when they reach it but an end
+/// does not leave along its direction (a direction square to the curve's own there, or an end
+/// leg only a few roundings of its coordinates long, as on a small curve far from the
+/// origin), or when the rebuilt curve has knots that `[0, 1]` cannot keep apart; the
+/// kernel's status otherwise.
 pub fn rebuild_within(
     curve: &Curve,
     degree: usize,
@@ -316,10 +325,18 @@ pub fn rebuild_within(
         }
     };
     let (start, end) = (direction(start)?, direction(end)?);
+    // How many spans of non-zero length a knot vector has.
+    let spans = |knots: &[f64]| {
+        knots
+            .windows(2)
+            .filter(|w| matches!(w, [a, b] if a < b))
+            .count()
+    };
     run("curve_fit::rebuild_within", |_| {
-        let mut unit = nurb;
-        unit.reparam_to_interval(Interval { ul: 0.0, ur: 1.0 })?;
-        let fit = match refit_within(&unit, degree, tolerance, start, end, 4096) {
+        // The fit is made on the curve's own domain, so its bound is against the curve as it
+        // was given: mapped onto [0, 1] first, two knots the mapping rounds together would
+        // lose the span between them, and the bound would be against another curve.
+        let fit = match refit_within(&nurb, degree, tolerance, start, end, 4096) {
             Ok(fit) => fit,
             Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
             Err(e) => return Err(e),
@@ -327,15 +344,26 @@ pub fn rebuild_within(
         if fit.bound > tolerance {
             return Ok(Err(Error::PastTolerance { bound: fit.bound }));
         }
-        // within the tolerance, but the search stopped at its limit before an end left along
-        // its direction
-        let turned = |reach: Option<f64>| reach.is_some_and(|r| r.is_nan() || r <= 0.0);
-        if turned(fit.start_reach) || turned(fit.end_reach) {
+        // within the tolerance, but an end does not leave along its direction: the search
+        // stopped at its limit before the end's reach was positive, or the end's leg is too
+        // short against the rounding of its coordinates to lie along the direction
+        if !fit.ends_held() {
             return Ok(Err(Error::Unsupported(
                 "an end the fit cannot bring to leave along its direction",
             )));
         }
-        Ok(record_of(&fit.curve).map(|c| (c, fit.bound)))
+        // Onto [0, 1], as every curve of this module. The rebuilt curve's own knots are
+        // mapped; two of them rounded together would lose a span of it.
+        let bound = fit.bound;
+        let mut unit = fit.curve;
+        let before = spans(unit.knots());
+        unit.reparam_to_interval(Interval { ul: 0.0, ur: 1.0 })?;
+        if spans(unit.knots()) != before {
+            return Ok(Err(Error::Unsupported(
+                "a rebuilt curve whose knots cannot be kept apart on [0, 1]",
+            )));
+        }
+        Ok(record_of(&unit).map(|c| (c, bound)))
     })?
 }
 

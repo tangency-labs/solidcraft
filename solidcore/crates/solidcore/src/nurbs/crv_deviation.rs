@@ -8,6 +8,7 @@
 //! |--------------------------------|----------|
 //! | [`certified_distance`]         | none     |
 //! | [`certified_distance_by_span`] | none     |
+//! | [`certified_distance_floor`]   | none     |
 //! | [`SpanDistance`]               | none     |
 //! | [`certified_hausdorff`]        | none     |
 //! | [`interpolation_bound`]        | none     |
@@ -18,6 +19,8 @@
 //! formed from that span's own largest control point difference, with the same rounding
 //! terms: addition and multiplication by a positive number round monotonically, so the
 //! largest of the spans' bounds is, to the bit, the bound formed from the largest difference.
+//! [`certified_distance_floor`] is what the rounding terms come to at the least for a curve,
+//! whatever it is compared with: a tolerance below it is one no refinement reaches.
 //!
 //! Both curves are cut into Bézier pieces over the union of their breakpoints (and, for
 //! [`certified_hausdorff`], the intervals' ends; [`Curve::refine`], [`Curve::decompose_bez`]) and each piece raised to the higher of the
@@ -61,6 +64,7 @@ use crate::nurbs::math::{gamma, CPoint, NOW, NOZ};
 
 const OP: &str = "nurbs::crv_deviation::certified_distance";
 const OP_BY_SPAN: &str = "nurbs::crv_deviation::certified_distance_by_span";
+const OP_FLOOR: &str = "nurbs::crv_deviation::certified_distance_floor";
 const OP_HAUSDORFF: &str = "nurbs::crv_deviation::certified_hausdorff";
 const OP_FIT: &str = "nurbs::crv_deviation::interpolation_bound";
 
@@ -169,6 +173,43 @@ pub struct SpanDistance {
 /// refinement, the extraction and the elevation.
 pub fn certified_distance_by_span(a: &Curve, b: &Curve) -> Result<Vec<SpanDistance>> {
     by_span(a, b, OP_BY_SPAN)
+}
+
+/// A number that no bound of [`certified_distance`] for `a` and another curve, and no span's
+/// bound of [`certified_distance_by_span`], is below, `a` being the first of the two: the
+/// rounding the bounds count on `a`'s own size. A caller that refines a curve towards a
+/// tolerance below it can stop, since no refinement brings a span's bound within it.
+///
+/// A bound is `(g + e) (1 + γ_2)`: `g` the span's largest difference, not negative, and `e`
+/// twice the sum of the two curves' coordinate errors. Each coordinate error is at least
+/// `γ_12` of twice the size (the term of a refinement that inserts no knot) plus `γ_2` of the
+/// size (the move into the curves' own frame), and the size is at least the largest
+/// coordinate of `a` in its own frame, whatever the other curve. The floor is that least
+/// value, formed by the operations the bounds are formed by on numbers that are never larger:
+/// each of them rounds monotonically, so no bound is below it, to the bit. A curve of one
+/// span against itself has it as its bound.
+///
+/// # Errors
+///
+/// `InvalidInput` for a rational or 2D curve, a number not finite, or knots not clamped, as
+/// [`certified_distance`] refuses them.
+pub fn certified_distance_floor(a: &Curve) -> Result<f64> {
+    check(a, OP_FLOOR)?;
+    let Some(&c0) = a.cpts().first() else {
+        return Err(SolidError::invalid_input(
+            OP_FLOOR,
+            "a curve without points",
+        ));
+    };
+    // the largest coordinate of `a` in its own frame, each formed as `in_own_frame` forms it
+    let size = a.cpts().iter().fold(0.0_f64, |m, p| {
+        m.max((p.x - c0.x).abs())
+            .max((p.y - c0.y).abs())
+            .max((p.z - c0.z).abs())
+    });
+    // one curve's coordinate error where its refinement inserts no knot and nothing is raised
+    let least = gamma(12) * 2.0 * size + gamma(2) * size;
+    Ok(2.0 * (least + least) * (1.0 + gamma(2)))
 }
 
 /// The common spans of `a` and `b` with their bounds, the refusals named by `op`: the one
@@ -959,6 +1000,58 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The pair of `a_gap_near_the_bottom_of_the_floating_range_is_not_lost_to_underflow`,
+    /// span by span: the curves are 1e-200 apart at every parameter. The square of that
+    /// underflows, so a distance sampled with squares reads 0 and holds under any bound; the
+    /// span's bound itself still has to enclose the gap, and not by much.
+    #[test]
+    fn a_span_bound_near_the_bottom_of_the_floating_range_is_not_lost_to_underflow() {
+        let tiny = spline(&[[0.0, 0.0, 0.0], [1e-200, 0.0, 0.0]], 1);
+        let beside = spline(&[[0.0, 1e-200, 0.0], [1e-200, 1e-200, 0.0]], 1);
+        let spans = certified_distance_by_span(&tiny, &beside).unwrap();
+        assert_eq!(spans.len(), 1);
+        assert!(spans[0].bound >= 1e-200, "{}", spans[0].bound);
+        assert!(spans[0].bound <= 1.0001e-200, "{}", spans[0].bound);
+    }
+
+    /// No bound is below the floor of the first curve, for the whole curves and for every
+    /// span. A curve of one span against itself has the floor as its bound, to the bit: no
+    /// knot is inserted, nothing is raised and no control point differs, so the bound is the
+    /// rounding terms alone, formed as the floor forms them. The floor follows the curve's
+    /// size in its own frame, not its place.
+    #[test]
+    fn no_bound_is_below_the_floor_of_the_first_curve() {
+        for (a, b) in pairs() {
+            let floor = certified_distance_floor(&a).unwrap();
+            assert!(floor >= 0.0 && floor.is_finite(), "{floor}");
+            for s in certified_distance_by_span(&a, &b).unwrap() {
+                assert!(s.bound >= floor, "{} below the floor {floor}", s.bound);
+            }
+            assert!(certified_distance(&a, &b).unwrap() >= floor);
+        }
+        let line = spline(&[[0.0, 0.0, 0.0], [5.0, 0.0, 0.0]], 1);
+        let cubic = spline(&WAVE[..4], 3);
+        for c in [&line, &cubic] {
+            assert_eq!(
+                certified_distance(c, c).unwrap().to_bits(),
+                certified_distance_floor(c).unwrap().to_bits()
+            );
+        }
+        let far: Vec<[f64; 3]> = WAVE[..4].iter().map(|&[x, y, z]| [x + 1e9, y, z]).collect();
+        let far = spline(&far, 3);
+        let (here, there) = (
+            certified_distance_floor(&cubic).unwrap(),
+            certified_distance_floor(&far).unwrap(),
+        );
+        assert!(there <= here * 1.0001, "{there} against {here}");
+        // what the bound refuses, the floor refuses under its own name
+        let mut rational = cubic.clone();
+        rational.non_rat_to_rat();
+        let e = certified_distance_floor(&rational).unwrap_err();
+        assert!(matches!(e, SolidError::InvalidInput { .. }), "{e}");
+        assert_eq!(e.operation(), OP_FLOOR);
     }
 
     /// The wave against a copy with its last control point raised by 1 in z. That point's

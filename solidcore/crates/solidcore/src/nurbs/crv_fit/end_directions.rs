@@ -215,9 +215,12 @@ fn dot(x: &[f64], y: &[f64]) -> f64 {
 /// direction that is not finite or has no length, a degree below 2, no points, or fewer
 /// parameters than points; [`NurbsFailure::Input`] when `n < p`, `knt` does not have
 /// `n + p + 2` knots, `m < n`, `n < 3` with both directions (`n < 2` with one), a basis span
-/// past the control points, or data that do not fix the unknowns (a pivot of the normal
-/// equations or of the 2 by 2 system below [`LU_TOL`]); those of
-/// [`KnotVector::basis_eval`] and of the solve.
+/// past the control points, data that do not fix the unknowns (a pivot of the normal
+/// equations or of the 2 by 2 system below [`LU_TOL`]), or a reach or a control point of the
+/// solve that is not finite (data not finite, or past what the arithmetic holds);
+/// [`NurbsFailure::Knots`] for knots not clamped to the degree ([`KnotVector::validate`]: an
+/// end's leg is its tangent, and the curve runs through its end points, only on such knots);
+/// those of [`KnotVector::basis_eval`] and of the solve.
 pub fn approx_end_directions(
     a: &[Vec3],
     u: &[f64],
@@ -265,6 +268,9 @@ pub fn approx_end_directions(
     if n.checked_add(p).and_then(|x| x.checked_add(1)) != Some(knt.last_index()) {
         return Err(no_fit());
     }
+    // An end's leg is its tangent, and the curve runs through its end points, only on knots
+    // clamped to the degree.
+    knt.validate(p)?;
     if m < n {
         return Err(no_fit());
     }
@@ -429,6 +435,12 @@ pub fn approx_end_directions(
         }
         (None, None) => (None, None),
     };
+    // A reach or a control point that is not finite (data not finite, or past what the
+    // arithmetic holds) is no fit: the curve is not built of such numbers.
+    if [s, e].into_iter().flatten().any(|r| !r.is_finite()) {
+        return Err(no_fit());
+    }
+    let finite = |q: Vec3| q.x.is_finite() && q.y.is_finite() && q.z.is_finite();
 
     // P_1 = P_0 + s T_0, P_(n-1) = P_n - e T_1, P_i = X_R,i - s x_a,i T_0 + e x_b,i T_1.
     let p1 = t0.zip(s).map(|(t, s)| q0 + t * s);
@@ -452,6 +464,9 @@ pub fn approx_end_directions(
                 q
             }
         };
+        if !finite(q) {
+            return Err(no_fit());
+        }
         pw.push(CPoint::from_point(q));
     }
     Ok(EndDirectionFit {
@@ -908,6 +923,71 @@ mod tests {
         for (s, e) in [(Some(d0), Some(d1)), (Some(d0), None), (None, Some(d1))] {
             let r = approx_end_directions(&a, &same, &knt, 6, 3, s, e);
             assert!(is_no_fit(&r), "{s:?} {e:?}");
+        }
+    }
+
+    /// Knots not clamped to the degree are refused with a direction. The knots here are
+    /// uniform (-2 to 3 in steps of 1) for degree 2, so the domain is `[0, 1]` and no end
+    /// knot is repeated: the basis reads as a clamped one at the domain's first knot only, and
+    /// a curve of the solve would leave its first data point just past it.
+    #[test]
+    fn knots_not_clamped_to_the_degree_are_refused_with_a_direction() {
+        let knots = [-2.0, -1.0, 0.0, 1.0, 2.0, 3.0];
+        let knt = KnotVector::from_slice(&knots).unwrap();
+        let a = [v(0.0, 0.0, 0.0), v(2.0, 0.0, 0.0), v(2.0, 0.0, 0.0)];
+        let u = [0.0, 0.5, 1.0];
+        let x = v(1.0, 0.0, 0.0);
+        for (s, e) in [(Some(x), None), (None, Some(x))] {
+            let r = approx_end_directions(&a, &u, &knt, 2, 2, s, e);
+            assert!(
+                matches!(&r, Err(err) if matches!(err.nurbs_failure(), Some(NurbsFailure::Knots))),
+                "{s:?} {e:?}: {r:?}"
+            );
+        }
+    }
+
+    /// Data that are not finite, or too large for the arithmetic, give an error: never a
+    /// curve with a reach or a control point that is not finite.
+    #[test]
+    fn data_not_finite_or_too_large_never_give_a_curve_of_such_numbers() {
+        let (a, u, d0, d1) = parabola(12);
+        let kv = knot_vector_approx(&u, 6, 3).unwrap();
+        let knt = KnotVector::from_slice(&kv).unwrap();
+        let finite = |f: &EndDirectionFit| {
+            f.curve
+                .cpts()
+                .iter()
+                .all(|q| q.x.is_finite() && q.y.is_finite() && q.z.is_finite())
+                && [f.start_reach, f.end_reach]
+                    .into_iter()
+                    .flatten()
+                    .all(f64::is_finite)
+        };
+        for (s, e) in [(Some(d0), Some(d1)), (Some(d0), None), (None, Some(d1))] {
+            // a sample that is not a number spoils every sum it enters; so does an end point
+            // that is not finite
+            for (at, bad) in [(6, f64::NAN), (0, f64::INFINITY), (12, f64::NAN)] {
+                let mut data = a.clone();
+                data[at] = v(bad, 0.0, 0.0);
+                let r = approx_end_directions(&data, &u, &knt, 6, 3, s, e);
+                assert!(r.is_err(), "{s:?} {e:?} {at} {bad}: {r:?}");
+            }
+            // a sample at the top of the floating range: whether the solve overflows or not,
+            // what it gives back is finite
+            for big in [f64::MAX, -f64::MAX, 1e300] {
+                let mut data = a.clone();
+                data[6] = v(big, big, 0.0);
+                if let Ok(fit) = approx_end_directions(&data, &u, &knt, 6, 3, s, e) {
+                    assert!(finite(&fit), "{s:?} {e:?} {big}: {fit:?}");
+                }
+            }
+        }
+        // the largest sample with a start direction along x: the reach overflows
+        let mut data = a.clone();
+        data[6] = v(f64::MAX, 0.0, 0.0);
+        if let Ok(fit) = approx_end_directions(&data, &u, &knt, 6, 3, Some(v(1.0, 0.0, 0.0)), None)
+        {
+            assert!(finite(&fit), "{fit:?}");
         }
     }
 
