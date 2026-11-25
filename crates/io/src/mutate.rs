@@ -426,7 +426,13 @@ fn paper_scenes_survive_mutation_into_pdf() {
     ];
     let scene = Scene::new(p(420.0, 297.0), vec![Group { object: 7, kind: ObjectKind::DrawingBorder, items }]);
     let json = serde_json::to_vec(&scene).unwrap();
-    let options = crate::paper::PdfOptions { layers: true, title: Some("Sheet 1".into()), output_time: Some(1_761_436_800), actual_size: false };
+    let options = crate::paper::PdfOptions {
+        layers: true,
+        title: Some("Sheet 1".into()),
+        output_time: Some(1_761_436_800),
+        actual_size: false,
+        text: crate::paper::PdfText::Outlines,
+    };
     let write = |b: &[u8]| -> Option<usize> {
         let scene: Scene = serde_json::from_slice(b).ok()?;
         crate::paper::paper_pdf(&scene.prepare().ok()?, &options).ok().map(|(bytes, _)| bytes.len())

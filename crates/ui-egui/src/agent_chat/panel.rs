@@ -826,9 +826,10 @@ pub fn window_place(saved: Option<[f32; 4]>) -> Option<([f32; 2], [f32; 2])> {
 /// The chat window's settings. The saved place and size go only to a window that is opening:
 /// egui turns a changed place into a move, and the system rounds what it is given, so giving it
 /// every frame made the window chase its own rounding (it shook a pixel up and down).
-pub fn window_builder(document: &str, placed: bool, prefs: &AgentPanelPrefs) -> egui::ViewportBuilder {
+pub fn window_builder(document: &str, placed: bool, prefs: &AgentPanelPrefs, owner: egui::ViewportId) -> egui::ViewportBuilder {
     let title = format!("{document} — {}", tr("ui.agent_chat"));
-    let builder = egui::ViewportBuilder::default().with_title(title).with_min_inner_size([MIN_WIDTH, 320.0]);
+    let builder =
+        crate::window_chrome::popout_viewport(egui::ViewportBuilder::default(), owner).with_title(title).with_min_inner_size([MIN_WIDTH, 320.0]);
     if placed {
         return builder;
     }
@@ -843,7 +844,7 @@ pub fn window_builder(document: &str, placed: bool, prefs: &AgentPanelPrefs) -> 
 /// The system's close button closes the chat (it opens there again); Dock puts it back.
 #[cfg(not(target_arch = "wasm32"))]
 fn window(chat: &mut AgentChat, view: &PanelView, ctx: &egui::Context, prefs: &mut AgentPanelPrefs, blur: &mut crate::blur::State) {
-    let builder = window_builder(&view.document, chat.window_placed, prefs);
+    let builder = window_builder(&view.document, chat.window_placed, prefs, ctx.viewport_id());
     chat.window_placed = true;
     // The side panel isn't drawn: its place no longer counts as "in the chat".
     chat.panel_rect = None;

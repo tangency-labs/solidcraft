@@ -119,6 +119,27 @@ fn rounded_edges_on_the_mesh_path_keep_their_angle() {
     let _ = shaped_in_3d(&crate::fixtures::fixture(name), crate::fixtures::size_of(name), name);
 }
 
+/// Shaping at the edge budget can keep a complete mesh with poor angles.
+/// Required trim crossings must still be resolved. Either refusal keeps both
+/// incident faces on the same unchanged boundary.
+#[test]
+fn an_edge_at_the_node_budget_keeps_its_existing_boundary() {
+    let b = record(&make_box([0.0; 3], [10.0; 3]).expect("box"));
+    let edge = b.edges.iter().position(|e| matches!(e.curve, brep::Curve::Line { .. })).unwrap();
+    let mut nodes = edges::sample_edge(&b, edge, &size::Rules::new(0.01, 20.0, None), 100.0).unwrap();
+    let [lo, hi] = b.edges[edge].interval;
+    let ts: Vec<_> = (1..edges::MAX_EDGE_NODES).map(|i| lo + (hi - lo) * i as f64 / edges::MAX_EDGE_NODES as f64).collect();
+    let (last, fill) = ts.split_last().unwrap();
+    assert!(edges::insert_at(&b, edge, &mut nodes, fill).unwrap());
+    let before = nodes.params.clone();
+    assert_eq!(before.len(), edges::MAX_EDGE_NODES);
+    assert!(edges::insert_at(&b, edge, &mut nodes, fill).unwrap(), "existing parameters cost no nodes");
+    assert!(!edges::insert_at(&b, edge, &mut nodes, &[*last]).unwrap());
+    assert_eq!(nodes.params, before);
+    assert!(edges::insert_crossings(&b, edge, &mut nodes, &[*last]).is_err());
+    assert_eq!(nodes.params, before);
+}
+
 /// Two faces of one edge split the same side in a round: each gives its fraction in its own
 /// metric, apart by their rounding, and the edge takes one node, not two a rounding apart (the
 /// plate's top face had a triangle of 1.3e-13 degrees at 5c1a53ef7c).
@@ -452,6 +473,34 @@ fn a_cylinder_wall_on_the_mesh_path_is_shaped() {
     assert_nothing_folds(&m, "cylinder");
     let (w, _) = plan.welded().unwrap();
     assert_closed(&w, "cylinder");
+}
+
+/// The axial span is shorter than the imported vertex tolerance. Both circular
+/// rims are real boundaries and the cylinder has finite volume.
+#[test]
+fn a_short_cylinder_keeps_both_rims_when_its_vertices_have_a_larger_tolerance() {
+    let height = 0.00044;
+    let mut body = record(&make_cylinder([0.0; 3], 0.65, height).expect("cylinder"));
+    for vertex in &mut body.vertices {
+        vertex.tolerance = 0.0018;
+    }
+    let wall = body.faces.iter().position(|f| matches!(f.surface, brep::Surface::Cylinder { .. })).expect("cylinder wall");
+    let middle = body.faces[wall].domain.map(|[lo, hi]| lo.midpoint(hi));
+    let prepared = super::prepare(&body, 0.01, None, Purpose::Display).expect("cylinder boundaries");
+    // The cylinder's NURBS runs from one rim to the other along v, even within the boundary's pole tolerance.
+    assert!(!prepared.evals[wall].pole(middle, 1, prepared.boundaries[wall].reach), "the axial generator has two distinct ends");
+    let (plan, _) = meshed(&body, &MeshSpec::chord(0.01), 2.0, None);
+    let (mesh, refused) = plan.welded().expect("welded cylinder");
+    assert!(refused.is_empty(), "{refused:?}");
+    assert!(!mesh.triangles.is_empty(), "a solid cylinder needs triangles");
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for &i in mesh.triangles.iter().flatten() {
+        let z = mesh.positions[i as usize].z;
+        lo = lo.min(z);
+        hi = hi.max(z);
+    }
+    assert!(lo.abs() < height * 1e-9 && (hi - height).abs() < height * 1e-9, "triangle heights {lo}..{hi}, expected 0..{height}");
+    assert_closed(&mesh, "short cylinder");
 }
 
 /// The kernel rig's `booleans/2928-join-cap-touching-lips-with-offset-walls`, its body `Base` as
