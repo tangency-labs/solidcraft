@@ -247,7 +247,8 @@ fn manifest() -> Value {
 fn workspace_manifest() -> Value {
     let mut value = manifest();
     value["capabilities"] = json!(["commands@0.2", "ui@0.1"]);
-    value["runtime"]["entries"] = json!([{"name":"make", "effect":"read"}]);
+    value["runtime"]["entries"] =
+        json!([{"name":"make", "effect":"read", "input_schema":{"type":"object","properties":{"workspace":{"type":"string"}}}}]);
     value["runtime"]["ui"] = json!({"ui_version":1,"panels":[],"workspaces":[{
         "id":"manufacture","name":"Manufacture","icon":"wrench","applies_to":["part"],
         "ribbon":[],"panels":[],"builtin_panels":["browser"],"on_enter":"make","on_exit":"make"
@@ -1070,6 +1071,8 @@ mod native {
     (data (i32.const 64) "project")
     (data (i32.const 96) "{path}")
     (data (i32.const 128) "changed")
+    (data (i32.const 0) "\00\00\00\00\10\00\00\00\02\00\00\00")
+    (data (i32.const 16) "{{}}")
     (func (export "execute") (param i32 i32 i32 i32) (result i32)
       i32.const 64 i32.const 7 i32.const 96 i32.const {path_len} {arguments} i32.const 0 call $file
       i32.const 0)

@@ -407,8 +407,8 @@ pub(crate) fn ribbon(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, fo
     egui::ScrollArea::horizontal().id_salt("plugin-workspace-tabs").auto_shrink([false, true]).show(&mut child, |ui| {
         ui.horizontal(|ui| {
             for (index, ribbon) in workspace.spec.ribbon.iter().enumerate() {
-                let button = egui::Button::selectable(*tab == index, &ribbon.name);
-                if ui.add_sized([0.0, t.control_height], button).clicked() {
+                let kind = if *tab == index { crate::ui_kit::Button::SmallSelected } else { crate::ui_kit::Button::Small };
+                if crate::ui_kit::button(ui, &ribbon.name, kind).clicked() {
                     clicked = Some(*tab == index);
                     *tab = index;
                 }
@@ -426,7 +426,7 @@ pub(crate) fn ribbon(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, fo
                     ui.vertical(|ui| {
                         ui.horizontal(|ui| {
                             for entry in &group.entries {
-                                if ui.add_sized([0.0, t.control_height], egui::Button::new(entry)).clicked()
+                                if crate::ui_kit::button(ui, entry, crate::ui_kit::Button::Normal).clicked()
                                     && let Ok(mut queue) = app.plugin_workspaces.commands.try_borrow_mut()
                                 {
                                     queue.push_back((workspace.plugin.id.clone(), entry.clone()));
