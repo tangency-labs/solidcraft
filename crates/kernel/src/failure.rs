@@ -57,3 +57,25 @@ pub fn last() -> Option<ErrorCode> {
 pub fn code_in(error: &str) -> Option<ErrorCode> {
     solidcraft_smlib::failure::code_in(error).map(ErrorCode::from)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::services::{ErrorClass, FailureCode};
+
+    /// #22148: the code keeps the kernel's class by its name, for every class, without deriving
+    /// it from the kind (a refusal of kind 6 stays a refusal).
+    #[test]
+    fn the_code_keeps_the_kernels_class_by_name() {
+        for (class, name) in [
+            (ErrorClass::Refusal, "refusal"),
+            (ErrorClass::Defect, "defect"),
+            (ErrorClass::PortFailure, "port_failure"),
+            (ErrorClass::Unclassed, "unclassed"),
+        ] {
+            let code = ErrorCode::from(FailureCode { call: "blend", kind: 6, operation: "blend::op", class });
+            assert_eq!(code, ErrorCode { call: "blend".into(), kind: 6, operation: "blend::op".into(), class: name.into() });
+            assert_eq!(serde_json::to_value(&code).unwrap()["class"], name);
+        }
+    }
+}

@@ -228,21 +228,22 @@ fn a_refused_fillet_carries_the_kernel_calls_code() {
     assert_eq!(&row["error_code"], timeline_code, "{row}");
 }
 
-/// #22148: a failure's code says the kernel's class of its error, so a client tells "change the
-/// input" from the kernel's fault without a copy of the kind table. A can (a cylinder of radius
-/// 10, open at its top) shelled thicker than its radius is refused by the kernel's offset (its
-/// wall's offset collapses or folds, kinds 200 to 204, every one a refusal), and the code says
-/// `refusal` in the command's error and in the timeline JSON, in full and in short.
+/// #22148: a failure's code carries its class into the timeline JSON. A can (a cylinder of radius
+/// 10, open at its top) shelled thicker than its radius is refused by the operations library
+/// itself, before the kernel builds anything ("the wall is too thick: it leaves no room inside
+/// the body", kind 0, `NoRoom`); solidcore classes only its own errors, so the class is
+/// `unclassed`, in the command's error and in the timeline JSON, in full and in short. (The
+/// kernel's classes reach the code through the same copy: `solidcraft_kernel::failure`'s tests.)
 #[test]
-fn a_shell_thicker_than_its_cans_radius_is_coded_a_refusal() {
+fn a_failures_class_reaches_the_timeline_json() {
     let mut s = Session::default();
     run(&mut s, "parameters.change", json!({"name":"wall", "expression":"2 mm"}));
     run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 20, "body_name": "Can"}));
     let before = s.doc.as_ref().clone();
     let e = s.execute("solid.shell", &json!({"faces": [[0, 0, 20]], "thickness": 12})).unwrap_err();
     let code = e.error_code().cloned().unwrap_or_else(|| panic!("no code: {e}"));
-    assert!((200..=204).contains(&code.kind), "{code}: {e}");
-    assert_eq!(json!(code)["class"], "refusal", "{code}: {e}");
+    assert_eq!((code.kind, code.operation.as_str()), (0, "NoRoom"), "{code}: {e}");
+    assert_eq!(code.class, "unclassed", "{code}: {e}");
 
     let mut s = Session::new(before);
     let out = run(&mut s, "solid.shell", json!({"faces": [[0, 0, 20]], "thickness": "wall"}));
@@ -251,8 +252,7 @@ fn a_shell_thicker_than_its_cans_radius_is_coded_a_refusal() {
     assert!(inspected["error"].is_null() && inspected.get("error_code").is_none(), "{inspected}");
     s.execute("parameters.change", &json!({"name":"wall", "expression":"12 mm"})).ok();
     let inspected = run(&mut s, "timeline.inspect", json!({"feature":id}));
-    assert_eq!(inspected["error_code"]["class"], "refusal", "{inspected}");
-    assert_eq!(inspected["error_code"]["kind"], code.kind, "{inspected}");
+    assert_eq!(inspected["error_code"], json!({"call": code.call, "kind": 0, "operation": "NoRoom", "class": "unclassed"}), "{inspected}");
     for detail in [json!(true), json!("summary")] {
         let doc = run(&mut s, "document.inspect", json!({"timeline":detail}));
         let row = doc["timeline"].as_array().unwrap().iter().find(|r| r["id"] == id).cloned().unwrap();
