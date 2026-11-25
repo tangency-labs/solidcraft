@@ -1305,7 +1305,10 @@ fn panel_fields(app: &mut SolveApp, ui: &mut egui::Ui) {
             close_panel(app);
         }
     } else if let Some(tool) = app.drawing_workspace.options {
-        panels::tool_body(app, ui, tool);
+        if let Some((command, params)) = panels::tool_body(app, ui, tool) {
+            // A refused change leaves the list as it was; the box reads the record again next frame.
+            let _ = app.session.execute(command, &params);
+        }
         if panels::footer(ui, tool) {
             close_panel(app);
         }

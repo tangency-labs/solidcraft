@@ -122,7 +122,9 @@ pub(super) fn footer(ui: &mut egui::Ui, tool: Tool) -> bool {
     close
 }
 
-pub(super) fn tool_body(app: &SolveApp, ui: &mut egui::Ui, tool: Tool) {
+/// The tool's panel. A control that already works returns its command, which the caller runs
+/// (the panel only reads the app).
+pub(super) fn tool_body(app: &SolveApp, ui: &mut egui::Ui, tool: Tool) -> Option<(&'static str, serde_json::Value)> {
     let drawing = app.session.drawing("drawing.inspect").ok().map(|drawing| drawing.as_ref());
     let sheet = active_sheet(app);
     caption(ui, "ui.drawing_panel.planned");
@@ -132,8 +134,9 @@ pub(super) fn tool_body(app: &SolveApp, ui: &mut egui::Ui, tool: Tool) {
         Tool::Edit(_) => {}
         Tool::Dimension(selected) => dimension(ui, drawing, sheet, selected),
         Tool::Note(_) | Tool::Export | Tool::Detail => {}
-        Tool::PartsList(table) => parts_list(ui, drawing, sheet, table, &app.session.doc.name),
+        Tool::PartsList(table) => return parts_list(ui, drawing, sheet, table, &app.session.doc.name),
     }
+    None
 }
 
 fn base_view(ui: &mut egui::Ui, source: &str, projected: bool) {
@@ -412,7 +415,14 @@ fn dimension(ui: &mut egui::Ui, drawing: Option<&Drawing>, sheet: Option<u64>, s
     }
 }
 
-fn parts_list(ui: &mut egui::Ui, drawing: Option<&Drawing>, sheet: Option<u64>, selected: Option<u64>, source: &str) {
+/// A saved list's Press-in hardware box works now: ticking it returns `drawing.table.edit`.
+fn parts_list(
+    ui: &mut egui::Ui,
+    drawing: Option<&Drawing>,
+    sheet: Option<u64>,
+    selected: Option<u64>,
+    source: &str,
+) -> Option<(&'static str, serde_json::Value)> {
     let stored = drawing.and_then(|drawing| {
         drawing
             .tables
@@ -439,7 +449,9 @@ fn parts_list(ui: &mut egui::Ui, drawing: Option<&Drawing>, sheet: Option<u64>, 
     });
     let table = stored.map(|stored| &stored.table).or(fallback.as_ref());
     // A list not drawn yet starts with its hardware rows; one saved says what it has.
-    let mut hardware = stored.is_none_or(|stored| matches!(&stored.kind, Kind::PartsList(list) if list.hardware));
+    let was = stored.is_none_or(|stored| matches!(&stored.kind, Kind::PartsList(list) if list.hardware));
+    let mut hardware = was;
+    let mut command = None;
     ui.add_enabled_ui(false, |ui| {
         choice(ui, tr("ui.drawing_panel.model"), 0, &[source]);
         segments(
@@ -449,7 +461,6 @@ fn parts_list(ui: &mut egui::Ui, drawing: Option<&Drawing>, sheet: Option<u64>, 
             &[tr("ui.top"), tr("ui.bottom")],
         );
         text(ui, tr("ui.drawing_panel.row_height"), &format!("{} mm", table.map_or(7.0, |table| table.row_height_mm)));
-        ui_kit::checkbox(ui, tr("ui.drawing_panel.press_in_hardware"), &mut hardware);
         ui_kit::section_heading(ui, tr("ui.drawing_panel.columns"));
         if let Some(table) = table {
             for column in &table.columns {
@@ -464,8 +475,19 @@ fn parts_list(ui: &mut egui::Ui, drawing: Option<&Drawing>, sheet: Option<u64>, 
             }
         }
     });
+    // Only a list that is drawn has a record to change; a new one starts with the rows.
+    ui.add_enabled_ui(stored.is_some(), |ui| {
+        ui_kit::checkbox(ui, tr("ui.drawing_panel.press_in_hardware"), &mut hardware);
+    });
+    if let Some(stored) = stored.filter(|_| hardware != was) {
+        command = Some((
+            "drawing.table.edit",
+            serde_json::json!({"table": solidcraft_engine::doc::ids::encode(stored.id), "set": {"list": {"press_in_hardware": hardware}}}),
+        ));
+    }
     ui_kit::section_heading(ui, tr("ui.drawing_panel.items"));
     pending(ui, tr("ui.drawing_panel.renumber"));
+    command
 }
 
 #[derive(Clone)]
