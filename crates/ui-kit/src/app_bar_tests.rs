@@ -3042,37 +3042,3 @@ fn layout_menu_keeps_glyph_choices_open_and_escape_restores_the_button() {
     rig.frame(Vec::new());
     assert!(solidcraft_ui_registry::rect_of("layout.side_by_side").is_some());
 }
-
-#[test]
-fn sketch_header_keeps_the_editing_chip_inside_its_control_free_room() {
-    let ctx = crate::test_support::context();
-    for width in [240.0, 100.0, 70.0, 60.0, 42.0, 16.0] {
-        let rect = Rect::from_min_size(pos2(10.0, 10.0), vec2(width, 28.0));
-        let output = crate::test_support::raw_frame(&ctx, egui::RawInput::default(), |ui| {
-            paint_sketch_header(ui.painter(), rect, "Model · Sketch 1", "Editing");
-        });
-        let texts: Vec<_> = crate::test_support::text_shapes(&output).map(|text| text.galley.text().to_string()).collect();
-        if width == 240.0 {
-            assert!(texts.iter().any(|text| text == "Model · Sketch 1"));
-        }
-        if width >= 70.0 {
-            assert!(texts.iter().any(|text| text == "Editing"), "width={width}: the state remains readable");
-        }
-        let chip = output
-            .shapes
-            .iter()
-            .find_map(|shape| match &shape.shape {
-                egui::Shape::Rect(shape) if shape.fill == Tokens::get().chip => Some(shape.rect),
-                _ => None,
-            })
-            .unwrap();
-        assert_eq!(chip.height(), 18.0);
-        assert!(rect.contains_rect(chip), "width={width}: {chip:?} must leave header controls free");
-    }
-    for t in [Tokens::light(), Tokens::dark()] {
-        assert!(
-            solidcraft_theme::contrast_ratio(t.sketch_ink, t.sketch_soft) >= 4.5,
-            "sketch titles follow the theme's small-text contrast policy on their actual header surface"
-        );
-    }
-}

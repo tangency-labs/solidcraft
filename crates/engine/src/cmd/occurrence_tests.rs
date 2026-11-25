@@ -1753,6 +1753,45 @@ fn reparent_keeps_the_world_position_and_follows_paths() {
     assert_eq!(s.doc.occurrences.iter().find(|o| o.id == child).unwrap().parent, 0);
 }
 
+/// #22216: a joint on a placement's origin plane names it by the placement's path from the design
+/// (`o:4/origin/XY`). Moving the placement into another component kept that path, which no longer
+/// leads anywhere, and the joint stopped with "the placement no longer exists". The datum follows
+/// the move as the joint's other references do, and it follows it back out again.
+#[test]
+fn reparent_carries_a_joint_on_the_moved_placements_origin_plane() {
+    let mut s = Session::default();
+    // Three components at the design's top, as the issue's script makes them.
+    let top = |s: &mut Session, name: &str| {
+        let made = created(s, name);
+        run(s, "component.activate", json!({"component": 0}));
+        made
+    };
+    let (_, a) = top(&mut s, "A");
+    let (_, b) = top(&mut s, "B");
+    let (group_component, group) = top(&mut s, "Group");
+    run(
+        &mut s,
+        "joint.create",
+        json!({"name": "J1", "type": "rigid", "a": {"occurrence": a, "plane": "XY"}, "b": {"occurrence": b, "plane": "XY"}, "offset": 5}),
+    );
+    let joint = |s: &mut Session| run(s, "joint.inspect", json!({"joint": "J1"}))["joints"][0].clone();
+    let side_b = |s: &mut Session| joint(s)["b"].clone();
+    let before = side_b(&mut s);
+    assert_eq!(before["snap"]["plane"]["datum"], json!(format!("o:{b}/origin/XY")), "{before}");
+
+    run(&mut s, "occurrence.reparent", json!({"occurrence": b, "parent": group_component}));
+    let moved = side_b(&mut s);
+    assert_eq!(moved["resolves"], json!(true), "{moved}");
+    assert_eq!(moved["snap"]["plane"]["datum"], json!(format!("o:{group}/{b}/origin/XY")));
+    let errors = joint(&mut s)["errors"].clone();
+    assert!(errors.as_array().is_none_or(Vec::is_empty), "{errors}");
+
+    run(&mut s, "occurrence.reparent", json!({"occurrence": b, "parent": "root"}));
+    let back = side_b(&mut s);
+    assert_eq!(back["resolves"], json!(true), "{back}");
+    assert_eq!(back["snap"]["plane"]["datum"], json!(format!("o:{b}/origin/XY")));
+}
+
 /// A component can't go inside itself or what it holds. Out of a parent placed more than once it
 /// moves from the placement named, keeping that one's place in the world.
 /// #11063: a part with a hole cut from a sketch on its disc's top face moves into another

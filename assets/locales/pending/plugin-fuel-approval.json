@@ -42,5 +42,9 @@
   "zh": {
     "plugin_install.fuel": "最多 {fuel} fuel。除非您允许更多，否则插件最多可用 {limit}。",
     "prefs.plugin_approved_fuel": "最多 {fuel} fuel"
+  },
+  "fr": {
+    "plugin_install.fuel": "Jusqu’à {fuel} unités de carburant. Les plugiciels disposent de {limit}, sauf si vous autorisez davantage.",
+    "prefs.plugin_approved_fuel": "jusqu’à {fuel} unités de carburant"
   }
 }

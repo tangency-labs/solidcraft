@@ -235,6 +235,7 @@ fn split_soft<T>(r: Result<T>) -> Result<core::result::Result<T, SolidError>> {
         Err(
             e @ (SolidError::Unported { .. }
             | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }),
         ) => Err(e),
@@ -1828,32 +1829,48 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     }
                 }
 
-                // ... and ProtoFaces have EdgeDefinitions too.
-                let pfs: Vec<ProtoFaceId> = self.proto_faces().to_vec();
-                for &this_pf in &pfs {
-                    let coinc: Vec<ProtoEdgeId> = self
+                // ... and ProtoFaces have EdgeDefinitions too. Not upstream: each coincident
+                // proto edge is taken once, however many proto faces list it, and every
+                // definition on a deleted edge goes. Upstream takes an edge once per proto
+                // face that lists it and, as above, steps past the definition that moves
+                // down after a removal, so how many of such definitions went hung on how the
+                // proto faces had been split (`update_faces` no longer splits them).
+                let mut coinc: Vec<ProtoEdgeId> = Vec::new();
+                let mut seen = std::collections::BTreeSet::new();
+                for &this_pf in self.proto_faces() {
+                    let listed = self
                         .proto_face(this_pf)
                         .ok_or(dangling("proto face is deleted"))?
-                        .coinc_proto_edges()
-                        .to_vec();
-                    for this_pe in coinc {
-                        let mut nn = 0;
-                        loop {
-                            let list = self
+                        .coinc_proto_edges();
+                    coinc.extend(listed.iter().copied().filter(|&pe| seen.insert(pe)));
+                }
+                for this_pe in coinc {
+                    let mut nn = 0;
+                    loop {
+                        let list = self
+                            .proto_edge(this_pe)
+                            .ok_or(dangling("proto edge is deleted"))?
+                            .edge_definitions();
+                        let Some(&ed) = list.get(nn) else { break };
+                        let d = self
+                            .edge_def(ed)
+                            .ok_or(dangling("edge definition is deleted"))?;
+                        let hit = d.final_edge(1).is_some_and(|e| deleted_edges1.contains(&e))
+                            || d.final_edge(2).is_some_and(|e| deleted_edges2.contains(&e));
+                        if hit {
+                            self.remove_edge_definition(ed, false)?;
+                            // the next definition moved down into this slot
+                            let still = self
                                 .proto_edge(this_pe)
                                 .ok_or(dangling("proto edge is deleted"))?
-                                .edge_definitions();
-                            let Some(&ed) = list.get(nn) else { break };
-                            let d = self
-                                .edge_def(ed)
-                                .ok_or(dangling("edge definition is deleted"))?;
-                            let hit = d.final_edge(1).is_some_and(|e| deleted_edges1.contains(&e))
-                                || d.final_edge(2).is_some_and(|e| deleted_edges2.contains(&e));
-                            if hit {
-                                self.remove_edge_definition(ed, false)?;
+                                .edge_definitions()
+                                .get(nn)
+                                == Some(&ed);
+                            if !still {
+                                continue;
                             }
-                            nn += 1;
                         }
+                        nn += 1;
                     }
                 }
             }

@@ -447,20 +447,7 @@ impl Sketch {
         }
         let id = if geom.is_empty() {
             let id = self.fresh("j")?;
-            self.links.push(Link {
-                sketch_placements: Vec::new(),
-                id: id.clone(),
-                kind,
-                source,
-                face_name: None,
-                edge_name: None,
-                vertex_name: None,
-                curve_edges: Vec::new(),
-                profile_boundary: Vec::new(),
-                auto_face: false,
-                lost: false,
-                name_dropped: false,
-            });
+            self.links.push(Link::new(id.clone(), kind, source));
             id
         } else {
             self.add_link(kind, source, geom)?
