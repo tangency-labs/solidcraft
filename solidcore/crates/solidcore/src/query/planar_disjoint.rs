@@ -233,28 +233,39 @@ pub(crate) fn planar_interiors_disjoint(
     let edge_faces_a = index_edge_faces(&faces_a);
     let edge_faces_b = index_edge_faces(&faces_b);
 
+    // Track `Undecided` without short-circuiting so a proved `Verdict::No` overlap in a later
+    // check always wins over a sub-tolerance `Undecided` in an earlier check. A false `Yes` is
+    // impossible because `undecided` prevents returning `Verdict::Yes`.
+    let mut undecided = false;
+    let mut record = |v: Verdict| -> Option<Verdict> {
+        match v {
+            Verdict::Yes => None,
+            Verdict::No => Some(Verdict::No),
+            Verdict::Undecided => {
+                undecided = true;
+                None
+            }
+        }
+    };
+
     // Check A: every vertex of `faces_a` against `b`, and vice versa.
-    match check_vertices(k, &faces_a, b, &faces_b, tol_b, eps)? {
-        Verdict::Yes => {}
-        other => return Ok(other),
+    if let Some(no) = record(check_vertices(k, &faces_a, b, &faces_b, tol_b, eps)?) {
+        return Ok(no);
     }
-    match check_vertices(k, &faces_b, a, &faces_a, tol_a, eps)? {
-        Verdict::Yes => {}
-        other => return Ok(other),
+    if let Some(no) = record(check_vertices(k, &faces_b, a, &faces_a, tol_a, eps)?) {
+        return Ok(no);
     }
 
     // Check B: every edge of `faces_a` split at every face plane of `faces_b`, and vice versa.
-    match check_edges(k, &faces_a, b, &faces_b, tol_b, eps)? {
-        Verdict::Yes => {}
-        other => return Ok(other),
+    if let Some(no) = record(check_edges(k, &faces_a, b, &faces_b, tol_b, eps)?) {
+        return Ok(no);
     }
-    match check_edges(k, &faces_b, a, &faces_a, tol_a, eps)? {
-        Verdict::Yes => {}
-        other => return Ok(other),
+    if let Some(no) = record(check_edges(k, &faces_b, a, &faces_a, tol_a, eps)?) {
+        return Ok(no);
     }
 
     // Check C: face-face coplanar and transverse crossing analysis.
-    match check_face_pairs(
+    if let Some(no) = record(check_face_pairs(
         k,
         &faces_a,
         &faces_b,
@@ -262,24 +273,25 @@ pub(crate) fn planar_interiors_disjoint(
         &edge_faces_b,
         tol_max,
         eps,
-    )? {
-        Verdict::Yes => {}
-        other => return Ok(other),
+    )?) {
+        return Ok(no);
     }
 
     // Check D: one certified strict interior point of every face in `faces_a` against `b`,
     // and vice versa (catches full-face containment whose boundary lies on the other solid's
     // edges, such as an equatorial slice of an octahedron).
-    match check_face_interiors(k, &faces_a, b, &faces_b, tol_b, eps)? {
-        Verdict::Yes => {}
-        other => return Ok(other),
+    if let Some(no) = record(check_face_interiors(k, &faces_a, b, &faces_b, tol_b, eps)?) {
+        return Ok(no);
     }
-    match check_face_interiors(k, &faces_b, a, &faces_a, tol_a, eps)? {
-        Verdict::Yes => {}
-        other => return Ok(other),
+    if let Some(no) = record(check_face_interiors(k, &faces_b, a, &faces_a, tol_a, eps)?) {
+        return Ok(no);
     }
 
-    Ok(Verdict::Yes)
+    Ok(if undecided {
+        Verdict::Undecided
+    } else {
+        Verdict::Yes
+    })
 }
 
 /// Extracts all faces of `brep` whose bounding boxes meet `region`. Returns `Ok(None)` if
@@ -326,7 +338,7 @@ fn void_side_faceuse(brep: &Brep, f: FaceId) -> Result<Option<FaceuseId>> {
     if m0 == m1 {
         return Ok(None);
     }
-    Ok(if !m0 { fu0 } else { fu1 })
+    Ok(if m0 { fu1 } else { fu0 })
 }
 
 /// Extracts one planar face with straight line edges and a verified outward unit normal.
@@ -515,10 +527,16 @@ fn classify_point_strict(
     eps: f64,
 ) -> Result<StrictPoint> {
     let mut d_min = f64::INFINITY;
+    let mut second_d_min = f64::INFINITY;
+    let mut nearest: Option<&PlanarFace> = None;
     for face in faces {
         let d = point_to_face_distance_3d(face, p);
         if d < d_min {
+            second_d_min = d_min;
             d_min = d;
+            nearest = Some(face);
+        } else if d < second_d_min {
+            second_d_min = d;
         }
         if d_min <= eps {
             return Ok(StrictPoint::OnBoundary);
@@ -547,7 +565,29 @@ fn classify_point_strict(
                 StrictPoint::Outside
             }
         }
-        _ => StrictPoint::Undecided,
+        _ => {
+            // In the sub-tolerance band where `p` is strictly off every face (`d_min > eps`)
+            // yet the B-rep's own face tolerance absorbed `point_3d_classify`, a unique
+            // nearest planar face whose 2D interior contains `p`'s projection certifies the
+            // exact side from its outward normal.
+            nearest
+                .filter(|face| {
+                    d_min <= 2.0 * tol
+                        && d_min + eps < second_d_min
+                        && point_in_polygon_2d(&face.loops_2d, face.project_2d(p), eps)
+                            == PolyClass::Inside
+                })
+                .map_or(StrictPoint::Undecided, |face| {
+                    let signed = (p - face.origin).dot(face.normal);
+                    if signed < -eps {
+                        StrictPoint::Inside
+                    } else if signed > eps {
+                        StrictPoint::Outside
+                    } else {
+                        StrictPoint::Undecided
+                    }
+                })
+        }
     })
 }
 
@@ -560,6 +600,7 @@ fn check_vertices(
     eps: f64,
 ) -> Result<Verdict> {
     let mut tested: Vec<Point3> = Vec::new();
+    let mut undecided = false;
     for face in from_faces {
         for lp in &face.loops_3d {
             for &p in lp {
@@ -570,13 +611,17 @@ fn check_vertices(
                 k.check_cancelled("query::contact::planar_interiors_disjoint")?;
                 match classify_point_strict(k, other, other_faces, p, other_tol, eps)? {
                     StrictPoint::Inside => return Ok(Verdict::No),
-                    StrictPoint::Undecided => return Ok(Verdict::Undecided),
+                    StrictPoint::Undecided => undecided = true,
                     StrictPoint::Outside | StrictPoint::OnBoundary => {}
                 }
             }
         }
     }
-    Ok(Verdict::Yes)
+    Ok(if undecided {
+        Verdict::Undecided
+    } else {
+        Verdict::Yes
+    })
 }
 
 fn check_edges(
@@ -588,6 +633,7 @@ fn check_edges(
     eps: f64,
 ) -> Result<Verdict> {
     let mut seen_edges: BTreeSet<EdgeId> = BTreeSet::new();
+    let mut undecided = false;
     for face in from_faces {
         for edge in &face.edges {
             if !seen_edges.insert(edge.edge_id) {
@@ -597,7 +643,8 @@ fn check_edges(
             let dir = edge.end - edge.start;
             let len = dir.length();
             if !(len > eps && len.is_finite()) {
-                return Ok(Verdict::Undecided);
+                undecided = true;
+                continue;
             }
             let e_box = Aabb::from_segment(edge.start, edge.end, eps);
             let mut params = vec![0.0_f64, 1.0_f64];
@@ -626,13 +673,17 @@ fn check_edges(
                 let mid = edge.start + dir * (0.5 * (t0 + t1));
                 match classify_point_strict(k, other, other_faces, mid, other_tol, eps)? {
                     StrictPoint::Inside => return Ok(Verdict::No),
-                    StrictPoint::Undecided => return Ok(Verdict::Undecided),
+                    StrictPoint::Undecided => undecided = true,
                     StrictPoint::Outside | StrictPoint::OnBoundary => {}
                 }
             }
         }
     }
-    Ok(Verdict::Yes)
+    Ok(if undecided {
+        Verdict::Undecided
+    } else {
+        Verdict::Yes
+    })
 }
 
 fn check_face_interiors(
@@ -643,18 +694,24 @@ fn check_face_interiors(
     other_tol: f64,
     eps: f64,
 ) -> Result<Verdict> {
+    let mut undecided = false;
     for face in from_faces {
         k.check_cancelled(OP)?;
         let Some(pt) = face_interior_point_3d(k, face, eps)? else {
-            return Ok(Verdict::Undecided);
+            undecided = true;
+            continue;
         };
         match classify_point_strict(k, other, other_faces, pt, other_tol, eps)? {
             StrictPoint::Inside => return Ok(Verdict::No),
-            StrictPoint::Undecided => return Ok(Verdict::Undecided),
+            StrictPoint::Undecided => undecided = true,
             StrictPoint::Outside | StrictPoint::OnBoundary => {}
         }
     }
-    Ok(Verdict::Yes)
+    Ok(if undecided {
+        Verdict::Undecided
+    } else {
+        Verdict::Yes
+    })
 }
 
 fn check_face_pairs(
@@ -666,6 +723,7 @@ fn check_face_pairs(
     tol_max: f64,
     eps: f64,
 ) -> Result<Verdict> {
+    let mut undecided = false;
     for f in faces_a {
         k.check_cancelled(OP)?;
         let f_box = f.bbox.inflated(2.0 * tol_max);
@@ -685,11 +743,16 @@ fn check_face_pairs(
                 eps,
             )? {
                 Verdict::Yes => {}
-                other => return Ok(other),
+                Verdict::No => return Ok(Verdict::No),
+                Verdict::Undecided => undecided = true,
             }
         }
     }
-    Ok(Verdict::Yes)
+    Ok(if undecided {
+        Verdict::Undecided
+    } else {
+        Verdict::Yes
+    })
 }
 
 fn signed_range_on_plane(

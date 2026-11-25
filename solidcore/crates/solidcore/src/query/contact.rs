@@ -469,7 +469,7 @@ fn bracket(
                     if made >= MAX_PAIRS {
                         return Ok((0.0, f64::INFINITY, None, false));
                     }
-                    if made & 255 == 0 {
+                    if made.trailing_zeros() >= 8 {
                         k.check_cancelled(OP)?;
                     }
                     let lower = (pair_lower(x, y, None)? - fa.slack - fb.slack).max(0.0);
