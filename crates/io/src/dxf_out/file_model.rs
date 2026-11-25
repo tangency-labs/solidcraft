@@ -169,7 +169,7 @@ impl DxfTextSource {
     }
 
     pub(super) fn transformed(&self, translation: Vec2, scale: f64) -> Result<Self> {
-        let first_anchor_mm = self.first_anchor_mm.map(|p| solidcore_ops::dxf::export::transform_anchor(p, scale, translation));
+        let first_anchor_mm = self.first_anchor_mm.map(|p| solidcraft_kernel::services::dxf::export::transform_anchor(p, scale, translation));
         let raw_group1 = self
             .raw_group1
             .as_deref()

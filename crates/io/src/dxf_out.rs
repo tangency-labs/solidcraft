@@ -426,7 +426,11 @@ pub(super) fn admit_bulged(vertices: &[DxfVertex], closed: bool) -> Result<()> {
     }
     let check = |from: DxfVertex, to: Vec2| -> Result<()> {
         if from.bulge != 0.0
-            && solidcore_ops::dxf::export::bulge_arc(solidcore_ops::dxf::export::Vertex { at: from.at, bulge: from.bulge }, to).is_none()
+            && solidcraft_kernel::services::dxf::export::bulge_arc(
+                solidcraft_kernel::services::dxf::export::Vertex { at: from.at, bulge: from.bulge },
+                to,
+            )
+            .is_none()
         {
             return Err(IoError::Invalid("bulged polyline arc has collapsed or non-finite geometry".into()));
         }
@@ -465,8 +469,11 @@ fn sample_bulged(vertices: &[DxfVertex], closed: bool, out: &mut Vec<Vec2>) -> R
 }
 
 fn sample_bulged_edge(from: DxfVertex, to: Vec2, out: &mut Vec<Vec2>) -> Result<()> {
-    let points = solidcore_ops::dxf::export::bulged_edge_points(solidcore_ops::dxf::export::Vertex { at: from.at, bulge: from.bulge }, to)
-        .map_err(|error| IoError::Invalid(error.reason))?;
+    let points = solidcraft_kernel::services::dxf::export::bulged_edge_points(
+        solidcraft_kernel::services::dxf::export::Vertex { at: from.at, bulge: from.bulge },
+        to,
+    )
+    .map_err(|error| IoError::Invalid(error.reason))?;
     out.try_reserve(points.len()).map_err(|_| IoError::Invalid("cannot allocate bulged polyline bounds".into()))?;
     out.extend(points);
     Ok(())
@@ -940,16 +947,18 @@ fn shape_preflight(shape: &DxfShape) -> Result<()> {
         DxfShape::Line(a, b) => a.is_finite() && b.is_finite(),
         DxfShape::Polyline { points } => points.len() >= 2 && points.len() <= MAX_DXF_FILE_VALUES && points.iter().all(|p| p.is_finite()),
         DxfShape::Circle { c, r } => c.is_finite() && r.is_finite() && *r > 0.0,
-        DxfShape::Arc { c, r, a0, a1 } => c.is_finite() && r.is_finite() && *r > 0.0 && solidcore_ops::dxf::export::arc_fields_finite(*a0, *a1),
+        DxfShape::Arc { c, r, a0, a1 } => {
+            c.is_finite() && r.is_finite() && *r > 0.0 && solidcraft_kernel::services::dxf::export::arc_fields_finite(*a0, *a1)
+        }
         DxfShape::Ellipse { c, major, ratio, t0, t1 } => {
             c.is_finite()
-                && solidcore_ops::dxf::export::axis_nonzero(*major)
+                && solidcraft_kernel::services::dxf::export::axis_nonzero(*major)
                 && ratio.is_finite()
                 && *ratio > 0.0
                 && *ratio <= 1.0
                 && t0.is_finite()
                 && t1.is_finite()
-                && solidcore_ops::dxf::export::finite_span(*t0, *t1)
+                && solidcraft_kernel::services::dxf::export::finite_span(*t0, *t1)
         }
         DxfShape::Spline { degree, knots, ctrl, weights } => {
             let degree = usize::from(*degree);
@@ -975,7 +984,7 @@ fn shape_preflight(shape: &DxfShape) -> Result<()> {
         }
         DxfShape::Text { at, height, angle_deg, text } | DxfShape::AlignedText { at, height, angle_deg, text, .. } => {
             text_encode::writable(text)?;
-            at.is_finite() && height.is_finite() && *height > 0.0 && solidcore_ops::dxf::export::finite_degrees(*angle_deg)
+            at.is_finite() && height.is_finite() && *height > 0.0 && solidcraft_kernel::services::dxf::export::finite_degrees(*angle_deg)
         }
     };
     if !finite {
@@ -1121,7 +1130,7 @@ fn shape_emission_preflight(shape: &DxfShape) -> Result<()> {
         DxfShape::Circle { r, .. } => positive(emitted_length(*r)?)?,
         DxfShape::Arc { r, a0, a1, .. } => {
             positive(emitted_length(*r)?)?;
-            if !solidcore_ops::dxf::export::distinct_degrees(emitted_number(*a0)?, emitted_number(*a1)?) {
+            if !solidcraft_kernel::services::dxf::export::distinct_degrees(emitted_number(*a0)?, emitted_number(*a1)?) {
                 return Err(collapse());
             }
         }
@@ -1164,7 +1173,7 @@ fn shape_emission_preflight(shape: &DxfShape) -> Result<()> {
 
 fn extend_extents(extents: Option<(Vec2, Vec2)>, point: Vec2) -> (Vec2, Vec2) {
     extents.map_or((point, point), |(lo, hi)| {
-        let b = solidcore_ops::dxf::export::union_bounds(lo, hi, point, point);
+        let b = solidcraft_kernel::services::dxf::export::union_bounds(lo, hi, point, point);
         (b.min, b.max)
     })
 }
@@ -3238,11 +3247,13 @@ mod tests {
             ("BEND_NOTES", 8, DxfLinetype::Continuous),
             ("PERFORATION", 3, DxfLinetype::Continuous),
             ("ROLL", 3, DxfLinetype::Continuous),
+            ("FORM_UP", 1, DxfLinetype::Dashed),
+            ("FORM_DOWN", 5, DxfLinetype::Dashed),
             ("POCKET_TOP_Z0.000000_TO_1.000000_MM", 3, DxfLinetype::Continuous),
         ] {
             every.declare_layer(name, color, linetype, None).unwrap();
         }
-        assert_eq!(every.layers().len(), 11);
+        assert_eq!(every.layers().len(), 13);
         write_dxf_file(&every).unwrap();
     }
 
@@ -3251,7 +3262,7 @@ mod tests {
     fn flat_with_every_role() -> DxfFile<DxfShape> {
         let neutral = DxfExportProfile::neutral();
         let mut file = DxfFile::for_flat_pattern_export(4, 4, 1).unwrap();
-        for role in DxfRole::ALL {
+        for &role in DxfRole::ALL {
             let style = neutral.role(role).unwrap();
             let name = if role == DxfRole::Pockets { format!("{}_TOP_Z0.000000_TO_1.000000_MM", style.layer) } else { style.layer.clone() };
             // The neutral profile holds what the producer's contract admits, or this is refused.
@@ -3311,7 +3322,7 @@ mod tests {
         let dxf = write_dxf_file_as(&file, &shop).unwrap();
         // 0 first, then by name; outline and cut share CUT, both bend directions share FOLD (layer
         // names ignore case), the notes and the roll have no layer, and what the profile leaves
-        // alone (ETCH, PERFORATION, the letters' colour) is as it was.
+        // alone (ETCH, PERFORATION, the bead layers, the letters' colour) is as it was.
         let row = |name: &str, color: &str, linetype: &str| (name.to_string(), color.to_string(), linetype.to_string());
         assert_eq!(
             layer_rows(&dxf),
@@ -3321,6 +3332,8 @@ mod tests {
                 row("CUT", "7", "Continuous"),
                 row("ETCH", "6", "Continuous"),
                 row("FOLD", "3", "HIDDEN"),
+                row("FORM_DOWN", "5", "DASHED"),
+                row("FORM_UP", "1", "DASHED"),
                 row("MILL_TOP_Z0.000000_TO_1.000000_MM", "6", "DASHED"),
                 row("PERFORATION", "3", "Continuous"),
             ]
@@ -3339,13 +3352,15 @@ mod tests {
                 ("LINE", "fold"),
                 ("LINE", "MILL_TOP_Z0.000000_TO_1.000000_MM"),
                 ("CIRCLE", "PERFORATION"),
+                ("LINE", "FORM_UP"),
+                ("LINE", "FORM_DOWN"),
             ]
         );
         // The linetypes the layers name are defined in the file.
         let types = table_records(&pairs(&dxf), "LTYPE");
         let types: Vec<&str> = types.iter().map(|r| field(r, 2)).collect();
         assert!(types.contains(&"HIDDEN") && types.contains(&"DASHED"), "{types:?}");
-        assert_eq!(crate::read_dxf_file(&dxf).unwrap().entities().len(), 8);
+        assert_eq!(crate::read_dxf_file(&dxf).unwrap().entities().len(), 10);
 
         // Every role off: a file with layer 0 only.
         let off: serde_json::Map<String, serde_json::Value> =

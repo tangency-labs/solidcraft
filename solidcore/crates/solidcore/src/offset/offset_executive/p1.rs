@@ -569,8 +569,12 @@ impl OffsetExecutive {
     /// beyond a collapsed face, seen from its edge use `edgeuse`. Across a rail (a
     /// tangent edge of a four-sided round) it is the radial of the opposite rail; across
     /// an end edge, seen from `from` (one of that edge's vertices), the radial of the
-    /// rail at the edge's other vertex. `None` when the edge use's face did not
-    /// collapse, the face across collapsed too, or the face has another shape.
+    /// rail at the edge's other vertex. A round of more or fewer sides (one that meets
+    /// another round at a corner, or ends on a sliver of a third face) has its rails
+    /// told from its ends by what they bound: across a rail it is the radial of the
+    /// loop's one other tangent edge onto a face that keeps an offset. `None` when the
+    /// edge use's face did not collapse, the face across collapsed too, or the face has
+    /// another shape.
     ///
     /// # Errors
     ///
@@ -592,11 +596,33 @@ impl OffsetExecutive {
         let tan_tol_deg = self.tangency_tol_degrees();
         let next = if eu2::is_tangent_sector(kernel, original, edgeuse, tan_tol_deg, false, true)? {
             let loopuse = present(eu::loopuse(original, edgeuse)?, EU_NO_LOOPUSE)?;
-            if eu::loopuse_edgeuses(original, loopuse)?.len() != 4 {
-                return Ok(None);
+            let uses = eu::loopuse_edgeuses(original, loopuse)?;
+            if uses.len() == 4 {
+                let ccw = present(eu::ccw_edgeuse(original, edgeuse)?, EU_NO_NEIGHBOUR)?;
+                eu::ccw_edgeuse(original, ccw)?
+            } else {
+                // a rail is a tangent edge onto a face that keeps an offset: an end met by
+                // another collapsed round (a seam's split, a corner's mitre) is not one
+                let mut rails = Vec::new();
+                for &u in &uses {
+                    if u == edgeuse
+                        || !eu2::is_tangent_sector(kernel, original, u, tan_tol_deg, false, true)?
+                    {
+                        continue;
+                    }
+                    let beyond = match eu::radial(original, u)? {
+                        Some(r) if r != u => eu::face(original, r)?,
+                        _ => None,
+                    };
+                    if beyond.is_some_and(|f| !self.is_collapsed_face(f)) {
+                        rails.push(u);
+                    }
+                }
+                match rails.as_slice() {
+                    [rail] => Some(*rail),
+                    _ => None,
+                }
             }
-            let ccw = present(eu::ccw_edgeuse(original, edgeuse)?, EU_NO_NEIGHBOUR)?;
-            eu::ccw_edgeuse(original, ccw)?
         } else {
             let Some(from) = from else {
                 return Ok(None);

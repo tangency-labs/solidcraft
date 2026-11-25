@@ -5,9 +5,9 @@
 //! arcs and points (free-form curves as polylines); the flat pattern's drawing, with ELLIPSE and SPLINE, is
 //! [`crate::write_dxf_file`].
 
-use solidcore_ops::dxf::import::{scale_point, scale_value};
 use solidcore_record::{MAX_BEZIER_DEGREE, Vec2};
 use solidcraft_geom::prelude::*;
+use solidcraft_kernel::services::dxf::import::{scale_point, scale_value};
 
 use crate::sketch2d::{Geom2, MAX_DRAWING_BYTES, MAX_ENTITIES, bulge_arc};
 // Shared X2 model; the partial reader below consumes the real metadata API.
@@ -749,12 +749,12 @@ fn layered_ellipse(entity: &Ent, k: f64) -> Result<DxfShape> {
     let ratio = layered_required(entity, 40)?;
     let t0 = layered_required(entity, 41)?;
     let t1 = layered_required(entity, 42)?;
-    match solidcore_ops::dxf::import::ellipse_support(c, major, ratio) {
-        solidcore_ops::dxf::import::EllipseSupport::Valid => {}
-        solidcore_ops::dxf::import::EllipseSupport::InvalidMajor => {
+    match solidcraft_kernel::services::dxf::import::ellipse_support(c, major, ratio) {
+        solidcraft_kernel::services::dxf::import::EllipseSupport::Valid => {}
+        solidcraft_kernel::services::dxf::import::EllipseSupport::InvalidMajor => {
             return Err(IoError::Invalid("invalid or degenerate layered DXF ellipse support".into()));
         }
-        solidcore_ops::dxf::import::EllipseSupport::CollapsedMinor => {
+        solidcraft_kernel::services::dxf::import::EllipseSupport::CollapsedMinor => {
             return Err(IoError::Invalid("DXF ellipse minor axis collapses in the represented units".into()));
         }
     }
