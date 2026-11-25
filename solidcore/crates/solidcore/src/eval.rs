@@ -18,6 +18,7 @@
 pub mod agreement;
 pub mod check;
 pub mod collapse;
+pub mod constraint;
 pub mod curve;
 pub mod folded;
 pub mod form;

@@ -2026,6 +2026,52 @@ fn a_join_into_the_only_body_makes_no_contact_test() {
     assert!((volume(&model, "B") - (2000.0 + 64.0)).abs() < 1e-6, "{}", volume(&model, "B"));
 }
 
+/// A cut that takes nothing from the body says so without measuring its volume: the cut's
+/// history traces every face of the body to the body itself, so the tool took no material
+/// (#8990: two exact volumes, a second each, for one such cut). A cut that takes material is
+/// still told apart, and says nothing.
+#[test]
+fn a_cut_that_takes_nothing_is_known_without_measuring() {
+    // A square on XY from (x, y) to (x + 4, y + 4), cut 4 mm up into block A.
+    let cut_at = |doc: &mut Document, x: f64, y: f64| {
+        let mut sk = Sketch::new();
+        let p = [(x, y), (x + 4.0, y), (x + 4.0, y + 4.0), (x, y + 4.0)].map(|(x, y)| sk.add_point(Vec2::new(x, y), None).unwrap());
+        for k in 0..4 {
+            sk.add_line_pts(p[k], p[(k + 1) % 4], None).unwrap();
+        }
+        let sketch = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, None).unwrap();
+        let kind = FeatureKind::Extrude {
+            thin: None,
+            sketch: SketchId(sketch),
+            profiles: ProfileSel::All,
+            extent: serde_json::from_value(serde_json::json!({"distance": "4"})).unwrap(),
+            operation: Operation::Cut,
+            targets: vec![],
+        };
+        doc.add_feature(kind, Some("Cut")).unwrap()
+    };
+    // Against the block's side at x 10, face to face: it takes nothing.
+    let mut doc = Document::new("beside");
+    block(&mut doc, "A", Vec3::new(-10.0, -5.0, 0.0), [20.0, 10.0, 10.0]);
+    let cut = cut_at(&mut doc, 10.0, -2.0);
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    let result = model.result(cut).unwrap();
+    assert!(result.error.is_none(), "{:?}", result.error);
+    assert!(result.warning.as_deref().is_some_and(|w| w.contains("the cut removes no material")), "{:?}", result.warning);
+    assert_eq!(work.measures, 0, "{work:?}");
+    assert!((volume(&model, "A") - 2000.0).abs() < 1e-6, "{}", volume(&model, "A"));
+    // Into the block's corner: it takes 2 x 2 x 4 mm, and says nothing.
+    let mut doc = Document::new("into");
+    block(&mut doc, "A", Vec3::new(-10.0, -5.0, 0.0), [20.0, 10.0, 10.0]);
+    let cut = cut_at(&mut doc, 8.0, 3.0);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let result = model.result(cut).unwrap();
+    assert!(result.error.is_none() && result.warning.is_none(), "{:?} {:?}", result.error, result.warning);
+    assert!((volume(&model, "A") - (2000.0 - 16.0)).abs() < 1e-6, "{}", volume(&model, "A"));
+}
+
 /// `comps` parts, each with `bodies` boxes, `sketches` sketches and `taps` taps, placed `copies`
 /// times: a design and its state, made without evaluating it.
 fn placed_parts(comps: usize, bodies: usize, sketches: usize, taps: usize, copies: usize) -> (Document, ModelState) {
@@ -3548,6 +3594,56 @@ fn a_hole_classifies_its_bottom_in_the_bodies_there_only() {
     assert!((plate - through).abs() < 1e-6 * through, "{plate}");
     assert!((under.unwrap() - 50_000.0).abs() < 1e-6 * 50_000.0, "the slab is not drilled: {under:?}");
     assert_eq!(work.hole_points, 4, "{work:?}");
+}
+
+#[test]
+fn targeted_holes_and_their_copies_classify_only_the_plate() {
+    let mut doc = Document::new("plate and reference");
+    let reference = MeshData {
+        name: "Reference".into(),
+        // A tetrahedron whose box contains both holes. At the plate's bottom (z = 0)
+        // the mesh ends at x + y = 45, and the plate starts at x + y = 48.
+        positions: [0., 0., -5., 60., 0., -5., 0., 60., -5., 0., 0., 15.].into(),
+        triangles: [0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3].into(),
+        color: None,
+        corner_normals: Default::default(),
+    };
+    doc.add_feature(FeatureKind::MeshImport { file: "reference.stl".into(), meshes: vec![reference] }, Some("Reference")).unwrap();
+    let plate = doc
+        .add_feature(
+            serde_json::from_value(serde_json::json!({"type": "box", "corner": [24, 24, 0], "length": "10", "width": "10", "height": "10"})).unwrap(),
+            Some("Plate"),
+        )
+        .unwrap();
+    doc.feature_mut(plate).unwrap().body_names = vec!["Plate".into()];
+    let hole = doc
+        .add_feature(
+            serde_json::from_value(serde_json::json!({
+                "type": "hole", "position": [27, 27, 10], "direction": [0, 0, -1], "diameter": "3", "depth": "5",
+            }))
+            .unwrap(),
+            Some("Hole"),
+        )
+        .unwrap();
+    doc.feature_mut(hole).unwrap().participants = vec!["Plate".into()];
+    doc.add_feature(
+        serde_json::from_value(serde_json::json!({
+            "type": "pattern", "features": [hole],
+            "pattern": {"type": "rectangular", "dir1": [1, 0, 0], "count1": "2", "spacing1": "4"},
+        }))
+        .unwrap(),
+        Some("Copy"),
+    )
+    .unwrap();
+
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+    // Two samples either side of the depth of each of the two holes.
+    assert_eq!(work.hole_points, 4, "{work:?}");
+    let volume = kernel::measure(&model.state().body("Plate").unwrap().body).unwrap().volume;
+    let expected = 1000.0 - 2.0 * std::f64::consts::PI * 1.5 * 1.5 * 5.0;
+    assert!((volume - expected).abs() < 1e-6 * expected, "{volume} against {expected}");
 }
 
 /// A pattern of a hole builds its tools once when every copy is drilled the same way, and for

@@ -50,6 +50,7 @@ use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use solidcore_record::brep::Loop as Bounds;
+use solidcore_record::brep::history::FaceOrigin;
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_develop::{
     Anchor, Bend, Corner, CornerRelief, Cut, Datum, Development, Fold, Joint, JointKind, Lap, Panel, Query, Relief, Rigid2, Rigid3, Rip, Sheet,
@@ -2982,7 +2983,8 @@ impl SurfaceConversion {
         let folded = fold_onto(&self.sheet, &self.development, &placed)?;
         let mut solids = Vec::with_capacity(parts.len());
         for (part, pieces) in parts {
-            let made = crate::sheet_surface_fold::solid(&self.development, &folded, self.thickness, &pieces, &mut FlatWork::new(), &|_, _| None)?;
+            let made =
+                crate::sheet_surface_fold::solid(&self.development, &folded, self.thickness, &pieces, &[], &mut FlatWork::new(), &|_, _| None)?;
             solids.push((part, made.0));
         }
         let own_bend = |a: Part, b: Part| match (a, b) {
@@ -3026,7 +3028,7 @@ impl SurfaceConversion {
     pub fn solid(&self) -> Result<Body> {
         let places: Vec<Option<Rigid3>> = self.places.iter().copied().map(Some).collect();
         let folded = fold_onto(&self.sheet, &self.development, &places)?;
-        Ok(crate::sheet_surface_fold::solid(&self.development, &folded, self.thickness, self.pieces()?, &mut FlatWork::new(), &|_, _| None)?.0)
+        Ok(crate::sheet_surface_fold::solid(&self.development, &folded, self.thickness, self.pieces()?, &[], &mut FlatWork::new(), &|_, _| None)?.0)
     }
 
     /// [`Self::solid`], with what each face was made for (see [`crate::sheet::FaceNamer`]) and
@@ -3037,14 +3039,14 @@ impl SurfaceConversion {
         let places: Vec<Option<Rigid3>> = self.places.iter().copied().map(Some).collect();
         let folded = fold_onto(&self.sheet, &self.development, &places)?;
         let pieces = self.pieces()?;
-        let namer = crate::sheet::FaceNamer::new(&sk.sheet, &self.development, pieces, &[], &sk.recipes);
+        let namer = crate::sheet::FaceNamer::new(&sk.sheet, &self.development, pieces, &[], &sk.recipes, &[]);
         let made = std::cell::RefCell::new(Vec::new());
         let keep = |p: crate::sheet_surface::Piece, r: crate::sheet::FaceRole| {
             let mut made = made.borrow_mut();
             made.push((p, r));
             Some((made.len() - 1).to_string())
         };
-        let (body, keys) = crate::sheet_surface_fold::solid(&self.development, &folded, self.thickness, pieces, &mut FlatWork::new(), &keep)?;
+        let (body, keys) = crate::sheet_surface_fold::solid(&self.development, &folded, self.thickness, pieces, &[], &mut FlatWork::new(), &keep)?;
         let made = made.into_inner();
         let at = |k: &Option<String>| k.as_deref().and_then(|k| k.parse::<usize>().ok()).and_then(|k| made.get(k).copied());
         // What each face was made for, and a panel's cap's sketch frame, carried through the cuts.
@@ -3315,6 +3317,9 @@ pub struct SurfaceSheet {
     /// The holes cuts made in its panels (see [`HoleRecord`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub holes: Vec<HoleRecord>,
+    /// The beads pressed into its planar panels (see `sheet_surface_bead`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub beads: Vec<crate::SurfaceBead>,
 }
 
 /// What a face of a sheet's body was made for, by its builder: the sheet's own structure, never a
@@ -3335,8 +3340,13 @@ pub enum SheetPart {
     Tab { panel: String, surface: bool },
     /// A wall of a hole the cut `feature` made, along its sketch curve `curve`.
     Hole { feature: u64, curve: String },
+    /// A face drilled by a hole tool at one sketch point, by the tool's part and face role.
+    Drill { feature: u64, role: String },
     /// A wall of the relief cut where the bends that make `panels` (sorted) meet at a corner.
     Relief { panels: [String; 2] },
+    /// A face of the bead the feature `feature` pressed along its sketch curve `curve`: `face` is
+    /// what it is (see `sheet_surface_bead::face_role`).
+    Bead { feature: u64, curve: String, face: String },
 }
 
 /// What made an edge of a panel's outline.
@@ -3377,6 +3387,9 @@ pub struct SheetFace {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub place: Option<usize>,
 }
+
+/// A built face's part, its place along the part, and its sketch frame where it has one.
+type BuiltSheetFace = (Option<(SheetPart, Option<f64>)>, Option<Plane>);
 
 /// What made a panel of a sheet made from surfaces: the feature, and what it made the panel from
 /// or on. Its faces are named by it (see `lineage::sheet_lineage`).
@@ -3422,6 +3435,9 @@ pub struct HoleRecord {
     pub panel: String,
     pub feature: u64,
     pub segs: Vec<(Seg2, String, Option<Seg2>)>,
+    /// A drilled circle's wall has a point-based role in place of a sketch curve.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) drill_role: Option<String>,
 }
 
 /// The sketch frame of a cap of panel `i` of a sheet developed as `dev`, whose chart `frame` puts
@@ -3649,6 +3665,7 @@ impl SurfaceSheet {
             parts: Vec::new(),
             recipes,
             holes: Vec::new(),
+            beads: Vec::new(),
         };
         sheet.laid_out(&c.development, c.pieces()?, c.flat()?)?;
         let (solid, parts, frames) = c.parted_solid(&sheet)?;
@@ -3848,6 +3865,7 @@ impl SurfaceSheet {
             parts: Vec::new(),
             recipes,
             holes: Vec::new(),
+            beads: Vec::new(),
         };
         let solid = sheet.build()?;
         Ok((sheet, solid))
@@ -4160,7 +4178,7 @@ impl SurfaceSheet {
             let frames = folded.places.clone();
             (Some(folded), frames)
         };
-        let namer = crate::sheet::FaceNamer::new(&self.sheet, &dev, &pieces, &self.sketch_curves, &self.recipes);
+        let namer = crate::sheet::FaceNamer::new(&self.sheet, &dev, &pieces, &self.sketch_curves, &self.recipes, &self.beads);
         // What the builder made each face for, in the order it makes them: each face's name from
         // the builder is its place in that order, read back below.
         let made = std::cell::RefCell::new(Vec::new());
@@ -4170,7 +4188,10 @@ impl SurfaceSheet {
             Some((made.len() - 1).to_string())
         };
         let (mut body, keys) = match &folded {
-            Some(folded) => crate::sheet_surface_fold::solid(&dev, folded, self.thickness, &pieces, &mut work, &keep)?,
+            Some(folded) => {
+                let forms = crate::sheet_surface_bead::forms(self, &pieces, folded)?;
+                crate::sheet_surface_fold::solid(&dev, folded, self.thickness, &pieces, &forms, &mut work, &keep)?
+            }
             // Laid flat in the sheet's flat: the same faces, so the flat's are the folded
             // sheet's (#7990).
             None => crate::sheet_surface_fold::solid_flat(&dev, self.flat, self.thickness, &pieces, &mut work, &keep)?,
@@ -4178,8 +4199,7 @@ impl SurfaceSheet {
         let made = made.into_inner();
         let at = |k: &Option<String>| k.as_deref().and_then(|k| k.parse::<usize>().ok()).and_then(|k| made.get(k).copied());
         // What each face was made for, and a panel's cap's sketch frame (the flat pattern's).
-        type Made = (Option<(SheetPart, Option<f64>)>, Option<Plane>);
-        let mut names: Vec<Option<Made>> = keys
+        let mut names: Vec<Option<BuiltSheetFace>> = keys
             .iter()
             .map(|k| {
                 at(k).map(|(p, r)| {
@@ -4203,7 +4223,7 @@ impl SurfaceSheet {
             names = crate::sheet::carried(&names, &body);
         }
         let (body, names) = self.recessed_named(body, names, &frames)?;
-        let (body, names) = self.bored_named(body, names, &frames)?;
+        let (body, names) = self.bored(body, names, &frames)?;
         self.parts = crate::sheet::ranked(names.iter().map(|n| n.as_ref().and_then(|n| n.0.clone())).collect());
         self.frames = names.into_iter().map(|n| n.and_then(|n| n.1)).collect();
         Ok(body)
@@ -4221,20 +4241,14 @@ impl SurfaceSheet {
         Ok(out)
     }
 
-    /// [`Self::bored`], carrying `names`, its faces' names, through each bore.
-    fn bored_named<T: Clone>(&self, body: Body, names: Vec<Option<T>>, frames: &[Option<Rigid3>]) -> Result<(Body, Vec<Option<T>>)> {
-        let mut out = (body, names);
-        for b in &self.bores {
-            let one = SurfaceSheet { bores: vec![*b], ..self.clone() };
-            let body = one.bored(out.0, frames)?;
-            out.1 = crate::sheet::carried(&out.1, &body);
-            out.0 = body;
-        }
-        Ok(out)
-    }
-
-    /// `body` with the sheet's bores cut from it, each from its panel where `frames` put it.
-    fn bored(&self, mut body: Body, frames: &[Option<Rigid3>]) -> Result<Body> {
+    /// Cut each bore in its panel's frame, keeping the body's face parts and identifying new
+    /// faces by the exact cut history and the drill that made them.
+    fn bored(
+        &self,
+        mut body: Body,
+        mut names: Vec<Option<BuiltSheetFace>>,
+        frames: &[Option<Rigid3>],
+    ) -> Result<(Body, Vec<Option<BuiltSheetFace>>)> {
         for b in &self.bores {
             let frame = frames.get(b.panel).copied().flatten().ok_or_else(|| DocError::Invalid("a bored panel has no place".into()))?;
             let axis = frame.vector(b.axis);
@@ -4243,10 +4257,29 @@ impl SurfaceSheet {
             let circle = Region2 { outer: Loop2::circle(Vec2::new(0.0, 0.0), b.radius), holes: Vec::new() };
             let (from, to) = (b.height.min(0.0), b.height.max(0.0));
             let tool = solidcraft_kernel::extrude_planar_regions(&plane, std::slice::from_ref(&circle), from, to)?;
+            let tool_names = match (&b.source, tool.history().filter(|h| h.operands == 0)) {
+                (Some(source), Some(history)) => history
+                    .faces
+                    .iter()
+                    .map(|f| {
+                        // The planar builder can split the drill's one circle into arcs. All
+                        // profile origins of its wall still belong to that one circle.
+                        let role = match f.origins.as_slice() {
+                            [FaceOrigin::Profile { .. }, rest @ ..] if rest.iter().all(|p| matches!(p, FaceOrigin::Profile { .. })) => {
+                                format!("{}:side:0", source.role)
+                            }
+                            origins => crate::lineage::part_role(origins, &source.role)?,
+                        };
+                        Some((Some((SheetPart::Drill { feature: source.feature, role }, None)), None))
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            };
             body = solidcraft_kernel::boolean(&body, &tool, solidcraft_kernel::BoolOp::Cut)?
                 .ok_or_else(|| DocError::Invalid("a bore takes the whole sheet".into()))?;
+            names = crate::sheet::carried_from(&names, &tool_names, &body);
         }
-        Ok(body)
+        Ok((body, names))
     }
 
     /// `body` with the sheet's recesses cut from it, each from its panel where `frames` put it.

@@ -116,6 +116,16 @@ impl State {
             State::Failed => "ui.agent_chat_state_failed",
         })
     }
+    /// Whether the header offers Stop: only while a turn (or the start of the agent) can be
+    /// stopped. An idle, connected agent has nothing to stop.
+    fn shows_stop(self) -> bool {
+        matches!(self, State::Starting | State::Busy)
+    }
+    /// Whether the agent's own sign-in label is shown: only when it needs a login. An agent that
+    /// is connected and signed in may still report a stale "not logged in" label.
+    fn shows_auth_status(self) -> bool {
+        self == State::NeedsAuth
+    }
     fn running(self) -> bool {
         matches!(self, State::Starting | State::Ready | State::Busy | State::NeedsAuth)
     }
@@ -1696,6 +1706,10 @@ pub(crate) fn lit<'a>(
 
 /// How many things the selection is, counting what was clicked (the two halves of a rim are one).
 pub fn selected_count(app: &mut SolveApp) -> usize {
+    // A whole-body selection counts the bodies it covers (they come and go with Hide and Show).
+    if app.session.all_bodies_selected() {
+        return app.session.selected_count().unwrap_or(0);
+    }
     let doc = Arc::as_ptr(&app.session.doc) as usize;
     if let Some((selection, at, count)) = &app.agent_chat.selected_count
         && *at == doc
@@ -2178,7 +2192,7 @@ fn decline_all(app: &mut SolveApp, why: &str) {
 
 /// Allow or deny a held request.
 pub fn approve(app: &mut SolveApp, id: u64, allow: bool) {
-    approve_with(app, id, allow, "the user declined it");
+    approve_with(app, id, allow, "the user declined this call");
 }
 
 /// Allow a held request and remember to allow its tool for this agent from now on.
@@ -2254,7 +2268,7 @@ fn approve_with(app: &mut SolveApp, id: u64, allow: bool, why: &str) {
     if allow {
         app.control_held.push_back(h.req);
     } else {
-        let _ = h.req.reply.send(json!({"ok": false, "error": format!("not run: {why}")}));
+        let _ = h.req.reply.send(json!({"ok": false, "error": format!("{} {why}", solidcraft_control::NOT_RUN)}));
     }
 }
 

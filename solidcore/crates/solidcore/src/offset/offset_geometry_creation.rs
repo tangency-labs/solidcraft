@@ -281,6 +281,9 @@ const OP_TRIM: &str = "offset::offset_geometry_creation::trim_extended_edge";
 const OP_EDGEUSE: &str = "offset::offset_geometry_creation::edgeuse_offset";
 const OP_EXACT_PIECE: &str = "offset::offset_geometry_creation::exact_piece";
 const OP_ANALYTICS_EXACT: &str = "offset::offset_geometry_creation::make_edges_on_analytics_exact";
+/// Not upstream (WR-346): the most sides a collapsed round's loop is walked for its other
+/// rail; a loop longer than this is no round of two supports and has none.
+const MAX_COLLAPSED_ROUND_SIDES: usize = 64;
 
 /// (not upstream, solidcraft#16983) An extended edge's trim interval on its curve, and
 /// whether its offset is inverted: the trim point of the base edge use's start vertex
@@ -495,6 +498,7 @@ fn ignore_soft<T>(r: Result<T>) -> Result<Option<T>> {
         Err(
             e @ (SolidError::Unported { .. }
             | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }
             | SolidError::InvalidInput {
                 operation: UNDEFINED_UPSTREAM,
                 ..
@@ -2766,7 +2770,11 @@ fn exact_edge(
     // leaves the edge marched rather than fail the shell.
     match grow_along_axis(k, &mut s1, margin).and_then(|()| grow_along_axis(k, &mut s2, margin)) {
         Ok(()) => {}
-        Err(err @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(err),
+        Err(
+            err @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }),
+        ) => return Err(err),
         Err(_) => return Ok(None),
     }
     let domain1 = s1.natural_uv_domain_with_nurb(k)?;
@@ -2787,12 +2795,20 @@ fn exact_edge(
         Some(deg20_rad),
     ) {
         Ok(exact) => exact,
-        Err(err @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(err),
+        Err(
+            err @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }),
+        ) => return Err(err),
         Err(_) => return Ok(None),
     };
     let trimmed = match topo_edge::create_trimmed_nurbs_curve(k, b, e) {
         Ok(Some(trimmed)) => trimmed,
-        Err(err @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(err),
+        Err(
+            err @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }),
+        ) => return Err(err),
         Ok(None) | Err(_) => return Ok(None),
     };
     let Some(mut found) = exact_piece(k, &trimmed, &exact.curves_3d, tol)? else {
@@ -3498,9 +3514,11 @@ impl OffsetGeometryCreation {
             // unported callee stays unported)
             let sphere = match BSplineSurface::create_sphere_from_arcs(k, &curves, tolerance) {
                 Ok(sphere) => sphere,
-                Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
-                    return Err(e)
-                }
+                Err(
+                    e @ (SolidError::Unported { .. }
+                    | SolidError::Cancelled { .. }
+                    | SolidError::OutOfFuel { .. }),
+                ) => return Err(e),
                 Err(e) => {
                     return Err(
                         Failure::new(OP_VERTEX, OffsetFailure::VertexArcsNotOneSphere)
@@ -3613,6 +3631,7 @@ impl OffsetGeometryCreation {
             Err(
                 e @ (SolidError::Unported { .. }
                 | SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }
                 | SolidError::InvalidInput { .. }
                 | SolidError::PortInvariant { .. }),
             ) => return Err(e),
@@ -5751,10 +5770,13 @@ impl OffsetGeometryCreation {
     /// original edge use beyond a collapsed face, seen from its edge use `edgeuse`.
     /// Across a rail (a tangent edge of a four-sided round) it is the radial of the
     /// opposite rail; across an end edge, seen from `from` (one of that edge's
-    /// vertices), the radial of the rail at the edge's other vertex. `None` when the
-    /// edge use's face did not collapse, the face across collapsed too, or the face has
-    /// another shape. The four-sided test walks the loop's CCW edge uses; the end edge's
-    /// two vertices are `GetVertex` / `GetOtherVertex`.
+    /// vertices), the radial of the rail at the edge's other vertex. A round of more or
+    /// fewer sides (one that meets another round at a corner, or ends on a sliver of a
+    /// third face) has its rails told from its ends by what they bound: across a rail it
+    /// is the radial of the loop's one other tangent edge onto a face that keeps an
+    /// offset. `None` when the edge use's face did not collapse, the face across collapsed
+    /// too, or the face has another shape. The four-sided test walks the loop's CCW edge
+    /// uses; the end edge's two vertices are `GetVertex` / `GetOtherVertex`.
     ///
     /// # Errors
     ///
@@ -5787,13 +5809,44 @@ impl OffsetGeometryCreation {
                     .edgeuse_ccw(cur)?
                     .ok_or(dangling("edge use without CCW"))?;
             }
-            if sides != 4 {
-                return Ok(None);
+            if sides == 4 {
+                let ccw = brep
+                    .edgeuse_ccw(edgeuse)?
+                    .ok_or(dangling("edge use without CCW"))?;
+                brep.edgeuse_ccw(ccw)?
+            } else {
+                // a round of more or fewer sides (one that meets another round at a
+                // corner, or ends on a sliver of a third face): its other rail is the
+                // loop's one other tangent edge onto a face that keeps an offset (bounded
+                // walk of the loop)
+                let mut rails = Vec::new();
+                let mut cur = brep
+                    .edgeuse_ccw(edgeuse)?
+                    .ok_or(dangling("edge use without CCW"))?;
+                let mut steps = 0;
+                while cur != edgeuse {
+                    steps += 1;
+                    if steps > MAX_COLLAPSED_ROUND_SIDES {
+                        return Ok(None);
+                    }
+                    if brep.edgeuse_is_tangent_sector(k, cur, tan_tol_deg)? {
+                        let beyond = match brep.edgeuse_radial(cur)? {
+                            Some(r) if r != cur => brep.edgeuse_face(r)?,
+                            _ => None,
+                        };
+                        if beyond.is_some_and(|f| !executive.is_collapsed_face(f)) {
+                            rails.push(cur);
+                        }
+                    }
+                    cur = brep
+                        .edgeuse_ccw(cur)?
+                        .ok_or(dangling("edge use without CCW"))?;
+                }
+                match rails.as_slice() {
+                    [rail] => Some(*rail),
+                    _ => None,
+                }
             }
-            let ccw = brep
-                .edgeuse_ccw(edgeuse)?
-                .ok_or(dangling("edge use without CCW"))?;
-            brep.edgeuse_ccw(ccw)?
         } else {
             let Some(from) = from else {
                 return Ok(None);
@@ -7631,9 +7684,11 @@ impl OffsetGeometryCreation {
                     out.trim_orientations = trimmed.trim_orientations;
                     new_surface = Some(trimmed.plane);
                 }
-                Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
-                    return Err(e)
-                }
+                Err(
+                    e @ (SolidError::Unported { .. }
+                    | SolidError::Cancelled { .. }
+                    | SolidError::OutOfFuel { .. }),
+                ) => return Err(e),
                 // any other failure is upstream's `!= SM_SUCCESS` (e.g. the `SM_ERR` of
                 // `Unitize` on the zero cross product of two collinear-derivative rails):
                 // the ruled surface between the rails instead
