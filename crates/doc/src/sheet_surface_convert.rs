@@ -3611,6 +3611,28 @@ fn pushed(plane: &Plane, seg: &Seg2, id: &str, width: f64, flip: bool, (z0, z1):
     }
 }
 
+/// The surfaces of a contour flange's profile `segs` drawn `depth` into the material from the
+/// face the surfaces are (see [`SurfaceSheet::contour`]), through the kernel's
+/// [`solidcraft_develop::offset_contour`]: each line shifted, each arc's radius changed, end to
+/// end again, the material on the right of the travel or on the left when `flip`. Its refusals
+/// are worded here.
+fn offset_profile(segs: &[Seg2], depth: f64, thickness: f64, flip: bool) -> Result<Vec<Seg2>> {
+    use solidcraft_develop::ContourRefusal as R;
+    solidcraft_develop::offset_contour(segs, depth, thickness, flip, SMOOTH).map_err(|why| {
+        DocError::Invalid(
+            match why {
+                R::ZeroLength => "a zero-length curve in the contour",
+                R::TurnsBack => "a contour flange turns back on itself",
+                R::CornersMiss => "the shifted curves at a sharp corner of a contour flange do not meet",
+                R::LineTooShort => "a contour line is shorter than its shifted corners",
+                R::RadiusTooSmall => "a contour arc's radius is no larger than the sheet is thick",
+                R::ArcTooShort => "a contour arc is shorter than its shifted corners",
+            }
+            .into(),
+        )
+    })
+}
+
 /// Why no contour flange is made along the sketch curve `id`, neither a line nor a circular arc:
 /// its panel would be free-form, and a free-form panel's flat has no closed form (#15743).
 pub(crate) fn free_form_contour(id: &str) -> DocError {
@@ -3728,6 +3750,14 @@ impl SurfaceSheet {
     /// sketch curve each piece was drawn on and the piece's key: the curve's id, with the piece's
     /// place on it where it was drawn in several (`s3.2`); each panel's key is the feature's and
     /// its piece's (see [`PanelMade::Contour`]).
+    ///
+    /// `depth` is how far into the material the drawn profile lies from the face the sheet's
+    /// surfaces are (0 on that face, half the thickness through the middle, the thickness on the
+    /// other face): each surface lies that far from the profile on the side away from the
+    /// material, so a drawn line's panel is the line shifted, a drawn arc's roll has its radius
+    /// less or more by it, and the virtual sharp of two lines is where their shifted lines meet,
+    /// while the bends' setbacks follow from the surfaces. `symmetric` takes `width` each way
+    /// across the plane, twice the width in all.
     #[allow(clippy::too_many_arguments)]
     pub fn contour(
         body: &str,
@@ -3736,6 +3766,8 @@ impl SurfaceSheet {
         plane: &Plane,
         segs: &[Seg2],
         width: f64,
+        depth: f64,
+        symmetric: bool,
         flip: bool,
         feature: u64,
         curves: &[(String, String)],
@@ -3760,6 +3792,13 @@ impl SurfaceSheet {
                 return err("a contour flange's profile crosses itself");
             }
         }
+        if !(depth.is_finite() && depth >= 0.0 && depth <= rule.thickness) {
+            return err("the contour flange's profile lies outside the sheet's thickness");
+        }
+        let segs = &*offset_profile(segs, depth, rule.thickness, flip)?;
+        // A symmetric flange runs `width` each way across the plane: from a plane a width back.
+        let back = Plane { origin: plane.origin - plane.normal() * width, x: plane.x, y: plane.y };
+        let (plane, width) = if symmetric { (&back, width * 2.0) } else { (plane, width) };
         let normal = plane.normal();
         let side = if flip { -1.0 } else { 1.0 };
         // Where a joint between two pieces runs, as heights above the plane: up its normal, or
@@ -4529,5 +4568,80 @@ mod tests {
         let got = extent_across(&arch, (Vec2::new(-1.0, 1.0), Vec2::X));
         assert!(got.is_some_and(|g| near(g, (3.0 - reach, 3.0 + reach))), "{got:?}");
         assert_eq!(extent_across(&arch, (Vec2::new(-1.0, 3.0), Vec2::X)), None);
+    }
+
+    /// #21829: a cone frustum roll must be recognized and converted at any sweep angle (not only
+    /// multiples of 90°), including non-quarter sweeps and a closed 360° cone, preserving its
+    /// solid volume and producing the expected annular-sector flat pattern.
+    #[test]
+    fn cone_roll_recognizes_and_converts_at_any_sweep_angle() {
+        use solidcore_record::{Plane, Vec3};
+        use solidcraft_geom::Region2Geom;
+        use solidcraft_kernel::{revolve, revolve_sheet};
+
+        use super::{ConvertRule, ReliefShape, SheetFaces, SurfaceSheet, convert_surfaces};
+        use crate::{IDENTITY, ModelBody};
+
+        // Cross-section on Plane::XZ (x = +X, y = -Z, so (r, -z) maps to world (r, 0, z)).
+        let xz = Plane::XZ;
+        let profile = Region2 {
+            outer: Loop2::polygon(&[Vec2::new(60.0, 0.0), Vec2::new(30.0, -40.0), Vec2::new(29.2, -39.4), Vec2::new(59.2, 0.6)]),
+            holes: Vec::new(),
+        };
+        let rule = ConvertRule {
+            thickness: 1.0,
+            k_factor: 0.5,
+            bend_radius: 1.0,
+            gap: 0.1,
+            corner_relief: ReliefShape::Round,
+            corner_relief_size: 1.0,
+            relief_width: 1.0,
+            relief_depth: 1.0,
+        };
+        // Analytic volume for open sweep θ: 50 mm² * 44.6 mm * θ = 2230 * θ mm³; with K = 0.5 and
+        // thickness 1 mm, the flat annular sector area matches 2230 * θ mm².
+        for deg in [10.0_f64, 45.0, 90.0, 100.0, 180.0, 200.0, 270.0, 359.9, 360.0] {
+            let rad = deg.to_radians();
+            let body = revolve(&xz, std::slice::from_ref(&profile), Vec2::ZERO, Vec2::new(0.0, -1.0), rad)
+                .unwrap_or_else(|e| panic!("revolve {deg}°: {e}"))
+                .remove(0);
+            let mb = ModelBody::new("Cone".into(), body, 1);
+            let mid = (0.5 * rad).min(1.0);
+            let pick = Vec3::new(45.0 * mid.cos(), 45.0 * mid.sin(), 20.0);
+            let conv = convert_surfaces(&mb, &|_| Ok(rule), &[], SheetFaces::Sheet { face: Some(pick), skip: &[] }, &[], false, &IDENTITY)
+                .unwrap_or_else(|e| panic!("convert_surfaces {deg}°: {e}"));
+            let (sheet, solid) = SurfaceSheet::converted("Cone", "T1", &conv, 1).unwrap_or_else(|e| panic!("converted {deg}°: {e}"));
+            assert!(solid.validity().is_empty(), "{deg}°: {:?}", solid.validity());
+            let vol = solidcraft_kernel::measure(&solid).unwrap().volume;
+            let expected = 50.0 * 44.6 * rad;
+            assert_eq!(sheet.regions.len(), 1, "{deg}°: expected 1 flat region");
+            let flat_area = sheet.regions[0].area();
+            if deg < 360.0 {
+                assert!((vol - expected).abs() < 0.2, "{deg}°: got vol {vol:.3}, expected {expected:.3}");
+                assert!((flat_area - expected).abs() < 0.2, "{deg}°: got flat area {flat_area:.3}, expected {expected:.3}");
+                let rolls = sheet.roll_infos();
+                assert_eq!(rolls.len(), 1, "{deg}°: expected 1 roll, got {rolls:?}");
+                assert!((rolls[0].length - 50.0).abs() < 0.05, "{deg}°: roll slant length {}", rolls[0].length);
+            } else {
+                // Closed 360° cone opens along a narrow 0.1 mm rip gap (~5 mm² removed along 50 mm slant).
+                assert!(vol > expected - 10.0 && vol < expected, "360°: got vol {vol:.3}, full {expected:.3}");
+                assert!(flat_area > expected - 10.0 && flat_area < expected, "360°: flat area {flat_area:.3}, full {expected:.3}");
+            }
+        }
+
+        // Convert on a revolved cone sheet (surface body), both inside and outside directions.
+        let slant = vec![Seg2::Line { a: Vec2::new(60.0, 0.0), b: Vec2::new(30.0, -40.0) }];
+        for (deg, outward) in [(100.0_f64, false), (100.0, true), (359.9, false)] {
+            let rad = deg.to_radians();
+            let surface = revolve_sheet(&xz, std::slice::from_ref(&slant), Vec2::ZERO, Vec2::new(0.0, -1.0), 0.0, rad)
+                .unwrap_or_else(|e| panic!("revolve_sheet {deg}°: {e}"));
+            let mb = ModelBody::new("ConeSheet".into(), surface, 2);
+            let conv = convert_surfaces(&mb, &|_| Ok(rule), &[], SheetFaces::AllBut(&[]), &[], outward, &IDENTITY)
+                .unwrap_or_else(|e| panic!("convert sheet {deg}° outward={outward}: {e}"));
+            let (sheet, solid) =
+                SurfaceSheet::converted("ConeSheet", "T1", &conv, 2).unwrap_or_else(|e| panic!("converted sheet {deg}° outward={outward}: {e}"));
+            assert!(solid.validity().is_empty(), "sheet {deg}° outward={outward}: {:?}", solid.validity());
+            assert_eq!(sheet.regions.len(), 1, "sheet {deg}° outward={outward}: expected 1 flat region");
+        }
     }
 }
