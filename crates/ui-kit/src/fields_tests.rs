@@ -5,6 +5,94 @@ use egui::Ui;
 use solidcraft_ui_registry as registry;
 
 #[test]
+fn table_cell_borders_are_single_inside_rings_for_hover_focus_and_errors() {
+    for dark in [false, true] {
+        let t = solidcraft_theme::Tokens::themed(dark, solidcraft_theme::ColorVision::default());
+        let _tokens = solidcraft_theme::scoped_tokens(t);
+        for (focused, invalid) in [(false, false), (true, false), (true, true)] {
+            let ctx = context();
+            let id = egui::Id::unique("single_cell_ring");
+            let mut value = "10 mm".to_owned();
+            let rect = std::cell::Cell::new(egui::Rect::NOTHING);
+            let mut draw = |ui: &mut Ui| {
+                ui.set_width(280.0);
+                scope(ui, |ui| {
+                    rect.set(cell_editor(ui, id, &mut value, "", invalid).rect);
+                });
+            };
+            raw_frame(&ctx, egui::RawInput::default(), &mut draw);
+            if focused {
+                ctx.memory_mut(|m| m.request_focus(id));
+            }
+            let output =
+                raw_frame(&ctx, egui::RawInput { events: vec![egui::Event::PointerMoved(rect.get().center())], ..Default::default() }, &mut draw);
+            let mut rings = Vec::new();
+            for s in &output.shapes {
+                each_shape(&s.shape, &mut |shape| {
+                    if let egui::Shape::Rect(r) = shape
+                        && r.stroke.width > 0.0
+                    {
+                        rings.push(r.clone());
+                    }
+                });
+            }
+            assert_eq!(rings.len(), 1, "dark {dark}, focus {focused}, invalid {invalid}: {rings:?}");
+            assert_eq!(rings[0].rect, rect.get());
+            assert_eq!(rings[0].stroke_kind, egui::StrokeKind::Inside);
+            assert_eq!(rings[0].corner_radius, egui::CornerRadius::same(t.control_radius));
+            assert_eq!(rings[0].stroke.width, if focused && !invalid { 1.5 } else { 1.0 });
+            assert_eq!(
+                rings[0].stroke.color,
+                if invalid {
+                    t.form_error
+                } else if focused {
+                    crate::selection_ink(&t)
+                } else {
+                    t.control_border.lerp_to_gamma(t.form_dim, 0.35)
+                }
+            );
+        }
+    }
+}
+
+#[test]
+fn wide_cell_editor_has_one_inside_ring_around_the_editor_and_note() {
+    let t = solidcraft_theme::Tokens::get();
+    for invalid in [false, true] {
+        let ctx = context();
+        let id = egui::Id::unique("wide_ring");
+        let mut value = "a long expression that wraps over the neighbouring cells".to_owned();
+        ctx.memory_mut(|m| m.request_focus(id));
+        let mut last = egui::FullOutput::default();
+        for _ in 0..4 {
+            last = raw_frame(&ctx, egui::RawInput::default(), |ui| {
+                scope(ui, |ui| {
+                    ui.set_width(100.0);
+                    wide_cell_editor(ui, id, &mut value, "", invalid, 460.0, ("Live value", false));
+                });
+            });
+        }
+        let mut rings = Vec::new();
+        for s in &last.shapes {
+            each_shape(&s.shape, &mut |shape| {
+                if let egui::Shape::Rect(r) = shape
+                    && r.stroke.width > 0.0
+                {
+                    assert!(s.clip_rect.contains_rect(r.rect));
+                    rings.push(r.clone());
+                }
+            });
+        }
+        assert_eq!(rings.len(), 1, "invalid {invalid}: {rings:?}");
+        assert_eq!(rings[0].stroke_kind, egui::StrokeKind::Inside);
+        assert_eq!(rings[0].corner_radius, egui::CornerRadius::same(t.control_radius));
+        assert_eq!(rings[0].stroke.width, if invalid { 1.0 } else { 1.5 });
+        assert!(rings[0].rect.width() > 300.0);
+        assert!(text_shapes(&last).any(|text| text.galley.job.text == "Live value" && rings[0].rect.contains(text.pos)));
+    }
+}
+
+#[test]
 fn combo_backing_zero_preserves_stock_shapes_and_semantics() {
     let fixture = |stock: bool| {
         let ctx = crate::test_support::context();

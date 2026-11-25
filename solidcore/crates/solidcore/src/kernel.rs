@@ -20,6 +20,7 @@
 //! | [`Caches`]                             | `SmCacheMgr`, `SmCacheMgrCrv/Srf/TSrf/Brep` |
 //! | [`Kernel::upstream_ub_passed`], [`Kernel::note_upstream_ub`] | (none: upstream undefined behaviour the port went past) |
 //! | [`CancelToken`], [`Kernel::cancel`], [`Kernel::set_cancel_token`], [`Kernel::check_cancelled`] | (none: cooperative cancellation for worker-thread jobs) |
+//! | [`CancelToken::with_fuel`], [`CancelToken::out_of_fuel`] | (none: a deterministic work budget, [`SolidError::OutOfFuel`]) |
 //! | [`WorkCounters`], [`Kernel::work_counters`] | the SolidCraft fork's `SmWorkCounters` (process-wide there) |
 //!
 //! Upstream seeds `rand()` from the clock in a few places; the port replaces that with an
@@ -146,6 +147,20 @@ pub struct Caches {
     /// option, only the import's narrow seam. (tangency-labs/solidcore#3368 makes the proved
     /// raise fast enough for import and removes the sampled path.)
     pub(crate) prove_lazy_trim_raise: bool,
+    /// Not upstream (#21105): whether a UV trim built now leaves its edge's tolerance as
+    /// it is, as `SetUVTrimCurve` does on a B-rep marked `m_bValidateOnly`. Set only for
+    /// the duration of a validate-only tolerance pass ([`Kernel::with_held_trim_raise`]),
+    /// which so takes `bValidateOnly` as its argument instead of setting and restoring the
+    /// flag on the body it checks. Crate-private: not a kernel option.
+    pub(crate) hold_trim_raise: bool,
+    /// Not upstream (tangency-labs/solidcore#3399): whether a UV trim built now that would
+    /// raise its edge's tolerance is fitted again, tighter, before it does
+    /// (`topology::edgeuse::p3::refit_raising_trim`). Set only while a boolean's cleanup tests
+    /// whether two faces cover each other without growing a tolerance
+    /// (`topology::edge::is_topological_without_growth`), and builds their trims to measure
+    /// their domains. A [`Cell`] so that test can set it through the `&Kernel` it takes.
+    /// Crate-private: not a kernel option.
+    pub(crate) refit_raising_trims: Cell<bool>,
 }
 
 impl Default for Caches {
@@ -153,16 +168,20 @@ impl Default for Caches {
         Self {
             curve_analysis: RefCell::default(),
             prove_lazy_trim_raise: true,
+            hold_trim_raise: false,
+            refit_raising_trims: Cell::new(false),
         }
     }
 }
 
 impl Caches {
-    /// Drops all cached data. The trim raise's mode stays: clearing a kernel's caches must
+    /// Drops all cached data. The trim raise's modes stay: clearing a kernel's caches must
     /// change no result.
     pub fn clear(&mut self) {
         *self = Self {
             prove_lazy_trim_raise: self.prove_lazy_trim_raise,
+            hold_trim_raise: self.hold_trim_raise,
+            refit_raising_trims: Cell::new(self.refit_raising_trims.get()),
             ..Self::default()
         };
     }
@@ -205,6 +224,8 @@ pub struct WorkCounters {
     contact_stretch_certifications: Cell<u64>,
     uv_trim_builds: Cell<u64>,
     trim_deviation_bounds: Cell<u64>,
+    band_face_solves: Cell<u64>,
+    band_edge_solves: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -432,11 +453,28 @@ impl WorkCounters {
     }
 
     /// Certified bounds on a new UV trim's distance from its edge
-    /// (`topology::edgeuse::p3::trim_deviation_bound`): each bisection the bound starts, the
-    /// costly part of building a trim. Not the fork's (#21105).
+    /// (`topology::edgeuse::p3::trim_deviation_bound`, and its same-parameter form
+    /// `trim_same_parameter_deviation_bound` that gates a boolean's carried trims): each
+    /// bisection the bound starts, the costly part of building a trim. Not the fork's (#21105).
     #[must_use]
     pub fn trim_deviation_bounds(&self) -> u64 {
         self.trim_deviation_bounds.get()
+    }
+
+    /// Intersections of a convex blend's section with a face of the part, run to learn whether
+    /// the blend cuts the part or breaks through it
+    /// (`blend::fillet_executive::session::band_cuts`). Not the fork's (#21434).
+    #[must_use]
+    pub fn band_face_solves(&self) -> u64 {
+        self.band_face_solves.get()
+    }
+
+    /// Intersections of an edge of the part with a station's plane, run to learn whether a
+    /// convex blend cuts the part (`blend::fillet_executive::session::band_cuts`). Not the
+    /// fork's (#21434).
+    #[must_use]
+    pub fn band_edge_solves(&self) -> u64 {
+        self.band_edge_solves.get()
     }
 
     /// Zeroes every count (`SmWorkCounters::Reset`).
@@ -467,6 +505,20 @@ impl WorkCounters {
         self.contact_stretch_certifications.set(0);
         self.uv_trim_builds.set(0);
         self.trim_deviation_bounds.set(0);
+        self.band_face_solves.set(0);
+        self.band_edge_solves.set(0);
+    }
+
+    /// Counts one intersection of a blend's section with a face.
+    pub(crate) fn add_band_face_solve(&self) {
+        self.band_face_solves
+            .set(self.band_face_solves.get().saturating_add(1));
+    }
+
+    /// Counts one intersection of an edge with a station's plane.
+    pub(crate) fn add_band_edge_solve(&self) {
+        self.band_edge_solves
+            .set(self.band_edge_solves.get().saturating_add(1));
     }
 
     /// Counts one UV trim curve built.
@@ -728,10 +780,18 @@ impl Default for KernelOptions {
     }
 }
 
+/// The error of a token found stopped in `operation`: out of fuel, unless it was cancelled.
 #[cold]
 #[inline(never)]
-const fn cancelled_error(operation: &'static str) -> SolidError {
-    SolidError::cancelled(operation)
+fn stopped_error(token: &CancelToken, operation: &'static str) -> SolidError {
+    match token.out_of_fuel() {
+        Some((spent, limit)) if !token.flagged() => SolidError::OutOfFuel {
+            operation,
+            spent,
+            limit,
+        },
+        _ => SolidError::cancelled(operation),
+    }
 }
 
 /// Shared cooperative cancellation flag for cancelling a [`Kernel`] operation from
@@ -749,6 +809,15 @@ const fn cancelled_error(operation: &'static str) -> SolidError {
 /// operation stops where it is cancelled, and for an application's progress or abort UI
 /// (SolidCraft's), which can read how far an operation got ([`Self::polls`]) or stop it after
 /// a budget of work. A token made by [`Self::new`] counts nothing and pays nothing for it.
+///
+/// Not upstream: a token made by [`Self::with_fuel`] is a *fuel* budget. It counts its polls
+/// as [`Self::after_polls`] does and stops the operation after `limit` of them, but the stop
+/// is [`SolidError::OutOfFuel`] (the operation spent the work it was given), not
+/// [`SolidError::Cancelled`] (someone asked it to stop). A poll is one unit of work: the
+/// checks sit at the kernel's outer loops (intersection marching and tracing, the fillet
+/// solver and its corners, the boolean's classification and merge, offset, stitch and heal,
+/// integration), so the count is a function of the input and never of the clock: the same
+/// call spends the same fuel on every machine. Polling changes nothing an operation computes.
 #[derive(Clone, Debug, Default)]
 pub struct CancelToken {
     flag: Arc<AtomicBool>,
@@ -759,13 +828,16 @@ pub struct CancelToken {
     polls: Option<Arc<PollCount>>,
 }
 
-/// The polls a [`CancelToken::after_polls`] token counts.
+/// The polls a [`CancelToken::after_polls`] or [`CancelToken::with_fuel`] token counts.
 #[derive(Debug)]
 struct PollCount {
     /// The poll the token is cancelled from (1: the first).
     from: u64,
     /// The polls made so far.
     made: AtomicU64,
+    /// Whether the count is a fuel budget ([`CancelToken::with_fuel`]): its stop is
+    /// [`SolidError::OutOfFuel`].
+    fuel: bool,
 }
 
 impl PollCount {
@@ -806,9 +878,38 @@ impl CancelToken {
             polls: Some(Arc::new(PollCount {
                 from: n,
                 made: AtomicU64::new(0),
+                fuel: false,
             })),
             ..Self::default()
         }
+    }
+
+    /// Not upstream: an uncancelled token with `limit` units of fuel. Each poll spends one;
+    /// the poll after the `limit`-th finds it empty, and from then on the token is cancelled
+    /// and [`Self::check`] returns [`SolidError::OutOfFuel`]. [`Self::cancel`] still stops it
+    /// at once, as [`SolidError::Cancelled`]. Clones share the tank; [`Self::reset`] fills it.
+    #[must_use]
+    pub fn with_fuel(limit: u64) -> Self {
+        Self {
+            polls: Some(Arc::new(PollCount {
+                from: limit.saturating_add(1),
+                made: AtomicU64::new(0),
+                fuel: true,
+            })),
+            ..Self::default()
+        }
+    }
+
+    /// Not upstream: `(spent, limit)` when the fuel of this token, or of a token it was
+    /// joined with ([`Self::either`]), has run out ([`Self::with_fuel`]); `None` while every
+    /// tank in the chain has fuel left, or none is one. Reading it spends nothing.
+    #[must_use]
+    pub fn out_of_fuel(&self) -> Option<(u64, u64)> {
+        let own = self.polls.as_deref().and_then(|p| {
+            let made = p.made.load(Ordering::Relaxed);
+            (p.fuel && made >= p.from).then(|| (made, p.from.saturating_sub(1)))
+        });
+        own.or_else(|| self.also.as_deref().and_then(CancelToken::out_of_fuel))
     }
 
     /// Not upstream: how many times this token has been polled since it was made or last
@@ -839,9 +940,16 @@ impl CancelToken {
         }
     }
 
+    /// Whether [`Self::cancel`] was called on this token or one it was joined with, without
+    /// polling (spending) anything.
+    fn flagged(&self) -> bool {
+        self.flag.load(Ordering::Relaxed) || self.also.as_deref().is_some_and(CancelToken::flagged)
+    }
+
     /// Whether [`Self::cancel`] has been called since construction or the last
     /// [`Self::reset`] (on this token, or on a token it was joined with by [`Self::either`]),
-    /// or, for a token made by [`Self::after_polls`], this is its `n`-th poll or a later one.
+    /// or, for a token made by [`Self::after_polls`], this is its `n`-th poll or a later one
+    /// (for one made by [`Self::with_fuel`], a poll past its `limit`).
     /// Every call is one poll of each counting token in the chain: none is skipped because
     /// an earlier one is already cancelled.
     #[must_use]
@@ -853,15 +961,17 @@ impl CancelToken {
     }
 
     /// Returns `Err(SolidError::Cancelled { operation })` when [`Self::is_cancelled`] is
-    /// `true`, else `Ok(())`.
+    /// `true`, else `Ok(())`; `Err(SolidError::OutOfFuel { .. })` instead when what stopped it
+    /// is a fuel budget that ran out ([`Self::with_fuel`]) and no [`Self::cancel`].
     ///
     /// # Errors
     ///
-    /// [`SolidError::Cancelled`] when [`Self::cancel`] has been signalled.
+    /// [`SolidError::Cancelled`] when [`Self::cancel`] has been signalled;
+    /// [`SolidError::OutOfFuel`] when the token's fuel ran out.
     #[inline]
     pub fn check(&self, operation: &'static str) -> crate::Result<()> {
         if self.is_cancelled() {
-            return Err(cancelled_error(operation));
+            return Err(stopped_error(self, operation));
         }
         Ok(())
     }
@@ -992,17 +1102,12 @@ pub struct Kernel {
     /// the kernel copies an operation makes.
     #[cfg(test)]
     pub(crate) strip_probe: Arc<std::sync::Mutex<StripProbe>>,
-    /// Not upstream, test only (feature `wr57-replay`): the seam of the goldens' WR-57
-    /// substitution replay ([`crate::surface::surface::replay`]). No hook by default, and
-    /// then it changes nothing. Shared with the kernel copies an operation makes for its
+    /// Not upstream, test only (feature `wr57-replay`): the seam of the goldens' WR-450
+    /// and WR-587 replays and target bound tests ([`crate::surface::surface::replay`]).
+    /// No hook by default, and then it changes nothing. Shared with the kernel copies an operation makes for its
     /// caches, which call through the same seam.
     #[cfg(feature = "wr57-replay")]
     pub replay: crate::surface::surface::replay::ReplaySeam,
-    /// Not upstream, test only (feature `wr469-replay`): the seam of the goldens' WR-469
-    /// substitution replay ([`crate::topology::brep::p9::replay`]). No hook by default,
-    /// and then it changes nothing. Shared with the kernel copies an operation makes.
-    #[cfg(feature = "wr469-replay")]
-    pub wr469_replay: crate::topology::brep::p9::replay::VertexStepSeam,
 }
 
 /// Test-only seam of `boolean::topology_intersector::curved_strip`
@@ -1078,8 +1183,6 @@ impl Kernel {
             strip_probe: Arc::default(),
             #[cfg(feature = "wr57-replay")]
             replay: crate::surface::surface::replay::ReplaySeam::default(),
-            #[cfg(feature = "wr469-replay")]
-            wr469_replay: crate::topology::brep::p9::replay::VertexStepSeam::default(),
         }
     }
 
@@ -1102,6 +1205,18 @@ impl Kernel {
         self.caches.prove_lazy_trim_raise = false;
         let out = f(self);
         self.caches.prove_lazy_trim_raise = proved;
+        out
+    }
+
+    /// Runs `f` with every UV trim it builds leaving its edge's tolerance as it is (see
+    /// [`Caches::hold_trim_raise`]), then restores the previous mode, whether `f` returns a
+    /// value or an error: the validate-only tolerance pass's `bValidateOnly`, carried for the
+    /// pass instead of written to the B-rep it checks (#21105).
+    pub(crate) fn with_held_trim_raise<T>(&mut self, f: impl FnOnce(&mut Kernel) -> T) -> T {
+        let held = self.caches.hold_trim_raise;
+        self.caches.hold_trim_raise = true;
+        let out = f(self);
+        self.caches.hold_trim_raise = held;
         out
     }
 
@@ -1212,6 +1327,55 @@ mod tests {
         b.reset();
         ab.cancel();
         assert!(a.is_cancelled() && !b.is_cancelled() && abc.is_cancelled());
+    }
+
+    #[test]
+    fn fuel_runs_out_after_its_limit_as_out_of_fuel_and_cancel_stays_cancel() {
+        let t = CancelToken::with_fuel(2);
+        assert_eq!(t.out_of_fuel(), None);
+        assert_eq!(t.check("kernel::a"), Ok(()));
+        assert_eq!(t.check("kernel::b"), Ok(()));
+        assert_eq!(
+            t.check("kernel::c"),
+            Err(SolidError::OutOfFuel {
+                operation: "kernel::c",
+                spent: 3,
+                limit: 2,
+            })
+        );
+        assert!(t.is_cancelled() && t.check("kernel::d").is_err_and(|e| e.is_out_of_fuel()));
+        assert_eq!(t.out_of_fuel(), Some((5, 2)), "reading spends nothing");
+        // sub-kernels share the tank through clones and joined tokens
+        t.reset();
+        let app = CancelToken::new();
+        let joined = t.either(&app);
+        let mut k = Kernel::default();
+        k.set_cancel_token(joined.clone());
+        assert_eq!(k.check_cancelled("kernel::e"), Ok(()));
+        assert!(!k.is_cancelled());
+        assert!(k
+            .check_cancelled("kernel::f")
+            .is_err_and(|e| e.is_out_of_fuel() && e.is_cancelled()));
+        assert_eq!(joined.out_of_fuel(), Some((3, 2)));
+        // the application's cancel is a cancel, even with the tank empty
+        app.cancel();
+        assert_eq!(
+            k.check_cancelled("kernel::g"),
+            Err(SolidError::cancelled("kernel::g"))
+        );
+        // an after_polls token is no fuel: its stop stays a cancel
+        let p = CancelToken::after_polls(1);
+        assert_eq!(p.out_of_fuel(), None);
+        assert_eq!(
+            p.check("kernel::h"),
+            Err(SolidError::cancelled("kernel::h"))
+        );
+        assert_eq!(
+            CancelToken::with_fuel(0)
+                .check("kernel::i")
+                .map_err(|e| e.kind()),
+            Err(crate::error::ErrorKind::OutOfFuel)
+        );
     }
 
     #[test]

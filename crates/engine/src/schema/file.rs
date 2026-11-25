@@ -186,17 +186,26 @@ pub struct Export3mfParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ExportUrdfParams {
-    /// The `.urdf` file to write; the meshes go in its folder.
+    /// The `.urdf` file to write; the meshes go in its folder unless `mesh_prefix` names another.
     pub path: String,
-    /// Put before each mesh file name in the URDF, such as `package://robot/meshes/`. Default: none.
+    /// Put before each mesh file name in the URDF, such as `meshes/` or
+    /// `package://robot/meshes/`; a folder in it is where the meshes are written, made if missing.
+    /// Default: none.
     #[serde(default)]
     pub mesh_prefix: Option<String>,
-    /// Each joint's effort limit, a positive number. Default: 1000.
+    /// Write the meshes where `mesh_prefix` points, making its folder if missing; false keeps
+    /// every mesh next to the `.urdf` whatever the prefix says. Default: false.
+    #[serde(default)]
+    pub place_meshes: Option<bool>,
+    /// The effort limit of joints with none saved (`joint.dynamics`), a positive number. Default: 1000.
     #[serde(default)]
     pub effort: Option<f64>,
-    /// Each joint's velocity limit, a positive number. Default: 10.
+    /// The velocity limit of joints with none saved (`joint.dynamics`), a positive number. Default: 10.
     #[serde(default)]
     pub velocity: Option<f64>,
+    /// Write motion links as `<mimic>`. Default: false (each joint free).
+    #[serde(default)]
+    pub mimic: Option<bool>,
     /// Also write each picture shown on the model (Canvas or Decal) as a textured COLLADA quad
     /// and its image, in one more `<visual>` of its part's link. Default: false.
     #[serde(default)]
@@ -233,9 +242,9 @@ pub struct ExportSdfParams {
 
 /// Export bodies, or the whole design, to a file. `format` names the format; without it the
 /// path's extension does. STL, OBJ and 3MF take `quality` (and 3MF `objects`); URDF takes
-/// `mesh_prefix`, `effort` and `velocity` and exports the whole assembly; SDF takes `name`,
-/// `static`, `model_uris` and `quality` and writes a model folder; design JSON the complete
-/// document.
+/// `mesh_prefix`, `effort`, `velocity`, `mimic`, `place_meshes` and `images` and exports the whole
+/// assembly; SDF takes `name`, `static`, `model_uris` and `quality` and writes a model folder;
+/// design JSON the complete document.
 #[derive(Debug, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = export_required)]
 pub struct ExportParams {
@@ -283,6 +292,13 @@ pub struct ExportParams {
     /// `file.export_stl` has it; refused for the other formats. Default: false. Not read for URDF.
     #[serde(default)]
     pub lay_on_print_faces: Option<bool>,
+    /// URDF only: write motion links as `<mimic>`. Default: false, each joint free.
+    #[serde(default)]
+    pub mimic: Option<bool>,
+    /// URDF only: write the meshes where `mesh_prefix` points, making the folder. Default: false,
+    /// next to the `.urdf` whatever the prefix says.
+    #[serde(default)]
+    pub place_meshes: Option<bool>,
     /// GLB only: true writes each component occurrence as a node named after it, holding its
     /// part's bodies in the part's frame, so a viewer can move each part on its own; false writes
     /// every body directly under the root in world coordinates, named as the model names it (as
@@ -409,6 +425,8 @@ impl<'de> Deserialize<'de> for ExportParams {
             name: None,
             is_static: None,
             model_uris: None,
+            mimic: None,
+            place_meshes: None,
         };
         // The handler reads `path` first and refuses anything but a name it can write to; the
         // other keys are read only once it has one, and the format is known.
@@ -484,6 +502,16 @@ impl<'de> Deserialize<'de> for ExportParams {
             out.images = match m.get("images") {
                 None | Some(Value::Null) => None,
                 Some(v) => Some(v.as_bool().ok_or_else(|| refuse::<D::Error>("`images` must be true or false"))?),
+            };
+            out.mimic = match m.get("mimic") {
+                None | Some(Value::Null) => None,
+                Some(Value::Bool(b)) => Some(*b),
+                Some(_) => return Err(refuse::<D::Error>("`mimic` must be true or false")),
+            };
+            out.place_meshes = match m.get("place_meshes") {
+                None | Some(Value::Null) => None,
+                Some(Value::Bool(b)) => Some(*b),
+                Some(_) => return Err(refuse::<D::Error>("`place_meshes` must be true or false")),
             };
             return Ok(out);
         }
@@ -773,6 +801,10 @@ impl JsonSchema for ReaderParam {
     }
 }
 
+fn linked_bodies_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"type": "string", "enum": ["all", "folder"]})
+}
+
 /// Open a file as the design: a SolidCraft design (`.sc`, or a `.solidcraft` design from an
 /// earlier release), a `.dxf` or `.svg` drawing (a new, unsaved design with an XY sketch, with
 /// the units and defaults of `sketch.insert_dxf` and `sketch.insert_svg`), a STEP, IGES,
@@ -829,6 +861,14 @@ pub struct OpenParams {
     /// elsewhere). Default: false.
     #[serde(default)]
     pub read_only: Option<bool>,
+    /// For a design saved without the bodies of its linked designs (`file.save`'s
+    /// `linked_bodies: false`): which linked design files are read for those bodies as it opens.
+    /// all (the default): every one the caller may read. folder: only those in the design's own
+    /// folder or below it; the other links have no bodies until `component.update_links` reads
+    /// them. The reply's warnings name each link that was not read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "linked_bodies_schema")]
+    pub linked_bodies: Option<String>,
     /// For a STEP or IGES file: false recomputes the import without reading or writing the local
     /// saved-model cache. Default: true.
     #[serde(default)]
@@ -1185,6 +1225,14 @@ pub struct RecoverParams {
     /// Delete the entry once the design is open. Default: false.
     #[serde(default)]
     pub discard: Option<bool>,
+    /// For a design saved without the bodies of its linked designs, whose copy lacks the bodies
+    /// of a link: which linked design files are read for them, as `doc.open`'s `linked_bodies`.
+    /// `all` (the default): every link's file the caller may read. `folder`: only files in the
+    /// design's own folder or below it; the other links have no bodies until
+    /// `component.update_links` reads them. The reply's warnings name each link that was not read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "linked_bodies_schema")]
+    pub linked_bodies: Option<String>,
 }
 
 /// `id` of `doc.recover`: text, which the handler gives its own message for when it is not.
@@ -1208,6 +1256,10 @@ pub struct RecoverResult {
     pub features: usize,
     /// How many of them failed to evaluate.
     pub errors: usize,
+    /// The links of a design saved without linked bodies that were not read, or whose file
+    /// changed, each with why.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -1256,6 +1308,12 @@ pub enum FileExportResult {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ImportCacheClearParams {}
+
+/// Read the active design again from the file it was opened or saved as, as File > Revert to
+/// Saved does. It takes nothing and never asks: unsaved changes are lost.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RevertSavedParams {}
 
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ImportCacheClearResult {

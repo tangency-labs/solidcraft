@@ -132,11 +132,12 @@ mod imp {
 mod imp {
     use std::cell::RefCell;
     use std::collections::BTreeMap;
+    use std::rc::Rc;
 
     use super::*;
 
     thread_local! {
-        static FILES: RefCell<BTreeMap<String, Vec<u8>>> = const { RefCell::new(BTreeMap::new()) };
+        static FILES: RefCell<BTreeMap<String, Rc<Vec<u8>>>> = const { RefCell::new(BTreeMap::new()) };
         static WRITES: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
     }
 
@@ -150,10 +151,10 @@ mod imp {
         if bytes.len() > max {
             return Err(Error::new(ErrorKind::InvalidData, "file too large"));
         }
-        Ok(bytes)
+        Ok(bytes.as_ref().clone())
     }
     pub fn write(path: &str, bytes: &[u8]) -> Result<()> {
-        FILES.with(|f| f.borrow_mut().insert(path.to_string(), bytes.to_vec()));
+        insert(path, bytes.to_vec());
         WRITES.with(|w| {
             let mut w = w.borrow_mut();
             w.retain(|p| p != path);
@@ -187,11 +188,32 @@ mod imp {
         Ok(())
     }
     pub fn insert(path: &str, bytes: Vec<u8>) {
-        FILES.with(|f| f.borrow_mut().insert(path.to_string(), bytes));
+        FILES.with(|f| f.borrow_mut().insert(path.to_string(), Rc::new(bytes)));
+    }
+    /// The cached version visible when a host write was queued. Holding it keeps its identity
+    /// distinct from later writes without copying the file.
+    pub struct Snapshot(Option<Rc<Vec<u8>>>);
+
+    pub fn snapshot(path: &str) -> Snapshot {
+        Snapshot(FILES.with(|f| f.borrow().get(path).cloned()))
+    }
+    /// A host acknowledgment may publish its bytes if no later operation replaced the cache.
+    pub fn insert_if_unchanged(path: &str, snapshot: Snapshot, bytes: Vec<u8>) {
+        FILES.with(|f| {
+            let mut files = f.borrow_mut();
+            let unchanged = match (files.get(path), snapshot.0.as_ref()) {
+                (None, None) => true,
+                (Some(current), Some(previous)) => Rc::ptr_eq(current, previous),
+                _ => false,
+            };
+            if unchanged {
+                files.insert(path.to_string(), Rc::new(bytes));
+            }
+        });
     }
     pub fn take_writes() -> Vec<(String, Vec<u8>)> {
         let paths = WRITES.with(|w| std::mem::take(&mut *w.borrow_mut()));
-        paths.into_iter().filter_map(|p| FILES.with(|f| f.borrow().get(&p).cloned()).map(|b| (p, b))).collect()
+        paths.into_iter().filter_map(|p| FILES.with(|f| f.borrow().get(&p).map(|b| (p, b.as_ref().clone())))).collect()
     }
     /// The files directly in a folder, sorted; at most `max` of them.
     pub fn files_in(dir: &str, max: usize) -> Result<Vec<String>> {
@@ -913,6 +935,35 @@ pub fn check_new(path: &str) -> Result<()> {
     SCOPE.with(|s| s.borrow().as_ref().map_or(Ok(()), |scope| scope.check_new(path)))
 }
 
+/// The start of a path that names a file in one of a plugin's granted folders by the grant's
+/// name, `grant:<name>/<path inside it>`, so the plugin need not know where the folder is.
+pub const GRANT_PREFIX: &str = "grant:";
+
+/// `path` with its leading `grant:<name>` replaced by the folder granted as `<name>` in `grants`:
+/// `grant:outbox/a/b.step` is `<outbox>/a/b.step`, and `grant:outbox` is the folder itself.
+/// `None` when `path` doesn't start with `grant:`: it is an ordinary path, as before. Text only,
+/// nothing on disk is asked; the caller's scope still judges the result (links, devices). Refused:
+/// a name not in `grants`, and a rest that is not plain names (`..`, `.`, a root or a drive).
+pub fn grant_path(path: &str, grants: &[(&str, &std::path::Path)]) -> Option<Result<String>> {
+    let rest = path.strip_prefix(GRANT_PREFIX)?;
+    let (name, inner) = rest.split_once(['/', '\\']).unwrap_or((rest, ""));
+    let refused = |why: String| Error::new(ErrorKind::PermissionDenied, format!("{path}: {why}"));
+    let Some((_, folder)) = grants.iter().find(|(granted, _)| *granted == name) else {
+        let names: Vec<&str> = grants.iter().map(|(granted, _)| *granted).collect();
+        return Some(Err(refused(format!(
+            "`{name}` is not a folder this command may use (it may use: {}); any command but an input reader such as `file.insert_step` needs a folder granted for reading and writing",
+            if names.is_empty() { "none".to_string() } else { names.join(", ") }
+        ))));
+    };
+    let inner = std::path::Path::new(inner);
+    if inner.components().any(|c| !matches!(c, std::path::Component::Normal(_))) {
+        return Some(Err(refused(format!(
+            "the path after `grant:{name}` must stay inside that folder: plain names only, no `..`, `.`, root or drive"
+        ))));
+    }
+    Some(Ok(if inner.as_os_str().is_empty() { folder.to_path_buf() } else { folder.join(inner) }.to_string_lossy().into_owned()))
+}
+
 /// A file's text, at most `max` bytes.
 pub fn read_to_string(path: &str, max: usize) -> Result<String> {
     String::from_utf8(read(path, max)?).map_err(|e| Error::new(ErrorKind::InvalidData, e))
@@ -1149,6 +1200,80 @@ mod tests {
             assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied, "{bad}: {e}");
         }
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A plugin names a file in a granted folder by the grant's name, judged from the text alone.
+    #[test]
+    fn grant_paths_name_a_file_in_a_granted_folder() {
+        use super::grant_path;
+        let outbox = std::path::Path::new("granted").join("outbox");
+        let grants = [("outbox", outbox.as_path()), ("c", std::path::Path::new("elsewhere"))];
+        let resolved = |p: &str| grant_path(p, &grants).expect("a grant path").expect("resolves");
+        assert_eq!(resolved("grant:outbox/part.sc"), outbox.join("part.sc").to_string_lossy());
+        assert_eq!(resolved("grant:outbox/sub/part.step"), outbox.join("sub/part.step").to_string_lossy());
+        assert_eq!(resolved(r"grant:outbox\part.sc"), outbox.join("part.sc").to_string_lossy());
+        assert_eq!(resolved("grant:outbox"), outbox.to_string_lossy());
+        assert_eq!(resolved("grant:c/x.sc"), std::path::Path::new("elsewhere").join("x.sc").to_string_lossy(), "a one-letter grant is no drive");
+        for refused in [
+            "grant:outbox/../x.sc",
+            "grant:outbox/sub/../../x.sc",
+            "grant:outbox/./x.sc",
+            "grant:outbox//etc/passwd",
+            "grant:other/x.sc",
+            "grant:/x.sc",
+            "grant:Outbox/x.sc",
+        ] {
+            let e = grant_path(refused, &grants).expect("a grant path").unwrap_err();
+            assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied, "{refused}: {e}");
+            assert!(e.to_string().starts_with(refused), "{e}");
+        }
+        assert!(grant_path("grant:other/x.sc", &grants).unwrap().unwrap_err().to_string().contains("it may use: outbox, c"));
+        assert!(grant_path("grant:outbox/x.sc", &[]).unwrap().unwrap_err().to_string().contains("it may use: none"));
+        for ordinary in [
+            r"C:\work\x.sc",
+            "C:/work/x.sc",
+            "C:x.sc",
+            "c:/x.sc",
+            r"\\server\share\x.sc",
+            r"\\?\C:\x.sc",
+            "/home/me/x.sc",
+            "outbox/x.sc",
+            "outbox:/x.sc",
+            "{outbox}/x.sc",
+            "file:///x.sc",
+            "Grant:outbox/x.sc",
+            "grants:outbox/x.sc",
+            "",
+        ] {
+            assert!(grant_path(ordinary, &grants).is_none(), "{ordinary}");
+        }
+    }
+
+    /// On Windows a drive, UNC, device or verbatim prefix after the grant's name would make `join`
+    /// replace the granted folder, and `\` separates names as `/` does: all refused from the text.
+    #[cfg(windows)]
+    #[test]
+    fn grant_paths_refuse_windows_prefixes_and_backslash_parents_after_the_name() {
+        use super::grant_path;
+        let grants = [("outbox", std::path::Path::new(r"C:\granted\outbox"))];
+        for refused in [
+            "grant:outbox/C:/x.sc",
+            r"grant:outbox\C:\x.sc",
+            "grant:outbox/C:x.sc",
+            "grant:outbox/D:",
+            r"grant:outbox/\\server\share\x.sc",
+            "grant:outbox///server/share/x.sc",
+            r"grant:outbox/\\?\C:\x.sc",
+            r"grant:outbox/\\?\UNC\server\share\x.sc",
+            r"grant:outbox/\\.\COM1",
+            r"grant:outbox\..\x.sc",
+            r"grant:outbox/sub\..\..\x.sc",
+            r"grant:outbox\\x.sc",
+        ] {
+            let e = grant_path(refused, &grants).expect("a grant path").unwrap_err();
+            assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied, "{refused}: {e}");
+            assert!(e.to_string().contains("must stay inside that folder"), "{refused}: {e}");
+        }
     }
 
     /// The short (8.3) spelling of an existing `path` as `cmd` gives it (`NAME~1.XYZ`), or `None`
