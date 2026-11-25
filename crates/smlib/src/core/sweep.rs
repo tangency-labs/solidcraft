@@ -8,7 +8,8 @@
 //! `lift_error`, `offset_error`, `path`, `path_curve`, `axial_radius`, `cylinder_piece`,
 //! `screw_wall` and `screw_sweep`).
 //!
-//! Planar faces, extrusions and revolutions are solidcore-ops' ([`solidcore_ops::sweep`]); a
+//! Planar faces, extrusions, revolutions, lofts to a point and station sweeps are
+//! solidcore-ops' ([`solidcore_ops::sweep`]); a
 //! straight extrusion's runs of arcs on one circle (`one_wall_per_circle` there) are joined by
 //! [`solidcore_ops::sweep::join_circle_runs`] first.
 //!
@@ -24,7 +25,6 @@
 
 use std::f64::consts::{PI, TAU};
 
-use solidcore::curve::curve::p3::compute_crvs_normal;
 use solidcore::curve::curve::{Curve, CurveKind};
 use solidcore::curve::ellipse::Ellipse;
 use solidcore::curve::line::Line;
@@ -32,7 +32,6 @@ use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::tol::USE_DEFAULT;
 use solidcore::geom::vector3d::{Point3, Vec3};
-use solidcore::heal::stitch::p1::api_stitch_into_solid;
 use solidcore::kernel::Kernel;
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, CurveCanonical, KnotType};
 use solidcore::nurbs::b_spline_surface::{BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData};
@@ -60,7 +59,7 @@ use solidcore::{EntityRef, SolidError};
 use super::blend::status;
 use super::offset::{face_miss, pick_faces};
 use super::{Body, run, with_body};
-use crate::sweeps::{Affine, Curve as Profile, DraftCorner, Ends, MAX_CURVES, MAX_STATION_CURVES, MAX_STATIONS, SweepFrame};
+use crate::sweeps::{Affine, Curve as Profile, DraftCorner, Ends, MAX_CURVES, SweepFrame};
 use crate::sweeps::{CURVE_MAX_DEGREE, CURVE_MAX_POINTS};
 use crate::{Error, Result};
 
@@ -898,98 +897,12 @@ pub(super) fn build_faces<T>(b: &mut Brep, f: impl FnOnce(&mut Brep, &mut FaceBu
     f(b, &mut fenv)
 }
 
-/// `smlib_loft_to_point`: the planar `section` (one closed loop of curves, in order) lofted to
-/// `apex`: the base on the section's curves, a planar triangle on each line, and on each arc or
-/// spline the ruled surface from it to the apex (a zero-length curve there: the wall's pole) as
-/// one face over the surface's whole box, then `StitchAndOrient`. Upstream's `smlib_loft_to_point`
-/// took lines only (solidcraft#11216).
+/// `smlib_loft_to_point`: the planar closed `section` lofted to `apex` (off its plane): the base,
+/// a triangle on each line and a ruled wall on each arc or spline
+/// ([`solidcore_ops::sweep::loft_to_point`]).
 pub(crate) fn loft_to_point(section: &[Profile], apex: [f64; 3]) -> Result<Body> {
-    if !coord_ok(&apex) {
-        return Err(Error::Argument);
-    }
-    making("smlib_loft_to_point", |k| {
-        let curves = match parse(k, section) {
-            Ok(c) => c,
-            Err(e) => return Ok(Err(e)),
-        };
-        if curves.is_empty() || !one_loop(k, &curves, 1e-6)? {
-            return Ok(Err(Error::Argument));
-        }
-        // Each segment's start, the base's corners; a curved segment's B-spline, for its wall.
-        let mut corners = Vec::with_capacity(curves.len());
-        let mut walls: Vec<Option<BSplineCurve>> = Vec::with_capacity(curves.len());
-        for c in &curves {
-            corners.push(ends(k, c)?.0);
-            walls.push(match c.kind() {
-                CurveKind::Line(_) => None,
-                CurveKind::Ellipse(e) => Some(e.base().clone()),
-                CurveKind::BSpline(s) => Some(s.clone()),
-                _ => return Ok(Err(Error::Argument)),
-            });
-        }
-        let Ok(normal) = compute_crvs_normal(k, &curves) else { return Ok(Err(Error::Argument)) };
-        let top = v3(apex);
-        let Some(&c0) = corners.first() else { return Ok(Err(Error::Argument)) };
-        let size = corners.iter().map(|q| (*q - c0).length()).fold(0.0, f64::max);
-        if !((top - c0).dot(normal).abs() > 1e-9 * size.max(1.0)) {
-            return Ok(Err(Error::Argument));
-        }
-        let mut b = new_brep(k, USE_DEFAULT, USE_DEFAULT)?;
-        let region = b.infinite_region();
-        let tol = 1e-6;
-        let made = build_faces(&mut b, |b, fenv| -> Out<()> {
-            // The base, on the section's own curves.
-            called(create_planar_face_with_3d_curves(k, b, region, &curves, tol, fenv))?;
-            for (i, (&p, wall)) in corners.iter().zip(&walls).enumerate() {
-                let q = corners.get((i + 1) % corners.len()).copied().unwrap_or(p);
-                match wall {
-                    // A line: the planar triangle to the apex.
-                    None => {
-                        let mut edges = Vec::with_capacity(3);
-                        for (a, z) in [(p, q), (q, top), (top, p)] {
-                            edges.push(Curve::from(called(Line::create_line_segment(3, a, z, None))?));
-                        }
-                        called(create_planar_face_with_3d_curves(k, b, region, &edges, tol, fenv))?;
-                    }
-                    // An arc or a spline: the ruled surface from it to the apex, a zero-length
-                    // curve there (the wall's pole); u = 0 and u = 1 are the rulings from the
-                    // segment's ends, so the face is the surface's whole box.
-                    Some(base) => {
-                        let at_apex = [top, top];
-                        let data = CanonicalData {
-                            dim: 3,
-                            degree: 1,
-                            control_points: &at_apex,
-                            form: BSplineCurveForm::Unspecified,
-                            knot_multiplicities: &[2, 2],
-                            knots: &[0.0, 1.0],
-                            knot_type: KnotType::Unspecified,
-                            weights: None,
-                            trim: None,
-                        };
-                        let tip = called(BSplineCurve::create_canonical(&data))?;
-                        let ruled = called(solidcore::nurbs::b_spline_surface::BSplineSurface::create_ruled_surface(
-                            base,
-                            &tip,
-                            solidcore::nurbs::b_spline_surface::p1::SurfParamType::Unknown,
-                        ))?;
-                        let surface = solidcore::surface::surface::Surface::from(ruled);
-                        let bx = called(surface.natural_uv_domain_with_nurb(k))?;
-                        called(solidcore::topology::brep::p8::create_face_from_surface(k, b, Some(surface), &bx, fenv))?;
-                    }
-                }
-            }
-            Ok(())
-        });
-        if let Err(e) = made {
-            return Ok(Err(e));
-        }
-        if let Err(e) = stitch_and_orient(k, &mut b, &StitchAndOrientOptions::default()) {
-            return Ok(Err(status(e)));
-        }
-        b.refresh_cached_topology();
-        finish(b, true)
-    })
+    let curves = ops_curves(section);
+    super::call::ops_as("smlib_loft_to_point", &[], sweep_error, || solidcore_ops::sweep::loft_to_point(&curves, apex))
 }
 
 /// The planar first section of `sections` lofted through the rest (stations) to `apex`: a loft
@@ -998,25 +911,6 @@ pub(crate) fn loft_to_point(section: &[Profile], apex: [f64; 3]) -> Result<Body>
 pub(crate) fn loft_to_point_through(sections: &[Vec<Profile>], apex: [f64; 3], params: &[f64]) -> Result<Body> {
     let ops: Vec<Vec<solidcore_ops::sweep::Curve>> = sections.iter().map(|s| ops_curves(s)).collect();
     super::call::ops("smlib_loft_to_point_through", || solidcore_ops::sweep::loft_to_point_through(&ops, apex, params))
-}
-
-/// `maps_ok`: each station map finite, of bounded size and far from singular, its translation
-/// within `MAX_COORD`.
-fn maps_ok(stations: &[Affine]) -> bool {
-    stations.iter().all(|s| {
-        let m = &s.m;
-        if !m.iter().flatten().chain(&s.t).all(|x| x.is_finite()) || !coord_ok(&s.t) {
-            return false;
-        }
-        let len = |c: &[f64; 3]| (c[0] * c[0] + c[1] * c[1] + c[2] * c[2]).sqrt();
-        let (c0, c1, c2) = (len(&m[0]), len(&m[1]), len(&m[2]));
-        if !(c0 < 1e6 && c1 < 1e6 && c2 < 1e6) {
-            return false;
-        }
-        let det = m[0][0] * (m[1][1] * m[2][2] - m[2][1] * m[1][2]) - m[1][0] * (m[0][1] * m[2][2] - m[2][1] * m[0][2])
-            + m[2][0] * (m[0][1] * m[1][2] - m[1][1] * m[0][2]);
-        det.abs() > 1e-9 * c0 * c1 * c2
-    })
 }
 
 /// `placed`: a copy of `c` as a plain B-spline with every control point carried by `s`, the
@@ -1052,54 +946,17 @@ fn placed(c: &BSplineCurve, s: &Affine) -> Out<Curve> {
     called(BSplineCurve::create_canonical(&data)).map(Curve::from)
 }
 
-/// `smlib_sweep_stations`: the profile placed by each station, its sections skinned through
-/// (`SmApiCreateSkinPrimitive`, cubic across them or as high as their number allows), the ends
-/// capped, or joined by `SmApiStitchIntoSolid`.
+/// `smlib_sweep_stations`: the profile carried through each station's map and skinned
+/// ([`solidcore_ops::sweep::sweep_stations`]), its ends open, capped or joined.
 pub(crate) fn sweep_stations(profile: &[Profile], stations: &[Affine], end: Ends) -> Result<Body> {
-    if !(2..=MAX_STATIONS).contains(&stations.len()) {
-        return Err(Error::Argument);
-    }
-    making("smlib_sweep_stations", |k| {
-        if !maps_ok(stations) {
-            return Ok(Err(Error::Argument));
-        }
-        let curves = match parse(k, profile) {
-            Ok(c) => c,
-            Err(e) => return Ok(Err(e)),
-        };
-        if curves.len() as f64 * stations.len() as f64 > MAX_STATION_CURVES as f64 {
-            return Ok(Err(Error::Argument));
-        }
-        // Every section is the profile carried by its station's map: the sections share the
-        // profile's degrees and knots, which the skin interpolates control point by control point.
-        let mut sections = Vec::with_capacity(curves.len() * stations.len());
-        let mut counts = Vec::with_capacity(stations.len());
-        for s in stations {
-            for c in &curves {
-                let Some(b) = bspline(c)? else { return Ok(Err(Error::Argument)) };
-                match placed(&b, s) {
-                    Ok(p) => sections.push(p),
-                    Err(e) => return Ok(Err(e)),
-                }
-            }
-            counts.push(curves.len());
-        }
-        let degree = (stations.len() - 1).min(3);
-        let refs: Vec<Option<&Curve>> = sections.iter().map(Some).collect();
-        let mut r = match create_skin_primitive(k, &counts, &refs, degree, end == Ends::Capped) {
-            Ok(r) => r.brep,
-            Err(e) => return Ok(Err(status(e))),
-        };
-        if end == Ends::Joined {
-            // The last section lies on the first: the walls' ends are glued to their starts.
-            match api_stitch_into_solid(k, Some(&mut r)) {
-                Ok(s) if s.produces_a_solid => {}
-                Ok(_) => return Ok(Err(Error::NotSolid)),
-                Err(e) => return Ok(Err(status(e))),
-            }
-        }
-        finish(r, end != Ends::Open)
-    })
+    let curves = ops_curves(profile);
+    let maps: Vec<solidcore_ops::sweep::Affine> = stations.iter().map(|s| solidcore_ops::sweep::Affine { m: s.m, t: s.t }).collect();
+    let end = match end {
+        Ends::Open => solidcore_ops::sweep::Ends::Open,
+        Ends::Capped => solidcore_ops::sweep::Ends::Capped,
+        Ends::Joined => solidcore_ops::sweep::Ends::Joined,
+    };
+    super::call::ops_as("smlib_sweep_stations", &[], sweep_error, || solidcore_ops::sweep::sweep_stations(&curves, &maps, end))
 }
 
 /// The entry checks of `smlib_screw_sweep` and `smlib_screw_sweep_radial`.
