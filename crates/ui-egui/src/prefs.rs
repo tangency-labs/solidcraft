@@ -815,6 +815,10 @@ pub const DIMENSION_STEP_DEG: std::ops::RangeInclusive<f64> = 0.001..=180.0;
 /// How far a sketch dimension's text may be scaled (Preferences › Sketch › Dimension text size).
 pub const DIMENSION_TEXT_SCALE: std::ops::RangeInclusive<f32> = 0.5..=2.5;
 
+/// How far the origin planes' squares may be scaled (Preferences › Design › Origin › Origin plane
+/// size, #21191).
+pub const ORIGIN_PLANE_SCALE: std::ops::RangeInclusive<f32> = 0.5..=4.0;
+
 /// What an orbit turns around (Preferences: "Orbit around").
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1161,6 +1165,12 @@ pub fn perspective_fov(p: &Prefs) -> f64 {
 /// outside the accepted range (a hand edit). Applies in the open sketch and to Show Dimensions.
 pub fn dimension_text_scale(p: &Prefs) -> f32 {
     if accepted::dimension_text_scale(p) { p.dimension_text_scale } else { 1.0 }
+}
+
+/// The factor the origin planes' squares are drawn at, of the size they take on screen by default:
+/// the preference, or 1 when a saved value is outside the accepted range (a hand edit).
+pub fn origin_plane_scale(p: &Prefs) -> f64 {
+    f64::from(if accepted::origin_plane_scale(p) { p.origin_plane_scale } else { 1.0 })
 }
 
 /// The colour a sketch dimension draws its lines, arrows and value in: the user's colour when set,
@@ -4000,6 +4010,9 @@ pub fn migrate(mut p: Prefs) -> Prefs {
     if !accepted::dimension_text_scale(&p) {
         p.dimension_text_scale = Prefs::default().dimension_text_scale;
     }
+    if !accepted::origin_plane_scale(&p) {
+        p.origin_plane_scale = Prefs::default().origin_plane_scale;
+    }
     if p.orbit_cursor {
         p.orbit_around = OrbitAround::Cursor;
         p.orbit_cursor = false;
@@ -4272,6 +4285,9 @@ fn prepare_preferences(
     }
     if !accepted::dimension_text_scale(&new) {
         return Err("`dimension_text_scale` must be 0.5…2.5".into());
+    }
+    if !accepted::origin_plane_scale(&new) {
+        return Err("`origin_plane_scale` must be 0.5…4".into());
     }
     let new = migrate(new);
     crate::plugins::host_limits(&new).validate().map_err(|e| format!("plugin_max_fuel / plugin_max_memory_mib: {e}"))?;
@@ -7333,6 +7349,7 @@ mod tests {
             ("browser_rows_start_closed", json!(true), PAGE_LAYOUT),
             ("quick_measure", json!(true), PAGE_GRAPHICS),
             ("origin_plane_names", json!("top_front_right"), PAGE_DESIGN),
+            ("origin_plane_scale", json!(2.0), PAGE_DESIGN),
             ("direct_interaction", json!(true), PAGE_TOOLS),
             ("hole_snaps", json!(true), PAGE_TOOLS),
             ("hole_moves", json!(true), PAGE_TOOLS),
@@ -8083,6 +8100,34 @@ mod tests {
         }
         let read = lenient(&json!({"dimension_text_scale":9.0,"dimension_colour":[256,0,0]}));
         assert_eq!((read.dimension_text_scale, read.dimension_colour), (1.0, None), "bad values cost only their settings");
+    }
+
+    /// #21191: Origin plane size scales the origin planes' squares in the view, from the size they
+    /// take on screen by default; the origin axes keep their length. An out-of-range size is refused,
+    /// and a saved one reads as 1.
+    #[test]
+    fn origin_plane_size_scales_the_origin_squares_not_the_axes() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        let side = |app: &SolveApp| {
+            let planes = crate::viewport::origin_planes(app);
+            let (_, _, q) = planes.iter().find(|(n, _, _)| *n == "XY").copied().unwrap_or(("XY", Vec3::ZERO, [Vec3::ZERO; 4]));
+            (q[1] - q[0]).len()
+        };
+        let before = side(&h.app);
+        assert!(before > 0.0, "the origin planes show by default");
+        let axis = crate::selection::origin_size(h.app.cam.half_height());
+        let drawn = crate::viewport::highlight_key(&h.app);
+        let out = h.call("ui.prefs", json!({"origin_plane_scale":2.0}));
+        assert!(out["error"].is_null(), "{out}");
+        assert!((side(&h.app) - 2.0 * before).abs() < 1e-9 * before, "{} against {before}", side(&h.app));
+        assert_eq!(crate::selection::origin_size(h.app.cam.half_height()), axis, "the axes keep their length");
+        assert_ne!(crate::viewport::highlight_key(&h.app), drawn, "the view draws the squares again at the new size");
+        for bad in [json!(0.4), json!(4.5)] {
+            assert!(h.call("ui.prefs", json!({"origin_plane_scale":bad}))["error"].is_string(), "{bad}");
+            assert_eq!(lenient(&json!({"origin_plane_scale":bad})).origin_plane_scale, 1.0, "{bad}");
+        }
+        assert_eq!(h.app.preferences.origin_plane_scale, 2.0, "a refused size leaves the last one");
     }
 
     /// The theme strip's Import… reads the theme file through `vfs`, like the other imports: in the

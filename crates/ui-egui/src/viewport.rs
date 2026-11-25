@@ -4055,7 +4055,7 @@ pub(crate) enum HoveredOrigin {
 pub(crate) fn hovered_hidden_origin(app: &SolveApp) -> Option<(String, HoveredOrigin)> {
     use solidcraft_engine::doc::construct::ConstructGeom;
     let (name, item) = browser_hovered_origin(app)?;
-    let size = origin_size(app.cam.half_height());
+    let size = origin_plane_size(app);
     let hidden = if solidcraft_engine::origins::item(name).is_some() {
         let geom = app.session.origin_geometry(name)?;
         if app.session.shown_component_origins().iter().any(|(n, _)| n == name) {
@@ -4097,6 +4097,12 @@ fn component_origin_quad(name: &str, p: &Plane, size: f64) -> (Vec3, [Vec3; 4]) 
     (n, [o, o + x, o + x + y, o + y])
 }
 
+/// The side of the origin planes' squares in this view: the origin's size on screen, scaled by
+/// Preferences › Design › Origin plane size (#21191). The origin axes keep the unscaled size.
+pub(crate) fn origin_plane_size(app: &SolveApp) -> f64 {
+    origin_size(app.cam.half_height()) * crate::prefs::origin_plane_scale(&app.preferences)
+}
+
 /// Origin planes and axes currently shown, sized for the view: (name, normal, quad).
 pub fn origin_planes(app: &SolveApp) -> Vec<(&'static str, Vec3, [Vec3; 4])> {
     if !app.origin_visible() {
@@ -4110,7 +4116,7 @@ pub fn origin_planes(app: &SolveApp) -> Vec<(&'static str, Vec3, [Vec3; 4])> {
     if !app.origin_shown() && !reveal {
         return Vec::new();
     }
-    origin_quads(origin_size(app.cam.half_height()))
+    origin_quads(origin_plane_size(app))
         .into_iter()
         .filter(|(n, _, _)| reveal || !app.session.visibility.hidden_origin.iter().any(|h| h == n))
         .collect()
@@ -4359,7 +4365,7 @@ pub fn construction_quads(app: &SolveApp) -> Vec<(String, Vec3, [Vec3; 4])> {
         })
         .chain(app.session.shown_component_origins().into_iter().filter_map(|(name, g)| match g {
             solidcraft_engine::doc::construct::ConstructGeom::Plane(p) => {
-                let (n, q) = component_origin_quad(&name, &p, size);
+                let (n, q) = component_origin_quad(&name, &p, origin_plane_size(app));
                 Some((name, n, q))
             }
             _ => None,
@@ -6683,6 +6689,8 @@ fn highlight_key_with_projection(app: &SolveApp, projection: impl FnOnce() -> Pr
     let selected = app.highlighted();
     app.cam.half_height().to_bits().hash(&mut h);
     app.preferences.origin_axes_across_view.hash(&mut h);
+    // The origin squares' size follows Preferences › Design › Origin › Plane size.
+    crate::prefs::origin_plane_scale(&app.preferences).to_bits().hash(&mut h);
     // A typed dimension value hides the hovered profile (see `build_highlight`).
     crate::dim_view::preview_solve(app).is_some().hash(&mut h);
     // A construction plane's handle being dragged: its quad is drawn at the live size.
