@@ -156,26 +156,33 @@ pub(super) fn tool(k: &Kernel, spec: &Spec) -> SolidResult<Out<Tool>> {
 
 /// `spec` as solidcore-ops' split tool: the record surface its numbers describe and the box of
 /// its parameters (radians for angles), which the kernel's `from_parameters` makes into the
-/// surface `smlib_ssi.cpp`'s constructors make ([`tool`]). A cone's box is its whole turn; a
+/// surface `smlib_ssi.cpp`'s constructors make ([`tool`]); a revolution's frame made unit and
+/// square from the given axes. [`Error::Argument`] for axes that make no frame. A cone's box is its whole turn; a
 /// NURBS net's is its knot range, rows of `nv` points, weighted as homogeneous points.
-fn ops_tool(spec: &Spec) -> solidcore_ops::split::Tool {
+fn ops_tool(spec: &Spec) -> Result<solidcore_ops::split::Tool> {
     use solidcore_record::brep::{Frame, Surface as R};
-    let frame = |origin: [f64; 3], x_axis: [f64; 3], y_axis: [f64; 3]| Frame { origin, x_axis, y_axis };
+    // a revolution's frame as the record holds it: unit, square axes, the x axis along the
+    // given one and the y axis turned square to it in their plane, as the kernel's
+    // constructors took the given axes
+    let frame = |origin: [f64; 3], x: [f64; 3], y: [f64; 3]| -> Result<Frame> {
+        let [x_axis, y_axis] = solidcore_ops::affine::orthonormal_axes(x, y).map_err(|_| Error::Argument)?;
+        Ok(Frame { origin, x_axis, y_axis })
+    };
     let rad = |d: [f64; 2]| [d[0].to_radians(), d[1].to_radians()];
     let (surface, domain) = match spec {
         Spec::Plane { origin, xaxis, yaxis, u, v } => (R::Plane { origin: *origin, u_axis: *xaxis, v_axis: *yaxis }, [*u, *v]),
         Spec::Cylinder { origin, xaxis, yaxis, radius, angle_deg, height } => {
-            (R::Cylinder { frame: frame(*origin, *xaxis, *yaxis), radius: *radius }, [rad(*angle_deg), *height])
+            (R::Cylinder { frame: frame(*origin, *xaxis, *yaxis)?, radius: *radius }, [rad(*angle_deg), *height])
         }
         Spec::Cone { apex, xaxis, yaxis, half_angle_deg, height } => (
-            R::Cone { frame: frame(*apex, *xaxis, *yaxis), radius_at_origin: 0.0, half_angle: half_angle_deg.to_radians() },
+            R::Cone { frame: frame(*apex, *xaxis, *yaxis)?, radius_at_origin: 0.0, half_angle: half_angle_deg.to_radians() },
             [[0.0, std::f64::consts::TAU], *height],
         ),
         Spec::Sphere { center, xaxis, yaxis, radius, lon_deg, lat_deg } => {
-            (R::Sphere { frame: frame(*center, *xaxis, *yaxis), radius: *radius }, [rad(*lon_deg), rad(*lat_deg)])
+            (R::Sphere { frame: frame(*center, *xaxis, *yaxis)?, radius: *radius }, [rad(*lon_deg), rad(*lat_deg)])
         }
         Spec::Torus { center, xaxis, yaxis, major_radius, minor_radius, major_deg, minor_deg } => (
-            R::Torus { frame: frame(*center, *xaxis, *yaxis), major_radius: *major_radius, minor_radius: *minor_radius, tube_start: 0.0 },
+            R::Torus { frame: frame(*center, *xaxis, *yaxis)?, major_radius: *major_radius, minor_radius: *minor_radius, tube_start: 0.0 },
             [rad(*major_deg), rad(*minor_deg)],
         ),
         Spec::Nurbs { nv, knots_u, knots_v, points, weights, .. } => {
@@ -204,7 +211,7 @@ fn ops_tool(spec: &Spec) -> solidcore_ops::split::Tool {
             (surface, domain)
         }
     };
-    solidcore_ops::split::Tool { surface, domain }
+    Ok(solidcore_ops::split::Tool { surface, domain })
 }
 
 /// solidcore-ops' refusal of a split as the capi's: a tool that ends inside a face as
@@ -231,7 +238,7 @@ pub(crate) fn split_faces(body: &Body, faces: &[usize], tools: &[&Spec]) -> Resu
         return Err(Error::Internal("smlib_split_faces: the body was left unfinished by an earlier panic".to_owned()));
     }
     let order = body.own_order();
-    let tools: Vec<solidcore_ops::split::Tool> = tools.iter().map(|t| ops_tool(t)).collect();
+    let tools = tools.iter().map(|t| ops_tool(t)).collect::<Result<Vec<_>>>()?;
     ops_as("smlib_split_faces", &[("brep", body)], split_error, || solidcore_ops::split::split_faces(body, &order, faces, &tools))
 }
 
@@ -244,7 +251,7 @@ pub(crate) fn split_body(body: &Body, spec: &Spec) -> Result<Option<(Body, Body)
     if body.kernel_left_unfinished() {
         return Err(Error::Internal("smlib_split_body: the body was left unfinished by an earlier panic".to_owned()));
     }
-    let tool = ops_tool(spec);
+    let tool = ops_tool(spec)?;
     ops_as("smlib_split_body", &[("brep", body)], split_error, || solidcore_ops::split::split_body(body, &tool))
 }
 

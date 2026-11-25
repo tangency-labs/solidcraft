@@ -32,6 +32,17 @@ pub struct StatusItem {
     pub setting: String,
     pub has_key: bool,
     pub editable: bool,
+    /// The key that turns this effect off, for the close button's hint; `None` keeps the hint's
+    /// Escape.
+    pub clear_key: Option<String>,
+}
+
+/// The close button's hint: its own key when the effect names one, else Escape's.
+fn clear_hint(item: &StatusItem) -> String {
+    match &item.clear_key {
+        Some(key) => format!("{} · {key}", solidcraft_ui_text::format("ui.viewport_status_clear", &[("name", &item.name)])),
+        None => solidcraft_ui_text::format("ui.viewport_status_clear_hint", &[("name", &item.name)]),
+    }
 }
 
 #[derive(Default)]
@@ -253,7 +264,7 @@ pub fn viewport_status_item(ui: &mut Ui, item: &StatusItem, state: &mut StatusPr
                     }
                 }
                 let label = solidcraft_ui_text::format("ui.viewport_status_clear", &[("name", &item.name)]);
-                let hint = solidcraft_ui_text::format("ui.viewport_status_clear_hint", &[("name", &item.name)]);
+                let hint = clear_hint(item);
                 let response = icon_action(ui, item, "close", "close", &label, &hint, false);
                 state.focus_ids.push(response.id);
                 if response.clicked() {
@@ -457,7 +468,7 @@ pub fn viewport_status_summary(
                                         }
                                     }
                                     let label = solidcraft_ui_text::format("ui.viewport_status_clear", &[("name", &item.name)]);
-                                    let hint = solidcraft_ui_text::format("ui.viewport_status_clear_hint", &[("name", &item.name)]);
+                                    let hint = clear_hint(item);
                                     let response = icon_action(ui, item, "close", "close", &label, &hint, false);
                                     state.focus_ids.push(response.id);
                                     if response.clicked() {
