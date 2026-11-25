@@ -345,6 +345,16 @@ fn missing_model_warnings_name_the_folder_and_repeats_are_counted() {
       (footprint "a" (at 5 5) (layer "F.Cu") (model "/work/board/models/X.step")))"#;
     let imported = read_kicad(beside.as_bytes(), "/work/board/t.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
     assert!(imported.feature.warnings.iter().any(|w| w == "X.step: not found in the board's folder, models"), "{:?}", imported.feature.warnings);
+    // Windows and the browser word a missing file differently; the folder is named all the same.
+    for words in ["The system cannot find the file specified. (os error 2)", "no such file in this browser"] {
+        let mut other = |path: &str| Err(format!("{path}: {words}"));
+        let imported = read_kicad(source.as_bytes(), "t.kicad_pcb", &KicadOptions::default(), &mut other).unwrap();
+        assert!(
+            imported.feature.warnings.iter().any(|w| w == "JST_SH.step: not found in /libs/jst (x3)"),
+            "{words}: {:?}",
+            imported.feature.warnings
+        );
+    }
     let mut unset = |_: &str| Err("unresolved environment variable `EASYEDA2KICAD`".to_string());
     let imported = read_kicad(source.as_bytes(), "t.kicad_pcb", &KicadOptions::default(), &mut unset).unwrap();
     let lines: Vec<&String> = imported.feature.warnings.iter().filter(|w| w.contains("EASYEDA2KICAD")).collect();

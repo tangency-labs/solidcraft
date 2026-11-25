@@ -1548,7 +1548,7 @@ fn load_failure(reference: &str, reason: &str, board_folder: Option<&Path>) -> S
     }
     if let Some((head, tail)) = reason.split_once(": ")
         && (head.contains('\\') || head.contains('/'))
-        && tail.to_ascii_lowercase().starts_with("no such file or directory")
+        && is_missing_file(tail)
     {
         let searched = Path::new(head).parent();
         // A folder under the board's own is named from the board, so a long personal path is not repeated.
@@ -1566,6 +1566,19 @@ fn load_failure(reference: &str, reason: &str, board_folder: Option<&Path>) -> S
         }
     }
     format!("{label}: {}", short_reason(reason))
+}
+
+/// Whether an operating system's or the browser's error says the file is not there, whatever the
+/// platform's words: Linux and macOS say "no such file or directory", Windows "cannot find the file
+/// specified" (or "cannot find the path"), the browser "no such file in this browser", and all of
+/// them carry the code `os error 2` or `3` where the system gives one.
+fn is_missing_file(tail: &str) -> bool {
+    let tail = tail.to_ascii_lowercase();
+    tail.starts_with("no such file")
+        || tail.contains("cannot find the file")
+        || tail.contains("cannot find the path")
+        || tail.contains("(os error 2)")
+        || tail.contains("(os error 3)")
 }
 
 /// Identical warnings said once, with how many there were: a board with fifty footprints of one
