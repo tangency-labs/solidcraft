@@ -37,10 +37,11 @@ fn panel_arrow_bindings_and_cleared_defaults_survive_profile_export_import_and_a
 #[test]
 fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
-    // Test change: show_design_view_switcher, the setting the owner asked for, is a portable key.
+    // Test change: show_design_view_switcher is a portable key; 110 -> 109 because the
+    // wide_panel_grab key left Preferences, so one fewer portable key.
     assert_eq!(
         keys.len(),
-        110,
+        109,
         "include document browser visibility and sizing, the repeated-shortcut preference and the browser scroll wheel preferences among the current portable settings"
     );
     for key in [
