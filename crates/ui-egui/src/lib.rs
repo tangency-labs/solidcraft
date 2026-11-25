@@ -2420,6 +2420,55 @@ impl SolveApp {
         }
     }
 
+    /// The innermost linked component on a placement's path: the placement's own component, or
+    /// the nearest one above it that is linked to a file.
+    fn linked_component_on(&self, path: &[u64]) -> Option<u64> {
+        (1..=path.len()).rev().find_map(|n| {
+            let placement = self.session.occurrence_placement(path.get(..n)?).ok()?;
+            self.session.doc.links.contains_key(&placement.component).then_some(placement.component)
+        })
+    }
+
+    /// Break the link of each linked component among what is selected: a selected placement, or
+    /// a body, face, edge or vertex picked in the view, stands for the innermost linked
+    /// component on its path (a linked component inside one that is not linked is found, where
+    /// Ground's outermost placement would be the one around it), and a component picked in the
+    /// Browser for itself. Its bodies stay, and it no longer follows its file. The status line
+    /// says which links were broken, as nothing else on the screen changes. With no linked
+    /// component among them it says what to pick.
+    fn break_links_of_selected_components(&mut self) {
+        let frames = self.session.doc.body_frames(&self.session.model.state());
+        let mut components: Vec<u64> = Vec::new();
+        for sel in &self.session.selection {
+            use solidcraft_engine::Sel;
+            let path = match sel {
+                Sel::Occurrence { path } => Some(path.clone()),
+                Sel::Body { name: body } | Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } => {
+                    frames.iter().find(|frame| frame.0 == *body).map(|frame| frame.2.clone())
+                }
+                _ => None,
+            };
+            components.extend(path.and_then(|path| self.linked_component_on(&path)));
+        }
+        components.extend(self.tree.picked_components.iter().copied());
+        let mut seen = std::collections::BTreeSet::new();
+        components.retain(|component| self.session.doc.links.contains_key(component) && seen.insert(*component));
+        if components.is_empty() {
+            self.set_status(self.tr("ui.break_link_select_first"), false);
+            return;
+        }
+        let mut broken: Vec<String> = Vec::new();
+        for component in components {
+            let name = self.session.doc.components.iter().find(|c| c.id == component).map(|c| c.name.clone()).unwrap_or_default();
+            if let Err(why) = self.run("component.break_link", json!({ "component": component })) {
+                self.set_status(why, true);
+                return;
+            }
+            broken.push(name);
+        }
+        self.set_status(solidcraft_ui_text::format("ui.break_link_done", &[("name", &broken.join(", "))]), false);
+    }
+
     /// Ground (or, when every one is already grounded, unground) the selected placements, the
     /// placements owning the bodies or faces picked in the view, and the components picked in the
     /// Browser, the way the Browser's Ground row toggles one. With
@@ -2716,6 +2765,13 @@ impl SolveApp {
         // occurrence and the engine answered "`occurrence` must be an id or name".
         if id == "occurrence.ground" {
             self.ground_selected_occurrences();
+            return;
+        }
+        // The ribbon's Break Link acts on the linked components among what is selected, as
+        // Ground does on the placements. It used to run with no component and the engine
+        // answered "`component` must be a component id or name".
+        if id == "component.break_link" {
+            self.break_links_of_selected_components();
             return;
         }
         if render_workspace::start_interactive(self, id) {
