@@ -397,28 +397,11 @@ pub fn analysis_colors(c: &solidcraft_color::AnalysisColors) -> [f32; 36] {
     solidcraft_viewport_gpu::view::analysis_colors(c)
 }
 
-/// The backends the offscreen tests start, chosen once per test process as the app chooses them
-/// (`apps/solidcraft/src/startup.rs`, `choose_backends`): what `WGPU_BACKEND` names; on Windows one
-/// backend, the first of D3D12, Vulkan and OpenGL with a hardware adapter (else D3D12); elsewhere
-/// wgpu's default. wgpu's default on Windows starts Vulkan, D3D12 and OpenGL together, and tests
-/// starting them side by side hung or crashed the test process inside the Vulkan driver.
+/// The backends the offscreen tests start: the headless ones
+/// (`solidcraft_viewport_gpu::select::native_backends`), as for headless pictures.
 #[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) fn offscreen_backends() -> wgpu::Backends {
-    static CHOSEN: std::sync::OnceLock<wgpu::Backends> = std::sync::OnceLock::new();
-    *CHOSEN.get_or_init(|| {
-        let default = solidcraft_viewport_gpu::instance_descriptor_from_env().backends;
-        if !cfg!(target_os = "windows") || std::env::var("WGPU_BACKEND").is_ok_and(|v| !v.trim().is_empty()) {
-            return default;
-        }
-        let hardware = |backends: wgpu::Backends| {
-            let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
-            desc.backends = backends;
-            desc.backend_options.dx12.shader_compiler = solidcraft_viewport_gpu::dx12_compiler();
-            let adapters = pollster::block_on(solidcraft_viewport_gpu::select::start_instance(desc).enumerate_adapters(backends));
-            adapters.iter().any(|a| a.get_info().device_type != wgpu::DeviceType::Cpu)
-        };
-        [wgpu::Backends::DX12, wgpu::Backends::VULKAN, wgpu::Backends::GL].into_iter().find(|b| hardware(*b)).unwrap_or(wgpu::Backends::DX12)
-    })
+    solidcraft_viewport_gpu::select::native_backends()
 }
 
 /// Held while a test starts an instance, adapter or device: starting an instance scans the Vulkan
@@ -755,6 +738,8 @@ fn offscreen(
     resources.insert(Renderer::new(&device, target, compute));
     let none = || Arc::new(Mutex::new(None));
     let cb = solidcraft_viewport_egui::ViewportCallback(Frame {
+        // A preview frame with no session: no whole-body selection.
+        selection_all: false,
         product_lights,
         product,
         upload_error: None,
@@ -784,6 +769,7 @@ fn offscreen(
         eye,
         ao_radius,
         ao_samples,
+        occlusion: false,
         edge_px: solidcraft_viewport_gpu::view::EDGE_PX,
         ssaa,
         sky: [0.0; 4],
@@ -1812,20 +1798,15 @@ mod tests {
         assert!(app.viewport.tess_ready.is_none());
     }
 
-    /// The offscreen tests start the backends the app would: on Windows without `WGPU_BACKEND`
-    /// exactly one, from the app's order (D3D12, Vulkan, OpenGL); otherwise wgpu's default.
+    /// The offscreen tests start the headless backends: Metal on macOS, D3D12 and Vulkan on
+    /// Windows, Vulkan elsewhere, never OpenGL.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn offscreen_tests_start_the_backend_the_app_would() {
+    fn offscreen_tests_start_the_headless_backends() {
         use egui_wgpu::wgpu::Backends;
         let chosen = super::offscreen_backends();
-        let env = std::env::var("WGPU_BACKEND").is_ok_and(|v| !v.trim().is_empty());
-        if cfg!(target_os = "windows") && !env {
-            assert!([Backends::DX12, Backends::VULKAN, Backends::GL].contains(&chosen), "one backend, not {chosen:?}");
-        } else {
-            assert_eq!(chosen, egui_wgpu::wgpu::InstanceDescriptor::new_without_display_handle_from_env().backends);
-        }
-        assert_eq!(super::offscreen_backends(), chosen, "chosen once per test process");
+        assert_eq!(chosen, solidcraft_viewport_gpu::select::native_backends());
+        assert!(!chosen.contains(Backends::GL), "{chosen:?}");
         // And the offscreen device is made on them (skipped without a GPU adapter).
         if let Some((adapter, _, _)) = super::offscreen_device() {
             let used = Backends::from(adapter.get_info().backend);
@@ -1912,7 +1893,7 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    /// A device the driver loses (#4172): its lost callback marks it, the painter's probe sees it
+    /// A device the driver loses (#4172): its lost callback marks it, the painter sees the mark
     /// before the next frame's uploads, those uploads no longer reach the device (they panicked
     /// inside wgpu when they were the first to meet the loss), and pictures (thumbnails of saves)
     /// come from the CPU rasterizer. `destroy` loses the device as a driver reset does; wgpu calls
@@ -1951,11 +1932,11 @@ mod tests {
         assert_eq!((picture.renderer, picture.rgba.len()), ("cpu", 16 * 16 * 4));
     }
 
-    /// The probe runs before every frame's uploads, so on a working device it must cost nothing
-    /// visible: no error for any scope or handler, and the uploads after it go through. On a
-    /// reset D3D12 device an empty submission went through and the upload after it panicked
-    /// inside wgpu (#6528); the probe now opens a command list, the driver call that upload's
-    /// queue write would make first. A driver reset can't be made here: `destroy` loses the
+    /// The probe runs after a panicked frame and before every capture, so on a working device it
+    /// must cost nothing visible: no error for any scope or handler, and the uploads after it go
+    /// through. On a reset D3D12 device an empty submission went through and the upload after it
+    /// panicked inside wgpu (#6528); the probe now opens a command list, the driver call that
+    /// upload's queue write would make first. A driver reset can't be made here: `destroy` loses the
     /// device in wgpu itself, before any driver call.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
@@ -1972,7 +1953,7 @@ mod tests {
         let delta = egui::epaint::ImageDelta::full(image, egui::TextureOptions::LINEAR);
         let (scene, cam) = (solidcraft_viewport::Scene::default(), solidcraft_viewport::Camera::default());
         for frame in 0..3 {
-            // As the painter: the probe, then the frame's first queue write.
+            // The probe, then a queue write, as a frame after a survived panic makes them.
             let (was_lost, error) = egui_wgpu::capture_errors(&device, || {
                 let was_lost = lost.probe(&device, &queue);
                 renderer.update_texture(&device, &queue, egui::TextureId::Managed(0), &delta);
@@ -1986,7 +1967,7 @@ mod tests {
         assert!(!lost.is_lost() && lost.reason().is_none(), "{:?}", lost.reason());
     }
 
-    /// A driver reset that lands after the frame's probe is met by a queue write (or the present),
+    /// A driver reset that lands mid-frame is met by a queue write (or the present),
     /// which panics inside wgpu (#10240). The painter survives that panic once the device turns
     /// out lost, and draws nothing more; on a working device a panic is a bug and carries on. A
     /// driver reset can't be made here: `destroy` loses the device in wgpu itself, so the probe

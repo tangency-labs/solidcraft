@@ -983,7 +983,7 @@ fn execute<H: PluginHost + 'static>(
         deadline: Instant::now() + Duration::from_millis(deadline_ms),
         limits: store_limits(limits, 10_000),
         import: None,
-        panels: None,
+        panels: runtime.ui.clone(),
     };
     let mut store = Store::new(&engine, state);
     let outcome = (|| {

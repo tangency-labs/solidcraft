@@ -112,7 +112,7 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "sheet.flange" | "sheet.hem" => &[("edges", Picks), ("body", Body)],
         "sheet.fold" => &[("points", Picks), ("fixed", Pick), ("body", Body)],
         "sheet.path_flange" => &[("edge", Pick), ("body", Body)],
-        "sheet.perforate" | "sheet.tab" => &[("body", Body)],
+        "sheet.perforate" | "sheet.tab" | "sheet.bead" => &[("body", Body)],
         "solid.cell_grid" => &[("anchor", Make), ("targets", Body), ("participants", Body)],
         "sketch.create" | "sketch.redefine" => &[("plane", HerePlane)],
         "canvas.decal" => &[("face", Here)],

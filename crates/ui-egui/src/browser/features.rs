@@ -801,6 +801,19 @@ mod tests {
         assert!(h.app.session.visibility.hidden_origin.is_empty());
     }
 
+    /// A construction plane's Features row has the eye its Construction folder row has, on that
+    /// row (#15843).
+    #[test]
+    fn a_construction_feature_rows_eye_is_on_its_row() {
+        let mut h = Harness::new();
+        let id = h.app.run("construct.plane.offset", json!({"base":"XY","offset":5,"name":"Lid"})).unwrap()["feature"].as_u64().unwrap();
+        h.app.tree.expanded.insert("c0/features".into());
+        h.settle();
+        let row = crate::scenario::handle_at(&format!("row:browser-feature:c0:{id}")).unwrap();
+        let eye = crate::scenario::handle_at("eye:Lid").expect("the plane's Features row has an eye");
+        assert!((eye.y - row.y).abs() < 2.0, "the eye is on the plane's Features row");
+    }
+
     #[test]
     fn browser_feature_rows_stay_listed_after_manual_rollback() {
         let mut h = Harness::new();
@@ -1085,7 +1098,7 @@ mod tests {
         let row = crate::scenario::handle_at(&format!("row:browser-feature:c0:{round}")).unwrap();
         h.step(&json!({"move":[row.x,row.y]})).unwrap();
         assert_eq!(h.app.viewport.hover_feature, Some(round));
-        assert!(h.app.session.selection.is_empty(), "hovering doesn't select");
+        assert!(!h.app.session.has_selection(), "hovering doesn't select");
         h.step(&json!({"move":[5,5]})).unwrap();
         assert_eq!(h.app.viewport.hover_feature, None);
         // The timeline's own hover still lights it: the browser clears only what it set.
@@ -2130,7 +2143,7 @@ mod tests {
         h.step(&json!({"click": {"handle": format!("row:browser-feature:c0:{id}")}})).unwrap();
         let picked = h.app.dialog.as_ref().map(|dialog| dialog.inputs[0].items.clone());
         assert_eq!(picked, Some(vec![Sel::Feature { id }]), "the row's click goes to the dialog");
-        assert!(h.app.session.selection.is_empty(), "dialog picks leave the ordinary selection alone");
+        assert!(!h.app.session.has_selection(), "dialog picks leave the ordinary selection alone");
     }
 
     #[test]
@@ -2152,7 +2165,7 @@ mod tests {
         let row_feature = crate::scenario::handle_at(&format!("row:browser-feature:c0:{round}")).unwrap();
         h.step(&json!({"move":[row_feature.x, row_feature.y]})).unwrap();
         assert_eq!(h.app.viewport.hover_feature, Some(round));
-        assert!(h.app.session.selection.is_empty(), "hovering doesn't select");
+        assert!(!h.app.session.has_selection(), "hovering doesn't select");
         h.step(&json!({"move":[5, 5]})).unwrap();
         assert_eq!(h.app.viewport.hover_feature, None);
 
@@ -2160,7 +2173,7 @@ mod tests {
         let row_sketch = crate::scenario::handle_at("row:MySketch").unwrap();
         h.step(&json!({"move":[row_sketch.x, row_sketch.y]})).unwrap();
         assert_eq!(h.app.viewport.hover_feature, Some(sketch));
-        assert!(h.app.session.selection.is_empty(), "hovering sketch doesn't select");
+        assert!(!h.app.session.has_selection(), "hovering sketch doesn't select");
         h.step(&json!({"move":[5, 5]})).unwrap();
         assert_eq!(h.app.viewport.hover_feature, None);
     }

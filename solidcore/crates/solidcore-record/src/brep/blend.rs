@@ -133,6 +133,8 @@ pub enum RadiusRecord {
     },
     /// A ball whose radius is the x of a curve over the leader's parameter.
     Law(NurbsCurveRecord),
+    /// The rolling radius is set by the chamfer's equal setbacks at each pair of feet.
+    EqualSetback,
 }
 
 /// How a chamfer's size was asked for.
@@ -535,6 +537,17 @@ impl BlendDefinitionRecord {
                 }
             }
             RadiusRecord::Law(law) => law.validate("definition.radius")?,
+            RadiusRecord::EqualSetback => {
+                if self.order != 0
+                    || !matches!(self.chamfer.as_ref().map(|c| c.size),
+                    Some(ChamferSizeRecord::Distances([a, b])) if a == b && a > 0.0)
+                {
+                    return Err(refuse(
+                        "definition.radius",
+                        "a local wedge needs an equal-setback chamfer",
+                    ));
+                }
+            }
         }
         self.leader.validate("definition.leader")?;
         for seed in &self.seeds {
@@ -546,7 +559,7 @@ impl BlendDefinitionRecord {
     /// How many numbers it holds, nested supports included (call on a validated record).
     pub fn items(&self) -> usize {
         let law = match &self.radius {
-            RadiusRecord::Constant { .. } => 0,
+            RadiusRecord::Constant { .. } | RadiusRecord::EqualSetback => 0,
             RadiusRecord::Law(law) => law.items(),
         };
         self.supports

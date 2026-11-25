@@ -2784,7 +2784,12 @@ pub fn make_vertex_split_uv_trim_curve(
             new_uv_curve.trim(k, &mut ivl1, TrimMode::Notify)?;
             new_uv_curve.edit_parameterization(k, &ivl1_3d)?;
         }
+        // Not upstream (#21416): a UV trim curve lifted across a periodic surface's seam
+        // (`CreateUVTrimCurve`'s periodic projection runs on through it) split at the seam
+        // has its part past the seam a period outside the face's domain
+        uv_into_period(k, &surface, attached)?;
     }
+    uv_into_period(k, &surface, &mut new_uv_curve)?;
 
     ignored(eu1::set_uv_trim_curve(
         b,
@@ -2794,6 +2799,68 @@ pub fn make_vertex_split_uv_trim_curve(
         false,
         None,
     ))?;
+    Ok(())
+}
+
+/// Not upstream (#21416): `uv`, a UV trim curve on `surface`, moved by a whole period into the
+/// surface's natural domain where it lies wholly past a side of that domain in a periodic
+/// direction (within a period of it). A UV curve lifted across the seam, continuous through it,
+/// holds its part beyond the seam a period outside the domain; cut at the seam, that part alone
+/// is the same curve on the face a period back. A curve within the domain, one across a side,
+/// and one on a surface periodic in neither direction are left as they are.
+///
+/// # Errors
+/// Those of the domain, the periodicity tests, the evaluations and the move.
+pub(crate) fn uv_into_period(k: &Kernel, surface: &Surface, uv: &mut Curve) -> Result<()> {
+    use crate::geom::axis2_placement::Axis2Placement;
+    // the curve's samples: a piece lifted past a side lies past it at every one
+    const SAMPLES: u32 = 8;
+    let domain = surface.natural_uv_domain_with_nurb(k)?;
+    let ivl = uv.natural_interval();
+    let mut points = Vec::new();
+    for i in 0..=SAMPLES {
+        let t = ivl.min() + (ivl.max() - ivl.min()) * f64::from(i) / f64::from(SAMPLES);
+        points.push(uv.evaluate_point(k, t)?);
+    }
+    let mut shift = Vec3::new(0.0, 0.0, 0.0);
+    for (param, side) in [
+        (SurfParamType::U, domain.u_interval()),
+        (SurfParamType::V, domain.v_interval()),
+    ] {
+        let (lo, hi) = (side.min(), side.max());
+        let period = hi - lo;
+        // a rounding of the domain's sides, far below any piece of a curve
+        let tol = 1e-9 * period.abs().max(1.0);
+        let along = |p: &Point3| if param == SurfParamType::U { p.x } else { p.y };
+        let (min, max) = points
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), p| {
+                (a.min(along(p)), b.max(along(p)))
+            });
+        let by = if min >= hi - tol && max > hi + tol && max <= hi + period + tol {
+            -period
+        } else if max <= lo + tol && min < lo - tol && min >= lo - period - tol {
+            period
+        } else {
+            continue;
+        };
+        // (asked only of a curve past a side: the test evaluates the surface)
+        if period.is_nan() || period <= 0.0 || !surface.is_periodic(k, &domain, param)? {
+            continue;
+        }
+        if param == SurfParamType::U {
+            shift.x = by;
+        } else {
+            shift.y = by;
+        }
+    }
+    if shift == Vec3::new(0.0, 0.0, 0.0) {
+        return Ok(());
+    }
+    let mut axis = Axis2Placement::default();
+    axis.set_canonical(shift, Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0))?;
+    uv.transform(k, &axis, None)?;
+    uv.convert_to_2d(k)?;
     Ok(())
 }
 
