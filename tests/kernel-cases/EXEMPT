@@ -68,6 +68,7 @@ component.unlock                  component locking
 component.update_links            component links
 config.update_from_design         configuration table bookkeeping; tested in crates/engine/src/cmd/config.rs
 construct.axis                    builds with the first construct.axis.* method that takes the references; that method's own feature (crates/engine/src/construct_tests.rs)
+construct.coordinate_system       a frame as a history step: a_coordinate_system_* (crates/engine/src/construct_tests.rs)
 construct.plane                   builds with the first construct.plane.* method that takes the references; that method's own feature (crates/engine/src/construct_tests.rs)
 construct.plane.square_to_line    a plane through a point, square to a line: plane_through_point_square_to_line_* (crates/engine/src/construct_tests.rs)
 construct.point                   builds with the first construct.point.* method that takes the references; that method's own feature (crates/engine/src/construct_tests.rs)

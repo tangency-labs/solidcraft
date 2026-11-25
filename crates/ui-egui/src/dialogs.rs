@@ -6927,6 +6927,9 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             let mut p = serde_json::Map::new();
             for (i, key) in keys.iter().enumerate() {
                 let input = d.inputs.get(i).map_or("", |inp| inp.label);
+                if sels(d, i).is_empty() && d.extra.get(*key).is_none() && construct_optional(command, key) {
+                    continue;
+                }
                 if d.inputs.get(i).is_some_and(|inp| inp.multi) {
                     // A list parameter takes everything picked: two points or twenty, in any order.
                     let picked = sels(d, i);
@@ -8215,6 +8218,16 @@ fn construct_picks(id: &str) -> Option<(&'static str, &'static str, &'static [(&
         }
         "construct.axis.edge" => ("construct.axis.edge", "AXIS THROUGH EDGE", &[("Edge", LINE, "edge", false)]),
         "construct.point.vertex" => ("construct.point.vertex", "POINT AT VERTEX", &[("Point", POINT, "point", false)]),
+        // Z and X are optional (`construct_optional`): the component's own axes otherwise.
+        "construct.coordinate_system" => (
+            "construct.coordinate_system",
+            "cmd.construct.coordinate_system",
+            &[
+                ("Origin", POINT | FACES | EDGES | selection::ORIGIN, "origin", false),
+                ("Z direction", LINE | PLANE | FACES, "z", false),
+                ("X direction", LINE | PLANE | FACES, "x", false),
+            ],
+        ),
         "construct.point.two_edges" => {
             ("construct.point.two_edges", "POINT THROUGH TWO EDGES", &[("First edge", CURVE, "a", false), ("Second edge", CURVE, "b", false)])
         }
@@ -8252,6 +8265,12 @@ fn construct_picks(id: &str) -> Option<(&'static str, &'static str, &'static [(&
         ),
         _ => return None,
     })
+}
+
+/// Whether a construction dialog's input may be left empty: a coordinate system's Z and X
+/// (#14644), which then follow its component's axes.
+fn construct_optional(command: &str, key: &str) -> bool {
+    command == "construct.coordinate_system" && matches!(key, "z" | "x")
 }
 
 /// Is `body` an imported mesh body (no B-rep, so no vertices of its own)?

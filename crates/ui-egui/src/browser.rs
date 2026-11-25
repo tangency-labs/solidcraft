@@ -1423,6 +1423,7 @@ impl Lit {
                                     FeatureKind::ConstructionPlane { .. }
                                         | FeatureKind::ConstructionAxis { .. }
                                         | FeatureKind::ConstructionPoint { .. }
+                                        | FeatureKind::CoordinateSystem { .. }
                                 )
                         })
                         .map(|f| f.component),

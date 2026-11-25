@@ -4059,6 +4059,13 @@ impl Session {
                 self.visibility.hidden_joints.push(j);
             }
         }
+        // A coordinate system the computation made starts hidden (#14644), and stays so.
+        for n in computed.visibility.hidden_origin {
+            let frame = self.doc.find_feature(&n).is_some_and(|f| matches!(f.kind, solidcraft_doc::FeatureKind::CoordinateSystem { .. }));
+            if frame && !self.visibility.hidden_origin.contains(&n) {
+                self.visibility.hidden_origin.push(n);
+            }
+        }
         self.sketch_finish_pending = computed.sketch_finish_pending;
         self.sketch_by_person = computed.sketch_by_person;
         self.prepared_edit_source = computed.prepared_edit_source;

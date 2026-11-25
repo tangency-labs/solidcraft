@@ -977,7 +977,11 @@ fn datum_paths_follow_their_place_and_nested_ones_refuse() {
     let holder = s.doc.occurrences.iter().find(|o| o.name == "Holder:1").unwrap().id;
     let sketch = s.doc.features.iter().find(|f| f.name == "Placed").unwrap().id;
     let datum = |path: Vec<u64>| solidcraft_doc::PlaneRef::Datum {
-        datum: solidcraft_doc::construct::DatumRef { path, item: solidcraft_doc::construct::DatumItem::XY },
+        datum: solidcraft_doc::construct::DatumRef {
+            path,
+            item: solidcraft_doc::construct::DatumItem::XY,
+            source: solidcraft_doc::construct::DatumSource::Origin,
+        },
     };
     let place_on = |s: &mut Session, path: Vec<u64>| {
         if let solidcraft_doc::FeatureKind::Sketch { plane, .. } = &mut s.doc_mut().feature_mut(sketch).unwrap().kind {

@@ -537,7 +537,7 @@ fn resolve_uncached(
                 "Z" => (Vec3::ZERO, Vec3::Z),
                 _ => match crate::construct::DatumRef::parse_key(name) {
                     // The origin axis of a component (#15086), where that component now stands.
-                    Some(datum) => match crate::construct::resolve_datum_in(doc, &datum, 0)? {
+                    Some(datum) => match crate::construct::resolve_datum_in(doc, Some(st), &datum, 0)? {
                         crate::construct::ConstructGeom::Axis { origin, dir } => (origin, dir),
                         _ => return Err(lost(&format!("axis {name}"))),
                     },

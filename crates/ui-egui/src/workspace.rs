@@ -432,6 +432,7 @@ pub fn groups(tab: &str, panel: &str) -> &'static [CommandGroup] {
                     "construct.point.average",
                 ],
             },
+            CommandGroup { label: "ui.construct_frames", ids: &["construct.coordinate_system"] },
         ],
         ("MODEL", "MODIFY") => &[
             CommandGroup { label: "Edges", ids: &["solid.fillet", "solid.chamfer"] },
@@ -1362,7 +1363,10 @@ mod tests {
         let specs = solidcraft_engine::command_specs();
         let (commands, _) = layout("MODEL", "CONSTRUCT", &specs).unwrap();
         let grouped = grouped_commands("MODEL", "CONSTRUCT", &commands);
-        assert_eq!(grouped.iter().filter_map(|(h, _)| *h).collect::<Vec<_>>(), ["ui.construct_planes", "ui.construct_axes", "ui.construct_points"]);
+        assert_eq!(
+            grouped.iter().filter_map(|(h, _)| *h).collect::<Vec<_>>(),
+            ["ui.construct_planes", "ui.construct_axes", "ui.construct_points", "ui.construct_frames"]
+        );
         assert_eq!(grouped.len(), commands.len());
         let mut seen = std::collections::BTreeSet::new();
         let mut previous = 0;
@@ -1376,6 +1380,8 @@ mod tests {
                 1
             } else if entity("point") {
                 2
+            } else if c.id == "construct.coordinate_system" {
+                3
             } else {
                 panic!("ungrouped {}", c.id)
             };
@@ -1390,7 +1396,7 @@ mod tests {
         let without_planes: Vec<_> =
             commands.iter().copied().filter(|c| c.id != "construct.plane" && !c.id.starts_with("construct.plane.")).collect();
         let grouped = grouped_commands("MODEL", "CONSTRUCT", &without_planes);
-        assert_eq!(grouped.iter().filter_map(|(h, _)| *h).collect::<Vec<_>>(), ["ui.construct_axes", "ui.construct_points"]);
+        assert_eq!(grouped.iter().filter_map(|(h, _)| *h).collect::<Vec<_>>(), ["ui.construct_axes", "ui.construct_points", "ui.construct_frames"]);
         assert_eq!(grouped.len(), without_planes.len());
     }
 

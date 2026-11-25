@@ -104,6 +104,10 @@ pub struct ExportStepParams {
     /// The bodies to export, by name. Default: every body.
     #[serde(default)]
     pub bodies: Option<StringList>,
+    /// Write the bodies in a coordinate system's frame (#14644), by name (`CS1`) or datum key,
+    /// instead of the world's. Not with URDF or the design file.
+    #[serde(default)]
+    pub frame: Option<String>,
 }
 
 /// Export bodies as an OBJ mesh file (`file.export_obj`), the colours of the bodies in a material
@@ -119,6 +123,10 @@ pub struct ExportMeshParams {
     /// How closely the mesh follows curved faces. Default: standard.
     #[serde(default)]
     pub quality: Option<MeshQualityParam>,
+    /// Write the bodies in a coordinate system's frame (#14644), by name (`CS1`) or datum key,
+    /// instead of the world's. Not with URDF or the design file.
+    #[serde(default)]
+    pub frame: Option<String>,
 }
 
 /// Export bodies as a binary STL file (`file.export_stl`), whatever the path's extension.
@@ -139,6 +147,10 @@ pub struct ExportStlParams {
     /// as it lies in the design.
     #[serde(default)]
     pub lay_on_print_faces: Option<bool>,
+    /// Write the bodies in a coordinate system's frame (#14644), by name (`CS1`) or datum key,
+    /// instead of the world's. Not with `lay_on_print_faces`.
+    #[serde(default)]
+    pub frame: Option<String>,
     /// True writes ASCII STL instead of binary. Default: false.
     #[serde(default)]
     pub ascii: Option<bool>,
@@ -179,6 +191,10 @@ pub struct Export3mfParams {
     /// its shape. Default: false.
     #[serde(default)]
     pub lay_on_print_faces: Option<bool>,
+    /// Write the bodies in a coordinate system's frame (#14644), by name (`CS1`) or datum key,
+    /// instead of the world's. Not with URDF or the design file.
+    #[serde(default)]
+    pub frame: Option<String>,
 }
 
 /// Export the whole assembly as a robot description (URDF), with an STL mesh for each link
@@ -292,6 +308,10 @@ pub struct ExportParams {
     /// `file.export_stl` has it; refused for the other formats. Default: false. Not read for URDF.
     #[serde(default)]
     pub lay_on_print_faces: Option<bool>,
+    /// Write the bodies in a coordinate system's frame (#14644), by name (`CS1`) or datum key,
+    /// instead of the world's. Not with URDF, SDF, the design file, or a format cadmpeg or a plugin writes.
+    #[serde(default)]
+    pub frame: Option<String>,
     /// URDF only: write motion links as `<mimic>`. Default: false, each joint free.
     #[serde(default)]
     pub mimic: Option<bool>,
@@ -415,6 +435,7 @@ impl<'de> Deserialize<'de> for ExportParams {
             velocity: None,
             images: None,
             lay_on_print_faces: None,
+            frame: None,
             hierarchy: None,
             solids: None,
             physics: None,
@@ -446,6 +467,7 @@ impl<'de> Deserialize<'de> for ExportParams {
             return Ok(out);
         };
         out.bodies = names::<D::Error>(&m)?;
+        out.frame = text::<D::Error>(&m, "frame")?;
         // `solids` is checked for every format, so URDF and SDF refuse `face` as binary STL does.
         out.solids = match m.get("solids") {
             None | Some(Value::Null) => None,

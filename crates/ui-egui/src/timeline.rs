@@ -342,6 +342,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
             PointDef::AlongPath { .. } => "point_along_path",
             PointDef::Average { .. } => "c_midpoint",
         },
+        FeatureKind::CoordinateSystem { .. } => "coordinate_system",
         FeatureKind::Hole { .. } => "hole",
         FeatureKind::Loft { .. } => "loft",
         FeatureKind::Sweep { .. } => "sweep",
