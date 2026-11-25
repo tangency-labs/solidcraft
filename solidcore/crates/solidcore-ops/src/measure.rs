@@ -8,7 +8,8 @@ use solidcore::error::EntityRef;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::extent3d::Extent3d;
 use solidcore::geom::object::Shape;
-use solidcore::geom::tol::{brep_zone_tol_3d, SmallTopoType};
+use solidcore::geom::tol::{brep_zone_tol_3d, context_xsect_tol_3d, SmallTopoType};
+use solidcore::heal::gap::GapFunction;
 use solidcore::intersect::point_class::{PointClassType, PointClassification};
 use solidcore::mass::integrator::properties::{
     brep_area_about, brep_area_about_prepared, brep_mass_properties_estimated,
@@ -22,6 +23,7 @@ use solidcore::query::api_queries::{
 };
 use solidcore::query::brep::{BrepClassifier, BrepQuery, LiveBrepObjects, Ray};
 use solidcore::query::face::p1 as face_p1;
+use solidcore::topology::brep::mirror::transform_matrix;
 use solidcore::topology::brep::outward_solid_failure;
 use solidcore::topology::brep::p3::{
     brep_copy_mapped, merge_brep, notify_serial, topology_ref, with_kernel_callbacks,
@@ -49,6 +51,7 @@ impl Answer for Vec<[f64; 3]> {}
 impl Answer for Vec<Option<f64>> {}
 impl Answer for Vec<Vec<Option<f64>>> {}
 impl Answer for Vec<Result<PointClass>> {}
+impl Answer for Vec<Result<PointLocation>> {}
 impl Answer for Vec<f64> {}
 impl Answer for Vec<solidcore::query::FaceLineHit> {}
 
@@ -174,6 +177,23 @@ pub enum PointClass {
     OnBoundary,
 }
 
+/// Where a point lies against a body ([`Body::locate_points`]), a region the kernel is unsure
+/// of named as that, for the caller's own rule.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PointLocation {
+    /// Within the body's tolerance of a face, an edge or a vertex.
+    OnBoundary,
+    /// In a material region.
+    Inside,
+    /// In a void region: outside the material, or in a cavity.
+    Outside,
+    /// In a region the kernel is unsure is material (its `IsVoid` `UNSURE`).
+    Unsure {
+        /// The kernel region's id index, as [`Error::UnsureRegion`] names it.
+        region: u32,
+    },
+}
+
 /// Which face supplies normals in [`Body::classify_points_with_normals`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PointNormalFace {
@@ -295,6 +315,31 @@ fn one(
     mut v: Vec<std::result::Result<Located, LocateFailure>>,
 ) -> std::result::Result<Located, LocateFailure> {
     v.pop().unwrap_or(Err(LocateFailure::Unclassified))
+}
+
+/// [`Body::locate_points`]'s location of a point [`locate_points`] placed.
+fn point_location(l: std::result::Result<Located, LocateFailure>) -> Result<PointLocation> {
+    match l {
+        Ok(Located::OnBoundary) => Ok(PointLocation::OnBoundary),
+        Ok(Located::InRegion {
+            material: Some(true),
+            ..
+        }) => Ok(PointLocation::Inside),
+        Ok(Located::InRegion {
+            material: Some(false),
+            ..
+        }) => Ok(PointLocation::Outside),
+        Ok(Located::InRegion {
+            region,
+            material: None,
+        }) => Ok(PointLocation::Unsure {
+            region: region.index(),
+        }),
+        Err(LocateFailure::NotFinite) => Err(Error::Argument),
+        Err(LocateFailure::Classify(e) | LocateFailure::Region(e)) => Err(status(e)),
+        // Point3DClassify reports only the four classes on success: SM_ERR.
+        Err(LocateFailure::Unclassified) => Err(Error::Status(solidcore::error::SM_ERR)),
+    }
 }
 
 /// [`Body::classify_point`]'s class of a point [`locate_points`] placed: a region the kernel
@@ -722,6 +767,32 @@ impl Body {
         })?)
     }
 
+    /// How far the body reaches along the normal of the plane through `origin` with axes `x`
+    /// and `y` (`x × y` made unit), measured from that plane: the least and the greatest level
+    /// of its points, `[low, high]`. A copy of the body is moved rigidly into the plane's own
+    /// frame ([`solidcore::Transform::into_plane_frame`]: the normal becomes Z) and its exact box
+    /// read there ([`Body::bounds`]'s), so the span is the body's own, not the shadow of its
+    /// world box. The body is unchanged.
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an entry that is not finite, an axis of no length or axes along
+    /// one line (the kernel's refusal); [`Error::Status`] `SM_ERR_INVALID_INPUT` for no box;
+    /// the kernel's error.
+    pub fn levels_along(&self, origin: [f64; 3], x: [f64; 3], y: [f64; 3]) -> Result<[f64; 2]> {
+        let to_plane = solidcore::Transform::into_plane_frame(point(origin)?, point(x)?, point(y)?)
+            .map_err(|_| Error::Argument)?
+            .m;
+        let span = measure_body("levels_along", self, |k, b| {
+            transform_matrix(k, b, &to_plane, true)?;
+            brep_bounding_box(k, b, true)
+        })?;
+        let (lo, hi) = (span.min().z, span.max().z);
+        if !(lo.is_finite() && hi.is_finite() && lo <= hi) {
+            return Err(Error::Status(crate::error::INVALID_INPUT));
+        }
+        Ok([lo, hi])
+    }
+
     /// The samples of the kernel's edge/face gap for record edge `edge` and record face `face`
     /// (`order`): the edge's curve over its interval against the face's surface over that
     /// surface's own domain. Each sample gives its points, their distance and, where the kernel
@@ -753,6 +824,45 @@ impl Body {
             .collect())
     }
 
+    /// The largest of the kernel's gap samples between record edge `edge` and record face
+    /// `face` (`order`): `SmEdgeuse::CalcMaxEdgeFaceGap`'s `SmCrvSrfGapFunction`, 20 samples of
+    /// the edge's curve over its interval against the face's surface, the longest one's length.
+    /// The largest sample, not a bound on the edge's largest gap (the curve is not bounded
+    /// between samples: [`Body::edge_face_gap_samples`] gives each sample with its bounds).
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an index past the edges or faces; [`Error::Refused`] with the
+    /// reason for an edge without a curve or a face without a surface, an empty edge interval or
+    /// a gap that is not finite; the kernel's error.
+    pub fn edge_face_largest_gap(&self, order: &Order, edge: usize, face: usize) -> Result<f64> {
+        const OP: &str = "edge_face_largest_gap";
+        let refused = |reason: &'static str| Error::Refused {
+            operation: OP,
+            reason,
+        };
+        let (e, f) = (order::edge(order, edge)?, order::face(order, face)?);
+        let gap = read_body(OP, self, |k, b| {
+            let interval = b.edge(e)?.interval;
+            let (Some(curve), Some(surface)) =
+                (b.edge(e)?.curve.as_ref(), b.face(f)?.surface.as_ref())
+            else {
+                return Ok(Err(refused("edge without curve or face without surface")));
+            };
+            if interval.max().partial_cmp(&interval.min()) != Some(std::cmp::Ordering::Greater) {
+                return Ok(Err(refused("empty edge interval")));
+            }
+            // SmTol::GetXSectTol3d of the process context: it only classifies the samples
+            let tol = context_xsect_tol_3d(k, None, SmallTopoType::NormalSize);
+            let mut gaps = GapFunction::crv_srf(tol, curve, &interval, surface, 20);
+            Ok(Ok(gaps.max_gap_sample(k, false)?.length()))
+        })??;
+        if gap.is_finite() {
+            Ok(gap)
+        } else {
+            Err(refused("non-finite gap"))
+        }
+    }
+
     /// Where `p` lies against this body (`SmBrep::Point3DClassify` at the body's own zone
     /// tolerance, with boundary intersections): on the boundary when within that tolerance of a
     /// face, an edge or a vertex (sheet faces too), else inside a material region or outside. A
@@ -768,6 +878,25 @@ impl Body {
         read_body("classify_point", self, |k, b| {
             Ok(point_class(one(locate_points(k, b, &[p]))))
         })?
+    }
+
+    /// Where each of `points` lies against this body, in order, through one classification of
+    /// the body ([`locate_points`]: the body's own zone tolerance, with boundary intersections,
+    /// made once for all the points): as [`Body::classify_points`], except that a point in a
+    /// region the kernel is unsure is material is [`PointLocation::Unsure`] rather than refused,
+    /// so the caller applies its own rule. Each point's location, or its own error. The
+    /// kernel's classification may add UV trim curves to the body.
+    ///
+    /// # Errors
+    /// Per point: [`Error::Argument`] for a coordinate that is not finite; the kernel's status.
+    /// The call: those of the session's call.
+    pub fn locate_points(&self, points: &[[f64; 3]]) -> Result<Vec<Result<PointLocation>>> {
+        read_body("locate_points", self, |k, b| {
+            Ok(locate_points(k, b, points)
+                .into_iter()
+                .map(point_location)
+                .collect())
+        })
     }
 
     /// [`Body::classify_point`] for each of `points`, in order, through one classification of
@@ -2793,6 +2922,41 @@ pub(crate) mod tests {
             area += ball.face_area(&o, f, 1e-8).unwrap();
         }
         assert!(rel(area, 36.0 * PI), "{area}");
+    }
+
+    /// A box's reach along a plane's normal, from the plane: away from the origin, and on a
+    /// plane whose normal is not a world axis's direction (its world box would overstate it).
+    /// The box itself does not move; axes that make no plane are refused.
+    #[test]
+    fn levels_along_a_plane_are_the_bodys_own() {
+        all_fixes();
+        let b = make_box([0.0, 0.0, 0.0], [10.0, 10.0, 10.0]).unwrap();
+        let [lo, hi] = b
+            .levels_along([3.0, 4.0, 5.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0])
+            .unwrap();
+        assert!(
+            (lo + 5.0).abs() < 1e-9 && (hi - 5.0).abs() < 1e-9,
+            "{lo} {hi}"
+        );
+        // x = Z and y = (1, -1, 0)/√2 make the normal x × y = (1, 1, 0)/√2: the box's corners
+        // reach from 0 to 20/√2 along it.
+        let s = std::f64::consts::FRAC_1_SQRT_2;
+        let [lo, hi] = b
+            .levels_along([0.0; 3], [0.0, 0.0, 1.0], [s, -s, 0.0])
+            .unwrap();
+        assert!(lo.abs() < 1e-9 && (hi - 20.0 * s).abs() < 1e-9, "{lo} {hi}");
+        let (min, max) = b.bounds().unwrap();
+        assert!(
+            min.iter().all(|v| v.abs() < 1e-9) && max.iter().all(|v| (v - 10.0).abs() < 1e-9),
+            "{min:?} {max:?}"
+        );
+        for (x, y) in [
+            ([0.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
+            ([1.0, 0.0, 0.0], [-2.0, 0.0, 0.0]),
+            ([f64::NAN, 0.0, 0.0], [0.0, 1.0, 0.0]),
+        ] {
+            assert_eq!(b.levels_along([0.0; 3], x, y), Err(Error::Argument));
+        }
     }
 
     /// A box's faces square to +Z: the top and the bottom, at their closed-form levels measured

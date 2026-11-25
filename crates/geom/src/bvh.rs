@@ -309,7 +309,7 @@ impl MeshIndex {
         self.triangle_tree.nearest(o, dir, |i| ray.hit(i as usize)).map(|(t, i)| (t, i as usize))
     }
 
-    /// Calls `f(edge, first point)` for every edge segment that may come within `a + bВ·t` of the
+    /// Calls `f(edge, first point)` for every edge segment that may come within `a + b·t` of the
     /// ray from `o` along unit `d`, `t` being the distance along it (each at most once). A
     /// constant `a` suits an orthographic view; a perspective view widens with `b`.
     pub fn segments_near(&self, o: Vec3, d: Vec3, a: f64, b: f64, mut f: impl FnMut(usize, usize)) {
@@ -433,7 +433,7 @@ impl PointCloudIndex {
         self.point_count
     }
 
-    /// Visit every point index whose leaf box may come within `a + bВ·t` of the ray from `o` along
+    /// Visit every point index whose leaf box may come within `a + b·t` of the ray from `o` along
     /// unit `d` ahead of `o` and within `*max_t` along `d`. Nearer child boxes are entered first,
     /// and `visit` may tighten `max_t` as front hits are found so boxes behind them are skipped.
     pub fn visit_near_ray(&self, o: Vec3, d: Vec3, a: f64, b: f64, max_t: &mut f64, mut visit: impl FnMut(u32, &mut f64)) {
