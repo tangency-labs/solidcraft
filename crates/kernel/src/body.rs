@@ -1106,17 +1106,6 @@ impl Body {
         }
     }
 
-    /// The first face of `self` met by the ray from `origin` along `dir`, as `(distance, face_index)`
-    /// ([`Self::fire_ray`]: a ray through an edge or vertex takes the face it enters).
-    pub fn raycast_face(&self, origin: Vec3, dir: Vec3) -> Option<(f64, usize)> {
-        self.fire_ray(origin, dir).ok().flatten().map(|hit| (hit.depth, hit.face))
-    }
-
-    /// Whether `p` lies inside or on the boundary of `self` ([`Self::classify_point`]).
-    pub fn contains(&self, p: Vec3) -> bool {
-        matches!(self.classify_point(p), Ok(PointClass::Inside | PointClass::OnBoundary))
-    }
-
     /// The face of `self` nearest `p` and its exact distance, or `None` for a mesh body or empty body.
     pub fn nearest_face(&self, p: Vec3) -> Option<(f64, usize)> {
         let reach = self.size().max(1.0) * 100.0;

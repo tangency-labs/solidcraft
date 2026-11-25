@@ -7970,7 +7970,30 @@ fn hole_reaches(st: &ModelState, p: Vec3, d: Vec3, ahead: bool, scope: &[String]
     let size = st.bodies.iter().map(|b| b.body.size()).fold(1.0, f64::max);
     let eps = size * 1e-6;
     let q = p + d * eps;
-    st.bodies.iter().filter(|b| in_hole_scope(scope, b)).any(|b| b.body.contains(q) || (ahead && b.body.raycast_face(q, d).is_some()))
+    st.bodies.iter().filter(|b| in_hole_scope(scope, b)).any(|b| exactly_inside(b, q) || (ahead && ray_face(b, q, d).is_some()))
+}
+
+/// Whether `p` is inside `b`, decided on its exact faces. A point the kernel finds on the
+/// boundary (within its tolerance), or cannot place, is decided on the display mesh as before.
+fn exactly_inside(b: &ModelBody, p: Vec3) -> bool {
+    match b.body.classify_point(p) {
+        Ok(kernel::PointClass::Inside) => true,
+        Ok(kernel::PointClass::Outside) => false,
+        _ => b.mesh().contains(p),
+    }
+}
+
+/// The first face of `b` the ray from `o` along `d` meets, as `(distance, face)`, found on its
+/// exact faces. A ray the kernel will not fire (one that starts on the body) goes on the display
+/// mesh as before, which passes the face it starts on.
+fn ray_face(b: &ModelBody, o: Vec3, d: Vec3) -> Option<(f64, usize)> {
+    match b.body.fire_ray(o, d) {
+        Ok(hit) => hit.map(|h| (h.depth, h.face)),
+        Err(_) => {
+            let m = b.mesh();
+            m.raycast(o, d).and_then(|(t, tri)| m.tri_face.get(tri).map(|f| (t, *f as usize)))
+        }
+    }
 }
 
 /// The side hole centres on a sketch drill to: into the material, whichever way the sketch plane
@@ -8179,7 +8202,7 @@ fn hole_depth_to(st: &ModelState, at: &Vec3, dir: Vec3, to: &Option<Vec3>, depth
     // The face at the To point, met along the axis.
     for b in st.bodies.iter().filter(|b| !b.body.is_mesh()) {
         let Some(fi) = crate::appearance::face_index_at(b, *t) else { continue };
-        if let Some((h, hit_face)) = b.body.raycast_face(*at + dir * 1e-6, dir)
+        if let Some((h, hit_face)) = ray_face(b, *at + dir * 1e-6, dir)
             && hit_face == fi
         {
             d = h + 1e-6;
@@ -13143,7 +13166,7 @@ fn height_at(st: &ModelState, face: Option<(usize, usize)>, plane: &Plane, centr
     }
     // A curved or slanted face: where the profile's middle meets it.
     for dir in [n, n * -1.0] {
-        if let Some((t, hit_face)) = b.body.raycast_face(centre, dir)
+        if let Some((t, hit_face)) = ray_face(b, centre, dir)
             && hit_face == fi
         {
             return h(centre + dir * t);
