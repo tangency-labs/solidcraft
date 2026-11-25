@@ -660,7 +660,7 @@ fn parse_member(s: &Session, p: &Value) -> Result<Parsed> {
             let a = v.as_array().filter(|a| a.len() == 2).ok_or_else(|| bad(cmd, "`locate` must be [x, y] in the profile's own coordinates"))?;
             let x = a[0].as_f64().filter(|v| v.is_finite()).ok_or_else(|| bad(cmd, "`locate` x must be a finite length"))?;
             let y = a[1].as_f64().filter(|v| v.is_finite()).ok_or_else(|| bad(cmd, "`locate` y must be a finite length"))?;
-            if x.abs() > frame::MAX_PROFILE_SIZE || y.abs() > frame::MAX_PROFILE_SIZE {
+            if !(frame::within_profile_size(x) && frame::within_profile_size(y)) {
                 return Err(bad(cmd, "`locate` is outside the largest profile"));
             }
             Some([x, y])

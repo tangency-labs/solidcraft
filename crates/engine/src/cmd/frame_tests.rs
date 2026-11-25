@@ -496,6 +496,13 @@ fn the_section_view_shows_where_the_member_goes_and_its_anchors() {
     p["locate"] = json!(v.locate_of(top_right));
     let again = super::member_section_view(&s, &p).unwrap();
     assert!((again.at.x - top_right.x).abs() < 1e-9 && (again.at.y - top_right.y).abs() < 1e-9, "{again:?}");
+    // And back: the section point a `locate` puts on the line, mirrored or not.
+    for view in [&v, &again] {
+        let back = view.locate_point(view.locate_of(top_right));
+        assert!((back.x - top_right.x).abs() < 1e-9 && (back.y - top_right.y).abs() < 1e-9, "{back:?}");
+    }
+    let back = again.locate_point(v.locate_of(top_right));
+    assert!((back.x - again.at.x).abs() < 1e-9 && (back.y - again.at.y).abs() < 1e-9, "{back:?}");
     run(&mut s, "frame.member", p);
     let b = bodies(&mut s).remove(0);
     assert!(near3(b.2, [0.0, -60.0, -40.0]) && near3(b.3, [1000.0, 0.0, 0.0]), "{b:?}");
