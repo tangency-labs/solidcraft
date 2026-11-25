@@ -685,30 +685,38 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
                 t_guess,
             )?
             else {
-                // Not upstream. The first guess is the line point dropped to the tangent
-                // plane at the middle of the leaf, which can land well short of a root far
-                // from there (0.036 in u at the end of a span of the radius-5 cylinder's
-                // rational circle, #21621). Off the root sideways, a curved surface lies off
-                // the line by about the square of that over twice its radius, and a line
-                // crossing the surface at a shallow slope only gets there by moving that
-                // over the slope along itself, beyond the leaf's interval: the clamped solve
-                // failed and the crossing was missed. Dropped again from where it landed,
-                // the guess is near enough the root for the solve.
+                // Not upstream (#21621). The first guess drops the line point at the middle
+                // of its interval to the tangent plane at the middle of the leaf, linearly in
+                // (u, v). Where the surface's parameter speed changes across the leaf, the
+                // guess lands off the root sideways: on the radius-5 cylinder's rational
+                // quarter circles, 0.036 in u at a span's end (speed 0.96 at the middle of
+                // the end leaf, 0.90 at the end), 5e-6 at a span's middle. Off the root by s
+                // sideways, the surface lies off the line by about s^2 / 2r, which a line
+                // crossing it at a shallow slope e closes only by moving s^2 / 2re along
+                // itself: 1.05 at the end, past the interval the leaf gives the line (+-0.3
+                // there at slope 1e-4). The solve's step is clamped to that interval and
+                // scaled with it, so u moves 0.29 of its way, the next full steps leave the
+                // interval again, and the solve stops out of bounds after its 6 boundary
+                // hits, short of the root. So when the first guess finds nothing, it is
+                // dropped again from where it landed (a step nearer the line point's foot on the
+                // surface, near enough the root for the solve) and tried once more. A drop
+                // that fails is no retry.
                 if index == 0 && uv_guesses.len() < MAX_GUESSES {
                     let point = self.line_point + t_guess * self.line_vector;
-                    let again = super::p7::drop_points_to_tangent_plane(
+                    if let Ok(again) = super::p7::drop_points_to_tangent_plane(
                         k,
                         leaf.eval,
                         uv_guess,
                         Side::Left,
                         Side::Left,
                         &[point],
-                    )?;
-                    if let Some(&again) = again.first() {
-                        let again = leaf.domain.clamp_point(again);
-                        if again.distance(uv_guess) > uv_eps {
-                            uv_guesses.push(again);
-                            t_guesses.push(t_guess);
+                    ) {
+                        if let Some(&again) = again.first() {
+                            let again = leaf.domain.clamp_point(again);
+                            if again.distance(uv_guess) > uv_eps {
+                                uv_guesses.push(again);
+                                t_guesses.push(t_guess);
+                            }
                         }
                     }
                 }
