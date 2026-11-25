@@ -11,8 +11,8 @@ Fixed in the port by https://github.com/tangency-labs/solidcraft/pull/21498 (htt
 - Verification:
   - Regression tests:
     - `domain_with_continuity_off_the_domain_is_the_span_next_to_the_point` (p1). It covers directions scaled by 1e-3, 1 and 1e3, and their reverses.
-    - `lift_curve_off_the_domain_is_the_same_whatever_the_speed` (p11). It covers the scales 1e-3 and 1 (1e3 hits a separate ApproximateCurve parameter-scale issue, #21657, as on main) on a dome with out-of-bounds evaluation enabled, checking every lift against the dome's closed-form polynomial; on main the slow segments were refused (`NoContinuousDomain`).
-  - Both fail without the fix.
+    - It fails without the fix: on main the start points off the domain get a zero-width box or a box that changes with the direction's length.
+  - `lift_curve_off_the_domain_is_the_same_whatever_the_speed` (p11) is coverage, not a regression test: it lifts an off-domain segment on a dome with out-of-bounds evaluation enabled at the scales 1e-3 and 1 and checks every lift against the dome's closed-form polynomial (1e3 hits a separate ApproximateCurve parameter-scale issue, #21657, as on main). On main the segment's continuity domain collapsed to the edge `[1, 1] x [0, 1]`, which `LiftCurve` still accepts (its size is positive), so the test passes there too.
   - `lift_curve_off_the_domain_follows_the_surface_s_evaluation` (p11) lifts the same off-domain segment onto a clamped patch's edge, onto the plane with out-of-bounds evaluation on, and on an analytic plane past its sentinel.
   - The 30 `surface.surface_p1` `DomCont` cases are no longer known failing. Their golden lines are blessed, and the goldens test `domcont_answers_are_the_span_next_to_the_start_point` derives every off-domain answer from the knots and continuities.
   - `intersect.surface_drop_curve` `adv_trace2_start_outside` now works on the plane's whole domain `[0, 10]²` instead of the point `(0, 0)` (test `a_trace_from_outside_the_plane_works_on_its_whole_domain`, which also rebuilds main's rec block bit for bit from the new record with the domain's maximum set back to `(0, 0)`: the move is `(+20, +20, +850)`).

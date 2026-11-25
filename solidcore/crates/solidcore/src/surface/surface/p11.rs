@@ -2781,9 +2781,11 @@ mod tests {
     /// with out-of-bounds evaluation enabled, which continues the dome's polynomial
     /// ([`dome_point`]) there. Every lift is within the tolerance, its ends are the
     /// polynomial's points and its samples lie on the polynomial. Before the fix the
-    /// continuity domain depended on `f` (the end knot was compared with the derivative's
-    /// component), and a slow segment's collapsed to the edge `u = 1`
-    /// (`NoContinuousDomain`). A segment just past the edge (by `2e-6`, rounding of a
+    /// segment's continuity domain collapsed to the edge `u = 1` (`[1, 1] x [0, 1]`, the
+    /// end knot compared with the derivative's component); `LiftCurve` still lifted it
+    /// there, as its zero-width domain keeps a positive size, so this test is coverage of
+    /// the lift through the new span, not the regression test (that is
+    /// `domain_with_continuity_off_the_domain_is_the_span_next_to_the_point`, p1). A segment just past the edge (by `2e-6`, rounding of a
     /// trim) and one inside are lifted in the same way. (At `f = 1e3` the continuity
     /// domain is the same too, as `domain_with_continuity_off_the_domain_is_the_span_next_to_the_point`
     /// checks, but `ApproximateCurve` accepts a span of the 1e-3-long interval at

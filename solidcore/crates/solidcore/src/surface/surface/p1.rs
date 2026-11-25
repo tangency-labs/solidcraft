@@ -5511,8 +5511,9 @@ mod tests {
     /// The issue's cases: a single-span surface with u knots `[-0.7286 x3, 1.778 x3]`
     /// and v knots `[0.04241 x2, 1.67 x2]`, started at u = -1.18 with `du = -0.235`
     /// (`domhist0011`); and the roof (C0 crease at u = 1/2) started off both ends with
-    /// the direction `(0.82, 0.52)` pointing into the domain (`domhist0067`), and its
-    /// mirror past the far ends. Every span is worked from the knots: the end knots are
+    /// the direction `(0.82, 0.52)` pointing into the domain (the start point and
+    /// direction of `domhist0067`, whose own surface differs), and its mirror past the
+    /// far ends. Every span is worked from the knots: the end knots are
     /// discontinuities (multiplicity degree + 1), the crease a C0 knot, so the C1 span
     /// next to a point before the first knot runs to the first discontinuity after it,
     /// and the one after the last knot from the last discontinuity before it.

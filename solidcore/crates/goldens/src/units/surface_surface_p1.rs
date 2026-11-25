@@ -1522,6 +1522,7 @@ mod tests {
             })
             .expect("cases");
         let (mut seen, mut off_seen) = (0, 0);
+        let mut off_names = std::collections::BTreeSet::new();
         for case in cases {
             let Ok(inputs) = case.parse::<Inputs>() else {
                 continue;
@@ -1557,6 +1558,7 @@ mod tests {
                     continue;
                 }
                 off_seen += 1;
+                off_names.insert(name.clone());
                 let (knots, _) = s.knots_with_nurb(k, param, None).expect("knots");
                 let (_, conts) = s.calculate_continuities(k, param).expect("continuities");
                 let want = end_span(&knots, &conts, c, x).unwrap_or_else(|| {
@@ -1567,5 +1569,13 @@ mod tests {
             }
         }
         assert!(seen > 0 && off_seen >= 30, "{seen} cases, {off_seen} off the domain");
+        // the 30 cases known failing before the fix, each checked off the domain here
+        for n in [
+            2, 4, 6, 9, 11, 21, 23, 28, 29, 35, 43, 49, 51, 57, 61, 62, 63, 67, 68, 71, 73,
+            79, 81, 82, 86, 88, 89, 90, 93, 95,
+        ] {
+            let name = format!("domhist{n:04}");
+            assert!(off_names.contains(&name), "{name}: not checked off the domain");
+        }
     }
 }
