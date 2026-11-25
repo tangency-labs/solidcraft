@@ -3168,7 +3168,7 @@ mod tests {
         }
     }
 
-    /// #21882: a classification combine_in_brep onto the chain's middle vertex v1 with
+    /// #21882: a classification `combine_in_brep` onto the chain's middle vertex `v1` with
     /// a propagated surf/surf/surf point `sss`.
     fn sss_combine(
         edge1: u8,
