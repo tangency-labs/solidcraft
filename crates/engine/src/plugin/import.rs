@@ -243,6 +243,7 @@ fn convert(
             evaluation: None,
             forms: Vec::new(),
             form_source: None,
+            messages: Vec::new(),
             user_data: None,
         };
         // The guest's stack is on this thread's: run it on a thread with room for the stack the
@@ -397,6 +398,7 @@ pub fn import_dialog(
             evaluation: None,
             forms: Vec::new(),
             form_source: None,
+            messages: Vec::new(),
             user_data: None,
         };
         let request = craft_plugin_wasm::ImportRequest { path: PathBuf::from(path), input_folder: false };

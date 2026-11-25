@@ -38,5 +38,10 @@
     "ui.agent_chat_interrupted": "에이전트가 작업을 마치기 전에 중단되었습니다.",
     "ui.agent_chat_continue": "계속",
     "ui.agent_chat_continue_tip": "완료하지 못한 작업을 에이전트가 계속하도록 요청합니다"
+  },
+  "fr": {
+    "ui.agent_chat_interrupted": "L’agent s’est arrêté avant d’avoir terminé la tâche.",
+    "ui.agent_chat_continue": "Continuer",
+    "ui.agent_chat_continue_tip": "Demander à l’agent de poursuivre la tâche qu’il n’a pas pu terminer"
   }
 }

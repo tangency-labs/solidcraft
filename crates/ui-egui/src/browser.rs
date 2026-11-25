@@ -125,16 +125,54 @@ struct Found {
 /// what is inside it.
 fn find_in_tree(app: &mut SolveApp, body: &str) {
     app.tree.reveal_feature = None;
+    app.tree.reveal_construction = None;
     app.tree.reveal = Some(body.to_string());
     remember_reveal_source(app, body);
     let Some((component, source, path)) = body_placement(app, body) else { return };
+    open_found_rows(app, component, &path, "bodies", &source);
+    app.tree.found = Some(Found { body: body.to_string(), path, selection: app.session.selection.clone() });
+}
+
+/// Find in Browser for a construction plane, axis or point (#15355): select it, show the Browser
+/// and open the rows down to its row in its component's Construction folder (in the component's
+/// first placement), as [`reveal_body`] does for a body.
+pub(crate) fn reveal_construction(app: &mut SolveApp, id: u64) {
+    sync_reveals(app);
+    let Some(f) = app.session.doc.feature(id) else { return };
+    if !f.kind.is_construction() {
+        return;
+    }
+    let (component, sel) = (f.component, solidcraft_engine::browser_find::construction_sel(f));
+    let _ = app.run("select.set", json!({ "items": [sel] }));
+    app.ui.show_browser = true;
+    reveal_shared_panel(app, "browser");
+    app.tree.reveal = None;
+    app.tree.reveal_feature = None;
+    app.tree.found = None;
+    app.tree.reveal_construction = Some(id);
+    // The design's own construction is in no placement; a component's is under its first one.
+    let path = if component == 0 {
+        Vec::new()
+    } else {
+        match app.session.doc.placements().into_iter().find(|(owner, _, _)| *owner == component) {
+            Some((_, path, _)) => path,
+            None => return,
+        }
+    };
+    open_found_rows(app, component, &path, "construction", &id.to_string());
+}
+
+/// Open the rows down to an item of `folder` (keyed `key` there) in the placement at `path` of
+/// `component`: the design, the placements, the folder and the groups around the item. While the
+/// rows start closed, the rows the last find opened close again unless they are on this path.
+fn open_found_rows(app: &mut SolveApp, component: u64, path: &[u64], folder: &str, key: &str) {
     let start_open = rows_start_open(app);
-    // A body of the design itself is in no placement: its folder is the design's (`c0`).
-    let scope = if path.is_empty() { format!("c{component}") } else { occurrence_key(&path) };
+    // An item of the design itself is in no placement: its folder is the design's (`c0`).
+    let scope = if path.is_empty() { format!("c{component}") } else { occurrence_key(path) };
     let mut rows = vec![("c0".to_string(), true)];
     rows.extend((1..=path.len()).map(|depth| (occurrence_key(&path[..depth]), start_open)));
-    rows.push((format!("{scope}/bodies"), start_open));
-    rows.extend(group_chain(app, component, "bodies", &source).into_iter().map(|id| (format!("{scope}/g{id}"), start_open)));
+    rows.push((format!("{scope}/{folder}"), start_open));
+    rows.extend(group_chain(app, component, folder, key).into_iter().map(|id| (format!("{scope}/g{id}"), start_open)));
     // Rows that start open stay open after a find, as they always have: only rows that start
     // closed close again at the next one.
     if start_open {
@@ -154,7 +192,6 @@ fn find_in_tree(app: &mut SolveApp, body: &str) {
         }
     }
     app.tree.found_rows = opened;
-    app.tree.found = Some(Found { body: body.to_string(), path, selection: app.session.selection.clone() });
 }
 
 /// Another design is shown: the rows the last Find in Browser opened were that design's, and the
@@ -245,6 +282,9 @@ pub struct TreeState {
     pub(super) reveal_feature: Option<features::Reveal>,
     /// The search above the tree (#1413).
     pub search: crate::browser_search::BrowserSearch,
+    /// Scroll to this construction plane's, axis's or point's row (its feature id): Find in
+    /// Browser on one in the 3D view (#15355). [`reveal_construction`] opens the rows above it.
+    reveal_construction: Option<u64>,
     /// The Redefine Sketch Plane panel (sketch id).
     pub redefine: Option<u64>,
     pub redefine_draft: Option<crate::sketch_attachment_ui::Draft>,
@@ -318,6 +358,7 @@ struct BodyRevealSource {
 pub(crate) struct PendingReveals {
     session: Option<u64>,
     body: Option<String>,
+    construction: Option<u64>,
     source: Option<BodyRevealSource>,
     feature: Option<features::Reveal>,
     timeline: Option<u64>,
@@ -327,6 +368,7 @@ pub(crate) fn discard_reveals(app: &mut SolveApp) {
     app.tree.reveal = None;
     app.tree.reveal_source = None;
     app.tree.reveal_feature = None;
+    app.tree.reveal_construction = None;
     app.tree.timeline_reveal = None;
     app.tree.view_pick = None;
     app.tree.reveal_session = Some(app.session.uid);
@@ -350,6 +392,7 @@ pub(crate) fn take_reveals(app: &mut SolveApp) -> PendingReveals {
     PendingReveals {
         session: Some(app.session.uid),
         body: app.tree.reveal.take(),
+        construction: app.tree.reveal_construction.take(),
         source: app.tree.reveal_source.take(),
         feature: app.tree.reveal_feature.take(),
         timeline: app.tree.timeline_reveal.take(),
@@ -360,6 +403,7 @@ pub(crate) fn restore_reveals(app: &mut SolveApp, pending: PendingReveals) {
     discard_reveals(app);
     if pending.session == Some(app.session.uid) {
         app.tree.reveal = pending.body;
+        app.tree.reveal_construction = pending.construction;
         app.tree.reveal_source = pending.source;
         app.tree.reveal_feature = pending.feature;
         app.tree.timeline_reveal = pending.timeline;
@@ -1281,6 +1325,8 @@ enum Thing {
     Body(String),
     /// A sketch, by feature id.
     Sketch(u64),
+    /// A feature, by feature id.
+    Feature(u64),
     /// An origin or construction plane, by name.
     Plane(String),
     /// An origin or construction axis.
@@ -1348,7 +1394,13 @@ impl Lit {
                     }
                     continue;
                 }
-                Sel::Feature { id } => Thing::Sketch(*id),
+                Sel::Feature { id } => {
+                    if app.session.doc.features.iter().any(|f| f.id == *id && matches!(f.kind, FeatureKind::Sketch { .. })) {
+                        Thing::Sketch(*id)
+                    } else {
+                        Thing::Feature(*id)
+                    }
+                }
                 Sel::Profile { sketch, .. }
                 | Sel::ExternalSketchCurve { sketch, .. }
                 | Sel::ExternalSketchPoint { sketch, .. }
@@ -1381,15 +1433,23 @@ impl Lit {
             Some(Hit::ConstructionPoint { name }) => Some(Thing::Point(name.clone())),
             Some(Hit::PointCloudPoint { .. }) => None,
             Some(Hit::MemberEnd { .. } | Hit::Centreline { .. }) => None,
-            None => app.viewport.hover_feature.and_then(|id| {
-                app.session.doc.feature(id).and_then(|f| match &f.kind {
-                    FeatureKind::Sketch { .. } => Some(Thing::Sketch(id)),
-                    FeatureKind::ConstructionPlane { .. } => Some(Thing::Plane(f.name.clone())),
-                    FeatureKind::ConstructionAxis { .. } => Some(Thing::Axis(f.name.clone())),
-                    FeatureKind::ConstructionPoint { .. } => Some(Thing::Point(f.name.clone())),
-                    _ => None,
-                })
-            }),
+            None => {
+                app.viewport
+                    .hover_feature
+                    .and_then(|id| {
+                        app.session.doc.feature(id).map(|f| match &f.kind {
+                            FeatureKind::Sketch { .. } => Thing::Sketch(id),
+                            FeatureKind::ConstructionPlane { .. } => Thing::Plane(f.name.clone()),
+                            FeatureKind::ConstructionAxis { .. } => Thing::Axis(f.name.clone()),
+                            FeatureKind::ConstructionPoint { .. } => Thing::Point(f.name.clone()),
+                            _ => Thing::Feature(id),
+                        })
+                    })
+                    .or_else(|| {
+                        if app.viewport.hover_bodies.len() == 1 { app.viewport.hover_bodies.first().map(|b| Thing::Body(b.clone())) } else { None }
+                    })
+                    .or_else(|| app.viewport.hover_plane.as_ref().map(|p| Thing::Plane(p.clone())))
+            }
         };
         // Unless the Browser follows the 3D view, a body's placement is not looked up for the rows
         // above it (that names every placement again after each edit): only the one Find in
@@ -1410,9 +1470,7 @@ impl Lit {
                 Thing::Body(b) => {
                     paths.extend(app.tree.found.as_ref().filter(|found| found.body == *b && !found.path.is_empty()).map(|found| found.path.clone()));
                 }
-                Thing::Sketch(id) => {
-                    components.extend(doc.features.iter().find(|f| f.id == *id && matches!(f.kind, FeatureKind::Sketch { .. })).map(|f| f.component))
-                }
+                Thing::Sketch(id) | Thing::Feature(id) => components.extend(doc.features.iter().find(|f| f.id == *id).map(|f| f.component)),
                 Thing::Plane(name) | Thing::Axis(name) | Thing::Point(name) => components.extend(
                     doc.features
                         .iter()
@@ -1779,6 +1837,11 @@ fn body_reveal(app: &SolveApp) -> Option<&str> {
     app.tree.content.browser_presentation().then_some(app.tree.reveal.as_deref()).flatten()
 }
 
+/// The construction row Find in Browser scrolls to, while the Browser shows its own rows.
+fn construction_reveal(app: &SolveApp) -> Option<u64> {
+    app.tree.content.browser_presentation().then_some(app.tree.reveal_construction).flatten()
+}
+
 /// A hidden or collapsed presentation retains its request. Removed targets expire here.
 pub(crate) fn prune_reveals(app: &mut SolveApp) {
     sync_reveals(app);
@@ -1808,6 +1871,9 @@ pub(crate) fn prune_reveals(app: &mut SolveApp) {
     }
     if app.tree.timeline_reveal.is_some_and(|id| app.session.doc.feature(id).is_none()) {
         app.tree.timeline_reveal = None;
+    }
+    if app.tree.reveal_construction.is_some_and(|id| app.session.doc.feature(id).is_none()) {
+        app.tree.reveal_construction = None;
     }
 }
 
@@ -3505,7 +3571,8 @@ fn entry_row(
     let pattern_key = e.patterns.as_deref().filter(|_| unsearched);
     let start_open = rows_start_open(app);
     let patterns_open = pattern_key.is_some_and(|key| is_open(app, key, start_open));
-    let revealed = folder == "bodies" && body_reveal(app).is_some_and(|b| e.row_key.strip_prefix("b:") == Some(b));
+    let revealed = (folder == "bodies" && body_reveal(app).is_some_and(|b| e.row_key.strip_prefix("b:") == Some(b)))
+        || (folder == "construction" && construction_reveal(app).is_some_and(|id| e.key == id.to_string()));
     // Features under bodies (#11945): the body row folds open on the features that built it.
     let built_key = (folder == "bodies"
         && unsearched
@@ -3622,6 +3689,13 @@ fn entry_row(
     {
         app.tree.reveal = None;
     }
+    if folder == "construction"
+        && construction_reveal(app).is_some_and(|id| e.key == id.to_string())
+        && let Some(rect) = r.rect
+        && crate::semantic_content::scroll_acknowledged(rows.ui(), rect)
+    {
+        app.tree.reveal_construction = None;
+    }
     if r.eye {
         set_visible(app, folder, &[e], !visible);
     }
@@ -3677,6 +3751,19 @@ fn entry_row(
     }
     if r.hovered
         && let Thing::Sketch(id) = &e.thing
+    {
+        acts.hover_feature = Some(*id);
+        acts.hovered = true;
+    }
+    if r.hovered
+        && matches!(&e.thing, Thing::Axis(_) | Thing::Point(_))
+        && let Ok(id) = e.key.parse()
+    {
+        acts.hover_feature = Some(id);
+        acts.hovered = true;
+    }
+    if r.hovered
+        && let Thing::Feature(id) = &e.thing
     {
         acts.hover_feature = Some(*id);
         acts.hovered = true;
@@ -3854,21 +3941,24 @@ pub fn dims_overlay(app: &SolveApp, painter: &egui::Painter, proj: &crate::viewp
     use solidcore_record::Vec2;
     use solidcraft_engine::sketch::{DimFrame, chain_centres, default_text, dim_layout_reaching, dim_reach};
     crate::dim_view::set_model_drawn(Vec::new());
-    if app.session.visibility.shown_dimensions.is_empty() {
+    let shown = &app.session.visibility.shown_dimensions;
+    // Edit Dimensions' sketch is usually one a feature used up, so hidden: its dimensions show anyway.
+    let edit = app.viewport.edit_dimensions.filter(|id| !shown.contains(id));
+    if shown.is_empty() && edit.is_none() {
         return;
     }
     let rect = painter.clip_rect();
     let mut drawn = Vec::new();
     let tk = Tokens::get();
     let st = crate::open_meshing::still_world(app);
-    for id in app
-        .session
-        .visibility
-        .shown_dimensions
+    for id in shown
         .iter()
-        .filter(|id| app.session.active_sketch != Some(**id) && solidcraft_engine::view::sketch_shown(&app.session, **id))
+        .copied()
+        .filter(|id| solidcraft_engine::view::sketch_shown(&app.session, *id))
+        .chain(edit)
+        .filter(|id| app.session.active_sketch != Some(*id))
     {
-        let Some(ss) = st.sketch(*id) else { continue };
+        let Some(ss) = st.sketch(id) else { continue };
         let sk = &ss.sketch;
         let to = |p: Vec2| proj.to_screen(ss.plane.to_world(p));
         // Unplaced dimensions sit away from the middle of the sketch.
@@ -3918,7 +4008,7 @@ pub fn dims_overlay(app: &SolveApp, painter: &egui::Painter, proj: &crate::viewp
             painter.rect_filled(r, tk.radius_sm / 2, tk.viewport_top.gamma_multiply(0.85));
             painter.galley(r.min + vec2(3.0, 1.0), galley, col);
             if rect.contains(tc) {
-                drawn.push(crate::dim_view::ModelDim { sketch: *id, id: c.id.clone(), param: c.param.clone(), text: r });
+                drawn.push(crate::dim_view::ModelDim { sketch: id, id: c.id.clone(), param: c.param.clone(), text: r });
             }
         }
     }

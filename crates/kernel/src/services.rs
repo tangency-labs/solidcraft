@@ -1,6 +1,6 @@
 //! solidcore's services that the application uses beside the body-making operations: 2D and
-//! curve helpers, projection, line-family clipping, affine maps, sheet development, frame members, the
-//! display plan, CADIR read and write, and STEP's string and parser helpers. They read records and data; none
+//! curve helpers, projection, line-family clipping, affine maps, sheet development, frame members and the
+//! display plan. They read records and data; none
 //! makes a body, so none is routed (`docs/design/kernel-layer.md` §2).
 //!
 //! The rest of SolidCraft takes them from here, never from solidcore's crates directly: this
@@ -26,6 +26,7 @@ pub use solidcore_ops::curve;
 pub use solidcore_ops::curve_fit;
 pub use solidcore_ops::develop;
 pub use solidcore_ops::dxf;
+pub use solidcore_ops::face_pair;
 pub use solidcore_ops::face_surface;
 pub use solidcore_ops::fit_projection;
 pub use solidcore_ops::frame_gusset;
@@ -33,6 +34,8 @@ pub use solidcore_ops::frame_member;
 pub use solidcore_ops::frame_trim;
 pub use solidcore_ops::hole_stacks;
 pub use solidcore_ops::joint_turn;
+pub use solidcore_ops::mid_joint;
+pub use solidcore_ops::mid_sheet;
 pub use solidcore_ops::outline;
 pub use solidcore_ops::paper_gaps;
 pub use solidcore_ops::pcurve;
@@ -50,6 +53,7 @@ pub use solidcore_ops::shaft_spline;
 pub use solidcore_ops::sketch_arc;
 pub use solidcore_ops::spline_projection;
 pub use solidcore_ops::sweep;
+pub use solidcore_ops::unit_direction;
 pub use solidcore_ops::{Body as ExactBody, CheckLevel, Order, Result, boolean, make_box, make_sphere, measure};
 
 /// Centroids of `tool`'s planar faces that lie back to back on a planar face of `target`
@@ -84,20 +88,4 @@ pub mod tess {
     pub use solidcore_tess::simplify;
     pub use solidcore_tess::triangulate_planar;
     pub use solidcore_tess::triangulate_union;
-}
-
-/// CADIR, cadmpeg's neutral CAD model: its bodies read into B-rep records, and a record written
-/// into it as a body (`solidcore-cadir`).
-pub mod cadir {
-    pub use solidcore_cadir::Bodies;
-    pub use solidcore_cadir::Written;
-    pub use solidcore_cadir::read_bodies;
-    pub use solidcore_cadir::write_body;
-}
-
-/// STEP's helpers that the application's own exchange code uses: the part 21 parser (a header's
-/// producer, the memory a file needs) and the string escape a product name is written with.
-pub mod step {
-    pub use solidcore_record::step::p21;
-    pub use solidcore_step::write::string;
 }
