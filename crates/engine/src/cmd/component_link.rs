@@ -2972,6 +2972,120 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// #22047: an unmoved planar face on a linked part (qualified by its neighbouring faces,
+    /// `F<id>:link:<digest>#[…]`) keeps resolving its planar mate joint and leaves the mated
+    /// occurrence in place with zero drift when an adjacent corner cut shortens and drops off its
+    /// boundary.
+    #[test]
+    fn mate_joint_on_a_linked_planar_face_survives_adjacent_cut_shortening() {
+        use solidcraft_doc::joints::{Snap, occurrence_world};
+
+        let dir = std::env::temp_dir().join(format!("solidcraft-link-neighbour-rename-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("side_plate.solidcraft");
+
+        // Linked part: a block whose +x face (x = 100) is split by a lower slot into two pieces so
+        // the upper mating piece carries a neighbour qualifier including its two pin holes and an
+        // adjacent top corner cut.
+        let mut part = Session::default();
+        run(&mut part, "parameters.add", json!({"name": "cut_len", "expression": "52 mm"}));
+        run(&mut part, "solid.box", json!({"length": 100, "width": 40, "height": 60, "corner": [0, 0, 0], "body_name": "SidePlate"}));
+        run(&mut part, "solid.hole", json!({"position": [100, 12, 35], "direction": [-1, 0, 0], "diameter": 6, "depth": 20, "name": "PinHoleA"}));
+        run(&mut part, "solid.hole", json!({"position": [100, 28, 35], "direction": [-1, 0, 0], "diameter": 6, "depth": 20, "name": "PinHoleB"}));
+        run(
+            &mut part,
+            "solid.box",
+            json!({"length": "cut_len", "width": 44, "height": 14, "corner": [50, -2, 50], "operation": "cut", "name": "TopCut"}),
+        );
+        run(
+            &mut part,
+            "solid.box",
+            json!({"length": 20, "width": 44, "height": 10, "corner": [85, -2, 10], "operation": "cut", "name": "LowerSlot"}),
+        );
+        run(&mut part, "file.save", json!({"path": path}));
+
+        // Assembly: link and ground SidePlate, build a Bracket with matching pin holes, and constrain
+        // it with a planar mate on the +x face plus two cylindrical pin joints.
+        let mut s = Session::default();
+        run(&mut s, "component.insert_design", json!({"path": path, "name": "SidePlate"}));
+        run(&mut s, "occurrence.ground", json!({"occurrence": "SidePlate:1", "grounded": true}));
+        run(
+            &mut s,
+            "solid.box",
+            json!({"length": 10, "width": 40, "height": 30, "corner": [100, 0, 20], "operation": "new", "body_name": "BracketBody"}),
+        );
+        run(&mut s, "solid.hole", json!({"position": [100, 12, 35], "direction": [1, 0, 0], "diameter": 6, "depth": 10, "name": "BracketHoleA"}));
+        run(&mut s, "solid.hole", json!({"position": [100, 28, 35], "direction": [1, 0, 0], "diameter": 6, "depth": 10, "name": "BracketHoleB"}));
+        run(&mut s, "component.create", json!({"name": "Bracket", "parent": "root", "activate": false}));
+        run(&mut s, "component.move_bodies", json!({"bodies": ["BracketBody"], "component": "Bracket"}));
+
+        run(
+            &mut s,
+            "joint.create",
+            json!({
+                "type": "planar",
+                "name": "SideMate",
+                "a": {"occurrence": "SidePlate:1", "face": [100, 20, 35]},
+                "b": {"occurrence": "Bracket:1", "face": [100, 20, 35]},
+            }),
+        );
+        run(
+            &mut s,
+            "joint.create",
+            json!({
+                "type": "cylindrical",
+                "name": "PinA",
+                "a": {"occurrence": "SidePlate:1", "circle": [100, 15, 35]},
+                "b": {"occurrence": "Bracket:1", "circle": [100, 15, 35]},
+            }),
+        );
+        run(
+            &mut s,
+            "joint.create",
+            json!({
+                "type": "cylindrical",
+                "name": "PinB",
+                "a": {"occurrence": "SidePlate:1", "circle": [100, 31, 35]},
+                "b": {"occurrence": "Bracket:1", "circle": [100, 31, 35]},
+            }),
+        );
+
+        let mate_face = match &s.doc.assembly.joints.iter().find(|j| j.name == "SideMate").unwrap().a.snap {
+            Snap::FaceCenter { face: Some(name), .. } => name.clone(),
+            other => panic!("expected named face on SideMate, got {other:?}"),
+        };
+        assert!(mate_face.contains(":link:") && mate_face.contains("#["), "expected linked neighbour-qualified face name, got {mate_face}");
+
+        let list_before = run(&mut s, "joint.list", json!({}));
+        assert_eq!(list_before["errors"], json!([]), "before update: {list_before}");
+        assert_eq!(list_before["conflicts"], json!([]), "before update: {list_before}");
+        let bracket_occ = s.doc.occurrences.iter().find(|o| o.name == "Bracket:1").unwrap().id;
+        let world_before = occurrence_world(&s.doc, bracket_occ);
+
+        // Shorten TopCut in the linked part so it stops at x = 80 and no longer borders x = 100.
+        run(&mut part, "parameters.change", json!({"name": "cut_len", "expression": "30 mm"}));
+        run(&mut part, "file.save", json!({}));
+
+        let update = run(&mut s, "component.update_links", json!({}));
+        assert_eq!(update["updated"], json!(["SidePlate"]), "{update}");
+        assert_eq!(update["warnings"], json!([]), "{update}");
+
+        let list_after = run(&mut s, "joint.list", json!({}));
+        assert_eq!(list_after["errors"], json!([]), "after update: {list_after}");
+        assert_eq!(list_after["conflicts"], json!([]), "after update: {list_after}");
+        let mate_after = list_after["joints"].as_array().unwrap().iter().find(|j| j["name"] == "SideMate").unwrap();
+        assert!(!mate_after["frame_a"].is_null(), "SideMate lost frame_a: {mate_after}");
+        let frame_a_x = mate_after["frame_a"]["origin"][0].as_f64().unwrap();
+        assert!((frame_a_x - 100.0).abs() < 1e-6, "SideMate frame_a moved off x = 100: {mate_after}");
+
+        let world_after = occurrence_world(&s.doc, bracket_occ);
+        for (a, b) in world_before.iter().flatten().zip(world_after.iter().flatten()) {
+            assert!((a - b).abs() < 1e-6, "Bracket drifted after update_links: before={world_before:?}, after={world_after:?}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// The plate linked in, with a sketch on its top face (away from the hole) extruded 3 mm.
     /// Returns the sketch's and the extrude's feature ids.
     fn sketched_on_plate(s: &mut Session, path: &Path) -> (u64, u64) {

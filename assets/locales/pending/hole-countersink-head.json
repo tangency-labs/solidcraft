@@ -1,11 +1,32 @@
 {
-  "en": { "ui.head_countersunk": "Countersunk socket head screw (ISO 10642)" },
-  "ar": { "ui.head_countersunk": "برغي برأس غاطس بتجويف سداسي (ISO 10642)" },
-  "de": { "ui.head_countersunk": "Senkschraube mit Innensechskant (ISO 10642)" },
-  "he": { "ui.head_countersunk": "בורג ראש שקוע עם משושה פנימי (ISO 10642)" },
-  "it": { "ui.head_countersunk": "Vite a testa svasata con esagono incassato (ISO 10642)" },
-  "ja": { "ui.head_countersunk": "六角穴付き皿ボルト (ISO 10642)" },
-  "ko": { "ui.head_countersunk": "육각 구멍붙이 접시머리 볼트 (ISO 10642)" },
-  "vi": { "ui.head_countersunk": "Vít đầu côn lục giác chìm (ISO 10642)" },
-  "zh": { "ui.head_countersunk": "内六角沉头螺钉 (ISO 10642)" }
+  "en": {
+    "ui.head_countersunk": "Countersunk socket head screw (ISO 10642)"
+  },
+  "ar": {
+    "ui.head_countersunk": "برغي برأس غاطس بتجويف سداسي (ISO 10642)"
+  },
+  "de": {
+    "ui.head_countersunk": "Senkschraube mit Innensechskant (ISO 10642)"
+  },
+  "he": {
+    "ui.head_countersunk": "בורג ראש שקוע עם משושה פנימי (ISO 10642)"
+  },
+  "it": {
+    "ui.head_countersunk": "Vite a testa svasata con esagono incassato (ISO 10642)"
+  },
+  "ja": {
+    "ui.head_countersunk": "六角穴付き皿ボルト (ISO 10642)"
+  },
+  "ko": {
+    "ui.head_countersunk": "육각 구멍붙이 접시머리 볼트 (ISO 10642)"
+  },
+  "vi": {
+    "ui.head_countersunk": "Vít đầu côn lục giác chìm (ISO 10642)"
+  },
+  "zh": {
+    "ui.head_countersunk": "内六角沉头螺钉 (ISO 10642)"
+  },
+  "fr": {
+    "ui.head_countersunk": "Vis à tête fraisée à six pans creux (ISO 10642)"
+  }
 }

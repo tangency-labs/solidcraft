@@ -324,6 +324,8 @@ pub struct ViewportState {
     patches: u64,
     /// Model scenes built since the viewport started (a scene with levels filled in is not one).
     pub(crate) scenes_built: u64,
+    /// Sketch scenes built since the viewport started: one per change of what that scene shows.
+    pub(crate) sketch_scenes_built: u64,
     /// The GPU target that last received this view's scene uploads.
     scene_target: Option<u64>,
     /// Ground geometry is reused independently of the camera-dependent sketch/grid scene.
@@ -384,6 +386,9 @@ pub struct ViewportState {
     /// past the circle's own size from the centre ([`WOKEN_CENTRE_FAR`]), or until a click on
     /// empty space clears the selection (#16346).
     pub woken_centre: Option<(u64, String)>,
+    /// The finished sketch whose dimensions Edit Dimensions shows for now (#6642): view state
+    /// only, never saved. Esc, a click on empty space or the start of a command hides them.
+    pub edit_dimensions: Option<u64>,
     /// The centre or midpoint most recently hovered for visual H/V tracking.
     pub(crate) tracking: crate::inference::Tracking,
 
@@ -824,6 +829,9 @@ struct FailedSketches {
     ids: Vec<u64>,
     placed: std::sync::Arc<Vec<std::sync::Arc<solidcraft_engine::doc::SolvedSketch>>>,
     bounds: solidcraft_engine::geom::Aabb3,
+    /// Results looked up among the model's sketches, to tell whether they failed and are shown.
+    #[cfg(test)]
+    asked: usize,
     #[cfg(test)]
     builds: usize,
     #[cfg(test)]
@@ -850,8 +858,17 @@ fn failed_sketches_built(app: &SolveApp) -> std::sync::Arc<Vec<std::sync::Arc<so
         .model
         .results
         .iter()
-        .filter(|r| !r.skipped && !r.stale && model.sketch(r.id).is_none() && solidcraft_engine::view::sketch_shown(s, r.id))
-        .filter_map(|r| r.lost_projections.as_ref().map(|lost| (r.id, lost)))
+        // The few that failed this way first: each other question looks through every sketch, and
+        // a camera move asks this many times a frame.
+        .filter_map(|r| r.lost_projections.as_ref().map(|lost| (r, lost)))
+        .filter(|(r, _)| {
+            #[cfg(test)]
+            {
+                cache.asked += 1;
+            }
+            !r.skipped && !r.stale && model.sketch(r.id).is_none() && solidcraft_engine::view::sketch_shown(s, r.id)
+        })
+        .map(|(r, lost)| (r.id, lost))
         .collect();
     let mut changed = cache.built.len() != failed.len() || failed.iter().any(|(id, _)| !cache.built.contains_key(id));
     cache.built.retain(|id, _| failed.iter().any(|(f, _)| f == id));
@@ -881,6 +898,12 @@ fn failed_sketches_built(app: &SolveApp) -> std::sync::Arc<Vec<std::sync::Arc<so
 #[cfg(test)]
 pub(crate) fn failed_sketch_counts(app: &SolveApp) -> (usize, usize) {
     app.viewport.failed_sketches.lock().map(|c| (c.builds, c.placements)).unwrap_or_default()
+}
+
+/// How many results have been looked up among the model's sketches (tests).
+#[cfg(test)]
+pub(crate) fn failed_sketches_asked(app: &SolveApp) -> usize {
+    app.viewport.failed_sketches.lock().map(|c| c.asked).unwrap_or_default()
 }
 
 /// The failed sketches drawn ([`failed_sketches_built`]), placed where the world places
@@ -3384,6 +3407,7 @@ pub(crate) fn refresh_sketch_scene(app: &mut SolveApp, proj: &Proj) {
         if let Ok(mut slot) = app.viewport.sketch_slot.lock() {
             *slot = Some(scene);
         }
+        app.viewport.sketch_scenes_built += 1;
         app.viewport.sketch_key = sk;
     }
 }
@@ -3422,6 +3446,11 @@ fn refresh_wireframe(app: &mut SolveApp, proj: &Proj) {
 pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
     let tk = Tokens::get();
     let mut sc = GpuScene::default();
+    // The last scene's sizes are this one's best guess: the lists are filled in one go instead of
+    // growing (and copying) through many reallocations.
+    if let Some(sizes) = app.viewport.sketch_slot.lock().ok().and_then(|slot| slot.as_ref().map(GpuScene::capacity_hint)) {
+        sc.reserve_lists(sizes);
+    }
     let st = crate::open_meshing::shown_world(app);
     if ground_shadow_shown(app) {
         let geometry = shadow_geometry(app, &st);
@@ -4029,7 +4058,7 @@ pub(crate) enum HoveredOrigin {
 pub(crate) fn hovered_hidden_origin(app: &SolveApp) -> Option<(String, HoveredOrigin)> {
     use solidcraft_engine::doc::construct::ConstructGeom;
     let (name, item) = browser_hovered_origin(app)?;
-    let size = origin_size(app.cam.half_height());
+    let size = origin_plane_size(app);
     let hidden = if solidcraft_engine::origins::item(name).is_some() {
         let geom = app.session.origin_geometry(name)?;
         if app.session.shown_component_origins().iter().any(|(n, _)| n == name) {
@@ -4071,6 +4100,12 @@ fn component_origin_quad(name: &str, p: &Plane, size: f64) -> (Vec3, [Vec3; 4]) 
     (n, [o, o + x, o + x + y, o + y])
 }
 
+/// The side of the origin planes' squares in this view: the origin's size on screen, scaled by
+/// Preferences › Design › Origin plane size (#21191). The origin axes keep the unscaled size.
+pub(crate) fn origin_plane_size(app: &SolveApp) -> f64 {
+    origin_size(app.cam.half_height()) * crate::prefs::origin_plane_scale(&app.preferences)
+}
+
 /// Origin planes and axes currently shown, sized for the view: (name, normal, quad).
 pub fn origin_planes(app: &SolveApp) -> Vec<(&'static str, Vec3, [Vec3; 4])> {
     if !app.origin_visible() {
@@ -4084,7 +4119,7 @@ pub fn origin_planes(app: &SolveApp) -> Vec<(&'static str, Vec3, [Vec3; 4])> {
     if !app.origin_shown() && !reveal {
         return Vec::new();
     }
-    origin_quads(origin_size(app.cam.half_height()))
+    origin_quads(origin_plane_size(app))
         .into_iter()
         .filter(|(n, _, _)| reveal || !app.session.visibility.hidden_origin.iter().any(|h| h == n))
         .collect()
@@ -4333,7 +4368,7 @@ pub fn construction_quads(app: &SolveApp) -> Vec<(String, Vec3, [Vec3; 4])> {
         })
         .chain(app.session.shown_component_origins().into_iter().filter_map(|(name, g)| match g {
             solidcraft_engine::doc::construct::ConstructGeom::Plane(p) => {
-                let (n, q) = component_origin_quad(&name, &p, size);
+                let (n, q) = component_origin_quad(&name, &p, origin_plane_size(app));
                 Some((name, n, q))
             }
             _ => None,
@@ -4944,9 +4979,6 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, options: PickOptions<'_>) -
     {
         let mut mids = Near::new(all);
         for (i, curve) in ss.sketch.curves.iter().enumerate() {
-            if curve.spline_handle_of.is_some() {
-                continue;
-            }
             if !solidcraft_engine::view::sketch_curve_visible(&ss.sketch, i) {
                 continue;
             }
@@ -6444,12 +6476,50 @@ pub(crate) fn profile_fill(sc: &mut GpuScene, app: &SolveApp, sketch: u64, index
         sc.trans_tri(w(b), [0.0; 3], col);
         sc.trans_tri(w(c), [0.0; 3], col);
     }
-    for lp in std::iter::once(&p.region.outer).chain(&p.region.holes) {
-        for part in crate::sketch_display::boundary_parts(lp, &plane, &proj, app.viewport.pixels_per_point()) {
+    profile_outline(sc, app, &p.region, &plane, lift, edge, false);
+}
+
+/// A profile's outline: its outer loop and its holes, `on_top` of everything else or not.
+fn profile_outline(
+    sc: &mut GpuScene,
+    app: &SolveApp,
+    region: &solidcore_record::Region2,
+    plane: &Plane,
+    lift: Vec3,
+    col: crate::gpu::PaletteIndex,
+    on_top: bool,
+) {
+    let proj = display_proj(app);
+    for lp in std::iter::once(&region.outer).chain(&region.holes) {
+        for part in crate::sketch_display::boundary_parts(lp, plane, &proj, app.viewport.pixels_per_point()) {
             for pair in part.windows(2) {
-                sc.line((pair[0] + lift).to_f32(), (pair[1] + lift).to_f32(), edge, 2.0, false);
+                sc.line((pair[0] + lift).to_f32(), (pair[1] + lift).to_f32(), col, 2.0, on_top);
             }
         }
+    }
+}
+
+/// The outlines of the profiles picked with others of their sketch, over the fills. Neighbours
+/// picked together are filled on both sides of the line that parts them, in the colour of that
+/// line; drawn in the sketch's own line colour, it stays visible to pick one out again (#21638).
+pub(crate) fn picked_profile_partings(sc: &mut GpuScene, app: &SolveApp, picked: &[(u64, usize)], col: Color32) {
+    let st = crate::open_meshing::shown_world(app);
+    let col = sc.color(c4(col));
+    for (sketch, index) in picked {
+        if picked.iter().filter(|(other, _)| other == sketch).count() < 2 {
+            continue;
+        }
+        let Some(p) = st.sketch(*sketch).and_then(|ss| ss.profiles.get(*index)) else { continue };
+        let plane = match crate::dialogs::emboss_profile_plane(app, *sketch) {
+            Ok(Some(plane)) => plane,
+            Ok(None) => match st.sketch(*sketch) {
+                Some(ss) => ss.plane,
+                None => continue,
+            },
+            Err(_) => continue,
+        };
+        let lift = if lies_on_section(app, plane.origin, plane.normal()) { Vec3::ZERO } else { app.cam.back() * (app.cam.half_height() * 0.002) };
+        profile_outline(sc, app, &p.region, &plane, lift, col, true);
     }
 }
 
@@ -6619,6 +6689,8 @@ fn highlight_key_with_projection(app: &SolveApp, projection: impl FnOnce() -> Pr
     let selected = app.highlighted();
     app.cam.half_height().to_bits().hash(&mut h);
     app.preferences.origin_axes_across_view.hash(&mut h);
+    // The origin squares' size follows Preferences › Design › Origin › Plane size.
+    crate::prefs::origin_plane_scale(&app.preferences).to_bits().hash(&mut h);
     // A typed dimension value hides the hovered profile (see `build_highlight`).
     crate::dim_view::preview_solve(app).is_some().hash(&mut h);
     // A construction plane's handle being dragged: its quad is drawn at the live size.
@@ -7133,7 +7205,8 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
         for (name, a, b) in construction_axis_segments(app).into_iter().chain(hidden_part_axis) {
             let on = sel.iter().any(|x| matches!(x, Sel::Axis { name: n } if *n == name))
                 || matches!(hover, Some(Hit::Axis { name: n }) if *n == name)
-                || browser_lit == Some(name.as_str());
+                || browser_lit == Some(name.as_str())
+                || app.viewport.hover_feature.is_some_and(|id| app.session.doc.features.iter().any(|f| f.id == id && f.name == *name));
             let len = a.dist(b);
             let dash = size * 0.08;
             if let Some(item) = component_origin_item_with(&feature_names, &name) {
@@ -7172,7 +7245,8 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
                 continue;
             }
             let on = sel.iter().any(|x| matches!(x, Sel::ConstructionPoint { name: n } if *n == name))
-                || matches!(hover, Some(Hit::ConstructionPoint { name: n }) if *n == name);
+                || matches!(hover, Some(Hit::ConstructionPoint { name: n }) if *n == name)
+                || app.viewport.hover_feature.is_some_and(|id| app.session.doc.features.iter().any(|f| f.id == id && f.name == *name));
             let col = sc.color(c4(if on { t.sel_edge } else { t.construction_geom }));
             let r = size * 0.04;
             for d in [Vec3::X, Vec3::Y, Vec3::Z] {
@@ -7459,6 +7533,18 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
             _ => {}
         }
     }
+    let picked: Vec<(u64, usize)> = sel
+        .iter()
+        .filter_map(|x| match x {
+            Sel::Profile { sketch, index }
+                if crate::dim_view::previewed_sketch(app) != Some(*sketch) && solidcraft_engine::view::sketch_shown(&app.session, *sketch) =>
+            {
+                Some((*sketch, *index))
+            }
+            _ => None,
+        })
+        .collect();
+    picked_profile_partings(&mut feedback, app, &picked, t.sketch_fixed);
     // A sketch picked in the Browser or the timeline: all its curves in their line types, over
     // the model, also while the sketch is hidden or inside a body, so it is easy to find.
     let (unit, proj) = (grid_step(app.cam.half_height()).0, display_proj(app));
@@ -8657,6 +8743,10 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
                             };
                             // A pen tap on geometry toggles it. A tap on empty space clears.
                             let (add, allow_toggle) = if pen_select { (sel.is_some(), true) } else { (add, allow_toggle) };
+                            // Not the first click of a double-click on a shown dimension's value.
+                            if sel.is_none() && !add && !crate::dim_view::model_text_at(p) {
+                                app.viewport.edit_dimensions = None;
+                            }
                             select(app, sel.clone(), add, allow_toggle);
                             crate::select_other::note_click(app, p, if add || pen_select { None } else { sel });
                         }
@@ -9143,6 +9233,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     crate::insert_handles::show(app, ui, &proj);
     crate::sketch_transform_ui::refresh(app);
+    crate::sketch_modify_ui::refresh_move(app);
     crate::sketch_transform_ui::show(app, ui, &proj);
     hover_highlight(app, &painter, &proj);
     crate::drag_extrude::tick(app);
@@ -10911,7 +11002,7 @@ fn draw_notes(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
 fn loose_end_markers(
     sk: &solidcraft_engine::sketch::Sketch,
     ends: &solidcraft_engine::sketch::EndReport,
-    plane: &solidcore_record::Plane,
+    plane: &Plane,
     painter: &egui::Painter,
     proj: &Proj,
     t: &Tokens,
@@ -15740,6 +15831,25 @@ mod tests {
     }
 
     #[test]
+    fn control_polygon_midpoints_follow_visibility() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let drawn = h.app.run("sketch.spline.control_point", json!({"points":[[0,0],[0,30],[40,30],[40,0]]})).unwrap();
+        let sides = h.app.run("sketch.spline.control_polygon", json!({"curve":drawn["curves"][0]})).unwrap();
+        let side = sides["curves"][1].as_str().unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.call("ui.view", json!({"view":"fit"}));
+        h.frames(3);
+        let proj = projection(&h.app, h.app.viewport.rect.unwrap());
+        let at = proj.to_screen(Vec3::new(20.0, 30.0, 0.0)).unwrap();
+        let picks_midpoint =
+            |app: &mut SolveApp| pick_cached(app, &proj, at).iter().any(|hit| matches!(hit, Hit::SketchMidpoint { id, .. } if id == side));
+        assert!(picks_midpoint(&mut h.app));
+        h.app.run("sketch.options", json!({"show_control_polygons":false})).unwrap();
+        assert!(!picks_midpoint(&mut h.app));
+    }
+
+    #[test]
     fn midpoint_picking_cache_follows_tool_lifecycle() {
         let mut h = crate::scenario::Harness::new();
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
@@ -16549,6 +16659,41 @@ mod tests {
         crate::browser::set_sketch_visible(&mut app, sketch, false);
         assert!(!solidcraft_engine::view::sketch_shown(&app.session, sketch));
         assert!(build_highlight(&app).merged().trans.is_empty(), "a hidden sketch leaves no filled profile behind");
+    }
+
+    /// A square inside a circle, both regions picked: the square is filled and the ring around it
+    /// too, so the line between them would be the selection colour on the selection colour. It is
+    /// drawn over the fills in the sketch's own line colour; one region picked alone keeps its
+    /// outline as before (#21638).
+    #[test]
+    fn neighbouring_picked_profiles_keep_the_line_between_them_visible() {
+        let mut app = hover_app(true);
+        let sketch = app.session.active_sketch.unwrap();
+        app.run("sketch.circle.center", json!({"center":[0,0],"radius":40})).unwrap();
+        app.run("sketch.rectangle.two_point", json!({"p0":[-15,-15],"p1":[15,15]})).unwrap();
+        app.finish_sketch();
+        crate::browser::set_sketch_visible(&mut app, sketch, true);
+        let profiles = crate::open_meshing::shown_world(&app).sketch(sketch).map_or(0, |ss| ss.profiles.len());
+        assert_eq!(profiles, 2, "the square and the ring around it");
+        let parting = c4(Tokens::get().sketch_fixed);
+        let on_top_in = |scene: &GpuScene, rgba: [u8; 4]| {
+            scene
+                .overlay
+                .as_chunks::<{ crate::gpu::LINE_SIZE }>()
+                .0
+                .iter()
+                .filter(|line| {
+                    let index = line.get(24..28).and_then(|w| w.try_into().ok()).map_or(u32::MAX, u32::from_le_bytes);
+                    scene.palette.get(crate::gpu::PaletteIndex(index)) == Some(rgba)
+                })
+                .count()
+        };
+        app.session.selection = vec![Sel::Profile { sketch, index: 0 }];
+        assert_eq!(on_top_in(&build_highlight(&app).merged(), parting), 0, "one picked region: its outline as before");
+        app.session.selection = vec![Sel::Profile { sketch, index: 0 }, Sel::Profile { sketch, index: 1 }];
+        let both = build_highlight(&app).merged();
+        assert!(on_top_in(&both, parting) > 0, "the line between two picked regions is drawn over their fills");
+        assert!(!both.trans.is_empty(), "both regions are still filled");
     }
 
     #[test]
@@ -21078,6 +21223,60 @@ mod grid_plane_tests {
         let state = crate::open_meshing::session_world(&h.app.session);
         assert!(on(state.sketches.first().map(|s| s.plane), "XZ"), "the click sketches on XZ");
         assert!(previewed_sketch_plane(&h.app).is_none(), "the open sketch has its own grid");
+    }
+
+    /// The sketch scene is built when what it shows changes (the camera moves its grid and the
+    /// sampling of its curves), and not again while nothing has changed.
+    #[test]
+    fn the_sketch_scene_is_not_built_again_while_nothing_changed() {
+        let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        app.run("sketch.rectangle.two_point", json!({"p0": [-10, -10], "p1": [10, 10]})).unwrap();
+        app.run("sketch.finish", json!({})).unwrap();
+        let proj = projection(&app, rect);
+        refresh_sketch_scene(&mut app, &proj);
+        assert_eq!(app.viewport.sketch_scenes_built, 1, "built once");
+        for _ in 0..5 {
+            refresh_sketch_scene(&mut app, &proj);
+        }
+        assert_eq!(app.viewport.sketch_scenes_built, 1, "five still frames build nothing");
+        app.cam.yaw += 0.1;
+        {
+            let proj = projection(&app, rect);
+            refresh_sketch_scene(&mut app, &proj);
+        }
+        assert_eq!(app.viewport.sketch_scenes_built, 2, "an orbit moves the grid and the sampling");
+        {
+            let proj = projection(&app, rect);
+            refresh_sketch_scene(&mut app, &proj);
+        }
+        assert_eq!(app.viewport.sketch_scenes_built, 2, "and holding still builds nothing again");
+        app.preferences.sketch_halo = !app.preferences.sketch_halo;
+        {
+            let proj = projection(&app, rect);
+            refresh_sketch_scene(&mut app, &proj);
+        }
+        assert_eq!(app.viewport.sketch_scenes_built, 3, "a change of what the scene shows builds it");
+    }
+
+    /// The capacity hint only reserves room: the scene's bytes are those of one built without it.
+    #[test]
+    fn a_capacity_hint_leaves_the_sketch_scene_unchanged() {
+        let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.ui.show_grid = true;
+        app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        app.run("sketch.circle.center", json!({"center": [0, 0], "radius": 12.0})).unwrap();
+        app.run("sketch.finish", json!({})).unwrap();
+        let proj = projection(&app, rect);
+        let plain = build_sketch_scene(&app, &proj);
+        assert!(app.viewport.sketch_slot.lock().unwrap().is_none(), "nothing to size it by yet");
+        *app.viewport.sketch_slot.lock().unwrap() = Some(plain.clone());
+        let hinted = build_sketch_scene(&app, &proj);
+        assert!(!plain.under.is_empty() && !plain.lines.is_empty());
+        assert_eq!((&plain.lines, &plain.overlay, &plain.under, &plain.trans), (&hinted.lines, &hinted.overlay, &hinted.under, &hinted.trans));
+        assert_eq!(plain.palette.entries(), hinted.palette.entries());
     }
 
     /// A finished sketch is depth-tested unless the preference draws reference geometry through

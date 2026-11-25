@@ -30,5 +30,9 @@
   "zh": {
     "ui.agent_chat_hint": "请在消息框中输入你的请求。",
     "ui.agent_chat_intro_short": "智能体处理打开的设计。更改即时显示，每条消息的更改可一步撤销。无需询问即可执行的范围在“首选项 > AI”中设置。"
+  },
+  "fr": {
+    "ui.agent_chat_hint": "Saisissez votre demande dans la zone de message.",
+    "ui.agent_chat_intro_short": "L’agent travaille sur la conception ouverte. Vous voyez ses modifications au fur et à mesure, et chaque message peut être annulé en une seule étape. Les actions qu’il peut effectuer sans demander votre accord se règlent dans Préférences > IA."
   }
 }
