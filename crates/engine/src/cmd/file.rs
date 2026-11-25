@@ -3164,7 +3164,7 @@ fn hierarchy(p: &Value, cmd: &str, format: Format) -> Result<bool> {
 
 /// `file.export` through an exporter plugin: the whole design, with the slot's options.
 fn export_with_plugin(s: &mut Session, cmd: &str, path: &str, exporter: &crate::plugin::FormatSlot, p: &Value) -> Result<Value> {
-    for key in ["bodies", "quality", "objects", "lay_on_print_faces", "mesh_prefix", "effort", "velocity"] {
+    for key in ["bodies", "quality", "chord", "objects", "lay_on_print_faces", "mesh_prefix", "effort", "velocity"] {
         if p.get(key).is_some_and(|v| !v.is_null()) {
             return Err(bad(cmd, format!("`{key}` is for SolidCraft's own formats; an exporter plugin writes the whole design with its `options`")));
         }
