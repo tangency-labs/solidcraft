@@ -27,10 +27,8 @@ pub struct SheetSceneParams {
 /// sheet's lower-left corner: the drawing border's (object: the sheet), then each image's picture
 /// (object and source: the placement), then each view's strokes (object: the view), then each
 /// dimension's lines and arrowheads (object: the dimension), each note of a view (object: the
-/// note), each view's label (object: the view) and each balloon's circle, number and leader (object:
-/// the balloon), then each parts list's and revision table's (object: the table), then each note on
-/// the sheet, each revision tag's triangle and text (object: the tag), each fill and each sheet
-/// sketch, then the title block's (object: the sheet).
+/// note), each view's label, balloons, centre marks and centre lines, then parts lists and revision
+/// tables, sheet notes and revision tags, sheet fills and sketches, and the title block.
 #[derive(Debug, Serialize)]
 #[serde(transparent)]
 pub struct SheetPaperScene(pub solidcraft_geom::paper::Scene);
@@ -49,6 +47,8 @@ impl JsonSchema for SheetPaperScene {
                 ObjectKind::Dimension,
                 ObjectKind::Note,
                 ObjectKind::ViewLabel,
+                ObjectKind::CentreMark,
+                ObjectKind::CentreLine,
                 ObjectKind::Balloon,
                 ObjectKind::PartsList,
                 ObjectKind::RevisionTable,
@@ -174,6 +174,22 @@ pub struct SheetSceneNote {
     pub drawn: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub why: Option<String>,
+}
+
+/// A centre annotation omitted from the scene and why.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SheetAnnotationFailure {
+    pub object: String,
+    pub view: String,
+    #[schemars(with = "String")]
+    pub kind: ObjectKind,
+    pub reason: String,
+}
+
+impl From<crate::drawing_scene::AnnotationFailure> for SheetAnnotationFailure {
+    fn from(failure: crate::drawing_scene::AnnotationFailure) -> Self {
+        Self { object: ids::encode(failure.object), view: ids::encode(failure.view), kind: failure.kind, reason: failure.reason }
+    }
 }
 
 /// One table on the sheet: `ok`, or `failed` when it can't be read or laid out, and whether its lines
@@ -442,6 +458,9 @@ pub struct SheetSceneResult {
     /// Each note of a view on the sheet, by view and id, then each note on the sheet, by id.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<SheetSceneNote>,
+    /// Centre annotations omitted and why.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub annotation_failures: Vec<SheetAnnotationFailure>,
     /// Each balloon of a view on the sheet, by view and id.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub balloons: Vec<SheetSceneBalloon>,
