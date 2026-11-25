@@ -1235,6 +1235,7 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
         http_download: Some(std::sync::Arc::new(http_download)),
         // Already an installed app: only the browser build offers to install.
         install_app: None,
+        persist_design: None,
         can_restore: None,
         restore_file: None,
         download_design: None,
@@ -2042,7 +2043,7 @@ fn main() -> eframe::Result {
             // macOS: AppKit must not move the window from a press on a tab or a bar button.
             #[cfg(target_os = "macos")]
             if !native_titlebar_macos::install(cc) {
-                eprintln!("SolidCraft window: could not stop native title bar drags; tabs may move the window");
+                solidcraft_engine::note!("SolidCraft window: could not stop native title bar drags; tabs may move the window");
             }
             app.integrated_titlebar = cfg!(target_os = "macos");
             app.cpu_meshing = safe_mode || safe;
