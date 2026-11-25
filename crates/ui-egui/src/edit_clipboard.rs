@@ -15,7 +15,8 @@
 //!
 //! Copied bodies paste into another design (tab) too, as imported bodies without their history,
 //! and copied components as independent copies with their history (Paste and Paste New alike),
-//! where they were in the world (`component.paste_from_design`); completed sketches paste as
+//! where they were in the world (`component.paste_from_design`; components at the target's
+//! origin with the `paste_components_at_origin` preference, #17621); completed sketches paste as
 //! independent features with their parameters (`timeline.paste`); cut ones paste there as copies,
 //! the originals staying. Sketch geometry copied or cut in a sketch pastes into a sketch of
 //! another design (`sketch.paste`), at the cursor or at the copied coordinates, with the
@@ -77,9 +78,9 @@ fn placement_selection(app: &SolveApp) -> Vec<Vec<u64>> {
     app.session.selection.iter().filter_map(|s| if let Sel::Occurrence { path } = s { Some(path.clone()) } else { None }).collect()
 }
 
-/// The selected bodies.
+/// The selected bodies (every shown one after Select All).
 fn body_selection(app: &SolveApp) -> Vec<String> {
-    app.session.selection.iter().filter_map(|s| if let Sel::Body { name } = s { Some(name.clone()) } else { None }).collect()
+    app.session.selected_items().unwrap_or_default().into_iter().filter_map(|s| if let Sel::Body { name } = s { Some(name) } else { None }).collect()
 }
 
 /// Does Copy copy the whole design (its row picked in the browser)? Features, bodies or
@@ -541,12 +542,16 @@ pub fn paste_into(app: &mut SolveApp, at: Option<Pos2>, new_copy: bool, into: Op
         return false;
     }
     if let Some(path) = app.linked_design_clipboard.clone() {
-        let (parent_path, translate) = paste_placement(app, at);
+        // At the target component's origin when asked, not at the pointer (#17621).
+        let at_origin = app.preferences.paste_components_at_origin;
+        let (parent_path, translate) = if at_origin { (into.1.clone(), [0.0; 3]) } else { paste_placement(app, at) };
+        let mut params = json!({"path": path, "reuse": true, "translate": translate});
+        if at_origin {
+            params["parent"] = json!(into.0);
+        }
         // The copied design is one the user opened: its server is the user's choice.
         let hosts: Vec<String> = solidcraft_engine::io::vfs::network_host(&path).into_iter().collect();
-        let pasted = solidcraft_engine::io::vfs::allowing_hosts(&hosts, || {
-            app.run("component.insert_design", json!({"path": path, "reuse": true, "translate":translate}))
-        });
+        let pasted = solidcraft_engine::io::vfs::allowing_hosts(&hosts, || app.run("component.insert_design", params));
         let Ok(out) = pasted else { return false };
         // Move/Copy opens on it, to place it.
         if let Some(id) = out.get("occurrence").and_then(Value::as_u64) {
@@ -621,15 +626,20 @@ fn paste_placement(app: &SolveApp, at: Option<Pos2>) -> (Vec<u64>, [f64; 3]) {
 }
 
 /// The bodies another design copied or cut, into `into` (a component, placed by its placement)
-/// as imported bodies, or its components as independent copies, where they were in the world;
-/// they are selected.
+/// as imported bodies where they were in the world, or its components as independent copies,
+/// where they were in the world or, with `paste_components_at_origin`, at that component's
+/// origin; they are selected.
 fn paste_from_design(app: &mut SolveApp, copy: std::sync::Arc<solidcraft_engine::ForeignCopy>, (component, path): (u64, Vec<u64>)) -> bool {
     if !copy.features.is_empty() {
         return paste_features(app, component, path).is_ok();
     }
     let design = copy.design.clone();
     app.session.foreign_copy = Some(copy);
-    let Ok(out) = app.run("component.paste_from_design", json!({ "component": component, "component_path": path })) else { return false };
+    // Components go to the target's origin, or where they were in the world (#17621).
+    let placement = if app.preferences.paste_components_at_origin { "origin" } else { "world" };
+    let Ok(out) = app.run("component.paste_from_design", json!({ "component": component, "component_path": path, "placement": placement })) else {
+        return false;
+    };
     if let Some(paths) = out.get("paths").and_then(Value::as_array) {
         // Pasted components arrive folded.
         for path in paths {

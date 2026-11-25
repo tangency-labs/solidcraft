@@ -59,6 +59,14 @@ xattr -dr com.apple.quarantine /Applications/SolidCraft.app
 When updating from a build released under the previous product name, follow the
 [macOS upgrade notes](https://github.com/tangency-labs/solidcraft/blob/main/docs/compatibility.md#macos) so you replace it rather than install a second copy.
 
+Tip: For command line convenience, symlink the executable to your `usr/local/bin`, or other location in your `PATH`.
+
+```
+sudo ln -s /Applications/SolidCraft.app/Contents/MacOS/SolidCraft /usr/local/bin/SolidCraft
+sudo ln -s /Applications/SolidCraft.app/Contents/MacOS/solidcraft-cli /usr/local/bin/solidcraft-cli
+```
+`SolidCraft` and `solidcraft-cli` will now work natively in the terminal.
+
 ### Linux AppImage
 
 The first time you open the AppImage it adds a menu entry and icons under `~/.local/share`
@@ -108,19 +116,37 @@ command-line paths outside Documents may need a specific additional filesystem p
 
 ### Linux Snap
 
-On Ubuntu and other distributions with snapd:
+On Ubuntu and other distributions with snapd, download the latest release's
+[Snap package for x86-64](https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-linux-x86_64.snap)
+or [Snap package for ARM64](https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-linux-aarch64.snap).
+Open a terminal in the download folder and install the package for your computer.
+
+For x86-64:
 
 ```sh
-sudo snap install solidcraft
+sudo snap install --dangerous ./solidcraft-linux-x86_64.snap
+```
+
+For ARM64:
+
+```sh
+sudo snap install --dangerous ./solidcraft-linux-aarch64.snap
+```
+
+`--dangerous` is required for a local package without a Snap Store signature. These installs
+do not update automatically. Check the [releases page](https://github.com/tangency-labs/solidcraft/releases)
+for newer packages.
+
+After installation:
+
+```sh
 solidcraft                # or open SolidCraft from the app menu
 solidcraft.cli --version  # the CLI, for scripts and `solidcraft.cli mcp`
 ```
 
 The snap can open designs in your home folder (not hidden folders) and, through the file
 chooser, anywhere else. For USB drives and other mounted disks, run
-`sudo snap connect solidcraft:removable-media` once. A release's `.snap` file installs without
-the store with `sudo snap install --dangerous ./solidcraft-VERSION-linux-ARCH.snap`; it then
-doesn't update automatically.
+`sudo snap connect solidcraft:removable-media` once.
 
 ## Web
 
@@ -328,11 +354,12 @@ A script is a list of commands:
 
 ![The bracket example, rendered by solidcraft-cli snapshot](../generated/bracket.png)
 
-`snapshot` looks at the model from the iso view. `--view NAME` takes another standard view (`front`, `back`, `top`, `bottom`, `left`, `right`) or the name of a view saved in the design with `view.save`. `--camera JSON` takes any camera, as the MCP `screenshot` tool does (its conventions are in [the MCP page](mcp.md#camera-and-close-up-recipe)). A script that applies a view itself with `view.apply` sets the camera too. The ground grid lies on Z 0, so it cuts through a part that straddles it: `--no-grid` leaves it out of the picture, and `--no-axes` the origin's axes. The picture is drawn on the GPU with the viewport's own pipelines, so it shows what the window would (a surface analysis such as `inspect.zebra` included); a machine without a GPU uses a software one (Mesa's lavapipe on Linux, WARP on Windows), and with neither (a Mac without usable Metal, a Linux box without Mesa's Vulkan) the CPU rasterizer draws it, without surface analysis colours, and the reply's `renderer` says `cpu` with a warning. `SOLIDCRAFT_GPU=auto|hardware|software|cpu` chooses (`hardware` and `software` fail rather than fall to the CPU), and `solidcraft-cli gpu` lists the adapters and the tier a snapshot would use.
+`snapshot` looks at the model from the iso view. `--view NAME` takes another standard view (`front`, `back`, `top`, `bottom`, `left`, `right`) or the name of a view saved in the design with `view.save`. `--camera JSON` takes any camera, as the MCP `screenshot` tool does (its conventions are in [the MCP page](mcp.md#camera-and-close-up-recipe)). A script that applies a view itself with `view.apply` sets the camera too. The ground grid lies on Z 0, so it cuts through a part that straddles it: `--no-grid` leaves it out of the picture, and `--no-axes` the origin's axes. `--transparent` saves the picture on a transparent background instead of the gradient. Where nothing is drawn the picture is fully transparent; the model is fully opaque, and its anti-aliased edges and see-through bodies are partly transparent. The picture is drawn twice to recover the alpha, so it takes about twice as long. The grid and the axes stay unless `--no-grid` and `--no-axes` leave them out. The picture is drawn on the GPU with the viewport's own pipelines, so it shows what the window would (a surface analysis such as `inspect.zebra` included); a machine without a GPU uses a software one (Mesa's lavapipe on Linux, WARP on Windows), and with neither (a Mac without usable Metal, a Linux box without Mesa's Vulkan) the CPU rasterizer draws it, without surface analysis colours, and the reply's `renderer` says `cpu` with a warning. `SOLIDCRAFT_GPU=auto|hardware|software|cpu` chooses (`hardware` and `software` fail rather than fall to the CPU), and `solidcraft-cli gpu` lists the adapters and the tier a snapshot would use.
 
 ```sh
 solidcraft-cli snapshot part.sc --out photo.png --view Photo
 solidcraft-cli snapshot part.sc --out close-up.png --no-grid --no-axes --camera '{"target": [30, -20, 0], "yaw": 0.6, "pitch": 0.25, "distance": 60}'
+solidcraft-cli snapshot part.sc --out cut-out.png --transparent --no-grid --no-axes
 ```
 
 ### Seeing what a cut or a join is about to do
@@ -374,6 +401,9 @@ feature's `error` in `timeline`, and then exits with status 1 for the same reaso
 failing features on stderr; `eval --allow-errors` exits with status 0, for a design you are
 inspecting because it fails.
 
+A mesh `--out` that cannot mesh one body still writes the others. Each body left out is named
+on its own line on stderr, with the reason, even with `--quiet`.
+
 `--quality standard|fine|finest` sets how closely an STL, OBJ or 3MF written by `--out`
 follows curved faces, as `file.export`'s `quality` does: a chord tolerance of 2e-4, 5e-5 or
 1e-5 of each body's size, though never under 1 µm, so on a small body `fine` and `finest`
@@ -381,6 +411,21 @@ can come out the same. The default is `standard`.
 
 ```sh
 solidcraft-cli run --in part.sc --out part.stl --quality fine
+```
+
+`--param NAME=EXPR` sets a parameter of the design as `parameters.change` would, for this run
+only: the file on disk is not touched. Repeat it to set several; they apply in the order given,
+before the script's own commands run, so a later one can use an earlier one's value. `--params-file
+FILE.json` does the same from an object such as `{"width": "30 mm", "depth": 20}` and applies before
+any `--param`. The name must already be a parameter of the design (or of one of its features), so a
+typo fails the run and names the parameter, rather than adding a new one. Overrides need a design to
+act on: the positional design, or `--in` with a script on top; a script alone has no parameters yet
+(have it set them itself). A missing `=`, an empty name or expression, or an expression that does not
+evaluate fails the run with the command's own message, and nothing is written. `eval` takes the same
+two options.
+
+```sh
+solidcraft-cli run part.sc --param width=30mm --param depth=width/2 --out part.step
 ```
 
 `--param-check warn|strict` checks each step against its command's parameter contract, for the

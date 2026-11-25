@@ -26,6 +26,9 @@
 //! vertex's and edge's to start with. A vertex measurably off its curve or surface, or an edge
 //! whose curve lies measurably off a face's surface, gets that distance (with margin) as its
 //! tolerance, and the solid's notes say how many and how far.
+//! Pcurves use a separate construction tolerance, never coarser than [`DEFAULT_TOLERANCE`]
+//! merely because the context states a coarse uncertainty. Measured gaps and explicit fit
+//! deviations still carry their own allowances; the source's tolerance remains the record's.
 //!
 //! Pcurves are the closed forms the 3D edges have on our surfaces ([`pcurve::exact_pcurves`]); a
 //! use with none gets its pcurve from the kernel ([`read_solids_with`], SMLib's own trims), except
@@ -705,7 +708,7 @@ impl<'b, 'a> Builder<'b, 'a> {
             self.asm.raise_vertex(v, gap, id)?;
         }
         let i = index(self.asm.edges.len())?;
-        self.asm.edges.push(EdgeB { curve, interval, vertices, tolerance: self.asm.tol, form: None });
+        self.asm.edges.push(EdgeB { curve, interval, vertices, tolerance: self.asm.tol, pcurve_tolerance: self.asm.pcurve_tolerance(), form: None });
         self.edge_ids.insert(id, (i, mapped.with_step));
         Ok((i, mapped.with_step))
     }
@@ -1014,6 +1017,7 @@ impl<'b, 'a> Builder<'b, 'a> {
                 interval: [0.0, 1.0],
                 vertices: [va, vb],
                 tolerance: self.asm.tol,
+                pcurve_tolerance: self.asm.pcurve_tolerance(),
                 form: None,
             });
             self.poly_edges.insert(key, e);
@@ -1200,9 +1204,137 @@ fn full_knots(knots: &[f64], mults: &[usize], count: usize, degree: usize) -> R<
     Ok(v)
 }
 
+/// A B-spline curve as the record holds it: clamped ([`spline_curve`]), its parameter rescaled
+/// where the file's cannot resolve its edges ([`resolvable`]).
 fn map_bspline_curve(b: &BSplineCurve) -> R<BCurve> {
     let knots = full_knots(&b.knots, &b.multiplicities, b.points.len(), b.degree)?;
-    spline_curve(b.degree, knots, &b.points, b.weights.as_deref())
+    resolvable(spline_curve(b.degree, knots, &b.points, b.weights.as_deref())?)
+}
+
+/// The kernel's knot resolution, `SM_EFF_ZERO` (absolute): two knots no farther apart than it
+/// are one knot (`nurbs::nurbs_crv::get_knots`, the B-spline check's knot count).
+const KNOT_RESOLUTION: f64 = 1e-12;
+
+/// The shortest edge the kernel keeps: it takes an edge shorter than half its tolerance for no
+/// edge, and no record's tolerance is below [`MIN_TOLERANCE`].
+const SHORTEST_EDGE: f64 = 0.5 * MIN_TOLERANCE;
+
+/// The resolution of [`project`]'s parameters at `t`: its search stops once its bracket is no
+/// wider than `1e-15 (1 + |t|)`, and gives the bracket's middle.
+fn projection_resolution(t: f64) -> f64 {
+    0.5e-15 * (1.0 + t.abs())
+}
+
+/// Spline `curve` on a parameter that resolves every edge the kernel keeps on it, the same curve
+/// point for point.
+///
+/// An edge on the curve at least [`SHORTEST_EDGE`] long spans at least that length over the
+/// curve's greatest speed, `S`, in parameter; the reader finds its ends to
+/// [`projection_resolution`] each. The file's parameter is kept when that interval, so found,
+/// is longer than the kernel's [`KNOT_RESOLUTION`] for every such edge:
+/// `SHORTEST_EDGE / S - 2 projection_resolution(max |knot|) > KNOT_RESOLUTION`. Otherwise (Siemens
+/// NX writes cubic Béziers on knots spanning 1.02e-7 for edges 20 mm long, `S` about 2e8, so an
+/// edge of 1.3e-6 mm spans 6.5e-15) the trims of a short edge on it have their end knots taken
+/// for one, the kernel's check fails the solid, and its mass properties have no trim to
+/// integrate. Its knots are then mapped `t ↦ (t − c) 2^k`, with `2^k` the least power of two at or
+/// above `S`, so that the curve runs no faster than one unit of length per unit of parameter
+/// (as a line's edge runs over `[0, length]`): `c` is the first knot when every `t − c` is exact
+/// (always when the first knot is 0, the usual case), else 0. Both steps are exact, so the knots
+/// keep their order and multiplicities and the curve is the file's point for point. The new
+/// domain is shorter than `2 S (b − a)`, `[a, b]` the file's domain: twice the length the curve
+/// would have at its bound speed throughout. That is about twice the curve's length where the
+/// bound is tight (a cubic whose control points are evenly spaced along a line, as NX's are,
+/// runs at exactly `S`) and within the bound's own factor otherwise. With `c = 0` the knots also
+/// reach no further from 0 than twice that (a `t − c` is inexact only where the first knot is
+/// smaller than the domain's length).
+///
+/// `S` is bounded from the derivative's control points (Piegl and Tiller, The NURBS Book,
+/// eqs. 3.4 and 4.8): a spline's derivative is `Σ N_{i,p-1} p (P_{i+1} − P_i) / Δ_i` with
+/// `Δ_i = t_{i+p+1} − t_{i+1}` (terms with `Δ_i = 0` vanish), so `|C'| ≤ max p |P_{i+1} − P_i| / Δ_i`;
+/// a rational one's is `Σ N_{i,p-1} p (w_{i+1} (P_{i+1} − C) − w_i (P_i − C)) / (Δ_i W)`. Term `i`
+/// is nonzero only on the knot spans `j = i + 1 ..= i + p`, where `C` lies in the hull of
+/// `P_{j-p} ..= P_j` and `W ≥ min w_{j-p ..= j}` (positive weights); both index ranges lie in
+/// `i + 1 − p ..= i + p`, so `|C'| ≤ max p (w_i + w_{i+1}) D_i / (Δ_i m_i)`, with `D_i` the
+/// diagonal of the box of `P_{i+1-p} ..= P_{i+p}` and `m_i` their least weight (local, so a long
+/// rational curve's bound is not its whole extent over each span). The bound is raised by 16 ε,
+/// past the rounding of the at most 16 operations behind each term (γ_16 is below 8.1 ε). A curve whose bound is not finite is refused (only a file whose spans are far
+/// below any rounding of its points gets one).
+fn resolvable(curve: BCurve) -> R<BCurve> {
+    let (knots, points, weights): (&[f64], Vec<Vec3>, Option<Vec<f64>>) = match &curve {
+        BCurve::Spline { knots, points } => (knots, points.iter().map(|p| v3(*p)).collect(), None),
+        BCurve::RationalSpline { knots, homogeneous } => (
+            knots,
+            homogeneous.iter().map(|h| Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3])).collect(),
+            Some(homogeneous.iter().map(|h| h[3]).collect()),
+        ),
+        _ => return Ok(curve),
+    };
+    let n = points.len();
+    let Some(degree) = knots.len().checked_sub(n + 1) else { return Ok(curve) };
+    let p = degree as f64;
+    // The rational bound's factor `D_i / min w` over the points `i + 1 − p ..= i + p` (weights
+    // are positive, `check_values`).
+    let spread = |w: &[f64], i: usize| -> Option<f64> {
+        let (from, to) = ((i + 1).saturating_sub(degree), (i + degree).min(n.saturating_sub(1)));
+        let (near, weights) = (points.get(from..=to)?, w.get(from..=to)?);
+        let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+        for q in near {
+            for (k, x) in [q.x, q.y, q.z].into_iter().enumerate() {
+                if let (Some(l), Some(h)) = (lo.get_mut(k), hi.get_mut(k)) {
+                    (*l, *h) = (l.min(x), h.max(x));
+                }
+            }
+        }
+        let least = weights.iter().copied().fold(f64::INFINITY, f64::min);
+        Some(v3(hi).dist(v3(lo)) / least)
+    };
+    let mut speed: f64 = 0.0;
+    for (i, pair) in points.windows(2).enumerate() {
+        let (Some(t0), Some(t1)) = (knots.get(i + 1), knots.get(i + degree + 1)) else { continue };
+        let span = t1 - t0;
+        if !(span > 0.0) {
+            continue;
+        }
+        let (Some(a), Some(b)) = (pair.first(), pair.last()) else { continue };
+        let term = match &weights {
+            None => p * b.dist(*a) / span,
+            Some(w) => {
+                let (Some(wa), Some(wb), Some(d)) = (w.get(i), w.get(i + 1), spread(w, i)) else { continue };
+                p * (wa + wb) * d / span
+            }
+        };
+        speed = speed.max(term);
+    }
+    let speed = speed * (1.0 + 16.0 * f64::EPSILON);
+    if !speed.is_finite() {
+        return Err("a B-spline curve too fast in its own parameter to rescale".into());
+    }
+    let (Some(&first), Some(&last)) = (knots.first(), knots.last()) else { return Ok(curve) };
+    let largest = first.abs().max(last.abs());
+    if SHORTEST_EDGE / speed - 2.0 * projection_resolution(largest) > KNOT_RESOLUTION {
+        return Ok(curve);
+    }
+    // The least power of two at or above the speed (at least 2^16 here, as the test above failed).
+    let mut scale = 1.0_f64;
+    while scale < speed {
+        scale *= 2.0;
+    }
+    // `t − c` exact for every knot (Knuth's two-sum: its rounding error is exactly zero).
+    let exact = |t: f64| {
+        let d = t - first;
+        let back = d - t;
+        (t - (d - back)) + (-first - back) == 0.0
+    };
+    let c = if knots.iter().all(|t| exact(*t)) { first } else { 0.0 };
+    let knots: Vec<f64> = knots.iter().map(|t| (t - c) * scale).collect();
+    if knots.iter().any(|t| !t.is_finite()) {
+        return Err("a B-spline curve too fast in its own parameter to rescale".into());
+    }
+    Ok(match curve {
+        BCurve::Spline { points, .. } => BCurve::Spline { knots, points },
+        BCurve::RationalSpline { homogeneous, .. } => BCurve::RationalSpline { knots, homogeneous },
+        other => other,
+    })
 }
 
 fn map_bspline_surface(b: &BSplineSurface) -> R<BSurface> {

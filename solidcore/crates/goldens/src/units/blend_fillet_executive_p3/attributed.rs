@@ -377,10 +377,8 @@ pub(super) fn rust(input: &AttributedFillet) -> Result<Output, HarnessError> {
         put_attributes(k, &mut values, &mut body)?;
         Ok(values)
     };
-    let result = run();
-    let step = super::rust_point_step(&k);
-    match result {
-        Ok(values) => Ok(super::with_point_step(output(&values)?, step)),
+    match run() {
+        Ok(values) => output(&values),
         Err(error) => {
             Output::unported(&error).ok_or_else(|| HarnessError::new(error.to_string()))
         }

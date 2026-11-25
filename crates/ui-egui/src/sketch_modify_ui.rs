@@ -120,8 +120,9 @@ pub enum Mod {
     Mirror,
     /// `sketch.move`: how far the picked entities move along the sketch's own axes, how far they
     /// turn about the centre, and whether the originals stay behind. The command already
-    /// carries the copy flag, so the Create Copy row needs no engine change.
-    Move { x: String, y: String, angle: String, copy: bool },
+    /// carries the copy flag, so the Create Copy row needs no engine change. In a 3D sketch
+    /// (`three_d`, taken when the window opens) `z` moves them off the plane along its normal.
+    Move { x: String, y: String, z: String, angle: String, copy: bool, three_d: bool },
     /// `sketch.transform`: the picked entities scaled, turned and moved as one, about the picked
     /// Center point or else the middle of their box. `x` and `y` move that point, `factor` scales
     /// and `angle` turns about it.
@@ -163,7 +164,13 @@ impl Mod {
     pub fn previews(&self) -> bool {
         matches!(
             self,
-            Self::Mirror | Self::PatternRect { .. } | Self::PatternCirc { .. } | Self::Offset { .. } | Self::Corner { .. } | Self::Divide { .. }
+            Self::Mirror
+                | Self::Move { .. }
+                | Self::PatternRect { .. }
+                | Self::PatternCirc { .. }
+                | Self::Offset { .. }
+                | Self::Corner { .. }
+                | Self::Divide { .. }
         )
     }
 
@@ -265,8 +272,10 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "sketch.move" => Mod::Move {
             x: crate::dialogs::length_default(&app.session, "0"),
             y: crate::dialogs::length_default(&app.session, "0"),
+            z: crate::dialogs::length_default(&app.session, "0"),
             angle: "0 deg".into(),
             copy: false,
+            three_d: crate::sketch3d::active(app),
         },
         "sketch.pattern.rectangular" => Mod::PatternRect {
             count: "3".into(),
@@ -382,6 +391,17 @@ pub fn candidate(d: &Dialog, session: &solidcraft_engine::Session, hit: &Hit) ->
                 return None;
             }
             sk.curve_index(id)?;
+            d.active_input()?.accepts(hit, Some(active), |_, _| false)
+        }
+        // Once the picked curves close a shape, Offset takes no curve that meets it at a corner:
+        // such a curve neither highlights nor picks. A picked curve still does, so clicking it
+        // opens the shape again, and so does a curve of a shape apart from the closed one.
+        Hit::SketchCurve { id, .. } if matches!(d.kind, Kind::SketchModify(Mod::Offset { .. })) => {
+            let follow = matches!(d.kind, Kind::SketchModify(Mod::Offset { chain: true, .. }));
+            let state = crate::open_meshing::session_world(session);
+            if solidcraft_engine::cmd::offset_leaves_out(&state.sketch(active)?.sketch, &curve_ids(&d.inputs, 0), id, follow) {
+                return None;
+            }
             d.active_input()?.accepts(hit, Some(active), |_, _| false)
         }
         _ => d.active_input()?.accepts(hit, Some(active), |_, _| false),
@@ -633,8 +653,11 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document) -> bool {
             });
         }
         Mod::Mirror => {}
-        Mod::Move { x, y, angle, copy } => {
+        Mod::Move { x, y, z, angle, copy, three_d } => {
             enter |= ui_kit::value_pair(ui, "Position", [x, y], ["X", "Y"], Some(["X Distance", "Y Distance"]));
+            if *three_d {
+                enter |= number(ui, "Z Distance", z);
+            }
             enter |= number(ui, "Angle", angle);
             ui_kit::options(ui, "move_options", &mut [("Create Copy", copy)]);
         }
@@ -816,15 +839,22 @@ pub(crate) fn point_id<'a>(session: &solidcraft_engine::Session, sel: &'a Sel) -
 }
 
 /// The curves and lone points picked in input `i`, as the engine's `entities` list. A profile
-/// pick expands to every curve of its boundary and its holes (#8390).
-pub(crate) fn entity_ids(session: &solidcraft_engine::Session, inputs: &[SelInput], i: usize) -> Vec<String> {
+/// pick expands to the curves of its outline (#8390): a shape drawn inside it is a region of its
+/// own, picked by a click inside that shape, so a click between two nested rectangles takes the
+/// outer one alone (#14496). With the `region_pick_takes_holes` preference on, the pick also
+/// takes the curves of the region's holes, as it did before.
+pub(crate) fn entity_ids(app: &SolveApp, inputs: &[SelInput], i: usize) -> Vec<String> {
+    let session = &app.session;
+    let holes = app.preferences.region_pick_takes_holes;
     let mut out = Vec::new();
     for x in items(inputs, i) {
         match x {
             Sel::SketchCurve { id, .. } => out.push(id.clone()),
             Sel::Profile { sketch, index } => {
-                if let Some(ids) =
-                    crate::open_meshing::session_world(session).sketch(*sketch).and_then(|ss| ss.profiles.get(*index)).map(|p| p.curve_ids())
+                if let Some(ids) = crate::open_meshing::session_world(session)
+                    .sketch(*sketch)
+                    .and_then(|ss| ss.profiles.get(*index))
+                    .map(|p| if holes { p.curve_ids() } else { p.outer_curves.clone() })
                 {
                     out.extend(ids);
                 }
@@ -988,7 +1018,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
     }
     let (cmd, mut params) = match k {
         Mod::Scale { factor: text } => {
-            let entities = entity_ids(&app.session, inputs, 0);
+            let entities = entity_ids(app, inputs, 0);
             if entities.is_empty() {
                 return Err("Select the sketch curves or points to scale first".into());
             }
@@ -1000,7 +1030,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             ("sketch.scale", p)
         }
         Mod::Transform { x, y, factor: text, angle, frame } => {
-            let entities = entity_ids(&app.session, inputs, 0);
+            let entities = entity_ids(app, inputs, 0);
             if entities.is_empty() {
                 return Err("Select the sketch curves or points to transform first".into());
             }
@@ -1040,7 +1070,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             ("sketch.offset", params)
         }
         Mod::Mirror => {
-            let entities = entity_ids(&app.session, inputs, 0);
+            let entities = entity_ids(app, inputs, 0);
             if entities.is_empty() {
                 return Err("Select the sketch curves or points to mirror first".into());
             }
@@ -1063,25 +1093,29 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             // picked in one action): the command leaves the line in place and mirrors the rest.
             ("sketch.mirror", json!({"entities": entities, "line": line}))
         }
-        Mod::Move { x, y, angle, copy } => {
-            let entities = entity_ids(&app.session, inputs, 0);
+        Mod::Move { x, y, z, angle, copy, three_d } => {
+            let entities = entity_ids(app, inputs, 0);
             if entities.is_empty() {
                 return Err("Select the sketch curves or points to move first".into());
             }
             let dx = value(app, x, ValueKind::Length, "X Distance")?;
             let dy = value(app, y, ValueKind::Length, "Y Distance")?;
             let deg = value(app, angle, ValueKind::Angle, "Angle")?.to_degrees();
-            if dx.abs() < 1e-9 && dy.abs() < 1e-9 && deg.abs() < 1e-9 {
+            let dz = if *three_d { value(app, z, ValueKind::Length, "Z Distance")? } else { 0.0 };
+            if dx.abs() < 1e-9 && dy.abs() < 1e-9 && dz.abs() < 1e-9 && deg.abs() < 1e-9 {
                 return Err("Type a distance or an angle to move by".into());
             }
             let mut p = json!({"entities": entities, "translate": [dx, dy], "angle": deg, "copy": copy});
+            if dz.abs() >= 1e-9 {
+                p["z"] = json!(dz);
+            }
             if let Some(center) = items(inputs, 1).first().and_then(|sel| point_id(&app.session, sel)) {
                 p["center"] = json!(center);
             }
             ("sketch.move", p)
         }
         Mod::PatternRect { count, spacing, count2, spacing2, alignment, alignment2, reversed, reversed2 } => {
-            let entities = entity_ids(&app.session, inputs, 0);
+            let entities = entity_ids(app, inputs, 0);
             if entities.is_empty() {
                 return Err("Select the sketch curves or points to pattern first".into());
             }
@@ -1127,7 +1161,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             ("sketch.point.divide", json!({"curves": curves, "segments": v.round()}))
         }
         Mod::PatternCirc { count, angle, alignment, reversed } => {
-            let entities = entity_ids(&app.session, inputs, 0);
+            let entities = entity_ids(app, inputs, 0);
             if entities.is_empty() {
                 return Err("Select the sketch curves or points to pattern first".into());
             }

@@ -21,10 +21,23 @@ use crate::{DocError, Document, Result};
 #[path = "sheet_face_names.rs"]
 mod face_names;
 pub use crate::sheet_surface_convert::bend_edge_names;
-pub(crate) use face_names::{FaceNamer, FaceRole, carried, ranked};
+pub(crate) use face_names::{FaceNamer, FaceRole, carried, carried_from, ranked};
 
 /// The most work one sheet's flat may take (see [`FlatWork`]).
 const MAX_FLAT_WORK: usize = 500_000_000;
+
+/// A tab's sketch is not on a flat face of the sheet.
+pub const TAB_OFF_SHEET: &str = "draw the tab on a flat face of a sheet metal body (either side), or in a plane level with one";
+/// A tab's profile does not meet the face it is drawn on.
+pub const TAB_APART: &str = "the tab must touch or overlap the outline of the face it is drawn on: draw it from an edge of that face out";
+/// A tab reaches into a bend.
+pub const TAB_IN_BEND: &str = "the tab reaches into a bend: keep it on the flat of its panel, clear of the bend zones";
+/// A tab lands on other material of the sheet.
+pub const TAB_OVERLAPS: &str = "the tab would overlap another panel of the sheet once folded or in the flat pattern";
+/// A tab more than one panel (or sheet) would take.
+pub const TAB_SEVERAL: &str = "not supported yet: a tab that would join more than one panel; draw it out from an edge of one panel only";
+/// A tab lies inside the face already.
+pub const TAB_ADDS_NOTHING: &str = "the tab adds no material: it lies inside the face already; draw it out past an edge of the face";
 
 fn flat_budget_error() -> DocError {
     DocError::Invalid("sheet metal flat geometry exceeds the bounded processing budget".into())
@@ -117,6 +130,8 @@ impl SheetRule {
 /// The design parameters a rule's `field` expression `e` reads: outside the rule's own
 /// `thickness`, `Thickness` is the rule's thickness (sheet metal and plastic rules alike).
 pub fn rule_references(field: &str, e: &str) -> Vec<String> {
+    #[cfg(test)]
+    crate::params::param_rows_tests::count_rule_read();
     let mut names = expr::references(e);
     if field != "thickness" {
         names.retain(|n| n != "Thickness");
@@ -444,13 +459,22 @@ pub const MAX_PATH_LINES: usize = 64;
 
 /// A straight round bore of panel `panel`, in that panel's chart (see `SurfaceSheet::bores`): a
 /// cylinder from `base` along the unit `axis` for `height`, cut only from that panel's material.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SheetBore {
     pub panel: usize,
     pub base: Vec3,
     pub axis: Vec3,
     pub radius: f64,
     pub height: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) source: Option<BoreSource>,
+}
+
+/// What drilled a bore and its role (e.g. `point:p2:bore`), when drilled at a sketch point.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct BoreSource {
+    pub feature: u64,
+    pub role: String,
 }
 
 /// A perforation field from a `sheet.perforate` feature (#732).
