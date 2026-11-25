@@ -42,6 +42,7 @@ fn schemas_and_the_key_check_agree() {
             "curves",
             "direction",
             "exact_regions",
+            "faced",
             "name",
             "participants",
             "profiles",

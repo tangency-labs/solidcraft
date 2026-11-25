@@ -113,6 +113,11 @@ pub struct SurfaceRevolveParams {
     /// `symmetric` is the same as `symmetric: true`.
     #[serde(default)]
     pub direction: Option<RevolveDirection>,
+    /// Each face faces the side Surface Extrude's would: the curve's direction crossed with the
+    /// sketch normal, so out of a profile. Default: true. False builds each face along its
+    /// surface's own normal, as surface revolves saved before it keep.
+    #[serde(default)]
+    pub faced: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }
