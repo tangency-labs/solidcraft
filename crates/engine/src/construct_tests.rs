@@ -1253,7 +1253,10 @@ fn a_construction_plane_keeps_the_size_it_is_given() {
 fn plane_tangent_to_a_spline_wall_takes_its_exact_normal() {
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Curve"}));
-    let cubic = run(&mut s, "sketch.spline.control_point", json!({"points": [[0, 0], [10, 0], [20, 0], [30, 30]]}))["curves"][0].as_str().unwrap().to_string();
+    let cubic = run(&mut s, "sketch.spline.control_point", json!({"points": [[0, 0], [10, 0], [20, 0], [30, 30]]}))["curves"][0]
+        .as_str()
+        .unwrap()
+        .to_string();
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "surface.extrude", json!({"sketch": "Curve", "curves": [cubic], "distance": 10, "body_name": "Wall"}));
     let wall = |x: f64| (x * x * x / 900.0, Vec3::new(-x * x / 300.0, 1.0, 0.0));
@@ -1262,10 +1265,12 @@ fn plane_tangent_to_a_spline_wall_takes_its_exact_normal() {
         // The plane's origin is the touching point: on the wall itself, not only on the plane.
         parallel(t.normal(), n) && (t.origin.x - x).abs() < 1e-6 && (t.origin.y - y).abs() < 1e-6
     };
-    // At x = 15: y = 3.75, slope 0.75, unit normal (-0.6, 0.8, 0).
+    // At x = 15: y = 3.75 and the slope is 0.75, so the normal runs along (-0.6, 0.8, 0). The
+    // plane faces the side the wall does: a Surface Extrude's wall faces its curve's direction
+    // crossed with the sketch normal, (0.8, 0.6, 0) × Z = (0.6, -0.8, 0).
     run(&mut s, "construct.plane.tangent", json!({"face": {"face": [15, 3.75, 5]}, "name": "T"}));
     let t = plane(&s, "T");
-    assert!(touches(&t, 15.0) && parallel(t.normal(), Vec3::new(-0.6, 0.8, 0.0)), "{t:?}");
+    assert!(touches(&t, 15.0) && near(t.normal(), Vec3::new(0.6, -0.8, 0.0)), "{t:?}");
     // A pick 0.02 mm off the wall along that normal, as one on the display mesh is: the same
     // plane, through the wall and not through the pick.
     run(&mut s, "construct.plane.tangent", json!({"face": {"face": [15.0 - 0.012, 3.75 + 0.016, 5]}, "name": "Off"}));
