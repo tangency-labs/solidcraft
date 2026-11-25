@@ -1,7 +1,7 @@
 //! Hole stacks: the places a rivet, bolt or pin can pass through two or more touching bodies
 //! (`inspect.hole_stacks`). Each body's bores — its round holes and obround slots, with the
 //! wall extents a countersink or chamfer extends — and the stacks across them come from the
-//! kernel through [`solidcore_ops::hole_stacks`], read from the exact faces of the bodies'
+//! kernel through [`solidcraft_kernel::services::hole_stacks`], read from the exact faces of the bodies'
 //! records; this is the command layer: names, parameters, the standard-parts exclusion and
 //! the caps.
 
@@ -104,16 +104,21 @@ fn hole_stacks(s: &mut Session, p: &Value) -> Result<Value> {
     if records.len() > MAX_BODIES {
         return Err(bad(cmd, format!("at most {MAX_BODIES} bodies (pass `bodies`)")));
     }
-    let out = solidcore_ops::hole_stacks::hole_stacks(
+    let out = solidcraft_kernel::services::hole_stacks::hole_stacks(
         &records,
-        &solidcore_ops::hole_stacks::Options { touching: o.touching, axis_tolerance: o.axis_tolerance, slots: o.slots, diameters: o.diameters },
+        &solidcraft_kernel::services::hole_stacks::Options {
+            touching: o.touching,
+            axis_tolerance: o.axis_tolerance,
+            slots: o.slots,
+            diameters: o.diameters,
+        },
     )
     .map_err(|e| bad(cmd, e.to_string()))?;
     let name = |i: usize| names.get(i).map(String::as_str).unwrap_or_default();
     // Millimetres to a nanometre (and no negative zero): readable output, far finer than any fit.
     let round = |x: f64| (x * 1e6).round() / 1e6 + 0.0;
     let round3 = |v: solidcore_record::Vec3| [round(v.x), round(v.y), round(v.z)];
-    let slot = |s: solidcore_ops::hole_stacks::Slot| SlotOut { length_mm: round(s.length), along: round3(s.along) };
+    let slot = |s: solidcraft_kernel::services::hole_stacks::Slot| SlotOut { length_mm: round(s.length), along: round3(s.along) };
     let stacks = out
         .stacks
         .iter()

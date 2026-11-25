@@ -33,7 +33,9 @@
 # intersect.surface_intersector_p2, intersect.surface_intersector_p3, offset.offset_executive_p2, topology.proto_topology_p1, topology.proto_topology_p2, topology.proto_topology_p3: this branch's files (the proto-topology statuses passed on and WR-73's misses answering false, #18927): 604 lines moved, none a ROWS case (offset_executive_p2's digest is main's file with its 5 k0.35 overlap lines this branch's, its 3 ROWS cases put back by the ledger as before); each proved by its unit's replay tests (status_proof_replays, moved_rows_return_their_failed_steps, k035_overlap_offsets_are_refused)
 # boolean.topology_intersector_p3, topology.brep_p9: the point merge grows its vertex to cover its certified edge ends (tangency-labs/solidcraft#21340): the digest is this branch's file (written by main_expected_digests, which gives main's digests from main's files). 7 p3 rows and brep_p9 point_merge_7_new_center move vertex tolerances only, each new value twice the certified reach and covering every end the old one left past its half; merged_vertex_rows replays each row and puts it back to main's line bit for bit; no ROWS case is in these units
 # offset.offset_geometry_creation: ExtendTrimEdges refuses a UV curve off the extended domain (#21743): the digest is this branch's file. 15 lines moved, each first moving at an ExtendTrimEdges (direct or inside EdgeuseOffset) whose kept UV piece lies outside the extended surface's domain, with every earlier op unchanged: gen0274, gen0329, gen0473, gen0484 and gen0577 go from success to SM_ERR; gen0163, gen0306, gen0666 and gen0705 stay SM_ERR but no longer leave the clamped lift on their edges; gen0248, gen0308 and gen0642 keep EdgeuseOffset's status with the edges keeping their input; gen0039, gen0155 and gen0545 are kept pieces whose midpoint is inside but which run outside the domain (an on-curve end 1.47, 1.47 and 5.30 outside), refused at that op with every later move following from the edges keeping their input (on main the lift put the offset edge up to 4.84, 4.84 and 6.75 off the input edge, check_brep Level 2 +4, +4 and +8 lines). Each is replayed by extend_trim_edges_refuses_a_uv_curve_off_the_extended_domain (the refusal, and the edge states bit for bit unchanged). gen0308's and gen0642's rows are removed: their edges keep their input tolerance instead of the rows' moved ones (gen0308 state[83]: 0.007446299247768298 -> 4.0511335586128185e-3 against this main); gen0642's 10 UNCOVERED lines leave the open list, the off-domain trim at u = 71.94 they recorded being this lift's
+# surface.cone_p2: the cone rebuild's EFF_ZERO branch certifies its cylinder net and records the cylinder about the axis the net's end circles are coaxial about (#17228, #21628): the digest is this branch's file (no ROWS case in the unit). Two rows move against this main, both proved in goldens/tests/issue_17228_cone_rebuild_moves.rs: adv_reb_cylarc_s1i0_id_tw rebuild status 1000 -> 1001 (a net turned 1e-4 degrees about its own axis is 2 r sin^2(a/4) = 3.8e-13 inside every cylinder the rebuild tries, 192 times gamma_8 of its size and about ten times implicit::lies_on's allowance, so the refusal NetOffCylinder is right) and gen0152 1001 -> 1000 (both end circles coaxial about the centre line, each tilted 1.43e-7 rad, so the net is within 2.9e-14 of that cylinder, under one ulp (2.2e-10) of its coordinates near 1e6; the net moves 1.6e-10)
 # intersect.surface_drop_lib_p1: main's file with trim0351 and trim0384 dropping cleanly across a closed U-seam (#20836): both move from 0 curves ([0.0, 0.0, 0.0, 0.0]) to 2 UV pieces meeting on opposite U-seam sides (n=182 and n=196); no tolerance moves
+# offset.offset_executive_p2: a rounded offset's tube that folds over itself is refused (#13685): this branch's file, 20 lines moved, none a ROWS case. 4 move from status 1000 to 1001 (extrude_holes1_face0_outset24_7_rounded and _unstitched, extrude_holes1_face3_outset24_7_rounded, fill_gap_extrudeHoles1_face0_round_d13, each unsound on main), and 16 refused on main stay 1001 with the smaller partial offset an earlier refusal records; proved by tests/issue_13685_tube_folds.rs and the unit's soundness probe
 blend.feature_executive	2a4bd65805caa498
 blend.fillet_corner_p1	b2b709c01153c4b4
 blend.fillet_corner_p2	6d62684209753123
@@ -207,7 +209,7 @@ nurbs.b_spline_surface_p2	f6eae99ab71257f5
 nurbs.nurbs_crv	c78af304772ea823
 nurbs.nurbs_srf	5ea987b73e360223
 offset.offset_executive_p1	369d6f853189d32e
-offset.offset_executive_p2	bfef3e402897cd02
+offset.offset_executive_p2	e22c3e324b02a3ab
 offset.offset_geometry_creation	99088c1c76d52516
 primitive.api_curve_ops	631989d29fe6f1dc
 primitive.api_curves	b384f5e70c20e9db
@@ -233,7 +235,7 @@ surface.b_spline_volume	a84045e0af965e76
 surface.b_spline_volume_n_lib	9b66552d807f80e1
 surface.bend_volume	4ed4f969a11b67a8
 surface.cone_p1	f919b20fa0fedb98
-surface.cone_p2	e45d5bc9b7336f39
+surface.cone_p2	6cd245e2759d098d
 surface.cone_p3	a5fb6323191885b2
 surface.curve_bounded_surface	f1010cd243b40745
 surface.offset_surface	bcb31e3779792b46
