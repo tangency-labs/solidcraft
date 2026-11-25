@@ -11,7 +11,87 @@ fn background(textures: &[&str]) -> Shader {
         animated: false,
         settings: Vec::new(),
         blur: None,
+        state: None,
     }
+}
+
+/// An animated background with a `width` by `height` state grid.
+fn stateful(width: u32, height: u32) -> Shader {
+    Shader { animated: true, state: Some(ShaderState { width, height }), ..background(&[]) }
+}
+
+/// A state shader: the code of the trails example in docs/plugin-examples (a shared crate's tests
+/// may not read files outside the crate; the engine tests the example itself).
+const TRAILS: &str = r"fn state(px: ScStatePixel) -> vec4<f32> {
+    let fade = textureLoad(sc_state_prev, vec2<i32>(px.texel), 0).r * 0.97;
+    let spot = vec2<f32>(0.5 + 0.3 * cos(sc.frame * 0.05), 0.5 + 0.3 * sin(sc.frame * 0.05));
+    return vec4<f32>(max(fade, 1.0 - smoothstep(0.02, 0.05, distance(px.uv, spot))), 0.0, 0.0, 1.0);
+}
+
+fn background(px: ScPixel) -> vec4<f32> {
+    let trail = textureLoad(sc_state, vec2<i32>(px.uv * sc.state_size), 0).r;
+    return vec4<f32>(mix(sc.bottom.rgb, sc.accent.rgb, trail), 1.0);
+}
+";
+
+/// A state's `fn state` must be there with the grid, and a grid needs no state of its own
+/// otherwise; both sides of the manifest are checked.
+#[test]
+fn a_state_grid_needs_fn_state_and_fn_state_needs_a_grid() {
+    let shader = stateful(64, 64);
+    assert!(reason(compile(&shader, GRADIENT).unwrap_err()).contains("fn state"));
+    compile(&shader, TRAILS).unwrap();
+    let plain = reason(compile(&background(&[]), TRAILS).unwrap_err());
+    assert!(plain.contains("no state grid"), "{plain}");
+}
+
+#[test]
+fn a_state_grid_is_animated_and_sized_within_1024() {
+    validate(&[stateful(64, 64)]).unwrap();
+    validate(&[stateful(1024, 1)]).unwrap();
+    for (width, height) in [(0, 64), (64, 0), (1025, 64), (64, 1025)] {
+        assert!(validate(&[stateful(width, height)]).is_err(), "{width}x{height}");
+    }
+    let still = Shader { animated: false, ..stateful(64, 64) };
+    assert!(validate(&[still]).is_err(), "a state needs animated");
+}
+
+#[test]
+fn the_state_grid_wires_its_two_bindings_and_its_entry_point() {
+    let compiled = compile(&stateful(64, 64), TRAILS).unwrap();
+    assert!(compiled.wgsl.contains("fn sc_state_fragment"), "{}", compiled.wgsl);
+    assert!(compiled.wgsl.contains("@binding(7)") && compiled.wgsl.contains("@binding(8)"), "{}", compiled.wgsl);
+    naga::front::wgsl::parse_str(&compiled.wgsl).unwrap();
+    // Without a grid the host declares none of it.
+    let plain = compile(&background(&[]), GRADIENT).unwrap();
+    assert!(!plain.wgsl.contains("sc_state"), "{}", plain.wgsl);
+}
+
+/// With a grid the `sc_state*` names are the host's, so a shader cannot declare them itself.
+#[test]
+fn sc_state_names_are_reserved() {
+    assert!(compile(&stateful(64, 64), &format!("var<private> sc_state_prev: f32 = 1.0;\n{TRAILS}")).is_err());
+    let function = format!("fn sc_state_help() -> f32 {{ return 1.0; }}\n{TRAILS}");
+    assert!(compile(&stateful(64, 64), &function).is_err());
+    let binding = format!("@group(0) @binding(9) var sc_state_other: texture_2d<f32>;\n{TRAILS}");
+    assert!(compile(&stateful(64, 64), &binding).is_err());
+}
+
+/// The state step is budgeted like the background: its loops and calls spend the same budget.
+#[test]
+fn the_state_step_spends_the_loop_budget_too() {
+    let plain = compile(&stateful(64, 64), TRAILS).unwrap();
+    let looped = TRAILS.replace("    let fade", "    loop { }\n    let fade");
+    let compiled = compile(&stateful(64, 64), &looped).unwrap();
+    assert!(compiled.wgsl.matches("sc_loop_budget").count() > plain.wgsl.matches("sc_loop_budget").count(), "the loop in fn state spends the budget");
+}
+
+/// A state entry point of the plugin's own is refused, and so is a second fn state.
+#[test]
+fn a_state_shader_brings_no_entry_points_of_its_own() {
+    let entry = format!("{TRAILS}@fragment fn sc_state_mine() -> @location(0) vec4<f32> {{ return vec4<f32>(1.0); }}\n");
+    assert!(reason(compile(&stateful(64, 64), &entry).unwrap_err()).contains("entry point"));
+    assert!(compile(&stateful(64, 64), &format!("{TRAILS}fn state(px: ScStatePixel) -> vec4<f32> {{ return vec4<f32>(0.0); }}\n")).is_err());
 }
 
 const GRADIENT: &str = "fn background(px: ScPixel) -> vec4<f32> {\n    return mix(sc.bottom, sc.top, 0.5 + 0.5 * px.ray.z);\n}\n";
@@ -127,7 +207,7 @@ fn the_manifest_list_checks_ids_files_and_texture_names() {
 
 #[test]
 fn the_host_uniform_size_matches_the_prelude() {
-    let module = naga::front::wgsl::parse_str(&format!("{GRADIENT}\n{}", PRELUDE.replace("{textures}", ""))).unwrap();
+    let module = naga::front::wgsl::parse_str(&format!("{GRADIENT}\n{}", PRELUDE.replace("{textures}", "").replace("{state}", ""))).unwrap();
     let (_, host) = module.types.iter().find(|(_, t)| t.name.as_deref() == Some("ScHost")).unwrap();
     let naga::TypeInner::Struct { span, .. } = host.inner else { panic!("ScHost is a struct") };
     assert_eq!(span as usize, HOST_UNIFORM_BYTES);
@@ -455,4 +535,25 @@ fn a_chosen_picture_needs_shaders_0_2_and_a_background() {
     let mut tint = tint_shader();
     tint.textures = vec![chosen("picture", None, Some("Picture"))];
     assert!(reason(validate(&[tint]).unwrap_err()).contains("only a background"));
+}
+
+/// Without a grid the state names are the plugin's own, as before `state` existed: a `fn state` helper
+/// and private `sc_` globals still compile.
+#[test]
+fn a_shader_without_a_grid_may_use_state_and_sc_names_of_its_own() {
+    let source = format!(
+        "var<private> sc_x: f32 = 1.0;\nvar<private> sc_state: f32 = 2.0;\nfn state(v: f32) -> f32 {{ return v * sc_x * sc_state; }}\n{GRADIENT}"
+    );
+    compile(&background(&[]), &source).unwrap();
+}
+
+#[test]
+fn a_state_grid_needs_shaders_0_2_and_a_background() {
+    let shaders = json!([{"id": "trails", "name": "Trails", "kind": "background", "source": "trails.wgsl", "animated": true,
+        "state": {"width": 64, "height": 64}}]);
+    let old = manifest(json!({"id": "sky", "name": "Sky", "version": "1", "capabilities": ["shaders@0.1"], "shaders": shaders})).unwrap_err();
+    assert!(old.to_string().contains("shaders@0.2"), "{old}");
+    manifest(json!({"id": "sky", "name": "Sky", "version": "1", "capabilities": ["shaders@0.2"], "shaders": shaders})).unwrap();
+    let tint = Shader { kind: ShaderKind::Tint, ..stateful(64, 64) };
+    assert!(validate(&[tint]).is_err(), "only a background keeps a state grid");
 }

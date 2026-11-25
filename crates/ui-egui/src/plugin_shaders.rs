@@ -8,6 +8,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use egui_wgpu::wgpu;
 
+use solidcraft_engine::plugin::shader::STATE_BINDING;
+
 use crate::SolveApp;
 
 /// The status line's message when a background can't be drawn.
@@ -23,6 +25,7 @@ pub(crate) struct Loaded {
     pub(crate) textures: Vec<Vec<([u32; 2], Vec<u8>)>>,
     /// One line for each chosen picture that was refused and replaced by the shipped one.
     pub(crate) notes: Vec<String>,
+    pub(crate) state: Option<[u32; 2]>,
 }
 
 pub(crate) type Pending = Arc<Mutex<Option<Result<Loaded, String>>>>;
@@ -33,9 +36,30 @@ struct Active {
     animated: bool,
     shader: solidcraft_engine::plugin::shader::Shader,
     pipeline: wgpu::RenderPipeline,
-    bind_group: wgpu::BindGroup,
+    /// One, or two for a state shader: each binds one grid to both state bindings, read as prev or current.
+    bind_groups: Vec<wgpu::BindGroup>,
     uniforms: wgpu::Buffer,
     target: Option<Target>,
+    state: Option<Sim>,
+}
+
+/// A state shader's two grids: each frame the step writes the other one, then the background reads it.
+struct Sim {
+    pipeline: wgpu::RenderPipeline,
+    views: [wgpu::TextureView; 2],
+    size: [u32; 2],
+    /// The grid the last step wrote.
+    current: usize,
+    /// The step this frame: 0 on the first, then counting up (back to 1 after `FRAME_WRAP`).
+    frame: u32,
+}
+
+/// The step counter's wrap: well past the grid's hash and warm-up needs, and far from f32's exact range.
+const FRAME_WRAP: u32 = 1_000_000;
+
+/// The next step's number: counting up, and back to 1 (never 0, which is the reset) after `FRAME_WRAP`.
+fn next_step(frame: u32) -> u32 {
+    if frame >= FRAME_WRAP { 1 } else { frame + 1 }
 }
 
 struct Target {
@@ -166,7 +190,15 @@ pub(crate) fn load(folder: String, key: String, pictures: BTreeMap<String, Strin
             }
         })
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(Loaded { wgsl: compiled.wgsl, animated: shader.animated, kind: shader.kind, shader: shader.clone(), textures, notes })
+    Ok(Loaded {
+        wgsl: compiled.wgsl,
+        animated: shader.animated,
+        kind: shader.kind,
+        shader: shader.clone(),
+        textures,
+        notes,
+        state: shader.state.map(|s| [s.width, s.height]),
+    })
 }
 
 /// A picture's mip levels, at most `limit` on a side, down to 1×1.
@@ -268,7 +300,15 @@ pub(crate) fn paint(app: &mut SolveApp, painter: &egui::Painter, rect: egui::Rec
         0.0
     };
     let settings = settings(&app.preferences.shader_settings, &active.key, &active.shader);
-    let uniforms = host_uniforms(size, time, ppp, &app.cam, tokens, settings);
+    let (step, grid) = match active.state.as_mut() {
+        Some(sim) => {
+            let step = sim.frame;
+            sim.frame = next_step(step);
+            (step as f32, sim.size.map(|v| v as f32))
+        }
+        None => (0.0, [0.0, 0.0]),
+    };
+    let uniforms = host_uniforms(size, time, ppp, &app.cam, tokens, (step, grid), settings);
     let Some(id) = draw(&rs, active, size, &uniforms) else { return };
     painter.image(id, rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
 }
@@ -387,7 +427,6 @@ pub(crate) fn linear(c: egui::Color32) -> [f32; 4] {
     [l.r(), l.g(), l.b(), 1.0]
 }
 
-/// `ScHost` as the shader reads it (`solidcraft_engine::plugin::shader::PRELUDE`).
 /// The values of `key`'s settings (`sc.settings`) from the preference, keyed `plugin/shader/setting`.
 pub(crate) fn settings(
     stored: &std::collections::BTreeMap<String, f32>,
@@ -397,12 +436,14 @@ pub(crate) fn settings(
     shader.setting_values(|id| stored.get(&format!("{key}/{id}")).copied())
 }
 
+/// `ScHost` as the shader reads it (`solidcraft_engine::plugin::shader::PRELUDE`).
 pub(crate) fn host_uniforms(
     size: [u32; 2],
     time: f32,
     scale: f32,
     cam: &solidcraft_viewport::Camera,
     t: &solidcraft_theme::Tokens,
+    (step, grid): (f32, [f32; 2]),
     settings: [f32; solidcraft_engine::plugin::shader::MAX_SETTINGS],
 ) -> Vec<u8> {
     const HALF_HEIGHT: f64 = 0.5;
@@ -417,7 +458,7 @@ pub(crate) fn host_uniforms(
     for c in [t.viewport_top, t.viewport_bottom, t.accent, t.text] {
         f.extend(linear(c));
     }
-    f.extend([if dark { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0]);
+    f.extend([if dark { 1.0 } else { 0.0 }, step, grid[0], grid[1]]);
     f.extend(settings);
     debug_assert_eq!(f.len() * 4, solidcraft_engine::plugin::shader::HOST_UNIFORM_BYTES);
     f.iter().flat_map(|v| v.to_le_bytes()).collect()
@@ -426,6 +467,9 @@ pub(crate) fn host_uniforms(
 /// Plain, not sRGB: the view shows a native texel as a screen value and blends there, so the
 /// fragment stage stores the colour sRGB-encoded and premultiplied.
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+
+/// Half floats, so a state keeps its precision between frames.
+const FORMAT_STATE: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
 /// The pipeline and bindings for `loaded`, made under error scopes: a module this graphics card
 /// refuses is an error here, never a crash.
@@ -471,28 +515,29 @@ fn build(rs: &egui_wgpu::RenderState, key: &str, loaded: Loaded) -> Result<Activ
             count: None,
         });
     }
+    // The state grids are read with textureLoad only, so they need not be filterable.
+    if loaded.state.is_some() {
+        for binding in [STATE_BINDING, STATE_BINDING + 1] {
+            entries.push(wgpu::BindGroupLayoutEntry {
+                binding,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            });
+        }
+    }
     let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("sc_plugin_background"), entries: &entries });
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("sc_plugin_background"),
         bind_group_layouts: &[Some(&layout)],
         immediate_size: 0,
     });
-    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("sc_plugin_background"),
-        layout: Some(&pipeline_layout),
-        vertex: wgpu::VertexState { module: &module, entry_point: Some("sc_vertex"), compilation_options: Default::default(), buffers: &[] },
-        fragment: Some(wgpu::FragmentState {
-            module: &module,
-            entry_point: Some("sc_fragment"),
-            compilation_options: Default::default(),
-            targets: &[Some(wgpu::ColorTargetState { format: FORMAT, blend: None, write_mask: wgpu::ColorWrites::ALL })],
-        }),
-        primitive: wgpu::PrimitiveState::default(),
-        depth_stencil: None,
-        multisample: wgpu::MultisampleState::default(),
-        multiview_mask: None,
-        cache: None,
-    });
+    let pipeline = make_pipeline(device, &module, &pipeline_layout, "sc_fragment", FORMAT);
+    let step = loaded.state.map(|_| make_pipeline(device, &module, &pipeline_layout, "sc_state_fragment", FORMAT_STATE));
     let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("sc_plugin_background"),
         size: solidcraft_engine::plugin::shader::HOST_UNIFORM_BYTES as u64,
@@ -512,19 +557,13 @@ fn build(rs: &egui_wgpu::RenderState, key: &str, loaded: Loaded) -> Result<Activ
     };
     let (clamp, repeat) = (sampler(wgpu::AddressMode::ClampToEdge), sampler(wgpu::AddressMode::Repeat));
     let views: Vec<wgpu::TextureView> = loaded.textures.iter().map(|levels| upload(&rs.device, &rs.queue, levels)).collect();
-    let mut bindings = vec![
-        wgpu::BindGroupEntry { binding: 0, resource: uniforms.as_entire_binding() },
-        wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&clamp) },
-        wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&repeat) },
-    ];
-    for (i, view) in views.iter().enumerate() {
-        bindings.push(wgpu::BindGroupEntry {
-            binding: solidcraft_engine::plugin::shader::FIRST_TEXTURE_BINDING + i as u32,
-            resource: wgpu::BindingResource::TextureView(view),
-        });
-    }
-    let bind_group =
-        device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("sc_plugin_background"), layout: &layout, entries: &bindings });
+    let samplers = (&clamp, &repeat);
+    let grids: Vec<wgpu::TextureView> = loaded.state.map_or_else(Vec::new, |size| (0..2).map(|_| grid(device, size)).collect());
+    let bind_groups: Vec<wgpu::BindGroup> = if grids.is_empty() {
+        vec![group(device, &layout, &uniforms, samplers, &views, None)]
+    } else {
+        grids.iter().map(|grid| group(device, &layout, &uniforms, samplers, &views, Some(grid))).collect()
+    };
     let mut error = None;
     for scope in scopes.into_iter().rev() {
         if let Some(e) = pollster::block_on(scope.pop()) {
@@ -534,7 +573,81 @@ fn build(rs: &egui_wgpu::RenderState, key: &str, loaded: Loaded) -> Result<Activ
     if let Some(error) = error {
         return Err(error);
     }
-    Ok(Active { key: key.to_string(), animated: loaded.animated, shader: loaded.shader, pipeline, bind_group, uniforms, target: None })
+    let state = match (loaded.state, step) {
+        (Some(size), Some(pipeline)) => {
+            <[wgpu::TextureView; 2]>::try_from(grids).ok().map(|views| Sim { pipeline, views, size, current: 0, frame: 0 })
+        }
+        _ => None,
+    };
+    Ok(Active { key: key.to_string(), animated: loaded.animated, shader: loaded.shader, pipeline, bind_groups, uniforms, target: None, state })
+}
+
+fn make_pipeline(
+    device: &wgpu::Device,
+    module: &wgpu::ShaderModule,
+    layout: &wgpu::PipelineLayout,
+    entry: &str,
+    format: wgpu::TextureFormat,
+) -> wgpu::RenderPipeline {
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("sc_plugin_background"),
+        layout: Some(layout),
+        vertex: wgpu::VertexState { module, entry_point: Some("sc_vertex"), compilation_options: Default::default(), buffers: &[] },
+        fragment: Some(wgpu::FragmentState {
+            module,
+            entry_point: Some(entry),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState { format, blend: None, write_mask: wgpu::ColorWrites::ALL })],
+        }),
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
+/// One of a state shader's grids, zeroed by the GPU.
+fn grid(device: &wgpu::Device, size: [u32; 2]) -> wgpu::TextureView {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("sc_plugin_background_state"),
+        size: wgpu::Extent3d { width: size[0], height: size[1], depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: FORMAT_STATE,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+    texture.create_view(&wgpu::TextureViewDescriptor::default())
+}
+
+/// With a `grid`, both state bindings name it: the step reads it as `sc_state_prev`, the background as `sc_state`.
+fn group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    uniforms: &wgpu::Buffer,
+    (clamp, repeat): (&wgpu::Sampler, &wgpu::Sampler),
+    views: &[wgpu::TextureView],
+    grid: Option<&wgpu::TextureView>,
+) -> wgpu::BindGroup {
+    let mut bindings = vec![
+        wgpu::BindGroupEntry { binding: 0, resource: uniforms.as_entire_binding() },
+        wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(clamp) },
+        wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(repeat) },
+    ];
+    for (i, view) in views.iter().enumerate() {
+        bindings.push(wgpu::BindGroupEntry {
+            binding: solidcraft_engine::plugin::shader::FIRST_TEXTURE_BINDING + i as u32,
+            resource: wgpu::BindingResource::TextureView(view),
+        });
+    }
+    if let Some(grid) = grid {
+        for binding in [STATE_BINDING, STATE_BINDING + 1] {
+            bindings.push(wgpu::BindGroupEntry { binding, resource: wgpu::BindingResource::TextureView(grid) });
+        }
+    }
+    device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("sc_plugin_background"), layout, entries: &bindings })
 }
 
 pub(crate) fn upload(device: &wgpu::Device, queue: &wgpu::Queue, levels: &[([u32; 2], Vec<u8>)]) -> wgpu::TextureView {
@@ -590,6 +703,32 @@ fn draw(rs: &egui_wgpu::RenderState, active: &mut Active, size: [u32; 2], unifor
     target.drawn = Some(uniforms.to_vec());
     rs.queue.write_buffer(&active.uniforms, 0, uniforms);
     let mut encoder = rs.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("sc_plugin_background") });
+    // The state step first, writing the grid that is not current; the background then reads it.
+    let mut group = 0;
+    if let Some(sim) = active.state.as_mut() {
+        let prev = sim.current;
+        let next = 1 - prev;
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("sc_plugin_background_step"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &sim.views[next],
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&sim.pipeline);
+            pass.set_bind_group(0, &active.bind_groups[prev], &[]);
+            pass.draw(0..3, 0..1);
+        }
+        sim.current = next;
+        group = next;
+    }
     {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("sc_plugin_background"),
@@ -605,7 +744,7 @@ fn draw(rs: &egui_wgpu::RenderState, active: &mut Active, size: [u32; 2], unifor
             multiview_mask: None,
         });
         pass.set_pipeline(&active.pipeline);
-        pass.set_bind_group(0, &active.bind_group, &[]);
+        pass.set_bind_group(0, &active.bind_groups[group], &[]);
         pass.draw(0..3, 0..1);
     }
     rs.queue.submit([encoder.finish()]);
@@ -628,16 +767,27 @@ mod tests {
     #[test]
     fn the_host_uniforms_are_the_size_the_prelude_declares() {
         let tokens = solidcraft_theme::Tokens::get();
-        let bytes = super::host_uniforms([800, 400], 1.5, 2.0, &solidcraft_viewport::Camera::default(), &tokens, [0.0; 4]);
+        let bytes =
+            super::host_uniforms([800, 400], 1.5, 2.0, &solidcraft_viewport::Camera::default(), &tokens, (7.0, [96.0, 48.0]), [5.0, 0.0, 0.0, 0.0]);
         assert_eq!(bytes.len(), solidcraft_engine::plugin::shader::HOST_UNIFORM_BYTES);
         let first: Vec<f32> = bytes.chunks(4).take(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
         assert_eq!(first, vec![800.0, 400.0, 1.5, 2.0]);
+        // The step and the grid's size follow the theme's dark flag, at the prelude's offsets.
+        let floats: Vec<f32> = bytes.chunks(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
+        assert_eq!(&floats[33..37], &[7.0, 96.0, 48.0, 5.0], "then the settings");
+    }
+
+    #[test]
+    fn the_step_counts_up_and_never_wraps_to_the_reset_value() {
+        assert_eq!(super::next_step(0), 1);
+        assert_eq!(super::next_step(super::FRAME_WRAP - 1), super::FRAME_WRAP);
+        assert_eq!(super::next_step(super::FRAME_WRAP), 1);
     }
 
     #[test]
     fn the_background_turns_with_the_camera_but_not_with_zoom_or_pan() {
         let tokens = solidcraft_theme::Tokens::get();
-        let at = |cam: &solidcraft_viewport::Camera| super::host_uniforms([800, 400], 0.0, 1.0, cam, &tokens, [0.0; 4]);
+        let at = |cam: &solidcraft_viewport::Camera| super::host_uniforms([800, 400], 0.0, 1.0, cam, &tokens, (0.0, [0.0, 0.0]), [0.0; 4]);
         let cam = solidcraft_viewport::Camera::default();
         let mut turned = cam;
         turned.orbit(200.0, 0.0);

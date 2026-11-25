@@ -115,7 +115,7 @@ pub(crate) fn prepare(app: &mut SolveApp, ctx: &egui::Context) {
     let window = ctx.content_rect().size() * ppp;
     let size = [window.x.round().max(1.0) as u32, window.y.round().max(1.0) as u32];
     let settings = crate::plugin_shaders::settings(&app.preferences.shader_settings, &active.key, &active.shader);
-    let bytes = crate::plugin_shaders::host_uniforms(size, time, ppp, &app.cam, &solidcraft_theme::Tokens::get(), settings);
+    let bytes = crate::plugin_shaders::host_uniforms(size, time, ppp, &app.cam, &solidcraft_theme::Tokens::get(), (0.0, [0.0, 0.0]), settings);
     app.blur.set_panel_hook_globals(&bytes);
 }
 
