@@ -4,14 +4,13 @@
 
 use std::f64::consts::PI;
 
-use solidcore_ops::check::{CheckLevel, ValidityScope};
 use solidcore_ops::face_surface::FaceSurface;
 use solidcore_ops::session;
 use solidcore_ops::surface::ruled;
 use solidcore_ops::sweep::{planar_faces, Curve as SweepCurve};
 use solidcore_ops::{
-    make_box, make_cylinder, make_sphere, make_torus, pick, Body, Error, Order, PointClass,
-    PointLocation, EDGE_POINTS_MAX,
+    make_box, make_cylinder, make_sphere, make_torus, Body, Error, Order, PointClass,
+    EDGE_POINTS_MAX,
 };
 use solidcore_record::brep::{Brep, Curve};
 
@@ -138,10 +137,10 @@ fn a_box_locates_points_as_it_classifies_them() {
     assert_eq!(located.len(), classified.len());
     for (l, c) in located.iter().zip(&classified) {
         let as_class = l.as_ref().ok().map(|l| match l {
-            PointLocation::OnBoundary => PointClass::OnBoundary,
-            PointLocation::Inside => PointClass::Inside,
-            PointLocation::Outside => PointClass::Outside,
-            PointLocation::Unsure { .. } => panic!("a box has no unsure region"),
+            solidcore_ops::PointLocation::OnBoundary => PointClass::OnBoundary,
+            solidcore_ops::PointLocation::Inside => PointClass::Inside,
+            solidcore_ops::PointLocation::Outside => PointClass::Outside,
+            solidcore_ops::PointLocation::Unsure { .. } => panic!("a box has no unsure region"),
         });
         assert_eq!(as_class, c.as_ref().ok().copied());
         assert_eq!(l.is_err(), c.is_err());
@@ -163,7 +162,7 @@ fn a_box_own_order_names_its_picked_edges() {
     );
     assert_eq!(order.split_edges, 0);
     let at = [0.5, 0.0, 0.0];
-    let Ok(picked) = pick::edges(&b, &[at], 1e-6).unwrap() else {
+    let Ok(picked) = solidcore_ops::pick::edges(&b, &[at], 1e-6).unwrap() else {
         panic!("a point on an edge picks it")
     };
     let p = b
@@ -205,15 +204,21 @@ fn a_box_edge_largest_gap_is_its_largest_sample() {
 fn a_box_checks_the_same_in_either_scope() {
     all_fixes();
     let b = make_box([0.0, 0.0, 0.0], [1.0, 2.0, 3.0]).unwrap();
-    let plain = b.check(CheckLevel::All).unwrap();
+    let plain = b.check(solidcore_ops::check::CheckLevel::All).unwrap();
     assert_eq!(
-        b.check_scoped(CheckLevel::All, ValidityScope::Body)
-            .unwrap(),
+        b.check_scoped(
+            solidcore_ops::check::CheckLevel::All,
+            solidcore_ops::check::ValidityScope::Body
+        )
+        .unwrap(),
         plain
     );
     assert!(plain.is_valid(), "{plain}");
     assert!(b
-        .check_scoped(CheckLevel::All, ValidityScope::Stitched)
+        .check_scoped(
+            solidcore_ops::check::CheckLevel::All,
+            solidcore_ops::check::ValidityScope::Stitched
+        )
         .unwrap()
         .is_valid());
 }
