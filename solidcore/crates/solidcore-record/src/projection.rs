@@ -35,7 +35,7 @@ pub enum PlanarPiece {
 #[serde(rename_all = "snake_case")]
 pub enum Projection {
     /// An already exact native segment.
-    Segment(solidcore_record::Seg2),
+    Segment(Seg2),
     /// A point image.
     Point(Vec2),
     /// A complete linear image.
