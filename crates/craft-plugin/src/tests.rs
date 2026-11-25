@@ -1481,3 +1481,62 @@ fn declared_property_order_follows_shared_definitions_at_the_reference() {
     let round_trip = parse_manifest(&serde_json::to_vec(&manifest).unwrap(), "sample").unwrap();
     assert_eq!(round_trip.runtime.unwrap().entries[0].input_property_order, entry.input_property_order);
 }
+
+#[test]
+fn updates_name_a_github_repository() {
+    let mut value = manifest();
+    value["updates"] = json!({"github": "maker-1/gear_tools.sc"});
+    assert_eq!(parse(&value).unwrap().updates, Some(Updates { github: "maker-1/gear_tools.sc".into() }));
+    for bad in ["maker", "maker/", "/gears", "-maker/gears", "maker/gears/x", "maker/..", "maker/gears?tab=1", "https://github.com/maker/gears"] {
+        value["updates"] = json!({"github": bad});
+        assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field == "updates.github"), "{bad}");
+    }
+    value["updates"] = json!({"github": "maker/gears", "url": "https://example.com/feed"});
+    assert!(matches!(parse(&value), Err(HostError::InvalidManifest { .. })));
+    assert!(parse(&manifest()).unwrap().updates.is_none());
+}
+
+#[test]
+fn theme_manifests_are_checked() {
+    let themed =
+        |themes: Value, capabilities: Value| json!({"id":"sample","name":"Sample","version":"1","capabilities":capabilities,"themes":themes});
+    let good = json!([{"id":"solid-glass","source":"solid-glass.json"},{"id":"night","source":"night.json"}]);
+    let plugin = parse(&themed(good.clone(), json!(["themes@0.1"]))).unwrap();
+    assert_eq!(plugin.themes.len(), 2);
+    assert_eq!(plugin.themes.first().map(|theme| theme.source.as_str()), Some("solid-glass.json"));
+
+    assert!(matches!(parse(&themed(good.clone(), json!([]))), Err(HostError::InvalidManifest { field, .. }) if field == "capabilities"));
+    assert!(matches!(parse(&themed(good.clone(), json!(["themes@0.2"]))), Err(HostError::UnsupportedCapability { .. })));
+    assert!(parse(&themed(json!([{"id":"a","source":"a.json"},{"id":"a","source":"b.json"}]), json!(["themes@0.1"]))).is_err());
+    for source in ["../x.json", "x.wgsl", "Big.json", "dir/x.json", "x.JSON", "-x.json"] {
+        assert!(parse(&themed(json!([{"id":"a","source":source}]), json!(["themes@0.1"]))).is_err(), "{source}");
+    }
+    let many: Vec<Value> = (0..9).map(|i| json!({"id": format!("t{i}"), "source": format!("t{i}.json")})).collect();
+    assert!(parse(&themed(json!(many), json!(["themes@0.1"]))).is_err());
+    assert!(matches!(parse(&themed(json!([]), json!(["themes@0.1"]))), Err(HostError::InvalidManifest { field, .. }) if field == "themes"));
+}
+
+#[test]
+fn theme_files_must_be_theme_json() {
+    let good = br#"{"format":"solidcraft-theme/1","name":"Night","base":"dark"}"#;
+    assert!(theme::check_file("night", good).is_ok());
+    assert!(theme::check_file("night", br#"{"format":"solidcraft-theme/2","name":"Night"}"#).is_err());
+    assert!(theme::check_file("night", br#"{"format":"solidcraft-theme/1"}"#).is_err());
+    assert!(theme::check_file("night", br#"["solidcraft-theme/1"]"#).is_err());
+    assert!(theme::check_file("night", b"not json").is_err());
+    let big = format!(r#"{{"format":"solidcraft-theme/1","name":"N","pad":"{}"}}"#, "x".repeat(theme::MAX_THEME_BYTES));
+    assert!(matches!(theme::check_file("night", big.as_bytes()), Err(HostError::LimitExceeded { .. })));
+}
+
+#[test]
+fn a_manifest_without_themes_reads_and_writes_as_before() {
+    let legacy = manifest();
+    let parsed = parse(&legacy).unwrap();
+    assert!(parsed.themes.is_empty());
+    assert_eq!(parsed.capabilities, ["commands@0.1"]);
+    let written = serde_json::to_value(&parsed).unwrap();
+    assert!(written.get("themes").is_none());
+    assert_eq!(written["capabilities"], json!(["commands@0.1"]));
+    assert_eq!(written["runtime"]["module"], "plugin.wasm");
+    assert!(parse(&json!({"id":"sample","name":"Sample","version":"1","themes":[{"id":"a","source":"a.json"}]})).is_err());
+}
