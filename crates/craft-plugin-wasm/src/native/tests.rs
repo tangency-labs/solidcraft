@@ -794,7 +794,7 @@ fn capability_query_obeys_cancellation_and_host_call_limits() {
     assert_eq!(capabilities::Host::granted(&mut state), ["commands@0.1"]);
     state.calls = state.max_calls;
     assert!(capabilities::Host::granted(&mut state).is_empty());
-    assert_eq!(state.failed, Some(limit("host call count")));
+    assert_eq!(state.failed, Some(HostError::Exhausted { limit: "host_calls".into(), allowed: state.max_calls }));
     let mut state = self::state(App { cancelled: true, ..App::default() });
     assert!(capabilities::Host::granted(&mut state).is_empty());
     assert_eq!(state.failed, Some(HostError::Cancelled));
