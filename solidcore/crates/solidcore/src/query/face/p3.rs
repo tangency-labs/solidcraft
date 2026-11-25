@@ -1442,8 +1442,17 @@ fn face_directed_max_with<'b>(
     limits: SearchLimits,
     solve: &mut CellSolve<'_, 'b>,
 ) -> Result<f64> {
-    // (`IsKindOf(SmBSplineSurface_TYPE)`: `GetKnots` through `GetOrCreateGwNurbPointer`)
-    let (knots_u, knots_v) = if has_b_spline_box(surface) {
+    // (`IsKindOf(SmBSplineSurface_TYPE)`: `GetKnots` through `GetOrCreateGwNurbPointer`.)
+    // The knots of the base whose subpatches decide the cells ([`patch_base`]: a
+    // procedural blend's or a ball patch's net too, as the fork's are kinds of
+    // SmBSplineSurface), not only of the surfaces with a B-spline box
+    // ([`has_b_spline_box`]): a rational subpatch is read monotone only within one span
+    // ([`patch_monotone`]), and a cell over a knot of the net halved at its middles alone
+    // never comes to lie within one span (WR-651). Along a trim the surface runs past,
+    // a blend's cells on its net's knot lines then stayed undecided to the depth and cell
+    // limits, an exact solve each, and counted with the solver's greatest outside the
+    // face (`a_round_trimmed_by_a_plane_it_runs_past_is_boxed_to_the_plane`).
+    let (knots_u, knots_v) = if patch_base(k, surface)?.is_some() {
         (
             surface.knots_with_nurb(k, SurfParamType::U, None)?.0,
             surface.knots_with_nurb(k, SurfParamType::V, None)?.0,

@@ -28,6 +28,18 @@ pub enum Holes<'a> {
 }
 
 impl Brep {
+    /// A copy trimmed by the complete bounded cutting sheet, retaining the connected regions
+    /// nearest `points`. The kernel's intersection edges separate regions; picks use exact
+    /// trimmed faces. The operands and their provenance are preserved.
+    pub fn trim_sheet(&self, sheet: &Brep, points: &[[f64; 3]]) -> Result<Brep> {
+        let r = core::call::ops_on("trim_sheet", &[("brep", self.core()), ("sheet", sheet.core())], || {
+            solidcore_ops::trim::trim_sheet(self.core(), sheet.core(), points)
+        })
+        .map(Brep::made_core);
+        trace::made("trim_sheet", &[self, sheet], &r, || json!({"points": points}));
+        r
+    }
+
     /// The face nearest `point` (within `tolerance`) restored towards its surface: the holes
     /// `holes` names taken away and, with `outer`, its outer boundary back on the surface's
     /// parameter box (a free-form surface's own, an analytic one's the box of the face's span; one
