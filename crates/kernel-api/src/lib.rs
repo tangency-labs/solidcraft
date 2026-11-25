@@ -25,10 +25,12 @@ use solidcore_record::brep::history::History;
 pub mod cell_grid;
 pub mod exchange;
 pub mod modelling;
+pub mod projection;
 
 pub use cell_grid::{CellGrid, CellGridLimits};
 pub use exchange::{CadirBodies, CadirFailure, CadirRead, CadirRefused, CadirWritten, Exchange};
 pub use modelling::{Axis2, BoolOp, ChamferSide, FilletTurn, Modelling, Primitive};
+pub use projection::{ProjectionRefused, Projections};
 
 /// A kernel's stable name: what build features, the support matrix and reports call it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -75,6 +77,9 @@ pub enum OpKind {
     CellGrid,
     /// The exchange helpers: a STEP string, CADIR read and written ([`Exchange`]).
     Exchange,
+    /// Planar projection: sketch curves between planes, edges read in a plane, outlines tidied
+    /// ([`Projections`]).
+    Projection,
 }
 
 impl OpKind {
@@ -94,6 +99,7 @@ impl OpKind {
         OpKind::OffsetFaces,
         OpKind::CellGrid,
         OpKind::Exchange,
+        OpKind::Projection,
     ];
 
     /// The operation's stable name, as the support matrix and route files spell it.
@@ -113,6 +119,7 @@ impl OpKind {
             OpKind::OffsetFaces => "offset_faces",
             OpKind::CellGrid => "cell_grid",
             OpKind::Exchange => "exchange",
+            OpKind::Projection => "projection",
         }
     }
 
