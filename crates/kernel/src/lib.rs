@@ -427,6 +427,7 @@ pub use repair::SewnGap;
 pub use repair::repair;
 pub use route::CELL_GRID_LIMITS;
 pub use route::Which;
+pub use route::affine;
 pub use route::boolean;
 pub use route::box_solid;
 pub use route::cell_regions;

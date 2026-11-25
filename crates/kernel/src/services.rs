@@ -1,5 +1,5 @@
 //! solidcore's services that the application uses beside the body-making operations: 2D and
-//! curve helpers, projection, line-family clipping, affine maps, sheet development, frame members and the
+//! curve helpers, projection, line-family clipping, sheet development, frame members and the
 //! display plan. They read records and data; none
 //! makes a body, so none is routed (`docs/design/kernel-layer.md` §2).
 //!
@@ -16,8 +16,6 @@ pub use solidcore_ops::ClassifiedPoint;
 pub use solidcore_ops::Error;
 pub use solidcore_ops::FailureCode;
 pub use solidcore_ops::PointNormalFace;
-pub use solidcore_ops::SquareFaceLevel;
-pub use solidcore_ops::affine;
 pub use solidcore_ops::cancel;
 pub use solidcore_ops::centroid_and_mean_radius;
 pub use solidcore_ops::conic_projection;
@@ -43,7 +41,6 @@ pub use solidcore_ops::pick;
 pub use solidcore_ops::point_displacement;
 pub use solidcore_ops::point_distance;
 pub use solidcore_ops::point_identity;
-pub use solidcore_ops::prism;
 pub use solidcore_ops::profile;
 pub use solidcore_ops::query;
 pub use solidcore_ops::section_corners;

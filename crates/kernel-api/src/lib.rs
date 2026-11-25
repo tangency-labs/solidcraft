@@ -22,10 +22,12 @@ use serde::{Deserialize, Serialize};
 use solidcore_record::brep::Brep;
 use solidcore_record::brep::history::History;
 
+pub mod affine;
 pub mod cell_grid;
 pub mod exchange;
 pub mod modelling;
 
+pub use affine::{Affine, AffineRefused, Matrix, OffsetQuad, SquareFaceLevel};
 pub use cell_grid::{CellGrid, CellGridLimits};
 pub use exchange::{CadirBodies, CadirFailure, CadirRead, CadirRefused, CadirWritten, Exchange};
 pub use modelling::{Axis2, BoolOp, ChamferSide, FilletTurn, Modelling, Primitive};
@@ -75,6 +77,8 @@ pub enum OpKind {
     CellGrid,
     /// The exchange helpers: a STEP string, CADIR read and written ([`Exchange`]).
     Exchange,
+    /// Placement maths: affine maps, axes and reaches ([`Affine`]).
+    Affine,
 }
 
 impl OpKind {
@@ -94,6 +98,7 @@ impl OpKind {
         OpKind::OffsetFaces,
         OpKind::CellGrid,
         OpKind::Exchange,
+        OpKind::Affine,
     ];
 
     /// The operation's stable name, as the support matrix and route files spell it.
@@ -113,6 +118,7 @@ impl OpKind {
             OpKind::OffsetFaces => "offset_faces",
             OpKind::CellGrid => "cell_grid",
             OpKind::Exchange => "exchange",
+            OpKind::Affine => "affine",
         }
     }
 

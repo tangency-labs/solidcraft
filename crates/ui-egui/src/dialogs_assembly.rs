@@ -2806,8 +2806,8 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
             let mut to_document = std::collections::HashMap::new();
             for (name, _, _, _, frame) in preview.doc.body_frames_with_source(&raw) {
                 if let Some((_, _, _, _, before)) = before_frames.iter().find(|(old, ..)| old == &name)
-                    && let Ok(inverse) = solidcraft_kernel::services::affine::inverse(&frame)
-                    && let Ok(mapping) = solidcraft_kernel::services::affine::then(&inverse, before)
+                    && let Ok(inverse) = solidcraft_kernel::affine::inverse(&frame)
+                    && let Ok(mapping) = solidcraft_kernel::affine::then(&inverse, before)
                 {
                     to_document.insert(name, mapping);
                 }
@@ -3035,13 +3035,13 @@ fn placed_snap(app: &SolveApp, sel: &Sel, mut snap: SnapPt) -> SnapPt {
     {
         let frame = body_of(sel)
             .and_then(|body| interaction.to_document.get(body))
-            .and_then(|frame| solidcraft_kernel::services::affine::inverse(frame).ok())
+            .and_then(|frame| solidcraft_kernel::affine::inverse(frame).ok())
             .or_else(|| {
                 let occurrence = alignment_occurrence(&app.session, sel)?;
                 let before = solidcraft_engine::doc::joints::occurrence_world(&app.session.doc, occurrence);
                 let after = solidcraft_engine::doc::joints::occurrence_world(&interaction.document, occurrence);
-                let inverse = solidcraft_kernel::services::affine::inverse(&before).ok()?;
-                solidcraft_kernel::services::affine::then(&inverse, &after).ok()
+                let inverse = solidcraft_kernel::affine::inverse(&before).ok()?;
+                solidcraft_kernel::affine::then(&inverse, &after).ok()
             });
         if let Some(frame) = frame {
             snap.at = solidcraft_engine::doc::apply_point(&frame, snap.at);

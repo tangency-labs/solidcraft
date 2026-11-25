@@ -4318,7 +4318,7 @@ impl SolveApp {
         if !matches!(solidcraft_kernel::services::measure::points_meet(up.into(), to_up.into(), 1e-9), Ok(true)) {
             return animation.around_screen_up(None);
         }
-        let angle = solidcraft_kernel::services::affine::signed_unit_angle(up.into(), back.into(), to_back.into()).ok();
+        let angle = solidcraft_kernel::affine::signed_unit_angle(up.into(), back.into(), to_back.into()).ok();
         animation.around_screen_up(angle)
     }
 

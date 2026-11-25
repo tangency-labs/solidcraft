@@ -10419,7 +10419,7 @@ fn feature_tools_with_constructor(
         } => {
             let line_from_world = |origin: Vec3, direction: Vec3| {
                 let (origin, direction) =
-                    solidcraft_kernel::services::affine::line_in_frame(&doc.component_transform(f.component), origin.into(), direction.into())
+                    solidcraft_kernel::affine::line_in_frame(&doc.component_transform(f.component), origin.into(), direction.into())
                         .map_err(|_| DocError::Invalid("the feature's component frame is invalid".into()))?;
                 Ok::<_, DocError>((Vec3::from(origin), Vec3::from(direction)))
             };
@@ -10436,9 +10436,9 @@ fn feature_tools_with_constructor(
                         let (origin, direction) = construction_axis_in(None, st, name, f.component)?;
                         // line_in_frame maps into its argument's local frame. Its argument must
                         // therefore be the inverse of the owner-to-feature transfer frame.
-                        let inverse = solidcraft_kernel::services::affine::inverse(&frame)
+                        let inverse = solidcraft_kernel::affine::inverse(&frame)
                             .map_err(|_| DocError::Invalid("the recorded transfer frame is invalid".into()))?;
-                        let (origin, direction) = solidcraft_kernel::services::affine::line_in_frame(&inverse, origin.into(), direction.into())
+                        let (origin, direction) = solidcraft_kernel::affine::line_in_frame(&inverse, origin.into(), direction.into())
                             .map_err(|_| DocError::Invalid("the recorded transfer axis is invalid".into()))?;
                         (origin.into(), direction.into())
                     } else {
@@ -13764,7 +13764,7 @@ fn level_along(plane: &Plane, q: Vec3) -> f64 {
 
 /// The level along `plane`'s normal of face `(body, face)` when it is a plane square to the
 /// normal, and the face's own tolerance, from solidcore ([`Body::face_square_level`]).
-fn square_face_level(st: &ModelState, (bi, fi): (usize, usize), plane: &Plane) -> Option<solidcraft_kernel::services::SquareFaceLevel> {
+fn square_face_level(st: &ModelState, (bi, fi): (usize, usize), plane: &Plane) -> Option<solidcraft_kernel::api::SquareFaceLevel> {
     st.bodies.get(bi)?.body.face_square_level(fi, plane.normal(), plane.origin).ok()?
 }
 
@@ -14145,7 +14145,7 @@ fn tapered_reach(
     // from the start, as the kernel measures it.
     let far_side = |body: &Body| -> Result<f64> {
         let bb = body.exact_bounds().map_err(|e| DocError::Invalid(e.to_string()))?;
-        let [_, far] = solidcraft_kernel::services::affine::span_along(bb.min.into(), bb.max.into(), start_plane.origin.into(), travel.into())
+        let [_, far] = solidcraft_kernel::affine::span_along(bb.min.into(), bb.max.into(), start_plane.origin.into(), travel.into())
             .map_err(|e| DocError::Invalid(e.to_string()))?;
         Ok(far)
     };
@@ -16511,7 +16511,7 @@ fn move_turn_line(
 ) -> Result<(Vec3, Vec3)> {
     let found = construction_state(doc, st, comp).and_then(|cs| crate::construct::model_axis_in(Some(doc), &cs, about, comp));
     match found {
-        Ok((o, d)) => match solidcraft_kernel::services::affine::same_sense(d.into(), axis.into()).filter(|_| o.is_finite()) {
+        Ok((o, d)) => match solidcraft_kernel::affine::same_sense(d.into(), axis.into()).filter(|_| o.is_finite()) {
             Some(d) => Ok((o, Vec3::from(d))),
             None => lost_turn_line(origin, axis, "it has no direction".into(), warning),
         },
@@ -18093,7 +18093,7 @@ fn half_traced(input: &Traced, plane: &Plane, positive: bool) -> Result<Option<T
 /// and leaves a slab a few µm thick under the face (#6762). A plane with nothing to drop stays
 /// as it is.
 fn square_to_axes(plane: &Plane) -> Plane {
-    match solidcraft_kernel::services::affine::axis_squared_axes(plane.x.into(), plane.y.into(), 1e-12) {
+    match solidcraft_kernel::affine::axis_squared_axes(plane.x.into(), plane.y.into(), 1e-12) {
         Some([x, y]) => Plane { origin: plane.origin, x: Vec3::new(x[0], x[1], x[2]), y: Vec3::new(y[0], y[1], y[2]) },
         None => *plane,
     }

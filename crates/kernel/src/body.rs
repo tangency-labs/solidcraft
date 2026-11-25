@@ -2310,14 +2310,14 @@ impl Body {
     /// from `origin` and the face's own tolerance ([`solidcore_ops::Body::face_square_level`]),
     /// exact, no mesh. `None` for a face that is not, a mesh body, an index out of range or a
     /// direction or origin that is not usable; `Err` for the kernel's failure.
-    pub fn face_square_level(&self, face_index: usize, direction: Vec3, origin: Vec3) -> Result<Option<solidcore_ops::SquareFaceLevel>> {
+    pub fn face_square_level(&self, face_index: usize, direction: Vec3, origin: Vec3) -> Result<Option<solidcraft_kernel_api::SquareFaceLevel>> {
         let Some(form) = self.ops_body() else { return Ok(None) };
         let (body, order) = &*form;
         if face_index >= self.record.faces.len() {
             return Ok(None);
         }
         match body.face_square_level(order, face_index, [direction.x, direction.y, direction.z], [origin.x, origin.y, origin.z]) {
-            Ok(found) => Ok(found),
+            Ok(found) => Ok(found.map(|f| solidcraft_kernel_api::SquareFaceLevel { level: f.level, tolerance: f.tolerance })),
             Err(solidcore_ops::Error::Argument) => Ok(None),
             Err(e) => Err(KernelError::Failed(format!("face square level: {e}"))),
         }

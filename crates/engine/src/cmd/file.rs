@@ -3506,12 +3506,12 @@ struct CadmpegChoices<'a> {
 fn usd_decals(doc: &solidcraft_doc::Document, st: &solidcraft_doc::ModelState, warnings: &mut Vec<String>) -> Vec<solidcraft_io::DecalPlan> {
     let mut decals = Vec::new();
     for d in shown_decals(doc, st, warnings) {
-        let Ok(to_component) = solidcraft_kernel::services::affine::inverse(&doc.component_transform(d.component)) else {
+        let Ok(to_component) = solidcraft_kernel::affine::inverse(&doc.component_transform(d.component)) else {
             warnings.push(format!("decal `{}`: its component's placement is degenerate: left out", d.name));
             continue;
         };
         let world = d.corners.map(|p| [p.x, p.y, p.z]);
-        let local = world.map(|p| solidcraft_kernel::services::affine::apply_point(&to_component, p));
+        let local = world.map(|p| solidcraft_kernel::affine::apply_point(&to_component, p));
         let sha256 = solidcraft_doc::render_resources::HdrId::of(&d.image).to_string();
         let image = solidcraft_io::SurfaceMap { sha256, bytes: std::sync::Arc::from(d.image) };
         decals.push(solidcraft_io::DecalPlan { name: d.name, component: d.component, local, world, image });
@@ -3523,12 +3523,12 @@ fn usd_decals(doc: &solidcraft_doc::Document, st: &solidcraft_doc::ModelState, w
 fn urdf_decals(doc: &solidcraft_doc::Document, st: &solidcraft_doc::ModelState, warnings: &mut Vec<String>) -> Vec<solidcraft_io::urdf::UrdfDecal> {
     let mut decals = Vec::new();
     for d in shown_decals(doc, st, warnings) {
-        let Ok(to_component) = solidcraft_kernel::services::affine::inverse(&doc.component_transform(d.component)) else {
+        let Ok(to_component) = solidcraft_kernel::affine::inverse(&doc.component_transform(d.component)) else {
             warnings.push(format!("decal `{}`: its component's placement is degenerate: left out", d.name));
             continue;
         };
         let corners = d.corners.map(|p| {
-            let [x, y, z] = solidcraft_kernel::services::affine::apply_point(&to_component, [p.x, p.y, p.z]);
+            let [x, y, z] = solidcraft_kernel::affine::apply_point(&to_component, [p.x, p.y, p.z]);
             solidcore_record::Vec3::new(x, y, z)
         });
         decals.push(solidcraft_io::urdf::UrdfDecal { name: d.name, component: d.component, corners, image: d.image });
