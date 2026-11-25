@@ -17,15 +17,13 @@
 //! continue.
 
 use solidcore::geom::extent2d::Extent2d;
-use solidcore::geom::object::Shape;
 use solidcore::geom::tol::USE_DEFAULT;
 use solidcore::geom::vector2d::Point2;
-use solidcore::geom::vector3d::{Point3, Vec3};
+use solidcore::geom::vector3d::Vec3;
 use solidcore::kernel::Kernel;
 use solidcore::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
-use solidcore::query::api_queries::{edge_closest_point, face_closest_point_in_shape, face_internal_point};
-use solidcore::query::brep::{BrepQuery, LiveBrepObjects};
+use solidcore::query::api_queries::{edge_closest_point, face_internal_point};
 use solidcore::surface::cone::p1::Cone;
 use solidcore::surface::extend::Continuity;
 use solidcore::surface::side::BoxSide;
@@ -35,46 +33,19 @@ use solidcore::topology::brep::p1 as brep_p1;
 use solidcore::topology::brep::p3::new_brep;
 use solidcore::topology::brep::p8::create_face_from_surface;
 use solidcore::topology::face::{p1 as face_p1, p2 as face_p2, p4 as face_p4};
-use solidcore::topology::{Brep, BrepId, EdgeId, FaceId};
+use solidcore::topology::{Brep, EdgeId, FaceId};
 use solidcore::{EntityRef, SolidError};
 
+use super::Body;
 use super::blend::{p3, refused, status};
 use super::call::ops_as;
 use super::sweep::build_faces;
-use super::{Body, answer};
 use crate::trim::Continuation;
 use crate::{Error, Result};
 use solidcore::topology::brep::p3::brep_copy;
 
 /// `MAX_HOLE_POINTS`.
 const MAX_HOLE_POINTS: usize = 10_000;
-
-const ONE: BrepId = BrepId::from_index(0);
-
-/// `face_at`: the face of `b` nearest `p`, within `tol` (`SmApiFaceClosestPoint`; a face whose
-/// query fails is skipped).
-pub(super) fn face_at(k: &mut Kernel, b: &mut Brep, p: Point3, tol: f64) -> solidcore::Result<Option<FaceId>> {
-    let all = brep_p1::faces(b, None)?;
-    let mut shapes = Vec::with_capacity(all.len());
-    for &f in &all {
-        shapes.push(answer(Shape::new(k, &(ONE, &*b), &[], &[(ONE, f)], &[], &[]))?);
-    }
-    let query = BrepQuery::of_brep(b);
-    let identity = query.effective_identity();
-    let objects = LiveBrepObjects::new(b, &identity, None)?;
-    let (mut best, mut d0) = (None, f64::INFINITY);
-    for (&f, shape) in all.iter().zip(&shapes) {
-        let Some(shape) = shape else { continue };
-        if let Some(c) = answer(face_closest_point_in_shape(k, shape, &objects, (ONE, f), p))?
-            && c.distance.is_finite()
-            && c.distance < d0
-        {
-            d0 = c.distance;
-            best = Some(f);
-        }
-    }
-    Ok(best.filter(|_| d0 <= tol))
-}
 
 /// `copy_attributes`: `to` (in `into`) takes a copy of each attribute of `from` (in `src`).
 fn copy_attributes(src: &Brep, from: EntityRef, into: &mut Brep, to: EntityRef) -> solidcore::Result<()> {
@@ -95,7 +66,7 @@ fn upward(b: &Brep, f: FaceId) -> solidcore::Result<Option<OrientType>> {
 
 /// The index of the least of `distances` within `tol`, the first of equal ones; an entry that
 /// is `None` or not finite is passed over (`face_at` and the nearest hole, as the capi picked).
-fn nearest_within(distances: impl IntoIterator<Item = Option<f64>>, tol: f64) -> Option<usize> {
+pub(super) fn nearest_within(distances: impl IntoIterator<Item = Option<f64>>, tol: f64) -> Option<usize> {
     let (mut best, mut d0) = (None, f64::INFINITY);
     for (i, d) in distances.into_iter().enumerate() {
         if let Some(d) = d.filter(|d| d.is_finite())
@@ -217,7 +188,7 @@ fn edge_distance(k: &Kernel, b: &Brep, e: EdgeId, p: Vec3) -> f64 {
 }
 
 /// `nearest_edge`: the distance to the nearest of `edges`, with that edge.
-pub(super) fn nearest_edge(k: &Kernel, b: &Brep, edges: &[EdgeId], p: Vec3) -> (f64, Option<EdgeId>) {
+fn nearest_edge(k: &Kernel, b: &Brep, edges: &[EdgeId], p: Vec3) -> (f64, Option<EdgeId>) {
     let (mut best, mut which) = (f64::INFINITY, None);
     for &e in edges {
         let d = edge_distance(k, b, e, p);
