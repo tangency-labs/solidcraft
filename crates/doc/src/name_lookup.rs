@@ -343,7 +343,10 @@ fn recover_misnumbered_side_edge(b: &ModelBody, name: &str, near: Vec3) -> Optio
     let [first, second] = read.faces.as_slice() else { return None };
     // One face numbered: the other, named as saved, ties the edge down. A name whose faces are
     // both numbered pieces (as 0.30.1 saved a revolve's) says nothing that tells the edge apart.
-    if numbered(first) == numbered(second) {
+    // The other face carries no piece number at all: one numbered side face is the only
+    // misnumbering this reads past.
+    let carries_number = |f: &FaceName| f.suffixes.iter().any(|s| matches!(s, Suffix::Numbered(_)));
+    if numbered(first) == numbered(second) || (carries_number(first) && carries_number(second)) {
         return None;
     }
     let record = b.body.record();
