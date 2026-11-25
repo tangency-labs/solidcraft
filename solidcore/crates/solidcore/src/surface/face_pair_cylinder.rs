@@ -14,8 +14,8 @@
 //!
 //! Also the small readings an application needs about one such face: which side its material
 //! lies on ([`material_toward_axis`]), the directions that stay on it from one of its points
-//! ([`round_directions`]), and one cylinder's axial range in another's coordinates
-//! ([`axial_range_in`]).
+//! ([`round_directions`]), the directions that stay inside the wall between two such faces
+//! ([`wall_steps`]), and one cylinder's axial range in another's coordinates ([`axial_range_in`]).
 //!
 //! Not upstream: no counterpart in SMLib. Deviations: none. No recursion.
 
@@ -172,6 +172,40 @@ pub fn round_directions(axis: Vec3, along: Vec3) -> Result<Vec<Vec3>> {
     let round = round.unitize()?;
     Ok(vec![u, -u, round, -round])
 }
+
+/// The unit directions to step along from a point inside a round wall (the material between two
+/// coaxial cylindrical faces) to keep, to first order, its distance from the axis: along the axis
+/// both ways, then round it both ways. `across` points from the point across the wall, at right
+/// angles to the axis (toward a face's nearest point): the direction round the axis is the unit
+/// axis crossed with it, made unit. A vector is made unit by dividing it by its length, which must
+/// be finite and more than a billionth ([`UNIT_MIN`]).
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for a vector that is not finite, an axis no longer than
+/// [`UNIT_MIN`], or an `across` that runs along the axis (their cross product no longer than it),
+/// where no direction round the axis follows.
+pub fn wall_steps(axis: Vec3, across: Vec3) -> Result<[Vec3; 4]> {
+    let bad = |reason| SolidError::InvalidInput {
+        operation: "surface::face_pair_cylinder::wall_steps",
+        reason,
+    };
+    if !(finite(axis) && finite(across)) {
+        return Err(bad(
+            "the axis and the direction across the wall must be finite",
+        ));
+    }
+    let unit = |v: Vec3| {
+        let length = v.length();
+        (length > UNIT_MIN && length.is_finite()).then(|| v / length)
+    };
+    let u = unit(axis).ok_or_else(|| bad("the axis must not be of zero length"))?;
+    let round = unit(u.cross(across))
+        .ok_or_else(|| bad("the direction across the wall must not run along the axis"))?;
+    Ok([u, -u, round, -round])
+}
+
+/// The shortest vector [`wall_steps`] makes unit (mm): a billionth.
+pub const UNIT_MIN: f64 = 1e-9;
 
 /// The axial range `range` of cylinder `b` (distances from its axis point along its unit axis)
 /// read in cylinder `a`'s axial coordinates (distances from `a`'s axis point along `a`'s unit
@@ -391,6 +425,42 @@ mod tests {
         assert!(round_directions(v(f64::NAN, 0.0, 1.0), v(0.0, 1.0, 0.0)).is_err());
         assert!(round_directions(v(0.0, 0.0, 1.0), v(0.0, f64::INFINITY, 0.0)).is_err());
         assert!(round_directions(v(0.0, 0.0, 0.0), v(0.0, 1.0, 0.0)).is_err());
+    }
+
+    #[test]
+    fn steps_inside_a_round_wall_go_along_and_round_its_axis() {
+        // Axis z (length 2). From (9, 0, 25), inside the wall of radii 8 and 10, the outer face's
+        // nearest point is (10, 0, 25): across is +x (length 1). Round the axis is z × x = +y.
+        let s = wall_steps(v(0.0, 0.0, 2.0), v(1.0, 0.0, 0.0)).unwrap();
+        assert_eq!(
+            s,
+            [
+                v(0.0, 0.0, 1.0),
+                v(0.0, 0.0, -1.0),
+                v(0.0, 1.0, 0.0),
+                v(0.0, -1.0, 0.0)
+            ]
+        );
+        // From (0, 9, 25), across +y (length 0.5): z × y = -x. Axis run down: -z × y = +x.
+        let t = wall_steps(v(0.0, 0.0, 1.0), v(0.0, 0.5, 0.0)).unwrap();
+        assert_eq!(t[2], v(-1.0, 0.0, 0.0));
+        let down = wall_steps(v(0.0, 0.0, -1.0), v(0.0, 0.5, 0.0)).unwrap();
+        assert_eq!(down[2], v(1.0, 0.0, 0.0));
+        // Across a 45 degree diagonal (3, 3, 0): z × (3, 3, 0) = (-3, 3, 0), of length 3√2, so
+        // round is (-1, 1, 0)/√2, at right angles to the axis and to across.
+        let d = wall_steps(v(0.0, 0.0, 1.0), v(3.0, 3.0, 0.0)).unwrap();
+        let h = core::f64::consts::FRAC_1_SQRT_2;
+        assert!((d[2] - v(-h, h, 0.0)).length() < 1e-15, "{d:?}");
+        // Across with a part along the axis: only its part off the axis turns round it.
+        let tilted = wall_steps(v(0.0, 0.0, 1.0), v(1.0, 0.0, 7.0)).unwrap();
+        assert_eq!(tilted[2], v(0.0, 1.0, 0.0));
+        // Across along the axis, or within a billionth of it: no direction round it.
+        assert!(wall_steps(v(0.0, 0.0, 1.0), v(0.0, 0.0, 3.0)).is_err());
+        assert!(wall_steps(v(0.0, 0.0, 1.0), v(1e-10, 0.0, 0.0)).is_err());
+        // Hostile: not finite, or no axis.
+        assert!(wall_steps(v(0.0, 0.0, 0.0), v(1.0, 0.0, 0.0)).is_err());
+        assert!(wall_steps(v(f64::NAN, 0.0, 1.0), v(1.0, 0.0, 0.0)).is_err());
+        assert!(wall_steps(v(0.0, 0.0, 1.0), v(f64::INFINITY, 0.0, 0.0)).is_err());
     }
 
     #[test]

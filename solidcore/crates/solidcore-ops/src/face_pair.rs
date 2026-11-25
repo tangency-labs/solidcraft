@@ -9,7 +9,8 @@ use solidcore::surface::face_pair::{facing_planes as kernel_facing_planes, Outwa
 use solidcore::surface::face_pair_cylinder::{
     axial_range_in as kernel_axial_range_in, facing_cylinders as kernel_facing_cylinders,
     material_toward_axis as kernel_material_toward_axis,
-    round_directions as kernel_round_directions, CylinderFace as KernelCylinder,
+    round_directions as kernel_round_directions, wall_steps as kernel_wall_steps,
+    CylinderFace as KernelCylinder,
 };
 use solidcore::Vec3;
 
@@ -156,6 +157,22 @@ pub fn round_directions(axis: [f64; 3], along: [f64; 3]) -> Result<Vec<[f64; 3]>
     })
 }
 
+/// The unit directions that stay inside a round wall from one of its points, where `across` points
+/// across the wall at right angles to `axis`: both ways along the axis, then both ways round it
+/// ([`solidcore::surface::face_pair_cylinder::wall_steps`]).
+///
+/// # Errors
+/// The kernel's refusal ([`crate::Error::Status`]) of a vector that is not finite, an axis of
+/// zero length, or an `across` that runs along the axis.
+pub fn wall_steps(axis: [f64; 3], across: [f64; 3]) -> Result<Vec<[f64; 3]>> {
+    run("face_pair::wall_steps", |_| {
+        Ok(kernel_wall_steps(vec(axis), vec(across))?
+            .into_iter()
+            .map(|d| [d.x, d.y, d.z])
+            .collect())
+    })
+}
+
 /// Cylinder `b`'s axial range `range` read in cylinder `a`'s axial coordinates, low end first
 /// ([`solidcore::surface::face_pair_cylinder::axial_range_in`]).
 ///
@@ -191,6 +208,18 @@ mod tests {
             ]
         );
         assert!(round_directions([0.0; 3], [0.0, 1.0, 0.0]).is_err());
+        // From (9, 0, 5) inside the wall of radii 8 and 10 about z, across +x to the outside:
+        // round the axis is z × x = +y.
+        assert_eq!(
+            wall_steps([0.0, 0.0, 2.0], [1.0, 0.0, 0.0]).unwrap(),
+            vec![
+                [0.0, 0.0, 1.0],
+                [0.0, 0.0, -1.0],
+                [0.0, 1.0, 0.0],
+                [0.0, -1.0, 0.0]
+            ]
+        );
+        assert!(wall_steps([0.0, 0.0, 1.0], [0.0, 0.0, 1.0]).is_err());
         // b from z = 50 downward: its 10..30 is a's 20..40.
         let a = CylinderFace {
             axis_point: o,

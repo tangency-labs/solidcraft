@@ -15,7 +15,7 @@ use solidcore_record::brep::Loop as Bounds;
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_geom::prelude::*;
 use solidcraft_kernel::services::face_pair::{
-    CylinderFace, OutwardPlane, axial_range_in, facing_cylinders, facing_planes, material_toward_axis, round_directions,
+    CylinderFace, OutwardPlane, axial_range_in, facing_cylinders, facing_planes, material_toward_axis, round_directions, wall_steps,
 };
 use solidcraft_kernel::services::mid_joint::{move_edge_onto_line, planes_meeting};
 use solidcraft_kernel::services::mid_sheet::{self as ms, Frame, Wall};
@@ -410,7 +410,10 @@ fn edge_in_round_wall(look: &Look, faces: [usize; 2], outer_face: usize, cylinde
     }
     let unchecked =
         |what: String| Some(format!("unchecked: {what} could not be tested for whether it lies inside the round wall of faces {faces:?}"));
-    let Some(axis) = vec3(cylinder.axis).normalized() else { return unchecked("its axis".to_string()) };
+    // The axis must have a direction to step along (the kernel's reading, as `wall_steps` needs).
+    if round_directions(cylinder.axis, [0.0; 3]).is_err() {
+        return unchecked("its axis".to_string());
+    }
     let nudge = (outer - inner) * 0.25;
     let reach = outer - inner + tol;
     // Inside the wall, the nearest points of the two faces lie on one line through the point,
@@ -439,16 +442,15 @@ fn edge_in_round_wall(look: &Look, faces: [usize; 2], outer_face: usize, cylinde
                 Err(()) => return unchecked(format!("edge {e}")),
             };
             // Well inside, not on the wall's end or its sides: moved a quarter of the thickness
-            // along the axis or round it, either way, the point is still inside.
-            let Some(round) = axis.cross(o - p).normalized() else { return unchecked(format!("edge {e}")) };
+            // along the axis or round it (the kernel's directions, across being toward `o`), either
+            // way, the point is still inside.
+            let Ok(steps) = wall_steps(cylinder.axis, array(o - p)) else { return unchecked(format!("edge {e}")) };
             let mut all = true;
-            for d in [axis, round] {
-                for moved in [p + d * nudge, p - d * nudge] {
-                    match within(moved) {
-                        Ok(Some(_)) => {}
-                        Ok(None) => all = false,
-                        Err(()) => return unchecked(format!("edge {e}")),
-                    }
+            for d in steps {
+                match within(p + vec3(d) * nudge) {
+                    Ok(Some(_)) => {}
+                    Ok(None) => all = false,
+                    Err(()) => return unchecked(format!("edge {e}")),
                 }
             }
             if all {
