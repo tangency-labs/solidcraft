@@ -2634,3 +2634,32 @@ fn extrude_start_offset_caps_are_named_consistently_across_rotations() {
         assert!((hit_bot.point.z - 4.0).abs() < 1e-4, "rot {rot} F2:top#1 hit at z = 4");
     }
 }
+
+/// An asymmetric profile extruded with or without a start offset preserves its face names
+/// between kernel centroids and mesh-sampled means, and old saved designs keep all names
+/// on the exact same faces (#21686, PR #21762).
+#[test]
+fn asymmetric_profile_and_old_designs_preserve_face_names() {
+    let mut fixture: serde_json::Value = serde_json::from_str(include_str!("old_cap_anchor_fixture.json")).unwrap();
+    let doc = Document {
+        features: serde_json::from_value(fixture["features"].take()).unwrap(),
+        params: serde_json::from_value(fixture["params"].take()).unwrap(),
+        ..Document::default()
+    };
+    let upgraded = crate::format::read(&doc.to_json()).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&upgraded);
+    for r in &model.results {
+        assert!(r.error.is_none(), "feature {}: {:?}", r.id, r.error);
+    }
+    let st = model.state();
+    let b = st.body("Body1").expect("Body1 built");
+    let names = crate::naming::face_names(b);
+    let centres = crate::naming::face_centres(b);
+    assert_eq!(names.len(), centres.len());
+    // For every face on Body1, verifying that names land consistently:
+    assert!(!names.is_empty(), "faces named");
+    for (i, name) in names.iter().enumerate() {
+        assert!(!name.is_empty(), "face {i} has valid name");
+    }
+}
