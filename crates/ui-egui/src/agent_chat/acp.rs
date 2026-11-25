@@ -176,27 +176,39 @@ pub fn is_bridge_tool(title: &str, kind: Option<&str>) -> bool {
 /// The MCP server the agent starts to reach the design: `solidcraft-cli mcp --connect` bridged to
 /// this app's control port. The server finds the port's token in the token file the app wrote
 /// (docs/control-protocol.md), so the token never travels through the agent, and it keeps its
-/// default folder limits (docs/mcp.md): no `--allow-any-path`.
+/// folder limits (docs/mcp.md): only folders the user explicitly allowed in `allow_paths`, never
+/// `--allow-any-path`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct McpBridge {
     pub cli: std::path::PathBuf,
     pub port: u16,
+    pub allow_paths: Vec<std::path::PathBuf>,
 }
 
 impl McpBridge {
     pub fn to_json(&self) -> Value {
+        let mut args = vec!["mcp".to_string(), "--connect".to_string(), format!("127.0.0.1:{}", self.port)];
+        for dir in &self.allow_paths {
+            let text = dir.to_string_lossy();
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                args.push("--allow-path".to_string());
+                args.push(trimmed.to_string());
+            }
+        }
         json!({
             "name": BRIDGE_NAME,
             "command": self.cli.to_string_lossy(),
-            "args": ["mcp", "--connect", format!("127.0.0.1:{}", self.port)],
+            "args": args,
             "env": [],
         })
     }
 
     /// The same bridge for an agent inside WSL: the CLI as WSL sees it. It still runs on the
-    /// Windows side (WSL starts Windows programs itself), so the port is the same.
+    /// Windows side (WSL starts Windows programs itself), so the port and `--allow-path` folders
+    /// stay as Windows paths.
     pub fn in_wsl(&self) -> McpBridge {
-        McpBridge { cli: wsl_path(&self.cli), port: self.port }
+        McpBridge { cli: wsl_path(&self.cli), port: self.port, allow_paths: self.allow_paths.clone() }
     }
 }
 
@@ -813,7 +825,7 @@ mod tests {
 
     #[test]
     fn the_session_gets_the_bridged_mcp_server_without_a_token_or_any_path() {
-        let b = McpBridge { cli: "/opt/solidcraft/solidcraft-cli".into(), port: 41234 };
+        let b = McpBridge { cli: "/opt/solidcraft/solidcraft-cli".into(), port: 41234, allow_paths: Vec::new() };
         let p = session_new_params(std::path::Path::new("/home/u/designs"), Some(&b), &json!({}), SYSTEM_NOTE);
         let s = &p["mcpServers"][0];
         assert_eq!(s["name"], BRIDGE_NAME);
@@ -824,12 +836,27 @@ mod tests {
         assert_eq!(session_new_params(std::path::Path::new("/tmp"), None, &json!({}), SYSTEM_NOTE)["mcpServers"], json!([]));
     }
 
+    #[test]
+    fn the_bridged_mcp_server_forwards_configured_allow_paths() {
+        let b = McpBridge {
+            cli: "/opt/solidcraft/solidcraft-cli".into(),
+            port: 41234,
+            allow_paths: vec![" /work/cad ".into(), "".into(), "/work/shared".into()],
+        };
+        let p = session_new_params(std::path::Path::new("/home/u/designs"), Some(&b), &json!({}), SYSTEM_NOTE);
+        assert_eq!(
+            p["mcpServers"][0]["args"],
+            json!(["mcp", "--connect", "127.0.0.1:41234", "--allow-path", "/work/cad", "--allow-path", "/work/shared"])
+        );
+        assert!(!p.to_string().contains("allow-any-path"));
+    }
+
     /// #19554: Claude Code gets only the chat's MCP server, none of the user's claude.ai connectors
     /// or own servers (`strictMcpConfig`), and only the built-in tools the chat names (`tools`),
     /// none of which the disallowed list turns off.
     #[test]
     fn claude_code_gets_only_the_chats_server_and_named_tools() {
-        let b = McpBridge { cli: "/opt/solidcraft/solidcraft-cli".into(), port: 41234 };
+        let b = McpBridge { cli: "/opt/solidcraft/solidcraft-cli".into(), port: 41234, allow_paths: Vec::new() };
         for bridge in [Some(&b), None] {
             let p = session_new_params(std::path::Path::new("/tmp"), bridge, &json!({}), SYSTEM_NOTE);
             let options = &p["_meta"]["claudeCode"]["options"];
@@ -907,11 +934,12 @@ mod tests {
         assert_eq!(wsl("/home/u/designs"), "/home/u/designs");
         assert_eq!(wsl(r"\\server\share\x"), r"\\server\share\x");
 
-        let b = McpBridge { cli: r"C:\Program Files\SolidCraft\solidcraft-cli.exe".into(), port: 41234 };
+        let b =
+            McpBridge { cli: r"C:\Program Files\SolidCraft\solidcraft-cli.exe".into(), port: 41234, allow_paths: vec![r"D:\Projects\CAD".into()] };
         let p = session_new_params(&wsl_path(std::path::Path::new(r"C:\Users\u\work")), Some(&b.in_wsl()), &json!({}), SYSTEM_NOTE);
         assert_eq!(p["cwd"], "/mnt/c/Users/u/work");
         assert_eq!(p["mcpServers"][0]["command"], "/mnt/c/Program Files/SolidCraft/solidcraft-cli.exe");
-        assert_eq!(p["mcpServers"][0]["args"], json!(["mcp", "--connect", "127.0.0.1:41234"]));
+        assert_eq!(p["mcpServers"][0]["args"], json!(["mcp", "--connect", "127.0.0.1:41234", "--allow-path", r"D:\Projects\CAD"]));
     }
 
     #[test]

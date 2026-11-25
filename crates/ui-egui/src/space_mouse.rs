@@ -708,7 +708,10 @@ pub fn navigate_frame(app: &mut SolveApp, ctx: &egui::Context, mapping: DriverMa
     // A long gap (the first frame after a pause) moves as far as a 50 ms one.
     let step = if seconds.is_finite() { seconds.min(0.05) } else { 0.0 };
     let handed = DeviceMotion {
-        motion: mapping.with_user_axes(app.preferences.space_mouse_reverse, app.preferences.space_mouse_axis_speed).apply(axes),
+        motion: moved_as(
+            mapping.with_user_axes(app.preferences.space_mouse_reverse, app.preferences.space_mouse_axis_speed).apply(axes),
+            app.preferences.space_mouse_motion,
+        ),
         seconds: step * speed.clamp(0.1, 5.0),
     };
     app.space_mouse.motion = Some(handed);
@@ -785,6 +788,17 @@ pub fn bridge_frame(app: &mut SolveApp, ctx: &egui::Context, motion: BridgeMotio
         viewed = true;
     }
     moved || viewed
+}
+
+/// The cap's `motion` as the chosen motion model moves the view. Object moves the model the way
+/// the cap goes. Target camera moves the camera that way instead, so the model goes the other way
+/// along every axis; the view still turns around the same point. The user's per-axis Invert is
+/// already in `motion`, so it still reverses its axis in either model.
+pub fn moved_as(motion: Motion, model: crate::prefs::SpaceMouseMotion) -> Motion {
+    match model {
+        crate::prefs::SpaceMouseMotion::Object => motion,
+        crate::prefs::SpaceMouseMotion::TargetCamera => Motion { translation: motion.translation.map(|v| -v), rotation: motion.rotation.map(|v| -v) },
+    }
 }
 
 /// A small dead zone avoids drift at rest. A full cap deflection takes roughly one viewport
@@ -1426,6 +1440,30 @@ mod tests {
         assert!(app.viewport.device_pivot.is_some(), "a turn holds a point");
         frame(&mut app, &ctx, DriverMapping::default(), Axes::default(), 0.016);
         assert_eq!(app.viewport.device_pivot, None, "at rest it is let go");
+    }
+
+    /// Target camera moves the camera the way the cap goes, so every axis moves the view the other
+    /// way from Object; the per-axis Invert still reverses its own axis on top.
+    #[test]
+    fn target_camera_moves_every_axis_the_other_way() {
+        let cap = Axes { translation: [300, -200, 150], rotation: [120, -250, 330] };
+        let handed = |model: crate::prefs::SpaceMouseMotion, reverse: [bool; 6]| {
+            let mut app = app();
+            app.preferences.space_mouse_motion = model;
+            app.preferences.space_mouse_reverse = reverse;
+            app.space_mouse.device = Some("hid 046d:c62b".into());
+            let ctx = window(true);
+            frame(&mut app, &ctx, DriverMapping::object_mode(), cap, 0.016);
+            app.space_mouse.motion.map(|m| m.motion)
+        };
+        let object = handed(crate::prefs::SpaceMouseMotion::Object, [false; 6]);
+        let camera = handed(crate::prefs::SpaceMouseMotion::TargetCamera, [false; 6]);
+        let object = object.unwrap_or_default();
+        assert!(object.translation.iter().chain(&object.rotation).all(|v| *v != 0.0), "every axis moves: {object:?}");
+        assert_eq!(camera, Some(Motion { translation: object.translation.map(|v| -v), rotation: object.rotation.map(|v| -v) }));
+        let inverted = handed(crate::prefs::SpaceMouseMotion::TargetCamera, [true, false, false, false, false, false]).unwrap_or_default();
+        assert_eq!(inverted.translation[0], object.translation[0], "Invert reverses its axis again");
+        assert_eq!(moved_as(Motion::default(), crate::prefs::SpaceMouseMotion::TargetCamera), Motion::default(), "a cap at rest stays at rest");
     }
 
     #[test]

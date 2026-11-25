@@ -9,8 +9,8 @@
 //! | [`end_at_smooth_vertex`], [`continuing_edges`] | `SmBlendCorner::EndAtSmoothVertex` (its test, with every edge it finds: solidcore's) |
 //! | [`calc_end_edge_geom`]            | `SmBlendCorner::CalcEndEdgeGeom` (before the base `CalcCornerEdgeGeom`) |
 //! | `calc_end_cap_edges` (private)    | `SmBlendCorner::CalcEndCapEdges`          |
-//! | `ball_touching_at` (private)      | `SmBlendCorner::BallTouchingAt` (54a4ee7 splits it out of 41a39ec's `RadiusReachingSideEdgeEnd`), G's surface continued exactly (#17780; not the fork's) |
-//! | `radius_reaching_side_edge_end` (private) | `SmBlendCorner::RadiusReachingSideEdgeEnd` |
+//! | `ball_touching_at` (private)      | `SmBlendCorner::BallTouchingAt` (54a4ee7 splits it out of 41a39ec's `RadiusReachingSideEdgeEnd`), G's surface continued exactly (#17780) and `on_g` tested to G's zone tolerance (#21938; not the fork's) |
+//! | `radius_reaching_side_edge_end`, `max_ball_over_side_edge` (private) | `SmBlendCorner::RadiusReachingSideEdgeEnd`; interior peak when the side edge's far end lies back on G (#21938; not the fork's) |
 //! | `refuse_end_past_side_edge` (private) | `SmBlendCorner::RefuseEndPastSideEdge` |
 //! | `blend_runs_out_past_vertex` (private) | none (a round run on past a smooth vertex keeps going past its side edge's end) |
 //! | [`describe_end_past_side_edge`]   | `SmBlendCorner::DescribeEndPastSideEdge`  |
@@ -696,7 +696,8 @@ pub(crate) fn ball_touching_on(
     let mut hi = radius;
     let at_lo = distance(lo)?;
     let at_hi = distance(hi)?;
-    let on_g = at_lo <= 0.0;
+    let on_g_tol = zone_tol3d(k, target.face(other_face)?.tolerance).max(target.tolerance());
+    let on_g = at_lo <= on_g_tol;
     let within = at_hi < 0.0;
     let mut rho = if on_g { 0.0 } else { radius };
     if on_g || !within {
@@ -716,9 +717,117 @@ pub(crate) fn ball_touching_on(
     Ok((on_g, within, rho))
 }
 
+/// Samples along a side edge whose far end lies back on G (`other_face`) when
+/// [`max_ball_over_side_edge`] searches for the largest ball touching F on that edge and G.
+const SIDE_EDGE_BALL_SAMPLES: u32 = 48;
+
+/// Not the fork's (#21938): when both ends of a side edge lie on G (`other_face`), the ball
+/// radius `rho(t)` touching F along the side edge and G is 0 at both ends and rises to an
+/// interior maximum. Where every point along the side edge has a ball smaller than the
+/// round's radius (`within` or `on_g`), the round's rail misses the side edge completely,
+/// and the largest ball along the edge (less the open margin) is the largest radius whose
+/// rail still reaches it. Returns `Ok(None)` if any probe reaches the round's radius (the
+/// rail does not pass over the edge) or if no positive ball is found along the edge; when
+/// the margin exhausts the peak (`most <= margin`), returns `Ok(Some(0.0))` so the
+/// rail-miss verdict is preserved as `NoRoom` with no fitting radius.
+///
+/// # Errors
+/// `SM_ERR_NULL_POINTER` without solver, side edge or curve; those of the evaluations and
+/// [`ball_touching_with`].
+fn max_ball_over_side_edge(
+    k: &Kernel,
+    target: &Brep,
+    solvers: &dyn SweptSolvers,
+    fil_eu: EdgeuseId,
+    side_eu: EdgeuseId,
+    other_face: FaceId,
+) -> Result<Option<f64>> {
+    let fs = solvers.solver_of_edgeuse(fil_eu)?;
+    let side_edge = edge_of(target, side_eu)?;
+    let curve = curve_of(target, side_edge)?;
+    let ivl = edge::interval(target, side_edge)?;
+    let probe = |t: f64| -> Result<Option<f64>> {
+        let p = curve.evaluate_point(k, t)?;
+        let (on_g, within, rho) = ball_touching_with(k, target, fs, side_eu, other_face, p, None)?;
+        Ok(if on_g {
+            Some(0.0)
+        } else if within {
+            Some(rho)
+        } else {
+            None
+        })
+    };
+    let mut best_i = 0_u32;
+    let mut best_rho = 0.0_f64;
+    for i in 1..SIDE_EDGE_BALL_SAMPLES {
+        let t = ivl.evaluate(f64::from(i) / f64::from(SIDE_EDGE_BALL_SAMPLES));
+        let Some(rho) = probe(t)? else {
+            return Ok(None);
+        };
+        if rho > best_rho {
+            best_rho = rho;
+            best_i = i;
+        }
+    }
+    if best_i == 0 || best_rho <= 0.0 {
+        return Ok(None);
+    }
+    let gold = 0.5 * (5.0_f64.sqrt() - 1.0);
+    let mut a =
+        ivl.evaluate(f64::from(best_i.saturating_sub(1)) / f64::from(SIDE_EDGE_BALL_SAMPLES));
+    let mut b = ivl.evaluate(f64::from(best_i + 1) / f64::from(SIDE_EDGE_BALL_SAMPLES));
+    let mut c = b - gold * (b - a);
+    let mut d = a + gold * (b - a);
+    let (Some(mut at_c), Some(mut at_d)) = (probe(c)?, probe(d)?) else {
+        return Ok(None);
+    };
+    let mut most = best_rho.max(at_c).max(at_d);
+    let mut it = 0;
+    while it < 200 && b - a > EFF_ZERO * (1.0 + ivl.length()) {
+        if at_c >= at_d {
+            b = d;
+            d = c;
+            at_d = at_c;
+            c = b - gold * (b - a);
+            let Some(rho) = probe(c)? else {
+                return Ok(None);
+            };
+            at_c = rho;
+        } else {
+            a = c;
+            c = d;
+            at_c = at_d;
+            d = a + gold * (b - a);
+            let Some(rho) = probe(d)? else {
+                return Ok(None);
+            };
+            at_d = rho;
+        }
+        most = most.max(at_c).max(at_d);
+        it += 1;
+    }
+    let Some(mid_rho) = probe(0.5 * (a + b))? else {
+        return Ok(None);
+    };
+    most = most.max(mid_rho);
+    // FitMargin: a thousand of the blended edge's tolerances, matching open end-face fits
+    let margin = match eu1::edge(target, fil_eu)? {
+        Some(e) => 1000.0 * edge::tolerance(target, e)?,
+        None => target.tolerance(),
+    };
+    let fit = (most - margin).max(0.0);
+    Ok(Some(fit))
+}
+
 /// The fork's `SmBlendCorner::RadiusReachingSideEdgeEnd` (41a39ec, 54a4ee7): whether the
 /// rail at the fillet's radius runs past the far end P of the side edge of `side_eu` (away
 /// from the corner's vertex), and the radius at which the rail reaches P (0 when not).
+///
+/// Not the fork's (#21938): where P itself lies on the fillet's other face G (topologically
+/// or within G's zone tolerance), the side edge starts and ends on G; the rail misses it
+/// when the largest ball touching F along the side edge and G ([`max_ball_over_side_edge`])
+/// stays below the round's radius, instead of treating P's floating-point distance to G as
+/// a near-zero root.
 ///
 /// # Errors
 /// `SM_ERR_NULL_POINTER` without side edge or far vertex; those of `ball_touching_at`.
@@ -739,16 +848,31 @@ fn radius_reaching_side_edge_end(
         edge::start_vertex(target, side_edge)?
     }
     .ok_or_else(|| edge_without_vertex(side_edge))?;
-    let (on, within, fit) = ball_touching_at(
-        k,
-        target,
-        solvers,
-        fil_eu,
-        side_eu,
-        other_face,
-        vertex::point(target, far)?,
-    )?;
-    let past = !on && within;
+    // A closed side edge has no separate far end.
+    if Some(far) == corner.vertex {
+        return Ok((false, 0.0));
+    }
+    let far_on_g = vertex::faces(target, far)?.contains(&other_face);
+    let (on, within, fit) = if far_on_g {
+        (true, false, 0.0)
+    } else {
+        ball_touching_at(
+            k,
+            target,
+            solvers,
+            fil_eu,
+            side_eu,
+            other_face,
+            vertex::point(target, far)?,
+        )?
+    };
+    if on {
+        return match max_ball_over_side_edge(k, target, solvers, fil_eu, side_eu, other_face)? {
+            Some(fit) => Ok((true, fit)),
+            None => Ok((false, 0.0)),
+        };
+    }
+    let past = within;
     Ok((past, if past { fit } else { 0.0 }))
 }
 
@@ -2969,13 +3093,61 @@ pub fn calc_end_edge_geom(
         // (the TangentRollover corner vertex, recomputed there)
         return Ok(EndEdges::Built);
     } else if !runs_on && !both_miss {
-        // The rail runs past its side edge's far end P onto the faces beyond. Refused,
-        // naming the radius at which the rail reaches P: the ball touching the rail's face
-        // F at P (its centre P offset along F's normal as the solver offsets F) that also
-        // touches the fillet's other face G, the root of dist(centre(rho), G) = rho on
-        // (0, r].
-        return refuse_end_past_side_edge(k, target, corner, solvers, fil_eu, side_eu, other_face)
-            .map(EndEdges::Refused);
+        // The rail runs past its side edge's far end P onto the faces beyond (or misses a
+        // side edge whose far end lies back on G). Refused, naming the largest radius whose
+        // rail still reaches its side edge; when both rails missed their side edges, take
+        // the smaller limit of the two.
+        let mut refusal =
+            refuse_end_past_side_edge(k, target, corner, solvers, fil_eu, side_eu, other_face);
+        if refusal
+            .as_ref()
+            .err()
+            .is_some_and(SolidError::is_unported_or_cancelled)
+        {
+            return refusal.map(EndEdges::Refused);
+        }
+        if misses[0] && misses[1] {
+            let second_fv = if miss_fv == start_fv {
+                end_fv
+            } else {
+                start_fv
+            };
+            let second_record = pseudo.fillet_vertex(second_fv)?;
+            if second_record.point_class() == PointClassType::Edgeuse {
+                if let Some(EntityRef::Edgeuse(second_eu)) = second_record.point_class_object() {
+                    let second_side_faces =
+                        [face_of(target, second_eu)?, radial_face(target, second_eu)?];
+                    let second_other = if second_side_faces.contains(&fil_faces[0]) {
+                        fil_faces[1]
+                    } else {
+                        fil_faces[0]
+                    };
+                    let second_rail = rail_face(fil_faces, second_side_faces);
+                    let second_continues =
+                        end_face_runs_on_past_side_edge(k, target, corner, second_eu, second_rail)?;
+                    if !second_continues {
+                        match refuse_end_past_side_edge(
+                            k,
+                            target,
+                            corner,
+                            solvers,
+                            fil_eu,
+                            second_eu,
+                            second_other,
+                        ) {
+                            Ok(second) => {
+                                if !refusal.as_ref().is_ok_and(|first| first.fit <= second.fit) {
+                                    refusal = Ok(second);
+                                }
+                            }
+                            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                            Err(_) => {}
+                        }
+                    }
+                }
+            }
+        }
+        return refusal.map(EndEdges::Refused);
     }
     Ok(EndEdges::Built)
 }
@@ -3290,5 +3462,63 @@ mod tests {
         assert_eq!(other_rail_end(start, start, end, [true, false]), Some(end));
         assert_eq!(other_rail_end(end, start, end, [true, true]), None);
         assert_eq!(other_rail_end(end, start, end, [false, true]), Some(start));
+    }
+
+    /// SolidCraft #21938: a point on the fillet's other face G with a tiny positive
+    /// floating-point distance to G (within G's zone tolerance) is reported as `on_g` with
+    /// radius 0, not bisected down to `radius * 2^-41`.
+    #[test]
+    fn ball_touching_on_treats_a_point_within_other_face_zone_as_on_g() {
+        use crate::blend::fillet_custom_solver::{OffsetSurface as SolverOffsetSurface, SurfaceId};
+        use crate::blend::fillet_solver::p1::FilletSolver;
+        use crate::topology::{Face, ShellId};
+
+        let k = Kernel::default();
+        let mut target = Brep::new();
+        let g_surface = Surface::from(Plane::from_normal(
+            Point3::new(3.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+        ));
+        let mut g_face = Face::new(ShellId::from_index(0));
+        g_face.surface = Some(g_surface);
+        let other_face = target.add_face_record(g_face).unwrap();
+
+        let f_surface = Surface::from(Cone::new_cylinder_bounded(
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            5.0,
+            0.0,
+            360.0,
+            30.0,
+            false,
+            false,
+            false,
+        ));
+        let offset_f =
+            SolverOffsetSurface::new(&k, -4.0, f_surface, SurfaceId::Free(1), 0).unwrap();
+        let mut fs = FilletSolver::new(1.0e-5, 1.0e-4, 1.0e-4);
+        fs.surfaces[0] = Some(OffsetSurfaceSlot {
+            key: 1,
+            surface: offset_f,
+        });
+
+        // A point on the cylinder shifted by 1e-15 off G (x = 3): within G's zone tolerance,
+        // so `ball_touching_on` must report `on_g = true, rho = 0.0` rather than bisecting to
+        // `4.0 * 2^-41`.
+        let p_on_g = Point3::new(3.0 - 1.0e-15, 4.0, 0.0);
+        let (on_g, _within, rho) =
+            ball_touching_on(&k, &target, &fs, 0, other_face, p_on_g, None).unwrap();
+        assert!(on_g, "expected on_g = true, got rho = {rho}");
+        assert_eq!(rho, 0.0);
+
+        // A point genuinely away from G on the cylinder's back (-5, 0, 0) solves to rho = 4.0
+        // (centre (-1, 0, 0) is distance 4 from x = 3).
+        let p_mid = Point3::new(-5.0, 0.0, 0.0);
+        let (on_g_mid, within_mid, rho_mid) =
+            ball_touching_on(&k, &target, &fs, 0, other_face, p_mid, Some(5.0)).unwrap();
+        assert!(!on_g_mid);
+        assert!(within_mid);
+        assert!((rho_mid - 4.0).abs() < 1e-9, "got {rho_mid}");
     }
 }

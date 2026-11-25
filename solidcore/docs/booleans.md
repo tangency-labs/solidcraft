@@ -144,8 +144,16 @@ until one classifies uniquely. Each test is `query::edge::radial_sector_classify
 edge) are compared, and when any two are within 10° the faces are stepped off the edge at growing
 distances (the two edges' tolerances, twice that, then growing with how fast the step-off points
 separate) until the sector test is unambiguous. This is the radial-edge form of Mäntylä's
-neighbourhood classification [4, 6]. The sector's region gives the class: `region_keep` reads its
-void flag.
+neighbourhood classification [4, 6]. One thing differs from upstream. A point where every
+candidate classifies from the binormals at the edge (all three at least 10° apart) is looked for
+first, in the same order of points, and the faces are stepped off only where the edge has none
+(`radial_sector_classify_at_edge`, `query/edge.rs`): near tangent, the steps read the faces where
+they part, and a stretch of face within the tolerance of the other can lead them past the face to
+where the surfaces cross back. Where two equal holes cross a hair off each other's axes, an edge
+round the tip of one hole's lens in the other's wall has its midpoint in a neck 0.018 mm wide, the
+walls within 1e-5 of each other, and read there the face lying in the material was put in the
+holes' space; a point nearer the edge's ends, where the walls cross at a clear angle (36° at the
+ends), decides at the edge. The sector's region gives the class: `region_keep` reads its void flag.
 
 A sector whose faces coincide is the coincident case of §5.
 
@@ -382,12 +390,19 @@ and a boss overhanging a cut ball's rim by as much is dropped by the union.
 The sites move to the rule one at a time (§10, "The coincidence rule in migration"). Reading it:
 - the side test of an edge use (`is_edgeuse_side_in_surface`, `topology/edgeuse/p2.rs`; the
   check's Loop test 2): a sample of the edge, dropped onto the surface, lies on a non-periodic
-  side of the surface's domain within the coincidence tolerance of the surface with itself
-  (its zone tolerance, at least the contact tolerance), where upstream took twice the zone
-  tolerance. A notch twice the zone tolerance deep has edges, where its walls meet the
-  faces across it, that leave the side square to it; at the intersection tolerance every
-  point of them lay on it, across the side's direction, and the check refused the body
-  (`solidcore-ops` `heal.rs`, `a_block_notched_twice_the_tolerance_deep_is_valid`);
+  side of the surface's domain within the larger of the surface's zone tolerance and the
+  edge's tolerance (`zone_reach_3d`), where upstream took twice the zone tolerance. The edge
+  and its face are one body's, held to the tolerances it states, so those decide: the contact
+  tolerance, which keeps a contact between two operands' curves and their coincidence in
+  agreement, is no floor here. The edge's tolerance counts up to the contact tolerance, the
+  band this site read before, so no body that band took is refused. A notch twice the zone
+  tolerance deep has edges, where its walls meet the faces across it, that leave the side
+  square to it; at the intersection tolerance every point of them lay on it, across the
+  side's direction, and the check refused the body (`solidcore-ops` `heal.rs`,
+  `a_block_notched_twice_the_tolerance_deep_is_valid`). With the contact tolerance as a
+  floor, a face and edges held to 1e-7 with an edge 1.17e-6 inside the face's domain side,
+  running along it the other way (the floor of a U whose base is that thin), were refused
+  the same way (#17689; `a_u_whose_base_is_well_past_a_tight_tolerance_thick_is_valid`);
 - two points one proto vertex (`find_proto_vertex_within` and `DeclaredContact::overlaps`,
   `proto_topology/p1/proto.rs`; "One point or two" below): two points, or their uncertainty
   regions, are one within the larger of their tolerances (radii), where upstream took their
@@ -398,12 +413,41 @@ The sites move to the rule one at a time (§10, "The coincidence rule in migrati
 - a point of a curve on the vertex where a seam ends on a boundary of material (the seam stretch
   of `edge_solutions`, `intersect/curve_class/p9.rs`; "Seams and poles" below), with the proto
   vertices: within the larger tolerance, not the band of both.
+- When two source edges produce overlapping proto edges, `resolve_overlapping_proto_edges`
+  (`topology/proto_topology/p3.rs`) compares their curves over the trimmed intervals.
+  For this search, each edge's zone is capped at its owning B-rep's tolerance, with the
+  manager's effective tolerance as a floor and as the bound for an unresolved owner.
+  Earlier vertex merges can raise an edge's zone, so those raises must not decide a new
+  shared interval. `coincidence_reach_3d` includes model contact and rounding at the trimmed
+  curves' scale. Both faces then classify the first edge's curve with its true zone
+  tolerance, using the manager's tolerance as a lower bound.
+- The ordinary curve/edge classifier can prove an entire curve clear of a boundary even
+  inside the intersection search band. The semi-axis radii bound every point on an ellipse.
+  Projecting a positive-weight B-spline's control hull onto the normal of an ellipse's
+  plane bounds every point on the spline. A surface–surface intersection also lies on
+  both of its defining surfaces. If either surface is provably clear of the trim, the
+  intersection is clear of it too. A gap past the local coincidence reach rules out a
+  shared edge. This prevents two concentric circles from sharing only part of their
+  circumference when their actual separation is constant.
+- A seam can end on a smooth closed material edge at a vertex that marks the start of the
+  edge's parameter interval. Before ruling out a snap to that vertex, the classifier
+  checks both the vertex and its complete material edge. An oblique cut can cross the
+  edge elsewhere even though it misses the vertex. When both are proved clear, the
+  curve intersector keeps its transverse crossing at the solved parameter.
+  Where several material edges meet, their crossing regions still determine how a corner
+  participates in the Boolean. A vertex without a complete material edge proved clear
+  retains the existing tolerant classification. Explicit gap repairs retain their allowance.
+- On a planar face, the control points of a rational circular arc can lie outside the
+  face's parameter domain even when the complete circle lies inside it. Rotating a
+  cylinder's seam moves these controls. If the projected ellipse fits within both
+  parameter bounds, the face keeps its exact rational trim. Its annular area then
+  agrees with the two spatial boundary circles at every seam orientation.
 
 Still on the intersection tolerance:
-- an intersection curve along an edge (`edge_solutions`, `intersect/curve_class/p9.rs`): a
-  curve the intersector finds within the two zone tolerances' sum of an edge, all along it,
-  runs along the edge, so the groove's floor is taken for the block's edge and the groove is
-  lost;
+- an intersection curve along an edge (`edge_solutions`, `intersect/curve_class/p9.rs`).
+  Where the curve/edge classifier lacks a separation proof, a curve that stays within the
+  sum of the two zone tolerances can be classified along the edge. For a rectangular groove
+  this still puts the groove's floor on the edge of the block and loses the groove.
 - a vertex of one operand on a line edge of the other (`split_edges_at_vertices`,
   `topology_intersector/p2.rs`), the two vertices of a pair that a proto vertex relates
   (`find_or_create_proto_vertex_crossing`, `proto_topology/p3.rs`) and the combine radius of
@@ -477,6 +521,15 @@ its arcs, which reaches the corner: one point, the box and the sphere meeting th
 along a slab's edge at 5° and a rod/round curve across it at 40° end 9.3e-5 apart at 1e-5: one
 point (1e-5 / sin 5° = 1.1e-4). The two crossings of the sphere's circles by the box edge, 1.5e-4
 apart, are crossed at sines of 0.26 and more: 3.9e-5 each, two points.
+
+For a chart vertex on a smooth closed material edge, overlapping crossing regions can
+reach the old rim even when the new intersection lies on a different face. During lookup
+and coalescence the Boolean checks the fixed vertex and its whole material rim against
+the opposite operand's defining plane, sphere or cylinder. If both are proved farther
+than the local coincidence reach, the two crossings retain separate vertices. A coaxial
+cylinder can thereby be distinguished from an older circular rim, while a plane that
+actually crosses the rim can still meet it near the seam. The check uses the face recorded
+by the classification and preserves the allowance for raised local tolerances.
 
 Two points farther apart than that are one only where a rule proves them one contact point, and the
 rule declares it before any proto vertex of a face pair is made (`DeclaredContact`,
@@ -934,9 +987,10 @@ A reviewer can check each of these on a change to the boolean.
 - A curve the marching intersection traces inside a lens of two circles in contact, from the
   touch to a crossing along both edges (a boss 5e-8 past a rim at a zone tolerance of 1e-7),
   is kept as a curve; the contact makes it no event (§6).
-- The coincidence rule in migration (§5, "The coincidence rule"): the side test of an edge use,
-  the proto vertices (`find_proto_vertex_within`, `DeclaredContact::overlaps`) and a seam's end
-  vertex in the seam stretch of `edge_solutions` read `coincidence_tol_3d`; the intersection
+- The coincidence rule in migration (§5, "The coincidence rule"): the side test of an edge use
+  reads `zone_reach_3d` (the body's own tolerances, no contact floor); the proto vertices
+  (`find_proto_vertex_within`, `DeclaredContact::overlaps`) and a seam's end vertex in the
+  seam stretch of `edge_solutions` read `coincidence_tol_3d`; the intersection
   curve along an edge (`edge_solutions`), a vertex on a line edge (`split_edges_at_vertices`),
   the vertex pair of a proto vertex, the exactly placed combine radius, the interval along an
   edge (`classify_edge_interval`), the
