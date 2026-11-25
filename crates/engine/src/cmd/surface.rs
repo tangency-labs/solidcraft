@@ -666,7 +666,8 @@ fn midsurface_input(s: &Session, p: &Value, cmd: &str) -> Result<MidsurfaceInput
     };
     let max = match &max_given {
         Some((_, v)) => *v,
-        None => match mid::suggested_max_thickness(&body).map_err(|e| bad(cmd, e.to_string()))? {
+        // The suggestion is probed from the minimum given, so it lies past it.
+        None => match mid::suggested_max_thickness(&body, min).map_err(|e| bad(cmd, e.to_string()))? {
             Some(v) => v,
             // Nothing confident at any shell-like thickness: look as far as a fifth of the body.
             None => mid::probe_max_thickness(&body),

@@ -4239,10 +4239,16 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
             }
             let base = f.body_names.first().map(|n| n.trim()).filter(|n| !n.is_empty());
             match base {
+                // A sheet is named by its stored name, `base (k)`, or a numbered `BodyN` when its
+                // stored name is taken (`new_name`): each of those placements is read.
                 Some(base) => doc
                     .body_offsets
                     .iter()
-                    .filter(|(name, _)| f.body_names.contains(name) || name.strip_prefix(base).is_some_and(|rest| rest.starts_with(" (")))
+                    .filter(|(name, _)| {
+                        f.body_names.contains(name)
+                            || name.strip_prefix(base).is_some_and(|rest| rest.starts_with(" ("))
+                            || crate::is_counted_body_name(name)
+                    })
                     .for_each(|entry| serde_json::to_string(&entry).unwrap_or_default().hash(&mut h)),
                 // Numbered `BodyN` sheets: any body's placement may be one of theirs.
                 None => serde_json::to_string(&doc.body_offsets).unwrap_or_default().hash(&mut h),

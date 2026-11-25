@@ -1543,9 +1543,15 @@ pub fn probe_max_thickness(body: &Body) -> f64 {
 
 /// The limit to use when none is given: probe the body with a generous limit (a fifth of its
 /// size, past which no wall is shell-like at the default aspect) and take the thickest confident
-/// cluster's suggestion. `None` when the probe finds no confident pair.
-pub fn suggested_max_thickness(body: &Body) -> Result<Option<f64>> {
-    let probe = Options { max_thickness: probe_max_thickness(body), ..Options::default() };
+/// cluster's suggestion. The probe takes no wall thinner than `min_thickness`, the minimum the
+/// scan will use, so every cluster is at least that thick and its suggestion lies past it. `None`
+/// when the probe finds no confident pair, or the minimum is past the probe's limit.
+pub fn suggested_max_thickness(body: &Body, min_thickness: f64) -> Result<Option<f64>> {
+    let max_thickness = probe_max_thickness(body);
+    if !(min_thickness.is_finite() && min_thickness < max_thickness) {
+        return Ok(None);
+    }
+    let probe = Options { min_thickness: min_thickness.max(0.0), max_thickness, ..Options::default() };
     let a = analyze(body, &probe)?;
     Ok(thickness_clusters(&a).last().map(|c| c.suggested_limit))
 }
@@ -2207,8 +2213,15 @@ mod tests {
         assert!((c[1].thickness - 4.0).abs() < 1e-9 && (c[1].area - 7400.0).abs() < 1e-6 && c[1].pairs == 4, "{c:?}");
         assert!((c[0].suggested_limit - 3.5).abs() < 1e-9 && (c[1].suggested_limit - 6.0).abs() < 1e-9, "{c:?}");
         // The beam is 40 x 60 x 100: a fifth of its size is past 4, so the probe sees both.
-        let max = suggested_max_thickness(&i_beam()).unwrap();
+        let max = suggested_max_thickness(&i_beam(), 0.0).unwrap();
         assert!(max.is_some_and(|m| (m - 6.0).abs() < 1e-9), "{max:?}");
+        // A minimum of 3.5 leaves the web (3) out of the probe: the flanges alone, still 6.
+        let max = suggested_max_thickness(&i_beam(), 3.5).unwrap();
+        assert!(max.is_some_and(|m| (m - 6.0).abs() < 1e-9), "{max:?}");
+        // A minimum of 7 is past the flanges' 6: no wall is that thick, so nothing is suggested,
+        // where a probe from 0 offered 6, a limit below the minimum the scan would refuse.
+        let max = suggested_max_thickness(&i_beam(), 7.0).unwrap();
+        assert_eq!(max, None);
     }
 
     #[test]

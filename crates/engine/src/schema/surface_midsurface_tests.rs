@@ -205,6 +205,58 @@ fn a_placed_plates_midsurface_is_where_the_plate_is() {
     assert_eq!(s.doc.features.len(), before);
 }
 
+/// With no `max_thickness`, the limit suggested lies past the `min_thickness` given. A plate 2
+/// thick suggests 2 x 1.5 = 3 when probed from 0; with a minimum of 3.5 the probe takes no wall
+/// under 3.5 and finds none, so the scan looks as far as a fifth of the plate's size (more than
+/// 3.5) and is not refused for a limit below its minimum.
+#[test]
+fn a_suggested_limit_lies_past_the_minimum_given() {
+    let mut s = plate(ParamCheck::Off);
+    let reply = s.execute("surface.midsurface_analyze", &json!({"body": "Plate"})).unwrap_or_else(|e| panic!("{e}"));
+    let limit = reply.get("max_thickness").and_then(Value::as_f64);
+    assert!(limit.is_some_and(|m| (m - 3.0).abs() < 1e-9), "{reply}");
+    let reply = s.execute("surface.midsurface_analyze", &json!({"body": "Plate", "min_thickness": "3.5 mm"})).unwrap_or_else(|e| panic!("{e}"));
+    let limit = reply.get("max_thickness").and_then(Value::as_f64);
+    assert!(limit.is_some_and(|m| m > 3.5), "{reply}");
+}
+
+/// A sheet whose stored name another body holds is numbered `BodyN` instead. Built from a plate
+/// placed 100 along x, it first takes the plate's placement; given a placement of its own (0 along
+/// x, 50 up), it is built again in the plate's frame and placed by that alone, so it spans the
+/// plate's 0..40 in x again, not 100..140 from a cached sheet that still holds the plate's 100.
+#[test]
+fn a_numbered_sheets_own_placement_builds_it_again() {
+    use solidcore_record::Vec3;
+    use solidcraft_geom::MeshGeom;
+    let mut s = Session::default();
+    s.execute("component.create", &json!({"name": "Part", "grounded": false})).unwrap_or_else(|e| panic!("{e}"));
+    s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 2, "body_name": "Plate"})).unwrap_or_else(|e| panic!("{e}"));
+    s.doc_mut().body_offsets.insert("Plate".into(), solidcraft_doc::rigid(Vec3::new(100.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+    s.refresh();
+    s.execute("surface.midsurface", &json!({"body": "Plate", "max_thickness": "5 mm"})).unwrap_or_else(|e| panic!("{e}"));
+    // The stored name is now one the plate holds: the sheet falls back to a numbered name.
+    let id = s.doc.features.last().map(|f| f.id).unwrap_or_else(|| panic!("no feature"));
+    if let Some(f) = s.doc_mut().features.last_mut() {
+        f.body_names = vec!["Plate".into()];
+    }
+    s.refresh();
+    let name = s.model.state().bodies.iter().find(|b| b.feature == id).map(|b| b.name.clone()).unwrap_or_else(|| panic!("no sheet"));
+    assert!(solidcraft_doc::is_counted_body_name(&name), "{name}");
+    let bounds = |s: &Session, n: &str| {
+        let world = s.world_state().unwrap();
+        world.bodies.iter().find(|b| b.definition_name() == n).map(|b| b.mesh().bounds()).unwrap_or_else(|| panic!("{n}"))
+    };
+    let (plate, placed) = (bounds(&s, "Plate"), bounds(&s, &name));
+    assert!((placed.min.x - plate.min.x).abs() < 1e-6 && (placed.max.x - plate.max.x).abs() < 1e-6, "{placed:?} against {plate:?}");
+    s.doc_mut().body_offsets.insert(name.clone(), solidcraft_doc::rigid(Vec3::new(0.0, 0.0, 50.0), Vec3::ZERO, Vec3::Z, 0.0));
+    s.refresh();
+    let own = bounds(&s, &name);
+    let mid_z = 0.5 * (plate.min.z + plate.max.z);
+    for (got, want) in [(own.min.x, plate.min.x - 100.0), (own.max.x, plate.max.x - 100.0), (own.min.z, mid_z + 50.0)] {
+        assert!((got - want).abs() < 1e-6, "{own:?} against {plate:?}");
+    }
+}
+
 #[test]
 fn replies_match_the_output_schemas() {
     let check = |schema: schemars::Schema, reply: &Value| {
