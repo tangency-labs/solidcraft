@@ -360,10 +360,11 @@ fn rejects_malformed_and_wrong_root_documents() {
 
 #[test]
 fn a_board_over_the_old_token_cap_but_under_the_size_cap_is_read() {
-    // 4 tokens per `(zz 1)`: just over 2 000 000 tokens in about 3 MB, far below the size cap.
+    // 4 tokens per indented `(zz 1)` line, as KiCad writes them: just over 2 000 000 tokens in
+    // about 4.5 MB, far below the size cap.
     let mut board = String::from("(kicad_pcb (general (thickness 1.6))\n");
     for _ in 0..500_100 {
-        board.push_str("(zz 1)\n");
+        board.push_str("\t\t(zz 1)\n");
     }
     board.push(')');
     assert!(board.len() < MAX_KICAD_BYTES);

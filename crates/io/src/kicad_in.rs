@@ -3736,10 +3736,11 @@ fn numbers_but(expr: &Expr<'_>, minimum: usize, skip: &str) -> std::result::Resu
     Ok(values)
 }
 
-/// The most tokens a board of `len` bytes may hold: one per two bytes, the densest a real file gets
-/// (a token is at least one byte and consecutive atoms are separated by a byte), so a file under
-/// `MAX_KICAD_BYTES` is never refused for its token count alone. The size cap bounds the memory:
-/// at most `MAX_KICAD_BYTES / 2` tokens.
+/// The most tokens a board of `len` bytes may hold: one per two bytes, with `MIN_TOKEN_CAP` as the
+/// floor. KiCad indents every line, so a real board has well over two bytes per token (about 2.5 at
+/// the densest); a board under `MAX_KICAD_BYTES` is therefore not refused for its token count, and
+/// only denser input (a run of bare parentheses is one token per byte) is. The size cap bounds the
+/// memory: at most `MAX_KICAD_BYTES / 2` tokens.
 fn token_cap(len: usize) -> usize {
     MIN_TOKEN_CAP.max(len / 2)
 }
