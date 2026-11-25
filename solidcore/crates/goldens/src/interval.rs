@@ -25,11 +25,6 @@ impl Iv {
         Self { lo: x, hi: x }
     }
 
-    /// `[x - e, x + e]`, rounded outward.
-    pub fn around(x: f64, e: f64) -> Self {
-        Self::out(x - e, x + e)
-    }
-
     fn out(lo: f64, hi: f64) -> Self {
         Self {
             lo: lo.next_down(),
@@ -92,11 +87,6 @@ impl Iv {
         } else {
             self.lo.abs().min(self.hi.abs())
         }
-    }
-
-    /// Whether `x` lies in the interval.
-    pub fn contains(self, x: f64) -> bool {
-        self.lo <= x && x <= self.hi
     }
 }
 

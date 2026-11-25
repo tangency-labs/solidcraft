@@ -44,7 +44,6 @@ use solidcore::blend::fillet_geom::p1::{
 };
 use solidcore::blend::fillet_solver::p1::{
     FilletExecutiveRef, FilletSolver, FilletSolverOps, FilletSurfaceGenerator, OffsetSurfaceSlot,
-    RailUvCurveIntersectEnfo,
 };
 use solidcore::blend::fillet_solver::p2::SolverErrorObject;
 use solidcore::curve::curve::Curve;
