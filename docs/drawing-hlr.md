@@ -7,7 +7,8 @@ investigation ([#2105][w05-issue], [draft #2106][w05-pr], [findings][findings])
 showed to be ready into code: exact orthographic hidden lines for placed bodies whose
 faces are planes, cylinders, cones, spheres or tori.
 
-The code is `crates/geom/src/hlr` (layer L0). It reads the neutral `geom::brep`
+The code is solidcore's (`solidcore_ops::hlr`); the application reaches it through the kernel
+adapter, `crates/kernel/src/hlr.rs` (`solidcraft_kernel::hlr`). It reads the neutral `geom::brep`
 records, uses no kernel or UI types, returns errors instead of panicking and builds for
 `wasm32-unknown-unknown`. It does not register commands, create views, extract bodies
 from the kernel or draw sections. The read-only kernel adapter follows the W02
@@ -212,7 +213,7 @@ Other limits:
 
 ## Fixtures
 
-`crates/geom/src/hlr_tests.rs` builds bodies from records and checks analytic positions
+`solidcore/crates/solidcore/src/hlr/tests.rs` builds kernel bodies and checks analytic positions
 and intervals:
 
 - a cube in an isometric view hides its three back edges; a box in front hides the

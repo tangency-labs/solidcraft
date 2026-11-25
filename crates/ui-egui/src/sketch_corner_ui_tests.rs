@@ -1149,3 +1149,435 @@ fn an_ellipse_axis_end_is_no_corner_to_pick() {
         assert_eq!(crate::sketch_tools::corner_curves(sk, pi, arcs_ok), None, "the axis and the line are no corner (arcs_ok {arcs_ok})");
     }
 }
+
+/// A corner where a conic or a control point spline meets a line is one the Fillet tool offers
+/// (#9178), and one the Chamfer tool does not: chamfers stay on lines. A fit point spline's
+/// corner is offered to neither (fillets do not take it yet).
+#[test]
+fn a_conic_or_spline_corner_is_offered_to_fillet_only() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[10,0]],"ids":["base"],"connect":false})).unwrap();
+    h.app.run("sketch.conic", json!({"start":"base.end","apex":[20,5],"end":[20,10],"rho":0.5})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,20],[10,20]],"ids":["top"],"connect":false})).unwrap();
+    h.app.run("sketch.spline.control_point", json!({"points":["top.end",[15,25],[20,24],[25,30]]})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,40],[10,40]],"ids":["fit"],"connect":false})).unwrap();
+    h.app.run("sketch.spline.fit_point", json!({"points":["fit.end",[15,45],[20,44],[25,50]]})).unwrap();
+    let st = h.app.session.model.state();
+    let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    for corner in ["base.end", "top.end"] {
+        let pi = sk.resolve_point(corner).unwrap();
+        assert!(crate::sketch_tools::corner_curves(sk, pi, true).is_some(), "{corner} is a corner a fillet rounds");
+        assert_eq!(crate::sketch_tools::corner_curves(sk, pi, false), None, "{corner} is no corner a chamfer cuts");
+    }
+    let pi = sk.resolve_point("fit.end").unwrap();
+    assert_eq!(crate::sketch_tools::corner_curves(sk, pi, true), None, "a fit point spline corner is not offered");
+}
+
+/// A sketch on XY with a horizontal line `base` (y = 0, x 0 to 60) and a vertical line `side`
+/// (x = 50, y -10 to 40), both fixed, and the drawing tool `tool` clicked at each of `clicks`.
+/// Returns the sketch as the clicks left it.
+fn rectangle_clicked_on_lines(tool: &str, clicks: &[[i32; 3]]) -> solidcraft_engine::sketch::Sketch {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[60,0]],"ids":["base"]})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[50,-10],[50,40]],"ids":["side"]})).unwrap();
+    for line in ["base", "side"] {
+        h.app.run("sketch.constraint.fix", json!({"entity":line})).unwrap();
+    }
+    h.step(&json!({"call":"ui.view","params":{"view":"fit"}})).unwrap();
+    h.settle();
+    h.step(&json!({"start":tool})).unwrap();
+    for at in clicks {
+        h.step(&json!({"move":{"world":at}})).unwrap();
+        h.step(&json!({"click":{"world":at}})).unwrap();
+    }
+    let sid = h.app.session.active_sketch.unwrap();
+    h.app.session.model.state().sketch(sid).unwrap().sketch.clone()
+}
+
+/// The points of `sk` held on curve `id` by a Coincident (point on curve), where they are (as
+/// clicked: within what a pixel of the view is in the sketch).
+fn held_on(sk: &solidcraft_engine::sketch::Sketch, id: &str) -> Vec<Vec2> {
+    let curve = sk.curve_index(id).unwrap();
+    sk.constraints
+        .iter()
+        .filter_map(|k| match k.kind {
+            solidcraft_engine::sketch::ConstraintKind::PointOnCurve { p, c } if c == curve => sk.point(p),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A 2-Point Rectangle corner clicked on a line shows the "On" snap and is kept on that line, as
+/// a Line's point clicked there is: the first corner, and the second one too.
+#[test]
+fn a_two_point_rectangle_corner_clicked_on_a_line_stays_on_it() {
+    let line = rectangle_clicked_on_lines("sketch.line", &[[20, 0, 0], [30, 25, 0]]);
+    assert_eq!(held_on(&line, "base").len(), 1, "the Line's point on the line: {:?}", line.constraints);
+
+    let first = rectangle_clicked_on_lines("sketch.rectangle.two_point", &[[20, 0, 0], [40, 25, 0]]);
+    let on_base = held_on(&first, "base");
+    assert_eq!(on_base.len(), 1, "the first corner on the line: {:?}", first.constraints);
+    assert!(on_base[0].dist(Vec2::new(20.0, 0.0)) < 1e-3, "{on_base:?}");
+    assert!(held_on(&first, "side").is_empty(), "the second corner was clicked off the lines: {:?}", first.constraints);
+
+    let both = rectangle_clicked_on_lines("sketch.rectangle.two_point", &[[20, 0, 0], [50, 25, 0]]);
+    assert_eq!(held_on(&both, "base").len(), 1, "the first corner on the line: {:?}", both.constraints);
+    let on_side = held_on(&both, "side");
+    assert_eq!(on_side.len(), 1, "the second corner on the other line: {:?}", both.constraints);
+    assert!(on_side[0].dist(Vec2::new(50.0, 25.0)) < 1e-3, "{on_side:?}");
+}
+
+/// A Center Rectangle's centre and its corner, each clicked on a line, are kept on those lines.
+#[test]
+fn a_center_rectangle_clicked_on_lines_stays_on_them() {
+    let sk = rectangle_clicked_on_lines("sketch.rectangle.center", &[[20, 0, 0], [50, 12, 0]]);
+    let on_base = held_on(&sk, "base");
+    assert_eq!(on_base.len(), 1, "the centre on the line: {:?}", sk.constraints);
+    assert!(on_base[0].dist(Vec2::new(20.0, 0.0)) < 1e-3, "{on_base:?}");
+    let on_side = held_on(&sk, "side");
+    assert_eq!(on_side.len(), 1, "the corner on the other line: {:?}", sk.constraints);
+    assert!(on_side[0].dist(Vec2::new(50.0, 12.0)) < 1e-3, "{on_side:?}");
+}
+
+/// A drawing left open while a model sketch is drawn in Design: the rectangle's corner clicked on
+/// a line is kept on it, as with no drawing open.
+#[test]
+fn a_rectangle_corner_clicked_on_a_line_stays_on_it_with_a_drawing_open() {
+    let mut h = crate::scenario::Harness::new();
+    // A body away from the sketch, for the drawing to show.
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 5, "corner": [200, 200, -50]})).unwrap();
+    h.app.run("drawing.create", json!({})).unwrap();
+    h.app.ui.tab = "MODEL".into();
+    // Setup only: drawing.create focuses the new Sheet view, and a sketch drawn in the Model view
+    // takes input only while that view is focused; the drawing stays open in its Sheet view.
+    let model = h.app.docs.views.views().iter().find(|view| view.kind == solidcraft_views::ViewKind::Model).unwrap().id;
+    assert!(crate::documents::view_activate(&mut h.app, model));
+    h.settle();
+    assert!(h.app.session.open_drawing.is_some());
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[60,0]],"ids":["base"]})).unwrap();
+    h.app.run("sketch.constraint.fix", json!({"entity":"base"})).unwrap();
+    h.step(&json!({"call":"ui.view","params":{"view":"fit"}})).unwrap();
+    h.settle();
+    assert!(!h.app.session.sheet_sketching());
+    h.step(&json!({"start":"sketch.rectangle.two_point"})).unwrap();
+    for at in [[20, 0, 0], [40, 25, 0]] {
+        h.step(&json!({"move":{"world":at}})).unwrap();
+        h.step(&json!({"click":{"world":at}})).unwrap();
+    }
+    let sid = h.app.session.active_sketch.unwrap();
+    let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
+    let on_base = held_on(&sk, "base");
+    assert_eq!(on_base.len(), 1, "the first corner on the line: {:?}", sk.constraints);
+    assert!(on_base[0].dist(Vec2::new(20.0, 0.0)) < 1e-3, "{on_base:?}");
+}
+
+/// A 2-Point Rectangle corner clicked on a line's midpoint is held at that midpoint.
+#[test]
+fn a_two_point_rectangle_corner_clicked_on_a_midpoint_is_held_there() {
+    let sk = rectangle_clicked_on_lines("sketch.rectangle.two_point", &[[30, 0, 0], [40, 25, 0]]);
+    let base = sk.curve_index("base").unwrap();
+    let held: Vec<usize> = sk
+        .constraints
+        .iter()
+        .filter_map(|k| match k.kind {
+            solidcraft_engine::sketch::ConstraintKind::Midpoint { p, l } if l == base => Some(p),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(held.len(), 1, "one MidPoint constraint on the line: {:?}", sk.constraints);
+    // The point held there is the rectangle's corner: an end of two of its sides.
+    let sides = sk.curves.iter().enumerate().filter(|(i, c)| *i != base && c.kind.point_ids().contains(&held[0])).count();
+    assert_eq!(sides, 2, "the held point is a corner of the rectangle: {:?}", sk.curves);
+    assert!(sk.point(held[0]).is_some_and(|at| at.dist(Vec2::new(30.0, 0.0)) < 1e-3));
+}
+
+/// #18756 as reported: a sketch on a box's top face with the face's edges projected, and a 2-Point
+/// Rectangle whose first click is on a projected edge. The corner is kept on that edge.
+#[test]
+fn a_two_point_rectangle_corner_clicked_on_a_projected_edge_stays_on_it() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length":60,"width":40,"height":10})).unwrap();
+    h.app.run("sketch.create", json!({"plane":{"face":[30,20,10]},"project_edges":true})).unwrap();
+    h.step(&json!({"call":"ui.view","params":{"view":"fit"}})).unwrap();
+    h.settle();
+    h.step(&json!({"start":"sketch.rectangle.two_point"})).unwrap();
+    for at in [[20, 0, 10], [45, 25, 10]] {
+        h.step(&json!({"move":{"world":at}})).unwrap();
+        h.step(&json!({"click":{"world":at}})).unwrap();
+    }
+    let sid = h.app.session.active_sketch.unwrap();
+    let state = h.app.session.model.state();
+    let ss = state.sketch(sid).unwrap();
+    let sk = &ss.sketch;
+    let held: Vec<Vec2> = sk
+        .constraints
+        .iter()
+        .filter_map(|k| match k.kind {
+            solidcraft_engine::sketch::ConstraintKind::PointOnCurve { p, c } if sk.is_linked_curve(c) => sk.point(p),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(held.len(), 1, "the corner on the projected edge: {:?}", sk.constraints);
+    assert!(held[0].dist(Vec2::new(20.0, 0.0)) < 1e-3, "{held:?}");
+    assert!(ss.report.ok());
+    assert_eq!(ss.report.dof, 3, "along the edge, width and height");
+}
+
+/// A 2-Point Rectangle corner clicked on a body's vertex is joined to that vertex, projected.
+#[test]
+fn a_two_point_rectangle_corner_clicked_on_a_body_vertex_is_joined_to_it() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length":60,"width":40,"height":10})).unwrap();
+    h.app.run("sketch.create", json!({"plane":{"face":[30,20,10]},"project_edges":false})).unwrap();
+    // A point level with the vertex. A click snapped to a body vertex takes no level or plumb
+    // alignment (the vertex snap comes first), so nothing is aligned to the projected vertex in
+    // place of the corner.
+    h.app.run("sketch.point", json!({"point":[20,0]})).unwrap();
+    h.step(&json!({"call":"ui.view","params":{"view":"fit"}})).unwrap();
+    h.settle();
+    h.step(&json!({"start":"sketch.rectangle.two_point"})).unwrap();
+    for at in [[60, 0, 10], [40, 20, 10]] {
+        h.step(&json!({"move":{"world":at}})).unwrap();
+        h.step(&json!({"click":{"world":at}})).unwrap();
+    }
+    let sid = h.app.session.active_sketch.unwrap();
+    let state = h.app.session.model.state();
+    let ss = state.sketch(sid).unwrap();
+    let sk = &ss.sketch;
+    let joined = sk.constraints.iter().filter(|k| matches!(k.kind, solidcraft_engine::sketch::ConstraintKind::Coincident { .. })).count();
+    assert_eq!(joined, 1, "the corner joined to the projected vertex: {:?}", sk.constraints);
+    let aligned = sk.constraints.iter().any(|k| {
+        matches!(
+            k.kind,
+            solidcraft_engine::sketch::ConstraintKind::HorizontalPoints { .. } | solidcraft_engine::sketch::ConstraintKind::VerticalPoints { .. }
+        )
+    });
+    assert!(!aligned, "no alignment was added for the vertex click: {:?}", sk.constraints);
+    assert!(ss.report.ok());
+    assert_eq!(ss.report.dof, 4, "width and height, and the free point");
+}
+
+/// With the snap suppress modifier held (Alt by default), a rectangle corner clicked over a line
+/// takes no snap and is not tied to the line.
+#[test]
+fn a_rectangle_corner_clicked_with_snap_suppressed_is_not_tied() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[60,0]],"ids":["base"]})).unwrap();
+    h.step(&json!({"call":"ui.view","params":{"view":"fit"}})).unwrap();
+    h.settle();
+    h.step(&json!({"start":"sketch.rectangle.two_point"})).unwrap();
+    for at in [[20, 0, 0], [40, 25, 0]] {
+        h.step(&json!({"move":{"world":at},"alt":true})).unwrap();
+        h.step(&json!({"click":{"world":at},"alt":true})).unwrap();
+    }
+    let sid = h.app.session.active_sketch.unwrap();
+    let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
+    assert_eq!(sk.curves.len(), 5, "the rectangle was drawn: {:?}", sk.curves);
+    assert!(held_on(&sk, "base").is_empty(), "{:?}", sk.constraints);
+}
+
+/// A 2-Point Rectangle corner clicked on the crossing of two lines is held on both.
+#[test]
+fn a_two_point_rectangle_corner_clicked_on_a_crossing_is_held_on_both() {
+    let sk = rectangle_clicked_on_lines("sketch.rectangle.two_point", &[[50, 0, 0], [30, 20, 0]]);
+    let (on_base, on_side) = (held_on(&sk, "base"), held_on(&sk, "side"));
+    assert_eq!((on_base.len(), on_side.len()), (1, 1), "{:?}", sk.constraints);
+    assert!(on_base[0].dist(Vec2::new(50.0, 0.0)) < 1e-3 && on_side[0].dist(on_base[0]) < 1e-9, "{on_base:?} {on_side:?}");
+}
+
+/// Typed sizes with a corner held on a line. The size boxes appear after the first click, so the
+/// first corner keeps its snap. The second corner then comes from the typed values, not from the
+/// pointer: with one size typed it takes no snap either, where it is clicked on a line.
+#[test]
+fn typed_sizes_keep_the_first_corner_on_its_line_and_place_the_second() {
+    let drawn = |sizes: &[&str], second: [i32; 3], enter: bool| {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[0,0],[60,0]],"ids":["base"]})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[50,-10],[50,40]],"ids":["side"]})).unwrap();
+        for line in ["base", "side"] {
+            h.app.run("sketch.constraint.fix", json!({"entity":line})).unwrap();
+        }
+        h.step(&json!({"call":"ui.view","params":{"view":"fit"}})).unwrap();
+        h.settle();
+        h.step(&json!({"start":"sketch.rectangle.two_point"})).unwrap();
+        h.step(&json!({"move":{"world":[20, 0, 0]}})).unwrap();
+        h.step(&json!({"click":{"world":[20, 0, 0]}})).unwrap();
+        h.step(&json!({"move":{"world":second}})).unwrap();
+        for (i, size) in sizes.iter().enumerate() {
+            if i > 0 {
+                h.step(&json!({"key":"Tab"})).unwrap();
+            }
+            h.step(&json!({"key":"A","cmd":true})).unwrap();
+            h.step(&json!({"text":size})).unwrap();
+        }
+        if enter {
+            h.step(&json!({"key":"Enter"})).unwrap();
+        } else {
+            h.step(&json!({"click":{"world":second}})).unwrap();
+        }
+        let sid = h.app.session.active_sketch.unwrap();
+        let state = h.app.session.model.state();
+        let ss = state.sketch(sid).unwrap();
+        assert!(ss.report.ok(), "{sizes:?}: {:?}", ss.report);
+        (ss.sketch.clone(), ss.report.dof)
+    };
+    // Both sizes typed: the first corner on the line, both sizes driving, one freedom left.
+    let (sk, dof) = drawn(&["30", "12"], [40, 25, 0], true);
+    assert_eq!(held_on(&sk, "base").len(), 1, "{:?}", sk.constraints);
+    assert_eq!(sk.constraints.iter().filter(|k| k.param.is_some() && !k.driven).count(), 2, "{:?}", sk.constraints);
+    assert_eq!(dof, 1, "along the line");
+    // Only the width typed, the second click on the other line: the corner goes where the typed
+    // width puts it (x = 45, off the line at x = 50), so the click's snap is not used. Without a
+    // typed size the same click is held on that line
+    // (`a_two_point_rectangle_corner_clicked_on_a_line_stays_on_it`).
+    let (sk, _) = drawn(&["25"], [50, 25, 0], false);
+    assert_eq!(held_on(&sk, "base").len(), 1, "{:?}", sk.constraints);
+    assert!(held_on(&sk, "side").is_empty(), "{:?}", sk.constraints);
+    let corner = sk.points.iter().map(|p| p.pos).find(|p| p.dist(Vec2::new(45.0, 25.0)) < 1e-3);
+    assert!(corner.is_some(), "the second corner is 25 mm from the first: {:?}", sk.points.iter().map(|p| p.pos).collect::<Vec<_>>());
+}
+
+/// The Undo button between a rectangle's two clicks can take away the curve the first corner snapped to. The
+/// second click then still draws the rectangle, through the places clicked, and the tool goes on.
+#[test]
+fn a_rectangle_whose_first_corner_lost_its_curve_to_undo_is_still_drawn() {
+    for (tool, lines) in [("sketch.rectangle.two_point", 4), ("sketch.rectangle.center", 6)] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[0,30],[60,30]],"ids":["keep"]})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[0,0],[60,0]],"ids":["base"]})).unwrap();
+        h.step(&json!({"call":"ui.view","params":{"view":"fit"}})).unwrap();
+        h.settle();
+        h.step(&json!({"start":tool})).unwrap();
+        h.step(&json!({"move":{"world":[20, 0, 0]}})).unwrap();
+        h.step(&json!({"click":{"world":[20, 0, 0]}})).unwrap();
+        let first = h.app.tool.as_ref().unwrap().pts.clone();
+        assert!(first.len() == 1 && first[0].1.as_deref().is_some_and(|snap| snap.starts_with("on:base:")), "{tool}: {first:?}");
+        // The Undo button: it runs `edit.undo` and leaves the tool on with its first point (the
+        // Undo key steps the tool itself back first).
+        h.app.run("edit.undo", json!({})).unwrap();
+        h.settle();
+        let sid = h.app.session.active_sketch.unwrap();
+        let gone = h.app.session.model.state().sketch(sid).unwrap().sketch.curve_index("base").is_none();
+        assert!(gone, "{tool}: Undo took the line the corner is on");
+        assert_eq!(h.app.tool.as_ref().map(|t| t.pts.len()), Some(1), "{tool}: the first corner is still placed");
+        h.step(&json!({"move":{"world":[40, 20, 0]}})).unwrap();
+        h.step(&json!({"click":{"world":[40, 20, 0]}})).unwrap();
+        let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
+        assert!(!h.app.status.as_ref().is_some_and(|s| s.2), "{tool}: {:?}", h.app.status);
+        assert_eq!(sk.curves.len(), 1 + lines, "{tool}: the rectangle beside the line that stayed: {:?}", sk.curves);
+        assert!(h.app.tool.as_ref().is_some_and(|t| t.pts.is_empty()), "{tool}: ready for the next rectangle");
+    }
+}
+
+/// A sketch on XY with the lines `keep` (y = 30) and `base` (y = 0), the tool `tool` clicked at
+/// each of `before`, then the Undo button (it runs `edit.undo` and leaves the tool on), which
+/// takes `base` away.
+fn clicked_then_undone(tool: &str, before: &[[i32; 3]]) -> crate::scenario::Harness {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,30],[60,30]],"ids":["keep"]})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[60,0]],"ids":["base"]})).unwrap();
+    h.step(&json!({"call":"ui.view","params":{"view":"fit"}})).unwrap();
+    h.settle();
+    h.step(&json!({"start":tool})).unwrap();
+    for at in before {
+        h.step(&json!({"move":{"world":at}})).unwrap();
+        h.step(&json!({"click":{"world":at}})).unwrap();
+    }
+    let pts = h.app.tool.as_ref().unwrap().pts.clone();
+    assert!(pts.last().and_then(|p| p.1.as_deref()).is_some_and(|snap| snap.starts_with("on:base:")), "{tool}: {pts:?}");
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.settle();
+    let sid = h.app.session.active_sketch.unwrap();
+    assert!(h.app.session.model.state().sketch(sid).unwrap().sketch.curve_index("base").is_none(), "{tool}: Undo took the line");
+    assert_eq!(h.app.tool.as_ref().map(|t| t.pts.len()), Some(before.len()), "{tool}: the clicks are still placed");
+    h
+}
+
+/// The Undo button between a shape's clicks can take away the curve a stored click snapped to
+/// (#21835). The next clicks then still draw the shape, through the places clicked, and the tool
+/// goes on: a circle or an arc from its centre, the centre or start on the removed line, and the
+/// other shapes that send a stored snap again.
+#[test]
+fn a_shape_whose_stored_click_lost_its_curve_to_undo_is_still_drawn() {
+    let cases: [(&str, &[[i32; 3]], &[[i32; 3]], usize); 6] = [
+        ("sketch.circle.center", &[[20, 0, 0]], &[[40, 20, 0]], 1),
+        ("sketch.arc.center_point", &[[20, 0, 0]], &[[40, 15, 0], [10, 20, 0]], 1),
+        ("sketch.arc.center_point", &[[20, 15, 0], [20, 0, 0]], &[[35, 15, 0]], 1),
+        ("sketch.circle.three_point", &[[20, 0, 0]], &[[40, 20, 0], [5, 20, 0]], 1),
+        ("sketch.arc.three_point", &[[20, 0, 0]], &[[45, 20, 0], [30, 15, 0]], 1),
+        ("sketch.rectangle.edge_center", &[[20, 0, 0]], &[[40, 8, 0], [40, 20, 0]], 4),
+    ];
+    let mut failed = Vec::new();
+    for (tool, before, after, added) in cases {
+        let mut h = clicked_then_undone(tool, before);
+        for at in after {
+            h.step(&json!({"move":{"world":at}})).unwrap();
+            h.step(&json!({"click":{"world":at}})).unwrap();
+        }
+        let sid = h.app.session.active_sketch.unwrap();
+        let curves = h.app.session.model.state().sketch(sid).unwrap().sketch.curves.len();
+        let error = h.app.status.as_ref().filter(|s| s.2).map(|s| s.0.clone());
+        let ready = h.app.tool.as_ref().is_some_and(|t| t.pts.is_empty());
+        if error.is_some() || curves != 1 + added || !ready {
+            failed.push(format!("{tool} after {} click(s): {curves} curves, ready {ready}, {error:?}", before.len()));
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// Redo after that Undo brings the line back, and the circle's centre clicked on it is held on it
+/// again: the stored snap is only set aside while its curve is gone.
+#[test]
+fn a_circle_centre_snapped_to_a_line_undone_and_redone_stays_on_it() {
+    let mut h = clicked_then_undone("sketch.circle.center", &[[20, 0, 0]]);
+    h.app.run("edit.redo", json!({})).unwrap();
+    h.settle();
+    h.step(&json!({"move":{"world":[40, 20, 0]}})).unwrap();
+    h.step(&json!({"click":{"world":[40, 20, 0]}})).unwrap();
+    let sid = h.app.session.active_sketch.unwrap();
+    let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
+    assert!(!h.app.status.as_ref().is_some_and(|s| s.2), "{:?}", h.app.status);
+    assert_eq!(sk.curves.len(), 3, "{:?}", sk.curves);
+    let held = held_on(&sk, "base");
+    assert!(held.iter().any(|p| p.dist(Vec2::new(20.0, 0.0)) < 0.5), "the centre is held on the line: {held:?}");
+}
+
+/// The Edge-Center Rectangle's second click snapped onto a line, a little off a sketch axis, and
+/// the Undo button then took that line away: the rectangle is drawn with its edge the way it was
+/// clicked and previewed, not nudged onto the axis.
+#[test]
+fn an_edge_center_rectangle_whose_edge_end_lost_its_curve_to_undo_keeps_its_clicked_direction() {
+    let mut h = clicked_then_undone("sketch.rectangle.edge_center", &[[-15, 2, 0], [55, 0, 0]]);
+    let pts = h.app.tool.as_ref().unwrap().pts.clone();
+    assert!(pts[0].1.is_none(), "the middle is a free click: {pts:?}");
+    let clicked = (pts[1].0 - pts[0].0).normalized().unwrap();
+    let off_axis = clicked.y.atan2(clicked.x).to_degrees().abs();
+    assert!((1.0..2.0).contains(&off_axis), "the edge is clicked {off_axis} degrees off the X axis");
+    h.step(&json!({"move":{"world":[40, 15, 0]}})).unwrap();
+    h.step(&json!({"click":{"world":[40, 15, 0]}})).unwrap();
+    assert!(!h.app.status.as_ref().is_some_and(|s| s.2), "{:?}", h.app.status);
+    let sid = h.app.session.active_sketch.unwrap();
+    let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
+    let keep = sk.curve_index("keep").unwrap();
+    let sides: Vec<Vec2> = sk
+        .curves
+        .iter()
+        .enumerate()
+        .filter_map(|(i, c)| match c.kind {
+            CurveKind::Line { a, b } if i != keep => (sk.point(b)? - sk.point(a)?).normalized(),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sides.len(), 4, "{:?}", sk.curves);
+    for side in &sides {
+        let (along, across) = (side.dot(clicked).abs(), side.dot(clicked.perp()).abs());
+        assert!(along.min(across) < 1e-6, "a side runs along {side:?}, the edge was clicked along {clicked:?}");
+    }
+}

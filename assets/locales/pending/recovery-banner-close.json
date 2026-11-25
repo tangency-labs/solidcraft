@@ -1,0 +1,29 @@
+{
+  "en": {
+    "home.recovery_hide": "Hide until next launch"
+  },
+  "ar": {
+    "home.recovery_hide": "إخفاء حتى التشغيل التالي"
+  },
+  "he": {
+    "home.recovery_hide": "הסתרה עד ההפעלה הבאה"
+  },
+  "ja": {
+    "home.recovery_hide": "次回起動時まで非表示"
+  },
+  "vi": {
+    "home.recovery_hide": "Ẩn cho đến lần khởi động sau"
+  },
+  "zh": {
+    "home.recovery_hide": "隐藏至下次启动"
+  },
+  "de": {
+    "home.recovery_hide": "Bis zum nächsten Start ausblenden"
+  },
+  "ko": {
+    "home.recovery_hide": "다음 실행까지 숨기기"
+  },
+  "fr": {
+    "home.recovery_hide": "Masquer jusqu’au prochain lancement"
+  }
+}

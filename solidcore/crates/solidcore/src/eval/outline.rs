@@ -12,6 +12,18 @@
 //! interval from a vertex does so at it, where the faces meet a third and which way they face is
 //! settled only to rounding.
 //!
+//! The samples make it an approximation: a stretch that starts and stops between two neighbouring
+//! samples (a face that turns toward the viewer and away again within a 32nd of an edge) is not
+//! seen. Every stretch it reports is on the outline, ends bisected to rounding.
+//!
+//! This is the whole outline, not the visible lines: a stretch is reported whether or not another
+//! part of the body hides it, and an edge between two faces that both face the viewer (a crease
+//! seen from outside) is not, however sharp. A drawing view's visible edges and silhouettes are a
+//! different job, hidden-line removal: [`crate::hlr`], and the port of upstream's
+//! `SmApiProjectBrepOntoPlane`
+//! ([`crate::topology::api_projection::project_brep_onto_plane`]), which projects the visible
+//! curves of [`crate::blend::hcr`] onto a plane.
+//!
 //! Not upstream: SolidCraft's whole-body projection (`crates/doc/src/project.rs`, MIT OR
 //! Apache-2.0, tangency-labs/solidcraft#19386), moved into the kernel so that the application
 //! computes no geometry (docs/layers.md §1). The arithmetic is the same, step for step.
@@ -21,9 +33,14 @@
 // A comparison that is not true takes the refusing branch, so a NaN is refused too.
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
 
+pub mod pieces;
+
 use super::query::Query;
 use super::vec::VecExt;
+use crate::error::{Result, SolidError};
 use crate::math::Vec3;
+
+const OP: &str = "eval::outline::stretches";
 
 /// Even steps along an edge at which its faces are asked which way they face.
 pub const SAMPLES: u32 = 32;
@@ -51,16 +68,34 @@ pub struct Stretch {
     pub whole: bool,
 }
 
-/// The stretches of `q`'s edges on the body's outline seen along `view` (from the viewer toward
-/// the body, or the other way: the outline is the same), edge by edge in the record's order and
-/// along each edge in the order of its parameter. `size` is the body's size (mm), `tolerance`
-/// each edge's tolerance (mm, by edge index; a missing one is taken as 0). A wire (an edge on no
-/// face) and a seam (one face on both its sides) have none.
+/// The stretches of `q`'s edges on the body's outline seen along `view`, edge by edge in the
+/// record's order and along each edge in the order of its parameter (an approximation: see the
+/// module docs). `view` is a unit vector pointing toward the viewer: a face faces the viewer where
+/// its normal out of the material has a component along `view` above [`FACING`]. Between two
+/// faces the outline is the same whichever way `view` points; an open sheet's border is outline
+/// only where its face faces the viewer. `size` is the body's size (mm), `tolerance` each edge's
+/// tolerance (mm, by edge index; a missing one is taken as 0). A wire (an edge on no face) and a
+/// seam (one face on both its sides) have none.
 ///
-/// `None` when an edge or face cannot be read (its curve or surface, or a point's parameters on a
-/// face), or an edge bounds more than two faces: the outline cannot be told exactly.
-#[must_use]
-pub fn stretches(q: &Query, view: Vec3, size: f64, tolerance: &[f64]) -> Option<Vec<Stretch>> {
+/// # Errors
+/// [`SolidError::InvalidInput`] for a `view` that is not a finite unit vector or a `size` that is
+/// not finite and positive, for an edge or face that cannot be read (its curve or surface, or a
+/// point's parameters on a face) and for an edge that bounds more than two faces: the outline
+/// cannot be told exactly.
+pub fn stretches(q: &Query, view: Vec3, size: f64, tolerance: &[f64]) -> Result<Vec<Stretch>> {
+    if !(view.is_finite() && (view.len() - 1.0).abs() <= 1e-9) {
+        return Err(SolidError::invalid_input(
+            OP,
+            "the view is not a finite unit vector",
+        ));
+    }
+    if !(size.is_finite() && size > 0.0) {
+        return Err(SolidError::invalid_input(
+            OP,
+            "the size is not finite and positive",
+        ));
+    }
+    let unreadable = || SolidError::invalid_input(OP, "an edge or face cannot be read");
     let n = view;
     let step = size * STEP;
     // Which way face `f` faces at `p`, a point of one of its edges running along `along`.
@@ -98,6 +133,12 @@ pub fn stretches(q: &Query, view: Vec3, size: f64, tolerance: &[f64]) -> Option<
             continue;
         }
         let accept = 4.0 * tolerance.get(e).copied().unwrap_or(0.0).max(1e-7) + size * 1e-7;
+        if faces.len() > 2 {
+            return Err(SolidError::invalid_input(
+                OP,
+                "an edge bounds more than two faces",
+            ));
+        }
         let outline = |(p, along): (Vec3, Vec3)| -> Option<bool> {
             match faces.as_slice() {
                 [f] => front(*f, p, along, accept),
@@ -105,13 +146,17 @@ pub fn stretches(q: &Query, view: Vec3, size: f64, tolerance: &[f64]) -> Option<
                 _ => None,
             }
         };
-        let [t0, t1] = q.edge_interval(e)?;
+        let [t0, t1] = q.edge_interval(e).ok_or_else(unreadable)?;
         let at = |t: f64| q.edge_at(e, t).map(|(p, _)| p);
         let state = |t: f64| q.edge_at(e, t).and_then(outline);
         let ts: Vec<f64> = (0..=SAMPLES)
             .map(|k| t0 + (t1 - t0) * f64::from(k) / f64::from(SAMPLES))
             .collect();
-        let states: Vec<bool> = ts.iter().map(|t| state(*t)).collect::<Option<_>>()?;
+        let states: Vec<bool> = ts
+            .iter()
+            .map(|t| state(*t))
+            .collect::<Option<_>>()
+            .ok_or_else(unreadable)?;
         if !states.iter().any(|s| *s) {
             continue;
         }
@@ -119,6 +164,11 @@ pub fn stretches(q: &Query, view: Vec3, size: f64, tolerance: &[f64]) -> Option<
             let (mut lo, mut hi) = (lo, hi);
             for _ in 0..BISECTIONS {
                 let mid = 0.5 * (lo + hi);
+                // Neighbouring numbers: every further step finds `lo` or `hi` again, whose
+                // states are known, and changes nothing.
+                if mid == lo || mid == hi {
+                    break;
+                }
                 if state(mid)? == lo_state {
                     lo = mid;
                 } else {
@@ -138,7 +188,7 @@ pub fn stretches(q: &Query, view: Vec3, size: f64, tolerance: &[f64]) -> Option<
             if a == b {
                 continue;
             }
-            let t = cross(ta, tb, a)?;
+            let t = cross(ta, tb, a).ok_or_else(unreadable)?;
             match start.take() {
                 Some(s) => ranges.push([s, t]),
                 None => start = Some(t),
@@ -158,7 +208,7 @@ pub fn stretches(q: &Query, view: Vec3, size: f64, tolerance: &[f64]) -> Option<
         }
         for [a, b] in ranges {
             let whole = a == t0 && b == t1;
-            let (pa, pb) = (at(a)?, at(b)?);
+            let (pa, pb) = (at(a).ok_or_else(unreadable)?, at(b).ok_or_else(unreadable)?);
             // A stretch that is a point of the edge, not a piece of it.
             if !whole && pa.dist(pb) <= size * 1e-9 && (b - a) < (t1 - t0) * 1e-6 {
                 continue;
@@ -171,5 +221,5 @@ pub fn stretches(q: &Query, view: Vec3, size: f64, tolerance: &[f64]) -> Option<
             });
         }
     }
-    Some(out)
+    Ok(out)
 }

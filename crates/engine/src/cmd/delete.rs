@@ -1,8 +1,8 @@
 //! Delete for everything that can be selected, in one undo step: sketch entities (while
 //! sketching), timeline features and sketches (with the features that depend on them),
 //! construction planes and axes, bodies (a Remove feature from here on in the timeline), occurrences and
-//! components, canvases, point clouds and joints; or, with a drawing open, its views, dimensions,
-//! balloons and notes. `dry_run` reports what would go and what would fail without changing anything, so the UI
+//! components, canvases, point clouds and joints; or, with a drawing open, its views and
+//! annotations. `dry_run` reports what would go and what would fail without changing anything, so the UI
 //! can ask first.
 
 use std::collections::BTreeSet;
@@ -20,12 +20,12 @@ use crate::{EngineError, Result, Sel, Session};
 const DELETE_CONTRACT: TypedContract<SelectionDeleteParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("selection.delete", "Delete", crate::checked!("selection.delete", delete))
-    .open_part()
+    .open_part().selection_edit()
     .icon("delete")
     .contract(&DELETE_CONTRACT)
     .output(output_schema_for::<SelectionDeleteResult>)
     .params(
-        "items?: [selection items]; components?, occurrences?, canvases?, point_clouds?, joints?: [ids or names]; dry_run?: bool → deleted, deleted_joints, would_fail, skipped (one undo step). With a drawing open, items are its views, dimensions and balloons ({type: drawing, drawing, object}); each view takes its dimensions and balloons with it; a view with views projected or cut from it is refused, naming them, unless they are in items or contents: delete takes them too → views, dimensions, balloons: [the ids that went]",
+        "items?: [selection items]; components?, occurrences?, canvases?, point_clouds?, joints?: [ids or names]; preserve_projection_link?: bool (default false, passed to sketch.delete including dry_run); dry_run?: bool → deleted, deleted_joints, would_fail, skipped (one undo step). With a drawing open, items are its views and annotations ({type: drawing, drawing, object}); each view takes its annotations with it; a view with views projected or cut from it is refused, naming them, unless they are in items or contents: delete takes them too → views, dimensions, balloons, notes, centre_marks, centre_lines, sketches, fills: [the ids that went], deleted: the names of the views that went with those asked for",
     )];
 
 /// Run another command's body inside this one (so the whole delete is one undo step).
@@ -54,12 +54,13 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
         return apply(&mut t, p);
     }
     let r = apply(s, p)?;
-    s.selection.clear();
+    s.clear_selection();
     Ok(r)
 }
 
-/// Deletes the views, dimensions, balloons and notes `items` name in the drawing open, as one change: the
-/// record's removal ([`solidcraft_doc::drawing::Drawing::remove_objects`]), with no model evaluated.
+/// Deletes the views and annotations `items` name in the drawing open, as one change: the
+/// record's removal ([`solidcraft_doc::drawing::Drawing::remove_objects`]), with no model evaluated. A
+/// view takes its sketches and their fills with it; the reply lists them too.
 fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value> {
     let cmd = "selection.delete";
     let model = || bad(cmd, "a drawing's objects are deleted apart from the model's: select one or the other");
@@ -68,9 +69,43 @@ fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value>
     if ["components", "occurrences", "canvases", "point_clouds", "joints"].iter().any(|key| p.get(*key).is_some_and(asks)) {
         return Err(model());
     }
+    if s.sheet_sketching()
+        && !items.is_empty()
+        && items.iter().all(|item| matches!(item, Sel::SketchCurve { .. } | Sel::SketchPoint { .. } | Sel::SketchConstraint { .. }))
+    {
+        let sketch = s.active_sheet_sketch.as_ref().map(|entry| entry.sketch);
+        let entities = items
+            .iter()
+            .map(|item| match item {
+                Sel::SketchCurve { id, sketch: target } if target.is_none() || *target == sketch => Ok(id.clone()),
+                Sel::SketchPoint { id } | Sel::SketchConstraint { id } => Ok(id.clone()),
+                _ => Err(bad(cmd, "sketch geometry must belong to the active sheet sketch")),
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let spec = super::find_command("sketch.delete").ok_or_else(|| EngineError::UnknownCommand("sketch.delete".into()))?;
+        spec.run_nested_continuing(s, &json!({"entities":entities}))?;
+        return serde_json::to_value(SelectionDeleteResult {
+            deleted: Vec::new(),
+            deleted_joints: Vec::new(),
+            bodies: Vec::new(),
+            would_fail: Vec::new(),
+            skipped: Vec::new(),
+            views: None,
+            dimensions: None,
+            balloons: None,
+            notes: None,
+            centre_marks: None,
+            centre_lines: None,
+            sketches: None,
+            fills: None,
+            param_warnings: Vec::new(),
+        })
+        .map_err(|error| bad(cmd, error.to_string()));
+    }
     let with_projected = super::drawing_sheet::contents_delete(cmd, p, "a view goes with the views projected or cut from it")?;
     let open = s.drawing(cmd)?.clone();
-    let (mut views, mut dimensions, mut balloons, mut notes) = (BTreeSet::new(), Vec::new(), Vec::new(), Vec::new());
+    let (mut views, mut dimensions, mut balloons, mut notes, mut centre_marks, mut centre_lines) =
+        (BTreeSet::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
     for item in items {
         let Sel::Drawing { drawing, object } = item else { return Err(model()) };
         if *drawing != open.id {
@@ -84,15 +119,30 @@ fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value>
             balloons.push(*object);
         } else if open.notes.by_id(*object).is_some() {
             notes.push(*object);
+        } else if open.centre_mark(*object).is_some() {
+            centre_marks.push(*object);
+        } else if open.centre_line(*object).is_some() {
+            centre_lines.push(*object);
         } else {
-            return Err(bad(cmd, format!("the drawing open has no view, dimension, balloon or note {}", ids::encode(*object))));
+            return Err(bad(cmd, format!("the drawing open has no selectable object {}", ids::encode(*object))));
         }
     }
-    if views.is_empty() && dimensions.is_empty() && balloons.is_empty() && notes.is_empty() {
+    if views.is_empty() && dimensions.is_empty() && balloons.is_empty() && notes.is_empty() && centre_marks.is_empty() && centre_lines.is_empty() {
         return Err(bad(cmd, "nothing to delete"));
     }
     let all = open.with_projected(&views);
-    let projected: Vec<String> = all.difference(&views).map(|view| ids::encode(*view)).collect();
+    // The views that go with what was asked for, by what they are called: what a front end lists
+    // before it deletes, as it lists the features a model delete takes with it.
+    let also: Vec<String> =
+        all.difference(&views).filter_map(|view| open.view(*view)).map(|record| super::drawing::view_label(&open, record)).collect();
+    // Each by what it is called, then its id for a caller that passes it back: never the id alone.
+    let projected: Vec<String> = all
+        .difference(&views)
+        .map(|view| match open.view(*view) {
+            Some(record) => format!("{} ({})", super::drawing::view_label(&open, record), ids::encode(*view)),
+            None => ids::encode(*view),
+        })
+        .collect();
     if !projected.is_empty() && !with_projected {
         let names = projected.join(", ");
         return Err(bad(
@@ -110,15 +160,37 @@ fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value>
     gone.notes.extend(notes);
     gone.notes.sort_unstable();
     gone.notes.dedup();
+    gone.centre_marks.extend(centre_marks);
+    gone.centre_marks.sort_unstable();
+    gone.centre_marks.dedup();
+    gone.centre_lines.extend(centre_lines);
+    gone.centre_lines.sort_unstable();
+    gone.centre_lines.dedup();
+    if s.active_sheet_sketch.as_ref().is_some_and(|entry| entry.goes_with(open.id, &gone)) {
+        return Err(bad(cmd, "finish or cancel the sketch being edited before deleting its view"));
+    }
     s.edit_drawing(cmd, |d| {
         d.remove_objects(&gone);
         Ok(())
     })?;
     let listed = |objects: &[u64]| objects.iter().map(|id| ids::encode(*id)).collect::<Vec<_>>();
-    let (views, dimensions, balloons) = (listed(&gone.views), listed(&gone.dimensions), listed(&gone.balloons));
-    Ok(
-        json!({ "deleted": [], "deleted_joints": [], "would_fail": [], "skipped": [], "views": views, "dimensions": dimensions, "balloons": balloons, "notes": listed(&gone.notes) }),
-    )
+    let reply = SelectionDeleteResult {
+        deleted: also,
+        deleted_joints: Vec::new(),
+        bodies: Vec::new(),
+        would_fail: Vec::new(),
+        skipped: Vec::new(),
+        views: Some(listed(&gone.views)),
+        dimensions: Some(listed(&gone.dimensions)),
+        balloons: Some(listed(&gone.balloons)),
+        notes: Some(listed(&gone.notes)),
+        centre_marks: Some(listed(&gone.centre_marks)),
+        centre_lines: Some(listed(&gone.centre_lines)),
+        sketches: Some(listed(&gone.sketches)),
+        fills: Some(listed(&gone.fills)),
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
 /// The delete `p` asks for is of the open drawing's objects (its undo step is the drawing's): it
@@ -134,12 +206,35 @@ pub(crate) fn in_drawing(s: &Session, p: &Value) -> bool {
 
 fn apply(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "selection.delete";
-    let items: Vec<Sel> = match p.get("items") {
-        None | Some(Value::Null) => Vec::new(),
-        Some(Value::Array(a)) if a.len() <= 10_000 => {
-            a.iter().map(|v| serde_json::from_value(v.clone()).map_err(|e| bad(cmd, format!("bad item {v}: {e}")))).collect::<Result<_>>()?
+    if p.get("preserve_projection_link").is_some_and(|value| !value.is_boolean()) {
+        return Err(bad(cmd, "`preserve_projection_link` must be a boolean"));
+    }
+    let items: Vec<Sel> = if p.get("all_bodies").and_then(Value::as_bool).unwrap_or(false) {
+        // A whole-body selection is a scope: resolve it once, here, into the bodies it covers,
+        // however many (the 10000-item cap is for lists a caller sends). A locked body stays, as
+        // it does when the selection names it (the app leaves it out).
+        // The scope itself, not whatever the session has selected now.
+        let locked: std::collections::HashSet<&str> = s.visibility.locked_bodies.iter().map(String::as_str).collect();
+        let mut items: Vec<Sel> =
+            s.shown_body_names()?.into_iter().filter(|name| !locked.contains(name.as_str())).map(|name| Sel::Body { name }).collect();
+        // Any items named beside the scope go too.
+        if let Some(Value::Array(a)) = p.get("items") {
+            for v in a.iter().take(10_000) {
+                let x: Sel = serde_json::from_value(v.clone()).map_err(|e| bad(cmd, format!("bad item {v}: {e}")))?;
+                if !items.contains(&x) {
+                    items.push(x);
+                }
+            }
         }
-        Some(_) => return Err(bad(cmd, "`items` must be a list of selection items")),
+        items
+    } else {
+        match p.get("items") {
+            None | Some(Value::Null) => Vec::new(),
+            Some(Value::Array(a)) if a.len() <= 10_000 => {
+                a.iter().map(|v| serde_json::from_value(v.clone()).map_err(|e| bad(cmd, format!("bad item {v}: {e}")))).collect::<Result<_>>()?
+            }
+            Some(_) => return Err(bad(cmd, "`items` must be a list of selection items")),
+        }
     };
     if items.iter().any(|x| matches!(x, Sel::Drawing { .. })) || s.sheet_sketching() {
         return delete_in_drawing(s, p, &items);
@@ -201,6 +296,7 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
                 _ => skip("the origin axes can't be deleted".into()),
             },
             Sel::SketchMidpoint { .. } => skip("a midpoint belongs to its sketch edge".into()),
+            Sel::PlacedSketchPoint { .. } => skip("a point on another copy of a part is deleted in its sketch".into()),
             Sel::ConstructionPoint { name } => match s.doc.find_feature(name) {
                 Some(f) if matches!(f.kind, FeatureKind::ConstructionPoint { .. }) => features.push(f.id),
                 _ => skip(format!("no construction point named \"{name}\"")),
@@ -211,6 +307,7 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
                 None => faces.push((body.clone(), vec![*point])),
             },
             Sel::Edge { .. } | Sel::Vertex { .. } => skip("edges and vertices are deleted with their body or face".into()),
+            Sel::PointCloudPoint { .. } => skip("points belong to their point cloud".into()),
             // In the sketch being edited, a profile stands for the curves around it (#7107);
             // its holes are shapes of their own and stay. A letter's outline stands for its
             // whole text, so no counters are left behind.
@@ -248,7 +345,11 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
         if s.active_sketch.is_none() {
             skip("sketch entities are deleted while editing their sketch".into());
         } else {
-            sub(s, "sketch.delete", json!({ "entities": entities }))?;
+            sub(
+                s,
+                "sketch.delete",
+                json!({ "entities": entities, "preserve_projection_link": p.get("preserve_projection_link").cloned().unwrap_or(json!(false)) }),
+            )?;
             done = true;
         }
     }
@@ -265,8 +366,9 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
     let st = s.model.state();
     bodies.retain(|b| st.body(b).is_some());
     bodies.dedup();
-    if !bodies.is_empty() {
-        sub(s, "solid.remove", json!({ "bodies": bodies }))?;
+    // A Remove takes at most 10000 names; a whole-body delete of more is several, in one step.
+    for chunk in bodies.chunks(crate::params::MAX_STRING_LIST) {
+        sub(s, "solid.remove", json!({ "bodies": chunk }))?;
         done = true;
     }
     // An occurrence goes alone while its component has others; the last one takes the component.
@@ -326,7 +428,22 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
     // Features after a rolled-back marker count too (#3471).
     let would_fail: Vec<String> =
         super::edit::newly_broken_in_history(&before_doc, &before, &s.doc, &s.model).into_iter().map(|(name, _)| name).collect();
-    let reply = SelectionDeleteResult { deleted, deleted_joints: joints, bodies, would_fail, skipped, param_warnings: Vec::new() };
+    let reply = SelectionDeleteResult {
+        deleted,
+        deleted_joints: joints,
+        bodies,
+        would_fail,
+        skipped,
+        views: None,
+        dimensions: None,
+        balloons: None,
+        notes: None,
+        centre_marks: None,
+        centre_lines: None,
+        sketches: None,
+        fills: None,
+        param_warnings: Vec::new(),
+    };
     serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
@@ -619,6 +736,29 @@ mod tests {
         assert!(s.drawing("test").unwrap().dimension(dimension).is_none());
     }
 
+    #[test]
+    fn a_drawing_delete_matches_its_schemas_at_every_check_level() {
+        use crate::schema::delete::{SelectionDeleteParams, SelectionDeleteResult};
+        use crate::schema::tests::conforms;
+        use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
+        let (input, output) = (input_schema_for::<SelectionDeleteParams>(), output_schema_for::<SelectionDeleteResult>());
+        let (input, output) = (input.as_value(), output.as_value());
+        for level in [ParamCheck::Warn, ParamCheck::Strict] {
+            let (mut s, [_, right, top], dimension, balloon, drawing) = sheet_objects();
+            s.param_check = level;
+            let p = json!({"items": [item(drawing, right), item(drawing, dimension), item(drawing, balloon)], "contents": "delete"});
+            assert!(conforms(input, input, &p), "{level:?}: {p} doesn't match {input}");
+            let gone = s.execute("selection.delete", &p).unwrap_or_else(|e| panic!("{level:?}: {e}"));
+            assert!(gone.get("param_warnings").is_none(), "{level:?}: {gone}");
+            assert!(conforms(output, output, &gone), "{level:?}: {gone} doesn't match {output}");
+            let mut views = vec![ids::encode(right), ids::encode(top)];
+            views.sort();
+            assert_eq!(gone["views"], json!(views), "{gone}");
+            assert_eq!((&gone["dimensions"], &gone["balloons"]), (&json!([ids::encode(dimension)]), &json!([ids::encode(balloon)])), "{gone}");
+            assert_eq!((&gone["sketches"], &gone["fills"]), (&json!([]), &json!([])), "{gone}");
+        }
+    }
+
     /// A view, a dimension and a balloon are selected by their ids, as a view's own id reads in every
     /// reply, with no undo step and no change to the design or its export. Adding one keeps the rest.
     #[test]
@@ -691,6 +831,7 @@ mod tests {
             place: ViewPlace::At([100.0, 100.0]),
             settings: ViewOverrides::default(),
             reference_shown_percent: 0.0,
+            centre_marks: None,
             label: None,
         };
         d.add_views([Arc::new(on_other)]);
@@ -777,7 +918,16 @@ mod tests {
         let line = CuttingLine::new(SectionKind::Full, vec![Vec2::new(-30.0, 0.0), Vec2::new(30.0, 0.0)], ArrowSide::Right).unwrap();
         let kind = ViewKind::Section { parent: front, line };
         let place = ViewPlace::At([300.0, 60.0]);
-        let cut = View { id, sheet: d.sheets[0].id, kind, place, settings: ViewOverrides::default(), reference_shown_percent: 0.0, label: None };
+        let cut = View {
+            id,
+            sheet: d.sheets[0].id,
+            kind,
+            place,
+            settings: ViewOverrides::default(),
+            reference_shown_percent: 0.0,
+            centre_marks: None,
+            label: None,
+        };
         d.add_views([Arc::new(cut)]);
         s.doc_mut().put_drawing(Arc::new(d));
         let e = s.execute("selection.delete", &json!({"items": [item(drawing, front)]})).unwrap_err().to_string();
@@ -845,8 +995,8 @@ mod tests {
         let before = s.drawing("test").unwrap().clone();
         let good = item(drawing, front);
         for (p, says) in [
-            (json!({"items": [good, item(drawing, 99)]}), "no view, dimension, balloon or note"),
-            (json!({"items": [good, item(drawing, sheet)]}), "no view, dimension, balloon or note"),
+            (json!({"items": [good, item(drawing, 99)]}), "no selectable object"),
+            (json!({"items": [good, item(drawing, sheet)]}), "no selectable object"),
             (json!({"items": [good, item(99, front)]}), "isn't the drawing open"),
             (json!({"items": [good, {"type": "body", "name": "Block"}]}), "deleted apart from the model's"),
             (json!({"items": [good, {"type": "feature", "id": 1}]}), "deleted apart from the model's"),
@@ -880,6 +1030,17 @@ mod tests {
         assert_eq!(s.open_drawing, open);
         assert_eq!(s.undo.last().unwrap().part, None, "the model's step");
         assert_eq!(s.drawing("test").unwrap(), &drawing);
+    }
+
+    #[test]
+    fn selected_drawing_items_keep_their_drawing_history_owner() {
+        let (mut s, _, dimension, _, drawing) = sheet_objects();
+        s.selection = vec![Sel::Drawing { drawing, object: dimension }];
+        let params = json!({"items":s.selection});
+        run(&mut s, "selection.delete", params);
+        assert_eq!(s.undo.last().unwrap().part, Some(drawing));
+        run(&mut s, "edit.undo", json!({}));
+        assert!(s.drawing("test").unwrap().has_object(dimension));
     }
 
     /// Seeded selections of the drawing's objects, deleted or dry-run in turn with undos between:

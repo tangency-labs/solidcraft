@@ -29,64 +29,70 @@ pub struct Query<'a> {
     inner: k::Query,
 }
 
+/// A record as the kernel reads it: its edges and faces copied through `solidcore-convert`
+/// once, each face told whether its shell reads it along its natural normal. A curve or
+/// surface the conversion refuses (geometry too deep) is one the kernel cannot evaluate, as a
+/// malformed one.
+pub(crate) fn kernel_record(record: &Brep) -> k::Record {
+    let mut forward = vec![None; record.faces.len()];
+    for shell in &record.shells {
+        if let Shell::Faces { faces, .. } = shell {
+            for of in faces {
+                if let Some(slot) = forward.get_mut(of.face as usize) {
+                    *slot = Some(of.forward);
+                }
+            }
+        }
+    }
+    let edges = record
+        .edges
+        .iter()
+        .map(|e| k::Edge {
+            curve: solidcore_convert::curve(e.parameters()).ok(),
+            interval: e.interval,
+            faces: e.uses.iter().map(|u| u.face as usize).collect(),
+        })
+        .collect();
+    let faces = record
+        .faces
+        .iter()
+        .zip(forward)
+        .map(|(f, forward)| k::Face {
+            parameters: solidcore_convert::surface(f.parameters()).ok(),
+            surface: solidcore_convert::surface(&f.surface).ok(),
+            domain: f.domain,
+            forward,
+            loops: f
+                .loops
+                .iter()
+                .map(|l| match l {
+                    Loop::Edges { edges } => k::Loop::Edges(
+                        edges
+                            .iter()
+                            .map(|u| k::Use {
+                                edge: u.edge as usize,
+                                forward: u.forward,
+                                pcurve: solidcore_convert::curve2(&u.pcurve),
+                            })
+                            .collect(),
+                    ),
+                    Loop::Vertex { vertex } => {
+                        k::Loop::Vertex(record.vertices.get(*vertex as usize).map(|v| v.point))
+                    }
+                })
+                .collect(),
+        })
+        .collect();
+    k::Record { edges, faces }
+}
+
 impl<'a> Query<'a> {
     /// The record made ready. A curve or surface the conversion refuses (geometry too deep) is
     /// one the queries cannot evaluate, as a malformed one.
     #[must_use]
     pub fn new(record: &'a Brep) -> Query<'a> {
-        let mut forward = vec![None; record.faces.len()];
-        for shell in &record.shells {
-            if let Shell::Faces { faces, .. } = shell {
-                for of in faces {
-                    if let Some(slot) = forward.get_mut(of.face as usize) {
-                        *slot = Some(of.forward);
-                    }
-                }
-            }
-        }
-        let edges = record
-            .edges
-            .iter()
-            .map(|e| k::Edge {
-                curve: solidcore_convert::curve(e.parameters()).ok(),
-                interval: e.interval,
-                faces: e.uses.iter().map(|u| u.face as usize).collect(),
-            })
-            .collect();
-        let faces = record
-            .faces
-            .iter()
-            .zip(forward)
-            .map(|(f, forward)| k::Face {
-                parameters: solidcore_convert::surface(f.parameters()).ok(),
-                surface: solidcore_convert::surface(&f.surface).ok(),
-                domain: f.domain,
-                forward,
-                loops: f
-                    .loops
-                    .iter()
-                    .map(|l| match l {
-                        Loop::Edges { edges } => k::Loop::Edges(
-                            edges
-                                .iter()
-                                .map(|u| k::Use {
-                                    edge: u.edge as usize,
-                                    forward: u.forward,
-                                    pcurve: solidcore_convert::curve2(&u.pcurve),
-                                })
-                                .collect(),
-                        ),
-                        Loop::Vertex { vertex } => {
-                            k::Loop::Vertex(record.vertices.get(*vertex as usize).map(|v| v.point))
-                        }
-                    })
-                    .collect(),
-            })
-            .collect();
-        Query {
-            record,
-            inner: k::Query::new(k::Record { edges, faces }),
-        }
+        let inner = k::Query::new(kernel_record(record));
+        Query { record, inner }
     }
 
     /// The record it reads.
@@ -125,24 +131,30 @@ impl<'a> Query<'a> {
             .map(|v| v.into_iter().map(|(t, p)| (t, record_vec3(p))).collect())
     }
 
-    /// The stretches of the body's edges on its outline seen along `view`, for a body of size
-    /// `size` (mm): edge by edge, each with its interval on the edge's parameter, its points at
-    /// the ends and whether it is the whole edge ([`solidcore::eval::outline::stretches`], where
-    /// what is outline is set out). Each edge's own tolerance is taken from the record. `None`
-    /// when an edge or face cannot be read, or an edge bounds more than two faces.
-    #[must_use]
-    pub fn outline_stretches(&self, view: Vec3, size: f64) -> Option<Vec<OutlineStretch>> {
+    /// The stretches of the body's edges on its outline seen along `view` (a unit vector toward
+    /// the viewer), for a body of size `size` (mm): edge by edge, each with its interval on the
+    /// edge's parameter, its points at the ends and whether it is the whole edge
+    /// ([`solidcore::eval::outline::stretches`], where what is outline is set out, and how far
+    /// its sampling sees). Each edge's own tolerance is taken from the record.
+    ///
+    /// # Errors
+    /// [`crate::Error::Refused`] for a `view` that is not a finite unit vector, a `size` that is
+    /// not finite and positive, an edge or face that cannot be read, or an edge that bounds more
+    /// than two faces.
+    pub fn outline_stretches(&self, view: Vec3, size: f64) -> crate::Result<Vec<OutlineStretch>> {
         let tolerance: Vec<f64> = self.record.edges.iter().map(|e| e.tolerance).collect();
-        solidcore::eval::outline::stretches(&self.inner, vec3(view), size, &tolerance).map(|v| {
-            v.into_iter()
-                .map(|s| OutlineStretch {
-                    edge: s.edge,
-                    range: s.range,
-                    ends: s.ends.map(record_vec3),
-                    whole: s.whole,
-                })
-                .collect()
-        })
+        solidcore::eval::outline::stretches(&self.inner, vec3(view), size, &tolerance)
+            .map_err(crate::error::status)
+            .map(|v| {
+                v.into_iter()
+                    .map(|s| OutlineStretch {
+                        edge: s.edge,
+                        range: s.range,
+                        ends: s.ends.map(record_vec3),
+                        whole: s.whole,
+                    })
+                    .collect()
+            })
     }
 
     /// How far `p` is from edge `e`.
@@ -174,6 +186,15 @@ impl<'a> Query<'a> {
     #[must_use]
     pub fn faces_at(&self, p: Vec3, accept: f64) -> Vec<(f64, usize)> {
         self.inner.faces_at(vec3(p), accept)
+    }
+
+    /// The faces that face against the curves `samples` lie on, ascending: each sample a point on
+    /// a curve and its direction there, a face through it meant to face along that direction
+    /// crossed with `normal` ([`k::Query::faces_against`]).
+    #[must_use]
+    pub fn faces_against(&self, normal: Vec3, samples: &[(Vec3, Vec3)], accept: f64) -> Vec<usize> {
+        let samples: Vec<_> = samples.iter().map(|(p, d)| (vec3(*p), vec3(*d))).collect();
+        self.inner.faces_against(vec3(normal), &samples, accept)
     }
 
     /// Where the ray from `o` along `d` meets the faces ahead of `o`: each meeting's distance,

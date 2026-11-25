@@ -85,7 +85,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<UnstitchParams>(), &with(&["body", "faces"]));
     assert_keys(input_schema_for::<ReverseNormalParams>(), &with(&["body", "faces"]));
     assert_keys(input_schema_for::<ThickenParams>(), &with(&["bodies", "operation", "symmetric", "targets", "thickness", "touching"]));
-    assert_keys(input_schema_for::<OffsetParams>(), &with(&["body", "chain", "distance", "faces", "tolerance"]));
+    assert_keys(input_schema_for::<OffsetParams>(), &with(&["body", "chain", "distance", "faces", "stays_surface", "tolerance"]));
     assert_keys(input_schema_for::<UntrimParams>(), &with(&["face", "holes", "in_place", "outer"]));
     assert_keys(input_schema_for::<FairParams>(), &with(&["body", "faces", "iterations", "keep_edges", "strength", "tolerance"]));
 }
@@ -351,12 +351,18 @@ fn assert_sheet_keeps_todays_errors(id: &str, calls: &[Value]) {
 fn surface_extend_and_trim_contracts_and_replies() {
     assert_keys(
         input_schema_for::<SurfaceExtendParams>(),
-        &["body", "body_name", "body_names", "distance", "edges", "mode", "name", "neighbours", "participants", "up_to"],
+        &["body", "body_name", "body_names", "distance", "edges", "mode", "name", "neighbours", "participants", "stays_surface", "up_to"],
     );
     assert_keys(
         input_schema_for::<SurfaceTrimParams>(),
         &["body", "body_name", "body_names", "curves", "extend", "keep", "keep_with", "name", "participants", "plane", "stitch", "tool", "with"],
     );
+    let trim_schema = input_schema_for::<SurfaceTrimParams>();
+    let trim_schema = trim_schema.as_value();
+    for tool in [json!({"body": "Cutter"}), json!({"body": "Cutter", "point": [0, 3, 0]})] {
+        let params = json!({"body": "Sheet", "tool": tool, "keep": [2, 1, 0]});
+        assert!(conforms(trim_schema, trim_schema, &params), "{params}");
+    }
     assert_strict_keeps_todays_errors(&[
         ("surface.extend", json!({})),
         ("surface.extend", json!({"body": 3})),
@@ -386,6 +392,8 @@ fn surface_extend_and_trim_contracts_and_replies() {
             json!({"body": "Sheet", "keep": [8, 5, 0], "with": 3}),
             json!({"body": "Sheet", "keep": [8, 5, 0], "with": "Sheet"}),
             json!({"body": "Sheet", "keep": [8, 5, 0], "tool": {"point": [0, 0, 0]}}),
+            json!({"body": "Sheet", "keep": [8, 5, 0], "tool": {"body": "Sheet"}}),
+            json!({"body": "Sheet", "keep": [8, 5, 0], "tool": {"body": "Sheet", "point": null}}),
             json!({"body": "Sheet", "keep": [8, 5, 0], "tool": {"body": "Sheet", "point": [0, 0, 0]}, "curves": {"sketch": "S"}}),
             json!({"body": "Sheet", "keep": [8, 5, 0], "curves": {"sketch": "Nope"}}),
             json!({"body": "Sheet", "keep": [8, 5, 0], "plane": "XY", "stitch": true}),
@@ -462,7 +470,7 @@ fn loft_of(section: Value) -> Value {
 fn surface_loft_contract_and_reply() {
     assert_keys(
         input_schema_for::<SurfaceLoftParams>(),
-        &["body_name", "body_names", "continuity", "crown", "name", "participants", "rail_fit", "rails", "sections"],
+        &["body_name", "body_names", "continuity", "crown", "faced", "name", "participants", "rail_fit", "rails", "sections", "stays_surface"],
     );
     let schema = input_schema_for::<SurfaceLoftParams>();
     let schema = schema.as_value();
@@ -608,4 +616,14 @@ fn surface_patch_checks_what_the_handler_ignores() {
         let error = sheet(ParamCheck::Strict).execute("surface.patch", &p).err().map(|e| e.to_string()).unwrap_or_default();
         assert!(error.contains(&format!("`{key}`")), "{p}: {error}");
     }
+}
+
+/// A patch edge picked where the body has none names the point as a command writes it,
+/// `[x, y, z]`, not as the program's own record of it (`Vec3 { x: … }`).
+#[test]
+fn surface_patch_names_a_missed_edge_point_as_parameters_write_it() {
+    let p = json!({"edges": [[100.5, -100, 0.0001], [0, 0, 10], [10, 0, 10]], "body": "Box", "body_name": "Patch"});
+    let error = cube(ParamCheck::Off).execute("surface.patch", &p).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(error.contains("no edge at [100.5, -100, 0]"), "{error}");
+    assert!(!error.contains("Vec3"), "{error}");
 }

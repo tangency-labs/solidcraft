@@ -1,5 +1,5 @@
 //! Contracts and result types for the selection commands in `cmd/edit.rs`: `select.set`,
-//! `select.filter`, `select.clear`, `select.same_look` and
+//! `select.filter`, `select.clear`, `select.same_look`, `select.edge_loop` and
 //! `select.sharp_edges`.
 //!
 //! `select.set` reads `items` and `add` from the raw JSON. Each item reads as the handler reads
@@ -176,6 +176,42 @@ pub struct SharpEdgesParams {
     pub add: Option<bool>,
 }
 
+/// Select the closed loop of edges around a face that holds one edge (#18094): the edges of that
+/// face's boundary loop, read from the body's exact topology, not from its mesh. `body` and `edge`
+/// name the edge together; without them, the last selected edge. `face` says which of the edge's
+/// faces gives the loop. Without it, a flat face comes before a curved one (a fillet or a hole's
+/// wall), then a face with more than one loop (the edge bounds a pocket, a hole or a boss on it),
+/// then the face with the lowest index. The loop follows the face, so a vertex where three or more
+/// edges meet does not make the choice ambiguous. A mesh body has no edge loops and is refused.
+/// Not an undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct EdgeLoopParams {
+    /// The name of a body in the design. Given with `edge`; default: the body of the last selected edge.
+    pub body: Option<String>,
+    /// The index of an edge of that body. Given with `body`; default: the last selected edge.
+    pub edge: Option<usize>,
+    /// The index of the face whose loop is selected: one of the edge's faces.
+    pub face: Option<usize>,
+    /// Add the loop to the current selection instead of replacing it. Default: false.
+    pub add: Option<bool>,
+}
+
+/// What `select.edge_loop` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct EdgeLoopResult {
+    /// How many items are selected now.
+    pub selected: usize,
+    /// The face whose loop was selected.
+    pub face: usize,
+    /// The loop's edges, in the order the loop runs, each once.
+    pub edges: Vec<usize>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// `select.all`: in an open sketch it selects every curve of that sketch, construction curves
 /// too, and every point of it that is on no curve; projected geometry and the sketch's origin are
 /// left out. With a drawing open and the model not focused it selects the views, dimensions,
@@ -204,6 +240,16 @@ pub struct SelectClearResult {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
 }
+
+/// `select.invert` takes no parameters. It selects, in place of the selected faces, the other
+/// faces of their bodies; in place of the selected edges, the other edges of their bodies; and in
+/// place of the selected bodies, the other bodies that are shown. A body selected together with
+/// faces or edges of it is not swapped for the other bodies: the invert stays inside it. Other
+/// selected items, such as features or sketch curves, stay selected. Refused when nothing of
+/// those three kinds is selected, or when the result would exceed 10,000 items. Not an undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct SelectInvertParams {}
 
 /// How fine the window lets a click pick: the three words `select.filter` takes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]

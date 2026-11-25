@@ -23,12 +23,12 @@ const LIST: TypedContract<NoteListParams> = TypedContract::new();
 const MAX_NOTES: usize = 1000;
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("note.add", "Add Note", crate::checked!("note.add", note_add))
+    CommandSpec::new("note.add", "Add Note", crate::checked!("note.add", note_add)).begins_edit()
         .icon("text")
         .contract(&ADD)
         .output(output_schema_for::<NoteId>)
         .params("anchor?: [x,y,z] (the point in model space, mm; without it, where the selection points, or the origin); text: the note (may span lines); hidden?: bool (saved but not drawn) → note: id"),
-    CommandSpec::new("note.update", "Edit Note", crate::checked!("note.update", note_update))
+    CommandSpec::new("note.update", "Edit Note", crate::checked!("note.update", note_update)).begins_edit_when(crate::edit_start::changes_editor_fields)
         .icon("edit")
         .contract(&UPDATE)
         .output(output_schema_for::<NoteId>)
@@ -43,6 +43,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&LIST)
         .output(output_schema_for::<NotesList>)
         .noundo()
+        .read_only()
         .doc_only()
         .params("→ notes: [{id, anchor: [x,y,z], text, hidden}] in creation order"),
 ];

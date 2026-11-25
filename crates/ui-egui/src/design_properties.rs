@@ -1,5 +1,6 @@
 //! The Design Properties window (#1015): the design's project, part number, revision, author,
-//! organization, description and licence, and a read-only list of the data other tools keep in
+//! organization, description, material, finish (with a list of common finishes to pick from; a
+//! design that is one part carries them itself, #20114) and licence, and a read-only list of the data other tools keep in
 //! the design. OK applies the edited fields through one `document.metadata.set` (one undo step);
 //! Cancel and the close button change nothing. File → Design Properties…, the Browser's
 //! Document Settings, the root component's menu and `ui.start` of `document.metadata` or
@@ -15,7 +16,7 @@ use std::sync::Arc;
 use egui::{Align2, FontId, Stroke};
 use serde_json::{Map, Value, json};
 use solidcore_record::Vec3;
-use solidcraft_engine::doc::metadata::{DESCRIPTION, Owner, keys};
+use solidcraft_engine::doc::metadata::{DESCRIPTION, FINISH, Owner, keys};
 use solidcraft_engine::doc::progress::Progress;
 
 use crate::SolveApp;
@@ -109,6 +110,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             let Some(field) = d.fields.get_mut(i) else { continue };
             if key == DESCRIPTION {
                 ui_kit::multiline_text_field(ui, label, egui::Id::unique(("sc_design_properties", key)), field);
+            } else if key == FINISH {
+                ui_kit::row(ui, label, |ui| crate::finish_field::editor(ui, "design_properties", field));
             } else {
                 ui_kit::row(ui, label, |ui| ui_kit::text_field(ui, field, ""));
             }
@@ -426,6 +429,9 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
         rows.push(("", solidcraft_ui_text::tr_label("Open surface — no volume").to_string()));
     } else {
         rows.push(("Mass", format!("{:.3} g", number(total, "mass_g"))));
+        if let Some(mass) = v["physical_override"]["mass"].as_f64() {
+            rows.push(("Mass override", format!("{mass:.3} kg")));
+        }
         rows.push(("Volume", crate::prefs::show_mm(app, number(total, "volume_mm3"), 3)));
     }
     if skipped > 0 && skipped < bodies.len() as u64 {
@@ -525,6 +531,19 @@ mod tests {
     use solidcraft_engine::geom::prelude::*;
 
     use crate::scenario::Harness;
+
+    #[test]
+    fn properties_note_a_mass_override_next_to_the_computed_mass() {
+        let mut h = Harness::new();
+        h.app.run("component.create", json!({"name": "Motor"})).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        h.app.run("component.physical_override", json!({"component": "Motor", "mass": 2.5})).unwrap();
+        let measured = h.app.run("component.properties", json!({"component": "Motor"})).unwrap();
+        h.app.menu.props = Some(("Motor".into(), measured));
+        h.frames(2);
+        assert!(h.widget("Mass").is_some());
+        assert!(h.widget("Mass override").is_some());
+    }
 
     #[test]
     fn open_surface_properties_show_area_without_volume_rows() {
@@ -631,7 +650,7 @@ mod tests {
         h.step(&json!({"start": "document.metadata"})).unwrap();
         h.frames(2);
         let labels: Vec<&str> = keys(Owner::Design).map(|k| english.text(k.label)).collect();
-        assert_eq!(labels, ["Project", "Part number", "Revision", "Author", "Organization", "Description", "License"]);
+        assert_eq!(labels, ["Project", "Part number", "Revision", "Author", "Organization", "Description", "Material", "Finish", "License"]);
         for label in &labels {
             assert!(h.widget(label).is_some(), "{label}");
         }
@@ -826,6 +845,27 @@ mod tests {
         h.step(&json!({"click": {"chevron": "Document Settings"}})).unwrap();
         h.step(&json!({"click": {"browser": "Design Properties"}})).unwrap();
         assert!(h.app.design_properties.is_some());
+    }
+
+    /// The window lists a material and a finish, so a single-part design can carry them; OK sets them
+    /// with the other properties in one `document.metadata.set`.
+    #[test]
+    fn the_window_edits_the_designs_material_and_finish() {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        crate::design_properties::open(&mut h.app);
+        h.frames(2);
+        assert!(h.widget("Material").is_some() && h.widget("Finish").is_some());
+        let d = h.app.design_properties.as_mut().unwrap();
+        use solidcraft_engine::doc::metadata::{Owner, keys};
+        let at = |key: &str| keys(Owner::Design).position(|k| k.name == key).unwrap();
+        d.fields[at("material")] = "5052-H32, 0.090 in".into();
+        d.fields[at("finish")] = "Powder coat, RAL 9005, matt".into();
+        let undo = h.app.session.undo.len();
+        h.step(&json!({"widget": "OK"})).unwrap();
+        let m = &h.app.session.doc.metadata;
+        assert_eq!((m.text("material"), m.text("finish")), (Some("5052-H32, 0.090 in"), Some("Powder coat, RAL 9005, matt")));
+        assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
     }
 
     /// #12218: an inertia cell reads as its entry and value; a row whose label does not name each

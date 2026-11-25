@@ -7,10 +7,9 @@
 //! tolerance 2e-5, and their separation changes sides: the flag's former per-span
 //! crossing rule took such a span pair for a crossing, and the Booleans then gave the
 //! wrong bodies (A − B empty, A ∩ B = A). A crossing is now decided on the merged range,
-//! which ends where one of the coincident curves stops (WR-647). With
-//! `simple_coincidence_crossing_is_point` on, its remaining nearest-point half still takes
-//! the one-sided span pairs for points and A − B is still empty; these tests use the
-//! default kernel.
+//! which ends where one of the coincident curves stops (WR-647). The flag's remaining
+//! nearest-point half, which still took the one-sided span pairs for points and left
+//! A − B empty, is retired (WR-647 part D).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -177,39 +176,9 @@ fn issue_1036_probe() {
         let mut x = skin_range(&mut k, from, to).unwrap();
         report.push(format!("{name} faces {:#?}", faces(&k, &mut x)));
     }
-    // The same with the opt-in that touches this path: WR-305 (an interval along a face
-    // edge classifies to the edge) for the slivers on A's top cap. It did not change the
-    // results (run of 2026-10-27), nor did WR-304 (the clean-up re-checks edges a face
-    // merge leaves inside one face), which is always on now.
-    {
-        let fix = "classify_edge_interval";
-        let mut k = Kernel::default();
-        k.fixes.classify_edge_interval = true;
-        for (name, op) in [("A - B", 0), ("A n B", 1), ("A u B", 2)] {
-            let (a, b) = (
-                skin_range(&mut k, 0, 5).unwrap(),
-                skin_range(&mut k, 2, 7).unwrap(),
-            );
-            let r = match op {
-                0 => boolean_difference(&mut k, a, b),
-                1 => boolean_intersection(&mut k, a, b),
-                _ => boolean_union(&mut k, a, b),
-            };
-            report.push(format!("[{fix}] {name}: {}", shape(&k, r)));
-        }
-        let (a, b) = (
-            skin_range(&mut k, 0, 5).unwrap(),
-            skin_range(&mut k, 2, 7).unwrap(),
-        );
-        let options = MergeOptions::new(false, true, false, false, false);
-        match boolean_with_options(&mut k, a, b, BooleanOperation::Difference, options) {
-            Ok(mut out) => {
-                let fs = faces(&k, &mut out.result);
-                report.push(format!("[{fix}] A imprinted: {} faces {fs:#?}", fs.len()));
-            }
-            Err(e) => report.push(format!("[{fix}] A imprinted: {e:?}")),
-        }
-    }
+    // WR-305 (an interval along a face edge classifies to the edge), always on now, did not
+    // change these results for the slivers on A's top cap (run of 2026-10-27, as an opt-in),
+    // nor did WR-304 (the clean-up re-checks edges a face merge leaves inside one face).
     panic!("{report:#?}");
 }
 

@@ -122,7 +122,8 @@ use core::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 
 use crate::curve::curve::Curve;
-use crate::error::{ignored, Result, SolidError};
+use crate::error::surface::SurfaceFailure;
+use crate::error::{ignored, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::attribute::ObjectKey;
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
@@ -819,9 +820,9 @@ impl OffsetSurface {
         hi: Point2,
     ) -> Result<Surface> {
         if !Self::continues_as_itself(surface) {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_EXTEND,
-                "the surface does not continue as itself",
+                SurfaceFailure::DoesNotContinueAsItself,
             ));
         }
         let domain = surface.natural_uv_domain_with_nurb(k)?;
@@ -1332,9 +1333,9 @@ impl OffsetSurface {
             surface = &off.surface;
             if matches!(surface.kind(), SurfaceKind::OffsetSurface(_)) {
                 // Should not be nesting offset surfaces
-                return Err(SolidError::surface_failed(
+                return Err(SolidError::surface(
                     operation,
-                    "the base of the offset surface is itself an offset surface",
+                    SurfaceFailure::OffsetNestedTooDeep,
                 ));
             }
             offset_distance += off.offset_distance.get();
@@ -1381,7 +1382,14 @@ impl OffsetSurface {
                     Some(base)
                 };
                 let original = original.ok_or_else(|| {
-                    SolidError::surface_missing(OP_EXTEND, "the extended base surface")
+                    Failure::new(
+                        OP_EXTEND,
+                        SurfaceFailure::Defect {
+                            why: "the extension to extend is missing, though it is asked for only when the extended surface is in use, which it is only when there is one",
+                        },
+                    )
+                    .with_status(SM_ERR_NULL_POINTER)
+                    .into_error()
                 })?;
                 // (kernel-free: an extension is a B-spline made from its NURB, never lazy)
                 let current = ext.current().map(Surface::natural_uv_domain_if_built);
@@ -1414,8 +1422,16 @@ impl OffsetSurface {
         let (base, offset_distance) = self.nested_base(OP_POINT)?;
         let (use_ext, uv, _domain) = self.select_surface(k, ext, base, uv)?;
         let surface = if use_ext {
-            ext.current()
-                .ok_or_else(|| SolidError::surface_missing(OP_POINT, "the extended base surface"))?
+            ext.current().ok_or_else(|| {
+                Failure::new(
+                    OP_POINT,
+                    SurfaceFailure::Defect {
+                        why: "the extended surface in use is missing, though select_surface says it is in use only when there is one or it has just made one",
+                    },
+                )
+                .with_status(SM_ERR_NULL_POINTER)
+                .into_error()
+            })?
         } else {
             base
         };
@@ -1450,21 +1466,22 @@ impl OffsetSurface {
         flags: EvaluateFlags,
         base_sides: [Side; 2],
     ) -> Result<Vec<Vec<Vec3>>> {
-        // (checked before the array is sized)
-        match highest_offset_deriv(hu, hv, flags.only_upper_half) {
-            Some(d) if d <= MAX_DERIVS => {}
+        // (checked before the array is sized, once: the step-off recursion passes it on)
+        let hod = match highest_offset_deriv(hu, hv, flags.only_upper_half) {
+            Some(d) if d <= MAX_DERIVS => d,
             _ => {
-                return Err(SolidError::surface_failed(
+                return Err(SolidError::surface(
                     OP_EVAL,
-                    "the derivative order is past the most the offset surface evaluates",
+                    SurfaceFailure::DerivativeOrderTooHigh { max: MAX_DERIVS },
                 ))
             }
-        }
+        };
         let mut out = vec![Vec3::UNDEF; (hu + 1) * (hv + 1)];
         self.plain_or_simple(
             k,
             ext,
             0,
+            hod,
             do_eval_simple,
             uv,
             [hu, hv],
@@ -1477,12 +1494,15 @@ impl OffsetSurface {
     }
 
     /// `EvaluatePlainOrSimple`: writes upstream's flat derivative array
-    /// (`out[i * (hv + 1) + j]`). `depth` counts the pole step-off recursion.
+    /// (`out[i * (hv + 1) + j]`). `depth` counts the pole step-off recursion; `hod` is the
+    /// highest derivative order of `[hu, hv]`, which `evaluate_with` checked is at most
+    /// [`MAX_DERIVS`].
     fn plain_or_simple(
         &self,
         k: &Kernel,
         ext: &mut Extension<'_>,
         depth: usize,
+        hod: usize,
         do_eval_simple: bool,
         cr_uv: Point2,
         [hu, hv]: [usize; 2],
@@ -1492,23 +1512,22 @@ impl OffsetSurface {
         out: &mut [Vec3],
     ) -> Result<()> {
         // locals
-        let hod = match highest_offset_deriv(hu, hv, only_upper_half) {
-            Some(d) if d <= MAX_DERIVS => d,
-            _ => {
-                return Err(SolidError::surface_failed(
-                    OP_EVAL,
-                    "the derivative order is past the most the offset surface evaluates",
-                ))
-            }
-        };
         let hb = hod + 1;
 
         // when base surface is also an offset surface
         let (base, offset_distance) = self.nested_base(OP_EVAL)?;
         let (use_ext, uv, domain) = self.select_surface(k, ext, base, cr_uv)?;
         let surface = if use_ext {
-            ext.current()
-                .ok_or_else(|| SolidError::surface_missing(OP_EVAL, "the extended base surface"))?
+            ext.current().ok_or_else(|| {
+                Failure::new(
+                    OP_EVAL,
+                    SurfaceFailure::Defect {
+                        why: "the extended surface in use is missing, though select_surface says it is in use only when there is one or it has just made one",
+                    },
+                )
+                .with_status(SM_ERR_NULL_POINTER)
+                .into_error()
+            })?
         } else {
             base
         };
@@ -1553,10 +1572,14 @@ impl OffsetSurface {
         // the base derivative `i` times in u and `j` times in v (NULL upstream above hb)
         let d = |i: usize, j: usize| -> Result<Vec3> {
             if i + j > hb {
-                return Err(SolidError::surface_missing(
+                return Err(Failure::new(
                     OP_EVAL,
-                    "the base derivative past the order evaluated",
-                ));
+                    SurfaceFailure::Defect {
+                        why: "a base derivative past the order evaluated was asked for, though each is asked only under the condition on hu, hv that puts its order within hod + 1",
+                    },
+                )
+                .with_status(SM_ERR_NULL_POINTER)
+                .into_error());
             }
             at(&m, i, j)
         };
@@ -1593,6 +1616,7 @@ impl OffsetSurface {
                 k,
                 ext,
                 depth + 1,
+                hod,
                 do_eval_simple,
                 step_uv,
                 [hu, hv],
@@ -1606,6 +1630,7 @@ impl OffsetSurface {
                 k,
                 ext,
                 depth + 1,
+                hod,
                 do_eval_simple,
                 step_uv,
                 [hu, hv],
@@ -1712,10 +1737,7 @@ impl OffsetSurface {
 
         // Leave this tol at SM_EFF_ZERO: that's where output becomes invalid.
         if l < EFF_ZERO {
-            return Err(SolidError::surface_failed(
-                OP_EVAL,
-                "the base surface's normal is degenerate",
-            ));
+            return Err(SolidError::surface(OP_EVAL, SurfaceFailure::NoNormal));
         }
 
         // never-assigned upstream locals are default SmVector3d values (UNDEF)
@@ -1919,9 +1941,9 @@ impl OffsetSurface {
         let (uv, location) = result?;
         let pt = self.point_with(k, ext, uv)?;
         if pt.distance(point_on_surf) > tol_3d {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_INV,
-                "the inverted point is farther from the offset surface than the tolerance",
+                SurfaceFailure::InvertedPointOffOffset,
             ));
         }
         Ok((uv, location))
@@ -1983,9 +2005,9 @@ impl OffsetSurface {
             }
         } else {
             // Can not swap UV if I do not own the surface
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_EDIT,
-                "the offset surface does not own its base, so cannot swap its UV",
+                SurfaceFailure::BaseSurfaceNotOwned,
             ));
         }
         Ok(())
@@ -2028,9 +2050,9 @@ impl OffsetSurface {
                 self.offset_distance.set(self.offset_distance.get() * s.x);
             } else {
                 // OffsetSurface NonUniform scaling not supported
-                return Err(SolidError::surface_failed(
+                return Err(SolidError::surface(
                     OP_EDIT,
-                    "an offset surface cannot be scaled non-uniformly",
+                    SurfaceFailure::ScaleNotUniform,
                 ));
             }
         }
@@ -2042,9 +2064,9 @@ impl OffsetSurface {
                 .transform_at_depth(k, rotate_n_move, scale, depth + 1)?;
         } else {
             // Can not transform if I do not own the surface
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_EDIT,
-                "the offset surface does not own its base, so cannot transform it",
+                SurfaceFailure::BaseSurfaceNotOwned,
             ));
         }
         Ok(())
@@ -2078,9 +2100,9 @@ impl OffsetSurface {
             self.surface.trim_with_domain(k, trim_domain)?;
         }
         if !self.owns_surface {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_EDIT,
-                "the offset surface does not own its base, so cannot trim it",
+                SurfaceFailure::BaseSurfaceNotOwned,
             ));
         }
         Ok(())
@@ -2278,7 +2300,7 @@ fn read_body(k: &Kernel, db: &mut DatabaseReader, version: u64) -> Result<Offset
 /// ([`Surface::kind_with_nurb`], as its evaluations make it); a make that leaves none
 /// (a failing `MakeNurb`, whose status upstream ignores) is `SM_ERR_NULL_POINTER`.
 fn nurb_of(k: &Kernel, surface: &Surface) -> Result<crate::nurbs::srf_basic::Surface> {
-    let missing = || SolidError::surface_missing(OP_EXTEND, "the surface's NURB");
+    let missing = || SolidError::surface(OP_EXTEND, SurfaceFailure::NoNurb);
     match surface.kind_with_nurb(k)? {
         SurfaceKind::BSpline(b) => b.gw_nurb().cloned().ok_or_else(missing),
         SurfaceKind::Plane(p) => p.base_with_nurb()?.gw_nurb().cloned().ok_or_else(missing),
@@ -2301,11 +2323,12 @@ fn extend_toward(k: &Kernel, surface: &Surface, uv: Point2) -> Result<Surface> {
     let mut esur: Option<UnboundedExtension> = None;
     match eval_pt_derivs_unbounded(&sur, uv.x, uv.y, 0, ExtendContinuity::G1R, &mut esur) {
         Err(e) if e.is_unported_or_cancelled() => return Err(e),
-        Err(_) => {
-            return Err(SolidError::surface_failed(
-                OP_EXTEND,
-                "the G1R extension toward the point failed",
-            ))
+        Err(e) => {
+            return Err(
+                Failure::new(OP_EXTEND, SurfaceFailure::ExtensionTowardFailed)
+                    .caused_by(e)
+                    .into_error(),
+            )
         }
         Ok(_) => {}
     }
@@ -2433,6 +2456,15 @@ enum Generator {
     },
 }
 
+/// The defect of [`revolution_of`] on a surface that is not one it reads: every caller asks
+/// it only of a surface that continues as itself ([`OffsetSurface::continues_as_itself`]
+/// or [`offset_continues_as_itself`]), each of which it reads.
+const fn not_as_itself() -> SurfaceFailure {
+    SurfaceFailure::Defect {
+        why: "the surface is not a cylinder, cone, sphere or torus, nor a surface of revolution whose generator is a circle, though every caller checked it continues as itself, which only those do",
+    }
+}
+
 /// The surface of revolution of a cylinder, cone, sphere or torus (its NURB made), or of a
 /// surface of revolution whose generator is a circle ([`generator_is_circle`]), and how
 /// its generator continues.
@@ -2451,15 +2483,9 @@ fn revolution_of<'a>(
         )),
         SurfaceKind::SurfOfRevolution(r) => match generator_is_circle(r) {
             Some((centre, angle)) => Ok((r, Generator::Circle { centre, angle })),
-            None => Err(SolidError::surface_failed(
-                OP_EXTEND,
-                "the generator of the surface of revolution is not a circle",
-            )),
+            None => Err(SolidError::surface(OP_EXTEND, not_as_itself())),
         },
-        _ => Err(SolidError::surface_failed(
-            OP_EXTEND,
-            "the surface is not a kind of surface of revolution",
-        )),
+        _ => Err(SolidError::surface(OP_EXTEND, not_as_itself())),
     }
 }
 
@@ -2666,9 +2692,9 @@ fn rot_turn(rev: &SurfOfRevolution) -> Result<RotTurn> {
     let arc = (rev.end_angle_deg() - rev.start_angle_deg()) * (PI / 180.0);
     let length = ivl.max() - ivl.min();
     if !gt(arc, 0.0) || !le(arc, 2.0 * PI) || !gt(length, 0.0) {
-        return Err(SolidError::surface_failed(
+        return Err(SolidError::surface(
             OP_EXTEND,
-            "the arc or the parameter length of the revolution is out of range",
+            SurfaceFailure::RevolutionArcOutOfRange,
         ));
     }
     let half_gap = PI - 0.5 * arc;
@@ -2754,17 +2780,17 @@ const AS_ITSELF_MAX_SPANS: usize = 4096;
 /// (the fork's `Spans`).
 fn as_itself_spans(span: f64, from: f64, goal: f64, sign: f64, knots: &mut Vec<f64>) -> Result<()> {
     if !gt(span, 0.0) {
-        return Err(SolidError::surface_failed(
+        return Err(SolidError::surface(
             OP_EXTEND,
-            "the span length is not positive",
+            SurfaceFailure::ExtensionSpanNotPositive,
         ));
     }
     // (ULONG)ceil(...): saturating, so a reach past the bound fails below
     let n = ((goal - from) * sign / span).ceil() as usize;
     if n > AS_ITSELF_MAX_SPANS {
-        return Err(SolidError::surface_failed(
+        return Err(SolidError::surface(
             OP_EXTEND,
-            "the extension needs more spans than its bound",
+            SurfaceFailure::ExtensionSpansPastBound,
         ));
     }
     for k in 1..=n {
@@ -2776,7 +2802,12 @@ fn as_itself_spans(span: f64, from: f64, goal: f64, sign: f64, knots: &mut Vec<f
 /// The point `i` of row `r` of the net `g` (`SM_ERR` past its end; never reached).
 fn net_at(g: &[Vec<WeightedPoint>], r: usize, i: usize) -> Result<WeightedPoint> {
     g.get(r).and_then(|row| row.get(i)).copied().ok_or_else(|| {
-        SolidError::surface_failed(OP_EXTEND, "the net point is past the end of the net")
+        SolidError::surface(
+            OP_EXTEND,
+            SurfaceFailure::Defect {
+                why: "a net point past the end of the net was asked for, though every row and column read is below the counts the net was checked or grown to",
+            },
+        )
     })
 }
 
@@ -2810,12 +2841,13 @@ fn extend_as_itself(
     hi: Point2,
     close_turn: bool,
 ) -> Result<Surface> {
-    let err = || {
-        SolidError::surface_failed(
-            OP_EXTEND,
-            "the surface of revolution cannot extend as itself",
-        )
+    let fail = |cause: SurfaceFailure| SolidError::surface(OP_EXTEND, cause);
+    // a named cause that keeps the refusing routine's error as its cause
+    let fail_from = |cause: SurfaceFailure, e: SolidError| {
+        Failure::new(OP_EXTEND, cause).caused_by(e).into_error()
     };
+    let shape = || fail(SurfaceFailure::AsItselfNetUnexpected);
+    let defect = |why: &'static str| fail(SurfaceFailure::Defect { why });
     let (rev, generator) = revolution_of(k, surface)?;
     let gen_circle = !matches!(generator, Generator::Line);
     let turn = rot_turn(rev)?;
@@ -2830,7 +2862,7 @@ fn extend_as_itself(
         || net.points.len() != num_u * num_v
         || (!net.weights.is_empty() && net.weights.len() != net.points.len())
     {
-        return Err(err());
+        return Err(shape());
     }
     let (num_rot, num_gen) = if l_rot == 0 {
         (num_u, num_v)
@@ -2846,11 +2878,15 @@ fn extend_as_itself(
             } else {
                 i * num_v + r
             };
-            let p = net.points.get(at).copied().ok_or_else(err)?;
+            let p = net.points.get(at).copied().ok_or_else(|| {
+                defect("a control point index is past the net's points, though it is below num_u * num_v, which the net's points were checked to number")
+            })?;
             let w = if net.weights.is_empty() {
                 1.0
             } else {
-                net.weights.get(at).copied().ok_or_else(err)?
+                net.weights.get(at).copied().ok_or_else(|| {
+                    defect("a control point index is past the net's weights, though the net was checked to hold a weight per point")
+                })?
             };
             row.push(WeightedPoint { p, w });
         }
@@ -2873,7 +2909,7 @@ fn extend_as_itself(
             || d.mults.first() != Some(&(d.deg + 1))
             || d.mults.last() != Some(&(d.deg + 1))
         {
-            return Err(err());
+            return Err(shape());
         }
     }
     let (rot, gen) = if l_rot == 0 {
@@ -2883,11 +2919,15 @@ fn extend_as_itself(
     };
     // Circles are rational quadratics; a cone's generator is a line.
     if rot.deg != 2 || gen.deg != if gen_circle { 2 } else { 1 } {
-        return Err(err());
+        return Err(shape());
     }
 
     let o = rev.position().origin();
-    let z = rev.position().z_axis().unitize().map_err(|_| err())?;
+    let z = rev
+        .position()
+        .z_axis()
+        .unitize()
+        .map_err(|e| fail_from(SurfaceFailure::RevolutionAxisDegenerate, e))?;
     let deg_to_rad = PI / 180.0;
     // the fork's tangency-labs/smlib@43fd6b6: a revolved circle's arc is its generator's
     let gen_angle = match generator {
@@ -2920,7 +2960,7 @@ fn extend_as_itself(
         let mut new: Vec<Vec<WeightedPoint>> = Vec::new(); // per column, outward
         if gen_circle {
             if !gt(gen_angle, 0.0) {
-                return Err(err());
+                return Err(fail(SurfaceFailure::RevolutionArcOutOfRange));
             }
             as_itself_spans(
                 gen_length / gen_angle * (0.5 * PI),
@@ -2936,7 +2976,9 @@ fn extend_as_itself(
             let out = radial(end.p, o, z);
             match generator {
                 Generator::Torus { major } => {
-                    let out = out.unitize().map_err(|_| err())?;
+                    let out = out
+                        .unitize()
+                        .map_err(|e| fail_from(SurfaceFailure::PointOnAxis, e))?;
                     centre = o + out * major;
                 }
                 // the fork's tangency-labs/smlib@43fd6b6: about the revolved circle's centre
@@ -2948,7 +2990,7 @@ fn extend_as_itself(
             let axis = (end.p - centre)
                 .cross(end.p - inner.p)
                 .unitize()
-                .map_err(|_| err())?;
+                .map_err(|e| fail_from(SurfaceFailure::GeneratorCircleUndefined, e))?;
             let first = arc_spans(end, centre, axis, new_knots.len(), 0.5 * PI);
             // Every other column is the first turned about the axis and scaled from it:
             // read off the generator point farthest from the axis.
@@ -2961,8 +3003,11 @@ fn extend_as_itself(
                 }
             }
             let ref0 = net_at(&g, 0, i_ref)?;
-            if !gt(d_ref, 0.0) || !gt(ref0.w, 0.0) {
-                return Err(err());
+            if !gt(d_ref, 0.0) {
+                return Err(fail(SurfaceFailure::PointOnAxis));
+            }
+            if !gt(ref0.w, 0.0) {
+                return Err(fail(SurfaceFailure::AsItselfWeightNotPositive));
             }
             let rho0 = radial(ref0.p, o, z);
             new.push(first);
@@ -2974,7 +3019,9 @@ fn extend_as_itself(
                 let dw = at.w / ref0.w;
                 let column = new
                     .first()
-                    .ok_or_else(err)?
+                    .ok_or_else(|| {
+                        defect("the first column's extension is missing, though it was pushed just before the other columns are made from it")
+                    })?
                     .iter()
                     .map(|c| {
                         let sr = radial(c.p, o, z);
@@ -2995,7 +3042,7 @@ fn extend_as_itself(
                 gen.at(1) - gen.front()
             };
             if !gt(last, 0.0) {
-                return Err(err());
+                return Err(shape());
             }
             let f = (goal - from) * sign / last;
             new_knots.push(goal);
@@ -3003,7 +3050,7 @@ fn extend_as_itself(
                 let (a, b) = (net_at(&g, r, i_end)?, net_at(&g, r, i_in)?);
                 let w = a.w + (a.w - b.w) * f;
                 if !gt(w, 0.0) {
-                    return Err(err());
+                    return Err(fail(SurfaceFailure::AsItselfWeightNotPositive));
                 }
                 new.push(vec![WeightedPoint {
                     p: (a.p * a.w + (a.p * a.w - b.p * b.w) * f) * (1.0 / w),
@@ -3047,7 +3094,9 @@ fn extend_as_itself(
         } else {
             (0, 1)
         };
-        let end_row = g.get(r_end).cloned().ok_or_else(err)?;
+        let end_row = g.get(r_end).cloned().ok_or_else(|| {
+            defect("the net's end row is missing, though the net was checked to have at least two rows round the axis and only grows")
+        })?;
         // turning outward, read off the row farthest from the axis
         let (mut i_ref, mut d_ref) = (0, -1.0);
         for (i, c) in end_row.iter().enumerate() {
@@ -3060,8 +3109,11 @@ fn extend_as_itself(
         let at_end = net_at(&g, r_end, i_ref)?.p;
         let at_in = net_at(&g, r_in, i_ref)?.p;
         let sense = (at_end - o).cross(at_end - at_in).dot(z);
-        if !gt(d_ref, 0.0) || sense == 0.0 {
-            return Err(err());
+        if !gt(d_ref, 0.0) {
+            return Err(fail(SurfaceFailure::PointOnAxis));
+        }
+        if sense == 0.0 {
+            return Err(fail(SurfaceFailure::RotationSenseUndefined));
         }
         let axis = if sense > 0.0 { z } else { -z };
         let mut new: Vec<Vec<WeightedPoint>> = vec![Vec::new(); 2 * new_knots.len()];
@@ -3267,9 +3319,9 @@ fn extend_surface(
 ) -> Result<Option<Surface>> {
     // SM_CAST_PTR(SmBSplineSurface, pSurface); NER(pOriginal) (in the caller)
     if !is_b_spline_kind(surface) {
-        return Err(SolidError::surface_missing(
+        return Err(SolidError::surface(
             OP_EXTEND,
-            "the B-spline kind surface",
+            SurfaceFailure::SurfaceNotBSplineKind,
         ));
     }
 
@@ -3306,9 +3358,11 @@ fn extend_surface(
         return Ok(None);
     }
     if !surface.is_kind_of(B_SPLINE_SURFACE_TYPE)? {
-        return Err(SolidError::surface_failed(
+        return Err(SolidError::surface(
             OP_EXTEND,
-            "the surface is not a B-spline surface",
+            SurfaceFailure::Defect {
+                why: "the surface is not a B-spline surface, though it is of a B-spline kind, each of which is one (is_kind_of reaches its B-spline base)",
+            },
         ));
     }
 
@@ -3343,11 +3397,12 @@ fn extend_surface(
             eval_pt_derivs_unbounded(&sur, uv.x, uv.y, 0, ExtendContinuity::G1R, &mut esur);
         match second {
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => {
-                return Err(SolidError::surface_failed(
-                    OP_EXTEND,
-                    "the G1R extension toward the point failed",
-                ))
+            Err(e) => {
+                return Err(
+                    Failure::new(OP_EXTEND, SurfaceFailure::ExtensionTowardFailed)
+                        .caused_by(e)
+                        .into_error(),
+                )
             }
             Ok(_) => {}
         }
@@ -3428,9 +3483,9 @@ fn find_nonsingular_stepoff(
     }
 
     // Neither direction worked.  We can't get an offset direction.
-    Err(SolidError::surface_failed(
+    Err(SolidError::surface(
         OP_STEPOFF,
-        "neither direction gives a nonsingular stepoff",
+        SurfaceFailure::NoNonsingularStepoff,
     ))
 }
 
@@ -4420,9 +4475,7 @@ mod tests {
         assert_eq!(err.upstream_status(), Some(crate::error::SM_ERR));
         assert_eq!(
             err.surface_failure(),
-            Some(&crate::error::surface::SurfaceFailure::Failed(
-                "the offset surface does not own its base, so cannot swap its UV"
-            ))
+            Some(&SurfaceFailure::BaseSurfaceNotOwned)
         );
         assert_eq!(off.offset_distance(), -0.4);
         assert!(off.extended_base_surface().is_some());
@@ -4809,44 +4862,62 @@ mod tests {
         );
     }
 
-    /// The offset surface's failures keep the operation, status, kind and entity of the bare
-    /// `Upstream` statuses they replace (a sample).
+    /// The offset surface's named causes, met through its routines: each keeps the operation
+    /// and the status of the phrase cause it replaced, with the kind its condition is (the
+    /// caller's surface or derivative order: `InvalidInput`).
     #[test]
-    fn typed_surface_failures_keep_their_upstream_answers() {
+    fn the_offset_surface_causes_keep_their_operation_and_status() {
         use crate::error::surface::SurfaceFailure;
-        let samples: [(&'static str, SurfaceFailure, i32); 3] = [
-            (
-                OP_EXTEND,
-                SurfaceFailure::Failed("the surface does not continue as itself"),
-                crate::error::SM_ERR,
-            ),
-            (
-                OP_EVAL,
-                SurfaceFailure::Missing("the extended base surface"),
-                crate::error::SM_ERR_NULL_POINTER,
-            ),
-            (
-                OP_STEPOFF,
-                SurfaceFailure::Failed("neither direction gives a nonsingular stepoff"),
-                crate::error::SM_ERR,
-            ),
-        ];
-        for (operation, failure, code) in samples {
-            let typed = SolidError::surface(operation, failure);
-            let before = SolidError::Upstream {
-                operation,
-                code,
-                entity: None,
-            };
-            assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
-            assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
-            assert_eq!(typed.kind(), before.kind(), "{typed:?}");
-            assert_eq!(typed.operation(), before.operation(), "{typed:?}");
-            assert_eq!(typed.entity(), None, "{typed:?}");
-            assert_eq!(typed.is_port_failure(), before.is_port_failure());
-            assert_eq!(typed.is_status_answer(), before.is_status_answer());
-            assert_eq!(typed.surface_failure(), Some(&failure));
-        }
+        use crate::error::{ErrorKind, SM_ERR};
+        let k = Kernel::default();
+        let check = |e: SolidError, op: &str, failure: SurfaceFailure, kind: ErrorKind| {
+            assert_eq!(e.operation(), op, "{e:?}");
+            assert_eq!(e.sm_status(), Some(SM_ERR), "{e:?}");
+            assert_eq!(e.upstream_status(), Some(SM_ERR), "{e:?}");
+            assert_eq!(e.kind(), kind, "{e:?}");
+            assert!(!e.is_defect(), "{e:?}");
+            assert_eq!(e.surface_failure(), Some(&failure), "{e:?}");
+        };
+        // a B-spline does not continue as itself
+        let e = OffsetSurface::continue_as_itself(
+            &k,
+            &wr_164_base(),
+            Point2::new(-1.0, -1.0),
+            Point2::new(2.0, 2.0),
+        )
+        .unwrap_err();
+        check(
+            e,
+            OP_EXTEND,
+            SurfaceFailure::DoesNotContinueAsItself,
+            ErrorKind::InvalidInput,
+        );
+        let off = OffsetSurface::new(&k, 0.4, wr_164_base(), true, SS_UNKNOWN).unwrap();
+        // past the third derivative the offset does not evaluate
+        let e = off
+            .evaluate(&k, Point2::new(0.5, 0.5), 4, 0, EvaluateFlags::default())
+            .unwrap_err();
+        check(
+            e,
+            OP_EVAL,
+            SurfaceFailure::DerivativeOrderTooHigh { max: MAX_DERIVS },
+            ErrorKind::InvalidInput,
+        );
+        // a non-uniform scale
+        let mut off = off;
+        let e = off
+            .transform(
+                &k,
+                &Axis2Placement::default(),
+                Some(Vec3::new(1.0, 2.0, 1.0)),
+            )
+            .unwrap_err();
+        check(
+            e,
+            OP_EDIT,
+            SurfaceFailure::ScaleNotUniform,
+            ErrorKind::InvalidInput,
+        );
     }
 
     /// [`OffsetSurface::evaluate_on_sides`] evaluates the base on the sides asked for.

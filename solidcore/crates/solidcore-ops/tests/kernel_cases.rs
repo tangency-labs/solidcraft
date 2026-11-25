@@ -11,8 +11,8 @@
 //! - **unsupported**: the kernel alone does not account for the result (`operation_expressible`
 //!   false), the rig itself rated it unsupported, or the conversion does not carry a record yet;
 //! - **unported**: an operation this crate does not have yet, named, so the case is not run;
-//! - **known-failing**: listed in `known_failing.json` beside the corpus, the one list, each entry
-//!   with its reason and issue. A listed case is steady while it reproduces the rig's result,
+//! - **known-failing**: listed in `kernel_cases_known_failing/` beside the corpus, the one list:
+//!   `<area>/<case>.json` per listed case, with its reason and issue. A listed case is steady while it reproduces the rig's result,
 //!   or, when its entry records `fails` (solidcore fails it differently from the rig), while it
 //!   fails exactly so. A listed case that moves from that (it passes, or fails otherwise) is
 //!   reported, so the list can shrink.
@@ -44,6 +44,13 @@
 //! - `KERNEL_CASES_REPORT_ONLY`: set, the test reports without failing;
 //! - `KERNEL_CASES_SMB`: a directory to write each run case's bodies to as `<case>.smb`, for
 //!   its render (`solidcore-diag`): the final bodies, or the inputs of the refusal that ends it.
+//!
+//! One entry from outside the corpus (a reported failure's case, `docs/failure-codes-and-reproduction.md`
+//! 3.4) replays with `KERNEL_CASES_ENTRY=<path to its .json>` (its records beside it) through
+//! the test `kernel_case_entry` (which does nothing without it): it prints the outcome as a JSON line, `same failure` when the
+//! call that fails fails with the entry's failure code (the failing call's `code`), `other
+//! failure`, `builds now`, or `unsupported`, and fails unless it is `same failure` (or
+//! `KERNEL_CASES_REPORT_ONLY` is set). `KERNEL_CASES_REPORT` writes the line to a file too.
 
 #![allow(
     clippy::unwrap_used,
@@ -78,7 +85,7 @@ use solidcore_ops::sweep::{
     Ends, SweepFrame,
 };
 use solidcore_ops::untrim::{untrim_face, Holes};
-use solidcore_ops::{make_sphere, offset, session, Body, Order};
+use solidcore_ops::{make_sphere, offset, session, Body, FailureCode, Order};
 use solidcore_record::brep::{Brep as Record, Frame, Surface as RecordSurface};
 
 fn corpus() -> PathBuf {
@@ -174,10 +181,13 @@ mod f64_bits {
     }
 }
 
-/// An entry of the known-failing list.
+/// An entry of the known-failing list: `kernel_cases_known_failing/<area>/<case>.json`, the case
+/// named by its path (one file per case, so PRs listing or unlisting different cases never touch
+/// the same file).
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Listed {
+    #[serde(skip)]
     case: String,
     issue: String,
     reason: String,
@@ -189,15 +199,45 @@ struct Listed {
     fails: Option<String>,
 }
 
+fn known_failing_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../solidcore/tests/kernel_cases_known_failing")
+}
+
+/// The known-failing list, by case (`<area>/<case>`): one file per case under
+/// [`known_failing_dir`], each `{"issue", "reason", "fails"?}`.
 fn known_failing() -> BTreeMap<String, Listed> {
-    let text = std::fs::read_to_string(corpus().join("known_failing.json")).unwrap();
-    let list: Vec<Listed> = serde_json::from_str(&text).unwrap();
-    let mut out = BTreeMap::new();
-    for l in list {
-        assert!(!l.reason.is_empty() && !l.issue.is_empty(), "{}", l.case);
-        let case = l.case.clone();
-        assert!(out.insert(case.clone(), l).is_none(), "{case} listed twice");
+    fn walk(root: &Path, dir: &Path, out: &mut BTreeMap<String, Listed>) {
+        for e in std::fs::read_dir(dir).unwrap() {
+            let p = e.unwrap().path();
+            if p.is_dir() {
+                walk(root, &p, out);
+                continue;
+            }
+            assert!(
+                p.extension().is_some_and(|x| x == "json") && p.parent() != Some(root),
+                "{}: the known-failing list holds only <area>/<case>.json files",
+                p.display()
+            );
+            let text = std::fs::read_to_string(&p).unwrap();
+            let mut l: Listed =
+                serde_json::from_str(&text).unwrap_or_else(|err| panic!("{}: {err}", p.display()));
+            l.case = p
+                .strip_prefix(root)
+                .unwrap()
+                .with_extension("")
+                .to_string_lossy()
+                .replace('\\', "/");
+            assert!(
+                !l.reason.is_empty() && !l.issue.is_empty(),
+                "{}: issue and reason must not be empty",
+                p.display()
+            );
+            assert!(out.insert(l.case.clone(), l).is_none());
+        }
     }
+    let root = known_failing_dir();
+    let mut out = BTreeMap::new();
+    walk(&root, &root, &mut out);
     out
 }
 
@@ -994,6 +1034,7 @@ fn call_with_copy(
             let turn = match p.get("turn").map(Value::as_str) {
                 None | Some(Some("mitre")) => Turn::Mitre,
                 Some(Some("swept")) => Turn::Swept,
+                Some(Some("auto")) => Turn::Auto,
                 Some(_) => return Err(bad("turn")),
             };
             let kind = match p["kind"].as_str() {
@@ -1384,6 +1425,8 @@ fn run_case_with_records(
                 }
             }
             (Err(x), Some(_)) => {
+                // what the call failed with, for a replay that compares failure codes
+                REFUSED.with(|r| r.set(session::take_failure_code()));
                 // An entry may name the refusal it expects (`refused_as`, a part of the
                 // error's text): any other error, such as a blend that fails inside instead of
                 // being refused, does not stand for it, whether the refusal was handled or not.
@@ -1403,6 +1446,7 @@ fn run_case_with_records(
                 }
             }
             (Err(x), None) => {
+                REFUSED.with(|r| r.set(session::take_failure_code()));
                 write_smb(e, &ins);
                 return Err(Stop::Fail(format!("call {i} ({op}) refused: {x}")));
             }
@@ -1498,30 +1542,35 @@ fn run_case_with_records(
 }
 
 /// The cases whose volume moved off the rig's when `brep_volume` began closing tolerant
-/// edges' gaps (#16735), with their volume now. The rig's records stay as measured (its
+/// edges' gaps (#16735), with their volume now. The three peg cases a second round runs along
+/// are at their volume since a round is fitted as finely as its edge is known: nearer the
+/// volume they converge to as the fit tightens than before (each listed with the sequence). The rig's records stay as measured (its
 /// integrator leaked through the gaps as this one did); each case is graded on its volume
 /// now, and the move from the rig's is checked within the old leak's bound on the result
 /// ([`moved_from_the_rig`]).
 const CLOSED_GAP_VOLUMES: [(&str, f64); 5] = [
-    // rig 9440.034329164451
+    // rig 9440.034329164451; the fit at 1/4, 1/10 and 3/100 of this one gives .0337164,
+    // .0337117, .0337089 (before: .0336361, farther from where they go)
     (
         "report-peg-concave-round-r3-then-front-round-r1-5",
-        9_440.033_636_074_577,
+        9_440.033_737_473_757,
     ),
     // rig 9404.790032915605
     (
         "report-peg-concave-round-then-front-round-r2",
         9_404.789_833_109_295,
     ),
-    // rig 9432.862095990427
+    // rig 9432.862095990427; the fit at 1/4, 1/10 and 3/100 of this one gives .862192,
+    // .862211, .862224 (before: .861780, farther from where they go)
     (
         "report-peg-front-round-r1-5-then-concave-round-r3",
-        9_432.861_779_882_673,
+        9_432.862_047_183_242,
     ),
-    // rig 9399.383292771683
+    // rig 9399.383292771683; the fit at 1/4, 1/10 and 3/100 of this one gives .383242,
+    // .383255, .383262 (before: .383030, farther from where they go)
     (
         "report-peg-front-round-then-concave-round-r2",
-        9_399.383_029_676_488,
+        9_399.383_180_752_53,
     ),
     // rig 112506.83949124035
     (
@@ -4408,7 +4457,7 @@ fn kernel_cases() {
     for k in listed.keys() {
         assert!(
             all.contains(k),
-            "known_failing.json lists {k}, which the corpus does not have"
+            "kernel_cases_known_failing/{k}.json lists a case the corpus does not have: delete it"
         );
     }
 
@@ -4446,6 +4495,156 @@ fn kernel_cases() {
             moved.len()
         );
     }
+}
+
+thread_local! {
+    /// The failure code of the last call the replay on this thread saw refused.
+    static REFUSED: std::cell::Cell<Option<FailureCode>> = const { std::cell::Cell::new(None) };
+}
+
+/// A failure code as an entry writes it: `{"call", "kind", "operation"}`.
+fn code_json(c: &FailureCode) -> Value {
+    serde_json::json!({"call": c.call, "kind": c.kind, "operation": c.operation})
+}
+
+/// The outcome of replaying `e`, a single entry at `entry`, against the failure code its failing
+/// call records: `same failure`, `other failure`, `builds now` or `unsupported`, as a JSON object
+/// with the code the replay failed with and the entry's.
+fn replay_entry(entry: &Path, e: &Value) -> Value {
+    let expected = e["calls"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .rev()
+        .find(|c| {
+            c["error"].is_string() && c.get("continued").and_then(Value::as_bool) != Some(true)
+        })
+        .map_or(Value::Null, |c| c["code"].clone());
+    REFUSED.with(|r| r.set(None));
+    let ran = run_case(entry, e);
+    let got = REFUSED.with(std::cell::Cell::take).map(|c| code_json(&c));
+    let (outcome, note) = match &ran {
+        Err(Stop::Unsupported(why)) => ("unsupported", why.clone()),
+        // the replay ended at a refusal where the entry's run did
+        Ok(None) => match &got {
+            Some(g) if !expected.is_null() && *g == expected => ("same failure", String::new()),
+            Some(_) => ("other failure", "refused with another code".to_owned()),
+            None => ("other failure", "refused without a code".to_owned()),
+        },
+        Ok(Some(_)) if expected.is_null() => ("builds now", String::new()),
+        Ok(Some(_)) => ("builds now", "the entry's failing call builds".to_owned()),
+        Err(Stop::Fail(why))
+            if got.is_none()
+                && why.starts_with("call ")
+                && why.contains("ran where the rig's refused") =>
+        {
+            ("builds now", why.clone())
+        }
+        Err(Stop::Fail(why)) => ("other failure", why.clone()),
+    };
+    serde_json::json!({
+        "case": e["case"],
+        "outcome": outcome,
+        "code": got,
+        "expected": expected,
+        "note": note,
+    })
+}
+
+/// `KERNEL_CASES_ENTRY`: one entry from outside the corpus, replayed against its failure code
+/// ([`replay_entry`]). Without it, nothing runs.
+#[test]
+fn kernel_case_entry() {
+    let Some(path) = std::env::var_os("KERNEL_CASES_ENTRY") else {
+        return;
+    };
+    session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
+    let path = PathBuf::from(path);
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|x| panic!("KERNEL_CASES_ENTRY: {}: {x}", path.display()));
+    let e: Value = serde_json::from_str(&text)
+        .unwrap_or_else(|x| panic!("KERNEL_CASES_ENTRY: {}: {x}", path.display()));
+    let line = replay_entry(&path, &e);
+    println!("{line}");
+    if let Ok(p) = std::env::var("KERNEL_CASES_REPORT") {
+        std::fs::write(p, format!("{line}\n")).unwrap();
+    }
+    if std::env::var_os("KERNEL_CASES_REPORT_ONLY").is_none() {
+        assert_eq!(line["outcome"], "same failure", "{line}");
+    }
+}
+
+/// A 30 x 2 x 10 wall's two top edges, by their record indices, and the wall's record.
+fn wall_and_top_edges() -> (Body, Order, solidcore_record::brep::Brep, Vec<usize>) {
+    let wall = solidcore_ops::make_box([0.0; 3], [30.0, 2.0, 10.0]).unwrap();
+    let (record, order) = wall.to_record().unwrap();
+    let at = |v: u32| record.vertices[v as usize].point;
+    let top: Vec<usize> = (0..record.edges.len())
+        .filter(|&i| {
+            let [a, b] = record.edges[i].vertices.map(at);
+            a[2] == 10.0 && b[2] == 10.0 && a[1] == b[1] && a[0] != b[0]
+        })
+        .collect();
+    assert_eq!(top.len(), 2, "the wall has two top edges along x");
+    (wall, order, record, top)
+}
+
+/// A single entry outside the corpus (a reported failure's case) replays to the failure code its
+/// failing call records: the wall's top edges rounded 1.5, past the 1 its 2 wide top allows, are
+/// refused with the code the same call gives run directly; another code is another failure; a
+/// round that fits builds now.
+#[test]
+fn a_single_entry_replays_to_its_failure_code() {
+    session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
+    let (wall, order, record, top) = wall_and_top_edges();
+    let _ = session::take_failure_code();
+    let direct = blend_ordered(
+        &wall,
+        &order,
+        Blend::Round,
+        &top,
+        &[1.5, 1.5],
+        &[],
+        Corners::Filled,
+        BlendOptions::default(),
+    );
+    assert!(direct.is_err());
+    let code = session::take_failure_code().unwrap();
+
+    let dir = std::env::temp_dir().join(format!("kernel-case-entry-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let gz = std::fs::File::create(dir.join("wall.bodies.json.gz")).unwrap();
+    let mut w = flate2::write::GzEncoder::new(gz, flate2::Compression::default());
+    std::io::Write::write_all(
+        &mut w,
+        serde_json::json!({"b1": record}).to_string().as_bytes(),
+    )
+    .unwrap();
+    w.finish().unwrap();
+    let entry = |size: f64, code: Value| {
+        serde_json::json!({
+            "case": "report-wall", "area": "reports", "records": "wall.bodies.json.gz",
+            "bodies": {"b1": {"trusted": true, "keeping_splines": true}},
+            "calls": [{"op": "blend_dropping", "inputs": ["b1"],
+                "params": {"kind": "round", "sizes": [size],
+                    "edges": {"kind": "edge", "picked": top.iter().map(|i| serde_json::json!({"index": i})).collect::<Vec<_>>()}},
+                "error": "too large", "code": code}],
+            "result": [], "operation_expressible": true,
+        })
+    };
+    let path = dir.join("wall.json");
+    let same = replay_entry(&path, &entry(1.5, code_json(&code)));
+    assert_eq!(same["outcome"], "same failure", "{same}");
+    assert_eq!(same["code"], code_json(&code), "{same}");
+    let other = FailureCode {
+        operation: "another::routine",
+        ..code
+    };
+    let differs = replay_entry(&path, &entry(1.5, code_json(&other)));
+    assert_eq!(differs["outcome"], "other failure", "{differs}");
+    let fits = replay_entry(&path, &entry(0.5, code_json(&code)));
+    assert_eq!(fits["outcome"], "builds now", "{fits}");
+    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 /// Set, a run of this binary is a case process: the case's path under the corpus.
@@ -4952,4 +5151,91 @@ fn the_disk_joined_with_its_lofted_blades_passes_the_check() {
     let joined = union_all(bodies).unwrap();
     let report = joined.check(solidcore_ops::CheckLevel::All).unwrap();
     assert!(report.is_valid(), "{}", report.text);
+}
+
+/// A bounded cliff does not excuse a separate material-adding blend on the same plate.
+#[test]
+fn tangent_cliff_still_checks_a_separate_concave_blend() {
+    use solidcore_ops::blend::blend_with;
+    use solidcore_ops::{make_box, make_cylinder, pick};
+    session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
+    let plate = make_box([-9.0, -6.0, -9.0], [12.0, 12.0, 9.0]).unwrap();
+    let tangent = make_cylinder([0.0, 0.0, -1.0], 3.0, 18.0).unwrap();
+    let inset = make_cylinder([-6.0, 0.0, -1.0], 1.0, 18.0).unwrap();
+    let plate = boolean(plate, tangent, BooleanOp::Union).unwrap().unwrap();
+    let body = boolean(plate, inset, BooleanOp::Union).unwrap().unwrap();
+    let points = [[0.0, 3.0, 0.0], [-6.0, 1.0, 0.0]];
+    let picks = pick::edges(&body, &points, 1e-4).unwrap().unwrap();
+    let apply = |body: &Body, picks: &[usize]| {
+        blend_with(
+            body,
+            Blend::Chamfer,
+            picks,
+            &[0.75],
+            &[],
+            Corners::Filled,
+            BlendOptions::default(),
+        )
+    };
+    for point in points {
+        let copy = body.copy().unwrap();
+        let pick = pick::edges(&copy, &[point], 1e-4).unwrap().unwrap();
+        apply(&copy, &pick).unwrap();
+        copy.check_solid().unwrap();
+    }
+    let error = apply(&body, &picks).unwrap_err();
+    assert_eq!(error, solidcore_ops::Error::NoRoom);
+}
+
+/// The exact cone, the original tangent walls and the upper rail survive clipping.
+#[test]
+fn tangent_cliff_chamfers_keep_the_walls_and_upper_rail() {
+    use solidcore_ops::measure::PointClass;
+    use solidcore_ops::pick;
+    session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
+    for (name, walls) in [
+        (
+            "12060-chamfer-circular-shoulder-between-tangent-walls",
+            &[[0.0, -1.0], [0.0, 1.0]][..],
+        ),
+        (
+            "12060-chamfer-closed-shoulder-at-tangent-seam",
+            &[[1.0, 0.0]][..],
+        ),
+    ] {
+        let entry = corpus().join("fillets").join(format!("{name}.json"));
+        let case: Value = serde_json::from_str(&std::fs::read_to_string(&entry).unwrap()).unwrap();
+        let operand: Record = serde_json::from_value(records(&entry, &case)["b1"].clone()).unwrap();
+        let (body, order) = Body::from_record(&operand, true).unwrap();
+        let mut input = [Slot {
+            body: Arc::new(body),
+            order: Some(order),
+        }];
+        let result = call(&case["calls"][0], &mut input).unwrap().unwrap();
+        let body = result.body;
+        body.check_solid().unwrap();
+        let diagonal = 3.0 * std::f64::consts::FRAC_1_SQRT_2;
+        assert!(pick::edges(&body, &[[diagonal, diagonal, 0.75]], 1e-5)
+            .unwrap()
+            .is_ok());
+        assert_eq!(
+            body.classify_point([-3.375, 0.0, 0.375]).unwrap(),
+            PointClass::OnBoundary,
+            "{name}: conical face at half height"
+        );
+        for &[x, y] in walls {
+            let point = |normal| [normal * x + 0.5 * y, normal * y + 0.5 * x, 0.375];
+            for (distance, class) in [
+                (2.98, PointClass::Inside),
+                (3.0, PointClass::OnBoundary),
+                (3.02, PointClass::Outside),
+            ] {
+                assert_eq!(
+                    body.classify_point(point(distance)).unwrap(),
+                    class,
+                    "{name}: original side wall at {x}, {y}"
+                );
+            }
+        }
+    }
 }

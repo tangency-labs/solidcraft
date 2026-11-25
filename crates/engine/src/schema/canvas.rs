@@ -21,19 +21,15 @@ use super::motion::require;
 use super::types::{LengthExpr, Point2, Point3};
 use crate::params;
 
-/// Place an image on a plane as a reference to trace, kept in the design. Give the image as
-/// `path` or as base64 `data`; PNG, JPEG and SVG are taken, up to 16 MiB, an SVG drawn into a
+/// Place an image on a plane as a reference to trace, kept in the design. Give the image file as
+/// `path`; PNG, JPEG and SVG are taken, up to 16 MiB, an SVG drawn into a
 /// PNG. The image goes into the active component. One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = image_required)]
 pub struct CanvasInsertParams {
-    /// A PNG, JPEG or SVG file to read (not blank, under 4096 characters). Used when `data` is
-    /// not given.
+    /// The PNG, JPEG or SVG file to read (not blank, under 4096 characters).
     #[serde(default)]
     pub path: Option<String>,
-    /// The image itself, a PNG, JPEG or SVG, as base64. Wins over `path`.
-    #[serde(default)]
-    pub data: Option<String>,
     /// The plane the image lies on. Default: XY. A picked face is read as `sketch.create` reads
     /// one.
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
@@ -96,19 +92,16 @@ pub enum FrameAuto {
     Auto,
 }
 
-/// Put an image on a planar face of the model, like a sticker, kept in the design. Give the image
-/// as `path` or as base64 `data`; PNG, JPEG and SVG are taken, up to 16 MiB, an SVG drawn into a
-/// PNG. The image goes into the active component. One undo step.
+/// Put an image on a planar face of the model, like a sticker, kept in the design and written to
+/// a URDF export as a textured visual of its component's link. Give the image file as `path`;
+/// PNG, JPEG and SVG are taken, up to 16 MiB, an SVG drawn into a PNG. The image
+/// goes into the active component. One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = decal_required)]
 pub struct CanvasDecalParams {
-    /// A PNG, JPEG or SVG file to read (not blank, under 4096 characters). Used when `data` is
-    /// not given.
+    /// The PNG, JPEG or SVG file to read (not blank, under 4096 characters).
     #[serde(default)]
     pub path: Option<String>,
-    /// The image itself, a PNG, JPEG or SVG, as base64. Wins over `path`.
-    #[serde(default)]
-    pub data: Option<String>,
     // Optional in the type and required in the schema (`decal_required`): left out, the handler
     // refuses it with its own message, not the check's "is required".
     /// The face: a point [x, y, z] in mm on a planar face, where the image is centred, or a
@@ -322,7 +315,8 @@ pub struct CanvasDeleteParams {
 
 /// Trace a canvas or decal image into a new sketch lying exactly on its plane: the drawing is
 /// told from the background, its outlines become lines and cubic splines, and its holes stay
-/// holes. The picture is read at up to 512 pixels on a side, at most 40 megapixels.
+/// holes. Give `at` to trace one region of one colour instead (a click-to-pick). The picture is
+/// read at up to 512 pixels on a side, at most 40 megapixels.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct CanvasToSketchParams {
@@ -335,6 +329,17 @@ pub struct CanvasToSketchParams {
     /// The new sketch's name. Default: `<the canvas's name> sketch`.
     #[serde(default)]
     pub name: Option<String>,
+    /// A point on the canvas's plane, in mm, [x, y] (as `canvas.calibrate` takes them). Given, only
+    /// the region of the picture around that point is traced: every pixel joined to it whose colour
+    /// is within `tolerance` of the colour there, instead of the drawing told from the background.
+    /// Refused when the point is off the image or the region is none of it or all of it.
+    #[serde(default)]
+    pub at: Option<Point2>,
+    /// With `at`: how far a pixel's colour may differ from the colour at `at` and still be part of
+    /// the region, from 0 (the same colour only) to 100 (any colour). Default: 20.
+    #[serde(default)]
+    #[schemars(range(min = 0.0, max = 100.0))]
+    pub tolerance: Option<f64>,
 }
 
 /// A key that is left out, `null`, or parses as `T`: `null` is the same as leaving it out, as
@@ -565,7 +570,7 @@ fn face_pick(point: &Schema) -> Value {
 /// `canvas.insert` and `canvas.decal` need `path` or `data`; the handler says so when both are
 /// left out.
 fn need_image(schema: &mut Schema) {
-    schema.insert("anyOf".into(), json!([{"required": ["data"]}, {"required": ["path"]}]));
+    require(schema, "path");
 }
 
 fn image_required(schema: &mut Schema) {

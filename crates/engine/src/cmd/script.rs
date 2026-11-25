@@ -37,7 +37,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<ExportScriptResult>)
         .params(
         "path?: write the script to this file → script: {commands: [...]} that rebuilds the design (solidcraft-cli eval/run), \
-         steps, path (the file written, made absolute), bytes (with path: the size of the file written), omitted: what the script leaves out (appearances, folders, views, configurations a replay cannot rebuild, print-face assignments); components and assemblies \
+         steps, path (as given), absolute_path (with path: the file written as an absolute path, left out when it can't be worked out), bytes (with path: the size of the file written), omitted: what the script leaves out (appearances, folders, views, configurations a replay cannot rebuild, print-face assignments); components and assemblies \
          are not supported yet",
     ),
 ];
@@ -207,12 +207,16 @@ fn export_script(s: &mut Session, p: &Value) -> Result<Value> {
     } else if p.get("path").is_some_and(|v| !v.is_null()) {
         return Err(bad(cmd, "`path` must be a file path"));
     }
-    // The file written, as an absolute path: a relative one resolves against this process's
-    // folder, which an agent talking to the app over MCP can't see. Where there is no such
-    // folder (browser storage) the path stays as given. A ".." stays in it: taking it out by
-    // the text alone names another file when the folder before it is a link.
-    let path = path.map(|p| std::path::absolute(p).ok().and_then(|a| a.to_str().map(str::to_string)).unwrap_or_else(|| p.to_string()));
-    serde_json::to_value(ExportScriptResult { omitted, path, bytes, script, steps, param_warnings: Vec::new() }).map_err(|e| bad(cmd, e.to_string()))
+    // `path` echoes the call, as it did before #18838 (#19248). `absolute_path` names the file in full:
+    // a relative path resolves against this process's folder, which an agent talking to the
+    // app over MCP can't see. It is left out where it can't be worked out: with no such folder
+    // (browser storage), or when the folder's name isn't valid UTF-8. On Linux and macOS a ".."
+    // stays in it: taking it out by the text alone names another file when the folder before it
+    // is a link. Windows removes it, and resolves the path the same way when opening it.
+    let absolute_path = path.and_then(|p| std::path::absolute(p).ok()).and_then(|a| a.to_str().map(str::to_string));
+    let path = path.map(str::to_string);
+    serde_json::to_value(ExportScriptResult { omitted, path, absolute_path, bytes, script, steps, param_warnings: Vec::new() })
+        .map_err(|e| bad(cmd, e.to_string()))
 }
 
 fn step(command: &str, params: Value) -> Value {
@@ -243,6 +247,7 @@ pub(crate) fn script_steps(doc: &Document, has_body: &dyn Fn(&str) -> bool, own:
         (doc.point_clouds.is_empty(), "point clouds"),
         (doc.print_faces.is_empty(), "print-face assignments (body.print_face)"),
         (doc.named_views.is_empty(), "named views"),
+        (doc.saved_sections.is_empty(), "saved section analyses"),
         (doc.browser_groups.is_empty() && doc.browser_order.is_empty(), "Browser folders and order"),
         (doc.timeline_groups.is_empty(), "timeline folders"),
         (doc.visibility.is_empty(), "hidden items"),
@@ -622,6 +627,24 @@ pub(crate) fn script_steps(doc: &Document, has_body: &dyn Fn(&str) -> bool, own:
         // The offset and the rest angle travel as they are stored, zero
         // included: a value left out would be re-inferred at creation from
         // wherever the parts sit (`least_turn_angle`), not restored.
+        match (&j.exprs.offset_x, j.offset_xy[0]) {
+            (Some(e), _) => {
+                o.insert("offset_x".into(), json!(e));
+            }
+            (None, v) if v.abs() > 1e-12 => {
+                o.insert("offset_x".into(), json!(v));
+            }
+            _ => {}
+        }
+        match (&j.exprs.offset_y, j.offset_xy[1]) {
+            (Some(e), _) => {
+                o.insert("offset_y".into(), json!(e));
+            }
+            (None, v) if v.abs() > 1e-12 => {
+                o.insert("offset_y".into(), json!(v));
+            }
+            _ => {}
+        }
         match (&j.exprs.offset, j.offset) {
             (Some(e), _) => {
                 o.insert("offset".into(), json!(e));
@@ -956,6 +979,8 @@ fn joint_origin_arg(origin: &solidcraft_doc::joints::JointOrigin, doc: &Document
             XRef::Dir(d) => json!(dir(*d)),
             XRef::Face { face, pick: None } => json!(face),
             XRef::Face { pick: Some(p), .. } => json!({"face": world(*p)}),
+            XRef::Reference { reference, reverse } => json!({"reference":reference,"reverse":reverse}),
+            XRef::Planar { planar_face, reverse } => json!({"planar_face":planar_face,"reverse":reverse}),
         }
     };
     match &origin.snap {

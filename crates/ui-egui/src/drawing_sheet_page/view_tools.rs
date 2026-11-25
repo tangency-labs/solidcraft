@@ -18,6 +18,9 @@ use crate::{SolveApp, drawing_workspace};
 #[derive(Default)]
 pub(super) struct State {
     drag: Option<Drag>,
+    /// The box round a dimension's text on paper, as of a revision: looked up once while the
+    /// pointer stays over that dimension with the Dimension tool in hand ([`over_text`]).
+    text_box: Option<(u64, u64, Vec<Aabb2>)>,
 }
 
 #[derive(Clone, Copy)]
@@ -42,11 +45,94 @@ fn origin(app: &SolveApp, response: &egui::Response, at: OnScreen, objects: &[Sh
 }
 
 pub(super) fn owns_drag(app: &SolveApp, response: &egui::Response, at: OnScreen, objects: &[SheetObject]) -> bool {
-    !drawing_workspace::placing_view(app)
+    // With the Dimension tool in hand a placed dimension or note still drags, as in a sketch; a
+    // view does not.
+    let tool = drawing_workspace::placing_dimension(app);
+    !matches!(app.viewport.nav, Some(crate::viewport::NavMode::Pan | crate::viewport::NavMode::Zoom))
+        && !drawing_workspace::placing_view(app)
         && !drawing_workspace::placing_note(app)
-        && !drawing_workspace::placing_dimension(app)
-        && (app.drawing_workspace.page.view_tools.drag.is_some()
-            || (response.dragged_by(PointerButton::Primary) && origin(app, response, at, objects).is_some()))
+        && ((!tool && app.drawing_workspace.page.view_tools.drag.is_some())
+            || dragging_dimension()
+            || (response.dragged_by(PointerButton::Primary)
+                && ((!tool && (origin(app, response, at, objects).is_some() || selected_origin(app, response, at, objects).is_some()))
+                    || dimension_origin(app, response, at, objects)
+                        .is_some_and(|(id, pointer)| !tool || in_tool(app, id, pointer, HOVER_BAND / at.scale)))))
+}
+
+/// With the Dimension tool in hand, whether a press at `point` on dimension or note `id` is on
+/// what drags there: a note, or the dimension's text as the pointer's hover last found it
+/// ([`over_text`] keeps it). Elsewhere on a dimension the press is the tool's, or navigation's.
+fn in_tool(app: &SolveApp, id: u64, point: Vec2, band: f64) -> bool {
+    let texts = app.drawing_workspace.page.view_tools.text_box.as_ref().filter(|(of, at, _)| *of == id && *at == app.session.revision);
+    app.session.drawing(drawing_scene::CMD).is_ok_and(|drawing| drawing.notes.by_id(id).is_some())
+        || texts.is_some_and(|(.., texts)| texts.iter().any(|text| text.inflated(band).contains(point)))
+}
+
+/// Whether something on the sheet is being dragged by the drag sketch dimensions use: a
+/// dimension's text, a note, or a selection of things together.
+pub(super) fn dragging_dimension() -> bool {
+    crate::dim_view::dragged().is_some_and(|item| !matches!(item, crate::dim_view::Dragged::Sketch(_)))
+}
+
+/// A selected object of the sheet a drag starts on, and where on paper.
+fn selected_origin(app: &SolveApp, response: &egui::Response, at: OnScreen, objects: &[SheetObject]) -> Option<(u64, Vec2)> {
+    let screen = response.ctx.input(|input| input.pointer.press_origin())?;
+    if crate::shell::covered(app, screen) {
+        return None;
+    }
+    let pointer = at.paper(screen);
+    let hit = drawing_scene::hit(objects, pointer, HOVER_BAND / at.scale)?;
+    let chosen = app.session.selection.iter().any(|s| matches!(s, Sel::Drawing { object, .. } if *object == hit.object));
+    chosen.then_some((hit.object, pointer))
+}
+
+/// The dimension or note a drag starts on, and where on paper: a press on a dimension's text or
+/// lines, or on a note.
+fn dimension_origin(app: &SolveApp, response: &egui::Response, at: OnScreen, objects: &[SheetObject]) -> Option<(u64, Vec2)> {
+    let screen = response.ctx.input(|input| input.pointer.press_origin())?;
+    if crate::shell::covered(app, screen) {
+        return None;
+    }
+    let pointer = at.paper(screen);
+    let hit =
+        drawing_scene::hit(objects, pointer, HOVER_BAND / at.scale).filter(|hit| matches!(hit.kind, ObjectKind::Dimension | ObjectKind::Note))?;
+    Some((hit.object, pointer))
+}
+
+/// Whether `point` on paper is on dimension `id`'s text, within `band`: with the Dimension tool in
+/// hand the text is the dimension's, as in a sketch, and the rest of its box (its lines, and the
+/// edge it measures between them) stays the tool's to pick.
+pub(super) fn over_text(app: &mut SolveApp, id: u64, point: Vec2, band: f64) -> bool {
+    let revision = app.session.revision;
+    let kept = app.drawing_workspace.page.view_tools.text_box.take().filter(|(of, at, _)| *of == id && *at == revision);
+    let (.., texts) = kept.unwrap_or_else(|| {
+        // Each of its texts' boxes: a chain has one for each member.
+        let read = app.run("drawing.dimension.inspect", json!({"dimension": encode(id)})).ok();
+        let boxes = read.as_ref().and_then(|read| read["layout"]["text_boxes"].as_array()).into_iter().flatten();
+        let texts = boxes
+            .filter_map(|corners| {
+                let corners: Vec<Vec2> =
+                    corners.as_array()?.iter().filter_map(|p| serde_json::from_value::<[f64; 2]>(p.clone()).ok().map(Vec2::from)).collect();
+                (corners.len() == 4).then(|| corners.iter().fold(Aabb2::EMPTY, |all, p| all.union(&Aabb2 { min: *p, max: *p })))
+            })
+            .collect();
+        (id, revision, texts)
+    });
+    let over = texts.iter().any(|text| text.inflated(band).contains(point));
+    app.drawing_workspace.page.view_tools.text_box = Some((id, revision, texts));
+    over
+}
+
+/// Where dimension `id`'s text's centre is on paper now, as inspect lays it out.
+fn text_centre(app: &mut SolveApp, id: u64) -> Option<Vec2> {
+    let read = app.run("drawing.dimension.inspect", json!({"dimension": encode(id)})).ok()?;
+    let corners: Vec<Vec2> = read["layout"]["text_boxes"]
+        .get(0)?
+        .as_array()?
+        .iter()
+        .filter_map(|p| serde_json::from_value::<[f64; 2]>(p.clone()).ok().map(Vec2::from))
+        .collect();
+    (corners.len() == 4).then(|| corners.iter().fold(Vec2::ZERO, |sum, p| sum + *p) * 0.25)
 }
 
 /// Cancel a view's drag; the selection stays (Escape clears it next).
@@ -132,6 +218,7 @@ pub(super) fn box_select(
 }
 
 pub(super) struct Canvas<'a> {
+    pub interactive: bool,
     pub at: OnScreen,
     pub painter: &'a egui::Painter,
     pub response: &'a egui::Response,
@@ -143,13 +230,56 @@ pub(super) struct Canvas<'a> {
 
 impl Canvas<'_> {
     pub(super) fn show(self, app: &mut SolveApp, ui: &mut egui::Ui, placing: bool) {
+        if !self.interactive {
+            app.drawing_workspace.page.view_tools.drag = None;
+            return;
+        }
         let mut state = std::mem::take(&mut app.drawing_workspace.page.view_tools);
         let mods = ui.input(|input| input.modifiers);
         let (add, toggle) =
             crate::tool_modifiers::selection_click(crate::tool_modifiers::Held::from_modifiers(mods), app.preferences.selection_shift_add_only);
-        if placing {
+        // The Dimension tool leaves a placed dimension or note draggable, as the sketch's does.
+        let tool = placing && drawing_workspace::placing_dimension(app);
+        let navigating = matches!(app.viewport.nav, Some(crate::viewport::NavMode::Pan | crate::viewport::NavMode::Zoom));
+        if navigating {
             state.drag = None;
-        } else if self.response.drag_started_by(PointerButton::Primary)
+            if dragging_dimension() {
+                crate::dim_view::drag_end();
+            }
+        }
+        if placing && !tool {
+            state.drag = None;
+        } else if !navigating
+            && !tool
+            && self.response.drag_started_by(PointerButton::Primary)
+            && let Some((_, pointer)) = selected_origin(app, self.response, self.at, self.objects)
+            && let Some(items) = Some(self.group(app)).filter(|items| items.len() > 1)
+        {
+            // A drag from one of several selected things moves them all together by the pointer's
+            // way, as a sketch drags its selected geometry: one undo step.
+            crate::dim_view::begin_group_drag(app, items, pointer);
+        } else if !navigating
+            && self.response.drag_started_by(PointerButton::Primary)
+            && let Some((dimension, pointer)) = dimension_origin(app, self.response, self.at, self.objects)
+            // With the tool in hand only its text is the dimension's: the rest is the tool's to pick.
+            && (!tool || self.drawing.notes.by_id(dimension).is_some() || over_text(app, dimension, pointer, HOVER_BAND / self.at.scale))
+        {
+            // A drag from a dimension moves its text, and one from a note the note, by the drag that
+            // moves a sketch dimension's text.
+            if !selected(app, self.drawing.id).contains(&dimension) {
+                crate::viewport::select(app, Some(pick(self.drawing.id, dimension)), false, false);
+            }
+            if let Some(note) = self.drawing.notes.by_id(dimension) {
+                // A note keeps where it sits: the drag moves that, by the same drag.
+                crate::dim_view::begin_drag(app, crate::dim_view::Dragged::Note(dimension), Vec2::new(note.at[0], note.at[1]), pointer);
+            } else if let Some(text) = text_centre(app, dimension) {
+                crate::dim_view::begin_drag(app, crate::dim_view::Dragged::Drawing(dimension), text, pointer);
+            }
+        } else if tool {
+            // Nothing else of the sheet's own with the tool in hand: its clicks are picks.
+            state.drag = None;
+        } else if !navigating
+            && self.response.drag_started_by(PointerButton::Primary)
             && let Some((view, pointer)) = origin(app, self.response, self.at, self.objects)
             && let Ok(from) = self.drawing.view_centre(view)
         {
@@ -167,14 +297,23 @@ impl Canvas<'_> {
             crate::viewport::select(app, hit.map(|hit| pick(self.drawing.id, hit.object)), add, toggle);
         }
 
-        if let Some(drag) = state.drag {
+        if dragging_dimension() {
+            if let Some(pointer) = self.response.interact_pointer_pos()
+                && (self.response.dragged_by(PointerButton::Primary) || self.response.drag_stopped())
+            {
+                crate::dim_view::drag_to(app, self.at.paper(pointer));
+            }
+            if self.response.drag_stopped() || !ui.input(|input| input.pointer.primary_down()) {
+                crate::dim_view::drag_end();
+            }
+        } else if let Some(drag) = state.drag {
             if drag.revision != app.session.revision || !selected(app, self.drawing.id).contains(&drag.view) {
                 state.drag = None;
             } else if let Some(pointer) = self.response.interact_pointer_pos() {
                 let alt = ui.input(|input| input.modifiers.alt);
                 let cursor = drag.from + (self.at.paper(pointer) - drag.pointer);
                 let target = if alt { cursor } else { self.snap(drag.view, cursor) };
-                self.preview(drag, target, cursor);
+                self.preview(app, drag, target, cursor);
                 if self.response.drag_stopped_by(PointerButton::Primary) {
                     state.drag = None;
                     // One undo step, undone with Ctrl+Z as any other.
@@ -187,6 +326,50 @@ impl Canvas<'_> {
             }
         }
         app.drawing_workspace.page.view_tools = state;
+    }
+
+    /// The selection as the shared drag moves it: each selected view, dimension text, note,
+    /// balloon and table from where it is now. A dimension, note or balloon on a selected view
+    /// is left to the view, which takes it along.
+    fn group(&self, app: &mut SolveApp) -> Vec<(crate::dim_view::Dragged, Vec2)> {
+        use crate::dim_view::Dragged;
+        let chosen = selected(app, self.drawing.id);
+        let on_chosen = |view: Option<u64>| view.is_some_and(|view| chosen.contains(&view));
+        let mut items = Vec::new();
+        for &id in &chosen {
+            if self.drawing.view(id).is_some() {
+                if let Ok(centre) = self.drawing.view_centre(id) {
+                    items.push((Dragged::View(id), centre));
+                }
+            } else if let Some(dimension) = self.drawing.dimension(id) {
+                if !on_chosen(Some(dimension.view))
+                    && let Some(text) = text_centre(app, id)
+                {
+                    items.push((Dragged::Drawing(id), text));
+                }
+            } else if let Some(note) = self.drawing.notes.by_id(id) {
+                if !on_chosen(note.anchor.view()) {
+                    items.push((Dragged::Note(id), Vec2::new(note.at[0], note.at[1])));
+                }
+            } else if let Some(balloon) = self.drawing.balloons.by_id(id) {
+                if !on_chosen(Some(balloon.view)) {
+                    items.push((Dragged::Balloon(id), Vec2::new(balloon.at[0], balloon.at[1])));
+                }
+            } else if let Some(table) = self.drawing.tables.by_id(id) {
+                // A table is placed by its outline's top left: where it says, or, anchored to a
+                // corner, where the sheet draws it.
+                let at = match table.place {
+                    solidcraft_engine::doc::drawing::table::Place::At([x, y]) => Some(Vec2::new(x, y)),
+                    _ => self.objects.iter().find(|object| object.object == id).map(|o| Vec2::new(o.bounds_mm.min.x, o.bounds_mm.max.y)),
+                };
+                if let Some(at) = at {
+                    items.push((Dragged::Table(id), at));
+                }
+            }
+        }
+        // Views first: what moves with a view is placed after it.
+        items.sort_by_key(|(item, _)| !matches!(item, Dragged::View(_)));
+        items
     }
 
     fn snap(&self, selected: u64, point: Vec2) -> Vec2 {
@@ -206,17 +389,30 @@ impl Canvas<'_> {
         Vec2::new(target[0], target[1])
     }
 
-    fn preview(&self, drag: Drag, to: Vec2, cursor: Vec2) {
+    fn preview(&self, app: &SolveApp, drag: Drag, to: Vec2, cursor: Vec2) {
         let mut draft = self.drawing.clone();
         let Ok(moved) = draft.move_view(drag.view, to, false) else { return };
         let t = Tokens::get();
         let line = Stroke::new(1.0, t.accent);
+        // Each moving view's own lines where it goes, in the accent colour, as a sketch shows what a
+        // drag moves: no box round it. A detail's callout on its parent stays where the parent is.
+        let page = &app.drawing_workspace.page;
+        let ppp = self.painter.ctx().pixels_per_point();
         for object in self.objects.iter().filter(|object| object.kind == ObjectKind::View && moved.contains(&object.object)) {
             let (Ok(before), Ok(after)) = (self.drawing.view_centre(object.object), draft.view_centre(object.object)) else { continue };
             let offset = after - before;
-            let bounds = object.boundary_mm.unwrap_or(object.bounds_mm);
-            let r = self.at.rect(&Aabb2 { min: bounds.min + offset, max: bounds.max + offset });
-            self.painter.rect_stroke(r, t.radius_sm, line, egui::StrokeKind::Outside);
+            let shifted = OnScreen { target: self.at.target - offset, ..self.at };
+            if let Some(marks) = &page.marks {
+                marks.paint_moving(
+                    self.painter,
+                    &shifted,
+                    shifted.visible(self.painter.clip_rect()),
+                    ppp,
+                    &page.pictures,
+                    &[object.object],
+                    t.accent,
+                );
+            }
         }
         let Ok(after) = draft.view_centre(drag.view) else { return };
         let from = self.at.screen(drag.from);

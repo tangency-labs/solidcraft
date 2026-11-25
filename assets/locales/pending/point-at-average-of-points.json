@@ -1,0 +1,47 @@
+{
+  "ar": {
+    "POINT AT AVERAGE OF POINTS": "نقطة عند متوسط النقاط",
+    "cmd.construct_point_average": "نقطة عند متوسط النقاط",
+    "help.construct.point.average": "ينشئ نقطة إنشاء عند متوسط مواضع نقطتين أو أكثر تحددها؛ ومع نقطتين تكون هي النقطة الواقعة في منتصف المسافة بينهما. تتبع النقطة الجديدة النقاط التي حددتها عندما تتحرك."
+  },
+  "de": {
+    "POINT AT AVERAGE OF POINTS": "PUNKT IN DER MITTE MEHRERER PUNKTE",
+    "cmd.construct_point_average": "Punkt in der Mitte mehrerer Punkte",
+    "help.construct.point.average": "Erstellt einen Konstruktionspunkt in der Mitte von zwei oder mehr angeklickten Punkten; bei zwei Punkten ist es der Punkt genau zwischen ihnen. Der neue Punkt folgt den angeklickten Punkten, wenn sie sich bewegen."
+  },
+  "en": {
+    "POINT AT AVERAGE OF POINTS": "POINT AT AVERAGE OF POINTS",
+    "cmd.construct_point_average": "Point at Average of Points",
+    "help.construct.point.average": "Creates a construction point at the average of two or more points you pick; with two points that is the point halfway between them. The new point follows the points you picked when they move."
+  },
+  "he": {
+    "POINT AT AVERAGE OF POINTS": "נקודה במרכז מספר נקודות",
+    "cmd.construct_point_average": "נקודה במרכז מספר נקודות",
+    "help.construct.point.average": "יוצר נקודת בנייה במרכז של שתי נקודות או יותר שבחרת; עבור שתי נקודות זו הנקודה באמצע הדרך ביניהן. הנקודה החדשה עוקבת אחרי הנקודות שבחרת כשהן זזות."
+  },
+  "ja": {
+    "POINT AT AVERAGE OF POINTS": "複数点の平均位置の点",
+    "cmd.construct_point_average": "複数点の平均位置の点",
+    "help.construct.point.average": "選んだ2つ以上の点の平均位置に構築点を作ります。2点を選べばその中点です。作った点は、選んだ点が動くと追従します。"
+  },
+  "ko": {
+    "POINT AT AVERAGE OF POINTS": "여러 점의 평균 위치의 점",
+    "cmd.construct_point_average": "여러 점의 평균 위치의 점",
+    "help.construct.point.average": "선택한 두 개 이상의 점의 평균 위치에 구성점을 만듭니다. 두 점을 선택하면 그 중간 지점입니다. 만든 점은 선택한 점이 움직이면 따라갑니다."
+  },
+  "vi": {
+    "POINT AT AVERAGE OF POINTS": "ĐIỂM TẠI VỊ TRÍ TRUNG BÌNH CỦA CÁC ĐIỂM",
+    "cmd.construct_point_average": "Điểm tại vị trí trung bình của các điểm",
+    "help.construct.point.average": "Tạo một điểm dựng tại vị trí trung bình của hai hoặc nhiều điểm bạn chọn; với hai điểm đó là điểm chính giữa. Điểm mới đi theo các điểm đã chọn khi chúng di chuyển."
+  },
+  "zh": {
+    "POINT AT AVERAGE OF POINTS": "多点平均位置的点",
+    "cmd.construct_point_average": "多点平均位置的点",
+    "help.construct.point.average": "在你选择的两个或更多点的平均位置创建一个构造点；选择两个点时就是它们的正中间。所选的点移动时，新创建的点随之移动。"
+  },
+  "fr": {
+    "POINT AT AVERAGE OF POINTS": "POINT AU BARYCENTRE DES POINTS",
+    "cmd.construct_point_average": "Point au barycentre des points",
+    "help.construct.point.average": "Crée un point de construction au centre de deux points ou plus que vous sélectionnez ; avec deux points, il se trouve à mi-distance entre eux. Le nouveau point suit les points sélectionnés lorsqu’ils se déplacent."
+  }
+}

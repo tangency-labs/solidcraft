@@ -94,6 +94,9 @@ pub struct ThemeFile {
     /// Conditional value tables, applied in file order with later entries winning by key.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub overlays: Vec<Overlay>,
+    /// Whether the Accent preference applies over this theme's colours (default: no).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub accepts_accent: bool,
     /// Levels newer than [`REQUIREMENTS_LEVEL`] disable options and overlays.
     #[serde(default = "default_requirements_level", skip_serializing_if = "is_default_requirements_level")]
     pub requires: u64,
@@ -126,6 +129,7 @@ impl Default for ThemeFile {
             tabs: BTreeMap::new(),
             options: Vec::new(),
             overlays: Vec::new(),
+            accepts_accent: false,
             requires: default_requirements_level(),
         }
     }
@@ -419,15 +423,14 @@ pub fn export_icon_palette(palette: Option<Palette>) -> BTreeMap<String, Value> 
     let mut out = BTreeMap::new();
     let Some(palette) = palette else { return out };
     let data = crate::icons::installed().data();
-    let hex = |[r, g, b]: [u8; 3]| format!("#{r:02x}{g:02x}{b:02x}");
     for (name, color) in data.role_names.iter().zip(palette.roles) {
         if let Some(rgb) = color {
-            out.insert((*name).into(), json!(hex(rgb)));
+            out.insert((*name).into(), json!(solidcraft_color::hex::format(rgb)));
         }
     }
     for (name, ramp) in std::iter::once("solid").chain(data.accent_names.iter().copied()).zip(palette.accents) {
         if let Some(colors) = ramp {
-            out.insert(name.into(), json!(colors.map(hex)));
+            out.insert(name.into(), json!(colors.map(solidcraft_color::hex::format)));
         }
     }
     out
@@ -512,7 +515,7 @@ theme_keys! {
         app_bar_hover_button, app_bar_hover_strong, app_bar_tab_active,
         form_ink, form_dim, form_primary, form_primary_fill, form_error, form_error_fill, form_success, form_success_fill, dialog_body, dialog_footer, dialog_rule, control_fill, control_border, dialog_label, selected_ink, selected_bg,
     ],
-    many: [continuity, logo, library_highlights, section_hatch],
+    many: [continuity, logo, library_highlights, section_hatch, paper_lines, paper_dark_lines],
     icons: [highlight, agent, marker_halo],
 }
 
@@ -528,18 +531,13 @@ const RENAMED_COLORS: [(&str, &str); 4] =
 
 /// `#rrggbb` or `#rrggbbaa` (alpha not premultiplied).
 pub fn parse_color(s: &str) -> Option<Color32> {
-    let hex = s.trim().strip_prefix('#')?;
-    if !(hex.len() == 6 || hex.len() == 8) || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return None;
-    }
-    let byte = |i: usize| hex.get(i..i + 2).and_then(|h| u8::from_str_radix(h, 16).ok());
-    let a = if hex.len() == 8 { byte(6)? } else { 255 };
-    Some(Color32::from_rgba_unmultiplied(byte(0)?, byte(2)?, byte(4)?, a))
+    let ([r, g, b], a) = solidcraft_color::hex::parse(s.trim())?;
+    Some(Color32::from_rgba_unmultiplied(r, g, b, a.unwrap_or(255)))
 }
 
 fn format_color(c: Color32) -> String {
     let [r, g, b, a] = c.to_srgba_unmultiplied();
-    if a == 255 { format!("#{r:02x}{g:02x}{b:02x}") } else { format!("#{r:02x}{g:02x}{b:02x}{a:02x}") }
+    if a == 255 { solidcraft_color::hex::format([r, g, b]) } else { solidcraft_color::hex::format_alpha([r, g, b], a) }
 }
 
 /// The colours a value gives for a slot of `len` colours, or why not.
@@ -609,6 +607,10 @@ fn read_value(v: &Value, unknown: UnknownTabs) -> Result<ThemeFile, String> {
         None => default_requirements_level(),
         Some(value) => value.as_u64().ok_or("`requires` must be a nonnegative integer")?,
     };
+    let accepts_accent = match v.get("accepts_accent") {
+        None => false,
+        Some(value) => value.as_bool().ok_or("`accepts_accent` must be true or false")?,
+    };
     let layer = parse_layer(v)?;
     let tabs = parse_tabs(v.get("tabs"), unknown)?;
     let options = if requires > REQUIREMENTS_LEVEL { Vec::new() } else { parse_options(v.get("options"))? };
@@ -627,6 +629,7 @@ fn read_value(v: &Value, unknown: UnknownTabs) -> Result<ThemeFile, String> {
         tabs,
         options,
         overlays,
+        accepts_accent,
         requires,
     })
 }
@@ -1234,72 +1237,9 @@ pub fn resolve_base(theme: &ThemeFile) -> Tokens {
     }
     // A file that sets no colours is its base palette, exactly.
     if !theme.colors.is_empty() {
-        file_view_from_theme(&mut t, theme.base.is_dark(), |k| theme.colors.contains_key(k));
+        solidcraft_theme::file_view_from_theme(&mut t, theme.base.is_dark(), |k| theme.colors.contains_key(k));
     }
     t
-}
-
-/// The File view's colours a theme leaves unset follow the theme's own panel, border, accent and
-/// text, not its base's fixed blue rail and grey cards (#4868). Each ink is whichever candidate
-/// reads best on the fills it sits on.
-fn file_view_from_theme(t: &mut Tokens, dark: bool, set: impl Fn(&str) -> bool) {
-    use solidcraft_theme::contrast_ratio;
-    let fallback = t.text;
-    let best = |inks: &[Color32], fills: &[Color32]| {
-        let worst = |ink: Color32| fills.iter().map(|f| contrast_ratio(ink, *f)).fold(f64::INFINITY, f64::min);
-        inks.iter().copied().max_by(|a, b| worst(*a).total_cmp(&worst(*b))).unwrap_or(fallback)
-    };
-    if !set("file_background") {
-        t.file_background = t.panel;
-    }
-    if !set("file_surface") {
-        t.file_surface = t.dialog_bg;
-    }
-    if !set("file_border") {
-        t.file_border = t.border;
-    }
-    let inks = [t.on_accent, t.text, t.panel, t.app_bar, t.form_ink];
-    let (rail_set, hover_set) = (set("file_rail"), set("file_rail_hover"));
-    if !rail_set {
-        // The accent deepened as the built-in palettes deepen theirs (Dark's rail is about 0.55 of
-        // its accent, Light's about 0.85), toward the theme's own darkest colour.
-        let (toward, k) = if dark { (t.app_bar, 0.45) } else { (t.text, 0.15) };
-        t.file_rail = t.accent.lerp_to_gamma(toward, k);
-    }
-    if !hover_set {
-        t.file_rail_hover = t.file_rail.lerp_to_gamma(t.accent, 0.25);
-    }
-    if !set("file_rail_ink") {
-        t.file_rail_ink = best(&inks, &[t.file_rail, t.file_rail_hover]);
-    }
-    // A rail still too mid-toned for any ink goes further from the ink until the ink reads.
-    let away = best(&inks, &[t.file_rail_ink]);
-    for _ in 0..10 {
-        let reads = |fill: Color32| contrast_ratio(t.file_rail_ink, fill) >= 4.5;
-        if (rail_set || reads(t.file_rail)) && (hover_set || reads(t.file_rail_hover)) {
-            break;
-        }
-        if !rail_set {
-            t.file_rail = t.file_rail.lerp_to_gamma(away, 0.1);
-        }
-        if !hover_set {
-            t.file_rail_hover = t.file_rail_hover.lerp_to_gamma(away, 0.1);
-        }
-    }
-    if !set("file_primary") {
-        t.file_primary = t.accent_soft;
-    }
-    if !set("file_primary_border") {
-        t.file_primary_border = t.accent;
-    }
-    if !set("file_primary_ink") {
-        t.file_primary_ink = best(&[t.accent, t.text, t.on_accent], &[t.file_primary, t.file_background]);
-    }
-    if !set("file_dim") {
-        // Dim where dim text still reads on the page and the cards, else the plain text colour.
-        let on = [t.file_surface, t.file_background];
-        t.file_dim = if on.iter().all(|f| contrast_ratio(t.text_dim, *f) >= 4.5) { t.text_dim } else { best(&[t.text, t.form_ink], &on) };
-    }
 }
 
 /// A complete theme file of a palette and its icon palette: every key, so it is a starting point for a new theme.
@@ -1368,6 +1308,9 @@ pub fn export_file(theme: &ThemeFile) -> Value {
         if !theme.overlays.is_empty() {
             obj.insert("overlays".into(), json!(theme.overlays));
         }
+        if theme.accepts_accent {
+            obj.insert("accepts_accent".into(), json!(true));
+        }
         if !is_default_requirements_level(&theme.requires) {
             obj.insert("requires".into(), json!(theme.requires));
         }
@@ -1434,7 +1377,49 @@ pub fn read_builtin(sources: &[(&str, &str)]) -> Result<Vec<ThemeFile>, String> 
 /// The theme a `theme` preference names: built in, or imported. `None` for dark, light, system
 /// or an unknown id.
 pub fn find<'a>(id: &str, custom: &'a [ThemeFile]) -> Option<&'a ThemeFile> {
-    builtin().iter().find(|t| t.id == id).or_else(|| custom.iter().find(|t| t.id == id))
+    builtin().iter().find(|t| t.id == id).or_else(|| custom.iter().find(|t| t.id == id)).or_else(|| plugin_theme(id))
+}
+
+thread_local! {
+    /// The plugin themes on offer to this thread's window: `(id, file text, theme)`, the id
+    /// `plugin:<plugin>/<theme>`.
+    static PLUGIN_THEMES: std::cell::RefCell<Vec<(String, String, &'static ThemeFile)>> = const { std::cell::RefCell::new(Vec::new()) };
+    /// Every plugin theme read so far, never cleared: a theme is leaked once per distinct id and
+    /// file text, so [`find`] can return a reference to it and turning a plugin off and on leaks nothing.
+    static INTERNED: std::cell::RefCell<Vec<(String, String, &'static ThemeFile)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn plugin_theme(id: &str) -> Option<&'static ThemeFile> {
+    PLUGIN_THEMES.with(|offered| offered.borrow().iter().find(|(key, _, _)| key == id).map(|(_, _, theme)| *theme))
+}
+
+/// Replaces the offer with `offers`, `(id, theme file text)`; a file that does not read is left out and named.
+pub fn set_plugin_themes(offers: Vec<(String, String)>) -> Vec<String> {
+    let mut errors = Vec::new();
+    let mut kept = Vec::new();
+    for (id, text) in offers {
+        let interned =
+            INTERNED.with(|interned| interned.borrow().iter().find(|(key, old, _)| *key == id && *old == text).map(|(_, _, theme)| *theme));
+        if let Some(theme) = interned {
+            kept.push((id, text, theme));
+            continue;
+        }
+        match parse(&text) {
+            Ok(theme) => {
+                let leaked: &'static ThemeFile = Box::leak(Box::new(ThemeFile { id: id.clone(), ..theme }));
+                INTERNED.with(|interned| interned.borrow_mut().push((id.clone(), text.clone(), leaked)));
+                kept.push((id, text, leaked));
+            }
+            Err(error) => errors.push(format!("{id}: {error}")),
+        }
+    }
+    PLUGIN_THEMES.with(|offered| *offered.borrow_mut() = kept);
+    errors
+}
+
+/// The plugin themes on offer, `(id, name)`, in the order they were set.
+pub fn plugin_theme_choices() -> Vec<(String, String)> {
+    PLUGIN_THEMES.with(|offered| offered.borrow().iter().map(|(key, _, theme)| (key.clone(), theme.name.clone())).collect())
 }
 
 /// Retired built-in cards now select a contrast value on their light/dark family.
@@ -2459,5 +2444,18 @@ mod tests {
         assert!(follow_path(&"x".repeat(MAX_FOLLOW_PATH + 1)).is_err() && follow_path("a\nb").is_err());
         assert!(follow_path("a\u{7}b").is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_plugin_theme_turned_off_and_on_again_is_not_leaked_again() {
+        let id = "plugin:tints/night".to_owned();
+        let text = r##"{"format":"solidcraft-theme/1","name":"Night","base":"dark","colors":{"accent":"#44d62c"}}"##.to_owned();
+        assert!(set_plugin_themes(vec![(id.clone(), text.clone())]).is_empty());
+        let custom: Vec<ThemeFile> = Vec::new();
+        let first = find(&id, &custom).unwrap();
+        assert!(set_plugin_themes(Vec::new()).is_empty());
+        assert!(find(&id, &custom).is_none() && plugin_theme_choices().is_empty());
+        assert!(set_plugin_themes(vec![(id.clone(), text)]).is_empty());
+        assert!(std::ptr::eq(first, find(&id, &custom).unwrap()));
     }
 }

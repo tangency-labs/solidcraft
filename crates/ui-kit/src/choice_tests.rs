@@ -5,6 +5,80 @@ use egui::Ui;
 use solidcraft_ui_registry as registry;
 
 #[test]
+fn swatch_picker_filters_titles_and_selects_original_option_indices() {
+    let ctx = context();
+    let texture = ctx.load_texture("synthetic", egui::ColorImage::filled([2, 2], egui::Color32::from_rgb(137, 61, 23)), Default::default());
+    let titles = vec!["Oak".into(), "Walnut".into(), "White oak".into()];
+    let textures = vec![Some(egui::load::SizedTexture::new(texture.id(), texture.size_vec2())); 3];
+    let mut chosen = None;
+    let mut draw = |ui: &mut Ui| {
+        row(ui, "Finish", |ui| {
+            swatch_picker(
+                ui,
+                "finish",
+                &mut chosen,
+                SwatchPicker { titles: &titles, textures: &textures, choose: "Choose…", search_hint: "Search finishes", preview: false },
+            )
+        });
+    };
+    frame(&ctx, vec![], &mut draw);
+    let trigger = registry::handle_at("dialog:Finish").unwrap();
+    frame(&ctx, pointer(trigger, true), &mut draw);
+    frame(&ctx, pointer(trigger, false), &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    let search = registry::handle_at("swatch:finish:search").unwrap();
+    frame(&ctx, pointer(search, true), &mut draw);
+    frame(&ctx, pointer(search, false), &mut draw);
+    frame(&ctx, vec![egui::Event::Text("OaK".into())], &mut draw);
+    registry::clear_handles();
+    frame(&ctx, vec![], &mut draw);
+    assert!(registry::handle_at("swatch:finish:option:0").is_some());
+    assert!(registry::handle_at("swatch:finish:option:1").is_none());
+    let oak = registry::handle_at("swatch:finish:option:2").unwrap();
+    frame(&ctx, pointer(oak, true), &mut draw);
+    frame(&ctx, pointer(oak, false), &mut draw);
+    assert_eq!(chosen, Some(2));
+}
+
+/// The preview area is reserved from the first frame: highlighting an option, with nothing chosen,
+/// must not move the tiles away from under the pointer.
+#[test]
+fn swatch_picker_preview_keeps_the_tiles_in_place_when_an_option_is_highlighted() {
+    let ctx = context();
+    let texture = ctx.load_texture("synthetic", egui::ColorImage::filled([2, 2], egui::Color32::from_rgb(20, 90, 160)), Default::default());
+    let titles = vec!["Elbow".into(), "Tee".into(), "Cap".into()];
+    let textures = vec![Some(egui::load::SizedTexture::new(texture.id(), texture.size_vec2())); 3];
+    let mut chosen = None;
+    let mut draw = |ui: &mut Ui| {
+        row(ui, "Part", |ui| {
+            swatch_picker(
+                ui,
+                "part",
+                &mut chosen,
+                SwatchPicker { titles: &titles, textures: &textures, choose: "Choose…", search_hint: "Search parts", preview: true },
+            )
+        });
+    };
+    frame(&ctx, vec![], &mut draw);
+    let trigger = registry::handle_at("dialog:Part").unwrap();
+    frame(&ctx, pointer(trigger, true), &mut draw);
+    frame(&ctx, pointer(trigger, false), &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    let tile = || registry::rect_of("swatch:part:tile:0").unwrap();
+    let before = tile();
+    let preview = registry::rect_of("swatch:part:preview").expect("the preview area is reserved with nothing highlighted");
+    let over = registry::handle_at("swatch:part:option:2").unwrap();
+    for _ in 0..4 {
+        frame(&ctx, vec![egui::Event::PointerMoved(over)], &mut draw);
+        assert_eq!(tile(), before, "tiles stay put as the highlighted option's picture appears");
+        assert_eq!(registry::rect_of("swatch:part:preview"), Some(preview));
+    }
+    frame(&ctx, vec![egui::Event::PointerMoved(egui::pos2(-50.0, -50.0))], &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    assert_eq!(tile(), before, "tiles stay put when the highlight goes away");
+}
+
+#[test]
 fn segmented_allocates_only_its_reserved_row() {
     for layout in [egui::Layout::top_down(egui::Align::Min), egui::Layout::left_to_right(egui::Align::Center)] {
         for width in [160.0, 320.0, 640.0] {

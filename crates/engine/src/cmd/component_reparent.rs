@@ -3,8 +3,9 @@
 //! once is one definition: what goes in it goes in every instance, placed by the one instance
 //! named (`parent_path`, else the active placement) and in the same place in the others. Paths
 //! through the placement change: the session's paths (selection, active and hidden placements,
-//! hidden folders) and the design's face attachments found through it follow it, and a move that
-//! would still leave a feature failing that worked before is refused.
+//! hidden folders), the design's face attachments found through it and the origin planes and axes
+//! its joints name follow it, and a move that would still leave a feature failing that worked
+//! before is refused.
 
 use super::placing::{parent_path, placement_of};
 use super::*;
@@ -74,12 +75,41 @@ pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
             }
         }
     }
+    let old_placed = s.placed_document();
     // Once all its placements sit in the new parent, the component belongs there too, so what
     // follows the component tree (the parent's eye, its bodies) takes it along.
     if scratch.doc.occurrences.iter().filter(|x| x.component == o.component).all(|x| x.parent == to)
         && let Some(c) = scratch.doc_mut().components.iter_mut().find(|c| c.id == o.component)
     {
         c.parent = to;
+    }
+    // Reparenting can change the common ancestor of a feature and its cross-component profile
+    // sketch; rebase stored `profile_frame` matrices so bodies keep their world position.
+    let new_placed = scratch.placed_document();
+    let rebased_frames: Vec<(u64, solidcraft_doc::Mat)> = scratch
+        .doc
+        .features
+        .iter()
+        .filter_map(|f| {
+            let m = f.profile_frame?;
+            let sketch_id = f.kind.constructor_profile_sketch()?;
+            let owner = old_placed.feature(sketch_id)?.component;
+            let old_lca = old_placed.common_ancestor(f.component, owner);
+            let new_lca = new_placed.common_ancestor(f.component, owner);
+            if old_lca == new_lca {
+                return None;
+            }
+            let old_owner_in_lca = old_placed.component_transform_in(owner, old_lca);
+            let new_owner_in_lca = new_placed.component_transform_in(owner, new_lca);
+            let inv_old_o = solidcraft_doc::mat_inverse(&old_owner_in_lca)?;
+            let updated = solidcraft_doc::mat_mul(&new_owner_in_lca, &solidcraft_doc::mat_mul(&inv_old_o, &m));
+            solidcraft_doc::is_placement(&updated).then_some((f.id, updated))
+        })
+        .collect();
+    for (fid, frame) in rebased_frames {
+        if let Some(f) = scratch.doc_mut().feature_mut(fid) {
+            f.profile_frame = Some(frame);
+        }
     }
     // Face attachments found through it follow it too (#11063): a sketch on a face of a body
     // inside it kept the old path, which no longer starts at the design, and the move was refused.
@@ -109,8 +139,28 @@ pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
             _ => {}
         }
     }
+    // A joint side on a placement's origin plane or axis names it by its path from the design
+    // (`o:4/origin/XY`), which follows the move the same way (#22216).
+    for joint in &mut scratch.doc_mut().assembly.joints {
+        for side in [&mut joint.a, &mut joint.b] {
+            use solidcraft_doc::joints::{AxisRef, AxisTarget, Snap};
+            match &mut side.snap {
+                Snap::Plane { plane, .. } => {
+                    if let solidcraft_doc::PlaneRef::Datum { datum } = plane.as_mut() {
+                        rebase(&mut datum.path);
+                    }
+                }
+                Snap::Axis { axis, .. } => {
+                    if let AxisRef::Target(AxisTarget::Datum { datum }) = axis.as_mut() {
+                        rebase(&mut datum.path);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
     if too_deep {
-        return Err(bad(cmd, format!("moving {} would nest a face attachment more than 64 placements deep", o.name)));
+        return Err(bad(cmd, format!("moving {} would nest a face attachment or a joint's origin plane more than 64 placements deep", o.name)));
     }
     // The paths through it follow it before the model is worked out again: that drops a selected
     // or active placement whose path no longer leads anywhere.
@@ -132,7 +182,7 @@ pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, format!("moving {} would break {}: {error}", o.name, f.name)));
         }
     }
-    s.accept_computed(scratch);
+    s.accept_computed(scratch)?;
     follow_visibility(s, &old_path, &new_path);
     Ok(json!({"occurrence": id, "parent": to, "path": new_path, "transform": transform}))
 }

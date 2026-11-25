@@ -18,10 +18,18 @@
 //! and the unused outputs are not returned. Not upstream (WR-679): the update grows a
 //! vertex past half its tolerance, not the whole. Edge-use marks are a local set.
 //! `CollectRegions`' linear stack and result searches use companion sets (same order).
+//! `AssertValid` does not run `ContainsCoincidentTopology`, which is not ported: upstream
+//! folds in a result that is always true and leaves its report (test 15) commented out, so
+//! the search's own answer never counted (it did edit the body: its queries created the
+//! faces' missing UV trim curves and moved the ends of existing ones, which the later tests
+//! then saw). It cannot be a validity test: the bodies solidcore builds keep
+//! coincident topology on purpose (a pinch where a hole is tangent to a face, solids
+//! touching along an edge, a sweep's glued lamina edges). A face's own coincident vertices
+//! and edges are its tests 32, 33 and 34.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::super::{contains_coincident_topology, ERROR};
+use super::super::PointerCheck;
 use super::{base, brep_object, class, edge, face, loops, seams, shell, vertex, Cx, Rep, Test};
 use crate::error::{EntityRef, Result};
 use crate::geom::tol;
@@ -35,8 +43,15 @@ use crate::topology::{Brep, EdgeId, EdgeuseId, RegionId, VertexId, VertexuseId};
 
 const C: i64 = class::BREP;
 
-/// `SmBrep::AssertValid`.
-pub(super) fn brep(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, walk: bool) -> Result<bool> {
+/// `SmBrep::AssertValid`; without `pointers` its `ValidatePointers` is taken as succeeding
+/// with no report (see `check_brep_with_keys`).
+pub(super) fn brep(
+    k: &mut Kernel,
+    b: &mut Brep,
+    cx: &mut Cx<'_>,
+    walk: bool,
+    pointers: bool,
+) -> Result<bool> {
     let this = brep_object();
 
     // Init rtn value, and invoke higher-level checks.
@@ -48,9 +63,20 @@ pub(super) fn brep(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, walk: bool) ->
     }
 
     // Old style checks: ValidatePointers() and ValidateAndUpdateTolerances().
-    let (status, exclusion_failed) =
-        super::validate_pointers_excluding(k, b, cx.rep.array.as_deref_mut(), 0, walk, cx.keys)?;
-    if status != super::SUCCESS {
+    let (pointer_check, exclusion_failed) = if pointers {
+        super::validate_pointers_excluding(
+            k,
+            b,
+            cx.rep.array.as_deref_mut(),
+            0,
+            walk,
+            cx.keys,
+            false,
+        )?
+    } else {
+        (PointerCheck::Passed, false)
+    };
+    if !pointer_check.is_passed() {
         return Ok(false);
     }
     // Test #82 refused a vertex whose ball reaches other topology: reported above, and the
@@ -58,10 +84,10 @@ pub(super) fn brep(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, walk: bool) ->
     rtn &= !exclusion_failed;
 
     // old style ValidateAndUpdateTolerances check (no updating is done)
-    let status = tolerances(k, b, cx)?;
+    let tolerances_ok = tolerances(k, b, cx)?;
 
     // new style - remember failures and keep checking
-    rtn &= status == super::SUCCESS;
+    rtn &= tolerances_ok;
 
     // Walk the Topology graph checks.
     let regions = p1::regions(b, None)?;
@@ -188,11 +214,6 @@ pub(super) fn brep(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, walk: bool) ->
     let ok = !cx.rep.need(0) || common == num_regions;
     rtn &= cx.rep.this_bool(b, C, this, 19, ok)?;
 
-    // See about running coincident-topology checks (its default level 0, first pair).
-    rtn &=
-        contains_coincident_topology(k, b, -1.0, false, cx.rep.array.as_deref_mut(), 0, cx.keys)?
-            .found;
-
     // Shell context checks (intrinsic).
     for _ in &shells {
         rtn &= cx.rep.this_bool(b, C, this, 13, true)?;
@@ -230,10 +251,10 @@ pub(super) fn brep(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, walk: bool) ->
 /// (list 2 of `SmBrep`, about each edge use) the vertex/edge and vertex/face gaps at
 /// both ends of every face's upward-faceuse edge use that exceed half the vertex
 /// tolerance (tests 0-3) and its edge/face gap over the edge tolerance (test 4); an
-/// edge use and its mate are checked once. Returns the native status (`SM_ERR` for an
-/// end without vertex).
-fn tolerances(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>) -> Result<i32> {
-    validate_and_update(k, b, &mut cx.rep, true).map(|(status, _)| status)
+/// edge use and its mate are checked once. Returns false for an end without vertex
+/// (upstream's `SM_ERR`), true otherwise.
+fn tolerances(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>) -> Result<bool> {
+    validate_and_update(k, b, &mut cx.rep, true).map(|(ok, _)| ok)
 }
 
 /// The outputs of `SmBrep::ValidateAndUpdateTolerances` (see
@@ -253,8 +274,8 @@ pub struct ToleranceGaps {
     pub max_vertex_face_use: Option<VertexuseId>,
 }
 
-/// `SmBrep::ValidateAndUpdateTolerances(bValidateOnly, ...)` reporting into `rep`: the
-/// native status and the outputs. Unless `validate_only`, a vertex with a bad
+/// `SmBrep::ValidateAndUpdateTolerances(bValidateOnly, ...)` reporting into `rep`: whether
+/// it succeeded (false for an end without vertex, upstream's `SM_ERR`) and the outputs. Unless `validate_only`, a vertex with a bad
 /// vertex/edge or vertex/face gap (over half its tolerance, WR-679; upstream: over the
 /// whole of it) grows to twice its larger gap, and an edge with an edge/face gap over its
 /// tolerance grows to twice the gap when the gap is under the B-rep's box diagonal / 800,
@@ -264,13 +285,16 @@ pub(super) fn validate_and_update(
     b: &mut Brep,
     rep: &mut Rep<'_>,
     validate_only: bool,
-) -> Result<(i32, ToleranceGaps)> {
-    // Don't change the brep if we are just validating
-    let saved = b.validate_only();
-    b.set_validate_only(if validate_only { true } else { saved });
-    let result = validate_and_update_body(k, b, rep, validate_only);
-    b.set_validate_only(saved);
-    result
+) -> Result<(bool, ToleranceGaps)> {
+    // Don't change the brep if we are just validating. Not upstream (#21105): upstream sets
+    // `m_bValidateOnly` on the B-rep for the pass and restores it after, so that a UV trim
+    // built during the pass raises no tolerance; here the pass's argument holds the raise on
+    // the kernel for the pass instead, and the B-rep it checks is not written.
+    if validate_only {
+        k.with_held_trim_raise(|k| validate_and_update_body(k, b, rep, true))
+    } else {
+        validate_and_update_body(k, b, rep, false)
+    }
 }
 
 use super::super::pointers::{edge_tube_reaches, vertex_ball_reaches, GROWTH_PAST_RATIO};
@@ -280,7 +304,7 @@ fn validate_and_update_body(
     b: &mut Brep,
     rep: &mut Rep<'_>,
     validate_only: bool,
-) -> Result<(i32, ToleranceGaps)> {
+) -> Result<(bool, ToleranceGaps)> {
     // init outputs
     let mut out = ToleranceGaps::default();
 
@@ -342,12 +366,18 @@ fn validate_and_update_body(
 
             let start_vu = super::super::required(eu1::vertexuse(b, eu)?)?;
             let Some(start_v) = tvu::vertex(b, start_vu)? else {
-                return Ok((ERROR, out));
+                return Ok((false, out));
             };
             let end_vu = super::super::required(eu1::vertexuse(b, mate)?)?;
             let Some(end_v) = tvu::vertex(b, end_vu)? else {
-                return Ok((ERROR, out));
+                return Ok((false, out));
             };
+            // not upstream: a use of a face whose neighbourhood (its edges, vertices and their
+            // tolerances) passed this pass on a body before has no gap over its tolerance
+            // ([`crate::geom::check_memo`]); only a check reads the memo
+            if crate::geom::check_memo::face_clean(k, f) {
+                continue;
+            }
 
             // get all edgeuse start/end vertex gaps: upstream keeps pointers into the
             // vertex uses' caches and reads their lengths below, so a later refresh that
@@ -487,7 +517,7 @@ fn validate_and_update_body(
     }
 
     // all done
-    Ok((super::SUCCESS, out))
+    Ok((true, out))
 }
 
 /// A `SM_ASSERT_OBJ_VALUE_REPORT(this, SM_LIST_2, index, ...)` of the tolerance pass.

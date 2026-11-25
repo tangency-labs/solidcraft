@@ -5,6 +5,8 @@
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_geom::prelude::*;
 
+pub use solidcore_ops::prism::{symmetric_offset_intervals, symmetric_offset_probe_points};
+
 use crate::body::Body;
 use crate::draft_corners::DraftCorner;
 use crate::numbered::{self, NumberedLoop, NumberedRegion};
@@ -174,6 +176,12 @@ pub fn revolve_whole(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis
     revolved(plane, regions, axis_origin, axis_dir, angle)
 }
 
+/// How near the axis (mm) a profile corner between two lines goes onto it when revolved. A sketch
+/// leaves a corner 0.00001 mm off the axis line when no constraint holds it there. Revolved, that
+/// corner made a cone face too thin to see, which broke STEP files and booleans (#17528). One
+/// ten-thousandth of a millimetre is far below any shape someone draws on purpose.
+const AXIS_SNAP: f64 = 1e-4;
+
 /// Each region revolved through SMLib ([`crate::smlib_sweeps::revolve`]).
 fn revolved(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec2, angle: f64) -> Result<Vec<Body>> {
     let angle = finite(angle, "angle")?;
@@ -184,27 +192,25 @@ fn revolved(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec
     if regions.is_empty() {
         return Err(KernelError::Invalid("no profile selected".into()));
     }
-    // The profile must lie on one side of the axis.
     let o = plane.to_world(axis_origin);
     let axis = plane.dir_to_world(d);
     let mut out = Vec::new();
     for r in regions {
         region_ok(r)?;
-        let (mut neg, mut pos) = (false, false);
-        for p in r.outer.polyline(1e-3) {
-            let s = d.cross(p - axis_origin);
-            neg |= s < -1e-7;
-            pos |= s > 1e-7;
-        }
-        if neg && pos {
-            return Err(KernelError::Invalid("the profile crosses the revolve axis".into()));
-        }
-        // Points on the axis (within solver tolerance) go exactly onto it, so the sweep does not
-        // create hair-thin faces.
+        // Points on the axis go exactly onto it, so the sweep does not create hair-thin faces.
+        // An arc's end moves only within solver tolerance, since moving it would leave a gap
+        // next to the arc. A corner between two lines moves within AXIS_SNAP (#17528).
+        let curved_ends: Vec<Vec2> = std::iter::once(&r.outer)
+            .chain(&r.holes)
+            .flat_map(|l| &l.segs)
+            .filter(|s| !matches!(s, Seg2::Line { .. }))
+            .flat_map(|s| [s.start(), s.end()])
+            .collect();
         let snap = |p: Vec2| {
             let along = (p - axis_origin).dot(d);
             let q = axis_origin + d * along;
-            if p.dist(q) < 1e-7 { q } else { p }
+            let reach = if curved_ends.iter().any(|c| c.dist(p) < 1e-9) { 1e-7 } else { AXIS_SNAP };
+            if p.dist(q) < reach { q } else { p }
         };
         let snap_loop = |l: &NumberedLoop| {
             l.map_segs(|s| match *s {
@@ -223,7 +229,23 @@ fn revolved(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec
         // Partial turns go toward the side the sketch normal points to (as features extrude
         // toward it).
         let given = numbered_region(r)?.map_loops(|l| snap_loop(l).merged_lines(axis_run));
-        let c = plane.to_world(r.centroid());
+        // The profile must lie on one side of the axis, once its corners are on it.
+        let (mut neg, mut pos) = (false, false);
+        let mut far = (0.0, r.centroid());
+        for p in given.outer.lp.polyline(1e-3) {
+            let s = d.cross(p - axis_origin);
+            neg |= s < -1e-7;
+            pos |= s > 1e-7;
+            if s.abs() > far.0 {
+                far = (s.abs(), p);
+            }
+        }
+        if neg && pos {
+            return Err(KernelError::Invalid("the profile crosses the revolve axis".into()));
+        }
+        // The side of the axis the profile is on: its point farthest from the axis, once its
+        // corners are on it (the centroid of a sliver can lie on the other side).
+        let c = plane.to_world(far.1);
         let radial = (c - o) - axis * (c - o).dot(axis);
         let angle = if axis.cross(radial).dot(plane.normal()) < 0.0 { -angle } else { angle };
         out.push(crate::smlib_sweeps::revolve(plane, &crate::smlib_sweeps::pieces(given.oriented().loops()), o, axis, angle)?);
@@ -283,15 +305,23 @@ pub(crate) const SEAM_ANGLE: f64 = 0.6131;
 pub fn cylinder(base: Vec3, axis: Vec3, radius: f64, height: f64) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "cylinder");
     let plane = Plane::from_normal(base, axis).ok_or_else(|| KernelError::Invalid("cylinder axis".into()))?;
+    if !frame_ok(&plane) {
+        return Err(KernelError::Invalid("extrude frame is not finite and orthonormal".into()));
+    }
     let radius = finite(radius, "radius")?;
     if radius <= 1e-6 {
         return Err(KernelError::Invalid("radius must be positive".into()));
     }
+    let height = finite(height, "height")?;
+    let (lo, hi) = if height >= 0.0 { (0.0, height) } else { (height, 0.0) };
+    if hi - lo < 1e-6 {
+        return Err(KernelError::Invalid("extrude distance is zero".into()));
+    }
     // The seams at an odd angle: on the frame's axes they would lie exactly where faces placed
     // on a grid cut the cylinder (along a seam edge, which booleans don't survive).
     let r = Region2 { outer: Loop2::circle_from(Vec2::ZERO, radius, SEAM_ANGLE), holes: vec![] };
-    let mut v = extrude(&plane, &[r], 0.0, finite(height, "height")?)?;
-    v.pop().ok_or_else(|| KernelError::Failed("cylinder".into()))
+    region_ok(&r)?;
+    crate::smlib_sweeps::cylinder(&plane, radius, lo, hi, &r)
 }
 
 /// Sphere: SMLib's own (smlib_make_sphere), each face swept from the arc (segment 0) of the half
@@ -323,7 +353,7 @@ pub fn torus(center: Vec3, major: f64, minor: f64) -> Result<Body> {
 /// neighbours now meet at one point). Loops of arcs on one circle, and loops of lines, arcs and
 /// free curves (spline and conic pieces, such as the outlines of text) where the arcs meet their
 /// neighbours tangentially are supported.
-pub(crate) fn offset_loop(lp: &Loop2, d: f64) -> Result<Vec<Option<Seg2>>> {
+pub fn offset_loop(lp: &Loop2, d: f64) -> Result<Vec<Option<Seg2>>> {
     if d == 0.0 {
         return Ok(lp.segs.iter().copied().map(Some).collect());
     }
@@ -986,12 +1016,26 @@ pub fn planar_face_record(plane: &Plane, r: &Region2) -> Result<solidcore_record
 
 /// Ruled loft through two or more planar sections (outer loops only). The sections and the
 /// same sections in reverse order give the same body.
+///
+/// Between paired vertices, for exactly two sections (`smlib_sweeps::loft` skins three at degree 2
+/// and four or more at degree 3), the rule is: each wall is skinned through the two sections
+/// (degree 1 across them, so a point at height `z` lies on the segment between the paired
+/// points), and each pair of matched spans runs on its own parameter. A line's parameter is linear in its length,
+/// an arc's is its rational Bezier parameter (not its angle or its arc length), and a span's
+/// point at parameter `t` is paired with the other span's point at `t`. An arc is one rational
+/// quadratic span below 91 degrees, two from 91 up to (not including) 181, three from 181 to 271
+/// and four beyond, as NLib's conic count makes it (`conic_data` in
+/// `solidcore/crates/solidcore/src/nurbs/crv_basic.rs`, the Piegl & Tiller quarter-turn bound), so
+/// a 90.5 degree arc is one span and a 200 degree arc is three. Where an arc has two spans the
+/// knot between them is a point of the wall, so a rectangle lofted to a circle has its x-sides'
+/// middles at the circle's 0 and 180 degree points (pinned by
+/// `loft_rectangle_to_circle_pairs_each_span_on_its_own_parameter`, #19478).
 pub fn loft(sections: &[(Plane, Loop2)]) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "loft");
     loft_with_rails(sections, &[], RailFit::Scale)
 }
 
-/// [`loft`] following one or two guide rails (polylines from the first section to the last,
+/// [`loft`] following 1…16 guide rails (polylines from the first section to the last,
 /// through every section's curve; see [`crate::loft_rails`]), `fit` saying how they reshape the
 /// sections between. Without rails, the plain loft.
 pub fn loft_with_rails(sections: &[(Plane, Loop2)], rails: &[Vec<Vec3>], fit: RailFit) -> Result<Body> {
@@ -1012,6 +1056,9 @@ pub fn loft_with_rails(sections: &[(Plane, Loop2)], rails: &[Vec<Vec3>], fit: Ra
             pieces = pieces_of(&loft_numbered_loops_by(&numbered, reversed, true)?);
         }
         return crate::smlib_sweeps::loft(&pieces, first);
+    }
+    if rails.len() > 2 {
+        return crate::smlib_sweeps::loft_many_rails(&pieces, first, rails, fit);
     }
     let mut all = crate::smlib_sweeps::rail_curves(&pieces, rails, fit)?;
     if all.iter().map(Vec::len).sum::<usize>() > solidcraft_smlib::sweeps::MAX_CURVES {
@@ -1261,8 +1308,12 @@ pub(crate) fn resplit_numbered_loops(ordered: &[(Plane, NumberedLoop)]) -> Resul
         })
         .collect();
     let mut out = Vec::with_capacity(ordered.len());
+    let mut before: Option<Vec3> = None;
     for (p, l) in ordered {
-        let back = p.normal().dot(normal) < 0.0;
+        let centre = p.to_world(l.lp.centroid());
+        let back =
+            before.is_some_and(|c: Vec3| solidcore_ops::sweep::loft_section_faces_back(normal.into(), c.into(), p.normal().into(), centre.into()));
+        before = Some(centre);
         let local: Vec<Vec2> = dirs.iter().map(|d| Vec2::new(d.dot(p.x), d.dot(p.y))).collect();
         // Break angles: the matched corners seen in this plane. A re-split circle runs counter-
         // clockwise in its plane; wound the other way when the plane faces back.
@@ -1520,4 +1571,22 @@ pub fn sweep_with(plane: &Plane, region: &Region2, path: &[PathSeg], ctl: &crate
 pub fn sweep(plane: &Plane, region: &Region2, path: &[PathSeg]) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "sweep");
     smlib_sweep(plane, region, path, &crate::SweepControl::default())
+}
+
+/// Where the line along `sketch`'s normal through `point` meets `plane`, as a level along that
+/// normal ([`solidcore_ops::prism::level_on_plane`]).
+pub fn level_on_plane(sketch: &Plane, point: Vec3, plane: &Plane) -> Result<f64> {
+    solidcore_ops::prism::level_on_plane(sketch, point, plane).map_err(|e| KernelError::Invalid(e.to_string()))
+}
+
+/// The least and the most level of `plane` above `sketch` over the profiles' outer loops
+/// ([`solidcore_ops::prism::plane_rise`]).
+pub fn plane_rise(sketch: &Plane, plane: &Plane, regions: &[Region2]) -> Result<(f64, f64)> {
+    solidcore_ops::prism::plane_rise(sketch, plane, regions).map_err(|e| KernelError::Invalid(e.to_string()))
+}
+
+/// The least and the most of `to`'s level above `sketch` less `from`'s over the profiles' outer
+/// loops ([`solidcore_ops::prism::plane_gap`]).
+pub fn plane_gap(sketch: &Plane, from: &Plane, to: &Plane, regions: &[Region2]) -> Result<(f64, f64)> {
+    solidcore_ops::prism::plane_gap(sketch, from, to, regions).map_err(|e| KernelError::Invalid(e.to_string()))
 }

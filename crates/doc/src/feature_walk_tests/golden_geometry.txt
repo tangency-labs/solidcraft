@@ -1,6 +1,9 @@
 newer_file_feature
 frame_end_cap
   moves: ends[0].plane.axis_dir[0], ends[0].plane.axis_dir[1], ends[0].plane.axis_origin[0], ends[0].plane.axis_origin[1], ends[0].plane.axis_origin[2]
+frame_member_turn
+frame_gusset
+  moves: supports[0].plane.axis_dir[0], supports[0].plane.axis_dir[1], supports[0].plane.axis_origin[0], supports[0].plane.axis_origin[1], supports[0].plane.axis_origin[2], supports[1].plane.axis_dir[0], supports[1].plane.axis_dir[1], supports[1].plane.axis_origin[0], supports[1].plane.axis_origin[1], supports[1].plane.axis_origin[2]
 body_transfer
 sketch
   moves: plane.axis_dir[0], plane.axis_dir[1], plane.axis_origin[0], plane.axis_origin[1], plane.axis_origin[2]
@@ -83,11 +86,16 @@ sweep_options
 shell
   moves: faces[0][0], faces[0][1], faces[0][2]
   face points: [0, 0, 0]
+dome
+  moves: face[0], face[1], face[2]
+  face points: [0, 0, 0]
 draft
   moves: faces[0][0], faces[0][1], faces[0][2], neutral.axis_dir[0], neutral.axis_dir[1], neutral.axis_origin[0], neutral.axis_origin[1], neutral.axis_origin[2], pull[0], pull[2]
   face points: [0, 0, 0]
 construction_plane
   moves: plane.axis_dir[0], plane.axis_dir[1], plane.axis_origin[0], plane.axis_origin[1], plane.axis_origin[2]
+construction_plane_square_to_line
+  moves: plane.line.at[0], plane.line.at[1], plane.line.at[2], plane.point.p[0], plane.point.p[1], plane.point.p[2]
 split
   moves: plane.axis_dir[0], plane.axis_dir[1], plane.axis_origin[0], plane.axis_origin[1], plane.axis_origin[2], tool.point[0], tool.point[1], tool.point[2]
   face points: [0, 0, 0]
@@ -113,8 +121,13 @@ delete_face
 bounding_solid
 pipe
 frame_member
+  moves: pairs[0].b.at[0], pairs[0].b.at[1], pairs[0].b.at[2]
 frame_member_sketch
   profiles: 2 all
+frame_trim
+  moves: to[1].plane.axis_dir[0], to[1].plane.axis_dir[1], to[1].plane.axis_origin[0], to[1].plane.axis_origin[1], to[1].plane.axis_origin[2]
+frame_plate
+  moves: plane.axis_dir[0], plane.axis_dir[1], plane.axis_origin[0], plane.axis_origin[1], plane.axis_origin[2]
 emboss
   face points: [5, 5.5, 5.25]
   profiles: 1 all
@@ -148,6 +161,9 @@ sheet_fold
   moves: a[0], a[1], a[2], b[1], b[2], fixed[0], fixed[1], fixed[2]
 sheet_path
   moves: edge[0], edge[1], edge[2]
+sheet_tab
+  profiles: 1 all
+sheet_bead
 sheet_unfold
 sheet_convert
   moves: bends[0][0], bends[0][1], bends[0][2], engrave[0][0], engrave[0][1], engrave[0][2], face[0], face[1], face[2]
@@ -191,6 +207,9 @@ surface_blend
 surface_offset
   moves: faces[0][0], faces[0][1], faces[0][2]
   face points: [0, 0, 0]
+surface_midsurface
+  moves: faces[0][0], faces[0][1], faces[0][2], faces[1][0], faces[1][1], faces[1][2]
+  face points: [0, 0, 0], [0, 0, 0]
 surface_blend
   moves: align[0][0], align[0][1], align[0][2], align[1][0], align[1][1], align[1][2], from.edges[0][0], from.edges[0][1], from.edges[0][2], seam[0][0], seam[0][1], seam[0][2], seam[1][0], seam[1][1], seam[1][2], to.edges[0][0], to.edges[0][1], to.edges[0][2]
 surface_boundary
@@ -228,5 +247,6 @@ move
   moves: rotate_axis[1], rotate_axis[2]
 import
 mesh_convert
+mesh_reduce
 mesh_import
 repair

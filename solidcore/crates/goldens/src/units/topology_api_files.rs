@@ -35,7 +35,6 @@ use solidcore::topology::api_files;
 use solidcore::topology::brep::p1 as bl;
 use solidcore::topology::brep::p10::TopologyEnv;
 use solidcore::topology::brep::p3::topology_ref;
-use solidcore::topology::brep::p7::read_from_file;
 use solidcore::topology::brep_data::{BrepData, Keyed};
 use solidcore::topology::brep_data_write::FromBrepEnv;
 use solidcore::topology::database_io::FileType;
@@ -199,6 +198,9 @@ fn finish(r: SolidResult<Vec<f64>>) -> Result<Output, HarnessError> {
 
 /// The shim's B-rep record.
 fn put_brep(k: &mut Kernel, o: &mut Vec<f64>, b: &Brep) -> SolidResult<()> {
+    // the recorded body, for the tolerance certificate (`certify::trim_tolerance`)
+    #[cfg(test)]
+    crate::certify::written(b);
     let faces = bl::faces(b, None)?;
     let edges = bl::edges(b, None)?;
     let vertices = bl::vertices(b, None)?;
@@ -490,12 +492,12 @@ fn write_bytes(
         return api_files::write_brep_to_file(k, Some(b), &env, file_type == FileType::Ascii);
     }
     let mut all = Vec::new();
-    let mut data = BrepData::from_brep(b, &env, &mut all)?;
+    let mut data = BrepData::from_brep(k, b, &env, &mut all)?;
     data.write_to_file_with_nurbs(k, file_type)
 }
 
 fn rust(op: &Op) -> Result<Output, HarnessError> {
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     match op {
         Op::ReadBrep {
             file,
@@ -750,7 +752,7 @@ fn rust_write(s: &WriteSrc, ascii: bool) -> Result<Output, HarnessError> {
     if let Some(why) = write_rejection(s) {
         return Ok(Output::rejected(why));
     }
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let made = match s {
         WriteSrc::File { file, rebuild } => {
             let bytes = read_bytes(file)?;
@@ -765,7 +767,14 @@ fn rust_write(s: &WriteSrc, ascii: bool) -> Result<Output, HarnessError> {
                     records: &mut records,
                     next_key: WRITE_GEOMETRY_KEYS,
                 };
-                read_from_file(&mut k, &mut b, bytes, FileType::Ascii, *rebuild, &mut env)
+                solidcore::topology::brep::p7::read_from_file(
+                    &mut k,
+                    &mut b,
+                    bytes,
+                    FileType::Ascii,
+                    *rebuild,
+                    &mut env,
+                )
             };
             return Ok(match read {
                 Ok(()) => write_rec(&k, &b, &write_file_key, &records, &attributes, ascii),
@@ -1002,6 +1011,7 @@ impl UnitDiff for Runner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solidcore::topology::brep::p7::read_from_file;
     use solidcore::topology::database_io::{fixed16, round_trip};
 
     /// The file a `write_bytes` output records (`rec`: `0, 0, n, bytes...`).
@@ -1016,7 +1026,7 @@ mod tests {
     /// `bytes` read with the Rust reader under the write cases' file identities, then
     /// written as a binary file under the same identities (binary doubles are exact).
     fn binary_after_reading(bytes: Vec<u8>, file_type: FileType) -> Vec<u8> {
-        let mut k = Kernel::default();
+        let mut k = crate::runner_kernel();
         let mut records = NotifyRecords::new();
         let mut attributes = AttributeStore::default();
         let mut b = Brep::new_with_infinite_region().unwrap();
@@ -1117,4 +1127,285 @@ mod tests {
         println!("ASCII_EXACT %.16f loses a double in {}: {lossy:?}", lossy.len());
         assert_eq!(covered.len(), ASCII_FILES);
     }
+
+    /// The surface part of a found sphere or torus, or of a B-spline surface.
+    fn nurb_part(s: &Surface) -> Option<&BSplineSurface> {
+        use solidcore::surface::surface::SurfaceKind;
+        match s.kind() {
+            SurfaceKind::BSpline(b) => Some(b),
+            SurfaceKind::Sphere(sp) => Some(sp.base().base()),
+            SurfaceKind::Torus(t) => Some(t.base().base()),
+            _ => None,
+        }
+    }
+
+    /// A NURB surface's control points and knots as bits.
+    fn surface_bits(s: &BSplineSurface) -> Vec<u64> {
+        let n = s.gw_nurb().expect("a NURB");
+        let mut out: Vec<u64> = n
+            .rows()
+            .flat_map(|r| r.iter().flat_map(|p| [p.x, p.y, p.z, p.w]))
+            .map(f64::to_bits)
+            .collect();
+        out.extend(n.u_knots().iter().chain(n.v_knots()).map(|x| x.to_bits()));
+        out
+    }
+
+    /// A UV curve's NURB as written (`Debug` writes every double as the shortest text
+    /// that reads back as itself, so equal text is equal bits). A line's record is its
+    /// NURB: the written file can hold a source polyline trim as the `Line` over that same
+    /// NURB (`Solids/sphere.smb`), so the NURB is what must be the source's. Any other kind is
+    /// compared by its whole record.
+    fn curve_text(c: &Curve) -> String {
+        use solidcore::curve::curve::CurveKind;
+        match c.kind() {
+            CurveKind::BSpline(b) => format!("{:?}", b.gw_nurb()),
+            CurveKind::Line(l) => format!("{:?}", l.base().gw_nurb()),
+            k => format!("{k:?}"),
+        }
+    }
+
+    /// The UV curves of the edge uses on `face`'s loops (sorted).
+    fn face_trims(d: &BrepData, face: usize) -> Vec<String> {
+        let f = &d.faces[face];
+        let loops = f.start_loop..f.start_loop + f.num_loops;
+        let mut out: Vec<String> = d
+            .edgeuses
+            .iter()
+            .filter(|eu| loops.contains(&eu.loop_))
+            .map(|eu| curve_text(&d.uv_curves[eu.uv_curve as usize].object))
+            .collect();
+        out.sort();
+        out
+    }
+
+    /// WR-493 (#18195): the `write_bytes` rows the retirement moved. Each writes a file
+    /// with a sphere or torus found in a NURB, and the file written holds, for every such
+    /// face, the source file's own surface (its NURB, bit for bit), and on it the source's own
+    /// UV trims (the same NURBs, bit for bit; a polyline trim can be written as the line over
+    /// that NURB) but those the read remade (counted; as on any surface, the healer remakes
+    /// a trim that misses its edge, see `wr493_class_proofs`): the retirement moved these rows only
+    /// by writing the file's own surface and trims where main wrote the NURB
+    /// made from the fitted circles and the trims rebuilt on it.
+    #[test]
+    fn wr493_written_found_faces_are_the_source_files() {
+        use solidcore::surface::surface::SurfaceKind;
+        // (case, found faces, trims on them written as the source's, trims the read remade)
+        const MOVED: [(&str, usize, usize, usize); 14] = [
+            ("write_bytes0004", 1, 2, 0),
+            ("write_bytes0026", 1, 2, 0),
+            ("write_bytes0061", 1, 2, 0),
+            ("write_bytes0085", 1, 12, 2),
+            ("write_bytes0094", 1, 2, 0),
+            ("write_bytes0106", 1, 2, 0),
+            ("write_bytes0115", 1, 12, 2),
+            ("write_bytes0153", 1, 4, 10),
+            ("write_bytes0179", 1, 12, 2),
+            ("write_bytes0180", 1, 2, 0),
+            ("write_bytes_file_nurb_fillet_ascii", 1, 12, 2),
+            ("write_bytes_file_nurb_fillet_binary", 1, 12, 2),
+            ("write_bytes_file_sphere_ascii", 1, 2, 0),
+            ("write_bytes_file_sphere_binary", 1, 2, 0),
+        ];
+        let mut measured = Vec::new();
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 16,
+        };
+        let cases = Runner.cases(&ctx).unwrap();
+        let k = crate::runner_kernel();
+        for (name, ..) in MOVED {
+            let case = cases.iter().find(|c| c.name == name).unwrap();
+            let op: Op = case.parse().unwrap();
+            let Op::WriteBytes {
+                brep: WriteSrc::File { file, .. },
+                ascii,
+            } = &op
+            else {
+                panic!("{name}: not a file write");
+            };
+            let written = file_of(&rust(&op).unwrap()).unwrap_or_else(|| panic!("{name}"));
+            let file_type = if *ascii {
+                FileType::Ascii
+            } else {
+                FileType::Binary
+            };
+            let w = BrepData::read_from_file(&k, written, file_type).unwrap();
+            let src = BrepData::read_from_file(&k, read_bytes(file).unwrap(), FileType::Ascii)
+                .unwrap();
+            assert_eq!(w.faces.len(), src.faces.len(), "{name}");
+            let (mut found, mut kept, mut remade) = (0, 0, 0);
+            for (i, (wf, sf)) in w.faces.iter().zip(&src.faces).enumerate() {
+                let ws = &w.surfaces[wf.surface as usize].object;
+                if !matches!(ws.kind(), SurfaceKind::Sphere(_) | SurfaceKind::Torus(_)) {
+                    continue;
+                }
+                found += 1;
+                let ss = &src.surfaces[sf.surface as usize].object;
+                assert!(
+                    matches!(ss.kind(), SurfaceKind::BSpline(_)),
+                    "{name}: face {i}: the source's surface is not a NURB"
+                );
+                assert_eq!(
+                    surface_bits(nurb_part(ws).unwrap()),
+                    surface_bits(nurb_part(ss).unwrap()),
+                    "{name} ({file}): face {i}: the written surface is not the source's"
+                );
+                let (wt, st) = (face_trims(&w, i), face_trims(&src, i));
+                assert!(!wt.is_empty(), "{name}: face {i}: no trims");
+                // one-to-one: each written trim uses up one matching source trim
+                let mut left = st.clone();
+                let same = wt
+                    .iter()
+                    .filter(|t| {
+                        left.iter()
+                            .position(|s| s == *t)
+                            .map(|at| left.swap_remove(at))
+                            .is_some()
+                    })
+                    .count();
+                kept += same;
+                remade += wt.len() - same;
+            }
+            assert!(found > 0, "{name} ({file}): no sphere or torus found");
+            measured.push((name, found, kept, remade));
+        }
+        assert_eq!(measured, MOVED, "{measured:#?}");
+    }
+
+    /// #16922: the `write_bytes` rows the fix moved. Each writes an upstream file whose
+    /// read raised edge tolerances to cover kept UV trims after the end check
+    /// ([`Brep::trim_cover_raises`], `end_checked`). Certified per row: the written file
+    /// holds every edge and vertex tolerance as the read B-rep holds it, but each raise
+    /// still held, which it holds as the tolerance before the raise (the only values
+    /// the fix changes; nothing else is written differently), and a read of the written
+    /// file has the same tolerances and the same raises as the B-rep written.
+    #[test]
+    fn issue_16922_written_raises_are_their_tolerances_before() {
+        // (case, edges written before their raise, vertices written before their raise)
+        const MOVED: [(&str, usize, usize); 12] = [
+            ("write_bytes0074", 2, 2),
+            ("write_bytes0085", 4, 4),
+            ("write_bytes0096", 2, 2),
+            ("write_bytes0115", 4, 4),
+            ("write_bytes0117", 2, 2),
+            ("write_bytes0128", 2, 2),
+            ("write_bytes0148", 2, 2),
+            ("write_bytes0179", 4, 4),
+            ("write_bytes_file_nurb_fillet_ascii", 4, 4),
+            ("write_bytes_file_nurb_fillet_binary", 4, 4),
+            ("write_bytes_file_revolution_ascii", 2, 2),
+            ("write_bytes_file_revolution_binary", 2, 2),
+        ];
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 16,
+        };
+        let cases = Runner.cases(&ctx).unwrap();
+        let mut measured = Vec::new();
+        for (name, ..) in MOVED {
+            let case = cases.iter().find(|c| c.name == name).unwrap();
+            let op: Op = case.parse().unwrap();
+            let Op::WriteBytes {
+                brep: WriteSrc::File { file, rebuild },
+                ascii,
+            } = &op
+            else {
+                panic!("{name}: not a file write");
+            };
+            let file_type = if *ascii {
+                FileType::Ascii
+            } else {
+                FileType::Binary
+            };
+            // the B-rep the case writes, read as `rust_write` reads it
+            let mut k = Kernel::default();
+            let mut records = NotifyRecords::new();
+            let mut attributes = AttributeStore::default();
+            let mut b = Brep::new_with_infinite_region().unwrap();
+            {
+                let mut env = TopologyEnv {
+                    all_attributes: &[],
+                    attributes: &mut attributes,
+                    key_of: &write_file_key,
+                    records: &mut records,
+                    next_key: WRITE_GEOMETRY_KEYS,
+                };
+                read_from_file(
+                    &mut k,
+                    &mut b,
+                    read_bytes(file).unwrap(),
+                    FileType::Ascii,
+                    *rebuild,
+                    &mut env,
+                )
+                .unwrap();
+            }
+            let raises = b.trim_cover_raises().clone();
+            assert!(raises.end_checked, "{name}");
+            let written = file_of(&rust(&op).unwrap()).unwrap_or_else(|| panic!("{name}"));
+            let w = BrepData::read_from_file(&k, written.clone(), file_type).unwrap();
+            let (vs, es) = (bl::vertices(&b, None).unwrap(), bl::edges(&b, None).unwrap());
+            assert_eq!((w.vertices.len(), w.edges.len()), (vs.len(), es.len()), "{name}");
+            let expect = |held: f64, raise: Option<&(f64, f64)>| match raise {
+                Some(&(before, after)) if after.to_bits() == held.to_bits() => (before, true),
+                _ => (held, false),
+            };
+            let (mut edges, mut vertices) = (0, 0);
+            for (i, (&v, vd)) in vs.iter().zip(&w.vertices).enumerate() {
+                let (t, raised) = expect(b.vertex(v).unwrap().tolerance, raises.vertices.get(&v));
+                assert_eq!(vd.zone_tol_3d.to_bits(), t.to_bits(), "{name}: vertex {i}");
+                vertices += usize::from(raised);
+            }
+            for (i, (&e, ed)) in es.iter().zip(&w.edges).enumerate() {
+                let (t, raised) = expect(b.edge(e).unwrap().tolerance, raises.edges.get(&e));
+                assert_eq!(ed.zone_tol_3d.to_bits(), t.to_bits(), "{name}: edge {i}");
+                edges += usize::from(raised);
+            }
+            // every written vertex covers every edge at it as written (the writer's floor
+            // for an unraised vertex never binds here)
+            for (&e, ed) in es.iter().zip(&w.edges) {
+                for v in solidcore::topology::vertex::edge_vertices(&b, e)
+                    .unwrap()
+                    .into_iter()
+                    .flatten()
+                {
+                    let i = vs.iter().position(|&x| x == v).unwrap();
+                    assert!(w.vertices[i].zone_tol_3d >= ed.zone_tol_3d, "{name}: vertex {i}");
+                }
+            }
+            // read back: the same tolerances, the same raises
+            let mut r = Brep::new_with_infinite_region().unwrap();
+            {
+                let mut records = NotifyRecords::new();
+                let mut attributes = AttributeStore::default();
+                let mut env = TopologyEnv {
+                    all_attributes: &[],
+                    attributes: &mut attributes,
+                    key_of: &write_file_key,
+                    records: &mut records,
+                    next_key: WRITE_GEOMETRY_KEYS,
+                };
+                read_from_file(&mut k, &mut r, written, file_type, *rebuild, &mut env).unwrap();
+            }
+            let tolerances = |b: &Brep| {
+                let raises = b.trim_cover_raises();
+                let bits = |r: Option<&(f64, f64)>| r.map(|&(x, y)| (x.to_bits(), y.to_bits()));
+                let mut out = Vec::new();
+                for e in bl::edges(b, None).unwrap() {
+                    let t = b.edge(e).unwrap().tolerance.to_bits();
+                    out.push((t, bits(raises.edges.get(&e))));
+                }
+                for v in bl::vertices(b, None).unwrap() {
+                    let t = b.vertex(v).unwrap().tolerance.to_bits();
+                    out.push((t, bits(raises.vertices.get(&v))));
+                }
+                out
+            };
+            assert_eq!(tolerances(&r), tolerances(&b), "{name}: read back");
+            measured.push((name, edges, vertices));
+        }
+        assert_eq!(measured, MOVED, "{measured:#?}");
+    }
+
 }

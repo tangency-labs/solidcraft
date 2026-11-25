@@ -17,7 +17,7 @@
 //! ([`keeps_contract`]); one outside it is a harness error.
 //!
 //! **`GetPointsInFace` with more than one point** draws its V dither from
-//! `srand(time(NULL))` / `rand()` upstream and from `kernel.rng` in the port
+//! `srand(time(NULL))` / `rand()` upstream and from the call's own seeded generator in the port
 //! (`plan/findings.md`); such cases record what does not depend on the draw: the
 //! point count, the U values and, on a rectangular face, each V's grid slot
 //! (`round(v / dVInc)`, the dither being under half a slot).
@@ -1491,7 +1491,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
     if !keeps_contract(Op::Export, &path, &block, None) {
         return Err(harness(format!("export: {CONTRACT}")));
     }
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let (mut b, c) = match own_brep(&mut k, brep, &path, i.validate_only, i.init_gaps)? {
         Ok(x) => x,
         Err(o) => return Ok(o),
@@ -1533,7 +1533,7 @@ fn fix_returns_early(dist: f64, dom: &Extent2d) -> bool {
 #[allow(clippy::too_many_lines)]
 fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> {
     use solidcore::topology::edgeuse::p1 as eu1;
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let fid = |x: i64| FaceId::from_index(x as u32);
     let eid = |x: i64| EdgeuseId::from_index(x as u32);
     let mut o = Vec::new();
@@ -1878,7 +1878,7 @@ fn run_rust_geom(op: &OpIn) -> Result<Vec<f64>, Fail> {
             }
             let s = rust_surface(surface)?;
             let l = fp2::PrecisePropertyLayout::new(*flags);
-            let k = Kernel::default();
+            let k = crate::runner_kernel();
             let e = fp2::OdeIsoCurveLength::new(&k, &s, *u, Vec3::new(origin[0], origin[1], origin[2]), *thickness, &l);
             let mut d = vec![7.0; *n];
             let r = e.evaluate(*t, &mut d);
@@ -1904,7 +1904,7 @@ fn run_rust_geom(op: &OpIn) -> Result<Vec<f64>, Fail> {
             let s = rust_surface(surface)?;
             let c = rust_curve(curve)?;
             let l = fp2::PrecisePropertyLayout::new(*flags);
-            let k = Kernel::default();
+            let k = crate::runner_kernel();
             let e = fp2::OdeArea {
                 kernel: &k,
                 surface: &s,
@@ -2173,7 +2173,7 @@ fn lacks_kind(i: &Inputs) -> bool {
     let (Some(brep), Ok(path)) = (&i.brep, path_of(i)) else {
         return false;
     };
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     own_brep(&mut k, brep, &path, i.validate_only, i.init_gaps)
         .is_ok_and(|b| b.is_ok_and(|(_, c)| resolve(&i.op, &counts_of(c)).is_err()))
 }
@@ -2211,6 +2211,62 @@ impl UnitDiff for Runner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The pole point on `sphere.smb` that `topology.face_p2` (`state[4..7]`) and
+    /// `topology.brep_p4` (`faces_values[9..12]`) record lies on the file's sphere (radius 5
+    /// about the origin) to `2.7e-15`, enclosed: `||p| - 5| = (|p|^2 - 25) / (|p| + 5)`, the
+    /// numerator summed exactly from exact squares, the rest in interval arithmetic. The
+    /// pole normal (`state[7..10]`) is the radial direction `p / |p|`, each component within
+    /// `gamma_5` (its rounding, at most 1 in magnitude).
+    #[test]
+    fn sphere_pole_points_lie_on_the_sphere() {
+        use crate::case::regression_case;
+        use crate::interval::{exact_sum, gamma_up, two_prod, Iv};
+        let off_sphere = |p: [f64; 3]| {
+            let mut terms: Vec<f64> = p
+                .iter()
+                .flat_map(|&c| <[f64; 2]>::from(two_prod(c, c)))
+                .collect();
+            terms.push(-25.0);
+            let [x, y, z] = p.map(Iv::exact);
+            let r = x.mul(x).add(y.mul(y)).add(z.mul(z)).sqrt();
+            exact_sum(&terms).div(r.add(Iv::exact(5.0))).mag()
+        };
+        let run = |runner: &dyn UnitDiff, case: &str| {
+            let out = runner
+                .run_rust(&regression_case(runner, case))
+                .expect("the run");
+            assert!(out.error.is_none(), "{case}: {:?}", out.error);
+            out
+        };
+        let mut points = Vec::new();
+        for case in [
+            "extra01050",
+            "points_file_sphere.smb_0",
+            "points_file_sphere.smb_1",
+            "points_file_sphere.smb_2",
+        ] {
+            let state = &run(&Runner, case).values["state"];
+            let p = [state[4], state[5], state[6]];
+            points.push((case, p));
+            let r = (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt();
+            for i in 0..3 {
+                let (n, radial) = (state[7 + i], p[i] / r);
+                assert!(
+                    (n - radial).abs() <= gamma_up(5),
+                    "{case}: normal[{i}] {n:e} against the radial {radial:e}"
+                );
+            }
+        }
+        for case in ["gen0000", "gen0009", "gen0042", "gen0043", "gen0142"] {
+            let faces = &run(&crate::units::topology_brep_p4::Runner, case).values["faces_values"];
+            points.push((case, [faces[9], faces[10], faces[11]]));
+        }
+        for (case, p) in points {
+            let off = off_sphere(p);
+            assert!(off < 2.7e-15, "{case}: {p:?} is {off:e} off the sphere");
+        }
+    }
 
     /// Nightly fuzz case `topology.face_p2/fuzz00020` (run 41040730716): a non-rational face
     /// surface (weights the marker `-f64::MAX`) with one weight set to 1, under a `best_uv`
@@ -2307,7 +2363,7 @@ mod tests {
             let Some(row) = out.values.get("state").cloned() else {
                 continue;
             };
-            let mut k = Kernel::default();
+            let mut k = crate::runner_kernel();
             let brep = i.brep.as_ref().unwrap();
             let path = path_of(&i).unwrap();
             let (mut b, c) = own_brep(&mut k, brep, &path, i.validate_only, i.init_gaps)
@@ -2327,7 +2383,7 @@ mod tests {
             if face.rectangular_trim != 1 || row.first().copied() != Some(0.0) || count == 0 {
                 continue;
             }
-            let mut k = Kernel::default();
+            let mut k = crate::runner_kernel();
             let r = fp2::points_in_face(&mut k, &mut b, fid, count).unwrap();
             assert_eq!(r.uv.len() as u64, count, "{name}: point count");
             let (u_ivl, v_ivl) = (face.uv_domain.u_interval(), face.uv_domain.v_interval());
@@ -2417,7 +2473,7 @@ mod tests {
         );
         let main = Vec3::new(8.501_171_443_409_645e-5, 1.955_087_294_908_429e-4, -2.533_443_274_855_833e-4);
 
-        let mut k = Kernel::default();
+        let mut k = crate::runner_kernel();
         let path = path_of(&i).unwrap();
         let (b, _) = own_brep(&mut k, i.brep.as_ref().unwrap(), &path, i.validate_only, i.init_gaps)
             .unwrap()

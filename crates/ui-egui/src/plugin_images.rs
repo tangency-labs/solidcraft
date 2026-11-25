@@ -1,6 +1,6 @@
-//! Vector images a plugin package ships: a command's icon and pictures for a choice's options.
+//! Vector images a plugin package ships: an entry's icon, ribbon group icons and pictures for a choice's options.
 //!
-//! An entry's `input_schema` names them with [`KEY`]: at its top, the command's icon (its ribbon
+//! An entry's `input_schema` names them with [`KEY`]: at its top, the command or importer's icon (its ribbon
 //! button, its menu rows and its dialog's header); on a `oneOf` option, that option's picture in
 //! the dropdown. Each names an `.svg` file inside the package by a relative path.
 //!
@@ -10,7 +10,7 @@
 //! absolute paths, circles, groups, masks and clips, and colours that name the icon palette's
 //! roles (or `currentColor`), so it is drawn in the theme's colours like the app's icons. Text,
 //! images, scripts, styles, links and references to other files are not in the subset, so such a
-//! file is refused. A refused or missing image is left out (a command keeps the generic plugin
+//! file is refused. A refused or missing image is left out (an entry keeps the generic plugin
 //! icon) and logged; it never stops the plugin from working.
 
 use std::collections::BTreeMap;
@@ -18,23 +18,35 @@ use std::hash::{Hash, Hasher};
 use std::path::Path;
 
 use serde_json::Value;
+use solidcraft_engine::plugin::images;
 
-/// The schema keyword that names a package image.
-pub(crate) const KEY: &str = "x-solidcraft-icon";
+pub(crate) use images::{KEY, referenced, valid_path};
 
-/// The icon every plugin command has when it names none of its own.
+/// The icon every plugin entry has when it names none of its own.
 pub(crate) const GENERIC: &str = "prefs_plugins";
 
 /// The largest image file read.
-const MAX_BYTES: u64 = solidcraft_ui_kit::icons::MAX_ADDED_BYTES as u64;
+const MAX_BYTES: u64 = images::MAX_BYTES as u64;
 
 /// The most images one package may name.
-const MAX_IMAGES: usize = 64;
+const MAX_IMAGES: usize = images::MAX_IMAGES;
 
 /// Every image the entries' schemas name, read from the package at `dir`: each relative path
 /// with the icon name it is drawn by. Paths that are not usable are left out.
+#[cfg(test)]
 pub(crate) fn load(dir: &Path, plugin_id: &str, entries: &[solidcraft_engine::plugin::Entry]) -> BTreeMap<String, String> {
+    load_with_groups(dir, plugin_id, entries, &[])
+}
+
+/// Load entry images and explicit ribbon group icons through the same package and SVG checks.
+pub(crate) fn load_with_groups(
+    dir: &Path,
+    plugin_id: &str,
+    entries: &[solidcraft_engine::plugin::Entry],
+    groups: &[solidcraft_engine::plugin::RibbonGroup],
+) -> BTreeMap<String, String> {
     let mut named = Vec::new();
+    named.extend(groups.iter().filter_map(|group| group.icon.clone()));
     for entry in entries {
         named.extend(referenced(&entry.input_schema));
     }
@@ -52,25 +64,75 @@ pub(crate) fn load(dir: &Path, plugin_id: &str, entries: &[solidcraft_engine::pl
     images
 }
 
-/// The image paths a schema names: at its top, and on its properties' `oneOf` options.
-pub(crate) fn referenced(schema: &Value) -> Vec<String> {
-    let mut out: Vec<String> = schema.get(KEY).and_then(Value::as_str).map(str::to_owned).into_iter().collect();
-    for property in schema.get("properties").and_then(Value::as_object).into_iter().flat_map(|p| p.values()) {
-        for option in property.get("oneOf").and_then(Value::as_array).into_iter().flatten() {
-            out.extend(option.get(KEY).and_then(Value::as_str).map(str::to_owned));
-        }
-    }
-    out
+/// Shared across the inventory and open dialogs. Files and decoding stay off the window thread.
+pub(crate) type Swatches = std::sync::Arc<std::sync::OnceLock<Artwork>>;
+
+/// The decoded package rasters, kept apart by the annotation that named them: a file accepted as
+/// a larger `x-solidcraft-image` picture may still have failed the swatch limits.
+#[derive(Debug, Default)]
+pub(crate) struct Artwork {
+    pub(crate) swatches: BTreeMap<String, Swatch>,
+    pub(crate) pictures: BTreeMap<String, Swatch>,
 }
 
-/// Whether `rel` is a path this host reads: forward slashes, plain names (letters, digits, `.`,
-/// `_`, `-`), no `.` or `..`, ending in `.svg`, at most 128 characters.
-pub(crate) fn valid_path(rel: &str) -> bool {
-    (5..=128).contains(&rel.len())
-        && rel.ends_with(".svg")
-        && rel.split('/').all(|part| {
-            !part.is_empty() && part != "." && part != ".." && part.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-'))
+#[derive(Debug)]
+pub(crate) struct Swatch {
+    image: egui::ColorImage,
+    key: egui::Id,
+}
+
+impl Swatch {
+    /// Upload once in each egui context. A content key prevents stale textures after a reload.
+    pub(crate) fn texture(&self, ctx: &egui::Context) -> egui::load::SizedTexture {
+        let cached = ctx.data(|data| data.get_temp::<egui::TextureHandle>(self.key));
+        let texture = match cached {
+            Some(texture) => texture,
+            None => {
+                let texture = ctx.load_texture("plugin swatch", self.image.clone(), egui::TextureOptions::LINEAR);
+                ctx.data_mut(|data| data.insert_temp(self.key, texture.clone()));
+                texture
+            }
+        };
+        egui::load::SizedTexture::new(texture.id(), texture.size_vec2())
+    }
+}
+
+pub(crate) fn read_swatches(dir: &Path, entries: &[solidcraft_engine::plugin::Entry]) -> Artwork {
+    let report = solidcraft_engine::plugin::swatches::check(entries, |rel| solidcraft_engine::plugin::swatches::read_artwork(dir, rel));
+    for warning in report.warnings {
+        log::warn!("plugin {}: {warning}", dir.display());
+    }
+    let texture = |(path, image): (String, solidcraft_engine::plugin::swatches::Swatch)| {
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        image.size.hash(&mut hash);
+        image.rgba.hash(&mut hash);
+        let key = egui::Id::unique(("plugin_swatch", hash.finish()));
+        (path, Swatch { image: egui::ColorImage::from_rgba_unmultiplied(image.size, &image.rgba), key })
+    };
+    Artwork { swatches: report.images.into_iter().map(texture).collect(), pictures: report.pictures.into_iter().map(texture).collect() }
+}
+
+pub(crate) fn load_swatches(dir: &Path, entries: &[solidcraft_engine::plugin::Entry]) -> Swatches {
+    let swatches = Swatches::default();
+    let referenced = entries.iter().any(|entry| {
+        entry.input_schema.get("properties").and_then(Value::as_object).into_iter().flat_map(|p| p.values()).any(|property| {
+            property.get("oneOf").and_then(Value::as_array).into_iter().flatten().any(|option| {
+                option.get(solidcraft_engine::plugin::swatches::KEY).is_some() || option.get(solidcraft_engine::plugin::swatches::IMAGE_KEY).is_some()
+            })
         })
+    });
+    if !referenced {
+        let _ = swatches.set(Artwork::default());
+        return swatches;
+    }
+    let (dir, entries, result) = (dir.to_path_buf(), entries.to_vec(), swatches.clone());
+    if let Err(error) = std::thread::Builder::new().name("plugin-swatches".into()).spawn(move || {
+        let _ = result.set(read_swatches(&dir, &entries));
+    }) {
+        log::warn!("could not load plugin swatches: {error}");
+        let _ = swatches.set(Artwork::default());
+    }
+    swatches
 }
 
 /// Read, check and add the image `rel` of the package at `dir`: the icon name it is drawn by.
@@ -92,22 +154,13 @@ fn read(dir: &Path, plugin_id: &str, rel: &str) -> Result<String, String> {
     if !meta.is_file() || meta.len() > MAX_BYTES {
         return Err(format!("not a file of at most {} KiB", MAX_BYTES / 1024));
     }
-    let src = std::fs::read_to_string(&path).map_err(|_| "not UTF-8 text".to_string())?;
-    if !square_view_box(&src) {
-        return Err("its <svg> needs viewBox=\"0 0 64 64\", as the app's icons have".into());
-    }
+    let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+    let src = images::source(&bytes)?;
     let mut hash = std::collections::hash_map::DefaultHasher::new();
     src.hash(&mut hash);
     let name = format!("plugin:{plugin_id}:{rel}:{:016x}", hash.finish());
-    solidcraft_ui_kit::icons::add(&name, &src)?;
+    solidcraft_ui_kit::icons::add(&name, src)?;
     Ok(name)
-}
-
-/// Whether the source's `<svg>` tag has the icons' 64 by 64 view box.
-fn square_view_box(src: &str) -> bool {
-    let Some(start) = src.find("<svg") else { return false };
-    let Some(tag) = src[start..].split('>').next() else { return false };
-    ["viewBox=\"0 0 64 64\"", "viewBox='0 0 64 64'"].iter().any(|v| tag.contains(v))
 }
 
 #[cfg(test)]

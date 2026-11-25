@@ -17,7 +17,11 @@ Put a hole in a solid body: a simple hole, a counterbore, a countersink or a tap
 | Reference 2 and Distance 2 | A second edge, and how far the hole center is from it. | The front edge, 0.75 in. |
 | Extents | How the depth is set. Distance drills to the Depth you type. | Use Distance for a blind hole. |
 | Hole Type | Simple is a straight hole. Counterbore and Countersink add a bore or a cone at the top. | Counterbore for a socket head cap screw. Countersink for a flat head screw: 82° for inch screws, 90° for metric. |
-| Hole Tap Type | Simple is a plain drilled hole with a Diameter you type. Tapped drills the tap drill size and shows the thread settings. | Choose Tapped for any tapped hole. |
+| Hole Tap Type | Simple is a plain drilled hole with a Diameter you type. Clearance sizes the hole for a metric bolt to pass through. Tapped drills the tap drill size and shows the thread settings. | Clearance for a bolt hole. Tapped for any tapped hole. |
+| Size (Clearance) | The bolt size, M1.6 to M64, from the ISO 273 clearance hole table. There are no inch sizes yet: for an inch bolt, use Simple and type the drill. | M6 for an M6 cap screw. |
+| Fit (Clearance) | Close, Normal or Loose: how much room the bolt gets in the hole. | Normal for most bolt holes. Close when the bolts also locate the part. Loose when the hole positions may not line up exactly. |
+| Clearance diameter (Clearance) | The hole size the table gives for that Size and Fit. Type another diameter to use your own drill. | M6 Normal fills in 6.6 mm. |
+| Screw head (Clearance with Counterbore) | Sizes the counterbore for a socket head (ISO 4762) or button head (ISO 7380-1) cap screw: the head's size plus 0.5 mm each side and below. The counterbore's diameter and depth fill in, and you can still change them. | Socket head for an M6 cap screw fills in an 11 mm counterbore 6.5 mm deep. |
 | Profile (Tapped) | The thread standard. | UNC for coarse inch threads, UNF for fine inch threads. |
 | Size (Tapped) | The thread size, from a list. The Designation box shows the callout. | 1/4-20 UNC. |
 | Tap drill diameter (Tapped) | The drill for the tapped hole. It fills in the standard tap drill for the size, the one on a tap drill chart (the app's messages call it "the tap maker's drill"), and you can type a different one. The app accepts drills from the smaller of the thread's minor diameter and the standard tap drill, up to 5% over the standard tap drill, and says the allowed range if you go outside it. For a custom metric size with no entry in the app's tap drill table, the app fills in major diameter minus pitch, the usual rule of thumb; check a tap drill chart. | 1/4-20 UNC fills in 0.201 in (a #7 drill); hover the box to see 5.105 mm. Typing 0.203 in (13/64) is accepted; 0.220 in is refused because too little thread would engage. |
@@ -40,15 +44,26 @@ Put a hole in a solid body: a simple hole, a counterbore, a countersink or a tap
 5. Set Hole Tap Type to Tapped, Profile to UNC and Size to 1/4-20 UNC. Check that Tap drill diameter shows 0.201 in.
 6. Turn off Full thread depth. Set Depth to 0.625 in and Thread depth to 0.50 in. Click OK.
 
+#### Try it: a counterbore for an M6 socket head cap screw
+
+1. On the block from the first example, click Hole, then click the top face.
+2. Click Reference 1, pick the right edge of the top face and set Distance 1 to 0.75 in. Click Reference 2, pick the front edge and set Distance 2 to 0.75 in.
+3. Set Hole Type to Counterbore and Hole Tap Type to Clearance.
+4. Set Size to M6 and Fit to Normal. Check that Clearance diameter shows 6.6 mm.
+5. Set Screw head to Socket head cap screw (ISO 4762). The counterbore fills in at 11 mm across and 6.5 mm deep.
+6. Set Extents to All and click OK. The hole goes through the block with the counterbore at the top.
+
 #### Tips and common mistakes
 
 - **Do** locate holes from edges the way the print dimensions them. When the part changes size, the holes keep their distances from those edges.
 - **Do** use Tapped and pick the size from the list instead of typing a drill diameter. The hole then carries the thread callout, and the tap drill comes from a standard tap drill chart.
 - **Do** check the Tap drill diameter before clicking OK. UNC and UNF sizes show it in inches; metric and pipe sizes show millimetres. If your shop runs a different drill, such as 0.203 in for 1/4-20 in steel, type it in. Hovering over the box shows the tap maker's drill in millimetres and the accepted range, not the drill you typed.
 - **Don't** turn on Modeled just to show the hole is tapped. The callout already says it.
+- **Do** use Clearance instead of looking up a bolt hole size. Pick the bolt and the fit, and the table gives the drill.
+- **Don't** expect Edit Feature to reopen a clearance hole as Clearance. The hole keeps its diameter, not the bolt size, so it opens as Simple with that diameter. The counterbore keeps its size.
 - **Do** turn off Full thread depth on blind tapped holes and set a Thread depth shorter than the drill Depth, so a standard tap doesn't bottom out.
 - **Do** type the unit with the number when the print is in another unit. In a millimetre design, typing 0.75 in enters 19.05 mm.
-- **Don't** expect every hole to work on sheet metal. Sheet metal holes must go straight into a flat panel; holes into the edge of the sheet, countersinks and drill points are refused there.
+- **Don't** expect every hole to work on sheet metal. Sheet metal holes must go straight into a flat panel (plain, counterbored, countersunk or tapped); drill points and countersinks across bends are refused there.
 
 #### See also
 

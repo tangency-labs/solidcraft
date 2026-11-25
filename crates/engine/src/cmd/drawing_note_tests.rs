@@ -4,6 +4,7 @@ use solidcraft_doc::drawing_view::{ViewDirection, ViewOverrides};
 use solidcraft_geom::drawing_view::NamedView;
 
 use super::*;
+use crate::drawing_scene::tests::in_the_model;
 use crate::schema::tests::conforms;
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
@@ -36,7 +37,16 @@ fn placed() -> (Session, u64, u64, [u64; 2]) {
     let (sheet, source) = (d.sheets[0].id, d.sources[0].id);
     let kind = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Front) };
     let settings = ViewOverrides { scale: Some("1:1".parse().unwrap()), ..ViewOverrides::default() };
-    d.add_views([Arc::new(View { id, sheet, kind, place: ViewPlace::At([200.0, 150.0]), settings, reference_shown_percent: 0.0, label: None })]);
+    d.add_views([Arc::new(View {
+        id,
+        sheet,
+        kind,
+        place: ViewPlace::At([200.0, 150.0]),
+        settings,
+        reference_shown_percent: 0.0,
+        centre_marks: None,
+        label: None,
+    })]);
     d.validate().unwrap();
     s.doc_mut().put_drawing(Arc::new(d));
     (s, sheet, id, [first, second])
@@ -54,6 +64,51 @@ fn on_edge(s: &mut Session, view: u64, occurrence: u64) -> Value {
 fn ends_at(reply: &Value, p: [f64; 3]) {
     let point: Vec<f64> = reply["point"].as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect();
     assert!(point.iter().zip(p).all(|(a, b)| (a - b).abs() < 1e-9), "{reply}");
+}
+
+/// A centred note's text is centred on its place, so one placed near the paper's edge can run past it: its
+/// reply warns, naming where its text spans, and one that fits says nothing. A note on a view is held
+/// to the paper where its view puts it.
+#[test]
+fn a_note_whose_text_runs_off_the_paper_is_warned_about() {
+    let (mut s, _, view, _) = placed();
+    let off_paper =
+        |reply: &Value| reply["warnings"].as_array().is_some_and(|w| w.iter().any(|w| w.as_str().unwrap_or("").contains("runs off the paper")));
+    let long = "ALL HOLES THROUGH. MATERIAL: AL 6061.";
+    let edge = run(&mut s, ADD, json!({"anchor": {"sheet": "Sheet 1"}, "at": [10, 40], "content": long, "align": "centre"}));
+    assert!(off_paper(&edge), "{edge}");
+    let note = edge["note"].as_str().unwrap().to_string();
+    assert!(off_paper(&run(&mut s, INSPECT, json!({"note": note}))), "inspect warns too");
+    let inside = run(&mut s, ADD, json!({"anchor": {"sheet": "Sheet 1"}, "at": [200, 40], "content": long, "align": "centre"}));
+    assert!(!off_paper(&inside), "{inside}");
+    // 200 mm left of a view at x = 200 is the paper's left edge.
+    let on_view = run(&mut s, ADD, json!({"anchor": {"view": ids::encode(view)}, "at": [-195, 0], "content": long, "align": "centre"}));
+    assert!(off_paper(&on_view), "{on_view}");
+    let centred = run(&mut s, ADD, json!({"anchor": {"view": ids::encode(view)}, "at": [0, -60], "content": long, "align": "centre"}));
+    assert!(!off_paper(&centred), "{centred}");
+}
+
+/// A note starting at its place runs off the paper's right edge from near it, and one ending there
+/// does not; the same place, and the text is the same width: the warning follows the alignment.
+#[test]
+fn a_note_is_held_to_the_paper_by_its_alignment() {
+    let (mut s, _, _, _) = placed();
+    let off_paper =
+        |reply: &Value| reply["warnings"].as_array().is_some_and(|w| w.iter().any(|w| w.as_str().unwrap_or("").contains("runs off the paper")));
+    let width = s.drawing("test").unwrap().sheets[0].sheet.size_mm().unwrap().x;
+    let long = "ALL HOLES THROUGH. MATERIAL: AL 6061.";
+    let at = json!([width - 10.0, 40]);
+    let sheet = json!({"sheet": "Sheet 1"});
+    let left = run(&mut s, ADD, json!({"anchor": sheet, "at": at, "content": long}));
+    assert!(off_paper(&left), "left, the default: {left}");
+    assert!(left["warnings"][0].as_str().unwrap().contains("starting at its place"), "{left}");
+    let right = run(&mut s, ADD, json!({"anchor": sheet, "at": at, "content": long, "align": "right"}));
+    assert!(!off_paper(&right), "{right}");
+    let near_left = json!([10, 40]);
+    let right = run(&mut s, ADD, json!({"anchor": sheet, "at": near_left, "content": long, "align": "right"}));
+    assert!(off_paper(&right) && right["warnings"][0].as_str().unwrap().contains("ending at its place"), "{right}");
+    let left = run(&mut s, ADD, json!({"anchor": sheet, "at": near_left, "content": long, "align": "left"}));
+    assert!(!off_paper(&left), "{left}");
 }
 
 /// Every anchor: a sheet by name, a view, an edge and a corner, each one undo step; a note that points
@@ -265,6 +320,8 @@ fn a_note_with_three_leaders_follows_the_model_and_loses_only_its_own() {
 /// The branches edit takes out by number as the list is now, then adds after those that stay, in one
 /// undo step, keeping the note's id; one that changes nothing makes no step. A wrong number, a
 /// repeat or a 17th leader is refused before anything is looked up, and the note is left as it was.
+/// A number past the end is named before a repeat, as a dimension set's targets edit names it, and
+/// a list longer than the note's is refused without being sorted.
 #[test]
 fn a_notes_branches_edit_keeps_its_id_in_one_step() {
     let (mut s, _, view, [bracket, _]) = placed();
@@ -287,6 +344,8 @@ fn a_notes_branches_edit_keeps_its_id_in_one_step() {
     let refusals = [
         (json!({"remove": [2]}), "`branches.remove` numbers this note's branches, 0 to 1"),
         (json!({"remove": [1, 1]}), "names each branch once"),
+        (json!({"remove": [1, 1, 5]}), "`branches.remove` numbers this note's branches, 0 to 1"),
+        (json!({"remove": vec![0; 100_000]}), "names each branch once"),
         (json!({"add": vec![json!({"corner": {"point": [1e8, 0, 0], "path": [bracket]}}); 14]}), "at most 16 leaders, its anchor's included"),
         (json!({"add": [{"corner": {"point": [1e8, 0, 0], "path": [bracket]}}]}), "corner"),
         (json!({"add": [{"face": [0, 0, 0]}]}), "face"),
@@ -359,24 +418,66 @@ fn a_notes_fields_read_its_sheet_and_inspect_tells_a_lost_one() {
         let reply = run(s, INSPECT, json!({"note": note}));
         (reply["text"].clone(), reply["fields"].clone())
     };
-    let on_model = |s: &mut Session, id: &str, p: Value| {
-        let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
-        run(s, "drawing.close", json!({}));
-        run(s, id, p);
-        run(s, "drawing.open", drawing);
-    };
     let sheet = shown("shown", Some("Sheet 1"), "sheet", "name");
     let organization = shown("empty", None, "drawing", "organization");
     let steel = json!([shown("shown", Some("Steel"), "component", "material"), sheet.clone(), organization.clone()]);
     assert_eq!(inspect(&mut s), (json!("Material: Steel (Sheet 1)"), steel));
-    on_model(&mut s, "material.assign", json!({"bodies": ["Block"], "material": "Aluminum"}));
+    in_the_model(&mut s, "material.assign", json!({"bodies": ["Block"], "material": "Aluminum"}));
     assert_eq!(inspect(&mut s).0, json!("Material: Aluminum (Sheet 1)"));
-    on_model(&mut s, "component.delete", json!({"component": component}));
+    in_the_model(&mut s, "component.delete", json!({"component": component}));
     let lost = json!([shown("lost", None, "component", "material"), sheet, organization]);
     assert_eq!(inspect(&mut s), (json!("Material:  (Sheet 1)"), lost));
     // A note on plain text reads no field.
     let plain = run(&mut s, ADD, json!({"anchor": {"sheet": "Sheet 1"}, "at": [20, 40], "content": "Deburr"}));
     assert_eq!((&plain["text"], plain.get("fields")), (&json!("Deburr"), None), "{plain}");
+}
+
+/// A note on a drawing of a sheet metal part reads the part's sheet metal fields, and follows the
+/// rule's thickness and K-factor when they change. The part is oracle 71's: rule `Custom`, 1.5 mm
+/// (the parameter `Thick`), K-factor 0.33, radius 3 mm, an 80 x 50 base flanged 20 mm on both long
+/// edges. Its flat is 80 wide and 50 − 2·(1.5 + 3) + 2·(π/2)(3 + 0.33·1.5) + 2·15.5 = 82.980 long;
+/// at 2 mm, 50 − 10 + π(3 + 0.66) + 30 = 81.498; and with K 0.5, 70 + π(3 + 1) = 82.566.
+#[test]
+fn a_notes_sheet_metal_fields_follow_the_rule() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.change", json!({"name": "Thick", "expression": "1.5 mm"}));
+    run(&mut s, "sheet.manage_rules", json!({"name": "Custom", "thickness": "Thick", "k_factor": 0.33, "bend_radius": "3 mm", "active": true}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [80, 50]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base"}));
+    run(&mut s, "sheet.flange", json!({"edges": [[40, 50, 1.5], [40, 0, 1.5]], "height": 20}));
+    run(&mut s, "drawing.create", json!({}));
+    let source = ids::encode(s.drawing("test").unwrap().sources[0].id);
+    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "documents": {"source": source}}));
+    let field = |key: &str| json!({"field": {"source": "component", "key": key}});
+    let content = json!([
+        {"text": "T "}, field("thickness"), {"text": " "}, field("sheet_rule"), {"text": " K "}, field("k_factor"),
+        {"text": " R "}, field("bend_radius"), {"text": " FLAT "}, field("flat_length"), {"text": " x "}, field("flat_width"),
+    ]);
+    let note = run(&mut s, ADD, json!({"anchor": {"sheet": "Sheet 1"}, "at": [20, 20], "content": content}))["note"].clone();
+    let text = |s: &mut Session| run(s, INSPECT, json!({"note": note}))["text"].clone();
+    assert_eq!(text(&mut s), json!("T 1.50 mm Custom K 0.33 R 3.00 mm FLAT 82.98 mm x 80.00 mm"));
+    in_the_model(&mut s, "parameters.change", json!({"name": "Thick", "expression": "2 mm"}));
+    assert_eq!(text(&mut s), json!("T 2.00 mm Custom K 0.33 R 3.00 mm FLAT 81.50 mm x 80.00 mm"));
+    in_the_model(&mut s, "sheet.manage_rules", json!({"name": "Custom", "k_factor": 0.5}));
+    assert_eq!(text(&mut s), json!("T 2.00 mm Custom K 0.5 R 3.00 mm FLAT 82.57 mm x 80.00 mm"));
+    let fields = run(&mut s, INSPECT, json!({"note": note}))["fields"].clone();
+    assert_eq!(fields[0], json!({"source": "component", "key": "thickness", "state": "shown", "value": "2.00 mm"}), "{fields}");
+}
+
+/// A note's sheet metal field on a part that isn't sheet metal reads empty, never a number: the
+/// box's drawing shows nothing for its thickness, and inspect says the field is empty.
+#[test]
+fn a_sheet_metal_field_on_a_part_without_a_sheet_reads_empty() {
+    let (mut s, _, view, _) = placed();
+    let content = json!([{"text": "T "}, {"field": {"source": "component", "key": "thickness"}}]);
+    let source = ids::encode(s.drawing("test").unwrap().sources[0].id);
+    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "documents": {"source": source}}));
+    let note = run(&mut s, ADD, json!({"anchor": {"view": ids::encode(view)}, "at": [0, -30], "content": content}))["note"].clone();
+    let reply = run(&mut s, INSPECT, json!({"note": note}));
+    assert_eq!(reply["text"], json!("T "), "{reply}");
+    assert_eq!(reply["fields"], json!([{"source": "component", "key": "thickness", "state": "empty"}]), "{reply}");
 }
 
 /// A field its source doesn't have is refused when a note is added or edited, and the note is left
@@ -490,4 +591,33 @@ fn a_note_on_an_exploded_view_ends_where_the_view_draws_its_edge() {
     let added = run(&mut s, ADD, json!({"anchor": {"edge": {"view": v, "edge": edge}}, "at": [60, 40], "content": "Deburr"}));
     leader_ends_near(&added, [140.0, 0.0, 50.0]);
     leader_ends_near(&run(&mut s, INSPECT, json!({"note": added["note"]})), [140.0, 0.0, 50.0]);
+}
+
+/// A new note starts at its place: left unless it says otherwise, kept in its record, and an edit sets
+/// it in one undo step, none when it is as it was. Centre is spelt either way and saved as `centre`.
+#[test]
+fn a_new_note_is_left_aligned_and_an_edit_sets_it() {
+    let (mut s, _, _, _) = placed();
+    let anchor = json!({"sheet": "Sheet 1"});
+    let plain = run(&mut s, ADD, json!({"anchor": anchor, "at": [15, 60], "content": "2 x 8.5mm Holes - Smooth Bore"}));
+    assert_eq!((&plain["align"], &plain["record"]["align"]), (&json!("left"), &json!("left")), "{plain}");
+    let right = run(&mut s, ADD, json!({"anchor": anchor, "at": [15, 60], "content": "x", "align": "right"}));
+    assert_eq!(right["align"], json!("right"));
+    let centred = run(&mut s, ADD, json!({"anchor": anchor, "at": [15, 60], "content": "x", "align": "center"}));
+    assert_eq!((&centred["align"], &centred["record"]["align"]), (&json!("centre"), &json!("centre")), "{centred}");
+    let id = plain["note"].clone();
+    let steps = |s: &Session| s.drawing("test").unwrap().notes.len();
+    assert_eq!(steps(&s), 3);
+    let reply = run(&mut s, EDIT, json!({"note": id, "set": {"align": "right"}}));
+    assert_eq!(reply["changed"], json!(["align"]));
+    assert_eq!(run(&mut s, INSPECT, json!({"note": id}))["align"], json!("right"));
+    let before = saved(&s);
+    assert_eq!(run(&mut s, EDIT, json!({"note": id, "set": {"align": "right"}}))["changed"], json!([]));
+    assert_eq!(saved(&s), before, "no change, no step");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(run(&mut s, INSPECT, json!({"note": id}))["align"], json!("left"));
+    for bad in [json!("middle"), json!(1), json!(["left"])] {
+        refused(&mut s, EDIT, json!({"note": id, "set": {"align": bad}}));
+        refused(&mut s, ADD, json!({"anchor": anchor, "at": [0, 0], "content": "x", "align": bad}));
+    }
 }

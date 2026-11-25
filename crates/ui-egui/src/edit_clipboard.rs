@@ -2,8 +2,11 @@
 //! menu (#1480).
 //!
 //! In a sketch they copy the selected sketch geometry (`sketch.copy`) and paste it at the cursor
-//! (`sketch.paste` with `at`); Cut copies the sketch geometry and deletes it (`sketch.cut`), or offset from the original when the cursor is not over the
-//! viewport. Outside a sketch they copy the selected timeline features and paste them at the
+//! (`sketch.paste` with `at`), or offset from the original when the cursor is not over the
+//! viewport; Cut copies the sketch geometry and deletes it (`sketch.cut`). Ctrl+V into another
+//! sketch or design pastes at the copied sketch coordinates instead, where the cursor means
+//! nothing; a menu's Paste still goes to the point the menu was opened, and Paste in Place
+//! (Ctrl+Shift+V) always pastes at the copied coordinates (#21646). Outside a sketch they copy the selected timeline features and paste them at the
 //! history marker (`timeline.copy` / `timeline.paste`), the selected bodies and paste copies of
 //! them into the active component, where the bodies are (`component.copy_bodies`), or the
 //! selected components and paste new instances of them there (`occurrence.copy`), or with
@@ -15,10 +18,11 @@
 //!
 //! Copied bodies paste into another design (tab) too, as imported bodies without their history,
 //! and copied components as independent copies with their history (Paste and Paste New alike),
-//! where they were in the world (`component.paste_from_design`); completed sketches paste as
+//! where they were in the world (`component.paste_from_design`; components at the target's
+//! origin with the `paste_components_at_origin` preference, #17621); completed sketches paste as
 //! independent features with their parameters (`timeline.paste`); cut ones paste there as copies,
 //! the originals staying. Sketch geometry copied or cut in a sketch pastes into a sketch of
-//! another design (`sketch.paste`), at the cursor or at the copied coordinates, with the
+//! another design (`sketch.paste`), at the copied coordinates or a menu's point, with the
 //! constraints and dimensions among it; a dimension that named the copied design's parameters
 //! keeps its value instead (#9258). The last copy or cut in any design is what pastes: a design's own
 //! clipboard empties when another design copied after it.
@@ -77,9 +81,9 @@ fn placement_selection(app: &SolveApp) -> Vec<Vec<u64>> {
     app.session.selection.iter().filter_map(|s| if let Sel::Occurrence { path } = s { Some(path.clone()) } else { None }).collect()
 }
 
-/// The selected bodies.
+/// The selected bodies (every shown one after Select All).
 fn body_selection(app: &SolveApp) -> Vec<String> {
-    app.session.selection.iter().filter_map(|s| if let Sel::Body { name } = s { Some(name.clone()) } else { None }).collect()
+    app.session.selected_items().unwrap_or_default().into_iter().filter_map(|s| if let Sel::Body { name } = s { Some(name) } else { None }).collect()
 }
 
 /// Does Copy copy the whole design (its row picked in the browser)? Features, bodies or
@@ -497,8 +501,49 @@ fn sketch_point(app: &SolveApp, at: Option<Pos2>) -> Option<[f64; 2]> {
     Some([p.x, p.y])
 }
 
-/// Paste: in a sketch, the copied sketch geometry centred at `at` (or offset from the original
-/// when `at` is not over the sketch); otherwise the copied features at the history marker, or
+/// How a paste in a sketch places the copied geometry (#21646).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SketchPaste {
+    /// Ctrl+V: centred at the pointer in the sketch it was copied from; at the copied sketch
+    /// coordinates in another sketch or design, where the pointer has nothing to do with it.
+    Key,
+    /// A menu's Paste: centred at the point the menu was opened, in any sketch.
+    Menu,
+    /// Paste in Place (Ctrl+Shift+V or the menu): at the copied sketch coordinates, in the
+    /// sketch it was copied from too.
+    InPlace,
+}
+
+/// Paste the copied sketch geometry into the active sketch, placed as `how` says (`at`: the
+/// pointer or the menu's point on screen). Without a point over the sketch, a paste into the
+/// sketch it was copied from lands offset from the original.
+pub fn paste_sketch(app: &mut SolveApp, at: Option<Pos2>, how: SketchPaste) -> bool {
+    let Some(active) = app.session.active_sketch else { return false };
+    // Another design copied sketch geometry last: it pastes here at the same sketch
+    // coordinates, its dimensions keeping their values rather than that design's parameters.
+    if let Some(clip) = foreign_sketch(app).map(|c| c.for_another_design()) {
+        app.session.sketch_clipboard = Some(clip);
+    }
+    let Some(clip) = app.session.sketch_clipboard.as_ref() else {
+        app.set_status("Nothing to paste: copy sketch geometry first", true);
+        return false;
+    };
+    // `sketch` is cleared by a cut; `source_sketch` stays.
+    let same_sketch = clip.sketch == active || clip.source_sketch == Some(active);
+    let in_place = how == SketchPaste::InPlace || (how == SketchPaste::Key && !same_sketch);
+    let params = match (in_place, sketch_point(app, at)) {
+        (true, _) => json!({ "translate": [0.0, 0.0] }),
+        (false, Some(p)) => json!({ "at": p }),
+        (false, None) => json!({}),
+    };
+    let Ok(out) = app.run("sketch.paste", params) else { return false };
+    let n = out.get("curves").and_then(Value::as_array).map_or(0, Vec::len) + out.get("points").and_then(Value::as_array).map_or(0, Vec::len);
+    app.set_status(format!("Pasted {n} sketch entities (selected: drag them, or press M to move them)"), false);
+    true
+}
+
+/// Paste: in a sketch, the copied sketch geometry as a menu's Paste places it
+/// ([`SketchPaste::Menu`]); otherwise the copied features at the history marker, or
 /// the copied bodies or components into the active component (components as new instances, or
 /// with `new_copy` as independent copies).
 pub fn paste(app: &mut SolveApp, at: Option<Pos2>) -> bool {
@@ -518,35 +563,24 @@ pub fn paste_into(app: &mut SolveApp, at: Option<Pos2>, new_copy: bool, into: Op
         (active, app.session.active_occurrence_path.clone().unwrap_or_else(|| app.session.doc.first_path(active)))
     });
     if app.session.active_sketch.is_some() {
-        // Another design copied sketch geometry last: it pastes here at the same sketch
-        // coordinates, its dimensions keeping their values rather than that design's parameters.
-        if let Some(clip) = foreign_sketch(app).map(|c| c.for_another_design()) {
-            app.session.sketch_clipboard = Some(clip);
-        }
-        if app.session.sketch_clipboard.is_none() {
-            app.set_status("Nothing to paste: copy sketch geometry first", true);
-            return false;
-        }
-        let params = match sketch_point(app, at) {
-            Some(p) => json!({ "at": p }),
-            None => json!({}),
-        };
-        let Ok(out) = app.run("sketch.paste", params) else { return false };
-        let n = out.get("curves").and_then(Value::as_array).map_or(0, Vec::len) + out.get("points").and_then(Value::as_array).map_or(0, Vec::len);
-        app.set_status(format!("Pasted {n} sketch entities (selected: drag them, or press M to move them)"), false);
-        return true;
+        // A menu's Paste: at the point the menu was opened; its Paste in Place where it was.
+        return paste_sketch(app, at, if new_copy { SketchPaste::InPlace } else { SketchPaste::Menu });
     }
     if design_copied_here(app) {
         app.set_status("A design can't be pasted into itself: paste it as a linked component in another design", true);
         return false;
     }
     if let Some(path) = app.linked_design_clipboard.clone() {
-        let (parent_path, translate) = paste_placement(app, at);
+        // At the target component's origin when asked, not at the pointer (#17621).
+        let at_origin = app.preferences.paste_components_at_origin;
+        let (parent_path, translate) = if at_origin { (into.1.clone(), [0.0; 3]) } else { paste_placement(app, at) };
+        let mut params = json!({"path": path, "reuse": true, "translate": translate});
+        if at_origin {
+            params["parent"] = json!(into.0);
+        }
         // The copied design is one the user opened: its server is the user's choice.
         let hosts: Vec<String> = solidcraft_engine::io::vfs::network_host(&path).into_iter().collect();
-        let pasted = solidcraft_engine::io::vfs::allowing_hosts(&hosts, || {
-            app.run("component.insert_design", json!({"path": path, "reuse": true, "translate":translate}))
-        });
+        let pasted = solidcraft_engine::io::vfs::allowing_hosts(&hosts, || app.run("component.insert_design", params));
         let Ok(out) = pasted else { return false };
         // Move/Copy opens on it, to place it.
         if let Some(id) = out.get("occurrence").and_then(Value::as_u64) {
@@ -621,15 +655,20 @@ fn paste_placement(app: &SolveApp, at: Option<Pos2>) -> (Vec<u64>, [f64; 3]) {
 }
 
 /// The bodies another design copied or cut, into `into` (a component, placed by its placement)
-/// as imported bodies, or its components as independent copies, where they were in the world;
-/// they are selected.
+/// as imported bodies where they were in the world, or its components as independent copies,
+/// where they were in the world or, with `paste_components_at_origin`, at that component's
+/// origin; they are selected.
 fn paste_from_design(app: &mut SolveApp, copy: std::sync::Arc<solidcraft_engine::ForeignCopy>, (component, path): (u64, Vec<u64>)) -> bool {
     if !copy.features.is_empty() {
         return paste_features(app, component, path).is_ok();
     }
     let design = copy.design.clone();
     app.session.foreign_copy = Some(copy);
-    let Ok(out) = app.run("component.paste_from_design", json!({ "component": component, "component_path": path })) else { return false };
+    // Components go to the target's origin, or where they were in the world (#17621).
+    let placement = if app.preferences.paste_components_at_origin { "origin" } else { "world" };
+    let Ok(out) = app.run("component.paste_from_design", json!({ "component": component, "component_path": path, "placement": placement })) else {
+        return false;
+    };
     if let Some(paths) = out.get("paths").and_then(Value::as_array) {
         // Pasted components arrive folded.
         for path in paths {
@@ -775,7 +814,11 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context) {
         cut(app);
     }
     if pastes > 0 {
-        paste_as(app, pointer, shift);
+        if app.session.active_sketch.is_some() {
+            paste_sketch(app, pointer, if shift { SketchPaste::InPlace } else { SketchPaste::Key });
+        } else {
+            paste_as(app, pointer, shift);
+        }
     }
     flush(app, ctx);
 }
