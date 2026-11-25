@@ -192,7 +192,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&EXPORT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::file::FileExportResult>)
-        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|glb|usd|3dm|urdf|sdf|json, or plugin_id.entry for an installed exporter plugin (plugin.list exporters), which writes the whole design with options?: the slot's declared options (default from extension; an extension SolidCraft doesn't write goes to the exporter plugin that claims it; sdf: a Gazebo model folder, as file.export_sdf (the path is the folder, a `.sdf` ending dropped; name?, static?, model_uris?, quality?); docs/sdf.md; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; glb: binary glTF in metres with Y up, each body placed and named, its colours, metallic, roughness and opacity as materials (a look that is not opaque is alpha blended), and the Glass a render setup gives a body as glTF transmission; Glass with subsurface scattering, Glass two setups give a body differently, or a body a render setup gives an image texture, is refused; urdf: the whole assembly as a robot, with STL meshes written next to it, or where mesh_prefix points with place_meshes; docs/urdf.md; 3dm: Rhino 8, written by cadmpeg: each body where the design shows it (no components), named and in its colour, as its exact shape when every face is planar and every edge straight, else as its mesh, with warnings for what the file leaves out; fcstd is refused, as cadmpeg cannot write a new FreeCAD file yet); bodies?: [names] (JSON and URDF export the complete design); writer?: solidcraft|cadmpeg (STEP and IGES only, refused for the other formats; default solidcraft: SolidCraft's own writers; cadmpeg: written from the design by cadmpeg, STEP AP242 with the components and colours but no solid names, IGES 5.3 with each body where the design shows it, named and coloured; warnings say what the file leaves out); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), place_meshes? (default false: the meshes next to the .urdf whatever mesh_prefix says; true: written where mesh_prefix points, its folder made), effort? (default 1000), velocity? (default 10), mimic? (default false; true: motion links as <mimic>), images?: bool (URDF and OpenUSD, default false, true for OpenUSD with purpose: distribution; true: each shown canvas and decal is written as a textured quad, its image next to the URDF or, for OpenUSD, in the .usdz package, a .usda or .usdc file leaving them out with a warning; an OpenUSD export of chosen bodies writes none, with a warning); quality?: standard|fine|finest (STL, OBJ, 3MF, GLB, OpenUSD and Rhino: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); lay_on_print_faces?: bool (STL and 3MF only, default false: each body with a print face (body.print_face) is written laid on it, as a slicer export lays it → print_faces: the bodies laid, warnings: each body that has a print face but was written as it lies); solids?: body|face (ASCII STL, format stla only, default body: face writes one `solid <name>` block per B-rep face, named by the face's persistent name, for CFD meshers; docs/formats/stl-face-solids.md); physics?: bool (OpenUSD only, default false: true also writes the joints, gears and racks as PhysX couplings of their joints, the grounded placements, each placement as a rigid body and each component's mass as OpenUSD physics, for a simulator, for the whole design with its components only, else none with a warning; a jointed placement moved without capturing the move is written where its joints place it, with a warning); render_setup?: name (OpenUSD only, default none: the saved render setup whose image textures (base colour, roughness, metallic, and a normal map the file can show as the renderer does) a .usdz package holds on each body's mesh; a .usda or .usdc file is written without them, with a warning; and the optics it gives bodies, written as glass in every encoding: the index of refraction, and full transmission on the MaterialX OpenPBR shader); purpose?: interchange|distribution (OpenUSD only, default interchange: each body's exact shape beside its mesh, for another CAD program; distribution: meshes only, with the pictures shown on the model, for a viewer or a game engine); exact_brep?: bool (OpenUSD only, default true for interchange, false for distribution: each body's exact shape beside its mesh); a given images or exact_brep overrides the purpose's default"),
+        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|glb|usd|3dm|urdf|sdf|json, or plugin_id.entry for an installed exporter plugin (plugin.list exporters), which writes the whole design with options?: the slot's declared options (default from extension; an extension SolidCraft doesn't write goes to the exporter plugin that claims it; sdf: a Gazebo model folder, as file.export_sdf (the path is the folder, a `.sdf` ending dropped; name?, static?, model_uris?, quality?); docs/sdf.md; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; glb: binary glTF in metres with Y up, each body placed and named, its colours, metallic, roughness and opacity as materials (a look that is not opaque is alpha blended), and the Glass a render setup gives a body as glTF transmission; Glass with subsurface scattering, Glass two setups give a body differently, or a body a render setup gives an image texture, is refused; urdf: the whole assembly as a robot, with STL meshes written next to it, or where mesh_prefix points with place_meshes; docs/urdf.md; 3dm: Rhino 8, written by cadmpeg: each body where the design shows it (no components), named and in its colour, as its exact shape when every face is planar and every edge straight, else as its mesh, with warnings for what the file leaves out; fcstd is refused, as cadmpeg cannot write a new FreeCAD file yet); bodies?: [names] (JSON and URDF export the complete design); writer?: solidcraft|cadmpeg (STEP and IGES only, refused for the other formats; default solidcraft: SolidCraft's own writers; cadmpeg: written from the design by cadmpeg, STEP AP242 with the components and colours but no solid names, IGES 5.3 with each body where the design shows it, named and coloured; warnings say what the file leaves out); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), place_meshes? (default false: the meshes next to the .urdf whatever mesh_prefix says; true: written where mesh_prefix points, its folder made), effort? (default 1000), velocity? (default 10), mimic? (default false; true: motion links as <mimic>), images?: bool (URDF and OpenUSD, default false, true for OpenUSD with purpose: distribution; true: each shown canvas and decal is written as a textured quad, its image next to the URDF or, for OpenUSD, in the .usdz package, a .usda or .usdc file leaving them out with a warning; an OpenUSD export of chosen bodies writes none, with a warning); quality?: standard|fine|finest (STL, OBJ, 3MF, GLB, OpenUSD, Rhino, URDF and SDF: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); chord?: mm, 0.001 to 1000 (instead of quality, for the same formats: one chord tolerance for every body; coarser gives fewer triangles); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); lay_on_print_faces?: bool (STL and 3MF only, default false: each body with a print face (body.print_face) is written laid on it, as a slicer export lays it → print_faces: the bodies laid, warnings: each body that has a print face but was written as it lies); solids?: body|face (ASCII STL, format stla only, default body: face writes one `solid <name>` block per B-rep face, named by the face's persistent name, for CFD meshers; docs/formats/stl-face-solids.md); physics?: bool (OpenUSD only, default false: true also writes the joints, gears and racks as PhysX couplings of their joints, the grounded placements, each placement as a rigid body and each component's mass as OpenUSD physics, for a simulator, for the whole design with its components only, else none with a warning; a jointed placement moved without capturing the move is written where its joints place it, with a warning); render_setup?: name (OpenUSD only, default none: the saved render setup whose image textures (base colour, roughness, metallic, and a normal map the file can show as the renderer does) a .usdz package holds on each body's mesh; a .usda or .usdc file is written without them, with a warning; and the optics it gives bodies, written as glass in every encoding: the index of refraction, and full transmission on the MaterialX OpenPBR shader); purpose?: interchange|distribution (OpenUSD only, default interchange: each body's exact shape beside its mesh, for another CAD program; distribution: meshes only, with the pictures shown on the model, for a viewer or a game engine); exact_brep?: bool (OpenUSD only, default true for interchange, false for distribution: each body's exact shape beside its mesh); a given images or exact_brep overrides the purpose's default"),
     // One command per format, so each File › Export item can have a key of its own; started
     // from a key or command search, the app opens the save picker (the mesh dialog for STL and
     // 3MF). Each takes `file.export`'s parameters for its format, without `format`.
@@ -211,6 +211,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "path; ",
             "bodies?: [names] (default: every body); ",
             "quality?: standard|fine|finest (default standard); ",
+            "chord?: mm, 0.001 to 1000 (instead of quality: the farthest a facet may stand off a curved face, the same for every body; coarser gives fewer triangles); ",
             "lay_on_print_faces?: bool (default false: as file.export); ",
             "ascii?: bool (default false: true writes ASCII STL); ",
             "solids?: body|face (default body; face, with ascii: true only: one named solid per B-rep face, as file.export) → {path, bytes, format, print_faces?, skipped?, warnings?}: STL (binary unless ascii), whatever the path's extension",
@@ -224,6 +225,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "path; ",
             "bodies?: [names] (default: every body); ",
             "quality?: standard|fine|finest (default standard); ",
+            "chord?: mm, 0.001 to 1000 (instead of quality: the farthest a facet may stand off a curved face, the same for every body; coarser gives fewer triangles); ",
             "objects?: body|component (as file.export); ",
             "lay_on_print_faces?: bool (default false: as file.export) → {path, bytes, format, print_faces?, skipped?, warnings?}: 3MF, whatever the path's extension",
         )),
@@ -235,7 +237,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(concat!(
             "path; ",
             "bodies?: [names] (default: every body); ",
-            "quality?: standard|fine|finest (default standard) → {path, bytes, format, files, skipped?, warnings?}: OBJ, with the colours of the bodies in a material library (`.mtl`) next to it",
+            "quality?: standard|fine|finest (default standard); ",
+            "chord?: mm, 0.001 to 1000 (instead of quality: the farthest a facet may stand off a curved face, the same for every body; coarser gives fewer triangles); → {path, bytes, format, files, skipped?, warnings?}: OBJ, with the colours of the bodies in a material library (`.mtl`) next to it",
         )),
     CommandSpec::new("file.export_urdf", "Export URDF", crate::checked!("file.export_urdf", export_urdf_cmd))
         .icon("export")
@@ -246,7 +249,10 @@ pub static COMMANDS: &[CommandSpec] = &[
             "path; ",
             "mesh_prefix? (before each mesh file name); place_meshes? (default false: the meshes next to the .urdf; true: where mesh_prefix points, its folder made); ",
             "effort? (default 1000), ",
-            "velocity? (default 10): for joints with none saved; mimic? (default false; true: motion links as <mimic>); images?: bool (default false) → {path, format, files, links, joints, warnings}: the whole assembly as a robot, with STL meshes written next to it, or where mesh_prefix points with place_meshes; ",
+            "velocity? (default 10): for joints with none saved; ",
+            "quality?: standard|fine|finest (default standard: the link meshes, as file.export_stl); ",
+            "chord?: mm, 0.001 to 1000 (instead of quality: the farthest a facet may stand off a curved face, the same for every body; coarser gives fewer triangles); ",
+            "mimic? (default false; true: motion links as <mimic>); images?: bool (default false) → {path, format, files, links, joints, warnings}: the whole assembly as a robot, with STL meshes written next to it, or where mesh_prefix points with place_meshes; ",
             "docs/urdf.md",
         )),
     CommandSpec::new("file.export_urdf_options", "Export URDF with Options", crate::checked!("file.export_urdf_options", export_urdf_options_cmd))
@@ -258,7 +264,10 @@ pub static COMMANDS: &[CommandSpec] = &[
             "path; ",
             "mesh_prefix? (before each mesh file name); place_meshes? (default false: the meshes next to the .urdf; true: where mesh_prefix points, its folder made); ",
             "effort? (default 1000), ",
-            "velocity? (default 10): for joints with none saved; mimic? (default false; true: motion links as <mimic>); images?: bool (default false) → {path, format, files, links, joints, warnings}: the whole assembly as a robot, with STL meshes written next to it, or where mesh_prefix points with place_meshes; ",
+            "velocity? (default 10): for joints with none saved; ",
+            "quality?: standard|fine|finest (default standard: the link meshes, as file.export_stl); ",
+            "chord?: mm, 0.001 to 1000 (instead of quality: the farthest a facet may stand off a curved face, the same for every body; coarser gives fewer triangles); ",
+            "mimic? (default false; true: motion links as <mimic>); images?: bool (default false) → {path, format, files, links, joints, warnings}: the whole assembly as a robot, with STL meshes written next to it, or where mesh_prefix points with place_meshes; ",
             "called from a script or MCP it exports as file.export_urdf does; in the app it opens the export's options (mesh prefix, limits, mimic, where the meshes go) first; docs/urdf.md",
         )),
     CommandSpec::new("file.export_sdf", "Export SDF Model", crate::checked!("file.export_sdf", export_sdf_cmd))
@@ -272,7 +281,8 @@ pub static COMMANDS: &[CommandSpec] = &[
             "static?: bool (default true; false gives the link the bodies' mass and inertia); ",
             "model_uris?: bool (default false: files named relative to model.sdf; true: model://<name>/<file>); ",
             "bodies?: [names] (default: every body); ",
-            "quality?: standard|fine|finest → {path, format, name, files, bodies, decals, warnings}: a Gazebo model folder with model.config, model.sdf, an STL per body and each shown decal's image on a textured COLLADA quad, the image also the visual's PBR albedo map; ",
+            "quality?: standard|fine|finest; ",
+            "chord?: mm, 0.001 to 1000 (instead of quality: the farthest a facet may stand off a curved face, the same for every body; coarser gives fewer triangles); → {path, format, name, files, bodies, decals, warnings}: a Gazebo model folder with model.config, model.sdf, an STL per body and each shown decal's image on a textured COLLADA quad, the image also the visual's PBR albedo map; ",
             "docs/sdf.md",
         )),
     CommandSpec::new("file.save_mesh", "Save As Mesh", crate::checked!("file.save_mesh", save_mesh))
@@ -2817,11 +2827,20 @@ fn save_as(s: &mut Session, p: &Value) -> Result<Value> {
     )
 }
 
-/// A mesh export's `quality`: standard (as every export was) unless asked for (#4747).
+/// A mesh export's `quality`: standard (as every export was) unless asked for (#4747), or one
+/// chord tolerance in mm for every body when `chord` is given (#20393). Both given are refused.
 fn mesh_quality(p: &Value, cmd: &str) -> Result<solidcraft_io::MeshQuality> {
-    match p.get("quality") {
-        None | Some(Value::Null) => Ok(solidcraft_io::MeshQuality::default()),
-        Some(v) => v
+    let chord = match p.get("chord") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(v.as_f64().and_then(solidcraft_io::MeshQuality::from_chord).ok_or_else(|| {
+            bad(cmd, format!("`chord` must be a number of mm from {} to {}, not {v}", solidcraft_io::MIN_CHORD, solidcraft_io::MAX_CHORD))
+        })?),
+    };
+    match (p.get("quality"), chord) {
+        (None | Some(Value::Null), Some(chord)) => Ok(chord),
+        (None | Some(Value::Null), None) => Ok(solidcraft_io::MeshQuality::default()),
+        (Some(_), Some(_)) => Err(bad(cmd, "give `quality` or `chord`, not both: `chord` sets the tolerance `quality` would")),
+        (Some(v), None) => v
             .as_str()
             .and_then(solidcraft_io::MeshQuality::from_name)
             .ok_or_else(|| bad(cmd, format!("`quality` must be standard, fine or finest, not {v}"))),
@@ -3688,6 +3707,7 @@ fn export_urdf(s: &Session, cmd: &str, path: &str, p: &Value) -> Result<Value> {
         velocity: positive("velocity")?,
         mimic: flag("mimic", false)?,
         decals: Vec::new(),
+        quality: mesh_quality(p, cmd)?,
     };
     // The pictures shown on the model are written only when asked for, so an export made the
     // usual way writes what it always has.

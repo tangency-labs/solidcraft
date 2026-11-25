@@ -944,14 +944,24 @@ impl Format {
 
 /// How closely an exported mesh follows curved faces: its chord tolerance as a share of each
 /// body's size. Standard is what every mesh export used; Fine and Finest give the small round
-/// features of a large part more sides (#4747).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// features of a large part more sides (#4747). `Chord` gives every body one chord tolerance in
+/// mm, so small parts are not meshed finer than the reader needs (a simulator's limit on
+/// triangles per file, #20393).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum MeshQuality {
     #[default]
     Standard,
     Fine,
     Finest,
+    /// The chord tolerance in mm, whatever the body's size; [`MeshQuality::from_chord`] checks it.
+    Chord(f64),
 }
+
+/// The finest chord tolerance [`MeshQuality::Chord`] takes (mm): the floor the shares have too.
+pub const MIN_CHORD: f64 = 1e-3;
+/// The coarsest chord tolerance [`MeshQuality::Chord`] takes (mm): a metre, far past any facet
+/// a reader would want, and a bound a hostile value cannot pass.
+pub const MAX_CHORD: f64 = 1e3;
 
 impl MeshQuality {
     /// By the name commands take: `standard`, `fine` or `finest`.
@@ -964,19 +974,23 @@ impl MeshQuality {
         }
     }
 
-    /// The chord tolerance as a share of the body's size.
-    fn share(self) -> f64 {
-        match self {
-            Self::Standard => 2e-4,
-            Self::Fine => 5e-5,
-            Self::Finest => 1e-5,
-        }
+    /// A chord tolerance of `mm` for every body: `None` unless it is a number from
+    /// [`MIN_CHORD`] to [`MAX_CHORD`].
+    pub fn from_chord(mm: f64) -> Option<Self> {
+        (MIN_CHORD..=MAX_CHORD).contains(&mm).then_some(Self::Chord(mm))
     }
 
-    /// The chord tolerance for a body of size `size` (its box diagonal): [`MeshQuality::share`]
-    /// of it, never finer than 1 µm.
+    /// The chord tolerance for a body of size `size` (its box diagonal): a share of it (2e-4,
+    /// 5e-5 or 1e-5), or `Chord`'s own, never finer than 1 µm.
     fn chord(self, size: f64) -> f64 {
-        (size * self.share()).max(1e-3)
+        let chord = match self {
+            Self::Standard => size * 2e-4,
+            Self::Fine => size * 5e-5,
+            Self::Finest => size * 1e-5,
+            Self::Chord(mm) if mm.is_finite() => mm.min(MAX_CHORD),
+            Self::Chord(_) => size * 2e-4,
+        };
+        chord.max(MIN_CHORD)
     }
 
     /// The mesh path's spec for a body of size `size`: this quality's chord
@@ -2312,6 +2326,23 @@ mod tests {
 
     /// The OBJ export carries the colours of the bodies: the mesh file names the material
     /// library beside it and every body with a colour gets a material in it.
+    /// A chord in mm is the same for every body and taken only within its bounds (#20393); the
+    /// shares follow the body's size, with the same 1 µm floor.
+    #[test]
+    fn a_chord_in_mm_is_the_same_for_every_size_and_bounded() {
+        let c = MeshQuality::from_chord(0.05).unwrap();
+        assert_eq!((c.chord(1.0), c.chord(1000.0)), (0.05, 0.05));
+        assert_eq!((MeshQuality::Standard.chord(10.0), MeshQuality::Standard.chord(1.0)), (2e-3, MIN_CHORD));
+        for bad in [0.0, -1.0, 0.0009, 1000.5, f64::NAN, f64::INFINITY] {
+            assert!(MeshQuality::from_chord(bad).is_none(), "{bad}");
+        }
+        assert!(MeshQuality::from_chord(MIN_CHORD).is_some() && MeshQuality::from_chord(MAX_CHORD).is_some());
+        // Built by hand past the check, a chord still stays within the bounds.
+        assert_eq!(MeshQuality::Chord(f64::NAN).chord(10.0), 2e-3);
+        assert_eq!(MeshQuality::Chord(-5.0).chord(10.0), MIN_CHORD);
+        assert_eq!(MeshQuality::Chord(1e12).chord(10.0), MAX_CHORD);
+    }
+
     #[test]
     fn obj_export_writes_the_colours_of_the_bodies() {
         let (_, m) = model();

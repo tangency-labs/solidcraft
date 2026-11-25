@@ -15,15 +15,19 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 #[test]
 fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<ExportStepParams>(), &["bodies", "path"]);
-    assert_keys(input_schema_for::<ExportMeshParams>(), &["bodies", "path", "quality"]);
-    assert_keys(input_schema_for::<ExportStlParams>(), &["ascii", "bodies", "lay_on_print_faces", "path", "quality", "solids"]);
-    assert_keys(input_schema_for::<Export3mfParams>(), &["bodies", "lay_on_print_faces", "objects", "path", "quality"]);
-    assert_keys(input_schema_for::<ExportUrdfParams>(), &["effort", "images", "mesh_prefix", "mimic", "path", "place_meshes", "velocity"]);
-    assert_keys(input_schema_for::<ExportSdfParams>(), &["bodies", "model_uris", "name", "path", "quality", "static"]);
+    assert_keys(input_schema_for::<ExportMeshParams>(), &["bodies", "chord", "path", "quality"]);
+    assert_keys(input_schema_for::<ExportStlParams>(), &["ascii", "bodies", "chord", "lay_on_print_faces", "path", "quality", "solids"]);
+    assert_keys(input_schema_for::<Export3mfParams>(), &["bodies", "chord", "lay_on_print_faces", "objects", "path", "quality"]);
+    assert_keys(
+        input_schema_for::<ExportUrdfParams>(),
+        &["chord", "effort", "images", "mesh_prefix", "mimic", "path", "place_meshes", "quality", "velocity"],
+    );
+    assert_keys(input_schema_for::<ExportSdfParams>(), &["bodies", "chord", "model_uris", "name", "path", "quality", "static"]);
     assert_keys(
         input_schema_for::<ExportParams>(),
         &[
             "bodies",
+            "chord",
             "effort",
             "exact_brep",
             "format",
@@ -342,6 +346,14 @@ fn strict_keeps_todays_errors() {
         ("file.export", json!({"path": at("a.xyz"), "quality": "rough"})),
         ("file.export", json!({"path": at("a.stl"), "quality": "rough"})),
         ("file.export", json!({"path": at("a.stl"), "quality": 3})),
+        ("file.export", json!({"path": at("a.stl"), "chord": 0})),
+        ("file.export", json!({"path": at("a.stl"), "chord": 1e4})),
+        ("file.export", json!({"path": at("a.stl"), "chord": "fine"})),
+        ("file.export", json!({"path": at("a.stl"), "chord": 0.05, "quality": "fine"})),
+        ("file.export", json!({"path": at("a.urdf"), "quality": "rough"})),
+        ("file.export", json!({"path": at("a.urdf"), "chord": -1})),
+        ("file.export_stl", json!({"path": at("a.stl"), "chord": 0.0001})),
+        ("file.export_urdf", json!({"path": at("a.urdf"), "chord": 0.05, "quality": "standard"})),
         ("file.export", json!({"path": at("a.stl"), "objects": "component"})),
         ("file.export", json!({"path": at("a.3mf"), "objects": "parts"})),
         ("file.export", json!({"path": at("a.stl"), "bodies": [1]})),
@@ -391,8 +403,14 @@ fn strict_keeps_todays_errors() {
 fn the_export_type_reads_each_key_only_for_its_format() {
     let read = |p: Value| serde_json::from_value::<ExportParams>(p).map_err(|e| e.to_string());
     let ok = |p: Value| read(p.clone()).unwrap_or_else(|e| panic!("{p}: {e}"));
-    let p = ok(json!({"path": "a.urdf", "quality": "rough", "objects": 3, "effort": 5}));
-    assert!(p.quality.is_none() && p.objects.is_none() && p.effort == Some(5.0), "{p:?}");
+    let p = ok(json!({"path": "a.urdf", "quality": "fine", "objects": 3, "effort": 5}));
+    assert!(p.quality.is_some() && p.objects.is_none() && p.effort == Some(5.0), "{p:?}");
+    // URDF meshes take `quality` or `chord` too (#20393), and refuse what the handler refuses.
+    assert!(read(json!({"path": "a.urdf", "quality": "rough"})).is_err());
+    let p = ok(json!({"path": "a.urdf", "chord": 0.05}));
+    assert!(p.chord == Some(0.05) && p.quality.is_none(), "{p:?}");
+    assert!(read(json!({"path": "a.stl", "chord": 0.05, "quality": "fine"})).is_err());
+    assert!(ok(json!({"path": "a.stl", "chord": null, "quality": "fine"})).quality.is_some());
     let p = ok(json!({"path": "a.stl", "effort": -1, "velocity": "fast", "mesh_prefix": 3, "quality": " Fine "}));
     assert!(p.effort.is_none() && p.velocity.is_none() && p.mesh_prefix.is_none() && p.quality.is_some(), "{p:?}");
     assert!(ok(json!({"path": "a.stl", "format": "3mf", "objects": "component"})).objects.is_some());
