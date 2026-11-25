@@ -31,7 +31,6 @@ pub mod fill_general;
 pub mod fill_iso;
 pub mod fill_matched;
 mod grid;
-pub mod hlr;
 pub mod ids;
 pub mod inertia;
 pub mod linkage;

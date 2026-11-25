@@ -1151,19 +1151,41 @@ pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
             let ss = st.sketch(sketch)?;
             let at = ss.plane.to_world(ss.sketch.point(ss.sketch.resolve_point(point)?)?);
             let z = ss.plane.normal();
-            ("", SnapPt { at, z, kind: SnapKind::Vertex, param: json!({"point": pt(at), "z": pt(z)}) })
+            let mut snap = SnapPt { at, z, kind: SnapKind::Vertex, param: json!({"point": pt(at), "z": pt(z)}) };
+            // On the copy of its part the sketch is drawn at: a copy placed on top of it has the
+            // same bodies there, and the point alone would find the first.
+            let component = s.doc.feature(sketch).map_or(0, |f| f.component);
+            if component != 0 {
+                placed_on(&mut snap, &s.feature_path(component));
+            }
+            return Some(snap);
+        }
+        Sel::PlacedSketchPoint { sketch, id, path } => {
+            // The same point on another copy of its part: where that copy has it, held by that copy.
+            let (at, z) = st.placed_sketch_point(*sketch, path, id)?;
+            let mut snap = SnapPt { at, z, kind: SnapKind::Vertex, param: json!({"point": pt(at), "z": pt(z)}) };
+            placed_on(&mut snap, path);
+            return Some(snap);
         }
         _ => return None,
     };
     // The placement picked on, so a part in a sub-assembly placed more than once is found on the
     // copy it was picked on (#11426).
-    if let (Some(path), Value::Object(m)) = (placement_of_body(s, body), &mut snap.param) {
+    if let Some(path) = placement_of_body(s, body) {
+        placed_on(&mut snap, &path);
+    }
+    Some(snap)
+}
+
+/// `snap` held by the placement `path` (occurrence ids from the root), not the one found nearest
+/// its point.
+fn placed_on(snap: &mut SnapPt, path: &[u64]) {
+    if let Value::Object(m) = &mut snap.param {
         m.insert("occurrence".into(), json!(path.last().copied().unwrap_or(0)));
         if !path.is_empty() {
             m.insert("path".into(), json!(path));
         }
     }
-    Some(snap)
 }
 
 /// A pick in a joint origin input, given the woken snap points (#11227, #11476):

@@ -1,27 +1,12 @@
-//! The router: which kernel runs each body-making operation (`docs/design/kernel-layer.md`).
-//!
-//! These are the application's entry points for the operations of the kernel interface
-//! ([`OpKind`]). Each asks [`which`] kernel runs it and calls that kernel's adapter. Which kernels
-//! a build holds is decided at compile time; this build holds solidcore only, so the choice is a
-//! constant and every call is exactly the adapter's, which is the call made before the router.
+//! The router's body-making operations ([`solidcraft_kernel_api::Modelling`]).
 
 use solidcore_record::{Plane, Region2, Vec2, Vec3};
-use solidcraft_kernel_api::{Axis2, Backend, BoolOp, ChamferSide, FilletTurn, OpKind, Primitive};
+use solidcraft_kernel_api::{Axis2, BoolOp, ChamferSide, FilletTurn, Modelling, OpKind, Primitive};
 
+use super::{Which, which};
 use crate::Result;
 use crate::backend::Solidcore;
 use crate::body::Body;
-
-/// A kernel compiled into this build.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Which {
-    Solidcore,
-}
-
-/// The kernel that runs `op`. Only solidcore is compiled in, so it runs every operation.
-pub const fn which(_op: OpKind) -> Which {
-    Which::Solidcore
-}
 
 /// The axis-aligned box between two opposite corners.
 pub fn box_solid(a: Vec3, b: Vec3) -> Result<Body> {
@@ -123,25 +108,5 @@ pub fn thicken(body: &Body, thickness: f64, symmetric: bool) -> Result<Body> {
 pub fn offset_faces(b: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
     match which(OpKind::OffsetFaces) {
         Which::Solidcore => Solidcore.offset_faces(b, at, distance),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn this_build_runs_every_operation_on_solidcore() {
-        for &op in OpKind::ALL {
-            assert_eq!(which(op), Which::Solidcore, "{}", op.name());
-        }
-    }
-
-    #[test]
-    fn a_routed_box_is_the_adapters_box() {
-        let (a, b) = (Vec3::new(0.0, 0.0, 0.0), Vec3::new(2.0, 3.0, 4.0));
-        let routed = box_solid(a, b).unwrap();
-        let direct = crate::build::box_solid(a, b).unwrap();
-        assert_eq!(routed.record(), direct.record());
     }
 }

@@ -774,6 +774,8 @@ impl SavedModel {
                 origin_frames: Default::default(),
                 bodies: ids("bodies", model_bodies.len())?.into_iter().filter_map(|i| model_bodies.get(i).cloned()).collect(),
                 sketches: ids("sketches", sketches.len())?.into_iter().filter_map(|i| sketches.get(i).cloned()).collect(),
+                // A world state's alone: a model's own state has none.
+                sketch_copies: BTreeMap::new(),
                 body_counter: index(s.get("body_counter"), usize::MAX)?,
                 reserved_body_names: s
                     .get("reserved_body_names")

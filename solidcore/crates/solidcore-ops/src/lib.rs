@@ -11,6 +11,8 @@
 //! - [`session`]: the one process kernel, the fixes the application names, the panic guard, the
 //!   call running now and the failure callback;
 //! - [`cancel`]: stopping the calls of work nobody waits for any more ([`Error::Cancelled`]);
+//! - [`fuel`]: a deterministic work budget per call, so a call going nowhere stops early
+//!   ([`Error::OutOfFuel`]);
 //! - [`Error`]: why an operation failed, as data (the application words it);
 //! - [`Body`]: a kernel body, with primitives, copy and transform, counts and volume, `.smb`
 //!   bytes ([`file`]) and the validity check ([`check`]), and the record both ways
@@ -40,11 +42,13 @@ pub mod blend_definition;
 pub mod blend_surface;
 pub mod body;
 pub mod boolean;
+pub mod bspline;
 pub mod cancel;
 pub mod cap;
 pub mod cell_grid;
 pub mod check;
 pub mod conic_projection;
+pub mod constraint;
 pub mod contact;
 pub mod continuity;
 pub mod curve;
@@ -66,6 +70,7 @@ pub mod fit_projection;
 pub mod frame_gusset;
 pub mod frame_member;
 pub mod frame_trim;
+pub mod fuel;
 pub mod hatch;
 pub mod heal;
 pub mod history;
@@ -82,6 +87,7 @@ pub mod network;
 pub mod offset;
 pub mod order;
 pub mod outline;
+pub mod paper_gaps;
 pub mod path_export;
 pub mod pcurve;
 pub mod pick;
@@ -184,6 +190,7 @@ pub use measure::MassPropertiesEstimate;
 pub use measure::MembersClosest;
 pub use measure::Normal;
 pub use measure::PointClass;
+pub use measure::PointLocation;
 pub use measure::PointNormalFace;
 pub use measure::PointSetSummary;
 pub use measure::RayEntity;
