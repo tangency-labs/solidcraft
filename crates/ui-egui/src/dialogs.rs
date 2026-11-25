@@ -5426,12 +5426,12 @@ fn object_on(inputs: &[SelInput], label: &str) -> bool {
     inputs.iter().any(|i| i.label == label)
 }
 
-fn to_object_on(inputs: &[SelInput]) -> bool {
+pub(crate) fn to_object_on(inputs: &[SelInput]) -> bool {
     inputs.iter().any(|i| i.label == TO_OBJECT)
 }
 
 /// Add or remove the To Object input; the active input moves to it when it is added.
-fn set_to_object(inputs: &mut Vec<SelInput>, active: &mut usize, on: bool) {
+pub(crate) fn set_to_object(inputs: &mut Vec<SelInput>, active: &mut usize, on: bool) {
     set_object(inputs, active, TO_OBJECT, on);
 }
 
@@ -5546,7 +5546,7 @@ fn object_target(s: &Session, reference: &solidcore_record::Plane, sel: &Sel) ->
 }
 
 /// The picked To Object place.
-fn to_object_point(inputs: &[SelInput]) -> Option<Value> {
+pub(crate) fn to_object_point(inputs: &[SelInput]) -> Option<Value> {
     object_point(inputs, TO_OBJECT)
 }
 

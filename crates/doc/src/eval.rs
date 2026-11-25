@@ -3918,7 +3918,9 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
     }
     // The faces To / From Object names, in `face_points` order.
     let object_names = match &f.kind {
-        FeatureKind::Extrude { extent, .. } => usize::from(extent.to.is_some()) + usize::from(extent.from.is_some()),
+        FeatureKind::Extrude { extent, .. } | FeatureKind::SurfaceExtrude { extent, .. } => {
+            usize::from(extent.to.is_some()) + usize::from(extent.from.is_some())
+        }
         FeatureKind::Revolve { to, .. } => usize::from(to.is_some()),
         _ => 0,
     };
