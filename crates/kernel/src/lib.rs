@@ -36,6 +36,7 @@ mod corner_g2;
 mod curvature_comb;
 mod delete_face;
 mod distance;
+mod dome;
 mod draft_corners;
 pub mod drawing_centre_mark;
 mod emboss;
@@ -307,6 +308,7 @@ pub use distance::body_distance;
 pub use distance::edges_closest;
 pub use distance::faces_closest;
 pub use distance::point_closest;
+pub use dome::dome;
 pub use draft_corners::CornerFill;
 pub use draft_corners::CornerOption;
 pub use draft_corners::CornerRefusal;
@@ -447,6 +449,8 @@ pub use sew::SurfSpec;
 pub use sew::sew;
 pub use sew::sew_touching;
 pub use sew::sew_touching_traced;
+pub use solidcore_ops::dome::DomeRefusal;
+pub use solidcore_ops::dome::DomeShape;
 pub use solidcore_ops::member_turn::ParallelTurnError;
 pub use solidcore_ops::member_turn::parallel_turn;
 /// SolidCraft's kernel interface: the trait each kernel's adapter implements, its operations,
@@ -617,6 +621,9 @@ pub enum KernelError {
     /// run ([`heal_tolerance_defects`]).
     #[error("the operation failed: {0}")]
     Heal(#[from] HealFailure),
+    /// A dome the face or the height cannot take.
+    #[error("the operation failed: {0}")]
+    Dome(#[from] DomeRefusal),
 }
 
 pub type Result<T> = std::result::Result<T, KernelError>;

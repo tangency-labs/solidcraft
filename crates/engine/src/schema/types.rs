@@ -689,6 +689,14 @@ keyword_param!(
     "Whether the profiles are raised from the face (emboss, the default) or sunk into it (deboss). Any case."
 );
 keyword_param!(
+    /// `solid.dome`'s `shape`.
+    DomeShapeParam,
+    "shape",
+    &["elliptical", "spherical"],
+    "elliptical or spherical",
+    "The dome's meridian: elliptical (a quarter ellipse, the default; on a circle, a half ellipsoid of revolution) or spherical (the sphere through the rim and the apex, on a circle). Any case."
+);
+keyword_param!(
     /// `surface.ruled`'s `mode`.
     RuledModeParam,
     "mode",
