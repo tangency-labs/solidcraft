@@ -351,3 +351,45 @@ fn a_chain_stops_where_it_would_turn_over() {
     let front = edge(&r, [-20.0, -5.0, 10.0], [20.0, -5.0, 10.0]);
     assert!(!chain.members.contains(&front), "{chain:?}");
 }
+
+/// The 140 plate with the boss, as the union leaves it: under `Contract::Closed` the boolean
+/// gives some faces no UV trims, and each of the boss's top rim edges (the four at z = 20) has
+/// a use with no pcurve (#3347). With no record order (so no `to_record`, which builds every trim) a
+/// pick of the boss's back top straight chains that whole rim, as
+/// `one_pick_follows_the_boss_rim_at_any_part_size` finds on the body with its trims; its base
+/// outline at z = 10, wholly on the plate and concave all round, chains its four edges too. The
+/// walk builds the trims it reads from the exact geometry instead of refusing an edge use with
+/// no pcurve.
+#[test]
+fn a_chain_on_a_body_without_uv_trims_builds_them() {
+    use solidcore::topology::trimming_tools::face_uv_curves_present;
+    let b = plate_with_stadium(140.0);
+    let lacking = {
+        let g = b.kernel();
+        g.face_list()
+            .iter()
+            .filter(|&&f| !face_uv_curves_present(&g, f).unwrap())
+            .count()
+    };
+    assert!(lacking > 0, "the union gave every face its trims");
+    for z in [20.0, 10.0] {
+        let mut rim = solidcore_ops::pick::edges(
+            &b,
+            &[
+                [0.0, 5.0, z],
+                [0.0, -5.0, z],
+                [25.0, 0.0, z],
+                [-25.0, 0.0, z],
+            ],
+            1e-6,
+        )
+        .unwrap()
+        .unwrap();
+        let chain = tangent_chain(&b, None, &rim[..1], &[], ANGLE).unwrap();
+        assert!(chain.undecided.is_empty(), "z {z}: {chain:?}");
+        let mut members = chain.members.clone();
+        members.sort_unstable();
+        rim.sort_unstable();
+        assert_eq!(members, rim, "z {z}: {chain:?}");
+    }
+}

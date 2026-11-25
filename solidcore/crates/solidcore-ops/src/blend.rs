@@ -2764,13 +2764,14 @@ fn carried_face_indices(
 /// among them), when it turns over (convex where the edge it continues is concave, or the
 /// reverse), or when it is in `passed_over`. An edge whose smoothness the kernel leaves
 /// undecided joins nothing and is named in [`Chain::undecided`]. Every measure is the kernel's
-/// (`query::tangent_edge`, `query::edge_turn`). For a blend that is to run on: the edges to
-/// blend together.
+/// (`query::tangent_edge`, `query::edge_turn`). An edge use with no pcurve (a body a boolean
+/// left without UV trims) is given the one the kernel builds from the exact geometry first, on
+/// the walk's copy of the body. For a blend that is to run on: the edges to blend together.
 ///
 /// # Errors
 /// [`Error::Argument`] for no edges, an index past the edges or naming an edge the body does
 /// not have, or an angle not finite and strictly between 0 and a right angle; the kernel's
-/// refusals (a face with no NURBS form or in power-basis form, an edge use with no pcurve, a
+/// refusals (a face with no NURBS form or in power-basis form, a pcurve it cannot build, a
 /// pcurve leaving its face's net); [`Error::Cancelled`] when the session's cancel token is
 /// cancelled.
 pub fn tangent_chain(
