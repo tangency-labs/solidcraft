@@ -146,7 +146,7 @@ impl Capturer {
     /// ([`crate::select`]).
     #[cfg(not(target_arch = "wasm32"))]
     pub fn headless(policy: crate::select::Policy) -> Result<Self> {
-        let (adapter, device, queue) = crate::open_headless(policy)?;
+        let (adapter, device, queue) = open_headless(policy)?;
         // Errors are caught per picture (error scopes); anything else is logged, never a panic.
         device.on_uncaptured_error(Arc::new(|e: wgpu::Error| log::error!("GPU: {e}")));
         let lost = watch_lost(&device);
@@ -156,7 +156,7 @@ impl Capturer {
     /// As [`Capturer::headless`], drawing with the depth format `depth` ([`Capturer::with_depth`]).
     #[cfg(not(target_arch = "wasm32"))]
     pub fn headless_with_depth(policy: crate::select::Policy, depth: wgpu::TextureFormat) -> Result<Self> {
-        let (adapter, device, queue) = crate::open_headless(policy)?;
+        let (adapter, device, queue) = open_headless(policy)?;
         device.on_uncaptured_error(Arc::new(|e: wgpu::Error| log::error!("GPU: {e}")));
         let lost = watch_lost(&device);
         Ok(Self::with_depth(&adapter, device, queue, depth)?.watching(lost))
@@ -166,7 +166,7 @@ impl Capturer {
     /// draws where 4× isn't available (some browsers and devices, or MSAA turned off).
     #[cfg(not(target_arch = "wasm32"))]
     pub fn headless_single_sample(policy: crate::select::Policy) -> Result<Self> {
-        let (adapter, device, queue) = crate::open_headless(policy)?;
+        let (adapter, device, queue) = open_headless(policy)?;
         device.on_uncaptured_error(Arc::new(|e: wgpu::Error| log::error!("GPU: {e}")));
         let depth = crate::depth_format(&device, true);
         let lost = watch_lost(&device);
@@ -405,16 +405,12 @@ pub fn shared(policy: crate::select::Policy) -> std::result::Result<&'static Cap
     SHARED.get_or_init(|| Capturer::headless(policy)).as_ref()
 }
 
-/// For a process about to exit on Linux with NVIDIA's own driver: close the device of [`shared`],
-/// if one was opened ([`Capturer::close`]). Without a display that driver's Vulkan runs on its EGL
-/// library, whose exit handler unloads `libnvidia-eglcore` while an open device's threads still
-/// run in it, and the process then ends with a segmentation fault after its work is done (#19431).
-/// Every other system and driver exits with the device open, as before.
+/// For a process about to exit: close the device of [`shared`], if one was opened
+/// ([`Capturer::close`]), so no driver's exit handler runs while the device's threads still do.
+/// One such handler ended a process with a segmentation fault after its work was done (#19431).
 #[cfg(not(target_arch = "wasm32"))]
 pub fn close_shared_before_exit() {
-    if crate::select::nvidia_linux_driver()
-        && let Some(Ok(capturer)) = SHARED.get()
-    {
+    if let Some(Ok(capturer)) = SHARED.get() {
         capturer.close();
     }
 }
@@ -512,9 +508,12 @@ fn frame(scene: &Scene, cam: &Camera, [width, height]: [u32; 2], key: u64, acces
         eye: [eye[0], eye[1], eye[2], if cam.fov > 0.0 { 1.0 } else { 0.0 }],
         ao_radius: 0.0,
         ao_samples: crate::view::AO_SAMPLES,
+        occlusion: false,
+        edge_px: crate::view::EDGE_PX,
         sky: [0.0; 4],
         ssaa: 1.0,
         hover_tint: [0.0; 3],
+        selection_all: false,
         selection_tint: [0.0; 3],
         hatch: scene.part_hatch.map_or_else(Default::default, |c| c.map(|Rgb(r, g, b)| [r, g, b].map(|x| f32::from(x) / 255.0))),
         moving: None,
@@ -595,6 +594,21 @@ pub fn scene_geometry(scene: &Scene) -> GpuScene {
         }
     }
     sc
+}
+
+/// A headless capturer's adapter and device ([`crate::open_headless`]). In this crate's own tests
+/// the capturers share a device apart from the other tests' one (`test_env::Sharers`): a capturer
+/// logs its device's uncaptured errors, where the other tests rely on wgpu's handler, which panics.
+#[cfg(not(target_arch = "wasm32"))]
+fn open_headless(policy: crate::select::Policy) -> Result<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
+    #[cfg(test)]
+    {
+        crate::test_env::shared_headless(crate::test_env::Sharers::Capturers, policy)
+    }
+    #[cfg(not(test))]
+    {
+        crate::open_headless(policy)
+    }
 }
 
 /// A flag `device`'s lost callback sets (a device of this crate's own: a device has one lost
@@ -797,8 +811,8 @@ mod tests {
     }
 
     /// A closed capturer has dropped its device and everything it drew with, and a picture asked
-    /// of it afterwards fails and says so. A host on NVIDIA's Linux driver closes the shared
-    /// capturer before it exits ([`close_shared_before_exit`]).
+    /// of it afterwards fails and says so. A host closes the shared capturer before it exits
+    /// ([`close_shared_before_exit`]).
     #[test]
     fn a_closed_capturer_drops_its_device_and_draws_no_more_pictures() {
         let Ok(capturer) = Capturer::headless(crate::test_env::policy()) else {

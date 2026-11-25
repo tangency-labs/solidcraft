@@ -55,6 +55,45 @@ fn each_earlier_tool_is_built_once() {
 }
 
 #[test]
+fn later_frames_fit_to_each_earlier_groups_actual_placement() {
+    let mut doc = Document::new("grouped earlier frames");
+    let a = doc.add_feature(lines_sketch(&[[[0.0, 0.0], [600.0, 0.0]], [[0.0, 200.0], [600.0, 200.0]]]), None).unwrap();
+    let ids: Vec<String> = doc.sketch(a).unwrap().curves.iter().map(|c| c.id.clone()).collect();
+    doc.add_feature(
+        member(
+            a,
+            40.0,
+            serde_json::json!({"groups": [
+                {"lines": [&ids[0]], "body_name": "Centred"},
+                {"lines": [&ids[1]], "anchor": "bottom_left", "mirror": true, "angle": "90 deg", "body_name": "Offset"}
+            ]}),
+        ),
+        None,
+    )
+    .unwrap();
+    // The centred rail occupies y=-20..20. The second rail's rotated bottom-left
+    // anchor puts its square at y=160..200, z=0..40. Each upright starts inside
+    // its earlier tool and must stop at that tool's far face, y=20 or y=200.
+    let b = doc.add_feature(lines_sketch(&[[[100.0, 0.0], [100.0, 100.0]], [[100.0, 180.0], [100.0, 300.0]]]), None).unwrap();
+    doc.add_feature(member(b, 10.0, serde_json::json!({"anchor": "bottom_left", "corner": "auto", "fit_ends": true, "body_name": "B"})), None)
+        .unwrap();
+    let check = |doc: &Document| {
+        let mut model = Model::new();
+        TOOL_BUILDS.set(0);
+        model.evaluate(doc);
+        assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+        assert_eq!(TOOL_BUILDS.get(), 2, "one tool for each earlier group's member");
+        let st = model.state();
+        for (name, low, high) in [("B", 20.0, 100.0), ("B (2)", 200.0, 300.0)] {
+            let bounds = st.body(name).unwrap().body.exact_bounds().unwrap();
+            assert!((bounds.min.y - low).abs() < 1e-6 && (bounds.max.y - high).abs() < 1e-6, "{name}: {bounds:?}");
+        }
+    };
+    check(&doc);
+    check(&Document::from_json(&doc.to_json()).unwrap());
+}
+
+#[test]
 fn a_tube_whose_middle_lies_in_an_earlier_tube_keeps_what_sticks_out() {
     // A: one 40 tube along X, y −20…20. B: a 30 mm line from A's centre-line, (100, 0) to (100, 30), fitted to A: B's
     // middle (y = 15) lies inside A, and y 20…30 sticks out. That piece is kept (ruling C4), not cut away completely.

@@ -14,7 +14,7 @@ Work: ROADMAP.md, "Where help is wanted most" in CONTRIBUTING.md, issues labelle
 - Model decisions (what an operation does, which bodies it touches, which face or edge a point or name means, depths, nearness) use exact geometry; a mesh is for display, export, previews and mesh bodies (`xtask/mesh-decisions/` only shrinks): `cargo xtask mesh-decisions`.
 - Everything is a command and programmatic calls never open dialogs: `.agents/skills/solidcraft-commands/SKILL.md`.
 - Kernel ops and math go in `solidcore/`; features call its API: `.agents/skills/solidcraft-layers/SKILL.md`.
-- Layering; only `crates/kernel` uses truck; solidcore only via `solidcore-ops`/`-tess`/`-record` (`xtask/solidcore-seam.txt`): `cargo xtask layers`; see `docs/layers.md`.
+- Only `crates/kernel` uses truck; solidcore only via `solidcore-ops`/`-tess`/`-record` (`xtask/solidcore-seam.txt`): `cargo xtask layers`/`app-geometry`, `docs/layers.md`.
 - One outer UI container, one camera path (`navigation::handle`), colours from theme tokens: `cargo xtask ui-containers`.
 - Application code is Rust only and builds for wasm: `cargo xtask wasm`, `cargo xtask web-offline-test`.
 - The product name is SolidCraft; the old name lives in `docs/compatibility.md`.
@@ -24,7 +24,7 @@ Work: ROADMAP.md, "Where help is wanted most" in CONTRIBUTING.md, issues labelle
 - New UI strings go in `assets/locales/pending/<slug>.json`, ATTRIBUTION rows in `attribution/pending/<slug>.md`: `cargo xtask lists`.
 - A changed UX default (not kernel results): old designs keep their result via a format legacy value, runtime choices go in the tool's options panel; fill `Changes a default:`.
 - A regression test goes in the area's existing test file, never a per-bug file (#3226).
-- Look at open PRs first, claim with a draft PR (lowest number wins), one topic per PR, English, a title a newcomer understands, screenshots you made: `.agents/skills/solidcraft-contributing/SKILL.md`.
+- Look at open PRs first, claim with a draft PR (lowest number wins), one topic per PR, English, a title a newcomer understands, screenshots you made for a visible UI or model change: `.agents/skills/solidcraft-contributing/SKILL.md`.
 - Run `cargo xtask fast` before each commit; CI runs the full gate. `cargo xtask skills` checks this file and both skill folders.
 
 ## Skills: read the one for your task

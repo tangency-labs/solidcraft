@@ -494,8 +494,10 @@ the agent or a maintainer can attach it.
 Keep an eye on your PR's status, but don't push to it only to catch up with `main`: every push
 restarts the whole CI run for everyone waiting behind it, and `main`'s own run catches what lands in
 between. When you push a change anyway, or GitHub reports a conflict, bring your branch up to date
-with the latest `main` by rebasing or by merging `main` in; both are fine. Rebasing is preferred for
-your own branch (push it with `--force-with-lease`). Never force-push `main` or a branch someone else
+with the latest `main` by merging `main` in or by rebasing; both are fine. Merging costs less: when
+the PR already passed and the merge leaves your own change as it was, CI carries the passing run and
+repeats only the repository checks (`scripts/ci/main_merge.py`). A rebase always re-runs the full
+suite, and you must push it with `--force-with-lease`. Never force-push `main` or a branch someone else
 works on. When the project's automation updates your pull request, it merges `main` into your branch
 and never force-pushes over your history. Resolve conflicts without losing others' changes.
 Don't re-run CI on an unchanged commit either: a real failure fails again.
