@@ -983,15 +983,24 @@ impl BSplineCurve {
         }
 
         let pw = cur.cpts();
-        // low work - begin point evaluation
-        if t == natural_interval.min() {
+        let uk = cur.knots();
+        let p = cur.degree();
+        let clamped_start = uk.get(p).is_some_and(|&up| up == u0);
+        let clamped_end = uk
+            .len()
+            .checked_sub(1 + p)
+            .and_then(|idx| uk.get(idx))
+            .is_some_and(|&um_p| um_p == um);
+
+        // low work - begin point evaluation (only when clamped at start)
+        if clamped_start && t == natural_interval.min() {
             return pw
                 .first()
                 .map(|&p| to_euclid(p))
                 .ok_or_else(no_control_point);
         }
-        // low work - end point evaluation
-        else if t == natural_interval.max() {
+        // low work - end point evaluation (only when clamped at end)
+        else if clamped_end && t == natural_interval.max() {
             return pw
                 .last()
                 .map(|&p| to_euclid(p))

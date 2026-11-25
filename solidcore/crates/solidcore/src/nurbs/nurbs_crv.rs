@@ -1171,8 +1171,10 @@ pub fn basis_eval_into(
     let m = sx(knt.last_index(), OP)?;
 
     // Special cases for end values: upstream fills N there but returns its error flag
-    // (initialised to NL_YES for early exits).
-    if u == get(uk, pi, OP)? || u == get(uk, m - pi, OP)? {
+    // (initialised to NL_YES for early exits) on clamped curves.
+    let clamped_start = get(uk, 0, OP)? == get(uk, pi, OP)?;
+    let clamped_end = get(uk, m - pi, OP)? == get(uk, m, OP)?;
+    if (clamped_start && u == get(uk, pi, OP)?) || (clamped_end && u == get(uk, m - pi, OP)?) {
         return Err(at_domain_end(OP));
     }
 
@@ -2979,7 +2981,9 @@ mod tests {
         let pi = sx(p, OP)?;
         let m = sx(knt.last_index(), OP)?;
         let mut n = vec![0.0_f64; p + 1];
-        if u == get(uk, pi, OP)? || u == get(uk, m - pi, OP)? {
+        let clamped_start = get(uk, 0, OP)? == get(uk, pi, OP)?;
+        let clamped_end = get(uk, m - pi, OP)? == get(uk, m, OP)?;
+        if (clamped_start && u == get(uk, pi, OP)?) || (clamped_end && u == get(uk, m - pi, OP)?) {
             return Err(at_domain_end(OP));
         }
         let span = knt.find_span(p, u, side)?;

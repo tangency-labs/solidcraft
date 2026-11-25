@@ -478,13 +478,15 @@ impl<'a> KnotVector<'a> {
         }
         n.get_mut(..=p).ok_or_else(|| out_of_range(OP))?.fill(0.0);
 
-        // Special cases for end values.
-        if u == rd(uk, p, OP)? {
+        // Special cases for end values on clamped knots.
+        let clamped_start = rd(uk, 0, OP)? == rd(uk, p, OP)?;
+        if clamped_start && u == rd(uk, p, OP)? {
             wr(n, 0, 1.0, OP)?;
             return Ok(p);
         }
         let end = sub(m, p, OP)?;
-        if u == rd(uk, end, OP)? {
+        let clamped_end = rd(uk, end, OP)? == rd(uk, m, OP)?;
+        if clamped_end && u == rd(uk, end, OP)? {
             wr(n, p, 1.0, OP)?;
             return sub(end, 1, OP);
         }

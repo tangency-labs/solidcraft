@@ -113,6 +113,8 @@ mod issue_2050_crossing_rails_query_no_solution;
 mod issue_2091_precise_volume_spans;
 #[path = "../issue_2136_cooperative_cancellation.rs"]
 mod issue_2136_cooperative_cancellation;
+#[path = "../issue_21889_unclamped_bspline_natural_ends.rs"]
+mod issue_21889_unclamped_bspline_natural_ends;
 #[path = "../issue_2313_unbounded_cone_iso_circle.rs"]
 mod issue_2313_unbounded_cone_iso_circle;
 #[path = "../issue_2356_smooth_interior.rs"]
