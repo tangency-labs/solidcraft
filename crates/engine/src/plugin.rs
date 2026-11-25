@@ -323,6 +323,18 @@ fn input_only_command(id: &str) -> bool {
 
 /// Both the manifest and the user must approve a folder for the intended access.
 /// Writers retain the existing requirement that both read and write are approved.
+/// Whether a plugin run's scratch session `computed` changed what [`Session::accept_computed`]
+/// takes into `live`: the design, the sketch being edited, pending moves or what is shown (#22153).
+fn changed_by(live: &Session, computed: &Session) -> bool {
+    !std::sync::Arc::ptr_eq(&live.doc, &computed.doc)
+        || live.active_sketch != computed.active_sketch
+        || live.sketching_view != computed.sketching_view
+        || !computed.sketch_finish_events.is_empty()
+        || computed.edit_start_sequence != 0
+        || live.pending_moves != computed.pending_moves
+        || live.visibility != computed.visibility
+}
+
 fn approved_file_folders(granted: &[FileGrant], requested: &[craft_plugin::FilePermission], write: bool) -> Vec<PathBuf> {
     granted
         .iter()
@@ -630,13 +642,7 @@ fn run_package(
         let value = result?;
         session.plugin_state.user.pending_user_settings = host.session.plugin_state.user.pending_user_settings.clone();
         session.plugin_state.panels.clone_from(&host.session.plugin_state.panels);
-        if !std::sync::Arc::ptr_eq(&session.doc, &host.session.doc)
-            || session.active_sketch != host.session.active_sketch
-            || session.sketching_view != host.session.sketching_view
-            || !host.session.sketch_finish_events.is_empty()
-            || host.session.edit_start_sequence != 0
-            || session.pending_moves != host.session.pending_moves
-        {
+        if changed_by(session, &host.session) {
             session.accept_computed(host.session)?;
         } else {
             session.plugin_state.link_changes = host.session.plugin_state.link_changes;
@@ -970,13 +976,7 @@ impl PluginHost for SolidCraftHost {
         computed.redo.clear();
         self.session.plugin_state.panels.clone_from(&computed.plugin_state.panels);
         // Session::execute(plugin.run) owns the one outer undo step.
-        if !std::sync::Arc::ptr_eq(&self.session.doc, &computed.doc)
-            || self.session.active_sketch != computed.active_sketch
-            || self.session.sketching_view != computed.sketching_view
-            || !computed.sketch_finish_events.is_empty()
-            || computed.edit_start_sequence != 0
-            || self.session.pending_moves != computed.pending_moves
-        {
+        if changed_by(&self.session, &computed) {
             self.session
                 .accept_computed(computed)
                 .map_err(|error| HostError::InvalidInput { field: "transaction".into(), reason: error.to_string() })?;

@@ -5640,3 +5640,35 @@ fn a_plugin_without_a_state_grid_is_unchanged() {
     assert!(!compiled.wgsl.contains("sc_state"), "{}", compiled.wgsl);
     assert!(!compiled.wgsl.contains("@binding(7)") && !compiled.wgsl.contains("@binding(8)"), "{}", compiled.wgsl);
 }
+
+#[test]
+fn a_body_a_plugin_run_hides_stays_hidden_beside_one_hidden_meanwhile() {
+    // #22153: the run's hide was lost when the window accepted the run.
+    let mut live = Session::default();
+    for name in ["Master", "Cabinet", "Door"] {
+        live.execute("solid.box", &json!({"length": 1, "width": 1, "height": 1, "body_name": name})).unwrap();
+    }
+    live.execute("browser.visibility", &json!({"items": ["Door"], "visible": false})).unwrap();
+    let command = crate::cmd::CommandSpec::new("plugin.run", "Run Plugin", |session, _| {
+        let mut host = SolidCraftHost { session: session.scratch(), ..panel_host() };
+        host.begin_transaction().unwrap();
+        host.run_command("browser.visibility", &json!({"items": ["Master"], "visible": false})).unwrap();
+        host.run_command("browser.visibility", &json!({"items": ["Door"], "visible": true})).unwrap();
+        host.commit_transaction().unwrap();
+        assert!(changed_by(session, &host.session), "a run that only hides is accepted");
+        session.accept_computed(host.session)?;
+        Ok(json!({}))
+    })
+    .icon("play");
+    // The window runs the plugin on a copy; the user hides Cabinet before it is accepted.
+    let mut computed = live.scratch();
+    computed.execute_spec(&command, &json!({})).unwrap();
+    live.execute("browser.visibility", &json!({"items": ["Cabinet"], "visible": false})).unwrap();
+    live.accept_computed(computed).unwrap();
+    let shown = |s: &Session| ["Master", "Cabinet", "Door"].map(|name| s.body_visible(name));
+    assert_eq!(shown(&live), [false, false, true], "the run's hide and show, and the hide made meanwhile");
+    live.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(shown(&live), [true, false, false], "undo takes back the run and keeps the hide made meanwhile");
+    live.execute("edit.redo", &json!({})).unwrap();
+    assert_eq!(shown(&live), [false, false, true]);
+}

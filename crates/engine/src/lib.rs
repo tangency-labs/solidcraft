@@ -1060,6 +1060,9 @@ pub struct Session {
     pub(crate) drawing_scenes: drawing_scene::Cache,
     /// The visibility the design file holds (what `is_dirty` compares with).
     saved_visibility: Visibility,
+    /// The visibility when this session was made as a [`Session::scratch`] copy: what
+    /// [`Session::accept_computed`] compares with to keep the copy's own visibility changes.
+    scratch_visibility: Option<Box<Visibility>>,
     /// The design as `doc.open` made it from a STEP, IGES or mesh file, never saved yet: while it
     /// is still that, closing it loses nothing the file doesn't hold ([`Session::unchanged_import`]).
     opened_import: Option<Arc<Document>>,
@@ -1498,6 +1501,7 @@ impl Session {
             next_checkpoint: 1,
             replacements: 0,
             saved_visibility: visibility.clone(),
+            scratch_visibility: None,
             opened_import: None,
             visibility,
             camera: None,
@@ -3618,6 +3622,7 @@ impl Session {
             // (`scratch_as_shown`), the many others never read them.
             drawing_scenes: Default::default(),
             saved_visibility: self.saved_visibility.clone(),
+            scratch_visibility: Some(Box::new(self.visibility.clone())),
             dimension_values: self.dimension_values.clone(),
             opened_import: self.opened_import.clone(),
             evaluations: 0,
@@ -3981,11 +3986,26 @@ impl Session {
             && Arc::ptr_eq(&before.doc, &self.doc)
         {
             before.visibility.hidden_bodies.clone_from(&self.visibility.hidden_bodies);
+            before.visibility.hidden_occurrences.clone_from(&self.visibility.hidden_occurrences);
+            before.visibility.hidden_folders.clone_from(&self.visibility.hidden_folders);
         }
+        // What the computation itself hid or showed is kept, on top of what this session hid or
+        // showed meanwhile (#22153). A session not made by `scratch` changed nothing to keep.
+        // Body names are compared only where the computation renamed no body or placement: the
+        // names it hid are then the names this session's hides have.
+        let start = computed.scratch_visibility.take().map(|v| *v).unwrap_or_else(|| computed.visibility.clone());
+        let mut ran = std::mem::take(&mut computed.visibility.hidden_bodies);
         let rename = computed.body_rename(&self.doc);
-        computed.visibility.hidden_bodies.clone_from(&self.visibility.hidden_bodies);
+        if rename.is_some() || computed.doc.occurrences != self.doc.occurrences {
+            ran.clone_from(&start.hidden_bodies);
+        }
+        computed.visibility.hidden_bodies =
+            self.visibility.hidden_bodies.iter().filter(|b| !shown_by(*b, &start.hidden_bodies, &ran)).cloned().collect();
         computed.remap_hidden_bodies(&self.doc, &self.model.state(), rename.as_ref().map(|(old, new, _)| (old.as_str(), new.as_str())));
+        keep_hidden(&mut computed.visibility.hidden_bodies, &start.hidden_bodies, &ran);
         self.visibility.hidden_bodies = std::mem::take(&mut computed.visibility.hidden_bodies);
+        merge_hidden(&mut self.visibility.hidden_occurrences, &start.hidden_occurrences, &computed.visibility.hidden_occurrences);
+        merge_hidden(&mut self.visibility.hidden_folders, &start.hidden_folders, &computed.visibility.hidden_folders);
         self.body_renames = computed.body_renames;
         // Only committed source reads cross back from the worker. A no-op read must not
         // replace a disk observation made since this evaluation began; changed source bytes
@@ -4357,6 +4377,26 @@ pub(crate) type SketchValues = std::collections::BTreeMap<u64, std::collections:
 pub(crate) type DimensionValues = std::collections::BTreeMap<(u64, u64), f64>;
 
 /// A design as its file holds it: `doc` with what is hidden in it and what its dimensions last read.
+/// Whether `item`, hidden when a computation began (`start`), was shown by it (`ran`).
+fn shown_by<T: PartialEq>(item: &T, start: &[T], ran: &[T]) -> bool {
+    start.contains(item) && !ran.contains(item)
+}
+
+/// Add to `live` what a computation hid (in `ran`, not in `start`).
+fn keep_hidden<T: PartialEq + Clone>(live: &mut Vec<T>, start: &[T], ran: &[T]) {
+    for item in ran {
+        if !start.contains(item) && !live.contains(item) {
+            live.push(item.clone());
+        }
+    }
+}
+
+/// `live` with what a computation that began at `start` and ended at `ran` hid or showed.
+fn merge_hidden<T: PartialEq + Clone>(live: &mut Vec<T>, start: &[T], ran: &[T]) {
+    live.retain(|item| !shown_by(item, start, ran));
+    keep_hidden(live, start, ran);
+}
+
 pub(crate) fn as_saved<'a>(doc: &'a Document, visibility: &Visibility, dimension_values: &DimensionValues) -> std::borrow::Cow<'a, Document> {
     if visibility.is_empty() && dimension_values.is_empty() {
         return std::borrow::Cow::Borrowed(doc);
