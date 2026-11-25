@@ -1109,11 +1109,20 @@ impl RegularityForms {
     /// formed, and a coefficient that is not finite certifies nothing: the patch is left to
     /// the ranges and to subdivision.
     ///
+    /// `R` touches `Q` at the middle, where `c` is taken, so its least coefficient is at
+    /// most `Q` there, up to rounding, and must clear at least `q0`'s rounding bound. A
+    /// patch whose middle is not above that bound is left to the ranges without forming the
+    /// products: on a face that collapses (`Q = 0`) or folds, every patch of the budget
+    /// would otherwise form them.
+    ///
     /// # Errors
     ///
     /// Those of the Bernstein products.
     fn tangent_certified(&self, b: &Binomials) -> Result<bool> {
         if self.q1.f.min_coefficient() - self.q1.err < 0.0 {
+            return Ok(false);
+        }
+        if self.middle() <= self.q0.err {
             return Ok(false);
         }
         let ((pu, pv), (xu, xv)) = (self.q1.f.degrees(), self.x2.f.degrees());
@@ -2141,6 +2150,34 @@ mod tests {
             certify_regular(&k, &s, -9.9, None).unwrap(),
             Regularity::Regular
         );
+    }
+
+    /// The tangent bound on patches written out as forms. Figure 2's patch (`q0` from 1 to
+    /// 1.3, `X q1` from 0.86 to 1.12, `q1 = 1`): the ranges overlap, the tangent certifies
+    /// it; with `q1` written at the forms' cap the product would pass [`MAX_DEGREE`], so it
+    /// is not formed and the patch is left to subdivision, not an error. Where `q1 < 0` the
+    /// tangent is an upper bound of `Q` and is not used: here `Q = -0.5 + X` is -0.4 at
+    /// `u = 0`, where the tangent line would give `R > 0` on the whole patch.
+    #[test]
+    fn the_tangent_bound_certifies_only_where_it_bounds_from_below() {
+        let b = Binomials::new();
+        let along_u =
+            |c0: f64, c1: f64| Bounded::exact(Bernstein2::new(1, 0, vec![c0, c1]).unwrap());
+        let one = |du: usize| Bounded::exact(Bernstein2::new(du, 0, vec![1.0; du + 1]).unwrap());
+        let figure = |q1: Bounded| RegularityForms {
+            q0: along_u(1.0, 1.3),
+            q1,
+            x2: along_u(0.86 * 0.86, 1.12 * 1.12),
+        };
+        assert!(figure(one(0)).tangent_certified(&b).unwrap());
+        assert!(figure(one(0)).certified(&b).unwrap());
+        assert!(!figure(one(MAX_DEGREE)).certified(&b).unwrap());
+        let saddle = RegularityForms {
+            q0: along_u(-0.5, -0.5),
+            q1: along_u(-1.0, -1.0),
+            x2: along_u(0.01, 4.0),
+        };
+        assert!(!saddle.certified(&b).unwrap());
     }
 
     /// The shell searches a face's least radius on the displaced side once
