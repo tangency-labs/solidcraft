@@ -2163,7 +2163,7 @@ enum BoundaryHit {
 
 /// Whole-body classification keeping the boundary entity for `OnBoundary` hits.
 #[derive(Clone, Copy, Debug)]
-enum PointLocation {
+enum LocatedPoint {
     Inside,
     Outside,
     OnBoundary(BoundaryHit),
@@ -2313,16 +2313,16 @@ fn classify_with_normals(
             .point_3d_classify(k, b, point(p)?, tol, true)
             .map_err(status)?;
         let location = match point_class(located(b, &pc))? {
-            PointClass::Inside => PointLocation::Inside,
-            PointClass::Outside => PointLocation::Outside,
-            PointClass::OnBoundary => PointLocation::OnBoundary(boundary_hit(&pc)),
+            PointClass::Inside => LocatedPoint::Inside,
+            PointClass::Outside => LocatedPoint::Outside,
+            PointClass::OnBoundary => LocatedPoint::OnBoundary(boundary_hit(&pc)),
         };
         locations.push(location);
     }
     let needs_faces = matches!(face, Some(PointNormalFace::Point(_)))
         || locations
             .iter()
-            .any(|loc| matches!(loc, PointLocation::OnBoundary(_)));
+            .any(|loc| matches!(loc, LocatedPoint::OnBoundary(_)));
     let candidates = if needs_faces {
         let selected = match face {
             Some(PointNormalFace::Index(i)) => Some(i),
@@ -2354,9 +2354,9 @@ fn classify_with_normals(
         .iter()
         .zip(locations)
         .map(|(&p, location)| match location {
-            PointLocation::Inside => Ok(ClassifiedPoint::Inside),
-            PointLocation::Outside => Ok(ClassifiedPoint::Outside),
-            PointLocation::OnBoundary(hit) => {
+            LocatedPoint::Inside => Ok(ClassifiedPoint::Inside),
+            LocatedPoint::Outside => Ok(ClassifiedPoint::Outside),
+            LocatedPoint::OnBoundary(hit) => {
                 let (face, normal) = resolve_point_normal(k, b, &faces, point(p)?, hit, selected)?
                     .ok_or(Error::Argument)?;
                 Ok(ClassifiedPoint::On { face, normal })
