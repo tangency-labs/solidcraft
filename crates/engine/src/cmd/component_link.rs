@@ -4186,7 +4186,7 @@ mod tests {
             // The code before its test module.
             text.split("\n#[cfg(test)]\n#[allow(clippy::unwrap_used").next().unwrap_or("").to_string()
         };
-        for file in ["src/cmd/component_link.rs", "src/cmd/component_extract.rs"] {
+        for file in ["src/cmd/component_link.rs", "src/cmd/component_extract.rs", "src/cmd/component_link_tree.rs"] {
             let text = code(file);
             for raw in [
                 "vfs::read(",

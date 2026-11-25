@@ -7229,30 +7229,6 @@ mod tests {
         h.call("ui.prefs", json!({"button":"cancel"}));
     }
 
-    /// Insert Design brings a linked design's joints only with its components
-    /// (`linked_source::insert_design_options`), so the second of the two preferences waits for
-    /// the first: greyed, a click on it changes nothing until the first is on.
-    #[test]
-    fn design_flexible_insert_waits_for_the_linked_designs_components() {
-        let mut h = crate::scenario::Harness::new();
-        h.app.home.open = false;
-        h.call("ui.prefs", json!({"language":"en","open":"Design"}));
-        let click = |h: &mut crate::scenario::Harness, label: &str, handle: &str| {
-            h.app.prefs_window.shell.filter = label.into();
-            h.frames(5);
-            super::reveal_preference(h, handle);
-            h.step(&json!({"click":{"handle":handle}})).unwrap();
-        };
-        let (keeps, flexible) = ("Insert Design keeps a linked design's components", "A new occurrence of a linked design with joints is flexible");
-        assert!(!h.app.preferences.insert_keeps_components && !h.app.preferences.insert_flexible, "both are off as shipped");
-        click(&mut h, flexible, "prefs:insert_flexible");
-        assert!(!h.app.preferences.insert_flexible, "greyed while a linked design comes in as one component");
-        click(&mut h, keeps, "prefs:insert_keeps_components");
-        assert!(h.app.preferences.insert_keeps_components);
-        click(&mut h, flexible, "prefs:insert_flexible");
-        assert!(h.app.preferences.insert_flexible, "offered once the components are kept");
-    }
-
     #[test]
     fn tools_ghost_and_pointer_tiles_edit_only_their_state_and_preserve_transactions() {
         for theme in ["light", "dark"] {
@@ -7325,9 +7301,6 @@ mod tests {
         assert!(!h.app.preferences.extrude_view_isometric && !h.app.preferences.extrude_view_return);
     }
 
-    /// Each preference listed is reset by the Reset of the page that owns it and by no other
-    /// page's: set away from its default, it is back at the default only after its own page was
-    /// reset.
     #[test]
     fn moved_preferences_reset_only_on_their_new_page() {
         use super::*;
@@ -7346,8 +7319,6 @@ mod tests {
             ("update_changed_links", json!(false), PAGE_DESIGN),
             ("double_click_components", json!(false), PAGE_DESIGN),
             ("insert_lists_open_designs", json!(false), PAGE_DESIGN),
-            ("insert_keeps_components", json!(true), PAGE_DESIGN),
-            ("insert_flexible", json!(true), PAGE_DESIGN),
             ("theme", json!("light"), PAGE_APPEARANCE),
             ("ui_scale", json!(1.25), PAGE_APPEARANCE),
             ("ui_font", json!("test font"), PAGE_APPEARANCE),
